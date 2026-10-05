@@ -22,7 +22,7 @@ import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
-import { loadApplied, type Applied } from "@/lib/applied";
+import type { Applied } from "@/lib/applied";
 import { emptyFriends, type FriendsState } from "@/lib/friends";
 import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
@@ -153,6 +153,8 @@ export const emptyDms = (): DmState => ({
 export type InstanceState = {
   key: string;
   url: string;
+  /** The user id of the account this is for, as kept in this browser; empty while signed out or not known yet. */
+  account: string;
   connection: Connection;
   problem: string | null;
   node: Node | null;
@@ -191,7 +193,7 @@ export type InstanceState = {
   profiles: Record<string, Profile>;
   /** Per server you can review applications for, once loaded: the ones waiting, oldest first. */
   applications: Record<string, Application[]>;
-  /** Servers you applied to and aren't in yet, by server id. Kept in this browser. */
+  /** Servers you applied to and aren't in yet, by server id. Kept in this browser, per account. */
   applied: Record<string, Applied>;
   /** Per server: who's in its voice channels, in the order they joined. */
   voice: Record<string, VoiceState[]>;
@@ -238,10 +240,11 @@ export function useFuwa<T>(selector: (s: FuwaState) => T): T {
   return useSyncExternalStore(store.subscribe, () => selector(state));
 }
 
-export function emptyInstance(key: string, url: string): InstanceState {
+export function emptyInstance(key: string, url: string, account = ""): InstanceState {
   return {
     key,
     url,
+    account,
     connection: "connecting",
     problem: null,
     node: null,
@@ -264,7 +267,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     rail: null,
     profiles: {},
     applications: {},
-    applied: loadApplied(key),
+    applied: {},
     voice: {},
     shared: {},
     dms: emptyDms(),

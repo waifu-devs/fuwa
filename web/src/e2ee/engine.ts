@@ -1542,12 +1542,18 @@ export function stopDms(key: string) {
   engines.delete(key);
 }
 
-/** Stops direct messages and forgets everything this browser kept for them on an instance: on signing out. */
-export async function wipeDms(key: string) {
-  stopDms(key);
+/**
+ * Forgets everything this browser kept for direct messages and secure
+ * channels as one account on an instance (signing out of it), or, without
+ * `userId`, as every account on it (forgetting the instance). Other
+ * accounts' devices are left alone.
+ */
+export async function wipeDms(key: string, userId?: string) {
+  if (userId === undefined || engines.get(key)?.me.id === userId) stopDms(key);
   try {
-    await vault.wipe(`${key}|`);
-  } catch (err) {
-    console.warn("fuwa: couldn't wipe encrypted messages from this browser", err);
+    if (userId === undefined) await vault.wipe(`${key}|`);
+    else await vault.wipeVault(`${key}|${userId}`);
+  } catch {
+    console.warn("fuwa: couldn't wipe encrypted messages from this browser");
   }
 }

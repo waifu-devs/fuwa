@@ -44,13 +44,12 @@ import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
-import { instanceKey, normalizeUrl } from "./saved";
-import { wipeDms } from "@/e2ee/engine";
+import { accountKey, instanceKey, normalizeUrl } from "./saved";
 import { outsideEmojis } from "@/lib/emoji-catalog";
-import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
 import type { Clip } from "@/voice/recorder";
-import { addInstance, engine, follow, removeInstance } from "./sync";
+import { forgetAccount, forgetInstance } from "./accounts";
+import { addAccount, dropAccount, engine, follow, keptAccounts, removeInstance } from "./sync";
 import {
   addServer,
   applyEvent,
@@ -119,13 +118,13 @@ export const signIn = (url: string, username: string, password: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.signIn({ username, password }, { signal }));
     if (res.twoFactorTicket) return { ticket: res.twoFactorTicket } as const;
-    return { key: addInstance(url, res.token) } as const;
+    return { key: addAccount(url, res.token, res.user) } as const;
   });
 
 export const verifyTwoFactor = (url: string, ticket: string, code: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.verifyTwoFactor({ ticket, code }, { signal }));
-    return addInstance(url, res.token);
+    return addAccount(url, res.token, res.user);
   });
 
 export const signUp = (url: string, username: string, password: string, displayName: string) =>
@@ -133,7 +132,7 @@ export const signUp = (url: string, username: string, password: string, displayN
     const res = yield* call((signal) =>
       makeApi(url, () => null).auth.signUp({ username, password, displayName }, { signal }),
     );
-    return addInstance(url, res.token);
+    return addAccount(url, res.token, res.user);
   });
 
 /**
@@ -164,7 +163,7 @@ export const finishLinkedSignIn = (pending: PendingSignIn, state: string, code: 
     const res = yield* call((signal) =>
       makeApi(pending.url, () => null).auth.finishLinkedSignIn({ state, code, secret: pending.secret }, { signal }),
     );
-    return { key: addInstance(pending.url, res.token), user: res.user, created: res.created };
+    return { key: addAccount(pending.url, res.token, res.user), user: res.user, created: res.created };
   });
 
 /** Which app a sign-in that came back to this instance belongs to. */
@@ -210,7 +209,7 @@ export const finishSsoSignIn = (pending: PendingSso, state: string, code: string
     const res = yield* call((signal) =>
       makeApi(pending.url, () => null).auth.finishSsoSignIn({ state, code, secret: pending.secret }, { signal }),
     );
-    const key = pending.test ? instanceKey(pending.url) : addInstance(pending.url, res.token);
+    const key = pending.test ? instanceKey(pending.url) : addAccount(pending.url, res.token, res.user);
     return { key, user: res.user, created: res.created, identity: res.identity };
   });
 
@@ -261,6 +260,7 @@ export const startServerSso = (key: string, serverId: string, opts: { join?: boo
       secret,
       next: opts.next ?? null,
       serverId,
+      userId: engine(key).userId,
       join: opts.join,
       inviteCode: opts.inviteCode,
       startedAt: Date.now(),
@@ -276,7 +276,7 @@ export const finishServerSso = (pending: PendingSso, state: string, code: string
       api(key).sso.finishServerSso({ serverId, state, code, secret: pending.secret }, { signal }),
     );
     if (res.member) storeMember(key, serverId, res.member);
-    else rememberServerSignIn(key, serverId);
+    else rememberServerSignIn(accountKey(key, pending.userId ?? engine(key).userId), serverId);
     let joinedNow = false;
     if (pending.join && !res.member) {
       yield* joinServer(key, serverId, pending.inviteCode ?? "");
@@ -285,22 +285,32 @@ export const finishServerSso = (pending: PendingSso, state: string, code: string
     return { key, serverId, identity: res.identity, joined: joinedNow };
   });
 
-/** Ends the session on the server too, then keeps the instance listed but signed out. */
+/**
+ * Ends the active account's session on the server too, then forgets it here
+ * (its encrypted messages, drafts and the rest) and leaves the instance
+ * signed out, with any other accounts kept on it to continue as.
+ */
 export const signOut = (key: string) =>
   Effect.gen(function* () {
-    yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
-    addInstance(engine(key).url, null);
-    forgetRecentSearches(key);
+    const { url, token } = engine(key);
+    const userId = dropAccount(key);
+    if (token) yield* call((signal) => makeApi(url, () => token).auth.signOut({}, { signal })).pipe(Effect.ignore);
     // The session's device is gone; what it kept here goes too.
-    yield* Effect.promise(() => wipeDms(key));
+    if (userId) yield* Effect.promise(() => forgetAccount(key, userId));
   });
 
+/** Signs every account kept on an instance out and forgets the instance here. */
 export const forget = (key: string) =>
   Effect.gen(function* () {
-    if (engine(key).token) yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
+    const url = engine(key).url;
+    const accounts = keptAccounts(key);
     removeInstance(key);
-    forgetRecentSearches(key);
-    yield* Effect.promise(() => wipeDms(key));
+    yield* Effect.forEach(
+      accounts,
+      (a) => call((signal) => makeApi(url, () => a.token).auth.signOut({}, { signal })).pipe(Effect.ignore),
+      { concurrency: "unbounded", discard: true },
+    );
+    yield* Effect.promise(() => forgetInstance(key));
   });
 
 export type ProfilePatch = Partial<
@@ -542,13 +552,14 @@ export const exportData = (key: string, progress: (bytes: number) => void) =>
     catch: toFuwaError,
   });
 
-/** Deletes your account on an instance, then forgets the instance here. */
+/** Deletes your account on an instance, then forgets it here; other accounts kept on the instance stay. */
 export const deleteAccount = (key: string, confirm: { password?: string; code?: string; username?: string }) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
-    removeInstance(key);
-    forgetRecentSearches(key);
-    yield* Effect.promise(() => wipeDms(key));
+    const userId = dropAccount(key);
+    if (userId) yield* Effect.promise(() => forgetAccount(key, userId));
+    // The only account here: the instance goes too, as it always did.
+    if (!keptAccounts(key).length) removeInstance(key);
     return true;
   });
 
@@ -804,7 +815,7 @@ function setApplied(key: string, serverId: string, applied: Applied | null) {
   updateInstance(key, (i) => {
     const { [serverId]: _, ...rest } = i.applied;
     const next = applied ? { ...rest, [serverId]: applied } : rest;
-    saveApplied(key, next);
+    if (i.me) saveApplied(accountKey(key, i.me.id), next);
     return { ...i, applied: next };
   });
 }
