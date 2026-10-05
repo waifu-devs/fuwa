@@ -3873,6 +3873,45 @@ fn new_id_like(id: &str) -> String {
 }
 
 #[tokio::test]
+async fn two_people_editing_a_role_keep_both_changes() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Edits", true).await;
+    let sid = server.id.clone();
+    join(&mut c, &mika, &sid).await;
+    let admin = create_role(&mut c, &juan, &sid, "Head admins", &[P::Administrator]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &admin.id).await.unwrap();
+    let mods = create_role(&mut c, &juan, &sid, "Mods", &[P::ManageMessages]).await.unwrap();
+    let update = |token: &str, grant: &[P], revoke: &[P]| {
+        authed(
+            token,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: mods.id.clone(),
+                grant: grant.iter().map(|&p| p as i32).collect(),
+                revoke: revoke.iter().map(|&p| p as i32).collect(),
+                ..Default::default()
+            },
+        )
+    };
+
+    // Both opened Mods with only Manage Messages. Juan adds Kick Members, then
+    // Mika, who hasn't seen that, takes Manage Messages away: both stick.
+    c.roles.update_role(update(&juan, &[P::KickMembers], &[])).await.unwrap();
+    let after = c.roles.update_role(update(&mika, &[], &[P::ManageMessages])).await.unwrap().into_inner().role.unwrap();
+    assert_eq!(after.permissions, [P::KickMembers as i32]);
+
+    // A whole list and changes in one request is refused.
+    let mut both = update(&mika, &[P::BanMembers], &[]);
+    both.get_mut().permissions = Some(pb::PermissionSet { permissions: vec![P::KickMembers as i32] });
+    assert_eq!(c.roles.update_role(both).await.unwrap_err().code(), Code::InvalidArgument);
+}
+
+#[tokio::test]
 async fn servers_from_before_roles_keep_their_admins() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;

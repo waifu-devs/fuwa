@@ -1649,14 +1649,12 @@ impl DmEngine {
         if !secure && conversation.is_none() {
             return;
         }
-        let (items, note, members) = {
-            let mut inner = self.inner.lock().await;
-            let items = inner.vault.items(id).map(|i| i.clone()).unwrap_or_default();
-            let note = inner.vault.note(id);
-            let members =
-                if inner.device.is_member(id) { inner.device.members(id).unwrap_or_default() } else { vec![] };
-            (items, note, members)
-        };
+        // Held until the store has what was read, so a refresh that read
+        // earlier can't put its older copy over a newer one.
+        let mut inner = self.inner.lock().await;
+        let items = inner.vault.items(id).map(|i| i.clone()).unwrap_or_default();
+        let note = inner.vault.note(id);
+        let members = if inner.device.is_member(id) { inner.device.members(id).unwrap_or_default() } else { vec![] };
         // Let go of meanwhile.
         if secure && !self.secure.lock().contains_key(id) {
             return;
@@ -1700,6 +1698,7 @@ impl DmEngine {
                 i.unread.insert(id.to_owned(), unread);
             });
         }
+        drop(inner);
         if looking && note.read < last {
             self.mark_read(id).await;
         }

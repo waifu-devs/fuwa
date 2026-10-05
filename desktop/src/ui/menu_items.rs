@@ -7,6 +7,7 @@ use gpui_kit::{App, Context, Hsla};
 
 use crate::core::account::NotificationPatch;
 use crate::core::dms::now_ms;
+use crate::core::i18n::t;
 use crate::core::moderation::Action;
 use crate::core::store::InstanceState;
 use crate::pb::{self, NotificationLevel as Level, Permission as P};
@@ -129,6 +130,14 @@ impl FuwaApp {
                             this.sync_list(cx);
                             this.sync_thread(cx);
                         }),
+                    ));
+                }
+                if m.can_pin && !m.editing {
+                    let (id, pinned, in_thread) = (m.id.clone(), m.pinned, thread.is_some());
+                    primary.push(Item::act(
+                        if pinned { t("chattools.pins.unpinMessage") } else { t("chattools.pins.pin") },
+                        if pinned { "pin-off" } else { "pin" },
+                        run(move |this, _, cx| this.toggle_pin(id.clone(), !pinned, in_thread, cx)),
                     ));
                 }
                 if !m.unreadable && !m.content.trim().is_empty() {

@@ -321,6 +321,8 @@ pub struct FuwaApp {
     pub emoji_born: Option<std::time::Instant>,
     /// The GIF picker over the composer, and what it knows of each instance's GIFs.
     pub gifs: crate::ui::gifs::Gifs,
+    /// The open channel's pinned messages, beside its messages (`ui::pins`).
+    pub pins: Option<crate::ui::pins::PinsPanel>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The activity link the open card asks about following (`ui::presence`).
@@ -556,6 +558,7 @@ impl FuwaApp {
             emoji: Default::default(),
             emoji_born: None,
             gifs,
+            pins: None,
             profile: None,
             profile_leaving: None,
             profile_tick: None,
@@ -813,6 +816,7 @@ impl FuwaApp {
         self.time_picker = None;
         self.forget_files_elsewhere();
         self.search_after_move(window, cx);
+        self.pins_after_move();
         self.maybe_welcome(cx);
         let target = self.target();
         let id = target.as_ref().map(Target::id);
