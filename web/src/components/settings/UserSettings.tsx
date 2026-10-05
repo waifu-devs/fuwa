@@ -12,6 +12,7 @@ import {
   KeyboardIcon,
   KeyRoundIcon,
   LanguagesIcon,
+  LogInIcon,
   LogOutIcon,
   MessageSquareTextIcon,
   MonitorSmartphoneIcon,
@@ -24,7 +25,7 @@ import {
   WandSparklesIcon,
 } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
-import type { User } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, type User } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { Accessibility } from "@/components/settings/app/Accessibility";
 import { Advanced } from "@/components/settings/app/Advanced";
@@ -49,6 +50,7 @@ import { Profile } from "@/components/settings/account/Profile";
 import { Security } from "@/components/settings/account/Security";
 import { ServerNotifications } from "@/components/settings/account/ServerNotifications";
 import { ServerProfiles } from "@/components/settings/account/ServerProfiles";
+import { SignInMethods } from "@/components/settings/account/SignInMethods";
 import { SettingsScreen, type SettingsGroup, type SettingsSection } from "@/components/settings/SettingsScreen";
 import { type I18n, useI18n } from "@/i18n/react";
 import { issuerName } from "@/lib/linked";
@@ -208,6 +210,14 @@ function accountSections(t: I18n["t"], me: User, where: string, linkedIssuer: st
       description: t("settings.nav.devicesAbout", { instance: where }),
       keywords: "sessions sign out log out phone browser",
     },
+    {
+      id: "sign-in",
+      label: t("settings.nav.signInMethods"),
+      icon: LogInIcon,
+      description: t("settings.nav.signInMethodsAbout", { instance: where }),
+      keywords: "google x twitter twitch link unlink connect sso single sign-on login provider",
+      settings: [{ id: "link-provider", label: t("settings.nav.linkProvider"), keywords: "google x twitch connect" }],
+    },
     ...(hasPassword(me)
       ? [
           {
@@ -229,15 +239,17 @@ function accountSections(t: I18n["t"], me: User, where: string, linkedIssuer: st
             keywords: "security change",
           },
         ]
-      : [
-          {
-            id: "linked",
-            label: t("settings.nav.linked"),
-            icon: Flower2Icon,
-            description: t("settings.nav.linkedAbout", { instance: where, issuer: issuerName(linkedIssuer) }),
-            keywords: "waifu.dev linked password 2fa security",
-          },
-        ]),
+      : me.kind === AccountKind.PROVIDER
+        ? []
+        : [
+            {
+              id: "linked",
+              label: t("settings.nav.linked"),
+              icon: Flower2Icon,
+              description: t("settings.nav.linkedAbout", { instance: where, issuer: issuerName(linkedIssuer) }),
+              keywords: "waifu.dev linked password 2fa security",
+            },
+          ]),
     {
       id: "server-notifications",
       label: t("settings.nav.serverNotifications"),
@@ -299,6 +311,7 @@ const ACCOUNT_PAGES: Record<string, (key: string) => ReactNode> = {
   profile: (key) => <Profile instanceKey={key} />,
   "server-profiles": (key) => <ServerProfiles instanceKey={key} />,
   devices: (key) => <Devices instanceKey={key} />,
+  "sign-in": (key) => <SignInMethods instanceKey={key} />,
   security: (key) => <Security instanceKey={key} />,
   password: (key) => <Password instanceKey={key} />,
   linked: (key) => <LinkedSignIn instanceKey={key} />,
@@ -315,7 +328,7 @@ function sectionPage(section: string, key: string | undefined) {
   return null;
 }
 
-const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "password", "server-notifications", "agents", "privacy", "session"]);
+const ACCOUNT = new Set(["profile", "server-profiles", "devices", "sign-in", "security", "password", "server-notifications", "agents", "privacy", "session"]);
 
 /**
  * Settings, opened from anywhere (the user panel, a shortcut, a link): App

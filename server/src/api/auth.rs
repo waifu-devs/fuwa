@@ -13,7 +13,7 @@ use crate::sso;
 use crate::twofactor;
 
 /// What someone whose account was turned off hears when they sign in.
-const DISABLED: &str = "this account was turned off by the instance's admins";
+pub(super) const DISABLED: &str = "this account was turned off by the instance's admins";
 
 impl Api {
     async fn create_account(&self, req: pb::SignUpRequest, user_agent: &str) -> Result<pb::SignUpResponse> {
@@ -212,7 +212,7 @@ impl Api {
         // Nothing is kept until the provider answers: the state carries it.
         let sign_in = sso::ticket::issue(
             self.app.picture_key(),
-            &settings.sso_provider,
+            &settings.sso_provider.trust_key(),
             &origin,
             &req.secret_hash,
             req.test,
@@ -438,7 +438,11 @@ impl AuthService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                Ok(pb::GetMeResponse { user: Some(account.user()), admin: account.admin })
+                Ok(pb::GetMeResponse {
+                    recent_sign_in_methods: self.recent_sign_in_methods(&account).await?,
+                    user: Some(account.user()),
+                    admin: account.admin,
+                })
             }
             .await,
         )
@@ -533,7 +537,7 @@ impl AuthService for Api {
                     Some(sign_in) => sign_in,
                     None => sso::ticket::read(
                         self.app.picture_key(),
-                        &settings.sso_provider,
+                        &settings.sso_provider.trust_key(),
                         state,
                         crate::id::now_ms(),
                         &settings.public_url,
@@ -557,6 +561,28 @@ impl AuthService for Api {
     ) -> Result<Response<pb::FinishSsoSignInResponse>, Status> {
         let user_agent = auth::user_agent(request.metadata());
         respond(self.finish_sso(request.into_inner(), &user_agent).await)
+    }
+
+    async fn start_provider_sign_in(
+        &self,
+        request: Request<pb::StartProviderSignInRequest>,
+    ) -> Result<Response<pb::StartProviderSignInResponse>, Status> {
+        respond(self.start_provider(request.into_inner()).await)
+    }
+
+    async fn get_provider_sign_in(
+        &self,
+        request: Request<pb::GetProviderSignInRequest>,
+    ) -> Result<Response<pb::GetProviderSignInResponse>, Status> {
+        respond(self.read_provider_sign_in(request.into_inner()).await)
+    }
+
+    async fn finish_provider_sign_in(
+        &self,
+        request: Request<pb::FinishProviderSignInRequest>,
+    ) -> Result<Response<pb::FinishProviderSignInResponse>, Status> {
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.finish_provider(request.into_inner(), &user_agent).await)
     }
 
     async fn change_password(

@@ -9,6 +9,17 @@ import "google/protobuf/timestamp.proto";
 // Your own account on this instance: where it's signed in, how it signs in,
 // how servers notify you, and your data.
 service AccountService {
+  // How the account signs in, and the providers it could link.
+  rpc ListSignInMethods(ListSignInMethodsRequest) returns (ListSignInMethodsResponse);
+  // Linking Google, X or Twitch, so it signs in too. Start needs proof it's
+  // you beyond the session (see ListSignInMethodsResponse.needs_*); the
+  // provider sends the browser to <public URL>/auth/provider/done#...&link=1,
+  // and FinishProviderLink, from the same account, adds it.
+  rpc StartProviderLink(StartProviderLinkRequest) returns (StartProviderLinkResponse);
+  rpc FinishProviderLink(FinishProviderLinkRequest) returns (FinishProviderLinkResponse);
+  // Refused for the last way in that works.
+  rpc UnlinkProvider(UnlinkProviderRequest) returns (UnlinkProviderResponse);
+
   // Every device signed in to the account, the caller's first.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   // Signs one device out. Its open streams end within a heartbeat.
@@ -201,3 +212,51 @@ message DeleteAccountRequest {
 }
 
 message DeleteAccountResponse {}
+
+message ListSignInMethodsRequest {}
+
+message ListSignInMethodsResponse {
+  repeated SignInMethod methods = 1;
+  // Providers the instance offers that the account hasn't linked.
+  repeated SignInProviderOption available = 2;
+  // False for accounts that sign in through the instance's identity
+  // provider (their organization decides) and agents.
+  bool can_link = 3;
+  // What linking or unlinking asks for: the password, a two-step code, or
+  // (without either) a session from the last ten minutes, so sign in again.
+  bool needs_password = 4;
+  bool needs_code = 5;
+  bool needs_fresh_sign_in = 6;
+}
+
+message StartProviderLinkRequest {
+  string provider = 1;
+  // Like StartProviderSignInRequest's.
+  string return_origin = 2;
+  string secret_hash = 3;
+  string password = 4;
+  string code = 5;
+}
+
+message StartProviderLinkResponse {
+  string authorize_url = 1;
+  string state = 2;
+}
+
+message FinishProviderLinkRequest {
+  string state = 1;
+  string code = 2;
+  string secret = 3;
+}
+
+message FinishProviderLinkResponse {
+  SignInMethod method = 1;
+}
+
+message UnlinkProviderRequest {
+  string provider = 1;
+  string password = 2;
+  string code = 3;
+}
+
+message UnlinkProviderResponse {}

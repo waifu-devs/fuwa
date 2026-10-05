@@ -95,5 +95,8 @@
   "nav.activity": "Show what I'm doing",
   "nav.export": "Download your data",
   "nav.deleteAccount": "Delete your account",
-  "nav.signOut": "Sign out"
+  "nav.signOut": "Sign out",
+  "nav.signInMethods": "Ways to sign in",
+  "nav.signInMethodsAbout": "How you get into {instance}: your password, Google, X or Twitch.",
+  "nav.linkProvider": "Link Google, X or Twitch"
 }

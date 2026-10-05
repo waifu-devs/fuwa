@@ -285,7 +285,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     }
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
-    patchInstance(key, { me: me.user ?? null, admin: me.admin });
+    patchInstance(key, { me: me.user ?? null, admin: me.admin, recentSignIns: me.recentSignInMethods });
     if (me.user) {
       const user = me.user;
       const token = e.token;

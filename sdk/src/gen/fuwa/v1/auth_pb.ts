@@ -6,7 +6,7 @@ import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegen
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SsoIdentity } from "./sso_pb.js";
 import { file_fuwa_v1_sso } from "./sso_pb.js";
-import type { Profile, User } from "./types_pb.js";
+import type { Profile, SignInMethod, User } from "./types_pb.js";
 import { file_fuwa_v1_types } from "./types_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/auth.proto.
  */
 export const file_fuwa_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIIvMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhMKBmVmZmVjdBgJIAEoCUgHiAEBQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzQgkKB19lZmZlY3QiVwoVVXBkYXRlUHJvZmlsZVJlc3BvbnNlEhsKBHVzZXIYASABKAsyDS5mdXdhLnYxLlVzZXISIQoHcHJvZmlsZRgCIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSIkChFHZXRQcm9maWxlUmVxdWVzdBIPCgd1c2VyX2lkGAEgASgJIjcKEkdldFByb2ZpbGVSZXNwb25zZRIhCgdwcm9maWxlGAEgASgLMhAuZnV3YS52MS5Qcm9maWxlIkcKFUNoYW5nZVBhc3N3b3JkUmVxdWVzdBIYChBjdXJyZW50X3Bhc3N3b3JkGAEgASgJEhQKDG5ld19wYXNzd29yZBgCIAEoCSIYChZDaGFuZ2VQYXNzd29yZFJlc3BvbnNlIkYKGFN0YXJ0TGlua2VkU2lnbkluUmVxdWVzdBIVCg1yZXR1cm5fb3JpZ2luGAEgASgJEhMKC3NlY3JldF9oYXNoGAIgASgJIkEKGVN0YXJ0TGlua2VkU2lnbkluUmVzcG9uc2USFQoNYXV0aG9yaXplX3VybBgBIAEoCRINCgVzdGF0ZRgCIAEoCSInChZHZXRMaW5rZWRTaWduSW5SZXF1ZXN0Eg0KBXN0YXRlGAEgASgJIjAKF0dldExpbmtlZFNpZ25JblJlc3BvbnNlEhUKDXJldHVybl9vcmlnaW4YASABKAkiSAoZRmluaXNoTGlua2VkU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCRIMCgRjb2RlGAIgASgJEg4KBnNlY3JldBgDIAEoCSJoChpGaW5pc2hMaW5rZWRTaWduSW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIEg8KB2NyZWF0ZWQYBCABKAgiUQoVU3RhcnRTc29TaWduSW5SZXF1ZXN0EhUKDXJldHVybl9vcmlnaW4YASABKAkSEwoLc2VjcmV0X2hhc2gYAiABKAkSDAoEdGVzdBgDIAEoCCI+ChZTdGFydFNzb1NpZ25JblJlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkSDQoFc3RhdGUYAiABKAkiJAoTR2V0U3NvU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCSJSChRHZXRTc29TaWduSW5SZXNwb25zZRIVCg1yZXR1cm5fb3JpZ2luGAEgASgJEhUKDXByb3ZpZGVyX25hbWUYAiABKAkSDAoEdGVzdBgDIAEoCCJFChZGaW5pc2hTc29TaWduSW5SZXF1ZXN0Eg0KBXN0YXRlGAEgASgJEgwKBGNvZGUYAiABKAkSDgoGc2VjcmV0GAMgASgJIo0BChdGaW5pc2hTc29TaWduSW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIEg8KB2NyZWF0ZWQYBCABKAgSJgoIaWRlbnRpdHkYBSABKAsyFC5mdXdhLnYxLlNzb0lkZW50aXR5MsAICgtBdXRoU2VydmljZRI5CgZTaWduVXASFi5mdXdhLnYxLlNpZ25VcFJlcXVlc3QaFy5mdXdhLnYxLlNpZ25VcFJlc3BvbnNlEjkKBlNpZ25JbhIWLmZ1d2EudjEuU2lnbkluUmVxdWVzdBoXLmZ1d2EudjEuU2lnbkluUmVzcG9uc2USVAoPVmVyaWZ5VHdvRmFjdG9yEh8uZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXF1ZXN0GiAuZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXNwb25zZRI8CgdTaWduT3V0EhcuZnV3YS52MS5TaWduT3V0UmVxdWVzdBoYLmZ1d2EudjEuU2lnbk91dFJlc3BvbnNlEjYKBUdldE1lEhUuZnV3YS52MS5HZXRNZVJlcXVlc3QaFi5mdXdhLnYxLkdldE1lUmVzcG9uc2USTgoNVXBkYXRlUHJvZmlsZRIdLmZ1d2EudjEuVXBkYXRlUHJvZmlsZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXNwb25zZRJFCgpHZXRQcm9maWxlEhouZnV3YS52MS5HZXRQcm9maWxlUmVxdWVzdBobLmZ1d2EudjEuR2V0UHJvZmlsZVJlc3BvbnNlElEKDkNoYW5nZVBhc3N3b3JkEh4uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlcXVlc3QaHy5mdXdhLnYxLkNoYW5nZVBhc3N3b3JkUmVzcG9uc2USWgoRU3RhcnRMaW5rZWRTaWduSW4SIS5mdXdhLnYxLlN0YXJ0TGlua2VkU2lnbkluUmVxdWVzdBoiLmZ1d2EudjEuU3RhcnRMaW5rZWRTaWduSW5SZXNwb25zZRJUCg9HZXRMaW5rZWRTaWduSW4SHy5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlcXVlc3QaIC5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlc3BvbnNlEl0KEkZpbmlzaExpbmtlZFNpZ25JbhIiLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVxdWVzdBojLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USUQoOU3RhcnRTc29TaWduSW4SHi5mdXdhLnYxLlN0YXJ0U3NvU2lnbkluUmVxdWVzdBofLmZ1d2EudjEuU3RhcnRTc29TaWduSW5SZXNwb25zZRJLCgxHZXRTc29TaWduSW4SHC5mdXdhLnYxLkdldFNzb1NpZ25JblJlcXVlc3QaHS5mdXdhLnYxLkdldFNzb1NpZ25JblJlc3BvbnNlElQKD0ZpbmlzaFNzb1NpZ25JbhIfLmZ1d2EudjEuRmluaXNoU3NvU2lnbkluUmVxdWVzdBogLmZ1d2EudjEuRmluaXNoU3NvU2lnbkluUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_sso, file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QicgoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIEjUKFnJlY2VudF9zaWduX2luX21ldGhvZHMYAyADKAsyFS5mdXdhLnYxLlNpZ25Jbk1ldGhvZCLzAgoUVXBkYXRlUHJvZmlsZVJlcXVlc3QSGQoMZGlzcGxheV9uYW1lGAEgASgJSACIAQESFwoKYXZhdGFyX3VybBgCIAEoCUgBiAEBEhUKCHByb25vdW5zGAMgASgJSAKIAQESEAoDYmlvGAQgASgJSAOIAQESFwoKYmFubmVyX3VybBgFIAEoCUgEiAEBEhkKDGFjY2VudF9jb2xvchgGIAEoBUgFiAEBEhMKBnN0YXR1cxgHIAEoCUgGiAEBEjUKEXN0YXR1c19leHBpcmVzX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgZlZmZlY3QYCSABKAlIB4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgsKCV9wcm9ub3Vuc0IGCgRfYmlvQg0KC19iYW5uZXJfdXJsQg8KDV9hY2NlbnRfY29sb3JCCQoHX3N0YXR1c0IJCgdfZWZmZWN0IlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZSJGChhTdGFydExpbmtlZFNpZ25JblJlcXVlc3QSFQoNcmV0dXJuX29yaWdpbhgBIAEoCRITCgtzZWNyZXRfaGFzaBgCIAEoCSJBChlTdGFydExpbmtlZFNpZ25JblJlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkSDQoFc3RhdGUYAiABKAkiJwoWR2V0TGlua2VkU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCSIwChdHZXRMaW5rZWRTaWduSW5SZXNwb25zZRIVCg1yZXR1cm5fb3JpZ2luGAEgASgJIkgKGUZpbmlzaExpbmtlZFNpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkSDAoEY29kZRgCIAEoCRIOCgZzZWNyZXQYAyABKAkiaAoaRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIIlEKFVN0YXJ0U3NvU2lnbkluUmVxdWVzdBIVCg1yZXR1cm5fb3JpZ2luGAEgASgJEhMKC3NlY3JldF9oYXNoGAIgASgJEgwKBHRlc3QYAyABKAgiPgoWU3RhcnRTc29TaWduSW5SZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIiQKE0dldFNzb1NpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkiUgoUR2V0U3NvU2lnbkluUmVzcG9uc2USFQoNcmV0dXJuX29yaWdpbhgBIAEoCRIVCg1wcm92aWRlcl9uYW1lGAIgASgJEgwKBHRlc3QYAyABKAgiRQoWRmluaXNoU3NvU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCRIMCgRjb2RlGAIgASgJEg4KBnNlY3JldBgDIAEoCSKNAQoXRmluaXNoU3NvU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIEiYKCGlkZW50aXR5GAUgASgLMhQuZnV3YS52MS5Tc29JZGVudGl0eSJaChpTdGFydFByb3ZpZGVyU2lnbkluUmVxdWVzdBIQCghwcm92aWRlchgBIAEoCRIVCg1yZXR1cm5fb3JpZ2luGAIgASgJEhMKC3NlY3JldF9oYXNoGAMgASgJIkMKG1N0YXJ0UHJvdmlkZXJTaWduSW5SZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjsKGEdldFByb3ZpZGVyU2lnbkluUmVxdWVzdBIQCghwcm92aWRlchgBIAEoCRINCgVzdGF0ZRgCIAEoCSJJChlHZXRQcm92aWRlclNpZ25JblJlc3BvbnNlEhUKDXJldHVybl9vcmlnaW4YASABKAkSFQoNcHJvdmlkZXJfbmFtZRgCIAEoCSKBAQobRmluaXNoUHJvdmlkZXJTaWduSW5SZXF1ZXN0Eg0KBXN0YXRlGAEgASgJEgwKBGNvZGUYAiABKAkSDgoGc2VjcmV0GAMgASgJEg4KBmNyZWF0ZRgEIAEoCBIQCgh1c2VybmFtZRgFIAEoCRITCgt1c2VfcHJvZmlsZRgGIAEoCCK3AQocRmluaXNoUHJvdmlkZXJTaWduSW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIEg8KB2NyZWF0ZWQYBCABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBSABKAkSMAoLbmV3X2FjY291bnQYBiABKAsyGy5mdXdhLnYxLk5ld1Byb3ZpZGVyQWNjb3VudCJyChJOZXdQcm92aWRlckFjY291bnQSFQoNcHJvdmlkZXJfbmFtZRgBIAEoCRIaChJzdWdnZXN0ZWRfdXNlcm5hbWUYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhMKC2hhc19waWN0dXJlGAQgASgIMuMKCgtBdXRoU2VydmljZRI5CgZTaWduVXASFi5mdXdhLnYxLlNpZ25VcFJlcXVlc3QaFy5mdXdhLnYxLlNpZ25VcFJlc3BvbnNlEjkKBlNpZ25JbhIWLmZ1d2EudjEuU2lnbkluUmVxdWVzdBoXLmZ1d2EudjEuU2lnbkluUmVzcG9uc2USVAoPVmVyaWZ5VHdvRmFjdG9yEh8uZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXF1ZXN0GiAuZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXNwb25zZRI8CgdTaWduT3V0EhcuZnV3YS52MS5TaWduT3V0UmVxdWVzdBoYLmZ1d2EudjEuU2lnbk91dFJlc3BvbnNlEjYKBUdldE1lEhUuZnV3YS52MS5HZXRNZVJlcXVlc3QaFi5mdXdhLnYxLkdldE1lUmVzcG9uc2USTgoNVXBkYXRlUHJvZmlsZRIdLmZ1d2EudjEuVXBkYXRlUHJvZmlsZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXNwb25zZRJFCgpHZXRQcm9maWxlEhouZnV3YS52MS5HZXRQcm9maWxlUmVxdWVzdBobLmZ1d2EudjEuR2V0UHJvZmlsZVJlc3BvbnNlElEKDkNoYW5nZVBhc3N3b3JkEh4uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlcXVlc3QaHy5mdXdhLnYxLkNoYW5nZVBhc3N3b3JkUmVzcG9uc2USWgoRU3RhcnRMaW5rZWRTaWduSW4SIS5mdXdhLnYxLlN0YXJ0TGlua2VkU2lnbkluUmVxdWVzdBoiLmZ1d2EudjEuU3RhcnRMaW5rZWRTaWduSW5SZXNwb25zZRJUCg9HZXRMaW5rZWRTaWduSW4SHy5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlcXVlc3QaIC5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlc3BvbnNlEl0KEkZpbmlzaExpbmtlZFNpZ25JbhIiLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVxdWVzdBojLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USUQoOU3RhcnRTc29TaWduSW4SHi5mdXdhLnYxLlN0YXJ0U3NvU2lnbkluUmVxdWVzdBofLmZ1d2EudjEuU3RhcnRTc29TaWduSW5SZXNwb25zZRJLCgxHZXRTc29TaWduSW4SHC5mdXdhLnYxLkdldFNzb1NpZ25JblJlcXVlc3QaHS5mdXdhLnYxLkdldFNzb1NpZ25JblJlc3BvbnNlElQKD0ZpbmlzaFNzb1NpZ25JbhIfLmZ1d2EudjEuRmluaXNoU3NvU2lnbkluUmVxdWVzdBogLmZ1d2EudjEuRmluaXNoU3NvU2lnbkluUmVzcG9uc2USYAoTU3RhcnRQcm92aWRlclNpZ25JbhIjLmZ1d2EudjEuU3RhcnRQcm92aWRlclNpZ25JblJlcXVlc3QaJC5mdXdhLnYxLlN0YXJ0UHJvdmlkZXJTaWduSW5SZXNwb25zZRJaChFHZXRQcm92aWRlclNpZ25JbhIhLmZ1d2EudjEuR2V0UHJvdmlkZXJTaWduSW5SZXF1ZXN0GiIuZnV3YS52MS5HZXRQcm92aWRlclNpZ25JblJlc3BvbnNlEmMKFEZpbmlzaFByb3ZpZGVyU2lnbkluEiQuZnV3YS52MS5GaW5pc2hQcm92aWRlclNpZ25JblJlcXVlc3QaJS5mdXdhLnYxLkZpbmlzaFByb3ZpZGVyU2lnbkluUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_sso, file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.SignUpRequest
@@ -236,6 +236,14 @@ export type GetMeResponse = Message<"fuwa.v1.GetMeResponse"> & {
    * @generated from field: bool admin = 2;
    */
   admin: boolean;
+
+  /**
+   * Ways to sign in added to the account in the last week, newest first, so
+   * every device can say so (and the person can undo one that wasn't them).
+   *
+   * @generated from field: repeated fuwa.v1.SignInMethod recent_sign_in_methods = 3;
+   */
+  recentSignInMethods: SignInMethod[];
 };
 
 /**
@@ -728,6 +736,239 @@ export const FinishSsoSignInResponseSchema: GenMessage<FinishSsoSignInResponse> 
   messageDesc(file_fuwa_v1_auth, 27);
 
 /**
+ * @generated from message fuwa.v1.StartProviderSignInRequest
+ */
+export type StartProviderSignInRequest = Message<"fuwa.v1.StartProviderSignInRequest"> & {
+  /**
+   * "google", "x" or "twitch".
+   *
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * The origin of the app signing in. The sign-in ends at
+   * <return_origin>/auth/provider/done.
+   *
+   * @generated from field: string return_origin = 2;
+   */
+  returnOrigin: string;
+
+  /**
+   * The SHA-256 (hex) of a random secret the app keeps until FinishProviderSignIn.
+   *
+   * @generated from field: string secret_hash = 3;
+   */
+  secretHash: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartProviderSignInRequest.
+ * Use `create(StartProviderSignInRequestSchema)` to create a new message.
+ */
+export const StartProviderSignInRequestSchema: GenMessage<StartProviderSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 28);
+
+/**
+ * @generated from message fuwa.v1.StartProviderSignInResponse
+ */
+export type StartProviderSignInResponse = Message<"fuwa.v1.StartProviderSignInResponse"> & {
+  /**
+   * @generated from field: string authorize_url = 1;
+   */
+  authorizeUrl: string;
+
+  /**
+   * @generated from field: string state = 2;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartProviderSignInResponse.
+ * Use `create(StartProviderSignInResponseSchema)` to create a new message.
+ */
+export const StartProviderSignInResponseSchema: GenMessage<StartProviderSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 29);
+
+/**
+ * @generated from message fuwa.v1.GetProviderSignInRequest
+ */
+export type GetProviderSignInRequest = Message<"fuwa.v1.GetProviderSignInRequest"> & {
+  /**
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * @generated from field: string state = 2;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetProviderSignInRequest.
+ * Use `create(GetProviderSignInRequestSchema)` to create a new message.
+ */
+export const GetProviderSignInRequestSchema: GenMessage<GetProviderSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 30);
+
+/**
+ * @generated from message fuwa.v1.GetProviderSignInResponse
+ */
+export type GetProviderSignInResponse = Message<"fuwa.v1.GetProviderSignInResponse"> & {
+  /**
+   * @generated from field: string return_origin = 1;
+   */
+  returnOrigin: string;
+
+  /**
+   * @generated from field: string provider_name = 2;
+   */
+  providerName: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetProviderSignInResponse.
+ * Use `create(GetProviderSignInResponseSchema)` to create a new message.
+ */
+export const GetProviderSignInResponseSchema: GenMessage<GetProviderSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 31);
+
+/**
+ * @generated from message fuwa.v1.FinishProviderSignInRequest
+ */
+export type FinishProviderSignInRequest = Message<"fuwa.v1.FinishProviderSignInRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string code = 2;
+   */
+  code: string;
+
+  /**
+   * @generated from field: string secret = 3;
+   */
+  secret: string;
+
+  /**
+   * For someone new (the answer had new_account): make the account, with
+   * this username.
+   *
+   * @generated from field: bool create = 4;
+   */
+  create: boolean;
+
+  /**
+   * @generated from field: string username = 5;
+   */
+  username: string;
+
+  /**
+   * Copy the name and picture from the provider into the new account's
+   * profile. Off, it starts with just the username.
+   *
+   * @generated from field: bool use_profile = 6;
+   */
+  useProfile: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishProviderSignInRequest.
+ * Use `create(FinishProviderSignInRequestSchema)` to create a new message.
+ */
+export const FinishProviderSignInRequestSchema: GenMessage<FinishProviderSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 32);
+
+/**
+ * @generated from message fuwa.v1.FinishProviderSignInResponse
+ */
+export type FinishProviderSignInResponse = Message<"fuwa.v1.FinishProviderSignInResponse"> & {
+  /**
+   * @generated from field: string token = 1;
+   */
+  token: string;
+
+  /**
+   * @generated from field: fuwa.v1.User user = 2;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: bool admin = 3;
+   */
+  admin: boolean;
+
+  /**
+   * @generated from field: bool created = 4;
+   */
+  created: boolean;
+
+  /**
+   * Set, with nothing else, when the account needs a two-step code too:
+   * send it to VerifyTwoFactor.
+   *
+   * @generated from field: string two_factor_ticket = 5;
+   */
+  twoFactorTicket: string;
+
+  /**
+   * Set, with nothing else, for someone new while sign-ups are open: ask
+   * for a username (and whether to use the provider's name and picture),
+   * then call again with create. The sign-in stays usable until it runs out.
+   *
+   * @generated from field: fuwa.v1.NewProviderAccount new_account = 6;
+   */
+  newAccount?: NewProviderAccount | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishProviderSignInResponse.
+ * Use `create(FinishProviderSignInResponseSchema)` to create a new message.
+ */
+export const FinishProviderSignInResponseSchema: GenMessage<FinishProviderSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 33);
+
+/**
+ * @generated from message fuwa.v1.NewProviderAccount
+ */
+export type NewProviderAccount = Message<"fuwa.v1.NewProviderAccount"> & {
+  /**
+   * @generated from field: string provider_name = 1;
+   */
+  providerName: string;
+
+  /**
+   * Free right now, from the handle there; the person may change it.
+   *
+   * @generated from field: string suggested_username = 2;
+   */
+  suggestedUsername: string;
+
+  /**
+   * What use_profile would copy.
+   *
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: bool has_picture = 4;
+   */
+  hasPicture: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.NewProviderAccount.
+ * Use `create(NewProviderAccountSchema)` to create a new message.
+ */
+export const NewProviderAccountSchema: GenMessage<NewProviderAccount> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 34);
+
+/**
  * Accounts on this instance. Signing up or in returns a session token, which
  * every other call sends as `authorization: Bearer <token>`.
  *
@@ -874,6 +1115,37 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof FinishSsoSignInRequestSchema;
     output: typeof FinishSsoSignInResponseSchema;
+  },
+  /**
+   * Signing in with Google, X or Twitch (NodeInfo.auth.providers), in three
+   * calls again. The provider sends the browser back to this instance
+   * (/sso/instance/providers/<id>), which reads who signed in and sends it on to
+   *   <public URL>/auth/provider/done#provider=<id>&state=<state>&code=<code>
+   * and FinishProviderSignIn trades the code for a session. Accounts are
+   * only ever found by the provider's id for the person, never by email.
+   *
+   * @generated from rpc fuwa.v1.AuthService.StartProviderSignIn
+   */
+  startProviderSignIn: {
+    methodKind: "unary";
+    input: typeof StartProviderSignInRequestSchema;
+    output: typeof StartProviderSignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.GetProviderSignIn
+   */
+  getProviderSignIn: {
+    methodKind: "unary";
+    input: typeof GetProviderSignInRequestSchema;
+    output: typeof GetProviderSignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.FinishProviderSignIn
+   */
+  finishProviderSignIn: {
+    methodKind: "unary";
+    input: typeof FinishProviderSignInRequestSchema;
+    output: typeof FinishProviderSignInResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_auth, 0);

@@ -155,6 +155,20 @@ message AuthMethods {
   // The host of the provider's sign-in page: that site sees the address of
   // whoever signs in, so apps name it next to the button.
   string sso_host = 9;
+  // Google, X or Twitch, for each an admin turned on.
+  repeated SignInProviderOption providers = 10;
+}
+
+// A provider people can sign in with: "Continue with <name>".
+message SignInProviderOption {
+  // "google", "x" or "twitch".
+  string id = 1;
+  string name = 2;
+  // The host of its sign-in page, which sees the address of whoever signs
+  // in: apps name it next to the button.
+  string host = 3;
+  // Whether someone new gets an account by signing in with it.
+  bool sign_up = 4;
 }
 
 // Who may make agents (accounts programs drive) on an instance.
@@ -189,6 +203,9 @@ enum AccountKind {
   // Signs in through the instance's single sign-on (an identity provider
   // its admins set up). See AuthService.StartSsoSignIn.
   ACCOUNT_KIND_SSO = 4;
+  // Made by signing in with Google, X or Twitch; signs in with any provider
+  // linked to it. See AccountService.ListSignInMethods.
+  ACCOUNT_KIND_PROVIDER = 5;
 }
 
 // A person's public profile.
@@ -1388,4 +1405,18 @@ message RoleUpdated {
 // without events of their own.
 message RoleDeleted {
   string role_id = 1;
+}
+
+// One way an account signs in.
+message SignInMethod {
+  // "password", "waifu" (waifu.dev), "sso" (the instance's identity
+  // provider), or a provider's id: "google", "x", "twitch".
+  string kind = 1;
+  // What to call it: the provider's name.
+  string name = 2;
+  // The person's name there, only ever shown to them. Empty for a password.
+  string account_name = 3;
+  google.protobuf.Timestamp linked_at = 4;
+  // Whether it signs in right now: false while the instance has it off.
+  bool works = 5;
 }

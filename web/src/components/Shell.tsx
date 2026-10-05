@@ -2,6 +2,7 @@ import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-
 import { AnimatePresence, m as motion } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
+import { SignInNotice } from "@/components/SignInNotice";
 import { UpdateReady } from "@/components/UpdateReady";
 import { AppliedWatcher } from "@/components/join/Applied";
 import { ChannelSidebar } from "@/components/ChannelSidebar";
@@ -99,6 +100,7 @@ export function Shell() {
     <LayoutContext.Provider value={layout}>
       <div className="flex h-full flex-col">
         <AnnouncementBanner instanceKey={params.instance} />
+        <SignInNotice instanceKey={params.instance} />
         <AppliedWatcher />
         <UpdateReady />
         <div className="flex min-h-0 flex-1 overflow-hidden">

@@ -34,6 +34,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0020_friends.sql"),
     include_str!("../migrations/node/0021_presence.sql"),
     include_str!("../migrations/node/0022_federation_moves.sql"),
+    include_str!("../migrations/node/0023_sign_in_providers.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -151,6 +152,26 @@ pub struct NewLinkedAccount<'a> {
     pub username_base: &'a str,
     pub display_name: &'a str,
     pub avatar_url: &'a str,
+}
+
+/// Someone new from a sign-in provider, as their account starts out.
+#[derive(Debug, Clone)]
+pub struct NewProviderAccount<'a> {
+    pub provider: &'a str,
+    pub subject: &'a str,
+    /// Their name there, kept with the link (shown only to them).
+    pub name: &'a str,
+    /// Checked, lowercase, and taken as it is.
+    pub username: &'a str,
+    pub display_name: &'a str,
+}
+
+/// A provider linked to an account.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkedProvider {
+    pub provider: String,
+    pub name: String,
+    pub linked_at: i64,
 }
 
 /// What a profile change sets; `None` leaves a field as it is.
@@ -702,6 +723,166 @@ impl NodeDb {
         Ok((account, true))
     }
 
+    /// The account a sign-in provider's person is linked to, if any.
+    pub async fn provider_account(&self, provider: &str, subject: &str) -> Result<Option<Account>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            &format!(
+                "SELECT {} FROM account_providers JOIN accounts ON accounts.id = account_providers.account_id
+                 WHERE account_providers.provider = ?1 AND account_providers.subject = ?2",
+                account_columns_of("accounts")
+            ),
+            (provider, subject),
+            account,
+        )
+        .await
+    }
+
+    /// The providers linked to an account, oldest first.
+    pub async fn account_providers(&self, account_id: &str) -> Result<Vec<LinkedProvider>> {
+        let conn = self.read()?;
+        db::query_all(
+            &conn,
+            "SELECT provider, name, linked_at FROM account_providers WHERE account_id = ?1 ORDER BY linked_at, provider",
+            [account_id],
+            |r| Ok(LinkedProvider { provider: r.get(0)?, name: r.get(1)?, linked_at: r.get(2)? }),
+        )
+        .await
+    }
+
+    /// Links a provider's person to an account. Refused when they're linked
+    /// to another account, or the account has that provider already.
+    pub async fn link_provider(
+        &self,
+        account_id: &str,
+        provider: &str,
+        subject: &str,
+        name: &str,
+    ) -> Result<LinkedProvider> {
+        let now = now_ms();
+        db::write(&self.db, async |conn| {
+            let linked = query_one(
+                conn,
+                "SELECT account_id FROM account_providers WHERE provider = ?1 AND subject = ?2",
+                (provider, subject),
+                |r| r.get::<String>(0),
+            )
+            .await?;
+            match linked {
+                Some(owner) if owner == account_id => {
+                    return Err(Error::AlreadyExists("that account is already linked to yours".into()));
+                }
+                Some(_) => return Err(Error::AlreadyExists("that account is already linked to another account here".into())),
+                None => {}
+            }
+            let has = query_one(
+                conn,
+                "SELECT 1 FROM account_providers WHERE account_id = ?1 AND provider = ?2",
+                (account_id, provider),
+                |r| r.get::<i64>(0),
+            )
+            .await?
+            .is_some();
+            if has {
+                return Err(Error::AlreadyExists("you already linked one; unlink it first".into()));
+            }
+            conn.execute(
+                "INSERT INTO account_providers (provider, subject, account_id, name, linked_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (provider, subject, account_id, name, now),
+            )
+            .await?;
+            Ok(())
+        })
+        .await?;
+        Ok(LinkedProvider { provider: provider.to_string(), name: name.to_string(), linked_at: now })
+    }
+
+    /// Unlinks a provider from an account; false if it wasn't linked.
+    pub async fn unlink_provider(&self, account_id: &str, provider: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn
+                .execute(
+                    "DELETE FROM account_providers WHERE account_id = ?1 AND provider = ?2",
+                    (account_id, provider),
+                )
+                .await?
+                == 1)
+        })
+        .await
+    }
+
+    /// Who vouches for a linked or single sign-on account (its issuer), if anyone.
+    pub async fn linked_issuer(&self, account_id: &str) -> Result<Option<String>> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT linked_issuer FROM accounts WHERE id = ?1", [account_id], |r| {
+            r.get::<Option<String>>(0)
+        })
+        .await?
+        .flatten())
+    }
+
+    /// When a live session started.
+    pub async fn session_started(&self, token_hash: &str) -> Result<Option<i64>> {
+        let conn = self.read()?;
+        query_one(&conn, "SELECT created_at FROM sessions WHERE token_hash = ?1", [token_hash], |r| r.get::<i64>(0))
+            .await
+    }
+
+    /// Creates an account for someone who signed in with a provider, under
+    /// exactly `username`, linked to them. The first account on the instance
+    /// is its admin. Someone linked meanwhile (a second sign-in racing this
+    /// one) gets that account.
+    pub async fn create_provider_account(&self, new: &NewProviderAccount<'_>) -> Result<(Account, bool)> {
+        let _one_at_a_time = self.sign_ups.lock().await;
+        if let Some(account) = self.provider_account(new.provider, new.subject).await? {
+            return Ok((account, false));
+        }
+        let result = db::write(&self.db, async |conn| {
+            let first = query_one(conn, "SELECT count(*) FROM accounts", (), |r| r.get::<i64>(0)).await? == Some(0);
+            let now = now_ms();
+            let id = new_id();
+            conn.execute(
+                "INSERT INTO accounts (id, kind, username, display_name, admin, created_at, updated_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6)",
+                (id.as_str(), pb::AccountKind::Provider as i64, new.username, new.display_name, first, now),
+            )
+            .await?;
+            conn.execute(
+                "INSERT INTO account_providers (provider, subject, account_id, name, linked_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (new.provider, new.subject, id.as_str(), new.name, now),
+            )
+            .await?;
+            Ok(Account {
+                id,
+                kind: pb::AccountKind::Provider,
+                username: new.username.to_string(),
+                display_name: new.display_name.to_string(),
+                avatar_url: String::new(),
+                admin: first,
+                created_at: now,
+                last_seen_at: now,
+                status: String::new(),
+                status_expires_at: None,
+                two_factor: false,
+                disabled: false,
+            })
+        })
+        .await;
+        let account = result.map_err(|err| {
+            if db::is_unique_violation(&err) { Error::AlreadyExists("that username is taken".into()) } else { err }
+        })?;
+        Ok((account, true))
+    }
+
+    /// Whether a username is free.
+    pub async fn username_free(&self, username: &str) -> Result<bool> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT 1 FROM accounts WHERE username = ?1", [username], |r| r.get::<i64>(0))
+            .await?
+            .is_none())
+    }
+
     /// Holds a sign-in through waifu.dev until its code comes back.
     pub async fn create_linked_sign_in(&self, sign_in: &LinkedSignIn) -> Result<()> {
         db::write(&self.db, async |conn| {
@@ -769,6 +950,22 @@ impl NodeDb {
         identity: &crate::sso::Identity,
     ) -> Result<bool> {
         db::write(&self.db, async |conn| crate::sso::answered_ticket(conn, sign_in, code_hash, identity).await).await
+    }
+
+    /// Keeps a sign-in that started signed in (linking a provider) until
+    /// the provider answers.
+    pub async fn save_sso_sign_in(&self, sign_in: &crate::sso::SignIn) -> Result<()> {
+        db::write(&self.db, async |conn| crate::sso::save(conn, sign_in).await).await
+    }
+
+    /// Records who the provider signed in for a kept sign-in, once.
+    pub async fn sso_row_answered(
+        &self,
+        state: &str,
+        code_hash: &str,
+        identity: &crate::sso::Identity,
+    ) -> Result<bool> {
+        db::write(&self.db, async |conn| crate::sso::answered(conn, state, code_hash, identity).await).await
     }
 
     /// Ends a single sign-on, so its code works once. False if another request already did.
@@ -2100,6 +2297,7 @@ impl NodeDb {
                 "attachment_days",
                 "saved_gifs",
                 "presence_settings",
+                "account_providers",
             ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }

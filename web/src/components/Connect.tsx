@@ -14,7 +14,7 @@ import {
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
-import { probe, run, signIn, signUp, startLinkedSignIn, startSsoSignIn, verifyTwoFactor } from "@/fuwa/actions";
+import { probe, run, signIn, signUp, startLinkedSignIn, startProviderSignIn, startSsoSignIn, verifyTwoFactor } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
 import { HostedBadge } from "@/components/HostedBadge";
+import { ProviderMark } from "@/components/ProviderMarks";
 import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
@@ -208,6 +209,7 @@ export function Account({
   const canSignIn = !!methods?.localSignIn;
   const linked = !!methods?.linkedSignIn;
   const sso = !!methods?.ssoSignIn;
+  const others = linked || sso || (methods?.providers.length ?? 0) > 0;
   const [tab, setTab] = useState(canSignIn ? "sign-in" : "sign-up");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -257,7 +259,7 @@ export function Account({
     return (
       <div className="flex flex-col gap-4">
         <Header url={url} node={node} onBack={onBack} />
-        {linked || sso ? (
+        {others ? (
           <ProviderButtons url={url} node={node} returnTo={returnTo} />
         ) : (
           <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
@@ -271,7 +273,7 @@ export function Account({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Header url={url} node={node} onBack={onBack} />
-      {(linked || sso) && (
+      {others && (
         <>
           <ProviderButtons url={url} node={node} returnTo={returnTo} />
           <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
@@ -352,6 +354,7 @@ function ProviderButtons({ url, node, returnTo }: { url: string; node: Node; ret
     <>
       {node.auth?.ssoSignIn && <SsoButton url={url} node={node} returnTo={returnTo} />}
       {node.auth?.linkedSignIn && <LinkedButton url={url} node={node} returnTo={returnTo} />}
+      <SocialButtons url={url} node={node} returnTo={returnTo} />
     </>
   );
 }
@@ -411,7 +414,7 @@ function Credentials({
  * The second step of signing in to an account with two-step sign-in: six
  * digits from the authenticator app, or one of the backup codes.
  */
-function TwoFactorStep({
+export function TwoFactorStep({
   url,
   ticket,
   onBack,
@@ -583,18 +586,77 @@ function SsoButton({ url, node, returnTo }: { url: string; node: Node; returnTo?
         closed={!node.auth?.ssoSignUp}
         testId="sso-sign-in"
       />
-      {host && (
-        <motion.p
-          initial={{ opacity: 0, y: 4 }}
+      {host && <HostLine host={host} testId="sso-sign-in-host" />}
+    </div>
+  );
+}
+
+/** Which site sees your address when a button sends you there. */
+function HostLine({ host, testId }: { host: string; testId?: string }) {
+  return (
+    <motion.p
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 300, damping: 26, delay: 0.1 }}
+      className="text-center text-xs text-balance text-muted-foreground"
+      data-testid={testId}
+    >
+      <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
+      <T k="connect.provider.signsYouInAt" values={{ host: <b className="text-foreground">{host}</b> }} />
+    </motion.p>
+  );
+}
+
+/**
+ * "Continue with Google / X / Twitch", for each the instance's admins turned
+ * on, each naming the site it sends you to. Comes back to /auth/provider/done.
+ */
+function SocialButtons({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
+  const providers = node.auth?.providers ?? [];
+  if (!providers.length) return null;
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="provider-sign-ins">
+      {providers.map((provider, n) => (
+        <motion.div
+          key={provider.id}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", stiffness: 300, damping: 26, delay: 0.1 }}
-          className="text-center text-xs text-balance text-muted-foreground"
-          data-testid="sso-sign-in-host"
+          transition={{ type: "spring", stiffness: 320, damping: 28, delay: n * 0.05 }}
         >
-          <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
-          <T k="connect.provider.signsYouInAt" values={{ host: <b className="text-foreground">{host}</b> }} />
-        </motion.p>
-      )}
+          <ProviderSignIn url={url} id={provider.id} name={provider.name} host={provider.host} closed={!provider.signUp} returnTo={returnTo} />
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function ProviderSignIn({
+  url,
+  id,
+  name,
+  host,
+  closed,
+  returnTo,
+}: {
+  url: string;
+  id: string;
+  name: string;
+  host: string;
+  closed: boolean;
+  returnTo?: string;
+}) {
+  const start = useAction(startProviderSignIn);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ProviderButton
+        name={name}
+        icon={<ProviderMark id={id} className="size-[18px] transition-transform duration-500 group-hover:scale-110" />}
+        onGo={() => start.go(url, id, returnTo ?? null)}
+        error={start.error}
+        closed={closed}
+        testId={`provider-sign-in-${id}`}
+      />
+      {host && <HostLine host={host} />}
     </div>
   );
 }

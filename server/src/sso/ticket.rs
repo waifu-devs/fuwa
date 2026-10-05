@@ -17,7 +17,9 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 
-use super::{Provider, SignIn, TTL_MS};
+#[cfg(test)]
+use super::Provider;
+use super::{SignIn, TTL_MS};
 use crate::error::{Error, Result};
 use crate::outside::Key;
 
@@ -107,7 +109,7 @@ fn mac(key: &Key, label: &str, parts: &[&[u8]]) -> [u8; 32] {
 #[allow(clippy::too_many_arguments)]
 pub fn issue(
     key: &Key,
-    provider: &Provider,
+    trust_key: &str,
     return_origin: &str,
     secret_hash: &str,
     test: bool,
@@ -127,17 +129,17 @@ pub fn issue(
     payload.push(kind);
     payload.extend_from_slice(&value.to_be_bytes());
     payload.extend_from_slice(&secret[..SECRET]);
-    let tag = mac(key, "fuwa sso state", &[provider.trust_key().as_bytes(), b"\0", &payload]);
+    let tag = mac(key, "fuwa sso state", &[trust_key.as_bytes(), b"\0", &payload]);
     payload.extend_from_slice(&tag[..MAC]);
     let state = URL_SAFE_NO_PAD.encode(&payload);
-    Ok(derive(key, provider, &state, expires_at, test, hex(&secret[..SECRET]), return_origin.to_string()))
+    Ok(derive(key, trust_key, &state, expires_at, test, hex(&secret[..SECRET]), return_origin.to_string()))
 }
 
-/// Reads back a state this instance issued for `provider`, if it's genuine,
+/// Reads back a state this instance issued under `trust_key` (a provider's), if it's genuine,
 /// still for the same provider and hasn't run out.
 pub fn read(
     key: &Key,
-    provider: &Provider,
+    trust_key: &str,
     state: &str,
     now_ms: i64,
     public_url: &str,
@@ -149,7 +151,7 @@ pub fn read(
         return Err(ran_out());
     }
     let (payload, tag) = bytes.split_at(PAYLOAD);
-    let expected = mac(key, "fuwa sso state", &[provider.trust_key().as_bytes(), b"\0", payload]);
+    let expected = mac(key, "fuwa sso state", &[trust_key.as_bytes(), b"\0", payload]);
     if !crate::auth::constant_time_eq(tag, &expected[..MAC]) {
         return Err(ran_out());
     }
@@ -168,12 +170,12 @@ pub fn read(
     let secret = hex(&payload[at..at + SECRET]);
     let origin =
         Origin::decode(kind, value).and_then(|origin| origin.origin(public_url, allowed)).ok_or_else(ran_out)?;
-    Ok(derive(key, provider, state, expires_at, test, secret, origin))
+    Ok(derive(key, trust_key, state, expires_at, test, secret, origin))
 }
 
 fn derive(
     key: &Key,
-    provider: &Provider,
+    trust_key: &str,
     state: &str,
     expires_at: i64,
     test: bool,
@@ -189,7 +191,7 @@ fn derive(
         return_origin,
         account_id: String::new(),
         test,
-        provider_key: provider.trust_key(),
+        provider_key: trust_key.to_string(),
         verifier,
         nonce,
         request_id,
@@ -241,9 +243,10 @@ mod tests {
         let allowed = vec!["https://app.example.com".to_string()];
         let secret = "ab".repeat(32);
         for origin in [PUBLIC, "http://127.0.0.1:53124", "https://[::1]", "https://app.example.com"] {
-            let issued = issue(&key(), &provider("acme"), origin, &secret, true, 1_000, PUBLIC, &allowed).unwrap();
+            let issued =
+                issue(&key(), &provider("acme").trust_key(), origin, &secret, true, 1_000, PUBLIC, &allowed).unwrap();
             assert!(issued.state.len() <= 80, "{}", issued.state.len());
-            let read = read(&key(), &provider("acme"), &issued.state, 2_000, PUBLIC, &allowed).unwrap();
+            let read = read(&key(), &provider("acme").trust_key(), &issued.state, 2_000, PUBLIC, &allowed).unwrap();
             assert_eq!(read.return_origin, origin);
             assert!(read.test);
             assert_eq!(read.secret_hash, "ab".repeat(16));
@@ -254,14 +257,24 @@ mod tests {
     #[test]
     fn tickets_are_refused_when_changed_late_or_for_another_provider() {
         let secret = "cd".repeat(32);
-        let issued = issue(&key(), &provider("acme"), PUBLIC, &secret, false, 1_000, PUBLIC, &[]).unwrap();
-        assert!(read(&key(), &provider("other"), &issued.state, 2_000, PUBLIC, &[]).is_err(), "another provider");
-        assert!(read(&key(), &provider("acme"), &issued.state, 1_000 + TTL_MS + 1_000, PUBLIC, &[]).is_err());
+        let issued = issue(&key(), &provider("acme").trust_key(), PUBLIC, &secret, false, 1_000, PUBLIC, &[]).unwrap();
+        assert!(
+            read(&key(), &provider("other").trust_key(), &issued.state, 2_000, PUBLIC, &[]).is_err(),
+            "another provider"
+        );
+        assert!(
+            read(&key(), &provider("acme").trust_key(), &issued.state, 1_000 + TTL_MS + 1_000, PUBLIC, &[]).is_err()
+        );
         let mut bytes = URL_SAFE_NO_PAD.decode(&issued.state).unwrap();
         bytes[RANDOM + 5] ^= 1; // the test flag
-        assert!(read(&key(), &provider("acme"), &URL_SAFE_NO_PAD.encode(&bytes), 2_000, PUBLIC, &[]).is_err());
+        assert!(
+            read(&key(), &provider("acme").trust_key(), &URL_SAFE_NO_PAD.encode(&bytes), 2_000, PUBLIC, &[]).is_err()
+        );
         let other = Key::from_cluster_key("another cluster key of at least thirty-two characters");
-        assert!(read(&other, &provider("acme"), &issued.state, 2_000, PUBLIC, &[]).is_err(), "another key");
-        assert!(issue(&key(), &provider("acme"), "https://evil.example", &secret, false, 1_000, PUBLIC, &[]).is_err());
+        assert!(read(&other, &provider("acme").trust_key(), &issued.state, 2_000, PUBLIC, &[]).is_err(), "another key");
+        assert!(
+            issue(&key(), &provider("acme").trust_key(), "https://evil.example", &secret, false, 1_000, PUBLIC, &[])
+                .is_err()
+        );
     }
 }

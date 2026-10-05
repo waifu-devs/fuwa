@@ -306,5 +306,21 @@
   "privacy.activityOff": "{instance} no muestra lo que está haciendo la gente. Tu estado se sigue mostrando.",
   "privacy.saveFailed": "No se pudo guardar: {error}",
   "privacy.shareHere": "Compartir mi actividad aquí",
-  "privacy.shareIn": "Compartir mi actividad en {server}"
+  "privacy.shareIn": "Compartir mi actividad en {server}",
+  "signIn.yours": "Cómo inicias sesión",
+  "signIn.password": "Contraseña",
+  "signIn.off": "Desactivado aquí",
+  "signIn.linkedOn": "Vinculado el {date}",
+  "signIn.onlyWay": "Es tu única forma de entrar, así que se queda hasta que agregues otra.",
+  "signIn.unlink": "Desvincular",
+  "signIn.add": "Agrega una forma de iniciar sesión",
+  "signIn.link": "Vincular {name}",
+  "signIn.addNote": "Esta instancia solo guarda el id de tu cuenta allí y su nombre. Tus dispositivos muestran un aviso cuando se agrega una forma de entrar.",
+  "signIn.unlinked": "{name} quedó desvinculado",
+  "signIn.linkTitle": "Vincular {name}",
+  "signIn.unlinkTitle": "¿Desvincular {name}?",
+  "signIn.freshNote": "Por seguridad, cierra sesión y vuelve a entrar primero, y luego inténtalo de nuevo en menos de 10 minutos.",
+  "signIn.passwordLabel": "Tu contraseña",
+  "signIn.codeLabel": "Tu código de dos pasos",
+  "signIn.continueTo": "Continuar a {name}"
 }

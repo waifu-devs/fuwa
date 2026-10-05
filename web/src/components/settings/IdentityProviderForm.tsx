@@ -350,7 +350,7 @@ function TellProvider({ protocol, sp }: { protocol: SsoProtocol; sp: ServiceProv
   );
 }
 
-function CopyRow({ label, value, delay }: { label: string; value: string; delay: number }) {
+export function CopyRow({ label, value, delay }: { label: string; value: string; delay: number }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   useEffect(() => {

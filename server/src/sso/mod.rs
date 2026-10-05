@@ -15,6 +15,7 @@
 
 pub mod http;
 pub mod oidc;
+pub mod providers;
 pub mod saml;
 pub mod ticket;
 pub mod xml;
