@@ -21,6 +21,7 @@ import { useFuwa } from "@/fuwa/store";
 import { PollPlace } from "@/components/chat/pollPlace";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
+import { T, useI18n } from "@/i18n/react";
 import { displayName, memberName } from "@/lib/format";
 import { hidesPersonal } from "@/lib/streamer";
 import { usePrefs } from "@/lib/prefs";
@@ -191,6 +192,7 @@ export function useCommandPicker(instanceKey: string, serverId: string, channelI
 
 /** The list over the composer while you type "/". */
 export function CommandPicker({ picker }: { picker: CommandPickerState }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence>
       {picker.open && (
@@ -202,16 +204,16 @@ export function CommandPicker({ picker }: { picker: CommandPickerState }) {
           className="absolute right-0 bottom-full left-0 z-20 mb-2 origin-bottom overflow-hidden rounded-2xl border bg-popover p-1.5 shadow-xl"
         >
           <p className="flex items-center gap-1 px-2 pt-0.5 pb-1 text-[0.65rem] font-extrabold tracking-wide text-muted-foreground uppercase">
-            <SlashIcon className="size-3" /> Commands
+            <SlashIcon className="size-3" /> {t("chattools.commands.title")}
           </p>
           {picker.loading ? (
             <p className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-              <LoaderCircleIcon className="size-4 animate-spin" /> Looking for commands…
+              <LoaderCircleIcon className="size-4 animate-spin" /> {t("chattools.commands.looking")}
             </p>
           ) : picker.empty ? (
-            <p className="px-2 py-2 text-sm text-muted-foreground">No agent here has commands yet.</p>
+            <p className="px-2 py-2 text-sm text-muted-foreground">{t("chattools.commands.none")}</p>
           ) : (
-            <ul role="listbox" aria-label="Commands">
+            <ul role="listbox" aria-label={t("chattools.commands.title")}>
               {picker.options.map((choice, n) => {
                 const on = n === picker.active;
                 return (
@@ -263,6 +265,7 @@ export function CommandForm({
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? NO_MEMBERS);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? NO_CHANNELS);
   const roles = useRoles(instanceKey, serverId);
+  const { t } = useI18n();
 
   useEffect(() => {
     // With nothing to fill in, the form itself takes Enter and Escape.
@@ -301,8 +304,8 @@ export function CommandForm({
         </span>
         <button
           type="button"
-          aria-label="Back to typing"
-          title="Back to typing (Escape)"
+          aria-label={t("chattools.commands.back")}
+          title={t("chattools.commands.backHint")}
           onClick={() => {
             picker.cancel();
             onDone();
@@ -318,7 +321,7 @@ export function CommandForm({
             const value = picker.values[option.name] ?? "";
             const set = (v: string) => picker.setValue(option.name, v);
             const ref = n === 0 ? first : undefined;
-            const label = `${option.name}${option.required ? "" : " (optional)"}`;
+            const label = option.required ? option.name : t("chattools.commands.optional", { name: option.name });
             let input;
             switch (option.type) {
               case CommandOptionType.INTEGER:
@@ -327,16 +330,16 @@ export function CommandForm({
               case CommandOptionType.BOOLEAN:
                 input = (
                   <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={field}>
-                    <option value="">Pick one</option>
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
+                    <option value="">{t("chattools.commands.pickOne")}</option>
+                    <option value="true">{t("chattools.commands.yes")}</option>
+                    <option value="false">{t("chattools.commands.no")}</option>
                   </select>
                 );
                 break;
               case CommandOptionType.USER:
                 input = (
                   <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
-                    <option value="">Pick someone</option>
+                    <option value="">{t("chattools.commands.pickSomeone")}</option>
                     {members
                       .filter((m) => m.user)
                       .map((m) => (
@@ -350,7 +353,7 @@ export function CommandForm({
               case CommandOptionType.CHANNEL:
                 input = (
                   <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
-                    <option value="">Pick a channel</option>
+                    <option value="">{t("chattools.commands.pickChannel")}</option>
                     {channels
                       .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.VOICE)
                       .map((c) => (
@@ -364,7 +367,7 @@ export function CommandForm({
               case CommandOptionType.ROLE:
                 input = (
                   <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
-                    <option value="">Pick a role</option>
+                    <option value="">{t("chattools.commands.pickRole")}</option>
                     {roles.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.id === serverId ? "@everyone" : r.name}
@@ -376,7 +379,7 @@ export function CommandForm({
               default:
                 input = option.choices.length ? (
                   <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
-                    <option value="">Pick one</option>
+                    <option value="">{t("chattools.commands.pickOne")}</option>
                     {option.choices.map((c) => (
                       <option key={c} value={c}>
                         {c}
@@ -404,16 +407,17 @@ export function CommandForm({
 export function UsedCommand({ message, instanceKey, serverId }: { message: Message; instanceKey: string; serverId: string }) {
   const used = message.interaction;
   const member = useFuwa((s) => (used ? s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === used.userId) : undefined));
+  const { t } = useI18n();
   if (!used) return null;
+  const name = <b className="text-foreground/80">{member ? memberName(member) : t("common.someone")}</b>;
   return (
     <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       <UserAvatar user={member?.user} className="size-4" />
       <span className="truncate">
-        <b className="text-foreground/80">{member ? memberName(member) : "Someone"}</b>{" "}
-        {used.kind === InteractionKind.BUTTON ? "pressed a button" : (
-          <>
-            used <b className="text-primary">/{used.command}</b>
-          </>
+        {used.kind === InteractionKind.BUTTON ? (
+          <T k="chattools.commands.pressed" values={{ name }} />
+        ) : (
+          <T k="chattools.commands.used" values={{ name, command: <b className="text-primary">/{used.command}</b> }} />
         )}
       </span>
     </p>

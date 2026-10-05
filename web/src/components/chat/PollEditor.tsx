@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { type Key, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const MAX_QUESTION = 300;
@@ -19,15 +20,15 @@ const MAX_ANSWER = 55;
 const MAX_ANSWERS = 10;
 
 /** How long a poll can run, as the server takes it: hours, 0 for until it's ended. */
-const DURATIONS = [
-  { hours: 1, label: "1 hour" },
-  { hours: 4, label: "4 hours" },
-  { hours: 24, label: "1 day" },
-  { hours: 72, label: "3 days" },
-  { hours: 168, label: "1 week" },
-  { hours: 336, label: "2 weeks" },
-  { hours: 0, label: "No end" },
-] as const;
+const DURATIONS: { hours: number; label: Key; count?: number }[] = [
+  { hours: 1, label: "chattools.editor.hours", count: 1 },
+  { hours: 4, label: "chattools.editor.hours", count: 4 },
+  { hours: 24, label: "chattools.editor.days", count: 1 },
+  { hours: 72, label: "chattools.editor.days", count: 3 },
+  { hours: 168, label: "chattools.editor.weeks", count: 1 },
+  { hours: 336, label: "chattools.editor.weeks", count: 2 },
+  { hours: 0, label: "chattools.editor.noEnd" },
+];
 
 type Answer = { key: number; text: string; emoji: string };
 
@@ -52,10 +53,11 @@ export function PollEditor({
   serverId: string;
   channel: Channel;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader title="Make a poll" description={`Everyone who can see #${channel.name} can vote.`} />
+        <DialogHeader title={t("chattools.editor.title")} description={t("chattools.editor.about", { channel: channel.name })} />
         {/* A fresh form each time it opens. */}
         {open && <PollForm instanceKey={instanceKey} serverId={serverId} channelId={channel.id} onDone={() => onOpenChange(false)} />}
       </DialogContent>
@@ -73,6 +75,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId]);
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const inputs = useRef(new Map<number, HTMLInputElement>());
+  const { t } = useI18n();
 
   const filled = answers.filter((a) => a.text.trim());
   const ready = !!question.trim() && filled.length >= 2 && !send.pending;
@@ -111,7 +114,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
     <form onSubmit={submit} className="flex flex-col gap-5">
       <label className="flex flex-col gap-2">
         <span className="flex items-baseline justify-between text-sm font-bold">
-          Question
+          {t("chattools.editor.question")}
           <span className={cn("text-xs font-normal text-muted-foreground tabular-nums", question.length > MAX_QUESTION - 30 && "text-amber-600 dark:text-amber-400")}>
             {MAX_QUESTION - question.length}
           </span>
@@ -121,16 +124,16 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
           value={question}
           maxLength={MAX_QUESTION}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What should we play tonight?"
+          placeholder={t("chattools.editor.questionPlaceholder")}
           className="h-11 rounded-xl text-[0.95rem] font-bold"
         />
       </label>
 
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-2 flex w-full items-baseline justify-between text-sm font-bold">
-          Answers
+          {t("chattools.editor.answers")}
           <span className="text-xs font-normal text-muted-foreground tabular-nums">
-            {answers.length} of {MAX_ANSWERS}
+            {t("chattools.editor.answerCount", { count: answers.length, max: MAX_ANSWERS })}
           </span>
         </legend>
         <AnimatePresence initial={false}>
@@ -153,7 +156,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
                 {(pickerOpen) => (
                   <motion.button
                     type="button"
-                    aria-label={answer.emoji ? `Answer ${n + 1}'s emoji` : `Add an emoji to answer ${n + 1}`}
+                    aria-label={answer.emoji ? t("chattools.editor.answerEmoji", { n: n + 1 }) : t("chattools.editor.addAnswerEmoji", { n: n + 1 })}
                     whileHover={{ scale: 1.08, rotate: -6 }}
                     whileTap={{ scale: 0.9 }}
                     transition={SPRING}
@@ -186,13 +189,13 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
                 maxLength={MAX_ANSWER}
                 onChange={(e) => update(answer.key, { text: e.target.value })}
                 onKeyDown={(e) => onAnswerKey(e, n)}
-                placeholder={`Answer ${n + 1}`}
-                aria-label={`Answer ${n + 1}`}
+                placeholder={t("chattools.editor.answer", { n: n + 1 })}
+                aria-label={t("chattools.editor.answer", { n: n + 1 })}
                 className="h-10 flex-1 rounded-xl"
               />
               <motion.button
                 type="button"
-                aria-label={`Remove answer ${n + 1}`}
+                aria-label={t("chattools.editor.removeAnswer", { n: n + 1 })}
                 onClick={() => remove(answer.key)}
                 disabled={answers.length <= 2}
                 whileHover={answers.length > 2 ? { scale: 1.1, rotate: 90 } : undefined}
@@ -220,15 +223,15 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
               className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-dashed text-sm font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
             >
               <PlusIcon className="size-4 transition-transform group-hover:rotate-90" />
-              Add an answer
+              {t("chattools.editor.addAnswer")}
             </motion.button>
           )}
         </AnimatePresence>
       </fieldset>
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-bold">Runs for</span>
-        <div role="radiogroup" aria-label="How long the poll runs" className="flex flex-wrap gap-1.5">
+        <span className="text-sm font-bold">{t("chattools.editor.runsFor")}</span>
+        <div role="radiogroup" aria-label={t("chattools.editor.howLong")} className="flex flex-wrap gap-1.5">
           {DURATIONS.map((d) => {
             const active = hours === d.hours;
             return (
@@ -245,7 +248,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
                 )}
               >
                 {active && <motion.span layoutId="poll-duration" transition={SPRING} className="absolute inset-0 rounded-full bg-primary" />}
-                <span className="relative">{d.label}</span>
+                <span className="relative">{d.count === undefined ? t(d.label) : t(d.label, { count: d.count })}</span>
               </motion.button>
             );
           })}
@@ -256,20 +259,16 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
         <Toggle
           id="poll-multiple"
           icon={<ListChecksIcon className="size-[18px]" />}
-          title="Pick more than one"
-          about={multiple ? "People can choose as many answers as they like." : "People choose one answer."}
+          title={t("chattools.editor.multiple")}
+          about={multiple ? t("chattools.editor.multipleOn") : t("chattools.editor.multipleOff")}
           checked={multiple}
           onChange={setMultiple}
         />
         <Toggle
           id="poll-anonymous"
           icon={anonymous ? <EyeOffIcon className="size-[18px]" /> : <EyeIcon className="size-[18px]" />}
-          title="Anonymous votes"
-          about={
-            anonymous
-              ? "Nobody here, moderators and admins included, sees who voted for what, and results show when the poll ends. Voters see this before they vote."
-              : "Everyone in the channel can see who voted for what. Voters see this before they vote."
-          }
+          title={t("chattools.editor.anonymous")}
+          about={anonymous ? t("chattools.editor.anonymousOn") : t("chattools.editor.anonymousOff")}
           checked={anonymous}
           onChange={setAnonymous}
         />
@@ -291,7 +290,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
 
       <Button type="submit" disabled={!ready} className="btn h-11 rounded-xl font-bold">
         {send.pending ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}
-        <SwapText>{filled.length < 2 ? "Add at least two answers" : !question.trim() ? "Ask a question" : "Post poll"}</SwapText>
+        <SwapText>{filled.length < 2 ? t("chattools.editor.needAnswers") : !question.trim() ? t("chattools.editor.needQuestion") : t("chattools.editor.post")}</SwapText>
       </Button>
     </form>
   );

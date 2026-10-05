@@ -8,6 +8,7 @@ import { run, uploadPicture } from "@/fuwa/actions";
 import { gifCategories, isSaved, prepareGif, saveGif, searchGifs, unsaveGif, useRecentGifs, useSavedGifs } from "@/fuwa/gifs";
 import { GifImage } from "@/components/chat/GifImage";
 import { SPRING } from "@/components/motion";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
   const [sending, setSending] = useState<string | null>(null);
   const saved = useSavedGifs(instanceKey);
   const recent = useRecentGifs(instanceKey);
+  const { t } = useI18n();
 
   // Search as you type, a moment after you stop.
   useEffect(() => {
@@ -123,7 +125,7 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
                   setQuery("");
                   setTrending(false);
                 }}
-                aria-label="Back"
+                aria-label={t("chattools.gifs.back")}
                 className="absolute top-1.5 left-1 z-10 grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <ArrowLeftIcon className="size-4" />
@@ -148,15 +150,15 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
               setTrending(false);
             }}
             maxLength={100}
-            placeholder={credit ? `Search ${credit}` : "Search GIFs"}
-            aria-label="Search GIFs"
+            placeholder={credit ? t("chattools.gifs.searchProvider", { provider: credit }) : t("chattools.gifs.search")}
+            aria-label={t("chattools.gifs.search")}
             className="h-9 w-full rounded-xl bg-muted/60 pr-8 pl-8 text-sm outline-none focus:ring-2 focus:ring-primary/40"
           />
           {typed && (
             <button
               type="button"
               onClick={() => setTyped("")}
-              aria-label="Clear search"
+              aria-label={t("chattools.gifs.clear")}
               className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
             >
               <XIcon className="size-3.5" />
@@ -195,7 +197,7 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
                 sending={sending}
                 onPick={pick}
                 onSave={toggleSave}
-                empty={<Empty icon={<ClockIcon className="size-6" />} title="Nothing sent yet" text="GIFs you send show up here, on this device." />}
+                empty={<Empty icon={<ClockIcon className="size-6" />} title={t("chattools.gifs.nothingSent")} text={t("chattools.gifs.nothingSentAbout")} />}
               />
             )}
           </motion.div>
@@ -203,7 +205,7 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
       </div>
       {credit && (
         <p className="flex h-7 shrink-0 items-center justify-end border-t px-3 text-[0.65rem] font-bold tracking-wide text-muted-foreground">
-          Powered by {credit} · through this instance
+          {t("chattools.gifs.credit", { provider: credit })}
         </p>
       )}
     </>
@@ -211,29 +213,30 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
 }
 
 function Tabs({ tab, onTab, savedCount }: { tab: Tab; onTab: (t: Tab) => void; savedCount: number }) {
+  const { t } = useI18n();
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
-    { id: "browse", label: "Browse", icon: <TrendingUpIcon className="size-3.5" /> },
-    { id: "saved", label: savedCount ? `Saved · ${savedCount}` : "Saved", icon: <StarIcon className="size-3.5" /> },
-    { id: "recent", label: "Recent", icon: <ClockIcon className="size-3.5" /> },
+    { id: "browse", label: t("chattools.gifs.browse"), icon: <TrendingUpIcon className="size-3.5" /> },
+    { id: "saved", label: savedCount ? t("chattools.gifs.savedCount", { count: savedCount }) : t("chattools.gifs.saved"), icon: <StarIcon className="size-3.5" /> },
+    { id: "recent", label: t("chattools.gifs.recent"), icon: <ClockIcon className="size-3.5" /> },
   ];
   return (
     <div role="tablist" className="flex gap-1 px-2 pt-2">
-      {tabs.map((t) => (
+      {tabs.map((item) => (
         <button
-          key={t.id}
+          key={item.id}
           type="button"
           role="tab"
-          aria-selected={tab === t.id}
-          onClick={() => onTab(t.id)}
+          aria-selected={tab === item.id}
+          onClick={() => onTab(item.id)}
           className={cn(
             "relative flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-colors",
-            tab === t.id ? "text-primary" : "text-muted-foreground hover:text-foreground",
+            tab === item.id ? "text-primary" : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {tab === t.id && <motion.span layoutId="gif-tab" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/10" />}
+          {tab === item.id && <motion.span layoutId="gif-tab" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/10" />}
           <span className="relative flex items-center gap-1.5">
-            {t.icon}
-            {t.label}
+            {item.icon}
+            {item.label}
           </span>
         </button>
       ))}
@@ -261,6 +264,7 @@ function Browse({ instanceKey, onTrending, onCategory }: { instanceKey: string; 
   const [categories, setCategories] = useState<GifCategory[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const still = usePrefs(reduceMotion);
+  const { t } = useI18n();
   useEffect(() => {
     let live = true;
     gifCategories(instanceKey).then(
@@ -271,12 +275,12 @@ function Browse({ instanceKey, onTrending, onCategory }: { instanceKey: string; 
       live = false;
     };
   }, [instanceKey]);
-  if (failed) return <Empty icon={<SearchIcon className="size-6" />} title="Browsing isn't working" text={failed} />;
+  if (failed) return <Empty icon={<SearchIcon className="size-6" />} title={t("chattools.gifs.browseFailed")} text={failed} />;
   const tiles = categories ?? [];
   const trendingPicture = tiles[0]?.preview;
   return (
     <div className="scroll-thin grid h-full auto-rows-[5.5rem] grid-cols-2 gap-1.5 overflow-y-auto p-2">
-      <CategoryTile n={0} label="Trending" icon={<TrendingUpIcon className="size-4" />} picture={trendingPicture} still={still} onClick={onTrending} />
+      <CategoryTile n={0} label={t("chattools.gifs.trending")} icon={<TrendingUpIcon className="size-4" />} picture={trendingPicture} still={still} onClick={onTrending} />
       {categories
         ? tiles.map((c, n) => <CategoryTile key={c.query} n={n + 1} label={c.name} picture={c.preview} still={still} onClick={() => onCategory(c)} />)
         : Array.from({ length: 9 }, (_, n) => <span key={n} className="animate-pulse rounded-xl bg-muted" style={{ animationDelay: `${n * 60}ms` }} />)}
@@ -346,6 +350,7 @@ function Results({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const asked = useRef(new Set<string>());
+  const { t } = useI18n();
 
   const more = useCallback(() => {
     if (busy || next === null || asked.current.has(next)) return;
@@ -370,9 +375,9 @@ function Results({
 
   useEffect(() => more(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (failed && !tiles.length) return <Empty icon={<SearchIcon className="size-6" />} title="Search isn't working" text={failed} />;
+  if (failed && !tiles.length) return <Empty icon={<SearchIcon className="size-6" />} title={t("chattools.gifs.searchFailed")} text={failed} />;
   if (!busy && !tiles.length && next === null)
-    return <Empty icon={<SearchIcon className="size-6" />} title={`No GIFs for “${query}”`} text="Try other words." />;
+    return <Empty icon={<SearchIcon className="size-6" />} title={t("chattools.gifs.noResults", { query })} text={t("chattools.gifs.tryOther")} />;
   return (
     <Grid
       tiles={tiles}
@@ -412,14 +417,15 @@ function Saved({
   const saved = useSavedGifs(instanceKey);
   const [progress, setProgress] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const { t, number } = useI18n();
 
   async function upload(file: File) {
-    if (file.type !== "image/gif") return toast("Pick a GIF file");
+    if (file.type !== "image/gif") return toast(t("chattools.gifs.pickGif"));
     setProgress(0);
     try {
       const url = await run(uploadPicture(instanceKey, MediaPurpose.GIF, file, setProgress));
       await run(saveGif(instanceKey, url));
-      toast("Uploaded to your GIFs");
+      toast(t("chattools.gifs.uploaded"));
     } catch (err) {
       toast((err as Error).message);
     } finally {
@@ -435,7 +441,7 @@ function Saved({
       className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed text-xs font-bold text-muted-foreground transition-colors hover:border-primary hover:text-primary"
     >
       {progress !== null ? <LoaderCircleIcon className="size-5 animate-spin" /> : <UploadIcon className="size-5" />}
-      {progress !== null ? `${Math.round(progress * 100)}%` : "Upload a GIF"}
+      {progress !== null ? number(Math.round(progress * 100) / 100, { style: "percent" }) : t("chattools.gifs.upload")}
       <input
         ref={input}
         type="file"
@@ -599,6 +605,7 @@ function GifTile({
   onSave: (t: Tile) => void;
 }) {
   const [hover, setHover] = useState(false);
+  const { t } = useI18n();
   return (
     <div className="group/tile absolute top-0 left-0" style={style} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
       <motion.button
@@ -611,7 +618,7 @@ function GifTile({
         onClick={() => onPick(tile)}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
-        aria-label={tile.title ? `Send ${tile.title}` : "Send this GIF"}
+        aria-label={tile.title ? t("chattools.gifs.send", { title: tile.title }) : t("chattools.gifs.sendThis")}
         title={tile.title || undefined}
         className="relative size-full overflow-hidden rounded-xl bg-muted ring-primary/60 hover:ring-2 focus-visible:ring-2 focus-visible:outline-none"
       >
@@ -625,7 +632,7 @@ function GifTile({
       <button
         type="button"
         onClick={() => onSave(tile)}
-        aria-label={saved ? "Remove from your GIFs" : "Save to your GIFs"}
+        aria-label={saved ? t("chattools.gifs.unsave") : t("chattools.gifs.save")}
         aria-pressed={saved}
         className={cn(
           "absolute top-1.5 right-1.5 grid size-7 place-items-center rounded-lg bg-black/55 text-white opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:opacity-100 focus-visible:opacity-100 active:scale-90",

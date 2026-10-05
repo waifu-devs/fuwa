@@ -19,6 +19,7 @@ import { useAccess } from "@/fuwa/hooks";
 import { providerName, sendGif, useGifSettings } from "@/fuwa/gifs";
 import { lazyComponent } from "@/components/lazy";
 import { SPRING } from "@/components/motion";
+import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: s
   const settings = useGifSettings(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
   const { refs, floatingStyles, context } = useFloating({
     open,
     onOpenChange: setOpen,
@@ -50,7 +52,7 @@ export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: s
         ref={refs.setReference}
         {...getReferenceProps()}
         type="button"
-        aria-label="GIFs"
+        aria-label={t("chattools.gifs.button")}
         whileHover={{ scale: 1.1, rotate: 6 }}
         whileTap={{ scale: 0.85 }}
         className={cn(

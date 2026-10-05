@@ -15,6 +15,7 @@ import { CalendarClockIcon, CheckIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { SPRING } from "@/components/motion";
+import { type Key, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { actionById, bindingOf, comboLabel } from "@/lib/keybinds";
 import { usePrefs } from "@/lib/prefs";
@@ -30,6 +31,17 @@ import { cn } from "@/lib/utils";
  * not, and reads the same in Discord. The "Insert a timestamp" shortcut
  * (Alt+Shift+T unless you change it) opens it from the message box.
  */
+
+/** Each style's name in the catalog. */
+const STYLE_NAMES: Record<TimestampStyle, Key> = {
+  t: "chattools.timestamp.style.shortTime",
+  T: "chattools.timestamp.style.longTime",
+  d: "chattools.timestamp.style.shortDate",
+  D: "chattools.timestamp.style.longDate",
+  f: "chattools.timestamp.style.dateTime",
+  F: "chattools.timestamp.style.dayDateTime",
+  R: "chattools.timestamp.style.relative",
+};
 
 /** The style you picked last, for next time. */
 let lastStyle: TimestampStyle = "R";
@@ -55,7 +67,7 @@ function nextHour(now: number) {
 }
 
 /** One-tap times. */
-function quickPicks(now: number): { label: string; at: Date }[] {
+function quickPicks(now: number): { label: Key; at: Date }[] {
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(9, 0, 0, 0);
@@ -67,10 +79,10 @@ function quickPicks(now: number): { label: string; at: Date }[] {
   const hour = new Date(now + 3_600_000);
   hour.setSeconds(0, 0);
   const picks = [
-    { label: "In an hour", at: hour },
-    { label: "Tonight", at: tonight },
-    { label: "Tomorrow morning", at: tomorrow },
-    { label: "In a week", at: week },
+    { label: "chattools.timestamp.inAnHour" as const, at: hour },
+    { label: "chattools.timestamp.tonight" as const, at: tonight },
+    { label: "chattools.timestamp.tomorrowMorning" as const, at: tomorrow },
+    { label: "chattools.timestamp.inAWeek" as const, at: week },
   ];
   return picks.filter((p) => p.at.getTime() > now);
 }
@@ -90,6 +102,8 @@ export function TimestampPicker({ onPick }: { onPick: (token: string) => void })
     return action ? bindingOf(action, p) : null;
   });
 
+  const { t } = useI18n();
+
   // On a phone, focusing the date field would throw up the keyboard over the picker.
   const coarse = useMediaQuery("(pointer: coarse)");
 
@@ -100,8 +114,8 @@ export function TimestampPicker({ onPick }: { onPick: (token: string) => void })
       <motion.button
         ref={refs.setReference}
         type="button"
-        aria-label="Insert a timestamp"
-        title={combo ? `Insert a timestamp (${comboLabel(combo)})` : "Insert a timestamp"}
+        aria-label={t("chattools.timestamp.insert")}
+        title={combo ? t("chattools.timestamp.insertWithKeys", { keys: comboLabel(combo) }) : t("chattools.timestamp.insert")}
         whileHover={{ scale: 1.12, rotate: 8 }}
         whileTap={{ scale: 0.85 }}
         className={cn(
@@ -143,6 +157,7 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
   const at = fromFields(date, time);
   const token = at ? toToken(at, style) : "";
   const picks = useMemo(() => quickPicks(opened), [opened]);
+  const { t } = useI18n();
 
   function choose(next: TimestampStyle) {
     setStyle(next);
@@ -168,11 +183,11 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
       }}
     >
       <div className="border-b px-3 pt-3 pb-2.5">
-        <p className="text-sm font-extrabold">Insert a timestamp</p>
-        <p className="text-xs text-muted-foreground">Everyone sees it in their own time zone.</p>
+        <p className="text-sm font-extrabold">{t("chattools.timestamp.insert")}</p>
+        <p className="text-xs text-muted-foreground">{t("chattools.timestamp.about")}</p>
         <div className="mt-2.5 grid grid-cols-[1fr_auto] gap-2">
           <label className="sr-only" htmlFor={`${id}-date`}>
-            Date
+            {t("chattools.timestamp.date")}
           </label>
           <input
             id={`${id}-date`}
@@ -182,7 +197,7 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
             className="h-9 min-w-0 rounded-xl bg-muted/60 px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/40"
           />
           <label className="sr-only" htmlFor={`${id}-time`}>
-            Time
+            {t("chattools.timestamp.time")}
           </label>
           <input
             id={`${id}-time`}
@@ -212,13 +227,13 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
                   on ? "border-primary/50 bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
-                {p.label}
+                {t(p.label)}
               </motion.button>
             );
           })}
         </div>
       </div>
-      <div role="radiogroup" aria-label="How it reads" className="p-1.5">
+      <div role="radiogroup" aria-label={t("chattools.timestamp.howItReads")} className="p-1.5">
         {STYLES.map((s, n) => {
           const on = s.style === style;
           return (
@@ -240,9 +255,9 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
               {on && <motion.span layoutId="timestamp-style" transition={SPRING} className="absolute inset-0 rounded-xl bg-primary/12" />}
               <span className="relative min-w-0 flex-1">
                 <span className={cn("block truncate text-sm font-bold", on && "text-primary")}>
-                  {at ? formatTimestamp(at.getTime(), s.style, now) : "Pick a date and time"}
+                  {at ? formatTimestamp(at.getTime(), s.style, now) : t("chattools.timestamp.pickDateTime")}
                 </span>
-                <span className="block text-[0.7rem] text-muted-foreground">{s.name}</span>
+                <span className="block text-[0.7rem] text-muted-foreground">{t(STYLE_NAMES[s.style])}</span>
               </span>
               <AnimatePresence initial={false}>
                 {on && (
@@ -262,7 +277,7 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
         })}
       </div>
       <div className="flex items-center gap-2 border-t bg-muted/30 px-3 py-2">
-        <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title="What gets sent">
+        <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={t("chattools.timestamp.sent")}>
           {token || " "}
         </code>
         <motion.button
@@ -272,7 +287,7 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
           whileTap={{ scale: 0.92 }}
           className="h-8 shrink-0 rounded-xl bg-primary px-3.5 text-xs font-bold text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)] transition-opacity disabled:opacity-50"
         >
-          Insert
+          {t("chattools.timestamp.insertButton")}
         </motion.button>
       </div>
     </motion.div>
