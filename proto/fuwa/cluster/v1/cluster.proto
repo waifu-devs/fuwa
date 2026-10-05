@@ -109,6 +109,10 @@ service ShardService {
   // servers: a guest server's people reading and writing in the home's
   // channel, or the home telling a guest what changed.
   rpc Shared(SharedRequest) returns (SharedResponse);
+  // Sends a file a server here uploaded and no message has yet, to the shard
+  // holding the shared channel's home it's being sent to, checked by SHA-256
+  // like SendPicture.
+  rpc SendSharedFile(SendSharedFileRequest) returns (stream SendSharedFileResponse);
 
   // Moving a server to another shard (and so maybe another region), run by
   // the directory: it asks the new shard to AdoptServer, which takes the
@@ -409,6 +413,12 @@ message CheckPictureResponse {
 message KeepPictureRequest {
   string media_id = 1;
   string server_id = 2;
+  // Set when a shared channel's home takes a file a guest server on this
+  // instance uploaded: the upload moves from that server to server_id, and
+  // only while no message has it and account_id uploaded it. Fails rather
+  // than logs.
+  string taken_from = 3;
+  string account_id = 4;
 }
 
 message KeepPictureResponse {}
@@ -420,6 +430,24 @@ message DropPictureRequest {
 }
 
 message DropPictureResponse {}
+
+message SendSharedFileRequest {
+  // The guest server the file was uploaded for.
+  string server_id = 1;
+  string media_id = 2;
+  // The home server that took it (KeepPictureRequest.taken_from), and who
+  // uploaded it: the file is sent only when its row says both.
+  string home_id = 3;
+  string account_id = 4;
+}
+
+// A piece of the file, in order, as SendPictureResponse.
+message SendSharedFileResponse {
+  bytes data = 1;
+  // Set on the last piece (which may have no data): the SHA-256 of the
+  // whole file.
+  bytes sha256 = 2;
+}
 
 message SendPictureRequest {
   string media_id = 1;

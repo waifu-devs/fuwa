@@ -236,6 +236,7 @@ impl App {
                 let request = cpb::KeepPictureRequest {
                     media_id: id.to_string(),
                     server_id: server_id.unwrap_or_default().into(),
+                    ..Default::default()
                 };
                 link.directory().keep_picture(request).await.map(|_| ()).map_err(Error::from)
             }
@@ -244,6 +245,32 @@ impl App {
         if let Err(err) = kept {
             tracing::warn!(media = %id, error = %err, "couldn't mark a picture as used");
         }
+    }
+
+    /// Moves a file `account_id` uploaded for a guest server on this
+    /// instance to the shared channel's home it's sent in, and marks it used
+    /// ([`Node::take_media`]). Unlike [`keep_picture`](Self::keep_picture) a
+    /// failure is the send's: a file that isn't that loose upload any more
+    /// isn't sent, and two sends of one file make one claim.
+    ///
+    /// [`Node::take_media`]: crate::node::Node::take_media
+    pub async fn take_attachment(&self, id: &str, from: &str, to: &str, account_id: &str) -> Result<()> {
+        let taken = match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::KeepPictureRequest {
+                    media_id: id.to_string(),
+                    server_id: to.to_string(),
+                    taken_from: from.to_string(),
+                    account_id: account_id.to_string(),
+                };
+                return link.ask(request, |mut d, r| async move { d.keep_picture(r).await }).await.map(|_| ());
+            }
+            _ => self.node()?.take_media(id, from, to, account_id).await?,
+        };
+        if !taken {
+            return Err(Error::NotFound("uploaded file; upload it again"));
+        }
+        Ok(())
     }
 
     /// Deletes the picture a change replaced, if it was one of this

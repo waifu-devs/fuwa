@@ -660,6 +660,10 @@ impl DirectoryService for Internal {
         request: Request<cpb::KeepPictureRequest>,
     ) -> Result<Response<cpb::KeepPictureResponse>, Status> {
         let req = request.into_inner();
+        if !req.taken_from.is_empty() {
+            let taken = self.app.take_attachment(&req.media_id, &req.taken_from, &req.server_id, &req.account_id).await;
+            return respond(taken.map(|()| cpb::KeepPictureResponse {}));
+        }
         let server = Some(req.server_id.as_str()).filter(|id| !id.is_empty());
         self.app.keep_picture(Some(&req.media_id), server).await;
         Ok(Response::new(cpb::KeepPictureResponse {}))

@@ -126,6 +126,13 @@ fn link_row(r: &turso::Row) -> turso::Result<LinkRow> {
     })
 }
 
+impl LinkRow {
+    /// Whether the channel's home is on another instance.
+    pub(super) fn elsewhere(&self) -> bool {
+        self.instance.origin.is_some()
+    }
+}
+
 async fn link_by_id(conn: &turso::Connection, id: &str) -> Result<Option<LinkRow>> {
     query_one(conn, &format!("SELECT {LINK_COLUMNS} FROM channel_links WHERE id = ?1"), [id], link_row).await
 }
@@ -1255,6 +1262,7 @@ pub(super) async fn guest_send(
     .into_owned();
     let text = automod::Text { all: &reviewed, content: &req.content };
     review_here(app, sdb, member, access, &channel_id, text, &pictures).await?;
+    let files: Vec<String> = req.attachments.iter().map(|file| file.id.clone()).collect();
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
         content: req.content,
@@ -1263,6 +1271,13 @@ pub(super) async fn guest_send(
         reply_to_id: req.reply_to_id,
     });
     let reply = to_home(app, &sdb.id, link, call).await?;
+    // The home has its own copies now; on a split instance this server's
+    // shard lets go of its own. One that went wrong is left to the sweeps.
+    if matches!(app.link, crate::app::Link::Shard(_)) {
+        for id in &files {
+            crate::cluster::pictures::drop(app, &sdb.id, id).await;
+        }
+    }
     shown_one(app, &sdb.id, link, reply.message).await
 }
 
@@ -1563,7 +1578,10 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     {
         return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
     }
-    // AutoMod reads the embeds' words with the text (files aren't taken here).
+    let mut send = send;
+    let files = take_files(app, sdb, &guest, &mut send.attachments).await?;
+    let file_bytes: i64 = send.attachments.iter().map(|file| file.size).sum();
+    // AutoMod reads the embeds' words and the files' names with the text.
     let reviewed = messages::reviewed_text(&pb::Message {
         content: send.content.clone(),
         embeds: send.embeds.clone(),
@@ -1589,9 +1607,17 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             let access = Access::guest(&channel.id, row.allowed);
             access.require_in(&channel.id, Permission::SendMessages)?;
             if !send.attachments.is_empty() {
-                // Files stay with the server they were uploaded for; the
-                // shared channels' design doesn't carry them across yet.
-                return Err(Error::invalid(super::messages::NO_SHARED_FILES));
+                access.require_in(&channel.id, Permission::AttachFiles)?;
+            }
+            // Checked again here, where no other message can take the room meanwhile.
+            if file_bytes > 0
+                && let Some(limit) = limits.attachment_bytes
+                && store::usage_count(conn, "attachment_bytes").await? + file_bytes > limit
+            {
+                return Err(Error::ResourceExhausted(format!(
+                    "this channel's home server is out of room for files ({} in all)",
+                    crate::media::size_label(limit)
+                )));
             }
             if !send.embeds.is_empty() {
                 access.require_in(&channel.id, Permission::EmbedLinks)?;
@@ -1628,9 +1654,81 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
             Ok(Ok(message))
         })
-        .await?
-        .map_err(Error::denied)?;
-    Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
+        .await
+        .and_then(|written| written.map_err(Error::denied));
+    if message.is_err() {
+        // Taken for a message that wasn't written: nothing has them.
+        crate::attachments::drop_soon(app, &sdb.id, files);
+    }
+    Ok(cpb::SharedReply { message: Some(message?), ..Default::default() })
+}
+
+/// Takes the files a guest on this instance sends into the home, before
+/// the write: each their own upload for their server, checked as the home
+/// checks its own people's, within its room for files, then claimed for the
+/// home (so a file goes in one message) and put with it
+/// ([`crate::cluster::pictures::take_shared`]). The ids taken, which are
+/// dropped if the message isn't written. Files from another instance don't
+/// come yet.
+async fn take_files(
+    app: &Arc<App>,
+    sdb: &ServerDb,
+    guest: &cpb::Guest,
+    files: &mut [pb::Attachment],
+) -> Result<Vec<String>> {
+    if files.is_empty() {
+        return Ok(vec![]);
+    }
+    let server_id = guest.server.as_ref().map(|s| s.id.clone()).unwrap_or_default();
+    let user_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    if server_id.contains('@') {
+        return Err(Error::invalid(messages::NO_SHARED_FILES));
+    }
+    {
+        let conn = sdb.read()?;
+        let (row, _, _) = connection(&conn, guest).await?;
+        let access = Access::guest(&row.channel_id, row.allowed);
+        access.require_in(&row.channel_id, Permission::SendMessages)?;
+        access.require_in(&row.channel_id, Permission::AttachFiles)?;
+    }
+    messages::check_extras(files, &[])?;
+    // Each one as its upload's own link, whatever server's link it came as.
+    let base = app.settings().public_url.clone();
+    for file in files.iter_mut() {
+        file.url = format!("{base}/media/{}", file.id);
+    }
+    let bytes = messages::check_files(app, &user_id, &server_id, &sdb.id, files).await?;
+    let per_file = app.settings().limits.attachment_upload_bytes;
+    if let Some(cap) = per_file
+        && files.iter().any(|file| file.size > cap)
+    {
+        return Err(Error::ResourceExhausted(format!("files can be at most {} here", crate::media::size_label(cap))));
+    }
+    let limits = sdb.limits(&app.settings().limits).await?;
+    if let Some(limit) = limits.attachment_bytes
+        && sdb.usage().await?.attachment_bytes + bytes > limit
+    {
+        return Err(Error::ResourceExhausted(format!(
+            "this channel's home server is out of room for files ({} in all)",
+            crate::media::size_label(limit)
+        )));
+    }
+    let mut taken = Vec::with_capacity(files.len());
+    let took = async {
+        for file in files.iter() {
+            app.take_attachment(&file.id, &server_id, &sdb.id, &user_id).await?;
+            taken.push(file.id.clone());
+            let size = u64::try_from(file.size.min(per_file.unwrap_or(i64::MAX))).unwrap_or_default();
+            crate::cluster::pictures::take_shared(app, &server_id, &sdb.id, &file.id, &user_id, size).await?;
+        }
+        Ok::<_, Error>(())
+    }
+    .await;
+    if let Err(err) = took {
+        crate::attachments::drop_soon(app, &sdb.id, taken);
+        return Err(err);
+    }
+    Ok(taken)
 }
 
 async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedReply> {

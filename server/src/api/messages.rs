@@ -15,8 +15,8 @@ use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
 const MAX_ATTACHMENTS: usize = 10;
-/// Why a file can't go in a channel shared from another server.
-pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel shared with another server yet";
+/// Why a file can't go in a channel shared from another instance.
+pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel shared from another instance yet";
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
@@ -427,51 +427,62 @@ pub(super) fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Emb
 }
 
 impl Api {
-    /// Checks the files a message is sent with: each one an upload of the
-    /// sender's for this server, whole, in it once. Fills in what the server
-    /// knows of each (its id, kind and size, its link where it's served, a
-    /// safe name) and says how many bytes they come to.
+    /// Checks the files a message is sent with: [`check_files`] for this server.
     async fn check_attachments(&self, account_id: &str, server_id: &str, files: &mut [pb::Attachment]) -> Result<i64> {
-        let files_len = files.len();
-        let mut total = 0;
-        let mut seen = Vec::with_capacity(files.len());
-        let voice_caps = &self.app.settings().limits;
-        for file in files.iter_mut() {
-            let voice = file.voice.take();
-            if voice.is_some() && files_len > 1 {
-                return Err(Error::invalid("a voice message is sent on its own"));
-            }
-            let Some(id) = media::id_in_url(file.url.trim()) else {
-                return Err(Error::invalid("attach files by uploading them here first"));
-            };
-            if seen.contains(&id) {
-                return Err(Error::invalid("that file is attached twice"));
-            }
-            let upload = self
-                .app
-                .check_upload(account_id, pb::MediaPurpose::Attachment, file.url.trim(), Some(server_id))
-                .await?
-                .ok_or(Error::NotFound("uploaded file; upload it again"))?;
-            if let Some(voice) = &voice {
-                check_voice(voice, &upload.content_type, upload.size, voice_caps)?;
-            }
-            let sized = upload.content_type.starts_with("image/") || upload.content_type.starts_with("video/");
-            let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
-            *file = pb::Attachment {
-                url: attachments::link(&self.app, server_id, &id),
-                filename: attachments::clean_name(&file.filename),
-                content_type: upload.content_type,
-                size: upload.size,
-                width: pixels(file.width),
-                height: pixels(file.height),
-                id: id.clone(),
-                voice,
-            };
-            total += upload.size;
-            seen.push(id);
-        }
-        Ok(total)
+        check_files(&self.app, account_id, server_id, server_id, files).await
     }
+}
+
+/// Checks the files a message is sent with: each one an upload of the
+/// sender's for `uploaded_for`, whole, in it once. Fills in what the server
+/// knows of each (its id, kind and size, its link where it's served in
+/// `served_by`, a safe name) and says how many bytes they come to. They
+/// differ only for a guest's files a shared channel's home takes.
+pub(super) async fn check_files(
+    app: &App,
+    account_id: &str,
+    uploaded_for: &str,
+    served_by: &str,
+    files: &mut [pb::Attachment],
+) -> Result<i64> {
+    let files_len = files.len();
+    let mut total = 0;
+    let mut seen = Vec::with_capacity(files.len());
+    let voice_caps = &app.settings().limits;
+    for file in files.iter_mut() {
+        let voice = file.voice.take();
+        if voice.is_some() && files_len > 1 {
+            return Err(Error::invalid("a voice message is sent on its own"));
+        }
+        let Some(id) = media::id_in_url(file.url.trim()) else {
+            return Err(Error::invalid("attach files by uploading them here first"));
+        };
+        if seen.contains(&id) {
+            return Err(Error::invalid("that file is attached twice"));
+        }
+        let upload = app
+            .check_upload(account_id, pb::MediaPurpose::Attachment, file.url.trim(), Some(uploaded_for))
+            .await?
+            .ok_or(Error::NotFound("uploaded file; upload it again"))?;
+        if let Some(voice) = &voice {
+            check_voice(voice, &upload.content_type, upload.size, voice_caps)?;
+        }
+        let sized = upload.content_type.starts_with("image/") || upload.content_type.starts_with("video/");
+        let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
+        *file = pb::Attachment {
+            url: attachments::link(app, served_by, &id),
+            filename: attachments::clean_name(&file.filename),
+            content_type: upload.content_type,
+            size: upload.size,
+            width: pixels(file.width),
+            height: pixels(file.height),
+            id: id.clone(),
+            voice,
+        };
+        total += upload.size;
+        seen.push(id);
+    }
+    Ok(total)
 }
 
 /// Checks a voice message's file against what the sending app said of it
@@ -870,7 +881,12 @@ impl MessageService for Api {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
                     if !req.attachments.is_empty() {
-                        return Err(Error::invalid(NO_SHARED_FILES));
+                        if link.elsewhere() {
+                            return Err(Error::invalid(NO_SHARED_FILES));
+                        }
+                        // The sender's uploads for this server, which the
+                        // channel's home takes and keeps.
+                        self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
                     }
                     if !req.thread_id.is_empty() {
                         return Err(Error::invalid("threads aren't in channels shared between servers yet"));
