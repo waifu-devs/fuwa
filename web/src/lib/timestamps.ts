@@ -5,17 +5,19 @@
 // either way. Only the browser's Intl APIs format them; nothing about the
 // reader's time zone ever leaves the device.
 
+import type { Key } from "../i18n/i18n.ts";
+
 export type TimestampStyle = "t" | "T" | "d" | "D" | "f" | "F" | "R";
 
-/** Every style, in the order the picker lists them. */
-export const STYLES: { style: TimestampStyle; name: string }[] = [
-  { style: "t", name: "Short time" },
-  { style: "T", name: "Long time" },
-  { style: "d", name: "Short date" },
-  { style: "D", name: "Long date" },
-  { style: "f", name: "Date and time" },
-  { style: "F", name: "Day, date and time" },
-  { style: "R", name: "Relative" },
+/** Every style, in the order the picker lists them, with its name in the catalog. */
+export const STYLES: { style: TimestampStyle; name: Key }[] = [
+  { style: "t", name: "chattools.timestamp.style.shortTime" },
+  { style: "T", name: "chattools.timestamp.style.longTime" },
+  { style: "d", name: "chattools.timestamp.style.shortDate" },
+  { style: "D", name: "chattools.timestamp.style.longDate" },
+  { style: "f", name: "chattools.timestamp.style.dateTime" },
+  { style: "F", name: "chattools.timestamp.style.dayDateTime" },
+  { style: "R", name: "chattools.timestamp.style.relative" },
 ];
 
 /** What `<t:SECONDS>` with no style shows, as in Discord. */
