@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Channel, Message, VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { collectTiles, pickTiles, type Sources, type Tile } from "./live-tiles.ts";
+import { collectTiles, enabledKinds, fitCustom, pickTiles, type Sources, type Tile } from "./live-tiles.ts";
 
 const NOW = 1_800_000_000_000;
 const ts = (ms: number) => ({ seconds: BigInt(Math.floor(ms / 1000)), nanos: (ms % 1000) * 1e6 }) as Message["createdAt"];
@@ -91,4 +91,38 @@ test("a followed thread's parent is found in a loaded channel when its thread wa
   const parent = { id: "t1", channelId: "general", content: "Plans", thread: { replyCount: 2, participantIds: [] } } as unknown as Message;
   const [tile] = collectTiles(sources({ messages: { general: { items: [parent] } }, followed: { t1: true }, threadUnread: { t1: 2 } }), NOW);
   assert.equal(tile?.kind === "thread" && tile.channelId, "general");
+});
+
+test("voice room tiles start off in big servers, and a server's own choices win", () => {
+  assert.equal(enabledKinds(undefined, 499).has("voice"), true);
+  assert.equal(enabledKinds(undefined, 500).has("voice"), false);
+  assert.equal(enabledKinds(undefined, 500).has("poll"), true);
+  assert.equal(enabledKinds({ voice: true }, 50_000).has("voice"), true);
+  assert.deepEqual([...enabledKinds({ poll: false, thread: false }, 10)], ["event", "voice", "shared", "custom"]);
+  const tiles: Tile[] = [
+    { kind: "voice", id: "voice", channelId: "c", channelName: "", userIds: ["a", "b"], since: 0, video: false, screen: false },
+    { kind: "thread", id: "thread", channelId: "c", threadId: "t", title: "", replies: 1, unread: 1, userIds: [] },
+  ];
+  assert.deepEqual(pickTiles(tiles, new Set(), NOW, enabledKinds(undefined, 2_000)).map((t) => t.id), ["thread"]);
+});
+
+test("an app's tile is cut to the template before anyone sees it", () => {
+  const fitted = fitCustom({
+    kind: "custom",
+    id: "c",
+    channelId: "general",
+    app: "Scorebot",
+    title: "A very\nlong title that keeps going well past forty characters",
+    status: "67'",
+    live: true,
+    rows: [1, 2, 3, 4, 5].map((n) => ({ label: `Team ${n}`, value: "123456789" })),
+    progress: 7,
+    action: "Watch",
+  });
+  assert.equal(fitted.title.length, 40);
+  assert.ok(!fitted.title.includes("\n"));
+  assert.equal(fitted.rows.length, 4);
+  assert.equal(fitted.rows[0]!.value, "1234567…");
+  assert.equal(fitted.progress, 1);
+  assert.equal(fitCustom({ ...fitted, progress: Number.NaN }).progress, null);
 });

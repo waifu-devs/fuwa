@@ -7,6 +7,18 @@
   "strip.quiet": "Sin tarjetas en vivo en este servidor",
   "strip.off": "Desactivar las tarjetas en vivo",
   "menu.show": "Tarjetas en vivo",
+  "menu.server": "Tarjetas para todo el servidor",
+  "menu.bigServer": {
+    "one": "Las salas de voz empiezan apagadas en servidores de {count} miembro o más",
+    "other": "Las salas de voz empiezan apagadas en servidores de {count} miembros o más"
+  },
+  "menu.draft": "Borrador: se guarda en este navegador, todavía no en el servidor",
+  "kind.event": "Eventos",
+  "kind.voice": "Salas de voz",
+  "kind.poll": "Encuestas",
+  "kind.thread": "Hilos que sigues",
+  "kind.shared": "Canales compartidos",
+  "kind.custom": "De apps",
   "voice.title": {
     "one": "{count} persona en {channel}",
     "other": "{count} personas en {channel}"
@@ -52,5 +64,13 @@
     "one": "{count} asistirá",
     "other": "{count} asistirán"
   },
-  "event.open": "Ver"
+  "event.open": "Ver",
+  "custom.by": "De {app}",
+  "custom.live": "En vivo",
+  "sample.app": "Scorebot",
+  "sample.match": "Final de copa",
+  "sample.home": "Sakura FC",
+  "sample.away": "Tsuki United",
+  "sample.watch": "Ver",
+  "sample.fullTime": "Final"
 }

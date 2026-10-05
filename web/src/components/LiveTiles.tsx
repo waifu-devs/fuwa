@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { BellOffIcon, CalendarClockIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, VideoIcon, Volume2Icon } from "lucide-react";
+import { BellOffIcon, BotIcon, CalendarClockIcon, TrophyIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, VideoIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { joinCall } from "@/calls/engine";
@@ -7,15 +7,15 @@ import { useCalls } from "@/calls/state";
 import { Count, SPRING } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { UserAvatar } from "@/components/Icons";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { loadFollowed, run } from "@/fuwa/actions";
 import { usePresenceSettings } from "@/fuwa/presence";
 import { notificationKey, useFuwa } from "@/fuwa/store";
 import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
 import { useI18n } from "@/i18n/react";
 import { formatTime } from "@/lib/format";
-import { collectTiles, EVENT_AHEAD_MS, pickTiles, POLL_SOON_MS, sampleTiles, type Tile, type TileKind } from "@/lib/live-tiles";
-import { hideTile, setServerQuiet, setTilesMode, useLiveTilesLocal } from "@/lib/live-tiles-store";
+import { BIG_SERVER, collectTiles, enabledKinds, EVENT_AHEAD_MS, pickTiles, POLL_SOON_MS, sampleTiles, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
+import { hideTile, setServerKind, setServerQuiet, setTilesMode, useLiveTilesLocal } from "@/lib/live-tiles-store";
 import { isMuted, useNow } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
 import { requestThread } from "@/lib/threads";
@@ -34,20 +34,24 @@ const KIND: Record<TileKind, { icon: typeof Volume2Icon; tint: string }> = {
   poll: { icon: ChartColumnIcon, tint: "from-amber-500 to-orange-500" },
   thread: { icon: MessagesSquareIcon, tint: "from-sky-500 to-indigo-500" },
   shared: { icon: RadioTowerIcon, tint: "from-violet-500 to-purple-500" },
+  custom: { icon: TrophyIcon, tint: "from-lime-500 to-emerald-600" },
 };
 
 const NO_VOICE: never[] = [];
 
 export function LiveTiles({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const { mode, hidden, quiet } = useLiveTilesLocal();
-  if (mode === "off" || quiet.has(serverId)) return null;
-  return <Strip instanceKey={instanceKey} serverId={serverId} demo={mode === "demo"} hidden={hidden} />;
+  const { mode, hidden, quiet, kinds: choices } = useLiveTilesLocal();
+  const members = useFuwa((s) => Number(s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.memberCount ?? 0));
+  const kinds = useMemo(() => enabledKinds(choices[serverId], members), [choices, serverId, members]);
+  if (mode === "off" || quiet.has(serverId) || kinds.size === 0) return null;
+  return <Strip instanceKey={instanceKey} serverId={serverId} demo={mode === "demo"} hidden={hidden} kinds={kinds} />;
 }
 
-function Strip({ instanceKey, serverId, demo, hidden }: { instanceKey: string; serverId: string; demo: boolean; hidden: ReadonlySet<string> }) {
+function Strip({ instanceKey, serverId, demo, hidden, kinds }: { instanceKey: string; serverId: string; demo: boolean; hidden: ReadonlySet<string>; kinds: ReadonlySet<TileKind> }) {
   const { t } = useI18n();
   // A minute is fine for countdowns in minutes; rooms and threads move with the store.
-  const now = useNow(15_000);
+  // Demo samples move every second (the sample match); real tiles are fine at 15 seconds.
+  const now = useNow(demo ? 1_000 : 15_000);
   const [anchor] = useState(Date.now);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
   const voice = useFuwa((s) => s.instances[instanceKey]?.voice[serverId] ?? NO_VOICE);
@@ -80,9 +84,18 @@ function Strip({ instanceKey, serverId, demo, hidden }: { instanceKey: string; s
       },
       now,
     );
-    const all = demo ? [...real, ...sampleTiles(channels, anchor, t("tiles.event.sampleTitle"))] : real;
-    return pickTiles(all, hidden, now);
-  }, [channels, voice, messages, threadParents, followed, threadUnread, unread, notifications, inChannel, serverId, now, demo, anchor, hidden, t]);
+    const words = {
+      eventTitle: t("tiles.event.sampleTitle"),
+      app: t("tiles.sample.app"),
+      match: t("tiles.sample.match"),
+      home: t("tiles.sample.home"),
+      away: t("tiles.sample.away"),
+      watch: t("tiles.sample.watch"),
+      fullTime: t("tiles.sample.fullTime"),
+    };
+    const all = demo ? [...real, ...sampleTiles(channels, anchor, now, words)] : real;
+    return pickTiles(all, hidden, now, kinds);
+  }, [channels, voice, messages, threadParents, followed, threadUnread, unread, notifications, inChannel, serverId, now, demo, anchor, hidden, kinds, t]);
 
   const serverMuted = isMuted(notifications?.[notificationKey(serverId)], now);
   const shown = dnd || serverMuted ? [] : tiles;
@@ -188,6 +201,7 @@ function TileCard({ tile, index, instanceKey, serverId, now }: { tile: Tile; ind
         </button>
         <TileMenu tile={tile} serverId={serverId} />
       </div>
+      {body.rows}
       <div className="flex items-center gap-2 px-2 pb-2">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">{body.extra}</span>
         <motion.button
@@ -205,7 +219,7 @@ function TileCard({ tile, index, instanceKey, serverId, now }: { tile: Tile; ind
   );
 }
 
-type Body = { title: string; line: string; extra: ReactNode; action: string; left: number | null };
+type Body = { title: string; line: ReactNode; extra: ReactNode; action: string; left: number | null; rows?: ReactNode };
 
 /** A tile's words, and how much of its window is left (for the bar along its bottom). */
 function describe(tile: Tile, now: number, t: ReturnType<typeof useI18n>["t"], instanceKey: string): Body {
@@ -255,7 +269,26 @@ function describe(tile: Tile, now: number, t: ReturnType<typeof useI18n>["t"], i
         action: t("tiles.shared.open"),
         left: null,
       };
-    case "event": {
+    case "custom":
+      return {
+        title: tile.title,
+        line: (
+          <span className="inline-flex items-center gap-1">
+            <BotIcon className="size-3" />
+            {t("tiles.custom.by", { app: tile.app })}
+          </span>
+        ),
+        rows: <Scoreboard rows={tile.rows} />,
+        extra: (
+          <span className="inline-flex items-center gap-1.5 font-bold tabular-nums">
+            {tile.live && <LiveDot />}
+            {tile.live ? `${t("tiles.custom.live")} · ${tile.status}` : tile.status}
+          </span>
+        ),
+        action: tile.action,
+        left: tile.progress,
+      };
+        case "event": {
       const until = tile.startsAt - now;
       const minutes = Math.max(1, Math.ceil(until / 60_000));
       return {
@@ -371,14 +404,41 @@ function TileMenu({ tile, serverId }: { tile: Tile; serverId: string }) {
 }
 
 /** In the server's menu while tiles are on in this browser: show them here or not. */
-export function LiveTilesMenuItem({ serverId }: { serverId: string }) {
+export function LiveTilesMenuItem({ instanceKey, serverId, manage }: { instanceKey: string; serverId: string; manage: boolean }) {
   const { t } = useI18n();
-  const { mode, quiet } = useLiveTilesLocal();
+  const { mode, quiet, kinds: choices } = useLiveTilesLocal();
+  const members = useFuwa((s) => Number(s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.memberCount ?? 0));
   if (mode === "off") return null;
+  const kinds = enabledKinds(choices[serverId], members);
   return (
-    <DropdownMenuCheckboxItem checked={!quiet.has(serverId)} onCheckedChange={(on) => setServerQuiet(serverId, !on)} onSelect={(e) => e.preventDefault()}>
-      {t("tiles.menu.show")}
-    </DropdownMenuCheckboxItem>
+    <>
+      <DropdownMenuCheckboxItem checked={!quiet.has(serverId)} onCheckedChange={(on) => setServerQuiet(serverId, !on)} onSelect={(e) => e.preventDefault()}>
+        {t("tiles.menu.show")}
+      </DropdownMenuCheckboxItem>
+      {/* For whoever can manage the server: which kinds of tiles everyone here sees. */}
+      {manage && (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <RadioTowerIcon /> {t("tiles.menu.server")}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64">
+            {TILE_KINDS.map((kind) => {
+              const Icon = KIND[kind].icon;
+              return (
+                <DropdownMenuCheckboxItem key={kind} checked={kinds.has(kind)} onCheckedChange={(on) => setServerKind(serverId, kind, on)} onSelect={(e) => e.preventDefault()}>
+                  <Icon /> {t(`tiles.kind.${kind}`)}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+            <DropdownMenuLabel className="text-xs leading-4 font-normal text-muted-foreground">
+              {t("tiles.menu.bigServer", { count: BIG_SERVER })}
+              <br />
+              {t("tiles.menu.draft")}
+            </DropdownMenuLabel>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      )}
+    </>
   );
 }
 
@@ -391,5 +451,32 @@ export function LiveTilesGroup({ children }: { children: ReactNode }) {
   if (mode === "off") return children;
   return (
     <LayoutGroup id="live-tiles">{children}</LayoutGroup>
+  );
+}
+
+/** An app's rows, such as teams and scores: a value that changes rolls to its new one. */
+function Scoreboard({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <ul className="mx-2 mb-2 flex flex-col gap-0.5 rounded-lg bg-muted/50 px-2 py-1.5">
+      {rows.map((row, n) => (
+        <li key={n} className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          <span className="relative inline-flex overflow-hidden font-extrabold tabular-nums">
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span
+                key={row.value}
+                initial={{ y: "100%", opacity: 0, scale: 1.4 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: "-100%", opacity: 0 }}
+                transition={SPRING}
+                className="inline-block"
+              >
+                {row.value}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

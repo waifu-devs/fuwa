@@ -7,6 +7,18 @@
   "strip.quiet": "No live tiles in this server",
   "strip.off": "Turn live tiles off",
   "menu.show": "Live tiles",
+  "menu.server": "Tiles for everyone here",
+  "menu.bigServer": {
+    "one": "Voice rooms start off in servers of {count} member or more",
+    "other": "Voice rooms start off in servers of {count} members or more"
+  },
+  "menu.draft": "Draft: kept in this browser, not on the server yet",
+  "kind.event": "Events",
+  "kind.voice": "Voice rooms",
+  "kind.poll": "Polls",
+  "kind.thread": "Followed threads",
+  "kind.shared": "Shared channels",
+  "kind.custom": "From apps",
   "voice.title": {
     "one": "{count} person in {channel}",
     "other": "{count} people in {channel}"
@@ -52,5 +64,13 @@
     "one": "{count} going",
     "other": "{count} going"
   },
-  "event.open": "See"
+  "event.open": "See",
+  "custom.by": "From {app}",
+  "custom.live": "Live",
+  "sample.app": "Scorebot",
+  "sample.match": "Cup final",
+  "sample.home": "Sakura FC",
+  "sample.away": "Tsuki United",
+  "sample.watch": "Watch",
+  "sample.fullTime": "Full time"
 }

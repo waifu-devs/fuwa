@@ -228,7 +228,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             </DropdownMenuItem>
           )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
-          <LiveTilesMenuItem serverId={serverId} />
+          <LiveTilesMenuItem instanceKey={instanceKey} serverId={serverId} manage={has(access, Permission.MANAGE_SERVER)} />
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
             <IdCardIcon /> Edit server profile

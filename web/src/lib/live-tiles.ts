@@ -19,7 +19,7 @@ const SECURE = 6;
 
 const ms = (ts: Timestamp | undefined) => (ts ? Number(ts.seconds) * 1000 + Math.floor(ts.nanos / 1e6) : 0);
 
-export type TileKind = "event" | "voice" | "poll" | "thread" | "shared";
+export type TileKind = "event" | "voice" | "poll" | "thread" | "shared" | "custom";
 
 type Base = {
   /** Stable while the activity lasts, and new when it starts again: hiding a tile hides this one only. */
@@ -35,7 +35,50 @@ export type ThreadTile = Base & { kind: "thread"; threadId: string; title: strin
 export type SharedTile = Base & { kind: "shared"; channelName: string; unread: number; servers: number };
 export type EventTile = Base & { kind: "event"; title: string; startsAt: number; going: number };
 
-export type Tile = VoiceTile | PollTile | ThreadTile | SharedTile | EventTile;
+/**
+ * A tile an app (an agent) keeps up to date in a server, such as a match's
+ * scoreboard. Apps fill a fixed template (`fitCustom` holds its limits) and
+ * never send markup, scripts, styles or outside links; the app's name always
+ * shows on it.
+ */
+export type CustomTile = Base & {
+  kind: "custom";
+  /** The agent's name, shown with its badge so nobody mistakes the tile for the app's own. */
+  app: string;
+  title: string;
+  /** A short state, such as "67'" or "Half time". */
+  status: string;
+  /** Going on right now: the tile gets the live dot. */
+  live: boolean;
+  /** Up to four label and value pairs: teams and scores, players and points. */
+  rows: { label: string; value: string }[];
+  /** How far along, 0 to 1, for the bar along the bottom; null for none. */
+  progress: number | null;
+  /** The button's words; it always opens the tile's channel. */
+  action: string;
+};
+
+export type Tile = VoiceTile | PollTile | ThreadTile | SharedTile | EventTile | CustomTile;
+
+/** The template's limits: what an app sends is cut to these before anyone sees it. */
+export const CUSTOM_LIMITS = { title: 40, status: 16, rows: 4, label: 24, value: 8, action: 12 } as const;
+
+const cut = (text: string, max: number) => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
+
+/** An app's tile as it may show: text on one line and cut to the limits, at most four rows, progress kept between 0 and 1. */
+export function fitCustom(tile: CustomTile): CustomTile {
+  return {
+    ...tile,
+    title: cut(tile.title, CUSTOM_LIMITS.title),
+    status: cut(tile.status, CUSTOM_LIMITS.status),
+    rows: tile.rows.slice(0, CUSTOM_LIMITS.rows).map((r) => ({ label: cut(r.label, CUSTOM_LIMITS.label), value: cut(r.value, CUSTOM_LIMITS.value) })),
+    progress: tile.progress === null || !Number.isFinite(tile.progress) ? null : Math.min(1, Math.max(0, tile.progress)),
+    action: cut(tile.action, CUSTOM_LIMITS.action),
+  };
+}
 
 /** At most this many tiles show in a server; the rest wait their turn. */
 export const MAX_TILES = 3;
@@ -168,16 +211,32 @@ export function urgency(tile: Tile, now: number): number {
       return 25 + Math.min(tile.unread, 10);
     case "shared":
       return 20 + Math.min(tile.unread / 10, 10);
+    case "custom":
+      // An app can't buy its way to the top: a live tile sits with busy rooms, a quiet one below.
+      return tile.live ? 55 : 35;
   }
 }
 
 /** Whether an event tile still belongs on screen. */
 export const eventLive = (startsAt: number, now: number) => startsAt - now <= EVENT_AHEAD_MS && now - startsAt <= EVENT_AFTER_MS;
 
-/** The tiles to show: hidden ones out, the most urgent first, at most `max`. Ties keep their order. */
-export function pickTiles(tiles: Tile[], hidden: ReadonlySet<string>, now: number, max = MAX_TILES): Tile[] {
+export const TILE_KINDS: readonly TileKind[] = ["event", "voice", "poll", "thread", "shared", "custom"];
+
+/** From this many members a server is big: voice room tiles start off there, so a crowd isn't pointed at a few people talking. */
+export const BIG_SERVER = 500;
+
+/** What a server's admins chose per kind of tile; a kind they never set follows the default. */
+export type KindChoices = Partial<Record<TileKind, boolean>>;
+
+/** The kinds of tiles a server shows: every kind, except voice rooms in big servers, unless its admins chose otherwise. */
+export function enabledKinds(choices: KindChoices | undefined, members: number): Set<TileKind> {
+  return new Set(TILE_KINDS.filter((kind) => choices?.[kind] ?? !(kind === "voice" && members >= BIG_SERVER)));
+}
+
+/** The tiles to show: hidden ones and kinds the server turned off out, the most urgent first, at most `max`. Ties keep their order. */
+export function pickTiles(tiles: Tile[], hidden: ReadonlySet<string>, now: number, kinds: ReadonlySet<TileKind> = new Set(TILE_KINDS), max = MAX_TILES): Tile[] {
   return tiles
-    .filter((t) => !hidden.has(t.id) && (t.kind !== "event" || eventLive(t.startsAt, now)))
+    .filter((t) => kinds.has(t.kind) && !hidden.has(t.id) && (t.kind !== "event" || eventLive(t.startsAt, now)))
     .map((t, n) => ({ t, n, u: urgency(t, now) }))
     .sort((a, b) => b.u - a.u || a.n - b.n)
     .slice(0, max)
@@ -192,11 +251,35 @@ export function pickTiles(tiles: Tile[], hidden: ReadonlySet<string>, now: numbe
  * the "demo" mode, and every one is marked as a sample. Times hang off
  * `anchor`, the moment the demo started, so they count down like real ones.
  */
-export function sampleTiles(channels: Channel[], anchor: number, eventTitle: string): Tile[] {
+export type SampleWords = { eventTitle: string; app: string; match: string; home: string; away: string; watch: string; fullTime: string };
+
+export function sampleTiles(channels: Channel[], anchor: number, now: number, words: SampleWords): Tile[] {
   const text = channels.find((c) => c.type === TEXT);
   if (!text) return [];
+  // A match that plays out fast so the demo shows scores changing: a minute every 2 seconds from the 60th.
+  const seconds = Math.max(0, (now - anchor) / 1000);
+  const minute = Math.min(90, 60 + Math.floor(seconds / 2));
+  const home = (minute >= 64 ? 1 : 0) + (minute >= 81 ? 1 : 0);
+  const away = 1 + (minute >= 72 ? 1 : 0);
+  const over = minute >= 90;
   return [
-    { kind: "event", id: `sample:event:${text.id}`, sample: true, channelId: text.id, title: eventTitle, startsAt: anchor + 12 * 60_000, going: 14 },
+    { kind: "event", id: `sample:event:${text.id}`, sample: true, channelId: text.id, title: words.eventTitle, startsAt: anchor + 12 * 60_000, going: 14 },
     { kind: "shared", id: `sample:shared:${text.id}`, sample: true, channelId: text.id, channelName: text.name, unread: 42, servers: 3 },
+    fitCustom({
+      kind: "custom",
+      id: `sample:custom:${text.id}`,
+      sample: true,
+      channelId: text.id,
+      app: words.app,
+      title: words.match,
+      status: over ? words.fullTime : `${minute}'`,
+      live: !over,
+      rows: [
+        { label: words.home, value: String(home) },
+        { label: words.away, value: String(away) },
+      ],
+      progress: minute / 90,
+      action: words.watch,
+    }),
   ];
 }
