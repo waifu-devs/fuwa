@@ -300,6 +300,8 @@ pub struct FuwaApp {
     pub time_ticking: bool,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
+    /// Agents' commands: the "/" list, a picked command's options, buttons being pressed.
+    pub commands: crate::ui::commands::Commands,
     /// Where the @ list was closed with Escape, so it stays closed for that mention.
     pub picker_dismissed: Option<usize>,
     /// Roles picked from the @ list by name, sent as their tokens.
@@ -365,6 +367,7 @@ impl FuwaApp {
                     // The send button lights up once there's something to send.
                     InputEvent::Change => {
                         this.update_picker(cx);
+                        this.update_commands(cx);
                         cx.notify()
                     }
                     InputEvent::Focus | InputEvent::Blur => cx.notify(),
@@ -521,6 +524,7 @@ impl FuwaApp {
             time_ticking: false,
             edit_box,
             picker: None,
+            commands: Default::default(),
             picker_dismissed: None,
             picked_roles: Vec::new(),
             menu: None,
@@ -948,6 +952,9 @@ impl FuwaApp {
     // ───────────────────────── Sending ─────────────────────────
 
     pub(crate) fn send_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.commands.form.is_some() {
+            return self.run_picked_command(window, cx);
+        }
         let Some(target) = self.target() else { return };
         let text = self.composer.read(cx).value().trim().to_owned();
         if text.is_empty() && !self.has_files() {

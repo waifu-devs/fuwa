@@ -59,6 +59,9 @@ impl FuwaApp {
             }
             return false;
         }
+        if self.picker.is_none() && self.command_keys(key, window, cx) {
+            return true;
+        }
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
             return false;
         }

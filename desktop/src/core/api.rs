@@ -120,6 +120,7 @@ clients! {
     sso => "SsoService" pb::sso_service_client::SsoServiceClient<Transport>,
     presence => "PresenceService" pb::presence_service_client::PresenceServiceClient<Transport>,
     admin => "AdminService" pb::admin_service_client::AdminServiceClient<Transport>,
+    commands => "CommandService" pb::command_service_client::CommandServiceClient<Transport>,
 }
 
 impl Api {
