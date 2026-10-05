@@ -9,6 +9,7 @@ import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
+import { type I18n, type Key, useI18n } from "@/i18n/react";
 import { actionById, bindingOf } from "@/lib/keybinds";
 import { setPrefs, usePrefs, type InputMode } from "@/lib/prefs";
 import { cue, play } from "@/lib/sounds";
@@ -16,17 +17,18 @@ import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { Keycaps, PrefSetting } from "./common";
 
-export const VOICE_SETTINGS = [
-  { id: "devices", label: "Microphone and speakers", keywords: "input output device headset" },
-  { id: "mic-test", label: "Mic test", keywords: "check level meter" },
-  { id: "input-mode", label: "Input mode", keywords: "voice activity push to talk ptt" },
-  { id: "sensitivity", label: "Sensitivity", keywords: "threshold gate noise" },
-  { id: "processing", label: "Processing", keywords: "echo noise suppression gain" },
-  { id: "camera", label: "Camera", keywords: "video webcam mirror preview" },
-  { id: "call-sounds", label: "Call sounds", keywords: "ring ringtone join leave" },
+export const voiceSettings = (t: I18n["t"]) => [
+  { id: "devices", label: t("appsettings.voice.devices"), keywords: "input output device headset" },
+  { id: "mic-test", label: t("appsettings.voice.micTest"), keywords: "check level meter" },
+  { id: "input-mode", label: t("appsettings.voice.inputMode"), keywords: "voice activity push to talk ptt" },
+  { id: "sensitivity", label: t("appsettings.voice.sensitivity"), keywords: "threshold gate noise" },
+  { id: "processing", label: t("appsettings.voice.processing"), keywords: "echo noise suppression gain" },
+  { id: "camera", label: t("appsettings.voice.camera"), keywords: "video webcam mirror preview" },
+  { id: "call-sounds", label: t("appsettings.voice.callSounds"), keywords: "ring ringtone join leave" },
 ];
 
-type Device = { id: string; label: string };
+/** A device; `label` is empty until the browser has been allowed to name it, so it goes by its place in the list. */
+type Device = { id: string; label: string; n: number };
 
 /** The microphones, speakers and cameras this browser can use. Names show once it's been allowed them. */
 function useDevices() {
@@ -38,7 +40,7 @@ function useDevices() {
         const pick = (kind: MediaDeviceKind) =>
           list
             .filter((d) => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications")
-            .map((d, n) => ({ id: d.deviceId, label: d.label || `${kind === "audioinput" ? "Microphone" : kind === "videoinput" ? "Camera" : "Speakers"} ${n + 1}` }));
+            .map((d, n) => ({ id: d.deviceId, label: d.label, n: n + 1 }));
         setDevices({ inputs: pick("audioinput"), outputs: pick("audiooutput"), cameras: pick("videoinput") });
       });
     read();
@@ -48,8 +50,28 @@ function useDevices() {
   return devices;
 }
 
-function DevicePicker({ icon: Icon, label, value, devices, onChange, disabled }: { icon: typeof MicIcon; label: string; value: string; devices: Device[]; onChange: (id: string) => void; disabled?: string }) {
-  const current = devices.find((d) => d.id === value)?.label ?? "System default";
+function DevicePicker({
+  icon: Icon,
+  label,
+  unnamed,
+  value,
+  devices,
+  onChange,
+  disabled,
+}: {
+  icon: typeof MicIcon;
+  label: string;
+  /** What a device the browser hasn't named yet is called, with its {number}. */
+  unnamed: Key;
+  value: string;
+  devices: Device[];
+  onChange: (id: string) => void;
+  disabled?: string;
+}) {
+  const { t } = useI18n();
+  const name = (d: Device) => d.label || t(unnamed, { number: d.n });
+  const picked = devices.find((d) => d.id === value);
+  const current = picked ? name(picked) : t("appsettings.voice.systemDefault");
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       <span className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
@@ -67,9 +89,9 @@ function DevicePicker({ icon: Icon, label, value, devices, onChange, disabled }:
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-56">
-          {[{ id: "", label: "System default" }, ...devices].map((d) => (
+          {[{ id: "", label: t("appsettings.voice.systemDefault"), n: 0 }, ...devices].map((d) => (
             <DropdownMenuItem key={d.id || "default"} onSelect={() => onChange(d.id)}>
-              <span className="min-w-0 flex-1 truncate">{d.label}</span>
+              <span className="min-w-0 flex-1 truncate">{name(d)}</span>
               {d.id === value && <CheckIcon className="text-primary" />}
             </DropdownMenuItem>
           ))}
@@ -85,6 +107,7 @@ const meterAt = (db: number) => Math.min(1, Math.max(0, (db + 100) / 100));
 
 /** Your microphone's level live, with where voice activity opens; optionally played back to you. */
 function MicTest() {
+  const { t } = useI18n();
   const [testing, setTesting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [state, setState] = useState({ level: -100, threshold: -50, open: false });
@@ -128,12 +151,12 @@ function MicTest() {
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant={testing ? "secondary" : "default"} className="btn group rounded-xl font-bold" onClick={() => setTesting((t) => !t)}>
           {testing ? <SquareIcon className="size-3.5" /> : <PlayIcon className="transition-transform group-hover:scale-110" />}
-          {testing ? "Stop" : "Let's check"}
+          {testing ? t("appsettings.voice.stop") : t("appsettings.voice.micTestStart")}
         </Button>
         <AnimatePresence>
           {testing && (
             <motion.span initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={SPRING}>
-              <Toggle checked={loopback} onChange={setLoopback} label="Hear myself" hint="Use headphones, or you'll hear an echo." />
+              <Toggle checked={loopback} onChange={setLoopback} label={t("appsettings.voice.hearMyself")} hint={t("appsettings.voice.hearMyselfHint")} />
             </motion.span>
           )}
         </AnimatePresence>
@@ -146,6 +169,7 @@ function MicTest() {
 
 /** Your camera, as others will see it (mirrored for you, if you like), until you stop it. */
 function CameraTest() {
+  const { t } = useI18n();
   const [testing, setTesting] = useState(false);
   const [track, setTrack] = useState<MediaStreamTrack | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -193,9 +217,9 @@ function CameraTest() {
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant={testing ? "secondary" : "default"} className="btn group rounded-xl font-bold" onClick={() => setTesting((t) => !t)}>
           {testing ? <SquareIcon className="size-3.5" /> : <PlayIcon className="transition-transform group-hover:scale-110" />}
-          {testing ? "Stop" : "Check my camera"}
+          {testing ? t("appsettings.voice.stop") : t("appsettings.voice.cameraTestStart")}
         </Button>
-        <Toggle checked={mirror} onChange={(mirrorVideo) => setPrefs({ mirrorVideo })} label="Mirror my camera" hint="Only for you: everyone else sees it the right way round." />
+        <Toggle checked={mirror} onChange={(mirrorVideo) => setPrefs({ mirrorVideo })} label={t("appsettings.voice.mirror")} hint={t("appsettings.voice.mirrorHint")} />
       </div>
       {problem && <p className="text-sm text-destructive">{problem}</p>}
     </div>
@@ -204,8 +228,9 @@ function CameraTest() {
 
 /** A level meter: the bar moves with your voice and turns green while what you say goes out. */
 function Meter({ level, threshold, open }: { level: number; threshold?: number; open: boolean }) {
+  const { t } = useI18n();
   return (
-    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={Math.round(level)} aria-label="Microphone level">
+    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={Math.round(level)} aria-label={t("appsettings.voice.micLevel")}>
       <motion.div
         className={cn("absolute inset-y-0 left-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
         animate={{ width: `${meterAt(level) * 100}%` }}
@@ -223,53 +248,55 @@ function Meter({ level, threshold, open }: { level: number; threshold?: number; 
 }
 
 export function Voice() {
+  const { t, number } = useI18n();
   const p = usePrefs((x) => x);
   const devices = useDevices();
   const ptt = usePrefs((x) => bindingOf(actionById("pushToTalk")!, x));
   return (
     <div className="flex flex-col">
-      <PrefSetting id="devices" title="Microphone and speakers" keys={["inputDevice", "outputDevice", "inputVolume", "outputVolume"]}>
+      <PrefSetting id="devices" title={t("appsettings.voice.devices")} keys={["inputDevice", "outputDevice", "inputVolume", "outputVolume"]}>
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <DevicePicker icon={MicIcon} label="Microphone" value={p.inputDevice} devices={devices.inputs} onChange={(inputDevice) => setPrefs({ inputDevice })} />
-            <Volume label="Microphone volume" value={p.inputVolume} onChange={(inputVolume) => setPrefs({ inputVolume })} />
+            <DevicePicker icon={MicIcon} label={t("appsettings.voice.mic")} unnamed="appsettings.voice.unnamedMic" value={p.inputDevice} devices={devices.inputs} onChange={(inputDevice) => setPrefs({ inputDevice })} />
+            <Volume label={t("appsettings.voice.micVolume")} value={p.inputVolume} onChange={(inputVolume) => setPrefs({ inputVolume })} />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <DevicePicker
               icon={HeadphonesIcon}
-              label="Speakers"
+              label={t("appsettings.voice.speakers")}
+              unnamed="appsettings.voice.unnamedSpeakers"
               value={p.outputDevice}
               devices={devices.outputs}
               onChange={(outputDevice) => setPrefs({ outputDevice })}
-              disabled={canPickOutput() ? undefined : "This browser plays calls through the system's speakers."}
+              disabled={canPickOutput() ? undefined : t("appsettings.voice.systemSpeakers")}
             />
-            <Volume label="Call volume" value={p.outputVolume} onChange={(outputVolume) => setPrefs({ outputVolume })} onCommit={() => cue("someoneJoined")} />
+            <Volume label={t("appsettings.voice.callVolume")} value={p.outputVolume} onChange={(outputVolume) => setPrefs({ outputVolume })} onCommit={() => cue("someoneJoined")} />
           </div>
         </div>
       </PrefSetting>
-      <PrefSetting id="mic-test" title="Mic test" hint="Say something and watch the bar. It turns green when what you say would go out." keys={[]} delay={0.04}>
+      <PrefSetting id="mic-test" title={t("appsettings.voice.micTest")} hint={t("appsettings.voice.micTestHint")} keys={[]} delay={0.04}>
         <MicTest />
       </PrefSetting>
-      <PrefSetting id="input-mode" title="Input mode" keys={["inputMode", "pttRelease"]} delay={0.08}>
+      <PrefSetting id="input-mode" title={t("appsettings.voice.inputMode")} keys={["inputMode", "pttRelease"]} delay={0.08}>
         <Choice<InputMode>
           value={p.inputMode}
           onChange={(inputMode) => setPrefs({ inputMode })}
           options={[
-            { value: "voice", label: "Voice activity", hint: "Goes out when you talk.", icon: <AudioLinesIcon className="size-4" /> },
-            { value: "ptt", label: "Push to talk", hint: "Goes out while you hold a key.", icon: <KeyboardIcon className="size-4" /> },
+            { value: "voice", label: t("appsettings.voice.voiceActivity"), hint: t("appsettings.voice.voiceActivityHint"), icon: <AudioLinesIcon className="size-4" /> },
+            { value: "ptt", label: t("appsettings.voice.pushToTalk"), hint: t("appsettings.voice.pushToTalkHint"), icon: <KeyboardIcon className="size-4" /> },
           ]}
         />
         <AnimatePresence initial={false}>
           {p.inputMode === "ptt" && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-3 overflow-hidden">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-muted-foreground">Your key:</span>
-                {ptt ? <Keycaps combo={ptt} /> : <span className="font-bold text-destructive">none yet</span>}
+                <span className="text-muted-foreground">{t("appsettings.voice.yourKey")}</span>
+                {ptt ? <Keycaps combo={ptt} /> : <span className="font-bold text-destructive">{t("appsettings.voice.noKey")}</span>}
                 <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => openSettings("keybinds")}>
-                  <KeyboardIcon /> {ptt ? "Change" : "Pick one"}
+                  <KeyboardIcon /> {ptt ? t("appsettings.voice.changeKey") : t("appsettings.voice.pickKey")}
                 </Button>
               </div>
-              <Slider label="Release delay" value={p.pttRelease} min={0} max={2000} step={20} format={(n) => `${n} ms`} onChange={(pttRelease) => setPrefs({ pttRelease })} />
+              <Slider label={t("appsettings.voice.releaseDelay")} value={p.pttRelease} min={0} max={2000} step={20} format={(n) => number(n, { style: "unit", unit: "millisecond" })} onChange={(pttRelease) => setPrefs({ pttRelease })} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -277,12 +304,12 @@ export function Voice() {
       <AnimatePresence initial={false}>
         {p.inputMode === "voice" && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
-            <PrefSetting id="sensitivity" title="Sensitivity" keys={["autoSensitivity", "sensitivity"]} delay={0.12}>
-              <Toggle checked={p.autoSensitivity} onChange={(autoSensitivity) => setPrefs({ autoSensitivity })} label="Pick it for me" hint="Follows the noise in your room." />
+            <PrefSetting id="sensitivity" title={t("appsettings.voice.sensitivity")} keys={["autoSensitivity", "sensitivity"]} delay={0.12}>
+              <Toggle checked={p.autoSensitivity} onChange={(autoSensitivity) => setPrefs({ autoSensitivity })} label={t("appsettings.voice.autoSensitivity")} hint={t("appsettings.voice.autoSensitivityHint")} />
               <AnimatePresence initial={false}>
                 {!p.autoSensitivity && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
-                    <Slider label="Opens at" value={p.sensitivity} min={-100} max={0} step={1} format={(n) => `${n} dB`} onChange={(sensitivity) => setPrefs({ sensitivity })} />
+                    <Slider label={t("appsettings.voice.opensAt")} value={p.sensitivity} min={-100} max={0} step={1} format={(n) => t("appsettings.voice.decibels", { value: n })} onChange={(sensitivity) => setPrefs({ sensitivity })} />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -290,20 +317,20 @@ export function Voice() {
           </motion.div>
         )}
       </AnimatePresence>
-      <PrefSetting id="processing" title="Processing" keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
-        <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label="Echo cancellation" hint="Keeps your speakers out of your microphone." />
-        <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label="Noise suppression" hint="Softens fans, keyboards and the street." />
-        <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label="Automatic gain" hint="Evens out how loud you are. Off for a studio microphone." />
+      <PrefSetting id="processing" title={t("appsettings.voice.processing")} keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
+        <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label={t("appsettings.voice.echo")} hint={t("appsettings.voice.echoHint")} />
+        <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label={t("appsettings.voice.noise")} hint={t("appsettings.voice.noiseHint")} />
+        <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label={t("appsettings.voice.gain")} hint={t("appsettings.voice.gainHint")} />
       </PrefSetting>
-      <PrefSetting id="camera" title="Camera" keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
+      <PrefSetting id="camera" title={t("appsettings.voice.camera")} keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
         <div className="flex flex-col gap-4">
-          <DevicePicker icon={VideoIcon} label="Camera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
+          <DevicePicker icon={VideoIcon} label={t("appsettings.voice.camera")} unnamed="appsettings.voice.unnamedCamera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
           <CameraTest />
         </div>
       </PrefSetting>
-      <PrefSetting id="call-sounds" title="Call sounds" keys={["sounds"]} delay={0.2}>
-        <SoundRow label="Joining, leaving, mute and deafen" hint="Little cues while you're in a call." on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
-        <SoundRow label="Ringtone" hint="When someone calls you." on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
+      <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
+        <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
+        <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
       </PrefSetting>
     </div>
   );
@@ -311,24 +338,26 @@ export function Voice() {
 
 /** A volume from 0 to 200%, with its name and value above it. */
 function Volume({ label, value, onChange, onCommit }: { label: string; value: number; onChange: (v: number) => void; onCommit?: () => void }) {
+  const { number } = useI18n();
+  const percent = (n: number) => number(n / 100, { style: "percent" });
   return (
     <div>
       <div className="-mb-5 flex items-baseline justify-between text-sm">
         <span className="font-bold">{label}</span>
-        <span className="text-xs font-bold text-muted-foreground tabular-nums">{value}%</span>
+        <span className="text-xs font-bold text-muted-foreground tabular-nums">{percent(value)}</span>
       </div>
-      <Slider label={label} value={value} min={0} max={200} step={5} format={(n) => `${n}%`} marks={[{ value: 100, label: "100%" }]} onChange={onChange} onCommit={onCommit} />
+      <Slider label={label} value={value} min={0} max={200} step={5} format={percent} marks={[{ value: 100, label: percent(100) }]} onChange={onChange} onCommit={onCommit} />
     </div>
   );
 }
 
-function SoundRow({ label, hint, on, onChange, preview }: { label: string; hint: string; on: boolean; onChange: (on: boolean) => void; preview: () => void }) {
+function SoundRow({ label, hint, playLabel, on, onChange, preview }: { label: string; hint: string; playLabel: string; on: boolean; onChange: (on: boolean) => void; preview: () => void }) {
   return (
     <div className="flex items-center gap-3">
       <button
         type="button"
         onClick={preview}
-        aria-label={`Play: ${label.toLowerCase()}`}
+        aria-label={playLabel}
         className="group grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:bg-primary hover:text-primary-foreground active:scale-90"
       >
         <Volume2Icon className="size-4 transition-transform group-hover:scale-110" />

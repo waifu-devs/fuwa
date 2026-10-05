@@ -3,6 +3,7 @@ import { ArrowLeftIcon, ChevronRightIcon, CornerDownRightIcon, SearchIcon, Searc
 import { AnimatePresence, motion } from "motion/react";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Count, EASE_OUT, SPRING } from "@/components/motion";
+import { useI18n } from "@/i18n/react";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +82,7 @@ export function SettingsScreen({
   /** Shown under every section, such as a save bar for edits across sections. */
   footer?: ReactNode;
 }) {
+  const { t } = useI18n();
   const wide = useMediaQuery("(min-width: 768px)");
   const [menu, setMenu] = useState(true);
   const [query, setQuery] = useState("");
@@ -202,7 +204,7 @@ export function SettingsScreen({
                           <button
                             type="button"
                             onClick={() => (holdsSection ? hold() : setMenu(true))}
-                            aria-label="All settings"
+                            aria-label={t("settings.screen.allSettings")}
                             className="grid size-10 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
                           >
                             <ArrowLeftIcon className="size-5" />
@@ -274,6 +276,7 @@ function Menu({
   query: string;
   onQuery: (query: string) => void;
 }) {
+  const { t } = useI18n();
   const highlight = useId();
   const results = useMemo(() => search(groups, query), [groups, query]);
   let n = 0;
@@ -293,7 +296,7 @@ function Menu({
           <CloseButton onClose={onClose} compact />
         </header>
       )}
-      <nav aria-label="Settings" className={cn("flex flex-col gap-5", wide ? "w-60 py-16 pr-3 pl-5" : "p-3")}>
+      <nav aria-label={t("settings.screen.title")} className={cn("flex flex-col gap-5", wide ? "w-60 py-16 pr-3 pl-5" : "p-3")}>
         {wide && (
           <div className="px-2">
             <DialogPrimitive.Title className="truncate text-lg font-extrabold">{title}</DialogPrimitive.Title>
@@ -395,6 +398,7 @@ function search(groups: SettingsGroup[], query: string): Result[] | null {
 }
 
 function SearchBox({ query, onQuery, onPick }: { query: string; onQuery: (q: string) => void; onPick: () => void }) {
+  const { t } = useI18n();
   return (
     <label className="group relative block">
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground transition group-focus-within:scale-110 group-focus-within:text-primary" />
@@ -408,15 +412,15 @@ function SearchBox({ query, onQuery, onPick }: { query: string; onQuery: (q: str
             onPick();
           }
         }}
-        placeholder="Search settings"
-        aria-label="Search settings"
+        placeholder={t("settings.screen.search")}
+        aria-label={t("settings.screen.search")}
         className="h-9 w-full rounded-lg border border-transparent bg-muted/70 pr-8 pl-8 text-sm outline-none transition placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus:ring-4 focus:ring-primary/10 [&::-webkit-search-cancel-button]:hidden"
       />
       <AnimatePresence>
         {query && (
           <motion.button
             type="button"
-            aria-label="Clear search"
+            aria-label={t("settings.screen.clearSearch")}
             onClick={() => onQuery("")}
             initial={{ opacity: 0, scale: 0.5, rotate: -90 }}
             animate={{ opacity: 1, scale: 1, rotate: 0 }}
@@ -443,6 +447,7 @@ function Results({
   onChoose: (id: string, setting?: string) => void;
   wide: boolean;
 }) {
+  const { t } = useI18n();
   if (results.length === 0)
     return (
       <motion.div
@@ -454,7 +459,7 @@ function Results({
         <motion.span animate={{ rotate: [0, -12, 10, -6, 0] }} transition={{ duration: 0.6, delay: 0.1 }}>
           <SearchXIcon className="size-7" />
         </motion.span>
-        Nothing matches “{query}”
+        {t("settings.screen.noMatches", { query })}
       </motion.div>
     );
   let n = 0;
@@ -516,8 +521,9 @@ function ResultRow({
 const ICON = "relative size-4 shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110";
 
 function CloseButton({ onClose, compact = false }: { onClose: () => void; compact?: boolean }) {
+  const { t } = useI18n();
   return (
-    <button type="button" onClick={onClose} aria-label="Close settings" className="group flex shrink-0 flex-col items-center gap-1">
+    <button type="button" onClick={onClose} aria-label={t("settings.screen.close")} className="group flex shrink-0 flex-col items-center gap-1">
       <span
         className={cn(
           "grid place-items-center rounded-full text-muted-foreground transition group-hover:bg-muted group-hover:text-foreground group-active:scale-90",

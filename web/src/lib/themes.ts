@@ -5,6 +5,8 @@
  * those variables, so any theme restyles every component.
  */
 
+import type { Key } from "@/i18n/i18n";
+
 export const TOKENS = [
   "background",
   "foreground",
@@ -45,25 +47,26 @@ export const SEEDS = ["background", "foreground", "card", "primary", "primary-fo
 export type Seed = (typeof SEEDS)[number];
 export type ThemeSeeds = Record<Seed, string>;
 
-export const TOKEN_LABELS: Record<Token, string> = {
-  background: "Background",
-  foreground: "Text",
-  card: "Cards",
-  "card-foreground": "Card text",
-  popover: "Menus",
-  "popover-foreground": "Menu text",
-  primary: "Primary",
-  "primary-foreground": "Text on primary",
-  secondary: "Secondary",
-  "secondary-foreground": "Text on secondary",
-  muted: "Muted",
-  "muted-foreground": "Muted text",
-  accent: "Hover",
-  "accent-foreground": "Hover text",
-  destructive: "Danger",
-  border: "Borders",
-  input: "Inputs",
-  ring: "Focus ring",
+/** Each color's name in the theme editor, as catalog keys (locales/, appsettings.themes.token.*). */
+export const TOKEN_LABELS: Record<Token, Key> = {
+  background: "appsettings.themes.token.background",
+  foreground: "appsettings.themes.token.foreground",
+  card: "appsettings.themes.token.card",
+  "card-foreground": "appsettings.themes.token.cardForeground",
+  popover: "appsettings.themes.token.popover",
+  "popover-foreground": "appsettings.themes.token.popoverForeground",
+  primary: "appsettings.themes.token.primary",
+  "primary-foreground": "appsettings.themes.token.primaryForeground",
+  secondary: "appsettings.themes.token.secondary",
+  "secondary-foreground": "appsettings.themes.token.secondaryForeground",
+  muted: "appsettings.themes.token.muted",
+  "muted-foreground": "appsettings.themes.token.mutedForeground",
+  accent: "appsettings.themes.token.accent",
+  "accent-foreground": "appsettings.themes.token.accentForeground",
+  destructive: "appsettings.themes.token.destructive",
+  border: "appsettings.themes.token.border",
+  input: "appsettings.themes.token.input",
+  ring: "appsettings.themes.token.ring",
 };
 
 /** A #rrggbb color. */

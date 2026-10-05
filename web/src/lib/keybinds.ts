@@ -1,3 +1,4 @@
+import type { I18n, Key } from "@/i18n/i18n";
 import { getPrefs, type Prefs } from "@/lib/prefs";
 
 /**
@@ -48,6 +49,48 @@ export const ACTIONS: KeyAction[] = [
 ];
 
 export const GROUPS: KeyGroup[] = ["Navigation", "Messages", "Chat", "Voice", "App"];
+
+/** Each action's name in the catalog (locales/, appsettings.keybinds.action.*). */
+const ACTION_NAMES: Record<string, Key> = {
+  quickSwitcher: "appsettings.keybinds.action.quickSwitcher",
+  searchServer: "appsettings.keybinds.action.searchServer",
+  previousServer: "appsettings.keybinds.action.previousServer",
+  nextServer: "appsettings.keybinds.action.nextServer",
+  previousChannel: "appsettings.keybinds.action.previousChannel",
+  nextChannel: "appsettings.keybinds.action.nextChannel",
+  previousUnread: "appsettings.keybinds.action.previousUnread",
+  nextUnread: "appsettings.keybinds.action.nextUnread",
+  markServerRead: "appsettings.keybinds.action.markServerRead",
+  focusComposer: "appsettings.keybinds.action.focusComposer",
+  insertTimestamp: "appsettings.keybinds.action.insertTimestamp",
+  toggleMembers: "appsettings.keybinds.action.toggleMembers",
+  toggleMute: "appsettings.keybinds.action.toggleMute",
+  toggleDeafen: "appsettings.keybinds.action.toggleDeafen",
+  pushToTalk: "appsettings.keybinds.action.pushToTalk",
+  toggleCamera: "appsettings.keybinds.action.toggleCamera",
+  toggleScreen: "appsettings.keybinds.action.toggleScreen",
+  toggleRecording: "appsettings.keybinds.action.toggleRecording",
+  openSettings: "appsettings.keybinds.action.openSettings",
+  shortcuts: "appsettings.keybinds.action.shortcuts",
+  toggleStreamer: "appsettings.keybinds.action.toggleStreamer",
+};
+
+const GROUP_NAMES: Record<KeyGroup, Key> = {
+  Navigation: "appsettings.keybinds.group.navigation",
+  Messages: "appsettings.keybinds.group.messages",
+  Chat: "appsettings.keybinds.group.chat",
+  Voice: "appsettings.keybinds.group.voice",
+  App: "appsettings.keybinds.group.app",
+};
+
+/** An action's name in the app's language (its English label if the catalog doesn't name it). */
+export const actionName = (t: I18n["t"], action: KeyAction) => {
+  const key = ACTION_NAMES[action.id];
+  return key ? t(key) : action.label;
+};
+
+/** A group's heading in the app's language. */
+export const groupName = (t: I18n["t"], group: KeyGroup) => t(GROUP_NAMES[group]);
 
 export const actionById = (id: string) => ACTIONS.find((a) => a.id === id);
 
@@ -182,18 +225,23 @@ export function bindings(p: Prefs = getPrefs()): Map<string, string> {
 /**
  * Why a combo can't be used for an action, or null if it can. `except` is
  * the binding being changed, so recording the same combo again is fine.
+ * `t` is the app's language (i18n/).
  */
-export function problemWith(combo: string, p: Prefs, except: { action?: string; custom?: string }): string | null {
+export function problemWith(combo: string, p: Prefs, except: { action?: string; custom?: string }, t: I18n["t"]): string | null {
   const c = normalize(combo);
-  if (browserKeeps(c)) return `Your browser keeps ${comboLabel(c)} for itself. The desktop app can use it.`;
+  const keys = comboLabel(c);
+  if (browserKeeps(c)) return t("appsettings.keybinds.browserKeeps", { keys });
   for (const action of ACTIONS) {
     if (action.id === except.action) continue;
     const bound = bindingOf(action, p);
-    if (bound && normalize(bound) === c) return `${comboLabel(c)} is already used for “${action.label}”.`;
+    if (bound && normalize(bound) === c) return t("appsettings.keybinds.taken", { keys, action: actionName(t, action) });
   }
   for (const custom of p.customKeybinds) {
     if (custom.id === except.custom) continue;
-    if (normalize(custom.combo) === c) return `${comboLabel(c)} is already used for “${actionById(custom.action)?.label ?? custom.action}”.`;
+    if (normalize(custom.combo) === c) {
+      const action = actionById(custom.action);
+      return t("appsettings.keybinds.taken", { keys, action: action ? actionName(t, action) : custom.action });
+    }
   }
   return null;
 }

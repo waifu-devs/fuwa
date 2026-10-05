@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import { type I18n, useI18n } from "@/i18n/react";
 import { DEFAULT_BACKDROP, type Backdrop } from "@/lib/backdrop";
 import { activeTheme, deleteCustomTheme, getPrefs, saveCustomTheme, usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
@@ -70,6 +71,7 @@ export function Themes({ instanceKey }: { instanceKey?: string }) {
 // ───────────────────────── Your themes ─────────────────────────
 
 function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme: CustomTheme, isNew: boolean) => void }) {
+  const { t } = useI18n();
   const custom = usePrefs((p) => p.customThemes);
   const current = usePrefs((p) => activeTheme(p).id);
   const [notes, setNotes] = useState<{ name: string; lines: string[] } | null>(null);
@@ -78,25 +80,26 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
   const input = useRef<HTMLInputElement>(null);
   const full = custom.length >= MAX_CUSTOM_THEMES;
 
-  const create = (base: Theme) => onEdit(themeFrom(base, base.builtin ? `My ${base.name}` : `${base.name} copy`, "backdrop" in base ? (base as CustomTheme).backdrop : null), true);
+  const create = (base: Theme) =>
+    onEdit(themeFrom(base, t(base.builtin ? "appsettings.themes.mine" : "appsettings.themes.copy", { theme: base.name }), "backdrop" in base ? (base as CustomTheme).backdrop : null), true);
 
   async function importFile(file: File | undefined) {
     if (!file || full) return;
     setImporting(true);
     setNotes(null);
     try {
-      if (file.size > 20 * 1024 * 1024) throw new ThemeFileError("That file is too big to be a theme.");
+      if (file.size > 20 * 1024 * 1024) throw new ThemeFileError(t("appsettings.themes.tooBig"));
       const { theme, picture, notes: lines } = parseThemeFile(await file.text());
       if (picture && theme.backdrop) {
         if (instanceKey) {
           const url = await run(uploadPicture(instanceKey, MediaPurpose.BACKGROUND, picture));
           theme.backdrop.image = (await run(keepBackground(instanceKey, url))).url;
         } else {
-          lines.push("Its background picture needs an instance to live on; open one you're signed in to and import it again.");
+          lines.push(t("appsettings.themes.pictureNeedsInstance"));
         }
       }
       saveCustomTheme(theme);
-      toast(`Imported ${theme.name}`);
+      toast(t("appsettings.themes.imported", { theme: theme.name }));
       if (lines.length) setNotes({ name: theme.name, lines });
     } catch (err) {
       setNotes({ name: file.name, lines: [(err as Error).message] });
@@ -124,17 +127,17 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h3 className="font-extrabold">Your themes</h3>
-            <p className="mt-0.5 text-sm text-muted-foreground">Made, tuned or imported here. They work on every instance you use on this device.</p>
+            <h3 className="font-extrabold">{t("appsettings.themes.yourThemes")}</h3>
+            <p className="mt-0.5 text-sm text-muted-foreground">{t("appsettings.themes.yourThemesHint")}</p>
           </div>
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" disabled={importing || full} onClick={() => input.current?.click()}>
               <FileUpIcon className="size-4" />
-              {importing ? "Importing…" : "Import"}
+              {importing ? t("appsettings.themes.importing") : t("appsettings.themes.import")}
             </Button>
             <Button type="button" size="sm" disabled={full} onClick={() => create(activeTheme())} className="group">
               <PlusIcon className="size-4 transition-transform group-hover:rotate-90" />
-              New theme
+              {t("appsettings.themes.new")}
             </Button>
           </div>
         </div>
@@ -159,7 +162,7 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
                   ))}
                 </div>
                 <button type="button" className="self-start text-xs font-bold text-muted-foreground hover:text-foreground" onClick={() => setNotes(null)}>
-                  Got it
+                  {t("appsettings.themes.gotIt")}
                 </button>
               </div>
             </motion.div>
@@ -180,24 +183,24 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
                   onUse={(e) => switchTheme({ theme: theme.id, followSystem: false }, clickPoint(e))}
                   onEdit={() => onEdit(theme, false)}
                   onDuplicate={() => !full && create(theme)}
-                  onExport={() => void exportTheme(theme)}
+                  onExport={() => void exportTheme(theme, t)}
                   onDelete={() => deleteCustomTheme(theme.id)}
                 />
               ))}
             </AnimatePresence>
           </div>
         )}
-        {full && <p className="text-xs text-muted-foreground">That's {MAX_CUSTOM_THEMES} themes, as many as fuwa keeps. Delete one to add another.</p>}
+        {full && <p className="text-xs text-muted-foreground">{t("appsettings.themes.full", { count: MAX_CUSTOM_THEMES })}</p>}
       </section>
 
       <section className="flex flex-col gap-3">
         <div>
-          <h3 className="font-extrabold">Start from a built-in</h3>
-          <p className="mt-0.5 text-sm text-muted-foreground">Make your own version of one of the Waifu Devs themes.</p>
+          <h3 className="font-extrabold">{t("appsettings.themes.fromBuiltin")}</h3>
+          <p className="mt-0.5 text-sm text-muted-foreground">{t("appsettings.themes.fromBuiltinHint")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {BUILTIN_THEMES.map((theme) => {
-            const t = theme.variant.tokens;
+            const tokens = theme.variant.tokens;
             return (
               <motion.button
                 key={theme.id}
@@ -206,10 +209,10 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
                 whileTap={{ scale: 0.95 }}
                 disabled={full}
                 onClick={() => create(theme)}
-                style={{ background: t.background, color: t.foreground, borderColor: t.border }}
+                style={{ background: tokens.background, color: tokens.foreground, borderColor: tokens.border }}
                 className="group flex items-center gap-2 rounded-full border py-1.5 pr-3 pl-1.5 text-sm font-bold"
               >
-                <span className="grid size-6 place-items-center rounded-full" style={{ background: t.primary, color: t["primary-foreground"] }}>
+                <span className="grid size-6 place-items-center rounded-full" style={{ background: tokens.primary, color: tokens["primary-foreground"] }}>
                   <PaintbrushIcon className="size-3.5 transition-transform group-hover:-rotate-12" />
                 </span>
                 {theme.name}
@@ -231,7 +234,7 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
               <motion.span animate={{ y: [0, -5, 0] }} transition={{ duration: 0.9, repeat: Infinity }}>
                 <FileUpIcon className="size-8" />
               </motion.span>
-              Drop a theme file to import it
+              {t("appsettings.themes.drop")}
             </span>
           </motion.div>
         )}
@@ -242,6 +245,7 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
 }
 
 function Empty({ onCreate }: { onCreate: () => void }) {
+  const { t } = useI18n();
   return (
     <motion.button
       type="button"
@@ -257,8 +261,8 @@ function Empty({ onCreate }: { onCreate: () => void }) {
       >
         <WandSparklesIcon className="size-7" />
       </motion.span>
-      <span className="font-extrabold">Make fuwa yours</span>
-      <span className="max-w-sm text-sm text-muted-foreground">Start from the theme you're using, pick your colors, add a background picture and an effect. Or drop a theme file here.</span>
+      <span className="font-extrabold">{t("appsettings.themes.empty")}</span>
+      <span className="max-w-sm text-sm text-muted-foreground">{t("appsettings.themes.emptyHint")}</span>
     </motion.button>
   );
 }
@@ -282,6 +286,7 @@ function ThemeCard({
   onExport: () => void;
   onDelete: () => void;
 }) {
+  const { t: text } = useI18n();
   const t = theme.variant.tokens;
   const picture = shownPicture(theme.backdrop?.image);
   return (
@@ -305,7 +310,7 @@ function ThemeCard({
         <span className="pr-8">
           <span className="block truncate font-extrabold">{theme.name}</span>
           <span className="block truncate text-xs" style={{ color: t["muted-foreground"] }}>
-            {theme.description || (active ? "In use" : "Click to use it")}
+            {theme.description || (active ? text("appsettings.themes.inUse") : text("appsettings.themes.clickToUse"))}
           </span>
         </span>
       </button>
@@ -317,23 +322,23 @@ function ThemeCard({
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" aria-label={`More for ${theme.name}`} className="grid size-7 place-items-center rounded-full transition-colors hover:bg-black/10">
+            <button type="button" aria-label={text("appsettings.themes.more", { theme: theme.name })} className="grid size-7 place-items-center rounded-full transition-colors hover:bg-black/10">
               <EllipsisIcon className="size-4" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={onEdit}>
-              <PencilIcon className="size-4" /> Edit
+              <PencilIcon className="size-4" /> {text("appsettings.themes.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onDuplicate}>
-              <CopyIcon className="size-4" /> Duplicate
+              <CopyIcon className="size-4" /> {text("appsettings.themes.duplicate")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onExport}>
-              <DownloadIcon className="size-4" /> Export file
+              <DownloadIcon className="size-4" /> {text("appsettings.themes.export")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-              <Trash2Icon className="size-4" /> Delete
+              <Trash2Icon className="size-4" /> {text("appsettings.themes.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -343,7 +348,7 @@ function ThemeCard({
 }
 
 /** Saves a theme file, with its background picture inside so it works anywhere. */
-async function exportTheme(theme: CustomTheme) {
+async function exportTheme(theme: CustomTheme, t: I18n["t"]) {
   let picture: string | null = null;
   const src = shownPicture(theme.backdrop?.image);
   if (src) {
@@ -361,7 +366,7 @@ async function exportTheme(theme: CustomTheme) {
   a.download = fileName(theme.name);
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(theme.backdrop?.image && !picture ? `Exported ${theme.name}, without its picture` : `Exported ${theme.name}`);
+  toast(t(theme.backdrop?.image && !picture ? "appsettings.themes.exportedNoPicture" : "appsettings.themes.exported", { theme: theme.name }));
 }
 
 // ───────────────────────── Editor ─────────────────────────
@@ -380,6 +385,7 @@ function contrast(a: string, b: string) {
 }
 
 function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; start: CustomTheme; isNew: boolean; onClose: () => void }) {
+  const { t: text, number } = useI18n();
   const [theme, setTheme] = useState(start);
   const [allColors, setAllColors] = useState(false);
   const appBackdrop = usePrefs((p) => p.backdrop);
@@ -403,13 +409,14 @@ function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; 
   const setBackdrop = (patch: Partial<Backdrop>) => setTheme((th) => ({ ...th, backdrop: { ...(th.backdrop ?? DEFAULT_BACKDROP), ...patch } }));
 
   function save(use: boolean, e?: MouseEvent) {
-    const saved = { ...theme, name: theme.name.trim() || "Untitled" };
+    const saved = { ...theme, name: theme.name.trim() || text("appsettings.themes.untitled") };
     saveCustomTheme(saved);
     if (use || getPrefs().theme === saved.id) switchTheme({ theme: saved.id, followSystem: false }, e && clickPoint(e));
-    toast(isNew ? `Made ${saved.name}` : `Saved ${saved.name}`);
+    toast(text(isNew ? "appsettings.themes.made" : "appsettings.themes.saved", { theme: saved.name }));
     onClose();
   }
 
+  const rem = (n: number) => `${number(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}rem`;
   const readable = contrast(t.foreground, t.background);
   const onPrimary = contrast(t["primary-foreground"], t.primary);
 
@@ -418,8 +425,8 @@ function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; 
       preview={
         <div className="flex flex-col gap-3">
           <ThemePreview theme={theme} backdrop={theme.backdrop ?? appBackdrop} />
-          <Readability label="Text" ratio={readable} />
-          <Readability label="Text on primary" ratio={onPrimary} />
+          <Readability label={text("appsettings.themes.token.foreground")} ratio={readable} />
+          <Readability label={text("appsettings.themes.token.primaryForeground")} ratio={onPrimary} />
         </div>
       }
     >
@@ -427,41 +434,41 @@ function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; 
         <div className="flex items-center gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} className="group -ml-2">
             <ArrowLeftIcon className="size-4 transition-transform group-hover:-translate-x-0.5" />
-            Your themes
+            {text("appsettings.themes.yourThemes")}
           </Button>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr]">
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Name</span>
+            <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{text("appsettings.themes.name")}</span>
             <Input value={theme.name} maxLength={NAME_MAX} onChange={(e) => setTheme((th) => ({ ...th, name: e.target.value }))} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Description</span>
+            <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{text("appsettings.themes.description")}</span>
             <Input
               value={theme.description ?? ""}
               maxLength={DESCRIPTION_MAX}
-              placeholder="A few words about it"
+              placeholder={text("appsettings.themes.descriptionHint")}
               onChange={(e) => setTheme((th) => ({ ...th, description: e.target.value || null }))}
             />
           </label>
         </div>
 
-        <Group title="Colors" hint="The main colors; the rest are made from them.">
+        <Group title={text("appsettings.themes.colors")} hint={text("appsettings.themes.colorsHint")}>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {SEEDS.map((key) => (
-              <ColorField key={key} label={TOKEN_LABELS[key]} value={t[key]} onChange={(v) => setSeed(key, v)} />
+              <ColorField key={key} label={text(TOKEN_LABELS[key])} value={t[key]} onChange={(v) => setSeed(key, v)} />
             ))}
           </div>
           <button type="button" onClick={() => setAllColors((v) => !v)} className="self-start text-xs font-bold text-primary hover:underline">
-            {allColors ? "Hide the other colors" : "Fine-tune every color"}
+            {allColors ? text("appsettings.themes.hideColors") : text("appsettings.themes.allColors")}
           </button>
           <AnimatePresence initial={false}>
             {allColors && (
               <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={SPRING} className="overflow-hidden">
                 <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-4">
                   {TOKENS.filter((k) => !(SEEDS as readonly string[]).includes(k)).map((key) => (
-                    <ColorField key={key} label={TOKEN_LABELS[key]} value={t[key]} onChange={(v) => setTokens({ [key]: v })} />
+                    <ColorField key={key} label={text(TOKEN_LABELS[key])} value={t[key]} onChange={(v) => setTokens({ [key]: v })} />
                   ))}
                 </div>
               </motion.div>
@@ -469,27 +476,27 @@ function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; 
           </AnimatePresence>
         </Group>
 
-        <Group title="Corners" hint="How round buttons, cards and fields are.">
-          <Labeled label="Corners" shown={`${theme.variant.radius.toFixed(2)}rem`}>
+        <Group title={text("appsettings.themes.corners")} hint={text("appsettings.themes.cornersHint")}>
+          <Labeled label={text("appsettings.themes.corners")} shown={rem(theme.variant.radius)}>
             <Slider
-              label="Corners"
+              label={text("appsettings.themes.corners")}
               value={theme.variant.radius}
               min={RADIUS_MIN}
               max={RADIUS_MAX}
               step={0.05}
-              format={(n) => `${n.toFixed(2)}rem`}
+              format={rem}
               onChange={(radius) => setTheme((th) => ({ ...th, variant: { ...th.variant, radius } }))}
               className="pt-6"
             />
           </Labeled>
         </Group>
 
-        <Group title="Backdrop" hint="A picture and an effect that come with this theme.">
+        <Group title={text("appsettings.themes.backdrop")} hint={text("appsettings.themes.backdropHint")}>
           <Toggle
             checked={!!theme.backdrop}
             onChange={(on) => setTheme((th) => ({ ...th, backdrop: on ? { ...appBackdrop } : null }))}
-            label="Bring its own backdrop"
-            hint="Off, it uses your Background setting like any theme."
+            label={text("appsettings.themes.ownBackdrop")}
+            hint={text("appsettings.themes.ownBackdropHint")}
           />
           <AnimatePresence initial={false}>
             {theme.backdrop && (
@@ -507,16 +514,16 @@ function Editor({ instanceKey, start, isNew, onClose }: { instanceKey?: string; 
         transition={SPRING}
         className="sticky bottom-4 z-10 flex items-center justify-end gap-2 rounded-2xl border bg-popover/95 p-3 shadow-xl backdrop-blur"
       >
-        <span className="mr-auto hidden text-sm text-muted-foreground sm:inline">{changed ? (isNew ? "A new theme" : "Unsaved changes") : "No changes"}</span>
+        <span className="mr-auto hidden text-sm text-muted-foreground sm:inline">{changed ? (isNew ? text("appsettings.themes.newTheme") : text("settings.controls.unsaved")) : text("appsettings.themes.noChanges")}</span>
         <Button type="button" variant="ghost" onClick={onClose}>
-          Cancel
+          {text("common.cancel")}
         </Button>
         <Button type="button" variant="outline" disabled={!changed} onClick={() => save(false)}>
-          Save
+          {text("appsettings.themes.save")}
         </Button>
         <Button type="button" onClick={(e) => save(true, e)} className="group">
           <SparklesIcon className="size-4 transition-transform group-hover:rotate-12" />
-          Save and use
+          {text("appsettings.themes.saveAndUse")}
         </Button>
       </motion.div>
     </WithPreview>
@@ -537,6 +544,7 @@ function Group({ title, hint, children }: { title: string; hint: string; childre
 
 /** A color: the swatch opens the system picker, the text takes a #rrggbb. */
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const { t } = useI18n();
   const [text, setText] = useState(value);
   const [editing, setEditing] = useState(false);
   const shown = editing ? text : value;
@@ -558,7 +566,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
             const hex = v.startsWith("#") ? v : `#${v}`;
             if (HEX.test(hex)) onChange(hex.toLowerCase());
           }}
-          aria-label={`${label}, as #rrggbb`}
+          aria-label={t("appsettings.themes.hex", { label })}
           className="w-full bg-transparent font-mono text-xs outline-none"
         />
       </span>
@@ -568,6 +576,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 
 /** How readable a pair of colors is, by the WCAG contrast ratio. */
 function Readability({ label, ratio }: { label: string; ratio: number }) {
+  const { t, number } = useI18n();
   const good = ratio >= 4.5;
   const ok = ratio >= 3;
   return (
@@ -580,7 +589,9 @@ function Readability({ label, ratio }: { label: string; ratio: number }) {
         transition={SPRING}
         className={cn("rounded-full px-2 py-0.5 font-bold", good ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : ok ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-destructive/15 text-destructive")}
       >
-        {ratio.toFixed(1)}:1 {good ? "Easy to read" : ok ? "Large text only" : "Hard to read"}
+        {t(good ? "appsettings.themes.easy" : ok ? "appsettings.themes.largeOnly" : "appsettings.themes.hard", {
+          ratio: number(ratio, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+        })}
       </motion.span>
     </div>
   );

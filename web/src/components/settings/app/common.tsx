@@ -3,12 +3,22 @@ import { AnimatePresence, motion } from "motion/react";
 import type { MouseEvent, ReactNode } from "react";
 import { SPRING } from "@/components/motion";
 import { Setting } from "@/components/settings/controls";
+import { type Key, useI18n } from "@/i18n/react";
 import { keycaps } from "@/lib/keybinds";
 import { defaultPrefs, setPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import type { Theme } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** The built-in themes' lines; their names stay as they are, like any name. */
+const BUILTIN_ABOUT: Record<string, Key> = {
+  sakura: "appsettings.themes.builtin.sakura",
+  yoru: "appsettings.themes.builtin.yoru",
+  matcha: "appsettings.themes.builtin.matcha",
+  sora: "appsettings.themes.builtin.sora",
+  tsundere: "appsettings.themes.builtin.tsundere",
+};
 
 /**
  * An app setting: like an instance setting, it says whether it still
@@ -84,10 +94,12 @@ export function ThemeGrid({
   onMake?: () => void;
   id: string;
 }) {
+  const { t: text } = useI18n();
   return (
     <div role="radiogroup" className="grid gap-3 sm:grid-cols-2">
       {themes.map((theme, n) => {
         const t = theme.variant.tokens;
+        const about = theme.builtin && BUILTIN_ABOUT[theme.id];
         const active = theme.id === value;
         return (
           <motion.button
@@ -111,10 +123,10 @@ export function ThemeGrid({
             <span>
               <span className="flex items-center gap-1.5 font-extrabold">
                 {theme.name}
-                {!theme.builtin && <SparklesIcon className="size-3.5" style={{ color: t.primary }} aria-label="Yours" />}
+                {!theme.builtin && <SparklesIcon className="size-3.5" style={{ color: t.primary }} aria-label={text("appsettings.themes.yours")} />}
               </span>
               <span className="block text-xs" style={{ color: t["muted-foreground"] }}>
-                {theme.description}
+                {about ? text(about) : theme.description}
               </span>
             </span>
             {active && (
@@ -144,8 +156,8 @@ export function ThemeGrid({
             <PlusIcon className="size-4 transition-transform group-hover:rotate-90" />
           </span>
           <span>
-            <span className="block font-extrabold">Make your own</span>
-            <span className="block text-xs">Colors, a background picture, effects.</span>
+            <span className="block font-extrabold">{text("appsettings.themes.makeYourOwn")}</span>
+            <span className="block text-xs">{text("appsettings.themes.makeYourOwnHint")}</span>
           </span>
         </motion.button>
       )}
