@@ -63,15 +63,19 @@ export type Tile = VoiceTile | PollTile | ThreadTile | SharedTile | EventTile | 
 /** The template's limits: what an app sends is cut to these before anyone sees it. */
 export const CUSTOM_LIMITS = { title: 40, status: 16, rows: 4, label: 24, value: 8, action: 12 } as const;
 
+// Control, zero-width and direction-override characters: an app could use them to make its name or a row read as something else.
+const HIDDEN_CHARS = /[\p{Cc}\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+
 const cut = (text: string, max: number) => {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = text.replace(/\s+/g, " ").replace(HIDDEN_CHARS, "").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-/** An app's tile as it may show: text on one line and cut to the limits, at most four rows, progress kept between 0 and 1. */
+/** An app's tile as it may show: text on one line, without hidden characters, cut to the limits, at most four rows, progress kept between 0 and 1. */
 export function fitCustom(tile: CustomTile): CustomTile {
   return {
     ...tile,
+    app: cut(tile.app, CUSTOM_LIMITS.title),
     title: cut(tile.title, CUSTOM_LIMITS.title),
     status: cut(tile.status, CUSTOM_LIMITS.status),
     rows: tile.rows.slice(0, CUSTOM_LIMITS.rows).map((r) => ({ label: cut(r.label, CUSTOM_LIMITS.label), value: cut(r.value, CUSTOM_LIMITS.value) })),

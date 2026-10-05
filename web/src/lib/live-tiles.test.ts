@@ -125,4 +125,7 @@ test("an app's tile is cut to the template before anyone sees it", () => {
   assert.equal(fitted.rows[0]!.value, "1234567…");
   assert.equal(fitted.progress, 1);
   assert.equal(fitCustom({ ...fitted, progress: Number.NaN }).progress, null);
+  const sneaky = fitCustom({ ...fitted, app: "Score\u202Ebot\u200B", rows: [{ label: "Home\u2066\u0007", value: "1" }] });
+  assert.equal(sneaky.app, "Scorebot");
+  assert.equal(sneaky.rows[0]!.label, "Home");
 });
