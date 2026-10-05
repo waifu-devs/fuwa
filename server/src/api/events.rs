@@ -172,6 +172,19 @@ impl View {
         out
     }
 
+    /// Works out what the member can see now, for a stream that starts live
+    /// from the server's head. Gone meanwhile, they subscribe again and hear so.
+    async fn reload(&mut self) -> Result<(), Status> {
+        match self.load().await {
+            Ok(Some(access)) => {
+                self.access = access;
+                Ok(())
+            }
+            Ok(None) => Err(Status::aborted("your membership changed; subscribe again from your last sequence")),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     async fn load(&self) -> Result<Option<Access>> {
         let conn = self.sdb.read()?;
         Ok(store::member_access(&conn, &self.sdb.id, &self.account_id).await?.map(|(_, access)| access))
@@ -267,6 +280,15 @@ impl EventService for Api {
                         }
                     },
                 };
+                // Live only skips what came up to the head, so what the member
+                // can see is worked out again from after it: a channel made
+                // meanwhile would otherwise stay hidden from this stream.
+                if after.is_none()
+                    && let Err(status) = view.reload().await
+                {
+                    send(Err(status)).await;
+                    return;
+                }
                 if after.is_some() {
                     loop {
                         let page = match sdb.events_after(sequence, REPLAY_PAGE).await {
@@ -358,7 +380,11 @@ impl EventService for Api {
                                 return;
                             }
                         };
-                        let view = View { sdb: sdb.clone(), account_id: account_id.clone(), access, replaying: false };
+                        let mut view = View { sdb: sdb.clone(), account_id: account_id.clone(), access, replaying: false };
+                        if let Err(status) = view.reload().await {
+                            send(Err(status)).await;
+                            return;
+                        }
                         last_sent.insert(sdb.id.clone(), sequence);
                         live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
                         views.insert(sdb.id.clone(), view);
