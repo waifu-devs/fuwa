@@ -323,6 +323,11 @@ impl InstanceSettingsView {
         self.config.as_ref().and_then(|c| c.settings.as_ref())
     }
 
+    /// Whether this instance knows a feature, so its settings show only where it does.
+    fn instance_has(&self, feature: &str) -> bool {
+        self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has(feature)))
+    }
+
     fn changed(&self) -> Vec<String> {
         match (&self.draft, self.saved()) {
             (Some(draft), Some(saved)) => admin::changed(draft, saved),

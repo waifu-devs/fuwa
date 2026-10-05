@@ -300,6 +300,38 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        // Files in channels shared with other instances, where this instance sends them.
+        if self.instance_has("shared-files-elsewhere") {
+            page = page.child(self.setting(
+                "federation-files",
+                "Files per server a day",
+                Some(
+                    "How much one server on another instance may send in files to channels shared from here in a day \
+                     (UTC). The files are kept here, under the home server's room for files.",
+                ),
+                &["shared_remote_file_bytes_per_day"],
+                &crate::core::instance_admin::size_label(defaults.shared_remote_file_bytes_per_day),
+                7,
+                self.cap("shared_remote_file_bytes_per_day", "Up to", true, p, window, cx),
+                p,
+                cx,
+            ));
+            page = page.child(self.setting(
+                "federation-fetches",
+                "Files fetched at once",
+                Some(
+                    "How many files this instance fetches from other instances at the same time, for shared \
+                     channels; each instance gets at most half, and the rest wait their turn. Leave it off for no \
+                     limit.",
+                ),
+                &["shared_file_fetches_in_flight"],
+                &crate::core::instance_admin::count_label(defaults.shared_file_fetches_in_flight),
+                8,
+                self.cap("shared_file_fetches_in_flight", "Up to", false, p, window, cx),
+                p,
+                cx,
+            ));
+        }
         page.into_any_element()
     }
 
