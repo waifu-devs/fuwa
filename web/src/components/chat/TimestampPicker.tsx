@@ -32,17 +32,6 @@ import { cn } from "@/lib/utils";
  * (Alt+Shift+T unless you change it) opens it from the message box.
  */
 
-/** Each style's name in the catalog. */
-const STYLE_NAMES: Record<TimestampStyle, Key> = {
-  t: "chattools.timestamp.style.shortTime",
-  T: "chattools.timestamp.style.longTime",
-  d: "chattools.timestamp.style.shortDate",
-  D: "chattools.timestamp.style.longDate",
-  f: "chattools.timestamp.style.dateTime",
-  F: "chattools.timestamp.style.dayDateTime",
-  R: "chattools.timestamp.style.relative",
-};
-
 /** The style you picked last, for next time. */
 let lastStyle: TimestampStyle = "R";
 
@@ -257,7 +246,7 @@ function Panel({ onPick }: { onPick: (token: string) => void }) {
                 <span className={cn("block truncate text-sm font-bold", on && "text-primary")}>
                   {at ? formatTimestamp(at.getTime(), s.style, now) : t("chattools.timestamp.pickDateTime")}
                 </span>
-                <span className="block text-[0.7rem] text-muted-foreground">{t(STYLE_NAMES[s.style])}</span>
+                <span className="block text-[0.7rem] text-muted-foreground">{t(s.name)}</span>
               </span>
               <AnimatePresence initial={false}>
                 {on && (

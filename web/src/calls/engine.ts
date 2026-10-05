@@ -4,7 +4,7 @@ import { createClient } from "@connectrpc/connect";
 import { CallService, type GetCallSettingsResponse } from "@/gen/fuwa/v1/call_pb";
 import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError, type FuwaError } from "@/fuwa/errors";
-import { engine } from "@/fuwa/sync";
+import { engine, onLeaveAccount } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
 import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
@@ -746,6 +746,14 @@ export async function joinCall(target: CallTarget) {
     toast(e);
   }
 }
+
+// A call belongs to the account that joined it: switching or signing out on its instance leaves it.
+onLeaveAccount((key) => {
+  if (getCalls().call?.target.instance !== key) return;
+  // Told now, while the instance still has the token of the account that joined.
+  session?.unload();
+  void hangUp(null, false);
+});
 
 /** Leaves the call, with `why` shown when it wasn't you. */
 export async function hangUp(why: string | null, tell = true) {

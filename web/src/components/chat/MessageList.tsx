@@ -8,6 +8,8 @@ import {
   HandIcon,
   MessageSquareReplyIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   RotateCwIcon,
   ShieldAlertIcon,
   ShieldIcon,
@@ -48,6 +50,9 @@ import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessa
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
+import type { FuwaError } from "@/fuwa/errors";
+import { pinMessage } from "@/fuwa/pins";
+import { PinMark } from "@/components/chat/Pins";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
@@ -143,6 +148,8 @@ type RowActions = {
   keepOut: (userId: string, name: string) => Promise<void>;
   /** Opens the thread under a message (starting it with the first reply). */
   thread: (id: string) => void;
+  /** Pins a message, or unpins it if it's pinned. */
+  pin: (message: Message) => void;
 };
 
 /**
@@ -296,6 +303,12 @@ function useRowActions(
         toast(t("chat.messages.keptOut", { name, channel: channel.name }));
       },
       thread: (id) => openThread?.(id),
+      pin: (message) =>
+        pinMessage(instanceKey, serverId, channel.id, message.id, !message.pinnedAt)
+          .then(() =>
+            toast(message.pinnedAt ? t("chattools.pins.unpinnedToast") : t("chattools.pins.pinnedToast", { place: threadId ? t("chat.threads.thread") : `#${channel.name}` })),
+          )
+          .catch((err: FuwaError) => toast(err.message)),
     }),
     [instanceKey, serverId, channel, catalog, at, threadId, openThread, t, setEditing],
   );
@@ -468,6 +481,7 @@ type RowContext = {
   canSend: boolean;
   canStart: boolean;
   canReply: boolean;
+  canPin: boolean;
   guestSide: boolean;
   keepsOut: boolean;
 };
@@ -502,6 +516,9 @@ function useRowContext({
   // Threads go under messages in the channel itself, not under replies; in a shared one, once this instance takes them there.
   const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
   const threads = !threadId && (!channel.shared || threadsShared);
+  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  // Pins are the home's in a shared channel, and need this instance to keep them.
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
   const display = usePrefs((p) => p.messageDisplay);
   const developer = usePrefs((p) => p.developerMode);
   const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
@@ -524,10 +541,11 @@ function useRowContext({
     developer,
     suppressEveryone,
     clock,
-    manager: hasIn(access, channel.id, Permission.MANAGE_MESSAGES),
+    manager,
     canSend,
     canStart: threads && hasIn(access, channel.id, Permission.CREATE_THREADS),
     canReply: threads && canSend,
+    canPin: pinsHere && manager && !(channel.shared && !channel.shared.home),
     // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
     // only the home keeps someone from another server out.
     guestSide: !!channel.shared && !channel.shared.home,
@@ -597,6 +615,7 @@ function drawRow(row: Row, c: RowContext): ReactNode {
       animate={animate}
       editing={c.editing === message.id}
       canThread={!message.threadId && (message.thread ? c.canReply : c.canStart)}
+      canPin={c.canPin && message.kind === MessageKind.UNSPECIFIED}
       inThread={!!c.threadId}
       actions={c.actions}
       clock={c.clock}
@@ -910,6 +929,7 @@ const MessageRow = memo(function MessageRow({
   animate,
   editing,
   canThread,
+  canPin,
   inThread,
   actions,
 }: Redraw & {
@@ -931,6 +951,8 @@ const MessageRow = memo(function MessageRow({
   editing: boolean;
   /** Can open the thread under it: reply in the one there, or start one. */
   canThread: boolean;
+  /** Can pin it or unpin it. */
+  canPin: boolean;
   /** Drawn in a thread's own list, where replies don't get threads of their own. */
   inThread: boolean;
   actions: RowActions;
@@ -943,6 +965,7 @@ const MessageRow = memo(function MessageRow({
       edit: mine && !editing && message.kind === MessageKind.UNSPECIFIED ? () => actions.edit(message.id) : undefined,
       copyText: message.content ? () => copy(t, message.content, t("common.copy.text")) : undefined,
       keepOut: canKeepOut ? { name: displayName(author), ask: () => setConfirming("keep-out") } : undefined,
+      pin: canPin ? { pinned: !!message.pinnedAt, toggle: () => actions.pin(message) } : undefined,
       delete: canDelete ? () => setConfirming("delete") : undefined,
     }),
   );
@@ -976,6 +999,7 @@ const MessageRow = memo(function MessageRow({
           confirming={confirming}
           setConfirming={setConfirming}
           canThread={canThread}
+          canPin={canPin}
           developer={developer}
           mine={mine}
           canKeepOut={canKeepOut}
@@ -1017,6 +1041,7 @@ function MessageContent({
           {t("chat.messages.edited")}
         </span>
       )}
+      {message.pinnedAt && <PinMark />}
       <Attachments files={message.attachments} animate={animate} />
       <Embeds embeds={message.embeds} animate={animate} />
       <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
@@ -1034,6 +1059,7 @@ function MessageTools({
   confirming,
   setConfirming,
   canThread,
+  canPin,
   developer,
   mine,
   canKeepOut,
@@ -1045,6 +1071,7 @@ function MessageTools({
   confirming: "delete" | "keep-out" | false;
   setConfirming: (confirming: "delete" | "keep-out" | false) => void;
   canThread: boolean;
+  canPin: boolean;
   developer: boolean;
   mine: boolean;
   canKeepOut: boolean;
@@ -1085,6 +1112,11 @@ function MessageTools({
           {canThread && (
             <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>
               <MessageSquareReplyIcon />
+            </ToolButton>
+          )}
+          {canPin && (
+            <ToolButton label={message.pinnedAt ? t("chattools.pins.unpinMessage") : t("chattools.pins.pin")} onClick={() => actions.pin(message)}>
+              {message.pinnedAt ? <PinOffIcon /> : <PinIcon />}
             </ToolButton>
           )}
           {developer && (

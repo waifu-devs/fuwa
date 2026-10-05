@@ -16,6 +16,8 @@
  * they were); everything else is a download.
  */
 
+import { Problem } from "../i18n/problem.ts";
+
 /** How big the web app's chunks are. */
 export const CHUNK_BYTES = 1024 * 1024;
 /** The chunk sizes a device takes from a message. */
@@ -65,7 +67,7 @@ export type SealedFile = {
 };
 
 const subtle = () => {
-  if (!globalThis.crypto?.subtle) throw new Error("this page can't encrypt files (it needs https)");
+  if (!globalThis.crypto?.subtle) throw new Problem("system.files.needsHttps");
   return crypto.subtle;
 };
 
@@ -79,7 +81,7 @@ function nonce(index: number, last: boolean): Uint8Array<ArrayBuffer> {
 
 /** Seals a file on this device: padded, then sealed chunk by chunk under a key of its own. */
 export async function sealFile(file: Blob, chunkBytes = CHUNK_BYTES): Promise<SealedFile> {
-  if (file.size > MAX_FILE_BYTES) throw new Error("that file is too big to send encrypted");
+  if (file.size > MAX_FILE_BYTES) throw new Problem("system.files.tooBig");
   const padded = paddedSize(file.size);
   const count = Math.ceil(padded / chunkBytes);
   const key = crypto.getRandomValues(new Uint8Array(32));
@@ -106,9 +108,9 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
  * reordered file doesn't open.
  */
 export async function openFile(bytes: Uint8Array<ArrayBuffer>, key: Uint8Array, sha256: Uint8Array, chunkBytes: number): Promise<Blob> {
-  if (key.length !== 32 || !plausible(bytes.length, chunkBytes)) throw new Error("that file can't be opened");
+  if (key.length !== 32 || !plausible(bytes.length, chunkBytes)) throw new Problem("system.files.cantOpen");
   const digest = new Uint8Array(await subtle().digest("SHA-256", bytes));
-  if (!same(digest, sha256)) throw new Error("that file isn't the one that was sent");
+  if (!same(digest, sha256)) throw new Problem("system.files.notTheSame");
   const k = await subtle().importKey("raw", new Uint8Array(key), "AES-GCM", false, ["decrypt"]);
   const whole = chunkBytes + TAG;
   const count = Math.ceil(bytes.length / whole);
@@ -127,7 +129,7 @@ export async function openFile(bytes: Uint8Array<ArrayBuffer>, key: Uint8Array, 
     p--;
     end = parts[p]!.length - 1;
   }
-  if (end < 0 || parts[p]![end] !== 0x80) throw new Error("that file can't be opened");
+  if (end < 0 || parts[p]![end] !== 0x80) throw new Problem("system.files.cantOpen");
   parts[p] = parts[p]!.slice(0, end);
   return new Blob(parts, { type: "application/octet-stream" });
 }

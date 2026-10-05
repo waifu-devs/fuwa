@@ -89,7 +89,7 @@ function Library({ instanceKey, onEdit }: { instanceKey?: string; onEdit: (theme
     setNotes(null);
     try {
       if (file.size > 20 * 1024 * 1024) throw new ThemeFileError(t("appsettings.themes.tooBig"));
-      const { theme, picture, notes: lines } = parseThemeFile(await file.text());
+      const { theme, picture, notes: lines } = parseThemeFile(t, await file.text());
       if (picture && theme.backdrop) {
         if (instanceKey) {
           const url = await run(uploadPicture(instanceKey, MediaPurpose.BACKGROUND, picture));

@@ -1,12 +1,12 @@
 import { Code } from "@connectrpc/connect";
 import { Effect } from "effect";
-import { dmEngine, DmError, type Content } from "@/e2ee/engine";
-import { engine } from "./sync";
+import { dmEngine, DmError, SECURE_BROKEN, type Content } from "@/e2ee/engine";
+import { engine, onLeaveAccount } from "./sync";
 import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
 import { cleanName, MAX_FILE_BYTES, MAX_FILES, openFile, sealFile } from "@/files/sealed";
 import { formatBytes } from "@/lib/format";
-import { i18n } from "@/i18n/i18n";
+import { i18n, inWords } from "@/i18n/i18n";
 import type { Loader } from "@/voice/player";
 import type { Clip } from "@/voice/recorder";
 import { MAX_VOICE_BYTES, readExactly } from "@/voice/fetch";
@@ -22,18 +22,27 @@ import { store, updateDms, type PendingMessage } from "./store";
 
 const ready = (key: string) => {
   const dms = dmEngine(key);
-  if (!dms) throw new DmError(store.get().instances[key]?.dms.problem ?? "encrypted messages are still starting");
+  if (!dms) throw new DmError(store.get().instances[key]?.dms.problem ?? i18n().t("system.e2ee.starting"));
   return dms;
 };
 
+/** Why a message here is blocked (from `dms.blocked`), in words for the screen. */
+export const blockedText = (blocked: string) => (blocked === SECURE_BROKEN ? i18n().t(SECURE_BROKEN) : blocked);
+
 /** In words, for the screen. */
-export const dmProblem = (err: unknown) => (err instanceof DmError ? err.message : toFuwaError(err).message);
+export const dmProblem = (err: unknown) => (err instanceof DmError ? blockedText(err.message) : toFuwaError(err).message);
+
+/** Low-level file and voice code names its problems by catalog key (i18n/problem.ts); this puts them in words. */
+const said = <T>(work: Promise<T>) =>
+  work.catch((err: unknown) => {
+    throw inWords(err);
+  });
 
 /** The conversation with someone: the one you have, or a new one. Answers its id. */
 export const openConversation = (key: string, userId: string) =>
   Effect.gen(function* () {
     const { conversation } = yield* call((signal) => engine(key).api.dms.openConversation({ userId }, { signal }));
-    if (!conversation) return yield* Effect.fail(new FuwaError({ code: Code.Unknown, message: "couldn't open that conversation" }));
+    if (!conversation) return yield* Effect.fail(new FuwaError({ code: Code.Unknown, message: i18n().t("system.e2ee.cantOpenConversation") }));
     dmEngine(key)?.add(conversation);
     return conversation.id;
   });
@@ -72,7 +81,7 @@ export async function sendDm(key: string, id: string, text: string, target?: Thr
   } catch (err) {
     const problem = dmProblem(err);
     setPending(key, id, (list) => list.map((p) => (p.nonce === nonce ? { ...p, failed: problem } : p)));
-    if (err instanceof DmError) updateDms(key, (d) => ({ ...d, blocked: { ...d.blocked, [id]: problem } }));
+    if (err instanceof DmError) updateDms(key, (d) => ({ ...d, blocked: { ...d.blocked, [id]: err.message } }));
   }
 }
 
@@ -138,13 +147,13 @@ export async function setSecureHistory(key: string, serverId: string, channelId:
 type Outgoing = { clip: Clip; replyTo: number; uploaded?: VoiceFile };
 const clips = new Map<string, Outgoing>();
 
-/** Why a sealed upload's PUT failed, in words. */
-async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer>, what = "the voice message") {
+/** Why a sealed upload's PUT failed, in words. `name` is the file's; none is a voice message. */
+async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer>, name?: string) {
   const path = URL.canParse(uploadUrl) ? new URL(uploadUrl).pathname : `/media/upload/${uploadUrl.slice(uploadUrl.lastIndexOf("/") + 1)}`;
   // Always to the instance's own address, whatever name it gave the link.
   const target = `${engine(key).url.replace(/\/+$/, "")}${path}`;
   const res = await fetch(target, { method: "PUT", body: bytes, credentials: "omit", referrerPolicy: "no-referrer" });
-  if (!res.ok) throw new DmError((await res.text().catch(() => "")).trim() || `${what} didn't upload`);
+  if (!res.ok) throw new DmError((await res.text().catch(() => "")).trim() || (name ? i18n().t("system.upload.fileFailed", { name }) : i18n().t("system.upload.voiceFailed")));
 }
 
 /**
@@ -170,7 +179,7 @@ async function sendVoice(key: string, id: string, out: Outgoing) {
     // Sent again after a failure: the file it uploaded is still waiting for it.
     let voice = out.uploaded;
     if (!voice) {
-      const sealed = await seal(clip.ogg);
+      const sealed = await said(seal(clip.ogg));
       const reserved = await engine(key).api.dms.createSealedUpload(
         { conversationId: id, size: BigInt(sealed.bytes.length) },
         { timeoutMs: 20_000 },
@@ -244,16 +253,16 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
     const mine = opened.get(voice.mediaId);
     if (mine) return mine;
     // The size is the sender's word: never fetch more than a long voice message can be.
-    if (voice.size > MAX_VOICE_BYTES) throw new Error("this voice message is too big to play here");
+    if (voice.size > MAX_VOICE_BYTES) throw new Error(i18n().t("system.voice.tooBig"));
     const started = performance.now();
     const res = await fetch(`${engine(key).url.replace(/\/+$/, "")}/media/${voice.mediaId}`, {
       credentials: "omit",
       referrerPolicy: "no-referrer",
     });
-    if (res.status === 404) throw new Error("this voice message was deleted");
-    if (!res.ok || !res.body) throw new Error("this voice message couldn't be fetched");
+    if (res.status === 404) throw new Error(i18n().t("system.voice.deleted"));
+    if (!res.ok || !res.body) throw new Error(i18n().t("system.voice.cantFetch"));
     const bytes = await readExactly(res.body, voice.size);
-    const ogg = await open(bytes, voice.key, voice.sha256);
+    const ogg = await said(open(bytes, voice.key, voice.sha256));
     reportTiming("dm.voice_open", performance.now() - started);
     return ogg;
   };
@@ -280,9 +289,9 @@ async function measure(file: File): Promise<{ width: number; height: number }> {
 
 /** Why files can't go in one message, or null when they can. */
 export function cantSendFiles(files: File[]): string | null {
-  if (files.length > MAX_FILES) return `A message can carry at most ${MAX_FILES} files.`;
+  if (files.length > MAX_FILES) return i18n().t("system.files.tooMany", { count: MAX_FILES });
   const big = files.find((f) => f.size > MAX_FILE_BYTES);
-  if (big) return `${cleanName(big.name)} is too big to send encrypted (at most ${formatBytes(i18n(), MAX_FILE_BYTES)}).`;
+  if (big) return i18n().t("system.files.oneTooBig", { name: cleanName(big.name), size: formatBytes(i18n(), MAX_FILE_BYTES) });
   return null;
 }
 
@@ -320,7 +329,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
     for (const [n, file] of out.files.entries()) {
       let ref = out.uploaded[n];
       if (!ref) {
-        const [sealed, size] = await Promise.all([sealFile(file), measure(file)]);
+        const [sealed, size] = await Promise.all([said(sealFile(file)), measure(file)]);
         const reserved = await dms.reserveUpload(id, sealed.bytes.length);
         await put(key, reserved.uploadUrl, sealed.bytes, cleanName(file.name));
         ref = {
@@ -363,6 +372,12 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
 
 /** Files this device sent or opened lately, by media id, so showing them again doesn't fetch them again. */
 const openedFiles = new Map<string, Blob>();
+
+// What an account opened stays with it: switching or signing out lets go of every opened file and voice message.
+onLeaveAccount(() => {
+  opened.clear();
+  openedFiles.clear();
+});
 const OPENED_BYTES = 64 * 1024 * 1024;
 function keepOpenedFile(mediaId: string, blob: Blob) {
   openedFiles.delete(mediaId);
@@ -381,7 +396,7 @@ async function readFile(body: ReadableStream<Uint8Array>, size: number): Promise
   try {
     return await readExactly(body, size);
   } catch {
-    throw new Error("this file isn't the one that was sent");
+    throw new Error(i18n().t("system.files.notTheOne"));
   }
 }
 
@@ -399,10 +414,10 @@ export async function openDmFile(key: string, file: FileRef): Promise<Blob> {
     credentials: "omit",
     referrerPolicy: "no-referrer",
   });
-  if (res.status === 404) throw new Error("this file was deleted");
-  if (!res.ok || !res.body) throw new Error("this file couldn't be fetched");
+  if (res.status === 404) throw new Error(i18n().t("system.files.deleted"));
+  if (!res.ok || !res.body) throw new Error(i18n().t("system.files.cantFetch"));
   const bytes = await readFile(res.body, file.size);
-  const blob = await openFile(bytes, file.key, file.sha256, file.chunkBytes);
+  const blob = await said(openFile(bytes, file.key, file.sha256, file.chunkBytes));
   reportTiming("dm.file_open", performance.now() - started);
   keepOpenedFile(file.mediaId, blob);
   return blob;

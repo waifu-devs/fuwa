@@ -416,7 +416,7 @@ function WebhookSummary({
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="truncate font-bold">{w.name}</span>
-          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-primary">APP</span>
+          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-primary">{t("system.webhook.appBadge")}</span>
         </span>
         <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
           {channel?.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon className="size-3" /> : <HashIcon className="size-3" />}

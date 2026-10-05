@@ -3,9 +3,11 @@ import { Effect } from "effect";
 import { useEffect, useSyncExternalStore } from "react";
 import { GifProvider, MessageGifSchema, type MessageGif } from "@/gen/fuwa/v1/types_pb";
 import type { GifCategory, SavedGif, SearchGifsResponse } from "@/gen/fuwa/v1/gif_pb";
+import { RECENT_GIFS } from "@/lib/account-keys";
 import { reportUsage } from "@/lib/reports";
 import { call } from "./errors";
-import { updateInstance, upsertMessage, withSharedAuthors } from "./store";
+import { accountKey } from "./saved";
+import { updateInstance, upsertMessage, useFuwa, withSharedAuthors } from "./store";
 import { engine } from "./sync";
 
 /*
@@ -90,7 +92,7 @@ export const prepareUpload = (key: string, uploadUrl: string) =>
 export const sendGif = (key: string, serverId: string, channelId: string, gif: MessageGif) =>
   Effect.gen(function* () {
     reportUsage("gif.send");
-    rememberSent(key, gif);
+    rememberSent(accountKey(key, engine(key).userId), gif);
     const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, gif }, { signal }));
     updateInstance(key, (i) => {
       const loaded = i.messages[channelId];
@@ -157,7 +159,8 @@ export const unsaveGif = (key: string, url: string) =>
 // ───────────────────────── Sent lately (this device) ─────────────────────────
 
 const RECENT = 30;
-const recentKey = (key: string) => `fuwa.gifs.recent.${key}`;
+/** `account` is "<instance>|<user id>": each account has its own. */
+const recentKey = (account: string) => RECENT_GIFS + account;
 const recents = new Map<string, MessageGif[]>();
 
 function readRecent(key: string): MessageGif[] {
@@ -185,7 +188,19 @@ function rememberSent(key: string, gif: MessageGif) {
   changed();
 }
 
-/** The GIFs you sent lately at an instance, from this device. */
+/** The GIFs you sent lately at an instance, as the account signed in there, from this device. */
 export function useRecentGifs(key: string): MessageGif[] {
-  return useSyncExternalStore(subscribe, () => readRecent(key));
+  const me = useFuwa((s) => s.instances[key]?.me?.id ?? "");
+  return useSyncExternalStore(subscribe, () => readRecent(accountKey(key, me)));
+}
+
+/** Forgets an account's recent GIFs on this device (signing out). */
+export function forgetRecentGifs(account: string) {
+  recents.delete(account);
+  try {
+    localStorage.removeItem(recentKey(account));
+  } catch {
+    // Nothing kept, nothing to forget.
+  }
+  changed();
 }

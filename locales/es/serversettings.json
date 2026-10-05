@@ -469,6 +469,8 @@
   "audit.kind.threadDelete": "Hilos eliminados",
   "audit.kind.pollEnd": "Encuestas terminadas",
   "audit.kind.onboarding": "Primeros pasos",
+  "audit.kind.messagePin": "Mensajes fijados",
+  "audit.kind.messageUnpin": "Mensajes desfijados",
   "audit.field.icon": "Ícono",
   "audit.field.discoverable": "Se muestra en Explorar",
   "audit.field.encryption": "Cifrado de extremo a extremo",
@@ -597,6 +599,8 @@
   "audit.s.threadLock": "{actor} bloqueó el hilo de {target} en {channel}",
   "audit.s.threadUnlock": "{actor} desbloqueó el hilo de {target} en {channel}",
   "audit.s.threadDelete": "{actor} eliminó el hilo de {target} en {channel}",
+  "audit.s.messagePin": "{actor} fijó un mensaje de {target} en {channel}",
+  "audit.s.messageUnpin": "{actor} desfijó un mensaje de {target} en {channel}",
   "audit.s.unknown": "{actor} hizo algo",
   "applications.waiting": "{people} esperando, de la más antigua a la más nueva. Si las rechazas, ven el motivo.",
   "applications.people": {

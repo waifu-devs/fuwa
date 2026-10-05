@@ -8,6 +8,7 @@
  */
 
 import type { Emoji, Server } from "@/gen/fuwa/v1/types_pb";
+import type { I18n } from "../i18n/i18n.ts";
 import { EMOJI_TOKEN, emojiToken } from "./emoji.ts";
 
 /** One standard emoji: how it's written (its first name), other names, words to find it by, and its five skin tones. */
@@ -63,8 +64,8 @@ export function catalogOf(
 }
 
 /** A catalog of only these emoji, for places that offer one server's own (the welcome screen). */
-export function ownCatalog(server: ServerRef | undefined, emojis: Emoji[] | undefined): Catalog {
-  const ref = server ?? { id: "", name: "This server", iconUrl: "" };
+export function ownCatalog(t: I18n["t"], server: ServerRef | undefined, emojis: Emoji[] | undefined): Catalog {
+  const ref = server ?? { id: "", name: t("system.emoji.thisServer"), iconUrl: "" };
   return catalogOf([ref as Server], { [ref.id]: emojis ?? NO_EMOJI }, ref.id);
 }
 

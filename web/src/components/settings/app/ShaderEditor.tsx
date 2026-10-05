@@ -16,13 +16,6 @@ const hasWebGpu = () => typeof navigator !== "undefined" && "gpu" in navigator;
 const SETTLE_MS = 450;
 
 /** What each starter is, for its tooltip (its name stays, like any name). */
-const STARTER_HINTS: Record<string, Key> = {
-  glow: "appsettings.shader.starter.glow",
-  plasma: "appsettings.shader.starter.plasma",
-  ripples: "appsettings.shader.starter.ripples",
-  clouds: "appsettings.shader.starter.clouds",
-};
-
 /**
  * Writing a custom shader: its name, what shows where it can't run, and the
  * WGSL, checked by the GPU's own compiler as you type. Code that compiles goes
@@ -54,7 +47,7 @@ export function ShaderEditor({ value, onChange }: { value: CustomShader; onChang
     if (!dirty) return;
     let live = true;
     const timer = setTimeout(() => {
-      const problem = shaderProblem(draft);
+      const problem = shaderProblem(t, draft);
       const found: Promise<Diagnostic[] | null> = problem
         ? Promise.resolve([{ message: problem, line: null, column: null }])
         : import("@/lib/effects/gpu").then(({ checkShader }) => checkShader(draft)).catch(() => null);
@@ -68,7 +61,7 @@ export function ShaderEditor({ value, onChange }: { value: CustomShader; onChang
       live = false;
       clearTimeout(timer);
     };
-  }, [draft, dirty]);
+  }, [draft, dirty, t]);
   const checking = dirty && checked.code !== draft;
   const errors = dirty ? checked.errors : [];
 
@@ -102,7 +95,7 @@ export function ShaderEditor({ value, onChange }: { value: CustomShader; onChang
           <motion.button
             key={starter.id}
             type="button"
-            title={STARTER_HINTS[starter.id] ? t(STARTER_HINTS[starter.id]!) : starter.hint}
+            title={t(starter.hint)}
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1, transition: { ...SPRING, delay: n * 0.04 } }}
             whileHover={{ y: -2 }}

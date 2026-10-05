@@ -469,6 +469,8 @@
   "audit.kind.threadDelete": "Deleted threads",
   "audit.kind.pollEnd": "Ended polls",
   "audit.kind.onboarding": "Onboarding",
+  "audit.kind.messagePin": "Pinned messages",
+  "audit.kind.messageUnpin": "Unpinned messages",
   "audit.field.icon": "Icon",
   "audit.field.discoverable": "Shown in Browse",
   "audit.field.encryption": "End-to-end encryption",
@@ -597,6 +599,8 @@
   "audit.s.threadLock": "{actor} locked {target}'s thread in {channel}",
   "audit.s.threadUnlock": "{actor} unlocked {target}'s thread in {channel}",
   "audit.s.threadDelete": "{actor} deleted {target}'s thread in {channel}",
+  "audit.s.messagePin": "{actor} pinned a message by {target} in {channel}",
+  "audit.s.messageUnpin": "{actor} unpinned a message by {target} in {channel}",
   "audit.s.unknown": "{actor} did something",
   "applications.waiting": "{people} waiting, oldest first. They see the reason if you turn them down.",
   "applications.people": {

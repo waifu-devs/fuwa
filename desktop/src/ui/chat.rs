@@ -70,6 +70,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         poll: None,
         voice: None,
         attachments: Vec::new(),
+        gif: None,
         thread: ThreadBits::default(),
         agent: None,
         sig: 0,
@@ -276,6 +277,8 @@ pub struct Msg {
     pub voice: Option<Rc<crate::ui::voice_notes::VoiceCard>>,
     /// The files it came with.
     pub attachments: Vec<pb::Attachment>,
+    /// The GIF it is.
+    pub gif: Option<pb::MessageGif>,
     /// Its thread, or the thread it's in.
     pub thread: ThreadBits,
     /// An agent's buttons, and over its answer who used what.
@@ -533,6 +536,7 @@ impl FuwaApp {
             (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
             m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
             m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
+            m.gif.as_ref().map(|g| (&g.url, g.width, g.height, g.provider)).hash(&mut h);
             (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
             user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
             (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
@@ -577,6 +581,7 @@ impl FuwaApp {
                     poll: card.clone(),
                     voice: None,
                     attachments: m.attachments.clone(),
+                    gif: m.gif.clone(),
                     thread: bits.clone(),
                     agent: agent.clone(),
                     sig,
@@ -615,6 +620,7 @@ impl FuwaApp {
                 poll: None,
                 voice: None,
                 attachments: p.attachments.clone(),
+                gif: None,
                 thread: ThreadBits::default(),
                 agent: None,
                 sig: 0,
@@ -938,6 +944,7 @@ impl FuwaApp {
             jumped: self.search.jumped.clone().filter(|(_, at)| at.elapsed() < JUMP_GLOW),
             thread,
             lit: self.context.as_ref().map(|c| c.of.lit()),
+            saved_gifs: crate::ui::gifs::saved_here(self, self.target().as_ref().map_or("", |t| t.key())),
         })
     }
 
@@ -987,9 +994,11 @@ impl FuwaApp {
                 .into_any_element();
         }
         let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
+        let gif_panel = self.gif_panel(&p, cx);
         let time_panel = self.time_picker_panel(&p, cx);
         let tray = self.file_tray(&p, cx);
         let recording = !command && self.recording_here();
+        let gif_button = (!command && !recording).then(|| self.gif_button(&p, cx)).flatten();
         // The microphone takes the send button's place while nothing's typed, as on the web.
         let voice = (!command && (recording || (!typed && self.can_record()))).then(|| self.voice_button(&p, cx));
         let commands_list = if self.picker.is_none() { self.command_list_view(&p, cx) } else { None };
@@ -1016,6 +1025,7 @@ impl FuwaApp {
             .children(commands_list)
             .children(picks)
             .children(emoji_panel)
+            .children(gif_panel)
             .children(time_panel)
             .children(tray)
             .child(
@@ -1044,6 +1054,7 @@ impl FuwaApp {
                     .when(!command && !recording, |el| {
                         el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
                     })
+                    .children(gif_button)
                     .when(!command && self.can_poll(), |el| {
                         el.child(
                             icon_button("poll-open", "chart-column", &p)
@@ -1506,6 +1517,8 @@ pub(crate) struct RowCtx {
     thread: Option<String>,
     /// What an open right-click menu is for, lit while it's open.
     lit: Option<String>,
+    /// Your saved GIFs' links here, for the stars on GIFs.
+    saved_gifs: Rc<std::collections::HashSet<String>>,
 }
 
 pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
@@ -1805,6 +1818,10 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .and_then(|a| crate::ui::commands::buttons_view(&m.id, a, p, &ctx.this, &ctx.key, ctx.server.as_deref()))
     {
         body = body.child(buttons);
+    }
+    if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
+        let starred = ctx.saved_gifs.contains(&gif.url);
+        body = body.child(crate::ui::gifs::gif_in_message(&m.id, gif, starred, p, &ctx.this, &ctx.key));
     }
     if !m.attachments.is_empty() {
         body = body.child(crate::ui::attachments::attachments_view(
@@ -2393,6 +2410,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         poll: None,
         voice: None,
         attachments: Vec::new(),
+        gif: None,
         thread: ThreadBits::default(),
         agent: None,
         sig: 0,

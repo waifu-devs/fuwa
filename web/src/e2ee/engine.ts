@@ -5,6 +5,7 @@ import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
 import { store, updateDms, updateInstance, type DmMember } from "@/fuwa/store";
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
+import { onDmPinEvent } from "@/fuwa/pins";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -29,6 +30,7 @@ import { SecureRecordKind } from "@/gen/fuwa/v1/secure_pb";
 import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
+import { i18n, type Key } from "@/i18n/i18n";
 import { reportError } from "@/lib/reports";
 import { BackupSync } from "./backup";
 import * as history from "./history";
@@ -87,10 +89,10 @@ const LATE_SETTLE_MS = 3500;
 /**
  * Why a secure channel can't be read or written: its group can't be followed
  * any more (a change to it no device could read), until someone with Manage
- * Channels starts its encryption over.
+ * Channels starts its encryption over. It's the catalog key, which also marks
+ * the channel in `dms.blocked`; whatever shows it translates it.
  */
-export const SECURE_BROKEN =
-  "This channel's encryption can't be followed any more: a change to its keys couldn't be read. Someone who can manage the channel can start it over.";
+export const SECURE_BROKEN: Key = "system.e2ee.secureBroken";
 
 /** One entry in a group's log: a direct message's ConversationRecord, or a secure channel's SecureRecord. */
 type Rec = {
@@ -320,7 +322,7 @@ export class DmEngine {
     return exclusive(lockName(vaultKey), async () => {
       let stored = await vault.loadDevice(vaultKey);
       if (stored && stored.session !== session) {
-        await vault.wipe(vaultKey);
+        await vault.wipeVault(vaultKey);
         stored = undefined;
       }
       const device = stored ? e2ee.Device.restore(stored.state) : new e2ee.Device(me.id);
@@ -381,7 +383,7 @@ export class DmEngine {
         // Signing out is the instance's sync to notice; an instance without DMs has nothing to follow.
         if (e.signedOut) return;
         if (e.code === Code.Unimplemented) {
-          onProblem("This instance doesn't have direct messages yet.");
+          onProblem(i18n().t("system.e2ee.noDms"));
           return;
         }
         onProblem(e.message);
@@ -469,10 +471,14 @@ export class DmEngine {
         break;
       }
       case "recordDeleted":
+        onDmPinEvent(this.key, event);
         void this.forgetDeleted(p.value.conversationId, Number(p.value.sequence)).catch(() => {});
         break;
       case "callUpdated":
         this.setCall(p.value);
+        break;
+      case "pinUpdated":
+        onDmPinEvent(this.key, event);
         break;
     }
   }
@@ -515,7 +521,7 @@ export class DmEngine {
     const stored = await vault.loadDevice(this.vaultKey);
     if (!stored || stored.session !== this.session) {
       this.stop();
-      throw new DmError("signed out");
+      throw new DmError(i18n().t("system.e2ee.signedOut"));
     }
     if (stored.version !== this.version) {
       this.device.free();
@@ -553,9 +559,7 @@ export class DmEngine {
         if (partner && !devices.some((d) => d.userId === partner.id)) {
           const name = partner.displayName || partner.username;
           throw new DmError(
-            partner.username === "deleted"
-              ? "This account was deleted."
-              : `${name} isn't signed in to fuwa anywhere that can receive encrypted messages yet. You can write once they are.`,
+            partner.username === "deleted" ? i18n().t("system.e2ee.accountDeleted") : i18n().t("system.e2ee.notSignedIn", { name }),
           );
         }
       },
@@ -609,7 +613,7 @@ export class DmEngine {
         return memberIds;
       },
       check: (_devices, belong) => {
-        if (!belong.includes(this.me.id)) throw new DmError("You can't see this channel any more.");
+        if (!belong.includes(this.me.id)) throw new DmError(i18n().t("system.e2ee.cantSeeChannel"));
       },
       records: (after) => secure.listSecureRecords({ ...at, afterSequence: BigInt(after), limit: PAGE }, CALL),
       welcome: async () => (await secure.listSecureWelcomes({ serverId: sc.serverId }, CALL)).welcomes.find((w) => w.channelId === id),
@@ -875,7 +879,7 @@ export class DmEngine {
           kind: "voice",
           senderId,
           deviceId,
-          content: `Voice message (${voiceLength(voice.durationMs)})`,
+          content: i18n().t("system.e2ee.voiceLine", { length: voiceLength(voice.durationMs) }),
           replyTo: Number(body.value.replyToSequence),
           voice,
         }),
@@ -1116,7 +1120,7 @@ export class DmEngine {
         if (!isPrecondition(err)) throw err;
       }
     }
-    throw new DmError("couldn't join this conversation; try again");
+    throw new DmError(i18n().t("system.e2ee.cantJoin"));
   }
 
   /**
@@ -1142,7 +1146,7 @@ export class DmEngine {
     // A secure channel starts its group even when nobody else is signed in yet, so its first writer isn't stuck.
     if (!claimed.length && !removes.length && !(starting && c.channel)) {
       if (starting) this.device.forget(c.id);
-      if (starting) throw new DmError("couldn't reach their devices yet; try again in a moment");
+      if (starting) throw new DmError(i18n().t("system.e2ee.cantReachDevices"));
       return;
     }
     const commit = this.device.commit(
@@ -1181,7 +1185,7 @@ export class DmEngine {
       await this.fresh();
       await this.catchUp(id);
       const c = this.room(id);
-      if (!c) throw new DmError("that conversation isn't here");
+      if (!c) throw new DmError(i18n().t("system.e2ee.notHere"));
       await this.reconcile(c);
     }).finally(() => this.refresh(id).catch(() => {}));
   }
@@ -1192,8 +1196,8 @@ export class DmEngine {
       await this.fresh();
       await this.catchUp(id);
       const c = this.room(id);
-      if (!c) throw new DmError("that conversation isn't here");
-      if (c.channel && "voice" in content) throw new DmError("Voice messages can't be sent in secure channels yet.");
+      if (!c) throw new DmError(i18n().t("system.e2ee.notHere"));
+      if (c.channel && "voice" in content) throw new DmError(i18n().t("system.e2ee.noVoiceInSecure"));
       await this.reconcile(c);
       const plaintext = c.channel ? this.signedContent(id, content) : encode(content);
       const mediaIds = "voice" in content ? [content.voice.mediaId] : "files" in content ? (content.files ?? []).map((f) => f.mediaId) : [];
@@ -1218,14 +1222,14 @@ export class DmEngine {
   /** Reserves an upload for a sealed file to send in a conversation or secure channel. */
   async reserveUpload(id: string, size: number): Promise<{ mediaId: string; uploadUrl: string }> {
     const c = this.room(id);
-    if (!c) throw new DmError("that conversation isn't here");
+    if (!c) throw new DmError(i18n().t("system.e2ee.notHere"));
     return c.upload(size);
   }
 
   /** Deletes a message you sent: from the instance, and from every device's copy. */
   async remove(id: string, seq: number) {
     const c = this.room(id);
-    if (!c) throw new DmError("that conversation isn't here");
+    if (!c) throw new DmError(i18n().t("system.e2ee.notHere"));
     await threads.deleteLine({ ...this.lines(id), remove: (s) => c.remove(s) }, seq, this.secure.has(id));
     await this.refresh(id);
   }
@@ -1507,7 +1511,7 @@ export const dmEngine = (key: string): DmEngine | undefined => engines.get(key);
 export function startDms(key: string, api: Api, me: User, token: string) {
   stopDms(key);
   if (typeof indexedDB === "undefined" || typeof WebAssembly === "undefined") {
-    updateDms(key, (d) => ({ ...d, status: "unsupported", problem: "This browser can't keep encrypted messages." }));
+    updateDms(key, (d) => ({ ...d, status: "unsupported", problem: i18n().t("system.e2ee.unsupported") }));
     return;
   }
   const attempt = Symbol(key);
@@ -1533,7 +1537,7 @@ export function startDms(key: string, api: Api, me: User, token: string) {
       updateDms(key, (d) => ({
         ...d,
         status: "failed",
-        problem: e.code === Code.Unimplemented ? "This instance doesn't have direct messages yet." : e.message,
+        problem: e.code === Code.Unimplemented ? i18n().t("system.e2ee.noDms") : e.message,
       }));
     });
 }
@@ -1544,12 +1548,18 @@ export function stopDms(key: string) {
   engines.delete(key);
 }
 
-/** Stops direct messages and forgets everything this browser kept for them on an instance: on signing out. */
-export async function wipeDms(key: string) {
-  stopDms(key);
+/**
+ * Forgets everything this browser kept for direct messages and secure
+ * channels as one account on an instance (signing out of it), or, without
+ * `userId`, as every account on it (forgetting the instance). Other
+ * accounts' devices are left alone.
+ */
+export async function wipeDms(key: string, userId?: string) {
+  if (userId === undefined || engines.get(key)?.me.id === userId) stopDms(key);
   try {
-    await vault.wipe(`${key}|`);
-  } catch (err) {
-    console.warn("fuwa: couldn't wipe encrypted messages from this browser", err);
+    if (userId === undefined) await vault.wipe(`${key}|`);
+    else await vault.wipeVault(`${key}|${userId}`);
+  } catch {
+    console.warn("fuwa: couldn't wipe encrypted messages from this browser");
   }
 }

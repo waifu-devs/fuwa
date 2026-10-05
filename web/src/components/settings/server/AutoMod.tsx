@@ -778,7 +778,7 @@ function TestVerdict({ checking, result, smart }: { checking: boolean; result: T
           <CheckIcon className="size-3" strokeWidth={3} /> {t("serversettings.automod.getsThrough")}
         </span>
       )}
-      {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{result.elapsedMs} ms</span>}
+      {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{t("system.automod.elapsed", { ms: result.elapsedMs })}</span>}
     </>
   );
 }

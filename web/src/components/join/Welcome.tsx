@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { Permission, type Channel, type Emoji, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance, useMyMember } from "@/fuwa/hooks";
+import { accountKey } from "@/fuwa/saved";
+import { WELCOMED } from "@/lib/account-keys";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeAndTalk, RulesList } from "@/components/join/Rules";
 import { StartHere } from "@/components/join/StartHere";
@@ -76,21 +78,22 @@ export function WelcomeCard({
   );
 }
 
-const SEEN = (instanceKey: string, serverId: string) => `fuwa.welcomed.${instanceKey}.${serverId}`;
+/** `account` is "<instance>|<user id>": each account is greeted on its own. */
+const SEEN = (account: string, serverId: string) => `${WELCOMED}${account}.${serverId}`;
 /** New members are people who joined in the last week. */
 const NEW_FOR = 7 * 86_400_000;
 
-function seen(instanceKey: string, serverId: string) {
+function seen(account: string, serverId: string) {
   try {
-    return localStorage.getItem(SEEN(instanceKey, serverId)) !== null;
+    return localStorage.getItem(SEEN(account, serverId)) !== null;
   } catch {
     return true;
   }
 }
 
-function markSeen(instanceKey: string, serverId: string) {
+function markSeen(account: string, serverId: string) {
   try {
-    localStorage.setItem(SEEN(instanceKey, serverId), "1");
+    localStorage.setItem(SEEN(account, serverId), "1");
   } catch {
     // Without storage it shows again next time, which is harmless.
   }
@@ -118,11 +121,12 @@ export function WelcomeGate({
   const inst = useInstance(instanceKey);
   const me = useMyMember(instanceKey, server.id);
   const navigate = useNavigate();
-  const { fresh, onboarding, endOnboarding } = useOnboardingDue(instanceKey, server, asked);
+  const account = accountKey(instanceKey, inst?.me?.id ?? "");
+  const { fresh, onboarding, endOnboarding } = useOnboardingDue(instanceKey, account, server, asked);
   // Onboarding ends with the welcome screen's channels, so it isn't shown again after.
-  const newcomer = fresh && !seen(instanceKey, server.id) && !(server.hasOnboarding && me?.onboardedAt);
+  const newcomer = fresh && !seen(account, server.id) && !(server.hasOnboarding && me?.onboardedAt);
   const wanted = !onboarding && (asked || (server.hasWelcomeScreen && newcomer));
-  const { screen, greeting, setGreeting } = useWelcomeScreen(instanceKey, server.id, asked, wanted);
+  const { screen, greeting, setGreeting } = useWelcomeScreen(instanceKey, account, server.id, asked, wanted);
 
   function go(channel: string) {
     void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: server.id, channel } });
@@ -174,7 +178,7 @@ export function WelcomeGate({
 }
 
 /** Whether you're new here (and not someone who can change all this), and whether onboarding is open. */
-function useOnboardingDue(instanceKey: string, server: Server, asked: boolean) {
+function useOnboardingDue(instanceKey: string, account: string, server: Server, asked: boolean) {
   const me = useMyMember(instanceKey, server.id);
   const access = useAccess(instanceKey, server.id);
   // Closed partway: it comes back next time, not straight away.
@@ -191,13 +195,13 @@ function useOnboardingDue(instanceKey: string, server: Server, asked: boolean) {
     endOnboarding: () => {
       setStarted(false);
       setDismissed(true);
-      markSeen(instanceKey, server.id);
+      markSeen(account, server.id);
     },
   };
 }
 
 /** The welcome screen, fetched once it's wanted; greeting a newcomer marks it seen. */
-function useWelcomeScreen(instanceKey: string, serverId: string, asked: boolean, wanted: boolean) {
+function useWelcomeScreen(instanceKey: string, account: string, serverId: string, asked: boolean, wanted: boolean) {
   const [screen, setScreen] = useState<WelcomeScreen | null>(null);
   const [greeting, setGreeting] = useState(false);
   useEffect(() => {
@@ -208,7 +212,7 @@ function useWelcomeScreen(instanceKey: string, serverId: string, asked: boolean,
         if (cancelled) return;
         setScreen(s);
         if (!asked) {
-          markSeen(instanceKey, serverId);
+          markSeen(account, serverId);
           if (s.enabled) setGreeting(true);
         }
       },
@@ -217,7 +221,7 @@ function useWelcomeScreen(instanceKey: string, serverId: string, asked: boolean,
     return () => {
       cancelled = true;
     };
-  }, [wanted, asked, instanceKey, serverId]);
+  }, [wanted, asked, instanceKey, account, serverId]);
   return { screen, greeting, setGreeting };
 }
 

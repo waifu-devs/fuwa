@@ -6,6 +6,7 @@ import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { discover, run } from "@/fuwa/actions";
 import { useInstance } from "@/fuwa/hooks";
 import { BuildLabel } from "@/components/BuildLabel";
+import { ContinueAs } from "@/components/AccountSwitcher";
 import { Connect } from "@/components/Connect";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon } from "@/components/Icons";
@@ -38,6 +39,7 @@ export function InstanceHome({ instanceKey }: { instanceKey: string }) {
       <Centered>
         <div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-xl sm:p-8">
           {inst.problem && <p className="mb-4 rounded-2xl bg-muted p-3 text-sm">{inst.problem}</p>}
+          <ContinueAs instanceKey={instanceKey} />
           <Connect initialUrl={inst.url} />
         </div>
       </Centered>

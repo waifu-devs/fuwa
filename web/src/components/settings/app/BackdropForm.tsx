@@ -206,7 +206,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
     if (!file || !instanceKey || uploading) return;
     setError(null);
     if (!PICTURE_TYPES.includes(file.type)) return setError(t("appsettings.backdrop.pickType"));
-    const picture = await backgroundPicture(file);
+    const picture = await backgroundPicture(t, file);
     const preview = URL.createObjectURL(picture);
     setUploading({ preview, sent: 0 });
     try {

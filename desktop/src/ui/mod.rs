@@ -19,6 +19,7 @@ mod embeds;
 mod emoji;
 mod emoji_picker;
 mod friends;
+mod gifs;
 mod http;
 mod instance_settings;
 mod keys;

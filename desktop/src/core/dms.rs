@@ -600,6 +600,8 @@ impl DmEngine {
                 tokio::spawn(async move { this.forget_deleted(&record.conversation_id, record.sequence).await });
             }
             Payload::CallUpdated(call) => self.update(|s| calls::set_dm_call(&mut s.calls, call)),
+            // Pins aren't shown here yet (compat feature "pins").
+            Payload::PinUpdated(_) => {}
         }
     }
 

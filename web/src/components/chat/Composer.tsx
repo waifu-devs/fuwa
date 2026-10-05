@@ -11,6 +11,8 @@ import { useAccess } from "@/fuwa/hooks";
 import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/chat/ComposerFiles";
 import { addFiles, takeFiles, useStaged, type Staged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
+import { accountKey } from "@/fuwa/saved";
+import { draftKey as toDraftKey, getDraft, setDraft } from "@/lib/drafts";
 import { MentionPicker, useMentionPicker, type MentionPickerState } from "@/components/chat/MentionPicker";
 import { CommandForm, CommandPicker, useCommandPicker, type CommandChoice, type CommandPickerState } from "@/components/chat/Commands";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -34,7 +36,6 @@ import { onCommand } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const MAX = 4000;
-const drafts = new Map<string, string>();
 
 /** When you last sent here: your newest message, or one still on its way. */
 function useLastSent(instanceKey: string, channelId: string) {
@@ -117,12 +118,13 @@ function useKeyedState<T>(key: string, initial: (key: string) => T) {
 }
 
 /** The box's text, kept as the draft for this channel or thread as you type. */
-function useDraft(channelId: string, threadId: string | undefined) {
-  // Drafts are kept per channel, and per thread apart from their channel.
-  const draftKey = threadId ? `thread:${threadId}` : channelId;
-  const [text, setShown] = useKeyedState(draftKey, (key) => drafts.get(key) ?? "");
+function useDraft(instanceKey: string, channelId: string, threadId: string | undefined) {
+  // Drafts are kept per account and channel, and per thread apart from their channel.
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id ?? "");
+  const draftKey = toDraftKey(accountKey(instanceKey, meId), threadId ? `thread:${threadId}` : channelId);
+  const [text, setShown] = useKeyedState(draftKey, getDraft);
   const setText = (next: string) => {
-    drafts.set(draftKey, next);
+    setDraft(draftKey, next);
     setShown(next);
   };
   return { draftKey, text, setText };
@@ -153,7 +155,7 @@ export function Composer({
   const lang = useI18n();
   const { t } = lang;
   const channelId = channel.id;
-  const { draftKey, text, setText } = useDraft(channelId, thread?.id);
+  const { draftKey, text, setText } = useDraft(instanceKey, channelId, thread?.id);
   const [alsoToChannel, setAlsoToChannel] = useState(false);
   // A problem with a voice message stays with the channel it happened in.
   const [voiceProblem, setVoiceProblem] = useKeyedState<string | null>(draftKey, () => null);
@@ -440,7 +442,6 @@ function useSender({
     if (cooling || uploading || brokenFile) return shake();
     const files = takeFiles(channelId);
     setText("");
-    drafts.delete(draftKey);
     void plane.start({
       x: [0, 28, -18, 0],
       y: [0, -14, 8, 0],

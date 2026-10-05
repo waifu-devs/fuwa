@@ -76,5 +76,13 @@
   "callback.elsewhereNote": "This sign-in began in another tab. Start it again from here.",
   "callback.ranOut": "This sign-in ran out",
   "callback.ranOutNote": "Sign-ins last ten minutes. Start again from the app.",
-  "callback.backToFuwa": "Back to fuwa"
+  "callback.backToFuwa": "Back to fuwa",
+  "accounts.title": "Accounts",
+  "accounts.switchTo": "Switch to {name}",
+  "accounts.inUse": "In use",
+  "accounts.add": "Add an account",
+  "accounts.addTitle": "Add an account",
+  "accounts.addAbout": "Sign in to another account on {instance}. You can switch between them from the menu under your name.",
+  "accounts.continueAs": "Continue as",
+  "accounts.orAnother": "Or sign in to another account"
 }

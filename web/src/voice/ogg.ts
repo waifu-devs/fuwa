@@ -5,6 +5,8 @@
  * stereo, granule positions at 48 kHz.
  */
 
+import { Problem } from "../i18n/problem.ts";
+
 const CRC = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -132,15 +134,15 @@ export function readOggOpus(file: Uint8Array): OggOpus {
   let at = 0;
   let lastGranule = 0n;
   while (at < file.length) {
-    if (at + 27 > file.length || v.getUint32(at, false) !== 0x4f676753) throw new Error("not an Ogg file");
+    if (at + 27 > file.length || v.getUint32(at, false) !== 0x4f676753) throw new Problem("system.ogg.notOgg");
     const count = file[at + 26]!;
     const lacing = file.subarray(at + 27, at + 27 + count);
     const bodyLength = lacing.reduce((n, l) => n + l, 0);
     const end = at + 27 + count + bodyLength;
-    if (end > file.length) throw new Error("the Ogg file is cut off");
+    if (end > file.length) throw new Problem("system.ogg.cutOff");
     const copy = file.slice(at, end);
     new DataView(copy.buffer).setUint32(22, 0, true);
-    if (crc(copy) !== v.getUint32(at + 22, true)) throw new Error("an Ogg page is damaged");
+    if (crc(copy) !== v.getUint32(at + 22, true)) throw new Problem("system.ogg.damaged");
     const granule = v.getBigInt64(at + 6, true);
     if (granule > 0n) lastGranule = granule;
     let body = at + 27 + count;
@@ -159,7 +161,7 @@ export function readOggOpus(file: Uint8Array): OggOpus {
     at = end;
   }
   const head = packets[0];
-  if (!head || head.length < 19 || String.fromCharCode(...head.subarray(0, 8)) !== "OpusHead") throw new Error("not an Opus file");
+  if (!head || head.length < 19 || String.fromCharCode(...head.subarray(0, 8)) !== "OpusHead") throw new Problem("system.ogg.notOpus");
   const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
   const preSkip = hv.getUint16(10, true);
   return { channels: head[9]!, preSkip, samples: Math.max(0, Number(lastGranule) - preSkip), packets: packets.slice(2) };

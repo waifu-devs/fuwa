@@ -42,15 +42,15 @@ import { arranged } from "@/lib/arrange";
 import { fromItems, sameRail, toItems, type RailLayout } from "@/lib/rail";
 import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
+import { i18n } from "@/i18n/i18n";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
-import { instanceKey, normalizeUrl } from "./saved";
-import { wipeDms } from "@/e2ee/engine";
+import { accountKey, instanceKey, normalizeUrl } from "./saved";
 import { outsideEmojis } from "@/lib/emoji-catalog";
-import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
 import type { Clip } from "@/voice/recorder";
-import { addInstance, engine, follow, removeInstance } from "./sync";
+import { forgetAccount, forgetInstance } from "./accounts";
+import { addAccount, dropAccount, engine, follow, keptAccounts, removeInstance } from "./sync";
 import {
   addServer,
   applyEvent,
@@ -105,7 +105,7 @@ export const probe = (input: string) =>
   Effect.gen(function* () {
     const url = yield* Effect.try({
       try: () => normalizeUrl(input),
-      catch: () => toFuwaError(new Error("that doesn't look like an address")),
+      catch: () => toFuwaError(new Error(i18n().t("system.signIn.badAddress"))),
     });
     const { node } = yield* call((signal) => makeApi(url, () => null).node.getNode({}, { signal }));
     return { url, node: node! };
@@ -119,13 +119,13 @@ export const signIn = (url: string, username: string, password: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.signIn({ username, password }, { signal }));
     if (res.twoFactorTicket) return { ticket: res.twoFactorTicket } as const;
-    return { key: addInstance(url, res.token) } as const;
+    return { key: addAccount(url, res.token, res.user) } as const;
   });
 
 export const verifyTwoFactor = (url: string, ticket: string, code: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.verifyTwoFactor({ ticket, code }, { signal }));
-    return addInstance(url, res.token);
+    return addAccount(url, res.token, res.user);
   });
 
 export const signUp = (url: string, username: string, password: string, displayName: string) =>
@@ -133,7 +133,7 @@ export const signUp = (url: string, username: string, password: string, displayN
     const res = yield* call((signal) =>
       makeApi(url, () => null).auth.signUp({ username, password, displayName }, { signal }),
     );
-    return addInstance(url, res.token);
+    return addAccount(url, res.token, res.user);
   });
 
 /**
@@ -144,7 +144,7 @@ export const signUp = (url: string, username: string, password: string, displayN
 export const startLinkedSignIn = (url: string, next: string | null) =>
   Effect.gen(function* () {
     if (!canReturnTo(window.location.origin)) {
-      return yield* Effect.fail(toFuwaError(new Error("signing in with waifu.dev needs this page on an https address")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.linkedNeedsHttps"))));
     }
     const secret = newSecret();
     const secretHash = yield* Effect.promise(() => sha256Hex(secret));
@@ -152,7 +152,7 @@ export const startLinkedSignIn = (url: string, next: string | null) =>
       makeApi(url, () => null).auth.startLinkedSignIn({ returnOrigin: window.location.origin, secretHash }, { signal }),
     );
     if (!savePending(res.state, { url, secret, next, startedAt: Date.now() })) {
-      return yield* Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit waifu.dev")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.linkedNotKept"))));
     }
     window.location.assign(res.authorizeUrl);
     return true;
@@ -164,7 +164,7 @@ export const finishLinkedSignIn = (pending: PendingSignIn, state: string, code: 
     const res = yield* call((signal) =>
       makeApi(pending.url, () => null).auth.finishLinkedSignIn({ state, code, secret: pending.secret }, { signal }),
     );
-    return { key: addInstance(pending.url, res.token), user: res.user, created: res.created };
+    return { key: addAccount(pending.url, res.token, res.user), user: res.user, created: res.created };
   });
 
 /** Which app a sign-in that came back to this instance belongs to. */
@@ -179,7 +179,7 @@ export const linkedSignInOrigin = (url: string, state: string) =>
 /** Keeps a sign-in in this tab, then sends the browser to the provider. */
 function leaveFor(authorizeUrl: string, state: string, pending: PendingSso) {
   if (!savePendingSso(state, pending)) {
-    return Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit the provider")));
+    return Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.ssoNotKept"))));
   }
   window.location.assign(authorizeUrl);
   return Effect.succeed(true);
@@ -210,7 +210,7 @@ export const finishSsoSignIn = (pending: PendingSso, state: string, code: string
     const res = yield* call((signal) =>
       makeApi(pending.url, () => null).auth.finishSsoSignIn({ state, code, secret: pending.secret }, { signal }),
     );
-    const key = pending.test ? instanceKey(pending.url) : addInstance(pending.url, res.token);
+    const key = pending.test ? instanceKey(pending.url) : addAccount(pending.url, res.token, res.user);
     return { key, user: res.user, created: res.created, identity: res.identity };
   });
 
@@ -247,7 +247,7 @@ export const updateServerSso = (
 export const startServerSso = (key: string, serverId: string, opts: { join?: boolean; inviteCode?: string; next?: string | null } = {}) =>
   Effect.gen(function* () {
     if (!canReturnTo(window.location.origin)) {
-      return yield* Effect.fail(toFuwaError(new Error("single sign-on needs this page on an https address")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.ssoNeedsHttps"))));
     }
     const { secret, secretHash } = yield* ssoSecret;
     const res = yield* call((signal) =>
@@ -261,6 +261,7 @@ export const startServerSso = (key: string, serverId: string, opts: { join?: boo
       secret,
       next: opts.next ?? null,
       serverId,
+      userId: engine(key).userId,
       join: opts.join,
       inviteCode: opts.inviteCode,
       startedAt: Date.now(),
@@ -276,7 +277,7 @@ export const finishServerSso = (pending: PendingSso, state: string, code: string
       api(key).sso.finishServerSso({ serverId, state, code, secret: pending.secret }, { signal }),
     );
     if (res.member) storeMember(key, serverId, res.member);
-    else rememberServerSignIn(key, serverId);
+    else rememberServerSignIn(accountKey(key, pending.userId ?? engine(key).userId), serverId);
     let joinedNow = false;
     if (pending.join && !res.member) {
       yield* joinServer(key, serverId, pending.inviteCode ?? "");
@@ -285,22 +286,32 @@ export const finishServerSso = (pending: PendingSso, state: string, code: string
     return { key, serverId, identity: res.identity, joined: joinedNow };
   });
 
-/** Ends the session on the server too, then keeps the instance listed but signed out. */
+/**
+ * Ends the active account's session on the server too, then forgets it here
+ * (its encrypted messages, drafts and the rest) and leaves the instance
+ * signed out, with any other accounts kept on it to continue as.
+ */
 export const signOut = (key: string) =>
   Effect.gen(function* () {
-    yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
-    addInstance(engine(key).url, null);
-    forgetRecentSearches(key);
+    const { url, token } = engine(key);
+    const userId = dropAccount(key);
+    if (token) yield* call((signal) => makeApi(url, () => token).auth.signOut({}, { signal })).pipe(Effect.ignore);
     // The session's device is gone; what it kept here goes too.
-    yield* Effect.promise(() => wipeDms(key));
+    if (userId) yield* Effect.promise(() => forgetAccount(key, userId));
   });
 
+/** Signs every account kept on an instance out and forgets the instance here. */
 export const forget = (key: string) =>
   Effect.gen(function* () {
-    if (engine(key).token) yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
+    const url = engine(key).url;
+    const accounts = keptAccounts(key);
     removeInstance(key);
-    forgetRecentSearches(key);
-    yield* Effect.promise(() => wipeDms(key));
+    yield* Effect.forEach(
+      accounts,
+      (a) => call((signal) => makeApi(url, () => a.token).auth.signOut({}, { signal })).pipe(Effect.ignore),
+      { concurrency: "unbounded", discard: true },
+    );
+    yield* Effect.promise(() => forgetInstance(key));
   });
 
 export type ProfilePatch = Partial<
@@ -371,10 +382,10 @@ const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent
           progress?.(1);
           return resume(Effect.void);
         }
-        const message = xhr.responseText.trim() || "the upload didn't go through";
+        const message = xhr.responseText.trim() || i18n().t("system.upload.failed");
         resume(Effect.fail(new FuwaError({ code: PUT_FAILURES[xhr.status] ?? Code.Unavailable, message })));
       };
-      xhr.onerror = () => resume(Effect.fail(new FuwaError({ code: Code.Unavailable, message: "can't reach this server right now" })));
+      xhr.onerror = () => resume(Effect.fail(new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.unreachable") })));
       xhr.send(file);
       return Effect.sync(() => xhr.abort());
     });
@@ -542,13 +553,14 @@ export const exportData = (key: string, progress: (bytes: number) => void) =>
     catch: toFuwaError,
   });
 
-/** Deletes your account on an instance, then forgets the instance here. */
+/** Deletes your account on an instance, then forgets it here; other accounts kept on the instance stay. */
 export const deleteAccount = (key: string, confirm: { password?: string; code?: string; username?: string }) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
-    removeInstance(key);
-    forgetRecentSearches(key);
-    yield* Effect.promise(() => wipeDms(key));
+    const userId = dropAccount(key);
+    if (userId) yield* Effect.promise(() => forgetAccount(key, userId));
+    // The only account here: the instance goes too, as it always did.
+    if (!keptAccounts(key).length) removeInstance(key);
     return true;
   });
 
@@ -804,7 +816,7 @@ function setApplied(key: string, serverId: string, applied: Applied | null) {
   updateInstance(key, (i) => {
     const { [serverId]: _, ...rest } = i.applied;
     const next = applied ? { ...rest, [serverId]: applied } : rest;
-    saveApplied(key, next);
+    if (i.me) saveApplied(accountKey(key, i.me.id), next);
     return { ...i, applied: next };
   });
 }
@@ -1677,7 +1689,7 @@ export const testWebhook = (url: string, content: string) =>
   Effect.tryPromise({
     try: async () => {
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
-      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? `the webhook answered ${res.status}`);
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? i18n().t("system.webhook.answered", { status: String(res.status) }));
       return true;
     },
     catch: (err) => toFuwaError(err),

@@ -1,5 +1,7 @@
 import {
   ArrowDownUpIcon,
+  PinIcon,
+  PinOffIcon,
   BarChart3Icon,
   BotIcon,
   FrownIcon,
@@ -119,6 +121,8 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.THREAD_DELETE]: { label: "serversettings.audit.kind.threadDelete", icon: MessagesSquareIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.POLL_END]: { label: "serversettings.audit.kind.pollEnd", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
   [AuditAction.ONBOARDING_UPDATE]: { label: "serversettings.audit.kind.onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
+  [AuditAction.MESSAGE_PIN]: { label: "serversettings.audit.kind.messagePin", icon: PinIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.MESSAGE_UNPIN]: { label: "serversettings.audit.kind.messageUnpin", icon: PinOffIcon, tint: "bg-muted text-muted-foreground" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -654,6 +658,10 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       return say("serversettings.audit.s.threadUnlock", { target, channel: named });
     case AuditAction.THREAD_DELETE:
       return say("serversettings.audit.s.threadDelete", { target, channel: named });
+    case AuditAction.MESSAGE_PIN:
+      return say("serversettings.audit.s.messagePin", { target, channel: named });
+    case AuditAction.MESSAGE_UNPIN:
+      return say("serversettings.audit.s.messageUnpin", { target, channel: named });
     default:
       return say("serversettings.audit.s.unknown");
   }

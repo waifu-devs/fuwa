@@ -8,6 +8,7 @@ import { ProviderButton } from "@/components/Connect";
 import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { signedInForServer } from "@/lib/sso";
+import { accountKey } from "@/fuwa/saved";
 import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { T, useI18n } from "@/i18n/react";
@@ -75,7 +76,7 @@ export function JoinButton({
     member,
     linkedOnly: !!server.linkedOnly && !!local,
     waiting: applied?.status === ApplicationStatus.PENDING,
-    sso: server.ssoRequired && !signedInForServer(instanceKey, server.id),
+    sso: server.ssoRequired && !signedInForServer(accountKey(instanceKey, inst?.me?.id ?? ""), server.id),
     applications: server.applications,
   });
 

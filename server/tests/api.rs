@@ -10259,3 +10259,156 @@ async fn votes_at_once_are_all_counted_in_order() {
     drop(stream);
     instance.stop().await;
 }
+
+async fn pin(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    pinned: bool,
+) -> Result<pb::Message, Code> {
+    c.messages
+        .pin_message(authed(
+            token,
+            pb::PinMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                pinned,
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+        .map_err(|s| s.code())
+}
+
+async fn try_pins(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> Result<Vec<String>, Code> {
+    c.messages
+        .list_pins(authed(
+            token,
+            pb::ListPinsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                thread_id: thread_id.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().messages.into_iter().map(|m| m.content).collect())
+        .map_err(|s| s.code())
+}
+
+async fn pins(c: &mut Clients, token: &str, server_id: &str, channel_id: &str, thread_id: &str) -> Vec<String> {
+    try_pins(c, token, server_id, channel_id, thread_id).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moderators_pin_messages_to_channels_and_threads() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_PINS_PER_CHANNEL", "2")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Pins", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    join(&mut c, &rin, &sid).await;
+    let general = new_channel(&mut c, &juan, &sid, "general", pb::ChannelType::Text).await.id;
+    let staff = new_channel(&mut c, &juan, &sid, "staff", pb::ChannelType::Text).await.id;
+    set_permissions(&mut c, &juan, &sid, &staff, vec![overwrite(&sid, T::Role, &[], &[P::ViewChannels])])
+        .await
+        .unwrap();
+    let mut rin_events = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let first = send(&mut c, &mika, &sid, &general, "first").await.unwrap();
+    let second = send(&mut c, &mika, &sid, &general, "second").await.unwrap();
+    let third = send(&mut c, &mika, &sid, &general, "third").await.unwrap();
+    let secret = send(&mut c, &juan, &sid, &staff, "staff only").await.unwrap();
+
+    // Pinning takes Manage Messages.
+    assert_eq!(pin(&mut c, &mika, &sid, &general, &first.id, true).await.unwrap_err(), Code::PermissionDenied);
+    let mods = create_role(&mut c, &juan, &sid, "Mods", &[P::ManageMessages]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    let pinned = pin(&mut c, &mika, &sid, &general, &first.id, true).await.unwrap();
+    assert!(pinned.pinned_at.is_some());
+    // A message in another channel isn't this channel's to pin.
+    assert_eq!(pin(&mut c, &juan, &sid, &general, &secret.id, true).await.unwrap_err(), Code::NotFound);
+    pin(&mut c, &juan, &sid, &staff, &secret.id, true).await.unwrap();
+    pin(&mut c, &juan, &sid, &general, &second.id, true).await.unwrap();
+    assert_eq!(pins(&mut c, &rin, &sid, &general, "").await, ["second", "first"], "latest pin first");
+    let listed = messages(&mut c, &rin, &sid, &general).await;
+    let marked: Vec<&str> = listed.iter().filter(|m| m.pinned_at.is_some()).map(|m| m.content.as_str()).collect();
+    assert_eq!(marked, ["first", "second"], "reading the channel shows the marker");
+
+    // Rin sees the general channel's pins happen, never the staff channel's.
+    let mut seen = Vec::new();
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(2), rin_events.message()).await.map(Result::unwrap)
+    {
+        if let Some(pb::Event { payload: Some(pb::event::Payload::MessagePinned(p)), .. }) = item.event {
+            seen.push(p.message_id);
+        }
+    }
+    assert_eq!(seen, [first.id.clone(), second.id.clone()]);
+    // Nor can she list the pins of a channel, or a thread in it, she can't read.
+    let staff_reply = reply(&mut c, &juan, &sid, &staff, &secret.id, "staff thread", false).await.unwrap();
+    pin(&mut c, &juan, &sid, &staff, &staff_reply.id, true).await.unwrap();
+    assert_eq!(try_pins(&mut c, &rin, &sid, &staff, "").await.unwrap_err(), Code::NotFound);
+    assert_eq!(try_pins(&mut c, &rin, &sid, &staff, &secret.id).await.unwrap_err(), Code::NotFound);
+    assert_eq!(pins(&mut c, &juan, &sid, &staff, &secret.id).await, ["staff thread"]);
+
+    // The cap is per channel; unpinning makes room.
+    assert_eq!(pin(&mut c, &juan, &sid, &general, &third.id, true).await.unwrap_err(), Code::ResourceExhausted);
+    pin(&mut c, &mika, &sid, &general, &second.id, false).await.unwrap();
+    pin(&mut c, &juan, &sid, &general, &third.id, true).await.unwrap();
+    assert_eq!(pins(&mut c, &rin, &sid, &general, "").await, ["third", "first"]);
+
+    // A thread keeps its own pins, apart from the channel's.
+    let answer = reply(&mut c, &rin, &sid, &general, &first.id, "in the thread", false).await.unwrap();
+    pin(&mut c, &mika, &sid, &general, &answer.id, true).await.unwrap();
+    assert_eq!(pins(&mut c, &rin, &sid, &general, &first.id).await, ["in the thread"]);
+    assert_eq!(pins(&mut c, &rin, &sid, &general, "").await, ["third", "first"]);
+
+    // Deleting a pinned message takes its pin along.
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: third.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(pins(&mut c, &rin, &sid, &general, "").await, ["first"]);
+
+    // Each pin and unpin is in the audit log, naming the message's author.
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let unpins: Vec<&pb::AuditEntry> =
+        log.entries.iter().filter(|e| e.action == pb::AuditAction::MessageUnpin as i32).collect();
+    assert_eq!(unpins.len(), 1);
+    assert_eq!(unpins[0].target_id, mika_user.id);
+    assert_eq!(log.entries.iter().filter(|e| e.action == pb::AuditAction::MessagePin as i32).count(), 6);
+
+    // Secure channels' messages aren't the server's to read, so their pins aren't either.
+    let vault = new_channel(&mut c, &juan, &sid, "vault", pb::ChannelType::Secure).await.id;
+    assert_eq!(pin(&mut c, &juan, &sid, &vault, &first.id, true).await.unwrap_err(), Code::FailedPrecondition);
+    assert_eq!(try_pins(&mut c, &juan, &sid, &vault, "").await.unwrap_err(), Code::FailedPrecondition);
+}

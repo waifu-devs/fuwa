@@ -18,6 +18,7 @@ mod join;
 mod media;
 mod messages;
 mod node;
+mod pins;
 mod polls;
 mod presence;
 mod roles;

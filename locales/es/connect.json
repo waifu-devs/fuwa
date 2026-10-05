@@ -76,5 +76,13 @@
   "callback.elsewhereNote": "Este inicio de sesión empezó en otra pestaña. Vuelve a empezarlo desde aquí.",
   "callback.ranOut": "Este inicio de sesión expiró",
   "callback.ranOutNote": "Los inicios de sesión duran diez minutos. Vuelve a empezar desde la app.",
-  "callback.backToFuwa": "Volver a fuwa"
+  "callback.backToFuwa": "Volver a fuwa",
+  "accounts.title": "Cuentas",
+  "accounts.switchTo": "Cambiar a {name}",
+  "accounts.inUse": "En uso",
+  "accounts.add": "Añadir una cuenta",
+  "accounts.addTitle": "Añadir una cuenta",
+  "accounts.addAbout": "Inicia sesión con otra cuenta en {instance}. Puedes cambiar entre ellas desde el menú bajo tu nombre.",
+  "accounts.continueAs": "Continuar como",
+  "accounts.orAnother": "O inicia sesión con otra cuenta"
 }

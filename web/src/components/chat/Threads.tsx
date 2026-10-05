@@ -30,6 +30,8 @@ import { type Key, T, useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { isArchived, type ThreadPanelState } from "@/lib/threads";
 import { usePrefs } from "@/lib/prefs";
+import { instanceHas } from "@/lib/compat";
+import { ChannelPinsButton } from "@/components/chat/Pins";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -302,6 +304,7 @@ export function ThreadPanel({
   // Only the channel's home locks its threads.
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) && !(channel.shared && !channel.shared.home);
   const list = useRef<MessageListHandle>(null);
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins")) && !(channel.shared && !channel.shared.home);
   const locked = !!parent?.thread?.locked;
   const archived = isArchived(parent?.thread, useArchiveHours(instanceKey, serverId));
 
@@ -350,6 +353,16 @@ export function ThreadPanel({
           >
             {locked ? <LockIcon /> : <LockOpenIcon />}
           </PanelButton>
+        )}
+        {pinsHere && !!parent?.thread && (
+          <ChannelPinsButton
+            instanceKey={instanceKey}
+            serverId={serverId}
+            channelId={channel.id}
+            threadId={threadId}
+            canUnpin={manager}
+            onJump={(id) => void list.current?.jumpTo(id)}
+          />
         )}
         <PanelButton label={t("chat.threads.jump")} onClick={() => onJump(threadId)}>
           <CornerUpLeftIcon />

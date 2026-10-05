@@ -15,7 +15,8 @@ import { SharedPill } from "@/components/chat/Shared";
 import { ThreadSide, ThreadsButton } from "@/components/chat/Threads";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchPanel } from "@/components/search/SearchPanel";
-import { closeSearch, getSearch, useSearch } from "@/fuwa/search";
+import { closeSearch, getSearch, requestJump, useSearch } from "@/fuwa/search";
+import { ChannelPinsButton } from "@/components/chat/Pins";
 import { ThreadOpenerProvider, useThreadPanel } from "@/lib/threads";
 import { CopyId } from "@/components/CopyId";
 import { ConnDot } from "@/components/Icons";
@@ -40,6 +41,9 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   useFocusAndTitle(instanceKey, serverId, channel);
 
   const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
+  const access = useAccess(instanceKey, serverId);
+  // Pins live at a shared channel's home; a guest server doesn't list them yet.
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins")) && !(channel.shared && !channel.shared.home);
   // Search results take the side panel's place while they're open.
   const searching = useSearch((s) => s.open && s.instanceKey === instanceKey && s.serverId === serverId);
 
@@ -93,6 +97,17 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           <ConnectionBadge instanceKey={instanceKey} />
           <SearchBar instanceKey={instanceKey} serverId={serverId} />
           <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
+          {pinsHere && (
+            <ChannelPinsButton
+              instanceKey={instanceKey}
+              serverId={serverId}
+              channelId={channel.id}
+              canUnpin={hasIn(access, channel.id, Permission.MANAGE_MESSAGES)}
+              onJump={(id) => {
+                if (!list.current?.jumpTo(id)) requestJump(instanceKey, channel.id, id);
+              }}
+            />
+          )}
           {(!channel.shared || threadsShared) && (
             <ThreadsButton
               open={panel?.kind === "threads"}

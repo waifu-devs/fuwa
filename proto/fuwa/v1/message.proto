@@ -38,6 +38,13 @@ service MessageService {
   // Who voted for one answer of a poll whose votes are public. Refused for
   // anonymous polls, whoever asks.
   rpc ListPollVoters(ListPollVotersRequest) returns (ListPollVotersResponse);
+  // Pins a message to its channel, or a thread reply to its thread, or
+  // unpins it. Needs MANAGE_MESSAGES in the channel. At most
+  // InstanceSettings.pins_per_channel pins in each channel and each thread.
+  // Not in channels shown from another server, nor secure channels.
+  rpc PinMessage(PinMessageRequest) returns (PinMessageResponse);
+  // A channel's pinned messages, or a thread's, the latest pin first.
+  rpc ListPins(ListPinsRequest) returns (ListPinsResponse);
 }
 
 message SendMessageRequest {
@@ -265,4 +272,35 @@ message ListPollVotersRequest {
 message ListPollVotersResponse {
   repeated User users = 1;
   bool has_more = 2;
+}
+
+message PinMessageRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string message_id = 3;
+  // False unpins it.
+  bool pinned = 4;
+}
+
+message PinMessageResponse {
+  Message message = 1;
+}
+
+message ListPinsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The pins of the thread under this message instead of the channel's.
+  string thread_id = 3;
+  // 1 to 100; defaults to 50.
+  int32 limit = 4;
+  // The page after this pinned message, from the last page.
+  string after_id = 5;
+}
+
+message ListPinsResponse {
+  // Latest pin first, each with pinned_at.
+  repeated Message messages = 1;
+  // Profiles of everyone who wrote one.
+  repeated User authors = 2;
+  bool has_more = 3;
 }

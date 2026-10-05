@@ -11,6 +11,8 @@
  * recovery key is kept here too, with the lines the backup hasn't taken yet.
  */
 
+import { i18n } from "@/i18n/i18n";
+
 const DB = "fuwa-e2ee";
 const VERSION = 2;
 
@@ -122,7 +124,7 @@ export type Voice = {
 /** What a line says, for previews and notifications: its text, or what files it carries. */
 export function lineText(i: Pick<Item, "content" | "files">): string {
   if (i.content || !i.files?.length) return i.content;
-  return i.files.length === 1 ? `File: ${i.files[0]!.name}` : `${i.files.length} files`;
+  return i.files.length === 1 ? i18n().t("system.e2ee.lineFile", { name: i.files[0]!.name }) : i18n().t("system.e2ee.lineFiles", { count: i.files.length });
 }
 
 /** Something someone said: text or a voice message. */
@@ -156,8 +158,8 @@ function open(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB wouldn't open"));
-    request.onblocked = () => reject(new Error("another tab is upgrading this browser's encrypted storage"));
+    request.onerror = () => reject(request.error ?? new Error(i18n().t("system.storage.wontOpen")));
+    request.onblocked = () => reject(new Error(i18n().t("system.storage.upgrading")));
   }).catch((err) => {
     opening = null;
     throw err;
@@ -168,14 +170,14 @@ function open(): Promise<IDBDatabase> {
 const done = (tx: IDBTransaction) =>
   new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write was aborted"));
+    tx.onerror = () => reject(tx.error ?? new Error(i18n().t("system.storage.writeFailed")));
+    tx.onabort = () => reject(tx.error ?? new Error(i18n().t("system.storage.writeAborted")));
   });
 
 const result = <T>(request: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB read failed"));
+    request.onerror = () => reject(request.error ?? new Error(i18n().t("system.storage.readFailed")));
   });
 
 /** Every key from `[vault]` to `[vault, …]` in a store keyed by arrays starting with the vault. */
@@ -336,7 +338,19 @@ export async function loadItemsAt(keys: [string, string, number][]): Promise<(It
   return Promise.all(keys.map((key) => result(tx.objectStore("items").get(key)) as Promise<Item | undefined>));
 }
 
-/** Forgets everything kept for vaults whose key starts with `prefix`: one account, or every account on an instance. */
+/** Forgets everything kept for exactly one vault: one account on one instance, and no other account whose id starts the same. */
+export async function wipeVault(vaultKey: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["devices", "notes", "items", "sent", "backup", "unbacked"], "readwrite");
+  tx.objectStore("devices").delete(vaultKey);
+  tx.objectStore("backup").delete(vaultKey);
+  for (const store of ["notes", "items", "sent", "unbacked"] as const) {
+    tx.objectStore(store).delete(IDBKeyRange.bound([vaultKey], [vaultKey, []]));
+  }
+  await done(tx);
+}
+
+/** Forgets everything kept for vaults whose key starts with `prefix`: every account on an instance. */
 export async function wipe(prefix: string): Promise<void> {
   const db = await open();
   const tx = db.transaction(["devices", "notes", "items", "sent", "backup", "unbacked"], "readwrite");

@@ -5,6 +5,7 @@ import type { Channel, Member, Role } from "@/gen/fuwa/v1/types_pb";
 import { accessOf, NO_ACCESS, type Access } from "@/lib/permissions";
 import { run } from "./actions";
 import type { FuwaError } from "./errors";
+import { i18n } from "@/i18n/i18n";
 import { store, useFuwa, type InstanceState } from "./store";
 
 /**
@@ -24,7 +25,7 @@ export function useAction<Args extends unknown[], A>(action: (...args: Args) => 
     try {
       return await run(latest.current(...args));
     } catch (err) {
-      setError((err as FuwaError).message ?? "something went wrong");
+      setError((err as FuwaError).message ?? i18n().t("system.error.unknown"));
       return undefined;
     } finally {
       setPending(false);
