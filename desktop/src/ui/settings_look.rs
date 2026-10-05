@@ -136,7 +136,7 @@ impl SettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let meta = tokio::fs::metadata(&path).await.map_err(|e| format!("Couldn't read that file: {e}"))?;
+                    let meta = tokio::fs::metadata(&path).await.map_err(|_| "Couldn't read that file.".to_owned())?;
                     if meta.len() > (themes::MAX_FILE_PICTURE_BYTES as u64) * 2 {
                         return Err("That file is too big to be a theme.".to_owned());
                     }
@@ -220,7 +220,7 @@ impl SettingsView {
                         None => None,
                     };
                     let file = themes::to_file(&theme, backdrop.as_ref(), picture.as_ref());
-                    tokio::fs::write(&path, file).await.map_err(|e| format!("Couldn't save the theme: {e}"))?;
+                    tokio::fs::write(&path, file).await.map_err(|_| "Couldn't save the theme.".to_owned())?;
                     Ok::<_, String>(theme.name)
                 }
             });
@@ -466,9 +466,7 @@ impl SettingsView {
             let rx = core.spawn({
                 let (core, key) = (core.clone(), key.clone());
                 async move {
-                    let bytes = tokio::fs::read(&path).await.map_err(|err| {
-                        crate::core::api::Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    })?;
+                    let bytes = crate::core::account::read_picture(&path).await?;
                     core.upload_background(&key, Picture { content_type: kind.into(), bytes }).await
                 }
             });

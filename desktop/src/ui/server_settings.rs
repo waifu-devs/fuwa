@@ -36,6 +36,7 @@ mod agents;
 mod automod;
 mod channels;
 mod emoji;
+mod onboarding;
 pub(crate) mod roles;
 pub(crate) use roles::switch;
 mod shared;
@@ -80,7 +81,7 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
-            Page::Welcome => "Welcome screen",
+            Page::Welcome => "Welcome & onboarding",
             Page::Invites => "Invites",
             Page::Roles => "Roles",
             Page::Channels => "Channels",
@@ -118,7 +119,9 @@ impl Page {
             Page::Roles => "Who can do what. Members take the color of their highest role.",
             Page::Channels => "Order, categories, topics, slow mode, and who can see and use each.",
             Page::Emoji => "The server's own emoji. Everyone here can use them as :name:.",
-            Page::Welcome => "What new members see first: a few words and channels to start in.",
+            Page::Welcome => {
+                "The banner, the welcome screen and the first steps new members take, previewed as you go."
+            }
             Page::Integrations => {
                 "Agents, accounts programs drive, and webhooks, addresses other apps post messages to."
             }
@@ -241,6 +244,7 @@ pub struct ServerSettingsView {
     automod: automod::AutoMod,
     channels: channels::Channels,
     welcome: welcome::Welcome,
+    onboard: onboarding::Onboard,
     shared: shared::Shared,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
@@ -271,6 +275,7 @@ impl ServerSettingsView {
         let (agents, agent_subscriptions) = agents::Agents::new(window, cx);
         let (automod, automod_subscriptions) = automod::AutoMod::new(window, cx);
         let (welcome, welcome_subscriptions) = welcome::Welcome::new(window, cx);
+        let (onboard, onboard_subscriptions) = onboarding::Onboard::new(window, cx);
         let (channels, channel_subscriptions) = channels::Channels::new(window, cx);
         let (shared, shared_subscriptions) = shared::Shared::new(window, cx);
         let mut subscriptions = vec![
@@ -296,6 +301,7 @@ impl ServerSettingsView {
         subscriptions.extend(agent_subscriptions);
         subscriptions.extend(automod_subscriptions);
         subscriptions.extend(welcome_subscriptions);
+        subscriptions.extend(onboard_subscriptions);
         subscriptions.extend(channel_subscriptions);
         subscriptions.extend(shared_subscriptions);
         Self {
@@ -326,6 +332,7 @@ impl ServerSettingsView {
             agents,
             automod,
             welcome,
+            onboard,
             channels,
             shared,
             bar: None,
@@ -470,9 +477,7 @@ impl ServerSettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let bytes = tokio::fs::read(&path).await.map_err(|err| {
-                        Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    })?;
+                    let bytes = crate::core::account::read_picture(&path).await?;
                     let url = core.upload_picture(&key, pb::MediaPurpose::ServerIcon, kind, bytes).await?;
                     core.update_server(&key, &sid, ServerPatch { icon_url: Some(url), ..ServerPatch::default() }).await
                 }

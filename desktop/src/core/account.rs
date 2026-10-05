@@ -47,6 +47,19 @@ pub fn picture_type(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The most a picture picked from this computer may be, checked before it's read.
+pub const MOST_PICTURE: u64 = 10 * 1024 * 1024;
+
+/// Reads a picked picture, refusing one too big to upload before loading it.
+pub async fn read_picture(path: &std::path::Path) -> Result<Vec<u8>, Problem> {
+    let unreadable = || Problem::new(Code::NotFound, "Couldn't read that file.");
+    let size = tokio::fs::metadata(path).await.map_err(|_| unreadable())?.len();
+    if size > MOST_PICTURE {
+        return Err(Problem::new(Code::InvalidArgument, "That picture is over 10 MB."));
+    }
+    tokio::fs::read(path).await.map_err(|_| unreadable())
+}
+
 fn missing() -> Problem {
     Problem::new(Code::NotFound, "That instance isn't here.")
 }
@@ -274,6 +287,18 @@ impl Core {
         content_type: &str,
         bytes: Vec<u8>,
     ) -> Result<String, Problem> {
+        self.upload_picture_for(key, "", purpose, content_type, bytes).await
+    }
+
+    /// [`Core::upload_picture`] for one server (a server's banner must be), so it can only be used there.
+    pub async fn upload_picture_for(
+        self: &Arc<Self>,
+        key: &str,
+        server_id: &str,
+        purpose: pb::MediaPurpose,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<String, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
         let res = rpc!(
             api.media(),
@@ -281,7 +306,7 @@ impl Core {
                 purpose: purpose as i32,
                 content_type: content_type.into(),
                 size: bytes.len() as i64,
-                server_id: String::new(),
+                server_id: server_id.into(),
             })
         )
         .await?;
@@ -403,5 +428,16 @@ mod tests {
         assert_eq!(picture_type("me.PNG"), Some("image/png"));
         assert_eq!(picture_type("a.b.jpeg"), Some("image/jpeg"));
         assert_eq!(picture_type("notes.txt"), None);
+    }
+
+    #[tokio::test]
+    async fn pictures_too_big_are_refused_before_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let (small, big) = (dir.path().join("small.png"), dir.path().join("big.png"));
+        std::fs::write(&small, b"png").unwrap();
+        std::fs::File::create(&big).unwrap().set_len(MOST_PICTURE + 1).unwrap();
+        assert_eq!(read_picture(&small).await.unwrap(), b"png");
+        assert_eq!(read_picture(&big).await.unwrap_err().code, Code::InvalidArgument);
+        assert_eq!(read_picture(&dir.path().join("gone.png")).await.unwrap_err().code, Code::NotFound);
     }
 }

@@ -367,9 +367,7 @@ impl SettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let bytes = tokio::fs::read(&path).await.map_err(|err| {
-                        crate::core::api::Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    })?;
+                    let bytes = crate::core::account::read_picture(&path).await?;
                     let url = core.upload_picture(&key, pb::MediaPurpose::Avatar, kind, bytes).await?;
                     core.update_profile(&key, ProfilePatch { avatar_url: Some(url), ..ProfilePatch::default() }).await
                 }

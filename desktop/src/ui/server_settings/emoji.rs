@@ -291,9 +291,8 @@ impl ServerSettingsView {
             self.run(
                 cx,
                 async move {
-                    let unreadable = |err: std::io::Error| {
-                        Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    };
+                    let unreadable =
+                        |_: std::io::Error| Problem::new(tonic::Code::NotFound, "Couldn't read that file.");
                     let size = tokio::fs::metadata(&path).await.map_err(unreadable)?.len();
                     if size > MAX_BYTES {
                         return Err(Problem::new(

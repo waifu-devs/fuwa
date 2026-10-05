@@ -8,7 +8,7 @@ use gpui_kit::component::input::Textarea;
 
 use super::roles::switch;
 use super::*;
-use crate::ui::overlay::welcome_emoji;
+use crate::ui::overlay::{emoji_tile, welcome_emoji};
 
 const MAX_CHANNELS: usize = 5;
 const DESCRIPTION_MAX: usize = 300;
@@ -32,7 +32,7 @@ enum Pick {
 }
 
 pub(super) struct Welcome {
-    saved: Option<pb::WelcomeScreen>,
+    pub(super) saved: Option<pb::WelcomeScreen>,
     loading: bool,
     enabled: bool,
     description: Entity<TextareaState>,
@@ -42,7 +42,7 @@ pub(super) struct Welcome {
     picking: Option<(u64, Pick)>,
     /// A row just moved, and how far it came, so it glides into place.
     moved: Option<(u64, f32, Instant)>,
-    saving: bool,
+    pub(super) saving: bool,
 }
 
 impl Welcome {
@@ -167,42 +167,17 @@ impl ServerSettingsView {
         draft(self.welcome.enabled, &self.welcome.description.read(cx).value(), &rows)
     }
 
-    fn save_welcome(&mut self, cx: &mut Context<Self>) {
-        let screen = self.welcome_draft(cx);
+    /// Whether the welcome screen can be saved as it is, saying why not.
+    fn check_welcome(&mut self, screen: &pb::WelcomeScreen, cx: &mut Context<Self>) -> bool {
         if screen.description.chars().count() > DESCRIPTION_MAX {
             self.error = Some(format!("The few words are {DESCRIPTION_MAX} characters at most."));
-            cx.notify();
-            return;
-        }
-        if screen.enabled && screen.description.is_empty() && screen.channels.is_empty() {
+        } else if screen.enabled && screen.description.is_empty() && screen.channels.is_empty() {
             self.error = Some("Add a few words or a channel first.".into());
-            cx.notify();
-            return;
+        } else {
+            return true;
         }
-        self.welcome.saving = true;
-        self.error = None;
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        let rx = core.spawn({
-            let core = core.clone();
-            async move { core.set_welcome_screen(&key, &sid, screen).await }
-        });
-        cx.spawn(async move |this, cx| {
-            let Ok(result) = rx.await else { return };
-            let _ = this.update(cx, |this, cx| {
-                this.welcome.saving = false;
-                match result {
-                    // The rows stay as they are: they're what was saved.
-                    Ok(screen) => {
-                        this.welcome.saved = Some(screen);
-                        this.flash_saved(cx);
-                    }
-                    Err(err) => this.error = Some(err.message),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
         cx.notify();
+        false
     }
 
     fn move_welcome_row(&mut self, key: u64, by: isize, cx: &mut Context<Self>) {
@@ -246,24 +221,36 @@ impl ServerSettingsView {
             )
         });
         let now = self.welcome_draft(cx);
-        let n = changes(&saved, &now);
+        let welcome_changed = changes(&saved, &now) > 0;
+        let n = changes(&saved, &now) + self.look_and_onboarding_changes(server, cx);
         if n > 0 {
+            let (s1, s2) = (server.clone(), server.clone());
             self.bar = Some(save_bar(
                 "welcome-save-bar",
                 n,
-                self.welcome.saving,
+                self.welcome.saving || self.onboard.saving,
                 p,
                 cx,
-                |this, window, cx| {
+                move |this, window, cx| {
                     if let Some(saved) = this.welcome.saved.clone() {
                         this.fill_welcome(saved, window, cx);
                     }
+                    this.discard_look_and_onboarding(&s1, window, cx);
                     this.error = None;
                     cx.notify();
                 },
-                |this, _, cx| this.save_welcome(cx),
+                move |this, _, cx| {
+                    let screen = this.welcome_draft(cx);
+                    if welcome_changed && !this.check_welcome(&screen, cx) {
+                        return;
+                    }
+                    this.save_everything(&s2, welcome_changed.then_some(screen), cx)
+                },
             ));
         }
+        let banner_part = self.look_section(server, p, window, cx);
+        let steps = self.onboarding_section(p, window, cx);
+        let drafted = self.server_as_drafted(server);
 
         let enabled = self.welcome.enabled;
         let length = self.welcome.description.read(cx).value().chars().count();
@@ -271,7 +258,7 @@ impl ServerSettingsView {
             .flex()
             .items_center()
             .gap(px(16.0))
-            .pb(px(18.0))
+            .py(px(18.0))
             .border_b_1()
             .border_color(p.border)
             .child(
@@ -362,15 +349,24 @@ impl ServerSettingsView {
             );
         }
 
-        let editor = div().flex_1().min_w_0().flex().flex_col().child(toggle).child(words).child(suggested);
-        div()
+        let editor = div()
+            .flex_1()
+            .min_w_0()
             .flex()
-            .items_start()
-            .gap(px(28.0))
-            .pb(px(80.0))
-            .child(editor)
-            .child(self.welcome_preview(server, &now, &channels, &look, p))
-            .into_any_element()
+            .flex_col()
+            .child(banner_part)
+            .child(toggle)
+            .child(words)
+            .child(suggested)
+            .child(steps);
+        let preview = div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(18.0))
+            .child(self.welcome_preview(&drafted, &now, &channels, &look, p, window, cx))
+            .children(self.onboarding_preview(&drafted, p, cx));
+        div().flex().items_start().gap(px(28.0)).pb(px(80.0)).child(editor).child(preview).into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -599,6 +595,7 @@ impl ServerSettingsView {
     }
 
     /// The welcome screen as new members will see it.
+    #[allow(clippy::too_many_arguments)]
     fn welcome_preview(
         &self,
         server: &pb::Server,
@@ -606,32 +603,12 @@ impl ServerSettingsView {
         channels: &[pb::Channel],
         look: &crate::ui::mentions::Look,
         p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(10.0))
-            .child(
-                div()
-                    .relative()
-                    .child(server_icon(server, 56.0, 18.0, p))
-                    .child(div().absolute().top(px(-10.0)).right(px(-14.0)).text_size(px(20.0)).child("👋")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .text_color(p.muted_foreground)
-                            .child("WELCOME TO"),
-                    )
-                    .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(server.name.clone())),
-            );
+        let tint = crate::ui::banner::accent(server);
+        let hero = crate::ui::banner::banner_hero(server, "Welcome to 👋", 320.0, p, window, cx);
+        let mut body = div().flex().flex_col().gap(px(10.0));
         if !screen.description.is_empty() {
             let shown =
                 crate::ui::mentions::mention_links(&crate::ui::text::images_as_links(&screen.description), look);
@@ -655,7 +632,7 @@ impl ServerSettingsView {
                     .border_1()
                     .border_color(p.border)
                     .bg(p.secondary)
-                    .child(welcome_emoji(&w.emoji, look, p))
+                    .child(emoji_tile(&w.emoji, look, tint, "hash"))
                     .child(
                         div()
                             .flex_1()
@@ -702,7 +679,6 @@ impl ServerSettingsView {
             );
         }
         let on = screen.enabled;
-        let glow = alpha(p.primary, 0.2);
         let card = div()
             .relative()
             .overflow_hidden()
@@ -711,12 +687,12 @@ impl ServerSettingsView {
             .border_color(p.border)
             .bg(p.card)
             .shadow_lg()
-            .child(div().absolute().top_0().left_0().right_0().h(px(110.0)).bg(gpui_kit::linear_gradient(
-                180.0,
-                gpui_kit::linear_color_stop(glow, 0.0),
-                gpui_kit::linear_color_stop(alpha(p.primary, 0.0), 1.0),
-            )))
-            .child(div().relative().p(px(20.0)).opacity(if on { 1.0 } else { 0.35 }).child(body))
+            .child(
+                div()
+                    .opacity(if on { 1.0 } else { 0.35 })
+                    .child(hero)
+                    .child(div().px(px(20.0)).pt(px(10.0)).pb(px(20.0)).child(body)),
+            )
             .when(!on, |el| {
                 el.child(
                     div().absolute().inset_0().flex().items_center().justify_center().p(px(24.0)).child(motion::rise(

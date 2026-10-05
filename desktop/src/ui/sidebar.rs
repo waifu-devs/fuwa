@@ -239,7 +239,9 @@ impl FuwaApp {
 
         let mut rows = div().relative().pt(px(8.0));
         let mut y = 8.0;
-        if server.has_welcome_screen {
+        if server.has_welcome_screen || server.has_onboarding {
+            // Going through the onboarding again, or the welcome screen when there's none.
+            let onboarding = server.has_onboarding;
             let (key, sid) = (key.to_owned(), server.id.clone());
             let hover = alpha(p.primary, 0.08);
             rows = rows.child(
@@ -257,10 +259,14 @@ impl FuwaApp {
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_dialog(Dialog::Welcome { key: key.clone(), server: sid.clone() }, window, cx)
+                        if onboarding {
+                            this.open_onboarding(&key, &sid, cx)
+                        } else {
+                            this.open_dialog(Dialog::Welcome { key: key.clone(), server: sid.clone() }, window, cx)
+                        }
                     }))
-                    .child(icon("party-popper").size(px(16.0)))
-                    .child("Welcome screen"),
+                    .child(icon(if onboarding { "sparkles" } else { "party-popper" }).size(px(16.0)))
+                    .child(if onboarding { "Channels & roles" } else { "Welcome screen" }),
             );
             y += ROW;
         }

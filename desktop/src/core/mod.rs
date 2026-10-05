@@ -26,6 +26,7 @@ pub mod keybinds;
 pub mod linked;
 pub mod moderation;
 pub mod notifications;
+pub mod onboarding;
 pub mod permissions;
 pub mod polls;
 pub mod presence;

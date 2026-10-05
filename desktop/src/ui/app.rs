@@ -133,6 +133,11 @@ pub enum Dialog {
         key: String,
         server: String,
     },
+    /// A server's first steps for new members (ui/onboarding.rs).
+    Onboarding {
+        key: String,
+        server: String,
+    },
     /// Joining a server that asks people to sign in through its identity
     /// provider first, found from an invite.
     SsoJoin {
@@ -287,6 +292,7 @@ pub struct FuwaApp {
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
     pub friends: crate::ui::friends::Friends,
+    pub onboarding: crate::ui::onboarding::Onboarding,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
     pub time_style: crate::core::timestamps::Style,
@@ -351,6 +357,7 @@ impl FuwaApp {
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
+        let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 match event {
@@ -403,6 +410,7 @@ impl FuwaApp {
         let weak = cx.entity().downgrade();
         subscriptions.extend(thread_subs);
         subscriptions.extend(friend_subs);
+        subscriptions.extend(onboarding_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 if this.intercept(&event.keystroke, window, cx) {
@@ -507,6 +515,7 @@ impl FuwaApp {
             search,
             threads,
             friends,
+            onboarding,
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
@@ -1339,19 +1348,31 @@ impl FuwaApp {
         const NEW_FOR: i64 = 7 * 86_400_000;
         let ready = self.core.shared.read(|s| {
             let i = s.instance(&key)?;
-            let has = i.server(&server)?.has_welcome_screen;
+            let srv = i.server(&server)?;
             let me = i.my_member(&server)?;
             let joined = me.joined_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
-            Some(
-                has && !me.pending
+            // Someone who went through the onboarding has seen where to start already.
+            let onboarded = srv.has_onboarding && me.onboarded_at.is_some();
+            Some((
+                crate::core::onboarding::due(i, &server, now_ms())?,
+                srv.has_welcome_screen
+                    && !onboarded
+                    && !me.pending
                     && !i.access(&server).has(crate::pb::Permission::ManageServer)
                     && now_ms() - joined < NEW_FOR,
-            )
+            ))
         });
         // Not loaded yet: look again on the next change.
-        let Some(newcomer) = ready else { return };
+        let Some((onboard, newcomer)) = ready else { return };
         self.welcome_checked.insert(seen.clone());
-        if !newcomer || self.prefs.welcomed.contains(&seen) {
+        if self.prefs.welcomed.contains(&seen) {
+            return;
+        }
+        if onboard {
+            self.open_onboarding(&key, &server, cx);
+            return;
+        }
+        if !newcomer {
             return;
         }
         let core = self.core.clone();
@@ -1528,6 +1549,7 @@ impl FuwaApp {
             Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } | Dialog::Picture { .. } => {
                 self.close_dialog(cx)
             }
+            Dialog::Onboarding { .. } => self.step_do(false, window, cx),
             Dialog::Poll { .. } => self.send_poll(cx),
             Dialog::Moderate { key, server, user_id, action } => {
                 let reason: String = value.chars().take(512).collect();

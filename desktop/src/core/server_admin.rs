@@ -24,6 +24,12 @@ pub struct ServerPatch {
     pub default_notifications: Option<pb::NotificationLevel>,
     /// A text channel's id, or empty for no join messages.
     pub system_channel_id: Option<String>,
+    /// An upload made for this server, or empty for none.
+    pub banner_url: Option<String>,
+    /// The banner's focus, 0 to 100 each.
+    pub banner_focus: Option<(i32, i32)>,
+    /// 0xRRGGBB, or -1 for none.
+    pub accent_color: Option<i32>,
 }
 
 /// Someone's account by id, from a list a call sent along.
@@ -45,6 +51,10 @@ impl Core {
                 icon_url: patch.icon_url,
                 default_notifications: patch.default_notifications.map(|l| l as i32),
                 system_channel_id: patch.system_channel_id,
+                banner_url: patch.banner_url,
+                banner_focus_x: patch.banner_focus.map(|(x, _)| x),
+                banner_focus_y: patch.banner_focus.map(|(_, y)| y),
+                accent_color: patch.accent_color,
                 ..Default::default()
             })
         )
