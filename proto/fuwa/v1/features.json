@@ -20,6 +20,7 @@
     { "id": "shared-polls", "date": "2026-10-05", "title": "Polls in shared channels" },
     { "id": "shared-emoji", "date": "2026-10-05", "title": "Custom emoji in shared channels" },
     { "id": "shared-threads", "date": "2026-10-05", "title": "Threads in shared channels" },
-    { "id": "pins", "date": "2026-10-05", "title": "Pinned messages" }
+    { "id": "pins", "date": "2026-10-05", "title": "Pinned messages" },
+    { "id": "role-permission-changes", "date": "2026-10-05", "title": "Role edits keep each other's changes" }
   ]
 }
