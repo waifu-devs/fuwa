@@ -117,6 +117,29 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        page = page.child(self.setting(
+            "call-recording-video",
+            "Video in recordings",
+            None,
+            &["call_recording_video"],
+            if defaults.call_recording_video { "on" } else { "off" },
+            1,
+            self.toggle(
+                "call-recording-video",
+                draft.call_recording_video,
+                false,
+                "Let servers keep cameras and shared screens in their recordings too",
+                "Each server's admins choose it under Recordings in their settings. A WebM file per camera and \
+                 screen, next to the sound: an hour of a camera takes several times the room of the sound, against \
+                 the same caps under Limits. Turning this off turns it off in every server and ends the recordings \
+                 filming now.",
+                p,
+                cx,
+                |d, on| d.call_recording_video = on,
+            ),
+            p,
+            cx,
+        ));
         let keep_default =
             defaults.call_recordings_keep_days.map_or_else(|| "until deleted".to_owned(), |n| format!("{n} days"));
         page = page.child(self.setting(
