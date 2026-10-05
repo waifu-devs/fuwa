@@ -2,12 +2,15 @@ import { CheckIcon, FingerprintIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SPRING } from "@/components/motion";
+import { type Key, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
-/** Developer mode's Copy ID button; it only exists while developer mode is on. */
-export function CopyId({ id, what, className }: { id: string; what: string; className?: string }) {
+/** Developer mode's Copy ID button; it only exists while developer mode is on. `what` names the ID (common.copy.*). */
+export function CopyId({ id, what, className }: { id: string; what: Key; className?: string }) {
+  const { t } = useI18n();
+  const name = t(what);
   const on = usePrefs((p) => p.developerMode);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -27,11 +30,11 @@ export function CopyId({ id, what, className }: { id: string; what: string; clas
           whileTap={{ scale: 0.85 }}
           onClick={(e) => {
             e.stopPropagation();
-            copy(id, what);
+            copy(t, id, name);
             setCopied(true);
           }}
-          aria-label={`Copy ${what}`}
-          title={`Copy ${what}`}
+          aria-label={t("common.copyThing", { what: name })}
+          title={t("common.copyThing", { what: name })}
           className={cn("grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground", className)}
         >
           <AnimatePresence mode="popLayout" initial={false}>

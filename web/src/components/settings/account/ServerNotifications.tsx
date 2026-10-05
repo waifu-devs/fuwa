@@ -14,21 +14,21 @@ import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { type I18n, useI18n } from "@/i18n/react";
-import { isMuted, LEVELS, MUTE_FOR, mutedLabel, useNow } from "@/lib/notifications";
+import { isMuted, LEVELS, MUTE_FOR, muteForLabel, mutedLabel, useNow } from "@/lib/notifications";
 import { toast, useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const levelOptions = (t: I18n["t"]) => [
   { value: NotificationLevel.UNSPECIFIED, label: t("accountsettings.serverNotifications.default") },
-  ...LEVELS.map((l) => ({ value: l.value, label: l.short as string })),
+  ...LEVELS.map((l) => ({ value: l.value, label: t(l.short) })),
 ];
 
 /** Your level for a server, or on Default, what the server's owners picked for everyone. */
 function levelLabel(t: I18n["t"], level: NotificationLevel | undefined, serverDefault: NotificationLevel) {
   const own = LEVELS.find((l) => l.value === level)?.label;
-  if (own) return own;
+  if (own) return t(own);
   const set = LEVELS.find((l) => l.value === serverDefault)?.label;
-  return set ? t("accountsettings.serverNotifications.defaultIs", { level: set.toLowerCase() }) : t("accountsettings.serverNotifications.default");
+  return set ? t("accountsettings.serverNotifications.defaultIs", { level: t(set).toLowerCase() }) : t("accountsettings.serverNotifications.default");
 }
 
 /** Saves a change and says so if it didn't go through. */
@@ -133,7 +133,7 @@ function ServerCard({
               {muted ? (
                 <motion.span key="muted" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="flex min-w-0 items-center gap-1 font-bold text-amber-500">
                   <BellOffIcon className="size-3.5 shrink-0" />
-                  <span className="truncate">{mutedLabel(settings, now)}</span>
+                  <span className="truncate">{mutedLabel(t, settings, now)}</span>
                 </motion.span>
               ) : (
                 <motion.span key={settings?.level ?? 0} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="flex items-center gap-1">
@@ -168,7 +168,7 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
 
   return (
     <div className="flex flex-col gap-5 border-t p-4">
-      <MuteControl muted={muted} label={mutedLabel(settings, now)} what="server" onMute={(mutedUntil) => change(instanceKey, server.id, "", { mutedUntil })} />
+      <MuteControl muted={muted} label={mutedLabel(t, settings, now)} what="server" onMute={(mutedUntil) => change(instanceKey, server.id, "", { mutedUntil })} />
       <div className="flex flex-col gap-2">
         <p className="text-sm font-bold">{t("appsettings.notifications.notifyFor")}</p>
         <Segmented
@@ -294,7 +294,7 @@ function ChannelRow({
           options={levelOptions(t)}
           className="w-full text-xs sm:w-auto sm:min-w-0 sm:flex-1 [&_button]:px-2"
         />
-        <MuteControl compact muted={muted} label={mutedLabel(settings, now)} what="channel" onMute={(mutedUntil) => onChange({ mutedUntil })} />
+        <MuteControl compact muted={muted} label={mutedLabel(t, settings, now)} what="channel" onMute={(mutedUntil) => onChange({ mutedUntil })} />
       </div>
     </div>
   );
@@ -352,8 +352,8 @@ function MuteControl({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 {MUTE_FOR.map((m) => (
-                  <DropdownMenuItem key={m.label} onSelect={() => onMute(m.ms === null ? null : new Date(Date.now() + m.ms))}>
-                    {m.label}
+                  <DropdownMenuItem key={m.id} onSelect={() => onMute(m.ms === null ? null : new Date(Date.now() + m.ms))}>
+                    {muteForLabel(t, m)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>

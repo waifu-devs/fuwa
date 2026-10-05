@@ -5,7 +5,8 @@ import { getInstance } from "@/fuwa/hooks";
 import { notificationKey } from "@/fuwa/store";
 import { attempt } from "@/components/menus/dialogs";
 import type { MenuAction, MenuEntry } from "@/lib/context-menu";
-import { isMuted, LEVELS, MUTE_FOR, mutedLabel } from "@/lib/notifications";
+import { i18n } from "@/i18n/i18n";
+import { isMuted, LEVELS, MUTE_FOR, muteForLabel, mutedHint } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";
 import { copy, openSettings } from "@/lib/ui";
 
@@ -21,10 +22,21 @@ export const setMenuNavigate = (fn: Navigate | null) => {
 export const goTo: Navigate = (options) => navigate?.(options);
 
 /** "Copy … ID", only with Developer Mode on, as everywhere else. */
-export function copyIdItem(id: string, what: string): MenuAction | null {
+export function copyIdItem(id: string, what: keyof typeof ID_NAMES): MenuAction | null {
   if (!getPrefs().developerMode || !id) return null;
-  return { id: "copy-id", label: `Copy ${what} ID`, icon: FingerprintIcon, onSelect: () => copy(id, `${what} ID`) };
+  const { t } = i18n();
+  const name = t(ID_NAMES[what]);
+  return { id: "copy-id", label: t("common.copyThing", { what: name }), icon: FingerprintIcon, onSelect: () => copy(t, id, name) };
 }
+
+/** What a copied ID is of, as the toast and menu name it. */
+const ID_NAMES = {
+  user: "common.copy.userId",
+  message: "common.copy.messageId",
+  channel: "common.copy.channelId",
+  category: "common.copy.categoryId",
+  server: "common.copy.serverId",
+} as const;
 
 /**
  * A link to a place in a server, on the instance's own address as invite
@@ -46,13 +58,14 @@ export function notificationEntries(instanceKey: string, serverId: string, chann
   const settings = inst?.notifications[notificationKey(serverId, channelId)];
   const change = (patch: NotificationPatch) => attempt(run(updateNotifications(instanceKey, serverId, channelId, patch)));
   const now = Date.now();
+  const { t } = i18n();
   const out: MenuEntry[] = [];
   if (isMuted(settings, now)) {
     out.push({
       id: "unmute",
       label: `Unmute ${what}`,
       icon: BellIcon,
-      hint: mutedLabel(settings, now).replace(/^Muted ?/, ""),
+      hint: mutedHint(t, settings, now),
       onSelect: () => change({ mutedUntil: false }),
     });
   } else {
@@ -62,23 +75,24 @@ export function notificationEntries(instanceKey: string, serverId: string, chann
       label: `Mute ${what}`,
       icon: BellOffIcon,
       items: MUTE_FOR.map((m) => ({
-        id: m.label,
-        label: m.label,
+        id: m.id,
+        label: muteForLabel(t, m),
         onSelect: () => change({ mutedUntil: m.ms === null ? null : new Date(Date.now() + m.ms) }),
       })),
     });
   }
   if (what === "channel") {
     const level = settings?.level ?? NotificationLevel.UNSPECIFIED;
+    const short = LEVELS.find((l) => l.value === level)?.short;
     out.push({
       kind: "sub",
       id: "notify",
       label: "Notifications",
       icon: SlidersHorizontalIcon,
-      hint: LEVELS.find((l) => l.value === level)?.short ?? "Server's",
+      hint: short ? t(short) : "Server's",
       items: [
         { kind: "check", radio: true, id: "default", label: "Use the server's", checked: level === NotificationLevel.UNSPECIFIED, onSelect: () => change({ level: NotificationLevel.UNSPECIFIED }) },
-        ...LEVELS.map((l) => ({ kind: "check" as const, radio: true, id: String(l.value), label: l.label, checked: level === l.value, onSelect: () => change({ level: l.value }) })),
+        ...LEVELS.map((l) => ({ kind: "check" as const, radio: true, id: String(l.value), label: t(l.label), checked: level === l.value, onSelect: () => change({ level: l.value }) })),
       ],
     });
   } else if (what === "server") {

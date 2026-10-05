@@ -25,6 +25,7 @@ import { MessageBody, MessageLine, MessageList, type MessageListHandle } from "@
 import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
 import { ago, displayName, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { isArchived, type ThreadPanelState } from "@/lib/threads";
 import { usePrefs } from "@/lib/prefs";
@@ -83,6 +84,7 @@ export const RepliesRow = memo(function RepliesRow({
   message: Message;
   onOpen: (threadId: string) => void;
 }) {
+  const lang = useI18n();
   const thread = message.thread;
   const unread = useFuwa((s) => s.instances[instanceKey]?.threadUnread[message.id] ?? 0);
   const hours = useArchiveHours(instanceKey, message.serverId);
@@ -120,7 +122,7 @@ export const RepliesRow = memo(function RepliesRow({
       {/* Both labels share one grid cell, so the row keeps the wider one's width and never shrinks out from under the pointer. */}
       <span className="grid min-w-0 text-muted-foreground">
         <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
-          {archived ? "Archived" : `Last reply ${ago(last)}`}
+          {archived ? "Archived" : `Last reply ${ago(lang, last)}`}
         </span>
         <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
           View thread
@@ -379,6 +381,7 @@ export function ThreadList({
   onOpen: (threadId: string) => void;
   onClose: () => void;
 }) {
+  const lang = useI18n();
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
   const [page, setPage] = useState<ListThreadsResponse | null>(null);
@@ -505,7 +508,7 @@ export function ThreadList({
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <b className="truncate text-sm">{m.webhook?.name || displayName(users?.[m.authorId])}</b>
-                  <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(toDate(m.createdAt))}</span>
+                  <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, toDate(m.createdAt))}</span>
                 </span>
                 <span className="line-clamp-2 text-sm break-words text-muted-foreground">
                   {plain(m.content) || m.embeds[0]?.title || "…"}
@@ -516,7 +519,7 @@ export function ThreadList({
                     {m.thread?.replyCount ?? 0} {m.thread?.replyCount === 1 ? "reply" : "replies"}
                   </b>
                   {m.thread?.locked && <LockIcon className="size-3 text-muted-foreground" />}
-                  <span className="truncate text-muted-foreground">last {ago(toDate(m.thread?.lastReplyAt))}</span>
+                  <span className="truncate text-muted-foreground">last {ago(lang, toDate(m.thread?.lastReplyAt))}</span>
                 </span>
               </span>
             </motion.button>

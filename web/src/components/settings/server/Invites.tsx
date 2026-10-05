@@ -11,6 +11,7 @@ import { SPRING } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { displayName, formatLeft, formatStamp } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { expiresAt, inviteLink, works } from "@/lib/invites";
 import { useNow } from "@/lib/notifications";
 import { has, hasIn } from "@/lib/permissions";
@@ -143,6 +144,7 @@ function Row({
   index: number;
   onRevoke: () => void;
 }) {
+  const lang = useI18n();
   const [copied, setCopied] = useState(false);
   const until = expiresAt(invite);
   const left = until ? until.getTime() - now : null;
@@ -198,7 +200,7 @@ function Row({
         title={until ? `Expires ${formatStamp(until)}` : "Never expires"}
       >
         {left !== null ? <TimerIcon className="size-3.5" /> : <InfinityIcon className="size-3.5" />}
-        {left !== null ? formatLeft(left) : "Never"}
+        {left !== null ? formatLeft(lang, left) : "Never"}
       </span>
       <span className="ml-auto flex items-center gap-1">
         <button

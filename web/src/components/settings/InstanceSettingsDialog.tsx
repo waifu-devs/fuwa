@@ -35,7 +35,8 @@ import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Private, usePrivateField } from "@/components/Private";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, type Lang } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { canReturnTo, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
@@ -96,7 +97,7 @@ const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
   FIELDS.filter((f) => f.get(draft) !== f.get(saved)).map((f) => f.path);
 
 const count = (n: bigint | undefined) => (n === undefined ? "no limit" : Number(n).toLocaleString());
-const size = (n: bigint | undefined) => (n === undefined ? "no limit" : formatBytes(Number(n)));
+const size = (lang: Lang, n: bigint | undefined) => (n === undefined ? "no limit" : formatBytes(lang, Number(n)));
 
 /**
  * Everything an admin can change about a fuwa instance while it runs. Each
@@ -112,6 +113,7 @@ export function InstanceSettingsDialog({
   onOpenChange: (open: boolean) => void;
   instanceKey: string;
 }) {
+  const lang = useI18n();
   const inst = useInstance(instanceKey);
   const [config, setConfig] = useState<InstanceConfig | null>(null);
   const [draft, setDraft] = useState<InstanceSettings | null>(null);
@@ -619,10 +621,10 @@ export function InstanceSettingsDialog({
                 defaultLabel={[
                   `${count(defaults.defaultLimits?.members)} members`,
                   `${count(defaults.defaultLimits?.channels)} channels`,
-                  `${size(defaults.defaultLimits?.storageBytes)} storage`,
-                  `${size(defaults.defaultLimits?.attachmentBytes)} files`,
+                  `${size(lang, defaults.defaultLimits?.storageBytes)} storage`,
+                  `${size(lang, defaults.defaultLimits?.attachmentBytes)} files`,
                   `${count(defaults.defaultLimits?.emojis)} emoji`,
-                  `${size(defaults.defaultLimits?.recordingBytes)} recordings`,
+                  `${size(lang, defaults.defaultLimits?.recordingBytes)} recordings`,
                 ].join(", ")}
                 {...resetter(
                   "default_limits.members",
@@ -646,7 +648,7 @@ export function InstanceSettingsDialog({
                 id="picture-uploads"
                 title="Largest picture upload"
                 hint="Avatars, banners and server icons. The app crops pictures and saves them small, so only GIFs, which go up as they are, get near a few megabytes."
-                defaultLabel={size(defaults.pictureUploadBytes)}
+                defaultLabel={size(lang, defaults.pictureUploadBytes)}
                 delay={0.04}
                 {...resetter("picture_upload_bytes")}
               >
@@ -656,7 +658,7 @@ export function InstanceSettingsDialog({
                 id="picture-uploads-per-day"
                 title="Pictures per day"
                 hint="How much one account may upload in a day (UTC), so nobody can fill this instance's disk."
-                defaultLabel={size(defaults.pictureUploadBytesPerDay)}
+                defaultLabel={size(lang, defaults.pictureUploadBytesPerDay)}
                 delay={0.08}
                 {...resetter("picture_upload_bytes_per_day")}
               >
@@ -671,7 +673,7 @@ export function InstanceSettingsDialog({
                 id="attachment-uploads"
                 title="Largest file in a message"
                 hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
-                defaultLabel={size(defaults.attachmentUploadBytes)}
+                defaultLabel={size(lang, defaults.attachmentUploadBytes)}
                 delay={0.12}
                 {...resetter("attachment_upload_bytes")}
               >
@@ -681,7 +683,7 @@ export function InstanceSettingsDialog({
                 id="attachment-uploads-per-day"
                 title="Files per day"
                 hint="How much one account may send in files in a day (UTC), apart from pictures."
-                defaultLabel={size(defaults.attachmentUploadBytesPerDay)}
+                defaultLabel={size(lang, defaults.attachmentUploadBytesPerDay)}
                 delay={0.16}
                 {...resetter("attachment_upload_bytes_per_day")}
               >
@@ -706,7 +708,7 @@ export function InstanceSettingsDialog({
                 id="voice-message-bytes"
                 title="Biggest voice message"
                 hint="Its encrypted file, which this instance does see. A minute of voice is about 240 KB."
-                defaultLabel={size(defaults.voiceMessageBytes)}
+                defaultLabel={size(lang, defaults.voiceMessageBytes)}
                 delay={0.24}
                 {...resetter("voice_message_bytes")}
               >
@@ -716,7 +718,7 @@ export function InstanceSettingsDialog({
                 id="voice-message-bytes-per-day"
                 title="Voice messages a day"
                 hint="What one account may send in a day (UTC), counted apart from pictures and files."
-                defaultLabel={size(defaults.voiceMessageBytesPerDay)}
+                defaultLabel={size(lang, defaults.voiceMessageBytesPerDay)}
                 delay={0.28}
                 {...resetter("voice_message_bytes_per_day")}
               >

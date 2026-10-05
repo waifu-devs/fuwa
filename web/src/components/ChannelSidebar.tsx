@@ -36,7 +36,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArrange } from "@/hooks/use-arrange";
 import { layoutOf, placements } from "@/lib/arrange";
-import { isMuted, MUTE_FOR, mutedLabel, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
+import { useI18n } from "@/i18n/react";
+import { isMuted, MUTE_FOR, muteForLabel, mutedHint, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
 import { copy, openSettings, toast } from "@/lib/ui";
@@ -76,6 +77,7 @@ export function groupChannels(channels: Channel[]): Group[] {
 
 /** Mute a server from its menu, or open its notification settings. */
 function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const now = useNow();
   const settings = useNotificationSettings(instanceKey, serverId);
   const mute = (mutedUntil: Date | null | false) =>
@@ -85,7 +87,7 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
       {isMuted(settings, now) ? (
         <DropdownMenuItem onSelect={() => void mute(false)}>
           <BellIcon /> Unmute server
-          <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedLabel(settings, now).replace(/^Muted /, "")}</span>
+          <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedHint(t, settings, now)}</span>
         </DropdownMenuItem>
       ) : (
         <DropdownMenuSub>
@@ -94,8 +96,8 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-52">
             {MUTE_FOR.map((m) => (
-              <DropdownMenuItem key={m.label} onSelect={() => void mute(m.ms === null ? null : new Date(Date.now() + m.ms))}>
-                {m.label}
+              <DropdownMenuItem key={m.id} onSelect={() => void mute(m.ms === null ? null : new Date(Date.now() + m.ms))}>
+                {muteForLabel(t, m)}
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>
@@ -109,6 +111,7 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
 }
 
 export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   // Only what the sidebar shows, so messages and member changes elsewhere don't re-render it.
   const known = useFuwa((s) => !!s.instances[instanceKey]);
   const nodeName = useFuwa((s) => s.instances[instanceKey]?.node?.name);
@@ -229,7 +232,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             <IdCardIcon /> Edit server profile
           </DropdownMenuItem>
           {developer && (
-            <DropdownMenuItem onSelect={() => copy(serverId, "server ID")}>
+            <DropdownMenuItem onSelect={() => copy(t, serverId, t("common.copy.serverId"))}>
               <FingerprintIcon /> Copy server ID
             </DropdownMenuItem>
           )}

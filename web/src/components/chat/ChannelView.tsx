@@ -22,12 +22,14 @@ import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { formatDuration, shortDuration } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
 export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
+  const lang = useI18n();
   const access = useAccess(instanceKey, serverId);
   const unslowed = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const list = useRef<MessageListHandle>(null);
@@ -108,7 +110,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
             </>
           )}
-          <CopyId id={channel.id} what="channel ID" />
+          <CopyId id={channel.id} what="common.copy.channelId" />
           <AnimatePresence initial={false}>
             {channel.slowmodeSeconds > 0 && (
               <motion.span
@@ -117,11 +119,11 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.6 }}
                 transition={SPRING}
-                title={`Slow mode: one message every ${formatDuration(channel.slowmodeSeconds)}${unslowed ? " (not for you)" : ""}`}
+                title={`Slow mode: one message every ${formatDuration(lang, channel.slowmodeSeconds)}${unslowed ? " (not for you)" : ""}`}
                 className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground tabular-nums"
               >
                 <SnailIcon className="size-3.5" />
-                <span className="hidden sm:inline">{shortDuration(channel.slowmodeSeconds)}</span>
+                <span className="hidden sm:inline">{shortDuration(lang, channel.slowmodeSeconds)}</span>
               </motion.span>
             )}
           </AnimatePresence>

@@ -11,6 +11,7 @@ import { GifImage } from "@/components/chat/GifImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, Setting, SPRING } from "../controls";
 
@@ -67,6 +68,7 @@ export function GifSettings({
   patch: (fn: (d: InstanceSettings) => void) => void;
   resetter: (...paths: string[]) => Reset;
 }) {
+  const lang = useI18n();
   const g = gifsOf(draft);
   const was = gifsOf(saved);
   const def = gifsOf(defaults);
@@ -164,7 +166,7 @@ export function GifSettings({
               </div>
               {g.gifBytes !== undefined && (
                 <p className="text-xs text-muted-foreground">
-                  Bigger GIFs are stored at the provider's smaller size, or refused when even that is over {formatBytes(Number(g.gifBytes))}.
+                  Bigger GIFs are stored at the provider's smaller size, or refused when even that is over {formatBytes(lang, Number(g.gifBytes))}.
                 </p>
               )}
             </Setting>

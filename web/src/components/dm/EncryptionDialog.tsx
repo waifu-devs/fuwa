@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { describeDevice, deviceName, type DeviceKind } from "@/lib/devices";
 import { displayName } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ export function EncryptionDialog({
   instanceKey: string;
   conversation: Conversation;
 }) {
+  const { t } = useI18n();
   const id = conversation.id;
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const myDevice = useFuwa((s) => s.instances[instanceKey]?.dms.deviceId ?? "");
@@ -220,7 +222,7 @@ export function EncryptionDialog({
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-1.5 text-sm font-bold">
-                              <span className="truncate">{device ? deviceName(described) : "Signed out"}</span>
+                              <span className="truncate">{device ? deviceName(t, described) : "Signed out"}</span>
                               {mine && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[0.65rem] text-primary">This device</span>}
                             </span>
                             <span className="block font-mono text-[0.7rem] text-muted-foreground" title={m.deviceId}>

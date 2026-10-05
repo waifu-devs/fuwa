@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/react";
 import { copy } from "@/lib/ui";
 import { cleanDomain, readSamlMetadata } from "@/lib/sso";
 import { cn } from "@/lib/utils";
@@ -368,6 +369,7 @@ function TellProvider({ protocol, sp }: { protocol: SsoProtocol; sp: ServiceProv
 }
 
 function CopyRow({ label, value, delay }: { label: string; value: string; delay: number }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -383,7 +385,7 @@ function CopyRow({ label, value, delay }: { label: string; value: string; delay:
           type="button"
           whileTap={{ scale: 0.85 }}
           onClick={() => {
-            copy(value, label);
+            copy(t, value, label);
             setCopied(true);
           }}
           aria-label={`Copy ${label}`}

@@ -15,6 +15,7 @@ import { createChannel, deleteChannel, markChannelsRead, run } from "@/fuwa/acti
 import { accessNow, getInstance } from "@/fuwa/hooks";
 import { copyIdItem, notificationEntries, placeLink } from "@/components/menus/common";
 import { attempt, confirmFirst } from "@/components/menus/dialogs";
+import { i18n } from "@/i18n/i18n";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 import { above, has, hasIn, outranks, standing, type Access } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
@@ -100,13 +101,14 @@ export function channelMenu(ctx: MenuContexts["channel"], actions: ChannelMenuAc
     !channel.shared &&
     (!channel.permissionOverwrites.length || (rolesThere && outranksOverwrites(instanceKey, serverId, channel, access)));
   const name = channel.type === ChannelType.VOICE ? channel.name : `#${channel.name}`;
+  const { t } = i18n();
   return withExtensions("channel", ctx, [
     {
       id: "primary",
       items: items(
         texty(channel) && { id: "mark-read", label: "Mark as read", icon: CheckCheckIcon, disabled: !unread, onSelect: () => markChannelsRead(instanceKey, [channel.id]) },
         actions.invite && { id: "invite", label: "Invite people", icon: UserPlusIcon, onSelect: actions.invite },
-        { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(placeLink(instanceKey, serverId, channel.id), "channel link") },
+        { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(t, placeLink(instanceKey, serverId, channel.id), t("common.copy.channelLink")) },
       ),
     },
     { id: "notifications", items: texty(channel) ? notificationEntries(instanceKey, serverId, channel.id, "channel") : [] },

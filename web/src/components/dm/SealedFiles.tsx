@@ -7,6 +7,7 @@ import { animated, sniff, type Preview } from "@/files/sealed";
 import { openDmFile } from "@/fuwa/dms";
 import { fitBox, shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +75,7 @@ export const SealedFiles = memo(function SealedFiles({ instanceKey, files, anima
 });
 
 function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string; file: FileRef; delay: number; animate: boolean }) {
+  const lang = useI18n();
   const [state, setState] = useState<State>({ at: "idle" });
   const place = useRef<HTMLDivElement>(null);
   const hinted = file.type.startsWith("image/") || file.type.startsWith("video/") || file.width > 0;
@@ -185,7 +187,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
             ) : busy ? (
               "Opening on this device…"
             ) : size > 0 ? (
-              formatBytes(size)
+              formatBytes(lang, size)
             ) : (
               "Encrypted file"
             )}
@@ -261,6 +263,7 @@ function Still({ url, name, width, height }: { url: string; name: string; width:
 
 /** Files on their way in an encrypted message: sealed and uploaded on this device before it's sent. */
 export function PendingFiles({ files }: { files: { name: string; size: number }[] }) {
+  const lang = useI18n();
   return (
     <div className="mt-1 flex flex-col gap-1.5">
       {files.map((file, n) => (
@@ -268,7 +271,7 @@ export function PendingFiles({ files }: { files: { name: string; size: number }[
           <FileBadge name={file.name} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold">{shortName(file.name, 48)}</p>
-            <p className="truncate text-xs text-muted-foreground tabular-nums">{formatBytes(file.size)}</p>
+            <p className="truncate text-xs text-muted-foreground tabular-nums">{formatBytes(lang, file.size)}</p>
           </div>
           <LockKeyholeIcon className="size-4 shrink-0 text-emerald-500" />
         </div>

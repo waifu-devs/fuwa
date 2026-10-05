@@ -65,7 +65,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
         <h1 className="truncate font-extrabold">
           <SwapText className="truncate align-bottom">{channel.name}</SwapText>
         </h1>
-        <CopyId id={channel.id} what="channel ID" />
+        <CopyId id={channel.id} what="common.copy.channelId" />
         <span className="flex-1" />
         <RecordingPill instanceKey={instanceKey} serverId={serverId} states={states} />
         <RecordingsButton instanceKey={instanceKey} serverId={serverId} channel={channel} states={states} />

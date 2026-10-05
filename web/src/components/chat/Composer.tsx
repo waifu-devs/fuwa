@@ -25,6 +25,7 @@ import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
@@ -128,6 +129,7 @@ export function Composer({
   placeholder: string;
   onEditLast: () => void;
 }) {
+  const lang = useI18n();
   const channelId = channel.id;
   // Drafts are kept per channel, and per thread apart from their channel.
   const draftKey = thread ? `thread:${thread.id}` : channelId;
@@ -418,7 +420,7 @@ export function Composer({
           onClick={send}
           disabled={!ready}
           aria-label={
-            chosen ? `Run /${chosen.command.name}` : cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
+            chosen ? `Run /${chosen.command.name}` : cooling ? `Slow mode: send again in ${formatLeft(lang, gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
           }
           whileTap={{ scale: 0.85 }}
           initial={false}
@@ -499,10 +501,10 @@ export function Composer({
             >
               <SnailIcon className={cn("size-3.5", cooling && "animate-[crawl_1.6s_ease-in-out_infinite]")} />
               {gate.exempt
-                ? `Slow mode is on for others: ${formatDuration(channel.slowmodeSeconds)}`
+                ? `Slow mode is on for others: ${formatDuration(lang, channel.slowmodeSeconds)}`
                 : cooling
-                  ? `Slow mode · send again in ${formatLeft(gate.cooldownUntil - gate.now)}`
-                  : `Slow mode · one message every ${formatDuration(gate.slowmode)}`}
+                  ? `Slow mode · send again in ${formatLeft(lang, gate.cooldownUntil - gate.now)}`
+                  : `Slow mode · one message every ${formatDuration(lang, gate.slowmode)}`}
             </motion.p>
           )}
         </AnimatePresence>
@@ -616,6 +618,7 @@ function ReadOnly({ title, about }: { title: string; about: string }) {
 
 /** In place of the box while you're timed out: how long until you can talk again. */
 function TimedOut({ left }: { left: number }) {
+  const lang = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -633,7 +636,7 @@ function TimedOut({ left }: { left: number }) {
         <p className="text-xs text-muted-foreground">You can still read along. Messages and edits open up again when it ends.</p>
       </div>
       <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-extrabold text-amber-600 tabular-nums dark:text-amber-400">
-        {formatLeft(left)}
+        {formatLeft(lang, left)}
       </span>
     </motion.div>
   );

@@ -1,6 +1,7 @@
 import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, MessageSquareReplyIcon, PencilIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
 import type { MenuTrigger } from "@/components/ContextMenu";
 import { copyIdItem } from "@/components/menus/common";
+import { i18n } from "@/i18n/i18n";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 import { reportError } from "@/lib/reports";
 import { shownPicture } from "@/lib/shown";
@@ -58,15 +59,16 @@ export function targetSection(trigger: MenuTrigger): MenuSection {
   const href = link && element.contains(link) ? link.href : "";
   // Only pictures from instances the app already talks to: opening or saving one asks nobody else.
   const src = picture && element.contains(picture) ? shownPicture(picture.src) : "";
+  const { t } = i18n();
   return {
     id: "target",
     items: items(
-      !!selection && { id: "copy-selection", label: "Copy", icon: TextSelectIcon, onSelect: () => copy(selection, "text") },
+      !!selection && { id: "copy-selection", label: "Copy", icon: TextSelectIcon, onSelect: () => copy(t, selection, t("common.copy.text")) },
       !!href && { id: "open-link", label: "Open link", icon: ExternalLinkIcon, hint: linkHint(href), onSelect: () => link?.click() },
-      !!href && { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(href, "link") },
+      !!href && { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(t, href, t("common.copy.link")) },
       !!src && { id: "open-picture", label: "Open picture", icon: ImageIcon, onSelect: () => window.open(src, "_blank", "noopener,noreferrer") },
       !!src && { id: "save-picture", label: "Save picture", icon: DownloadIcon, onSelect: () => void savePicture(src) },
-      !!src && { id: "copy-picture-link", label: "Copy picture link", icon: LinkIcon, onSelect: () => copy(src, "picture link") },
+      !!src && { id: "copy-picture-link", label: "Copy picture link", icon: LinkIcon, onSelect: () => copy(t, src, t("common.copy.pictureLink")) },
     ),
   };
 }

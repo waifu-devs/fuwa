@@ -73,6 +73,7 @@ import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsUser, useNotificationSettings } from "@/lib/notifications";
 import { has, hasIn } from "@/lib/permissions";
@@ -808,6 +809,7 @@ const MessageRow = memo(function MessageRow({
   inThread: boolean;
   actions: RowActions;
 }) {
+  const { t } = useI18n();
   const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
   const [copied, setCopied] = useState(false);
   const edited = !!message.editedAt;
@@ -815,7 +817,7 @@ const MessageRow = memo(function MessageRow({
     messageMenu({ instanceKey, serverId: actions.serverId, channel: actions.channel, message, mine }, trigger, {
       thread: canThread ? { open: !!message.thread, go: () => actions.thread(message.id) } : undefined,
       edit: mine && !editing && message.kind === MessageKind.UNSPECIFIED ? () => actions.edit(message.id) : undefined,
-      copyText: message.content ? () => copy(message.content, "text") : undefined,
+      copyText: message.content ? () => copy(t, message.content, t("common.copy.text")) : undefined,
       keepOut: canKeepOut ? { name: displayName(author), ask: () => setConfirming("keep-out") } : undefined,
       delete: canDelete ? () => setConfirming("delete") : undefined,
     }),
@@ -915,7 +917,7 @@ const MessageRow = memo(function MessageRow({
                 </ToolButton>
               )}
               {developer && (
-                <ToolButton label="Copy message ID" onClick={() => copy(message.id, "message ID")}>
+                <ToolButton label="Copy message ID" onClick={() => copy(t, message.id, t("common.copy.messageId"))}>
                   <FingerprintIcon />
                 </ToolButton>
               )}
@@ -986,6 +988,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
   canDelete: boolean;
   actions: RowActions;
 }) {
+  const lang = useI18n();
   const alert = message.autoMod;
   const color = useRoleColor(member);
   const [confirming, setConfirming] = useState(false);
@@ -1068,7 +1071,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
             ))}
             {alert.timedOutSeconds > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-bold text-amber-600 dark:text-amber-400">
-                <TimerIcon className="size-3" /> Timed out for {formatDuration(alert.timedOutSeconds)}
+                <TimerIcon className="size-3" /> Timed out for {formatDuration(lang, alert.timedOutSeconds)}
               </span>
             )}
           </div>
@@ -1326,6 +1329,7 @@ const PendingRow = memo(function PendingRow({
   member: Member | undefined;
   actions: RowActions;
 }) {
+  const { t } = useI18n();
   const onRetry = () => actions.retry(pending);
   const onDismiss = () => actions.dismiss(pending.nonce);
   // A message AutoMod stopped: why, without a retry that would only be stopped again.
@@ -1335,7 +1339,7 @@ const PendingRow = memo(function PendingRow({
       id: "primary",
       items: items(
         !!pending.failed && !blocked && { id: "retry", label: "Retry", icon: RotateCwIcon, onSelect: onRetry },
-        { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: () => copy(pending.content, "text") },
+        { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: () => copy(t, pending.content, t("common.copy.text")) },
       ),
     },
     { id: "danger", items: items(!!pending.failed && { id: "dismiss", label: "Dismiss", icon: XIcon, onSelect: onDismiss }) },

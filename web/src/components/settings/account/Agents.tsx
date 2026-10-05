@@ -395,7 +395,8 @@ function AgentCard({
   onTokenSeen: () => void;
   onDelete: () => void;
 }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const user = a.user!;
   const [name, setName] = useState(user.displayName);
   const [bio, setBio] = useState(a.bio);
@@ -496,7 +497,7 @@ function AgentCard({
           </span>
           <span className="block truncate text-xs text-muted-foreground">
             @{user.username} · <T k="accountsettings.agents.servers" values={{ count: <Count value={a.servers} /> }} count={a.servers} /> ·{" "}
-            {a.lastActiveAt ? t("accountsettings.agents.active", { when: ago(toDate(a.lastActiveAt)) }) : t("accountsettings.agents.neverSignedIn")}
+            {a.lastActiveAt ? t("accountsettings.agents.active", { when: ago(lang, toDate(a.lastActiveAt)) }) : t("accountsettings.agents.neverSignedIn")}
           </span>
         </span>
         {busy === "save" && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
@@ -619,7 +620,7 @@ function AgentCard({
                     </motion.span>
                   )}
                 </AnimatePresence>
-                <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(toDate(a.createdAt)) })}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(lang, toDate(a.createdAt)) })}</span>
               </div>
             </div>
           </motion.div>

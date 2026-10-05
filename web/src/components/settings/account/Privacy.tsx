@@ -85,7 +85,8 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
 }
 
 function Export({ instanceKey, where }: { instanceKey: string; where: string }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const [state, setState] = useState<"idle" | "working" | "done">("idle");
   const [bytes, setBytes] = useState(0);
   const [file, setFile] = useState<{ url: string; name: string } | null>(null);
@@ -171,7 +172,7 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
                 )}
               </div>
               <span className="w-28 text-right text-xs font-bold text-muted-foreground tabular-nums">
-                {state === "done" ? t("accountsettings.privacy.ready", { size: formatBytes(bytes) }) : formatBytes(bytes)}
+                {state === "done" ? t("accountsettings.privacy.ready", { size: formatBytes(lang, bytes) }) : formatBytes(lang, bytes)}
               </span>
             </div>
           </motion.div>

@@ -12,6 +12,7 @@ import { UserAvatar } from "@/components/Icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { displayName, formatBytes, memberName, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
@@ -145,6 +146,7 @@ type Usage = { used: number; cap: number | null; keepDays: number | null };
  * and turns red once it's full, when no recording can go on.
  */
 function UsageStrip({ usage: { used, cap, keepDays } }: { usage: Usage }) {
+  const lang = useI18n();
   if (cap === null && keepDays === null) return null;
   const share = cap ? Math.min(1, used / cap) : 0;
   const full = cap !== null && used >= cap;
@@ -155,7 +157,7 @@ function UsageStrip({ usage: { used, cap, keepDays } }: { usage: Usage }) {
           <div className="flex items-baseline justify-between gap-3 text-sm">
             <span className={cn("font-bold", full && "text-destructive")}>{full ? "Full: delete some to record again" : "This server's recordings"}</span>
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {formatBytes(used)} of {formatBytes(cap)}
+              {formatBytes(lang, used)} of {formatBytes(lang, cap)}
             </span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -209,6 +211,7 @@ const filesOf = (track: RecordingTrack) => PARTS.filter((p) => p.bytes(track) > 
 const fileKey = (track: RecordingTrack, part: FilePart) => `${track.userId}:${part.part}`;
 
 function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }: { instanceKey: string; serverId: string; channel: Channel; rec: Recording; index: number; onDeleted: () => void }) {
+  const lang = useI18n();
   const live = !rec.endedAt;
   const now = useNow(live ? 1_000 : 60_000);
   const started = toDate(rec.startedAt);
@@ -316,7 +319,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
               <span className="font-bold text-[#ed4245]">Recording now · {clock(length)}</span>
             ) : (
               <>
-                {clock(length)} · {formatBytes(Number(rec.sizeBytes))}
+                {clock(length)} · {formatBytes(lang, Number(rec.sizeBytes))}
               </>
             )}{" "}
             · started by {starter}
@@ -379,7 +382,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
             </AnimatePresence>
             <TrackAvatar instanceKey={instanceKey} userId={track.userId} />
             <span className="relative min-w-0 flex-1 truncate text-sm font-bold">{names[track.userId]}</span>
-            <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(Number(track.sizeBytes + track.cameraBytes + track.screenBytes))}</span>
+            <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(lang, Number(track.sizeBytes + track.cameraBytes + track.screenBytes))}</span>
             {live
               ? filesOf(track)
                   .filter((part) => part.part !== RecordingPart.UNSPECIFIED)

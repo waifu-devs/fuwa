@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { formatDay, formatLeft, formatStamp, memberName, timedOutUntil, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { colorOf, standing } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
@@ -171,6 +172,7 @@ function MemberRow({
   now: number;
   onModerate: (action: ModAction) => void;
 }) {
+  const lang = useI18n();
   const id = m.user?.id ?? "";
   const until = timedOutUntil(m, now);
   const can = useModeration(instanceKey, m.serverId, m);
@@ -212,7 +214,7 @@ function MemberRow({
             className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-1 text-xs font-bold text-amber-600 tabular-nums transition enabled:hover:bg-amber-500/25 dark:text-amber-400"
           >
             <HourglassIcon className="size-3.5 animate-[spin_3s_ease-in-out_infinite]" />
-            {formatLeft(until.getTime() - now)}
+            {formatLeft(lang, until.getTime() - now)}
           </motion.button>
         )}
       </AnimatePresence>
@@ -251,7 +253,7 @@ function MemberRow({
             )}
             {developer && can.any && <DropdownMenuSeparator />}
             {developer && (
-              <DropdownMenuItem onSelect={() => copy(id, "user ID")}>
+              <DropdownMenuItem onSelect={() => copy(lang.t, id, lang.t("common.copy.userId"))}>
                 <FingerprintIcon /> Copy user ID
               </DropdownMenuItem>
             )}

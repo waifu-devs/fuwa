@@ -3,6 +3,9 @@ import { AccountKind, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { i18n } from "@/i18n/i18n";
 import { getPrefs } from "@/lib/prefs";
 
+// Lengths of time and sizes; they take the language from the caller (useI18n).
+export { ago, formatBytes, formatDuration, formatLeft, type Lang, roughly, shortDuration } from "@/lib/durations";
+
 export const toDate = (ts: Timestamp | undefined) => (ts ? timestampDate(ts) : new Date(0));
 
 /** The 12 or 24 hour clock setting; "auto" is the language's own. */
@@ -47,19 +50,8 @@ export function formatStamp(d: Date, now = new Date()) {
   return t("common.time.dayTime", { day: formatDay(d, now), time });
 }
 
-export function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
-}
-
-export const displayName = (user: User | undefined) => user?.displayName || user?.username || "Someone";
+/** Someone's name: their display name, else username, else "Someone" in the app's language. */
+export const displayName = (user: User | undefined) => user?.displayName || user?.username || i18n().t("common.someone");
 export const memberName = (member: Member | undefined) => member?.nickname || displayName(member?.user);
 /** An agent: an account a program drives, not a person. */
 export const isAgent = (user: User | undefined) => user?.kind === AccountKind.AGENT;
@@ -100,50 +92,6 @@ export function shownStatus(user: User | undefined, now = Date.now()) {
 
 /** A 0xRRGGBB profile color as CSS. */
 export const colorCss = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
-
-const UNITS = [
-  { seconds: 86_400, one: "day" },
-  { seconds: 3_600, one: "hour" },
-  { seconds: 60, one: "minute" },
-  { seconds: 1, one: "second" },
-] as const;
-
-/** A length of time in its largest whole unit: "30 seconds", "5 minutes", "1 hour", "7 days". */
-export function formatDuration(seconds: number) {
-  const unit = UNITS.find((u) => seconds >= u.seconds && seconds % u.seconds === 0) ?? UNITS[3];
-  const n = Math.round(seconds / unit.seconds);
-  return `${n} ${unit.one}${n === 1 ? "" : "s"}`;
-}
-
-/** The same, clipped for a chip: "30s", "5m", "1h", "7d". */
-export const shortDuration = (seconds: number) =>
-  formatDuration(seconds).replace(/ (second|minute|hour|day)s?$/, (_, unit: string) => unit[0]!);
-
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-
-/** How long something has been around, rounded down to its largest unit: "5 minutes", "3 days", "2 months". */
-export function roughly(ms: number) {
-  const minutes = Math.floor(Math.max(0, ms) / 60_000);
-  if (minutes < 1) return "less than a minute";
-  if (minutes < 60) return plural(minutes, "minute");
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return plural(hours, "hour");
-  const days = Math.floor(hours / 24);
-  if (days < 30) return plural(days, "day");
-  if (days < 365) return plural(Math.floor(days / 30), "month");
-  return plural(Math.floor(days / 365), "year");
-}
-
-/** "just now", "5 minutes ago", "3 days ago". */
-export const ago = (date: Date, now = Date.now()) => (now - date.getTime() < 60_000 ? "just now" : `${roughly(now - date.getTime())} ago`);
-
-/** Time left, as a countdown: "0:42", "12:05", "3h 20m", "2d 4h". */
-export function formatLeft(ms: number) {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-  return `${Math.floor(s / 86_400)}d ${Math.floor((s % 86_400) / 3600)}h`;
-}
 
 /** When a member's time-out ends, if they're timed out now. */
 export function timedOutUntil(member: Member | undefined, now = Date.now()): Date | null {

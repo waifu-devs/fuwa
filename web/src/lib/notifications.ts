@@ -2,7 +2,8 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { useEffect, useState } from "react";
 import { NotificationLevel, type Message, type NotificationSettings, type User } from "@/gen/fuwa/v1/types_pb";
 import { notificationKey, useFuwa, type InstanceState } from "@/fuwa/store";
-import { mentions } from "@/lib/format";
+import { i18n, type I18n, type Key } from "@/i18n/i18n";
+import { formatTime, mentions } from "@/lib/format";
 import type { Prefs } from "@/lib/prefs";
 
 /**
@@ -100,27 +101,46 @@ export function useMuted(key: string, serverId: string, channelId = ""): boolean
   return isMuted(server, now) || isMuted(channel, now);
 }
 
+/** The levels, named in the app's language (common.notify.*): `label` for menus, `short` for chips. */
 export const LEVELS = [
-  { value: NotificationLevel.ALL, label: "All messages", short: "All" },
-  { value: NotificationLevel.MENTIONS, label: "Only @mentions", short: "Mentions" },
-  { value: NotificationLevel.NOTHING, label: "Nothing", short: "Nothing" },
-] as const;
+  { value: NotificationLevel.ALL, label: "common.notify.all", short: "common.notify.allShort" },
+  { value: NotificationLevel.MENTIONS, label: "common.notify.mentions", short: "common.notify.mentionsShort" },
+  { value: NotificationLevel.NOTHING, label: "common.notify.nothing", short: "common.notify.nothingShort" },
+] as const satisfies readonly { value: NotificationLevel; label: Key; short: Key }[];
 
 /** How long a mute can last, like Discord's menu. `null` is until you turn it back on. */
 export const MUTE_FOR = [
-  { label: "For 15 minutes", ms: 15 * 60_000 },
-  { label: "For 1 hour", ms: 60 * 60_000 },
-  { label: "For 3 hours", ms: 3 * 60 * 60_000 },
-  { label: "For 8 hours", ms: 8 * 60 * 60_000 },
-  { label: "For 24 hours", ms: 24 * 60 * 60_000 },
-  { label: "Until I turn it back on", ms: null },
+  { id: "15m", ms: 15 * 60_000 },
+  { id: "1h", ms: 60 * 60_000 },
+  { id: "3h", ms: 3 * 60 * 60_000 },
+  { id: "8h", ms: 8 * 60 * 60_000 },
+  { id: "24h", ms: 24 * 60 * 60_000 },
+  { id: "forever", ms: null },
 ] as const;
 
-/** "Muted until 4:30 PM", "Muted until Tue 9:00 AM", or "Muted". */
-export function mutedLabel(n: NotificationSettings | undefined, now = Date.now()) {
-  if (!n?.mutedUntil) return "Muted";
+/** A mute length as the menu says it: "For 15 minutes", "For 1 hour", "Until I turn it back on". */
+export function muteForLabel(t: I18n["t"], m: (typeof MUTE_FOR)[number]) {
+  if (m.ms === null) return t("common.notify.forever");
+  const minutes = m.ms / 60_000;
+  return minutes < 60 ? t("common.notify.forMinutes", { count: minutes }) : t("common.notify.forHours", { count: minutes / 60 });
+}
+
+/** When a timed mute runs out: "4:30 PM", or "Tue 9:00 AM" on another day; "" when it lasts until turned off. */
+export function mutedUntil(n: NotificationSettings | undefined, now = Date.now()) {
+  if (!n?.mutedUntil) return "";
   const until = timestampDate(n.mutedUntil);
-  const sameDay = until.toDateString() === new Date(now).toDateString();
-  const time = until.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `Muted until ${sameDay ? time : `${until.toLocaleDateString(undefined, { weekday: "short" })} ${time}`}`;
+  const time = formatTime(until);
+  return until.toDateString() === new Date(now).toDateString() ? time : `${i18n().date(until, { weekday: "short" })} ${time}`;
+}
+
+/** Beside "Unmute": "until 4:30 PM", or nothing when it lasts until turned off. */
+export function mutedHint(t: I18n["t"], n: NotificationSettings | undefined, now = Date.now()) {
+  const time = mutedUntil(n, now);
+  return time ? t("common.notify.until", { time }) : "";
+}
+
+/** "Muted until 4:30 PM", "Muted until Tue 9:00 AM", or "Muted". */
+export function mutedLabel(t: I18n["t"], n: NotificationSettings | undefined, now = Date.now()) {
+  const time = mutedUntil(n, now);
+  return time ? t("common.notify.mutedUntil", { time }) : t("common.notify.muted");
 }
