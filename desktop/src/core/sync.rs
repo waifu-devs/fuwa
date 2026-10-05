@@ -436,6 +436,10 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     {
         engine.on_server_event(&sid, payload);
     }
+    // A pin changed: the lists it shows in are read again where they're open.
+    if let Some(Payload::MessagePinned(p)) = &event.payload {
+        core.reload_pins(key, &sid, &p.channel_id, &p.thread_id);
+    }
     // A server's shared channels changed: read them again where a manager has them open.
     if matches!(event.payload, Some(Payload::SharedChannelsUpdated(_)))
         && core.shared.read(|s| s.instance(key).is_some_and(|i| i.shared.contains_key(&sid)))

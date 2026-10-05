@@ -428,6 +428,7 @@ impl FuwaApp {
             // Search and threads share the side: whichever opened last closes the other.
             self.close_thread(cx);
             self.threads.listing = None;
+            self.pins = None;
         }
         match request {
             Some(Ok(Some(request))) => {

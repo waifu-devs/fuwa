@@ -93,6 +93,8 @@ pub struct InstanceState {
     /// Who's online here and what they're doing, by user id (`presence::people`),
     /// in memory only. None until the instance first says, or if it has no presence.
     pub people: Option<HashMap<String, pb::Presence>>,
+    /// Pinned messages, by `pins::pins_key`, only for lists someone opened.
+    pub pins: HashMap<String, crate::core::pins::PinList>,
 }
 
 impl InstanceState {
@@ -125,6 +127,7 @@ impl InstanceState {
             thread_unread: HashMap::new(),
             friends: Default::default(),
             people: None,
+            pins: HashMap::new(),
         }
     }
 
@@ -469,7 +472,11 @@ pub fn apply_event(
                 .then_some(voter_answer_ids.as_slice());
             crate::core::polls::with_poll(i, channel_id, message_id, poll, mine);
         }
-        Payload::MessageDeleted(p) => delete_message(i, &p.channel_id, &p.message_id),
+        Payload::MessageDeleted(p) => {
+            delete_message(i, &p.channel_id, &p.message_id);
+            crate::core::pins::forget(i, &p.channel_id, &p.message_id);
+        }
+        Payload::MessagePinned(p) => crate::core::pins::mark(i, p),
         Payload::ThreadUpdated(p) => threads::with_thread_summary(i, &p.channel_id, &p.thread_id, p.thread.as_ref()),
         Payload::UserUpdated(pb::UserUpdated { user: Some(user) }) => update_user(i, user),
         Payload::MemberJoined(pb::MemberJoined { member: Some(member) })
