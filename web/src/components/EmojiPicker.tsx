@@ -191,7 +191,8 @@ export function EmojiPicker({
     middleware: [offset(8), flip(), shift({ padding: 8 })],
   });
   const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context), useRole(context, { role: "dialog" })]);
-  const own = useMemo(() => catalog ?? ownCatalog(server, emojis), [catalog, server, emojis]);
+  const { t } = useI18n();
+  const own = useMemo(() => catalog ?? ownCatalog(t, server, emojis), [catalog, server, emojis, t]);
 
   // Inside a dialog it opens in the dialog, which keeps pointer events (and clicks) to itself.
   const dialog = (elements.domReference as Element | null)?.closest<HTMLElement>("[role=dialog]") ?? null;

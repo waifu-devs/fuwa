@@ -158,7 +158,7 @@ function OidcFields({ value, onChange }: { value: IdentityProvider; onChange: (f
   const o = value.oidc!;
   return (
     <>
-      <Setting id="sso-issuer" title="Issuer" hint={t("instancesettings.provider.issuerHint")} badge={false} delay={0.06}>
+      <Setting id="sso-issuer" title={t("system.sso.issuer")} hint={t("instancesettings.provider.issuerHint")} badge={false} delay={0.06}>
         <Field icon={<GlobeLockIcon className="size-4" />}>
           <Input
             value={o.issuer}
@@ -170,14 +170,14 @@ function OidcFields({ value, onChange }: { value: IdentityProvider; onChange: (f
           />
         </Field>
       </Setting>
-      <Setting id="sso-client" title="Client" hint={t("instancesettings.provider.clientHint")} badge={false} delay={0.09}>
+      <Setting id="sso-client" title={t("system.sso.client")} hint={t("instancesettings.provider.clientHint")} badge={false} delay={0.09}>
         <div className="grid gap-2 sm:grid-cols-2">
-          <Input value={o.clientId} placeholder="Client ID" onChange={(e) => onChange((p) => (p.oidc!.clientId = e.target.value))} className="h-10 rounded-xl" />
+          <Input value={o.clientId} placeholder={t("system.sso.clientId")} onChange={(e) => onChange((p) => (p.oidc!.clientId = e.target.value))} className="h-10 rounded-xl" />
           <Input
             value={o.clientSecret}
             type="password"
             autoComplete="off"
-            placeholder={o.clientSecretSet ? t("instancesettings.provider.secretKept") : "Client secret"}
+            placeholder={o.clientSecretSet ? t("instancesettings.provider.secretKept") : t("system.sso.clientSecret")}
             onChange={(e) => onChange((p) => (p.oidc!.clientSecret = e.target.value))}
             className="h-10 rounded-xl"
           />

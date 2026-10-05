@@ -4,6 +4,8 @@
  * so node's test runner reads this file as is.
  */
 
+import type { I18n } from "../i18n/i18n.ts";
+
 /** At most this many files go with one message, as on the server. */
 export const MAX_FILES = 10;
 
@@ -76,7 +78,7 @@ export function fitBox(width: number, height: number, max: { width: number; heig
 }
 
 /** Why the files can't be added, or "" when they can. */
-export function cantAdd(already: number, adding: number): string {
+export function cantAdd(t: I18n["t"], already: number, adding: number): string {
   if (already + adding <= MAX_FILES) return "";
-  return `You can send up to ${MAX_FILES} files at once`;
+  return t("system.attachments.tooMany", { count: MAX_FILES });
 }

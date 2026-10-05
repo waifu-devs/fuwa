@@ -6,6 +6,7 @@ import { onFriendNews } from "@/lib/notify";
 import { reportUsage } from "@/lib/reports";
 import type { Api } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
+import { i18n } from "@/i18n/i18n";
 import { engine } from "./sync";
 import { store, updateInstance } from "./store";
 
@@ -43,7 +44,7 @@ export const followFriends = (key: string, api: Api) =>
         Stream.ensuring(Effect.sync(() => controller.abort())),
       );
     }).pipe(
-      Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: "lost the connection" }), SILENCE),
+      Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.lost") }), SILENCE),
       Stream.mapEffect((res) =>
         res.ready
           ? // Listening: read the whole list, so whatever happened while away is in.
