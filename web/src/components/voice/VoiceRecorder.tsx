@@ -1,6 +1,6 @@
 import { MicIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { micProblem } from "@/calls/audio";
 import { SPRING } from "@/components/motion";
 import { reduceMotion } from "@/lib/prefs";
@@ -186,21 +186,9 @@ export function VoiceRecorder({
   };
 
   const recording = mode === "hold" || mode === "tap" || mode === "starting";
-  const cancelling = Math.min(1, -dragX / CANCEL_PX);
-  const motionOk = !reduceMotion();
 
   if (!supported) {
-    return (
-      <button
-        type="button"
-        disabled
-        aria-label={t("dms-calls.voice.recorder.unsupportedLabel")}
-        title={t("dms-calls.voice.recorder.unsupportedLabel")}
-        className="relative z-20 mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground/50"
-      >
-        <MicIcon className="size-[18px]" />
-      </button>
-    );
+    return <UnsupportedMic />;
   }
 
   return (
@@ -217,51 +205,14 @@ export function VoiceRecorder({
             role="status"
             aria-label={t("dms-calls.voice.recorder.recording")}
           >
-            <motion.button
-              type="button"
-              onClick={cancel}
-              whileTap={{ scale: 0.85 }}
-              aria-label={t("dms-calls.voice.recorder.throwAway")}
-              title={t("dms-calls.voice.recorder.throwAwayTitle")}
-              className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash2Icon className="size-[18px]" />
-            </motion.button>
-            <span className="relative grid size-3 shrink-0 place-items-center">
-              <motion.span
-                className="absolute inset-0 rounded-full bg-destructive"
-                animate={limited || !motionOk ? { scale: 1, opacity: 1 } : { scale: [1, 1.9, 1], opacity: [0.6, 0, 0.6] }}
-                transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
-              />
-              <span className="relative size-2.5 rounded-full bg-destructive" />
-            </span>
-            <span ref={time} className="w-10 shrink-0 text-sm font-bold tabular-nums">
-              0:00
-            </span>
-            <div
-              className="relative flex h-7 min-w-0 flex-1 items-center justify-end gap-[3px] overflow-hidden text-primary"
-              style={{ opacity: 1 - cancelling * 0.7 }}
-              aria-hidden
-            >
-              {Array.from({ length: LIVE_BARS }, (_, i) => (
-                <span
-                  // Fixed slots the live levels flow through.
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={i}
-                  ref={(el) => {
-                    bars.current[i] = el;
-                  }}
-                  className="h-full w-[3px] shrink-0 origin-center rounded-full bg-current transition-transform duration-75"
-                  style={{ transform: "scaleY(0.1)" }}
-                />
-              ))}
-            </div>
-            <span
-              className={cn("hidden shrink-0 text-xs font-bold text-muted-foreground sm:block", limited && "text-amber-600 dark:text-amber-400")}
-              style={{ transform: `translateX(${dragX * 0.4}px)`, opacity: mode === "hold" ? 1 - cancelling : 1 }}
-            >
-              {limited ? t("dms-calls.voice.recorder.longest") : mode === "hold" ? t("dms-calls.voice.recorder.slide") : t("dms-calls.voice.recorder.esc")}
-            </span>
+            <BarContents
+              mode={mode}
+              limited={limited}
+              dragX={dragX}
+              onCancel={cancel}
+              barsRef={bars}
+              timeRef={time}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -307,6 +258,96 @@ export function VoiceRecorder({
           </motion.span>
         </AnimatePresence>
       </motion.button>
+    </>
+  );
+}
+
+/** Shown where recording can't work at all (no microphone API). */
+function UnsupportedMic() {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      disabled
+      aria-label={t("dms-calls.voice.recorder.unsupportedLabel")}
+      title={t("dms-calls.voice.recorder.unsupportedLabel")}
+      className="relative z-20 mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground/50"
+    >
+      <MicIcon className="size-[18px]" />
+    </button>
+  );
+}
+
+/**
+ * What the recording bar holds: throw-away, the pulsing dot, the time and the
+ * live waveform. The time and the bars are drawn straight into the DOM each
+ * frame through `timeRef` and `barsRef`.
+ */
+function BarContents({
+  mode,
+  limited,
+  dragX,
+  onCancel,
+  barsRef,
+  timeRef,
+}: {
+  mode: Mode;
+  limited: boolean;
+  dragX: number;
+  onCancel: () => void;
+  barsRef: RefObject<(HTMLSpanElement | null)[]>;
+  timeRef: RefObject<HTMLSpanElement | null>;
+}) {
+  const { t } = useI18n();
+  const cancelling = Math.min(1, -dragX / CANCEL_PX);
+  const motionOk = !reduceMotion();
+  return (
+    <>
+      <motion.button
+        type="button"
+        onClick={onCancel}
+        whileTap={{ scale: 0.85 }}
+        aria-label={t("dms-calls.voice.recorder.throwAway")}
+        title={t("dms-calls.voice.recorder.throwAwayTitle")}
+        className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+      >
+        <Trash2Icon className="size-[18px]" />
+      </motion.button>
+      <span className="relative grid size-3 shrink-0 place-items-center">
+        <motion.span
+          className="absolute inset-0 rounded-full bg-destructive"
+          animate={limited || !motionOk ? { scale: 1, opacity: 1 } : { scale: [1, 1.9, 1], opacity: [0.6, 0, 0.6] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
+        />
+        <span className="relative size-2.5 rounded-full bg-destructive" />
+      </span>
+      <span ref={timeRef} className="w-10 shrink-0 text-sm font-bold tabular-nums">
+        0:00
+      </span>
+      <div
+        className="relative flex h-7 min-w-0 flex-1 items-center justify-end gap-[3px] overflow-hidden text-primary"
+        style={{ opacity: 1 - cancelling * 0.7 }}
+        aria-hidden
+      >
+        {Array.from({ length: LIVE_BARS }, (_, i) => (
+          <span
+            // Fixed slots the live levels flow through.
+            // eslint-disable-next-line react/no-array-index-key
+            key={i}
+            ref={(el) => {
+              barsRef.current[i] = el;
+            }}
+            className="h-full w-[3px] shrink-0 origin-center rounded-full bg-current transition-transform duration-75"
+            style={{ transform: "scaleY(0.1)" }}
+          />
+        ))}
+      </div>
+      <span
+        className={cn("hidden shrink-0 text-xs font-bold text-muted-foreground sm:block", limited && "text-amber-600 dark:text-amber-400")}
+        style={{ transform: `translateX(${dragX * 0.4}px)`, opacity: mode === "hold" ? 1 - cancelling : 1 }}
+      >
+        {limited ? t("dms-calls.voice.recorder.longest") : mode === "hold" ? t("dms-calls.voice.recorder.slide") : t("dms-calls.voice.recorder.esc")}
+      </span>
     </>
   );
 }

@@ -46,11 +46,12 @@ export function ServerNotifications({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const target = useUi((u) => u.settingsTarget);
   const servers = inst?.servers ?? [];
-  const [open, setOpen] = useState<string | null>(() => (target && servers.some((s) => s.id === target) ? target : null));
+  const targetHere = !!target && servers.some((s) => s.id === target);
+  const [open, setOpen] = useState<string | null>(() => (targetHere ? target : null));
 
   useEffect(() => {
-    if (target && servers.some((s) => s.id === target)) setOpen(target);
-  }, [target, servers]);
+    if (targetHere) setOpen(target);
+  }, [target, targetHere]);
 
   if (!servers.length) {
     return (
@@ -161,10 +162,11 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
   const { t } = useI18n();
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[server.id]);
   const all = useFuwa((s) => s.instances[instanceKey]?.notifications);
-  const [added, setAdded] = useState<string[]>([]);
+  const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set());
   const openable = openableChannels(channels ?? []);
-  const withSettings = openable.filter((c) => all?.[notificationKey(server.id, c.id)] || added.includes(c.id));
-  const rest = openable.filter((c) => !withSettings.includes(c));
+  const withSettings = openable.filter((c) => all?.[notificationKey(server.id, c.id)] || added.has(c.id));
+  const shown = new Set(withSettings);
+  const rest = openable.filter((c) => !shown.has(c));
 
   return (
     <div className="flex flex-col gap-5 border-t p-4">
@@ -211,7 +213,7 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
               {rest.map((c) => {
                 const Icon = CHANNEL_ICON[c.type] ?? HashIcon;
                 return (
-                  <DropdownMenuItem key={c.id} onSelect={() => setAdded((a) => [...a, c.id])}>
+                  <DropdownMenuItem key={c.id} onSelect={() => setAdded((a) => new Set(a).add(c.id))}>
                     <Icon /> {c.name}
                   </DropdownMenuItem>
                 );
@@ -230,11 +232,15 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
                   now={now}
                   // Kept on screen even when it goes back to all defaults, until removed.
                   onChange={(patch) => {
-                    setAdded((a) => (a.includes(c.id) ? a : [...a, c.id]));
+                    setAdded((a) => (a.has(c.id) ? a : new Set(a).add(c.id)));
                     change(instanceKey, server.id, c.id, patch);
                   }}
                   onRemove={() => {
-                    setAdded((a) => a.filter((id) => id !== c.id));
+                    setAdded((a) => {
+                      const next = new Set(a);
+                      next.delete(c.id);
+                      return next;
+                    });
                     if (all?.[notificationKey(server.id, c.id)]) change(instanceKey, server.id, c.id, { level: NotificationLevel.UNSPECIFIED, mutedUntil: false });
                   }}
                 />

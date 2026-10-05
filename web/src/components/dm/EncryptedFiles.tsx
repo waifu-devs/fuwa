@@ -1,49 +1,13 @@
 import { PaperclipIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useRef, useSyncExternalStore } from "react";
+import { useRef } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import { SPRING } from "@/components/motion";
-import { cleanName, MAX_FILES } from "@/files/sealed";
-import { cantSendFiles } from "@/fuwa/dms";
+import { cleanName } from "@/files/sealed";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
 import { useI18n } from "@/i18n/react";
-import { toast } from "@/lib/ui";
-
-/**
- * Files picked for the next encrypted message, by conversation (or thread).
- * Nothing leaves this device until the message is sent: then each is sealed
- * here and uploaded as ciphertext.
- */
-const NONE: File[] = [];
-const picked = new Map<string, File[]>();
-const listeners = new Set<() => void>();
-
-function set(draft: string, files: File[]) {
-  if (files.length) picked.set(draft, files);
-  else picked.delete(draft);
-  for (const l of listeners) l();
-}
-
-const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
-
-export function usePicked(draft: string): File[] {
-  return useSyncExternalStore(subscribe, () => picked.get(draft) ?? NONE);
-}
-
-/** Adds files to the next message, up to what one can carry. */
-export function pickFiles(draft: string, files: File[]) {
-  if (!files.length) return;
-  const next = [...(picked.get(draft) ?? NONE), ...files];
-  const problem = cantSendFiles(next);
-  if (problem) toast(problem);
-  set(draft, next.slice(0, MAX_FILES).filter((f) => !cantSendFiles([f])));
-}
-
-export const clearPicked = (draft: string) => set(draft, []);
+import { pickFiles, setPicked } from "@/components/dm/use-picked";
 
 /** The paperclip in an encrypted composer. */
 export function EncryptedAttach({ draft, disabled }: { draft: string; disabled?: boolean }) {
@@ -115,7 +79,7 @@ export function PickedTray({ draft, files }: { draft: string; files: File[] }) {
               <button
                 type="button"
                 aria-label={lang.t("dms-calls.dm.files.remove", { name })}
-                onClick={() => set(draft, files.filter((_, i) => i !== n))}
+                onClick={() => setPicked(draft, files.filter((_, i) => i !== n))}
                 className="absolute top-1 right-1 grid size-6 place-items-center rounded-full bg-card/90 text-foreground shadow-sm transition hover:rotate-90 hover:text-destructive"
               >
                 <XIcon className="size-3.5" />

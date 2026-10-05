@@ -2,7 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, EyeOffIcon, HashIcon, KeyboardIcon, SearchIcon, SparklesIcon, TvMinimalPlayIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";
 import { toggleCamera, toggleDeafen, toggleMute, toggleRecording, toggleScreen } from "@/calls/engine";
@@ -75,8 +75,11 @@ export function AppOverlays() {
   const here = useHere();
   const navigate = useNavigate();
   const router = useRouter();
+  // Where you are, for the shortcuts below to read when pressed.
   const hereRef = useRef(here);
-  hereRef.current = here;
+  useLayoutEffect(() => {
+    hereRef.current = here;
+  });
 
   // Clicking a desktop notification opens its channel or conversation.
   useEffect(() => {
@@ -474,7 +477,6 @@ function Switcher({ here }: { here: Here }) {
       <label className="flex items-center gap-3 border-b px-4">
         <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
         <input
-          autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {

@@ -87,29 +87,30 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
       </header>
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
-        {states.length === 0 ? (
-          <Empty name={channel.name} />
-        ) : (
-          <LayoutGroup>
-            <AnimatePresence initial={false}>
-              {sharing.length > 0 && (
-                <motion.ul
-                  key="screens"
-                  layout
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={SPRING}
-                  className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
-                >
-                  <AnimatePresence initial={false} mode="popLayout">
-                    {sharing.map((state) => (
-                      <ScreenTile key={state.userId} instanceKey={instanceKey} serverId={serverId} state={state} self={state.userId === me} />
-                    ))}
-                  </AnimatePresence>
-                </motion.ul>
-              )}
-            </AnimatePresence>
+        <LayoutGroup>
+          {/* Mounted even when the call empties, so the screens can still play their exit. */}
+          <AnimatePresence initial={false}>
+            {sharing.length > 0 && (
+              <motion.ul
+                key="screens"
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={SPRING}
+                className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
+              >
+                <AnimatePresence initial={false} mode="popLayout">
+                  {sharing.map((state) => (
+                    <ScreenTile key={state.userId} instanceKey={instanceKey} serverId={serverId} state={state} self={state.userId === me} />
+                  ))}
+                </AnimatePresence>
+              </motion.ul>
+            )}
+          </AnimatePresence>
+          {states.length === 0 ? (
+            <Empty name={channel.name} />
+          ) : (
             <motion.ul layout className={cn("m-auto grid w-full max-w-5xl gap-3 sm:gap-4", sharing.length > 0 && "mt-0", gridFor(states.length))}>
               <AnimatePresence initial={false} mode="popLayout">
                 {states.map((state, n) => (
@@ -117,8 +118,8 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
                 ))}
               </AnimatePresence>
             </motion.ul>
-          </LayoutGroup>
-        )}
+          )}
+        </LayoutGroup>
       </div>
 
       <footer className="flex shrink-0 flex-col items-center gap-2 border-t bg-card/60 px-4 py-3 backdrop-blur">

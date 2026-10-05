@@ -60,7 +60,8 @@ import { type I18n, T, useI18n } from "@/i18n/react";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import { PendingFiles, SealedFiles } from "@/components/dm/SealedFiles";
-import { clearPicked, EncryptedAttach, PickedTray, pickFiles, usePicked } from "@/components/dm/EncryptedFiles";
+import { EncryptedAttach, PickedTray } from "@/components/dm/EncryptedFiles";
+import { clearPicked, pickFiles, usePicked } from "@/components/dm/use-picked";
 import { DropOverlay } from "@/components/chat/ComposerFiles";
 
 /** Messages from one person closer together than this share a header. */

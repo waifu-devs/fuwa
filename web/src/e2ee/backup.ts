@@ -313,8 +313,8 @@ export class BackupSync {
   async restore(text: string) {
     const key = await parseRecoveryKey(text);
     if (!key) throw new BackupError("That isn't a recovery key. Check for a typo: it's 56 letters and digits.");
-    const keys = await deriveKeys(key);
-    const { backup } = await this.api.dms.getBackup({}, CALL);
+    // Working out the keys takes a moment; fetch the backup meanwhile.
+    const [keys, { backup }] = await Promise.all([deriveKeys(key), this.api.dms.getBackup({}, CALL)]);
     if (!backup) throw new BackupError("Your account has no message backup any more.");
     if (!sameBytes(backup.keyCheck, keys.check)) throw new BackupError("That's not this backup's recovery key.");
     this.show({ status: "restoring", restored: 0, total: Number(backup.parts), problem: null });
