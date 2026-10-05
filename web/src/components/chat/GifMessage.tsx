@@ -14,7 +14,7 @@ const MAX_W = 320;
 const MAX_H = 260;
 
 /** How big a GIF shows: its own size, shrunk to fit, never stretched. */
-export function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H) {
+function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H) {
   const w = Math.max(1, width);
   const h = Math.max(1, height);
   const scale = Math.min(1, maxW / w, maxH / h);

@@ -48,34 +48,9 @@ export function CallButton({ instanceKey, conversationId }: { instanceKey: strin
  * waves go out from them.
  */
 export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: string; conversation: Conversation; me: User }) {
-  const call = useDmCall(instanceKey, conversation.id);
-  const inCall = useInDmCall(instanceKey, conversation.id);
-  const status = useCalls((s) => (inCall ? s.call?.status : null));
-  const since = useCalls((s) => (inCall ? s.call?.since : null));
-  const now = useNow(1_000);
   const { t } = useI18n();
-  const show = inCall || !!call?.participants.length;
-  const here = new Set((call?.participants ?? []).map((p) => p.userId));
-  if (inCall) here.add(me.id);
-  const partner = conversation.users.find((u) => u.id !== me.id);
-  const partnerIn = !!partner && here.has(partner.id);
-  const startedBy = conversation.users.find((u) => u.id === call?.startedBy);
-  const mine = useCalls((s) => s.selfVideo);
-  // Cameras come through only while you're in the call.
-  const filming = new Set(inCall ? (call?.participants ?? []).filter((p) => p.selfVideo && p.userId !== me.id).map((p) => p.userId) : []);
-  if (inCall && mine) filming.add(me.id);
-  const myStream = useCalls((s) => s.selfStream);
-  const sharing = new Set(inCall ? (call?.participants ?? []).filter((p) => p.selfStream && p.userId !== me.id).map((p) => p.userId) : []);
-  if (inCall && myStream) sharing.add(me.id);
-
-  let line: string;
-  if (!inCall) line = t("dms-calls.calls.dm.started", { name: displayName(startedBy ?? partner) });
-  else if (status !== "connected") line = t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting");
-  else if (!partnerIn) line = t("dms-calls.calls.dm.calling", { name: displayName(partner) });
-  else line = since ? clock(Math.max(0, Math.floor((now - since) / 1000))) : t("dms-calls.calls.dm.inCall");
-  const myRecord = useCalls((s) => s.selfRecord);
-  const recorders = conversation.users.filter((u) => (u.id === me.id ? inCall && myRecord : call?.participants.some((p) => p.userId === u.id && p.selfRecord)));
-  if (recorders.length) line = t("dms-calls.calls.dm.recording", { line, names: recorders.map((u) => (u.id === me.id ? t("dms-calls.calls.dm.you") : displayName(u))).join(", ") });
+  const { show, inCall, here, filming, sharing } = useStripPeople(instanceKey, conversation, me);
+  const line = useStripLine(instanceKey, conversation, me, here);
 
   return (
     <AnimatePresence initial={false}>
@@ -89,33 +64,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
           className="shrink-0 overflow-hidden border-b bg-[linear-gradient(180deg,color-mix(in_srgb,#3ba55d_14%,var(--background)),var(--background))]"
         >
           <div className="flex flex-col items-center gap-3 px-4 py-5">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {filming.size || sharing.size ? (
-                <motion.div
-                  key="cameras"
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={SPRING}
-                  className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
-                >
-                  {conversation.users
-                    .filter((u) => sharing.has(u.id))
-                    .map((u) => (
-                      <Screen key={`screen-${u.id}`} instanceKey={instanceKey} user={u} self={u.id === me.id} />
-                    ))}
-                  {conversation.users.map((u) => (
-                    <Camera key={u.id} instanceKey={instanceKey} user={u} self={u.id === me.id} here={here.has(u.id)} videoOn={filming.has(u.id)} />
-                  ))}
-                </motion.div>
-              ) : (
-                <motion.div key="people" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-6 sm:gap-10">
-                  {conversation.users.map((u) => (
-                    <Person key={u.id} instanceKey={instanceKey} user={u} here={here.has(u.id)} ringing={inCall && !here.has(u.id)} />
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <Stage instanceKey={instanceKey} users={conversation.users} me={me} inCall={inCall} here={here} filming={filming} sharing={sharing} />
             <p className="flex items-center gap-1.5 text-sm font-bold text-muted-foreground tabular-nums">
               <LockKeyholeIcon className="size-3.5" aria-label={t("dms-calls.dm.encrypted")} />
               {line}
@@ -137,6 +86,92 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
               </Button>
             )}
           </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Who's in the call, and whose camera and screen are on (cameras come through only while you're in the call). */
+function useStripPeople(instanceKey: string, conversation: Conversation, me: User) {
+  const call = useDmCall(instanceKey, conversation.id);
+  const inCall = useInDmCall(instanceKey, conversation.id);
+  const mine = useCalls((s) => s.selfVideo);
+  const myStream = useCalls((s) => s.selfStream);
+  const participants = call?.participants ?? [];
+  const here = new Set(participants.map((p) => p.userId));
+  if (inCall) here.add(me.id);
+  const others = inCall ? participants.filter((p) => p.userId !== me.id) : [];
+  const filming = new Set(others.filter((p) => p.selfVideo).map((p) => p.userId));
+  if (inCall && mine) filming.add(me.id);
+  const sharing = new Set(others.filter((p) => p.selfStream).map((p) => p.userId));
+  if (inCall && myStream) sharing.add(me.id);
+  return { show: inCall || participants.length > 0, inCall, here, filming, sharing };
+}
+
+/** The line under the call: who started it, connecting, calling them, or how long it's run; and who's recording. */
+function useStripLine(instanceKey: string, conversation: Conversation, me: User, here: Set<string>): string {
+  const { t } = useI18n();
+  const call = useDmCall(instanceKey, conversation.id);
+  const inCall = useInDmCall(instanceKey, conversation.id);
+  const status = useCalls((s) => (inCall ? s.call?.status : null));
+  const since = useCalls((s) => (inCall ? s.call?.since : null));
+  const myRecord = useCalls((s) => s.selfRecord);
+  const now = useNow(1_000);
+  const partner = conversation.users.find((u) => u.id !== me.id);
+  let line: string;
+  if (!inCall) line = t("dms-calls.calls.dm.started", { name: displayName(conversation.users.find((u) => u.id === call?.startedBy) ?? partner) });
+  else if (status !== "connected") line = t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting");
+  else if (!partner || !here.has(partner.id)) line = t("dms-calls.calls.dm.calling", { name: displayName(partner) });
+  else line = since ? clock(Math.max(0, Math.floor((now - since) / 1000))) : t("dms-calls.calls.dm.inCall");
+  const recorders = conversation.users.filter((u) => (u.id === me.id ? inCall && myRecord : call?.participants.some((p) => p.userId === u.id && p.selfRecord)));
+  if (!recorders.length) return line;
+  return t("dms-calls.calls.dm.recording", { line, names: recorders.map((u) => (u.id === me.id ? t("dms-calls.calls.dm.you") : displayName(u))).join(", ") });
+}
+
+/** Tiles while a camera or screen is on, else both of you as big avatars (waves going out from whoever hasn't picked up). */
+function Stage({
+  instanceKey,
+  users,
+  me,
+  inCall,
+  here,
+  filming,
+  sharing,
+}: {
+  instanceKey: string;
+  users: User[];
+  me: User;
+  inCall: boolean;
+  here: Set<string>;
+  filming: Set<string>;
+  sharing: Set<string>;
+}) {
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {filming.size || sharing.size ? (
+        <motion.div
+          key="cameras"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={SPRING}
+          className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
+        >
+          {users
+            .filter((u) => sharing.has(u.id))
+            .map((u) => (
+              <Screen key={`screen-${u.id}`} instanceKey={instanceKey} user={u} self={u.id === me.id} />
+            ))}
+          {users.map((u) => (
+            <Camera key={u.id} instanceKey={instanceKey} user={u} self={u.id === me.id} here={here.has(u.id)} videoOn={filming.has(u.id)} />
+          ))}
+        </motion.div>
+      ) : (
+        <motion.div key="people" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-6 sm:gap-10">
+          {users.map((u) => (
+            <Person key={u.id} instanceKey={instanceKey} user={u} here={here.has(u.id)} ringing={inCall && !here.has(u.id)} />
+          ))}
         </motion.div>
       )}
     </AnimatePresence>

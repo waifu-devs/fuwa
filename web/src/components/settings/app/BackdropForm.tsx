@@ -15,7 +15,7 @@ import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 /** Whether this browser can draw effects on the GPU. */
-export const hasWebGpu = () => typeof navigator !== "undefined" && "gpu" in navigator;
+const hasWebGpu = () => typeof navigator !== "undefined" && "gpu" in navigator;
 
 /**
  * Everything about a backdrop: the picture (from your backgrounds on this

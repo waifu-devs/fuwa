@@ -942,7 +942,8 @@ export class DmEngine {
       }
     }
     if (!opened.length) return;
-    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => c.allowed.includes(id));
+    const allowedIds = new Set(c.allowed);
+    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => allowedIds.has(id));
     const devices = new Set<string>();
     for (const userIds of chunks(senders, LOOKUPS)) {
       for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) devices.add(`${d.userId}/${d.id}`);
@@ -1124,8 +1125,7 @@ export class DmEngine {
    */
   private async reconcile(c: Room, attempt = 0): Promise<void> {
     const belong = await c.belong();
-    const devices: DeviceInfo[] = [];
-    for (const userIds of chunks(belong, LOOKUPS)) devices.push(...(await this.api.dms.listDevices({ userIds }, CALL)).devices);
+    const devices: DeviceInfo[] = (await Promise.all(chunks(belong, LOOKUPS).map((userIds) => this.api.dms.listDevices({ userIds }, CALL)))).flatMap((r) => r.devices);
     c.check(devices, belong);
     const allowed = unique([...c.allowed, ...belong]);
     const starting = !this.device.isMember(c.id);
@@ -1135,8 +1135,7 @@ export class DmEngine {
     const expected = new Set(devices.map((d) => d.id));
     const adds = devices.filter((d) => !present.has(d.id)).map((d) => d.id);
     const removes = members.filter((m) => !expected.has(m.deviceId) && m.deviceId !== this.device.deviceId).map((m) => m.deviceId);
-    const claimed = [];
-    for (const deviceIds of chunks(adds, LOOKUPS)) claimed.push(...(await this.api.dms.claimKeyPackages({ deviceIds }, CALL)).keyPackages);
+    const claimed = (await Promise.all(chunks(adds, LOOKUPS).map((deviceIds) => this.api.dms.claimKeyPackages({ deviceIds }, CALL)))).flatMap((r) => r.keyPackages);
     // A secure channel starts its group even when nobody else is signed in yet, so its first writer isn't stuck.
     if (!claimed.length && !removes.length && !(starting && c.channel)) {
       if (starting) this.device.forget(c.id);

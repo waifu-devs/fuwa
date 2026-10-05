@@ -116,43 +116,12 @@ export function WelcomeGate({
 }) {
   const inst = useInstance(instanceKey);
   const me = useMyMember(instanceKey, server.id);
-  const access = useAccess(instanceKey, server.id);
   const navigate = useNavigate();
-  const [screen, setScreen] = useState<WelcomeScreen | null>(null);
-  const [greeting, setGreeting] = useState(false);
-  // Closed partway: it comes back next time, not straight away.
-  const [dismissed, setDismissed] = useState(false);
-  const channels = inst?.channels[server.id] ?? [];
-
-  const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
-  const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
-  // Once it opens it stays until it's closed: finishing sets onboardedAt
-  // before its last step (where to start) has been seen.
-  const [started, setStarted] = useState(false);
-  if (due && !started) setStarted(true);
-  const onboarding = due || started;
+  const { fresh, onboarding, endOnboarding } = useOnboardingDue(instanceKey, server, asked);
   // Onboarding ends with the welcome screen's channels, so it isn't shown again after.
   const newcomer = fresh && !seen(instanceKey, server.id) && !(server.hasOnboarding && me?.onboardedAt);
   const wanted = !onboarding && (asked || (server.hasWelcomeScreen && newcomer));
-
-  useEffect(() => {
-    if (!wanted) return;
-    let cancelled = false;
-    run(getWelcomeScreen(instanceKey, server.id)).then(
-      (s) => {
-        if (cancelled) return;
-        setScreen(s);
-        if (!asked) {
-          markSeen(instanceKey, server.id);
-          if (s.enabled) setGreeting(true);
-        }
-      },
-      () => {},
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [wanted, asked, instanceKey, server.id]);
+  const { screen, greeting, setGreeting } = useWelcomeScreen(instanceKey, server.id, asked, wanted);
 
   function go(channel: string) {
     void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: server.id, channel } });
@@ -166,9 +135,7 @@ export function WelcomeGate({
         open
         onOpenChange={(o) => {
           if (!o) {
-            setStarted(false);
-            setDismissed(true);
-            markSeen(instanceKey, server.id);
+            endOnboarding();
             onOpenChange(false);
           }
         }}
@@ -190,7 +157,7 @@ export function WelcomeGate({
             instanceKey={instanceKey}
             server={server}
             screen={screen}
-            channels={channels}
+            channels={inst?.channels[server.id] ?? []}
             emojis={inst?.emojis[server.id]}
             agree={!!me?.pending && server.hasRules}
             onPick={(channel) => {
@@ -203,6 +170,54 @@ export function WelcomeGate({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Whether you're new here (and not someone who can change all this), and whether onboarding is open. */
+function useOnboardingDue(instanceKey: string, server: Server, asked: boolean) {
+  const me = useMyMember(instanceKey, server.id);
+  const access = useAccess(instanceKey, server.id);
+  // Closed partway: it comes back next time, not straight away.
+  const [dismissed, setDismissed] = useState(false);
+  const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
+  const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
+  // Once it opens it stays until it's closed: finishing sets onboardedAt
+  // before its last step (where to start) has been seen.
+  const [started, setStarted] = useState(false);
+  if (due && !started) setStarted(true);
+  return {
+    fresh,
+    onboarding: due || started,
+    endOnboarding: () => {
+      setStarted(false);
+      setDismissed(true);
+      markSeen(instanceKey, server.id);
+    },
+  };
+}
+
+/** The welcome screen, fetched once it's wanted; greeting a newcomer marks it seen. */
+function useWelcomeScreen(instanceKey: string, serverId: string, asked: boolean, wanted: boolean) {
+  const [screen, setScreen] = useState<WelcomeScreen | null>(null);
+  const [greeting, setGreeting] = useState(false);
+  useEffect(() => {
+    if (!wanted) return;
+    let cancelled = false;
+    run(getWelcomeScreen(instanceKey, serverId)).then(
+      (s) => {
+        if (cancelled) return;
+        setScreen(s);
+        if (!asked) {
+          markSeen(instanceKey, serverId);
+          if (s.enabled) setGreeting(true);
+        }
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [wanted, asked, instanceKey, serverId]);
+  return { screen, greeting, setGreeting };
 }
 
 /** The welcome screen in its dialog: scrolls under the banner, with the rules to agree to at the end when there are. */

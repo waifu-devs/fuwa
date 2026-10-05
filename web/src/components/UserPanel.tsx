@@ -9,7 +9,8 @@ import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
 import { MuteButtons } from "@/components/calls/parts";
 import { SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
-import { STATUS_LABEL, StatusDot, shownOf } from "@/components/Presence";
+import { StatusDot } from "@/components/Presence";
+import { STATUS_LABEL, shownOf } from "@/components/presence-status";
 import {
   DropdownMenu,
   DropdownMenuContent,

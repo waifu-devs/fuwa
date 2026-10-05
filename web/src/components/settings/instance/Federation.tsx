@@ -4,6 +4,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { CheckInstanceResponse, FederationPeer, GetFederationResponse, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import { checkInstance, getFederation, rotateFederationKey, run } from "@/fuwa/actions";
+import { hosts } from "./federation-fields";
 import { Private, usePrivateField } from "@/components/Private";
 import { ConfirmDialog } from "@/components/settings/server/SharedChannels";
 import { Button } from "@/components/ui/button";
@@ -11,60 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/ui";
 import { ago, formatBytes } from "@/lib/format";
-import { type I18n, T, useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 
-/** The instance settings the Federation page reads. */
-export const FEDERATION_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
-  { path: "federation", get: (s) => s.federation, copy: (into, from) => (into.federation = from.federation) },
-  {
-    path: "federation_blocked_hosts",
-    get: (s) => hosts(s.federationBlockedHosts).join("\n"),
-    copy: (into, from) => (into.federationBlockedHosts = [...from.federationBlockedHosts]),
-  },
-  {
-    path: "shared_remote_sends_per_minute",
-    get: (s) => s.sharedRemoteSendsPerMinute,
-    copy: (into, from) => (into.sharedRemoteSendsPerMinute = from.sharedRemoteSendsPerMinute),
-  },
-  { path: "shared_remote_people", get: (s) => s.sharedRemotePeople, copy: (into, from) => (into.sharedRemotePeople = from.sharedRemotePeople) },
-  {
-    path: "shared_remote_file_bytes_per_day",
-    get: (s) => s.sharedRemoteFileBytesPerDay,
-    copy: (into, from) => (into.sharedRemoteFileBytesPerDay = from.sharedRemoteFileBytesPerDay),
-  },
-  {
-    path: "shared_file_fetches_in_flight",
-    get: (s) => s.sharedFileFetchesInFlight,
-    copy: (into, from) => (into.sharedFileFetchesInFlight = from.sharedFileFetchesInFlight),
-  },
-];
-
-/** The Other instances page in the settings menu, in the app's language. */
-export const federationSection = (t: I18n["t"]) => ({
-  id: "federation",
-  label: t("instancesettings.nav.federation"),
-  icon: NetworkIcon,
-  description: t("instancesettings.nav.federationAbout"),
-  keywords: "federation federate instances share channels across key fingerprint block",
-  settings: [
-    { id: "federation", label: t("instancesettings.nav.federationOn"), keywords: "federation on off" },
-    { id: "federation-identity", label: t("instancesettings.nav.federationIdentity"), keywords: "fingerprint key address rotate replace" },
-    { id: "federation-check", label: t("instancesettings.nav.federationCheck"), keywords: "test reach ping" },
-    { id: "federation-peers", label: t("instancesettings.nav.federationPeers"), keywords: "pinned peers" },
-    { id: "federation-blocked", label: t("instancesettings.nav.federationBlocked"), keywords: "block list deny" },
-    { id: "federation-sends", label: t("instancesettings.nav.federationSends"), keywords: "limit cap rate flood shared remote" },
-    { id: "federation-people", label: t("instancesettings.nav.federationPeople"), keywords: "limit cap shared remote guests" },
-    { id: "federation-files", label: t("instancesettings.nav.federationFiles"), keywords: "limit cap shared remote attachments bytes" },
-    { id: "federation-fetches", label: t("instancesettings.nav.federationFetches"), keywords: "limit cap shared remote attachments busy" },
-  ],
-});
-
-/** One host per line, trimmed, lowercased, each once. */
-const hosts = (list: string[]) => [...new Set(list.map((h) => h.trim().toLowerCase()).filter(Boolean))];
 /** An origin as people read it: the host, and the port when there is one. */
 const shown = (origin: string) => origin.replace(/^[a-z]+:\/\//, "");
 /** How many known instances show before "Show more". */
@@ -96,7 +49,6 @@ export function FederationSettings({
   const [info, setInfo] = useState<GetFederationResponse | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
   const [blockText, setBlockText] = useState(() => saved.federationBlockedHosts.join("\n"));
-  const [shownPeers, setShownPeers] = useState(PAGE);
   const [rotating, setRotating] = useState(false);
   const [reads, setReads] = useState(0);
 
@@ -145,60 +97,7 @@ export function FederationSettings({
         />
       </Setting>
 
-      <Setting id="federation-identity" title={t("instancesettings.nav.federationIdentity")} delay={0.04} badge={false}>
-        {infoError ? (
-          <p className="text-xs text-muted-foreground first-letter:uppercase">{infoError}</p>
-        ) : !info ? (
-          <div className="shimmer h-16 rounded-xl" />
-        ) : (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={SPRING} className="flex flex-col gap-3">
-            {info.origin ? (
-              <p className="text-sm">
-                <T
-                  k="instancesettings.federation.knownAs"
-                  values={{
-                    origin: (
-                      <b className="font-mono text-xs">
-                        <Private text={shown(info.origin)} />
-                      </b>
-                    ),
-                  }}
-                />
-              </p>
-            ) : (
-              <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span className="first-letter:uppercase">{info.originProblem}</span>
-              </p>
-            )}
-            <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
-              <FingerprintIcon className="size-5 shrink-0 text-primary" />
-              <code className="grid grid-cols-4 gap-x-3 gap-y-1 font-mono text-xs tracking-wider sm:grid-cols-8">
-                {info.fingerprint.split(" ").map((group, n) => (
-                  <motion.span key={n} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: n * 0.03 }}>
-                    {group}
-                  </motion.span>
-                ))}
-              </code>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("instancesettings.federation.compare")}</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className="group rounded-xl"
-                disabled={!info.origin}
-                onClick={() => setRotating(true)}
-              >
-                <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> {t("instancesettings.federation.rotate")}
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                {info.rotatedAt ? t("instancesettings.federation.lastRotated", { when: ago(lang, timestampDate(info.rotatedAt)) }) : t("instancesettings.federation.neverRotated")}
-              </span>
-            </div>
-          </motion.div>
-        )}
-      </Setting>
+      <IdentityCard info={info} error={infoError} onRotate={() => setRotating(true)} />
 
       <ConfirmDialog
         open={rotating}
@@ -215,24 +114,7 @@ export function FederationSettings({
 
       <CheckCard instanceKey={instanceKey} enabled={saved.federation} onChecked={(r) => setInfo((i) => (i ? withPeer(i, r.peer) : i))} />
 
-      <Setting id="federation-peers" title={t("instancesettings.nav.federationPeers")} delay={0.12} badge={false}>
-        {!info || info.peers.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("instancesettings.federation.noPeers")}</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            <AnimatePresence initial={false}>
-              {info.peers.slice(0, shownPeers).map((peer, n) => (
-                <PeerRow key={peer.origin} peer={peer} delay={Math.min(n, 10) * 0.03} />
-              ))}
-            </AnimatePresence>
-            {info.peers.length > shownPeers && (
-              <Button variant="ghost" size="sm" className="self-start rounded-full" onClick={() => setShownPeers((n) => n + PAGE)}>
-                {t("instancesettings.federation.showMore", { count: Math.min(PAGE, info.peers.length - shownPeers) })}
-              </Button>
-            )}
-          </ul>
-        )}
-      </Setting>
+      <PeersCard info={info} />
 
       <Setting
         id="federation-blocked"
@@ -314,6 +196,94 @@ export function FederationSettings({
         />
       </Setting>
     </>
+  );
+}
+
+/** This instance's address and key fingerprint, for other admins to compare, and the button to replace the key. */
+function IdentityCard({ info, error, onRotate }: { info: GetFederationResponse | null; error: string | null; onRotate: () => void }) {
+  const lang = useI18n();
+  const { t } = lang;
+  return (
+  <Setting id="federation-identity" title={t("instancesettings.nav.federationIdentity")} delay={0.04} badge={false}>
+    {error ? (
+      <p className="text-xs text-muted-foreground first-letter:uppercase">{error}</p>
+    ) : !info ? (
+      <div className="shimmer h-16 rounded-xl" />
+    ) : (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={SPRING} className="flex flex-col gap-3">
+        {info.origin ? (
+          <p className="text-sm">
+            <T
+              k="instancesettings.federation.knownAs"
+              values={{
+                origin: (
+                  <b className="font-mono text-xs">
+                    <Private text={shown(info.origin)} />
+                  </b>
+                ),
+              }}
+            />
+          </p>
+        ) : (
+          <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span className="first-letter:uppercase">{info.originProblem}</span>
+          </p>
+        )}
+        <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
+          <FingerprintIcon className="size-5 shrink-0 text-primary" />
+          <code className="grid grid-cols-4 gap-x-3 gap-y-1 font-mono text-xs tracking-wider sm:grid-cols-8">
+            {info.fingerprint.split(" ").map((group, n) => (
+              <motion.span key={n} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: n * 0.03 }}>
+                {group}
+              </motion.span>
+            ))}
+          </code>
+        </div>
+        <p className="text-xs text-muted-foreground">{t("instancesettings.federation.compare")}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="group rounded-xl"
+            disabled={!info.origin}
+            onClick={onRotate}
+          >
+            <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> {t("instancesettings.federation.rotate")}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {info.rotatedAt ? t("instancesettings.federation.lastRotated", { when: ago(lang, timestampDate(info.rotatedAt)) }) : t("instancesettings.federation.neverRotated")}
+          </span>
+        </div>
+      </motion.div>
+    )}
+  </Setting>
+  );
+}
+
+/** The instances this one has pinned a key for, a page at a time. */
+function PeersCard({ info }: { info: GetFederationResponse | null }) {
+  const { t } = useI18n();
+  const [shownPeers, setShownPeers] = useState(PAGE);
+  return (
+  <Setting id="federation-peers" title={t("instancesettings.nav.federationPeers")} delay={0.12} badge={false}>
+    {!info || info.peers.length === 0 ? (
+      <p className="text-xs text-muted-foreground">{t("instancesettings.federation.noPeers")}</p>
+    ) : (
+      <ul className="flex flex-col gap-2">
+        <AnimatePresence initial={false}>
+          {info.peers.slice(0, shownPeers).map((peer, n) => (
+            <PeerRow key={peer.origin} peer={peer} delay={Math.min(n, 10) * 0.03} />
+          ))}
+        </AnimatePresence>
+        {info.peers.length > shownPeers && (
+          <Button variant="ghost" size="sm" className="self-start rounded-full" onClick={() => setShownPeers((n) => n + PAGE)}>
+            {t("instancesettings.federation.showMore", { count: Math.min(PAGE, info.peers.length - shownPeers) })}
+          </Button>
+        )}
+      </ul>
+    )}
+  </Setting>
   );
 }
 

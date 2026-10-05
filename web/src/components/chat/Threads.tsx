@@ -387,6 +387,65 @@ function plain(content: string) {
     .trim();
 }
 
+/** The thread list's search box, and Open and Archived when threads get archived. */
+export function ThreadFilters({
+  query,
+  onQuery,
+  tabs,
+  archived,
+  onArchived,
+  glide,
+}: {
+  query: string;
+  onQuery: (query: string) => void;
+  tabs: boolean[];
+  archived: boolean;
+  onArchived: (archived: boolean) => void;
+  /** The selected tab's layout id, one per list. */
+  glide: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
+        <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+        <input
+          value={query}
+          onChange={(e) => onQuery(e.target.value.slice(0, 100))}
+          placeholder={t("chat.threads.search")}
+          aria-label={t("chat.threads.search")}
+          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        />
+      </label>
+      {tabs.length > 1 && (
+        <div className="relative grid grid-cols-2 rounded-xl bg-muted p-0.5 text-xs font-bold">
+          {tabs.map((tab) => (
+            <button
+              key={String(tab)}
+              type="button"
+              onClick={() => onArchived(tab)}
+              className={cn(
+                "relative z-10 flex items-center justify-center gap-1 rounded-lg py-1.5 transition-colors",
+                archived === tab ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {archived === tab && (
+                <motion.span
+                  layoutId={glide}
+                  transition={SPRING}
+                  className="absolute inset-0 -z-10 rounded-lg bg-card shadow-sm"
+                />
+              )}
+              {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
+              {tab ? t("chat.threads.archived") : t("chat.threads.open")}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * A channel's threads, the latest reply first: open ones, or archived ones,
  * searched by what their message or replies say.
@@ -448,41 +507,7 @@ export function ThreadList({
     <div className="flex h-full min-h-0 flex-col">
       <ThreadListHeader where={t("chat.threads.where", { channel: channel.name })} onClose={onClose} />
       <div className="flex flex-col gap-2 border-b p-3">
-        <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
-          <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value.slice(0, 100))}
-            placeholder={t("chat.threads.search")}
-            aria-label={t("chat.threads.search")}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </label>
-        {tabs.length > 1 && (
-          <div className="relative grid grid-cols-2 rounded-xl bg-muted p-0.5 text-xs font-bold">
-            {tabs.map((tab) => (
-              <button
-                key={String(tab)}
-                type="button"
-                onClick={() => setArchived(tab)}
-                className={cn(
-                  "relative z-10 flex items-center justify-center gap-1 rounded-lg py-1.5 transition-colors",
-                  archived === tab ? "text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {archived === tab && (
-                  <motion.span
-                    layoutId={`thread-tab-${channel.id}`}
-                    transition={SPRING}
-                    className="absolute inset-0 -z-10 rounded-lg bg-card shadow-sm"
-                  />
-                )}
-                {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
-                {tab ? t("chat.threads.archived") : t("chat.threads.open")}
-              </button>
-            ))}
-          </div>
-        )}
+        <ThreadFilters query={query} onQuery={setQuery} tabs={tabs} archived={archived} onArchived={setArchived} glide={`thread-tab-${channel.id}`} />
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
         {error && <p className="p-3 text-sm text-destructive">{error}</p>}

@@ -45,7 +45,7 @@ export async function formatRecoveryKey(key: Uint8Array): Promise<string> {
     }
   }
   if (bits > 0) out += ALPHABET[(value << (5 - bits)) & 31];
-  return out.match(/.{1,4}/g)!.join("-");
+  return (out.match(/.{1,4}/g) ?? []).join("-");
 }
 
 /** Reads a key back, forgiving spaces, dashes, case and the letters people confuse with digits. Null if it isn't one. */

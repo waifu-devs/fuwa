@@ -37,14 +37,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
 import { AccountKind, ChannelType, NotificationLevel, Permission, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
-import { joinLine } from "@/components/chat/MessageList";
+import { joinLine } from "@/components/chat/join-line";
 import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
@@ -115,23 +115,45 @@ export function ServerSettingsDialog({
   const allowed = useServerSettingsTabs(instanceKey, server.id);
   const can = (id: string) => allowed.includes(id);
   const access = useAccess(instanceKey, server.id);
+  const managesShared = allowed.includes("shared");
+  useEffect(() => {
+    if (open && managesShared) run(listConnections(instanceKey, server.id)).catch(() => {});
+  }, [open, managesShared, instanceKey, server.id]);
+  const [picked, setTab] = useState(initialTab);
+  // Opening it (or asking for another section while open) starts on the section asked for.
+  const opening = open ? initialTab : null;
+  const [lastOpening, setLastOpening] = useState(opening);
+  if (lastOpening !== opening) {
+    setLastOpening(opening);
+    if (opening !== null) setTab(opening);
+  }
+  // Permissions can change while it's open: fall back to a section still yours.
+  const tab = open && allowed.length && !allowed.includes(picked) ? allowed[0]! : picked;
+  const groups = useSettingsGroups(instanceKey, server, can);
+  return (
+    <SettingsScreen
+      open={open}
+      onOpenChange={onOpenChange}
+      title={server.name}
+      subtitle={t("serversettings.nav.subtitle")}
+      section={tab}
+      onSectionChange={setTab}
+      openToSection={initialTab !== "overview"}
+      groups={groups}
+    >
+      {can(tab) && PAGES[tab]?.({ instanceKey, server, access, target, allowed, setTab, close: () => onOpenChange(false) })}
+    </SettingsScreen>
+  );
+}
+
+/** The menu: this server's sections, the people ones, and the dangerous ones, each only if yours. */
+function useSettingsGroups(instanceKey: string, server: Server, can: (id: string) => boolean) {
+  const { t } = useI18n();
   const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[server.id]?.length ?? 0);
   // Other servers asking to show one of this server's channels, for the menu's badge.
   const sharedRequests = useFuwa(
     (s) => s.instances[instanceKey]?.shared[server.id]?.connections.filter((c) => c.home && c.state === SharedConnectionState.WAITING).length ?? 0,
   );
-  const managesShared = allowed.includes("shared");
-  useEffect(() => {
-    if (open && managesShared) run(listConnections(instanceKey, server.id)).catch(() => {});
-  }, [open, managesShared, instanceKey, server.id]);
-  const [tab, setTab] = useState(initialTab);
-  useEffect(() => {
-    if (open) setTab(initialTab);
-  }, [open, initialTab]);
-  // Permissions can change while it's open: fall back to a section still yours.
-  useEffect(() => {
-    if (open && allowed.length && !allowed.includes(tab)) setTab(allowed[0]!);
-  }, [open, allowed, tab]);
   const sections = [
     ...[{
       id: "overview",
@@ -303,48 +325,48 @@ export function ServerSettingsDialog({
     { id: "ownership", label: t("serversettings.nav.ownership"), icon: CrownIcon, danger: true, keywords: "owner hand give" },
     { id: "danger", label: t("serversettings.nav.danger"), icon: Trash2Icon, danger: true, keywords: "remove" },
   ].filter((s) => can(s.id));
-  return (
-    <SettingsScreen
-      open={open}
-      onOpenChange={onOpenChange}
-      title={server.name}
-      subtitle={t("serversettings.nav.subtitle")}
-      section={tab}
-      onSectionChange={setTab}
-      openToSection={initialTab !== "overview"}
-      groups={[{ label: server.name, sections }, ...people, ...(danger.length ? [{ sections: danger }] : [])]}
-    >
-      {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
-      {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
-      {tab === "sso" && can("sso") && <SingleSignOn instanceKey={instanceKey} server={server} />}
-      {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
-      {tab === "welcome" && can("welcome") && <WelcomeAndOnboarding instanceKey={instanceKey} server={server} />}
-      {tab === "emoji" && can("emoji") && <Emoji instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "integrations" && can("integrations") && (
-        <div className="flex flex-col gap-8">
-          {has(access, Permission.MANAGE_SERVER) && <ServerAgents instanceKey={instanceKey} serverId={server.id} />}
-          {has(access, Permission.MANAGE_WEBHOOKS) && <Webhooks instanceKey={instanceKey} serverId={server.id} />}
-        </div>
-      )}
-      {tab === "shared" && can("shared") && <SharedChannels instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "automod" && can("automod") && <AutoMod instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
-      {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
-      {tab === "recordings" && can("recordings") && <RecordingSettings instanceKey={instanceKey} server={server} />}
-      {tab === "usage" && can("usage") && <Usage instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "limits" && can("limits") && <Limits instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "applications" && can("applications") && (
-        <Applications instanceKey={instanceKey} serverId={server.id} takesApplications={server.applications} />
-      )}
-      {tab === "members" && can("members") && <Members instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "bans" && can("bans") && <Bans instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "audit-log" && can("audit-log") && <AuditLog instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "ownership" && can("ownership") && <Ownership instanceKey={instanceKey} server={server} onDone={() => setTab(allowed[0] ?? "overview")} />}
-      {tab === "danger" && can("danger") && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
-    </SettingsScreen>
-  );
+  return [{ label: server.name, sections }, ...people, ...(danger.length ? [{ sections: danger }] : [])];
 }
+
+type PageProps = {
+  instanceKey: string;
+  server: Server;
+  access: ReturnType<typeof useAccess>;
+  target: string | null;
+  allowed: string[];
+  setTab: (tab: string) => void;
+  close: () => void;
+};
+
+/** What each section shows. */
+const PAGES: Record<string, (p: PageProps) => ReactNode> = {
+  overview: (p) => <Overview instanceKey={p.instanceKey} server={p.server} />,
+  access: (p) => <Access instanceKey={p.instanceKey} server={p.server} />,
+  sso: (p) => <SingleSignOn instanceKey={p.instanceKey} server={p.server} />,
+  "join-form": (p) => <JoinFormEditor instanceKey={p.instanceKey} server={p.server} onOpenAccess={() => p.setTab("access")} />,
+  welcome: (p) => <WelcomeAndOnboarding instanceKey={p.instanceKey} server={p.server} />,
+  emoji: (p) => <Emoji instanceKey={p.instanceKey} serverId={p.server.id} />,
+  integrations: (p) => (
+    <div className="flex flex-col gap-8">
+      {has(p.access, Permission.MANAGE_SERVER) && <ServerAgents instanceKey={p.instanceKey} serverId={p.server.id} />}
+      {has(p.access, Permission.MANAGE_WEBHOOKS) && <Webhooks instanceKey={p.instanceKey} serverId={p.server.id} />}
+    </div>
+  ),
+  shared: (p) => <SharedChannels instanceKey={p.instanceKey} serverId={p.server.id} />,
+  automod: (p) => <AutoMod instanceKey={p.instanceKey} serverId={p.server.id} />,
+  invites: (p) => <Invites instanceKey={p.instanceKey} serverId={p.server.id} />,
+  roles: (p) => <Roles instanceKey={p.instanceKey} serverId={p.server.id} initial={p.target} />,
+  channels: (p) => <Channels instanceKey={p.instanceKey} serverId={p.server.id} initial={p.target} />,
+  recordings: (p) => <RecordingSettings instanceKey={p.instanceKey} server={p.server} />,
+  usage: (p) => <Usage instanceKey={p.instanceKey} serverId={p.server.id} />,
+  limits: (p) => <Limits instanceKey={p.instanceKey} serverId={p.server.id} />,
+  applications: (p) => <Applications instanceKey={p.instanceKey} serverId={p.server.id} takesApplications={p.server.applications} />,
+  members: (p) => <Members instanceKey={p.instanceKey} serverId={p.server.id} />,
+  bans: (p) => <Bans instanceKey={p.instanceKey} serverId={p.server.id} />,
+  "audit-log": (p) => <AuditLog instanceKey={p.instanceKey} serverId={p.server.id} />,
+  ownership: (p) => <Ownership instanceKey={p.instanceKey} server={p.server} onDone={() => p.setTab(p.allowed[0] ?? "overview")} />,
+  danger: (p) => <Danger instanceKey={p.instanceKey} server={p.server} onDeleted={p.close} />,
+};
 
 const onlyMentions = (level: NotificationLevel) => level === NotificationLevel.MENTIONS;
 
@@ -356,7 +378,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   const [iconUrl, setIconUrl] = useState(server.iconUrl);
   const [description, setDescription] = useState(server.description);
   const [systemChannel, setSystemChannel] = useState(server.systemChannelId);
-  const [mentionsOnly, setMentionsOnly] = useState(onlyMentions(server.defaultNotifications));
+  const [mentionsOnly, setMentionsOnly] = useState(() => onlyMentions(server.defaultNotifications));
   const save = useAction(updateServer);
   const changes = [
     name !== server.name,

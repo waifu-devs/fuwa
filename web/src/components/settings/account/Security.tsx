@@ -301,8 +301,14 @@ function Secret({ uri, children }: { uri: string; children: ReactNode }) {
   const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const [revealed, setRevealed] = useState(false);
+  // A new secret, or streamer mode turned on or off, veils it again (before it can show).
+  const shownFor = `${uri}|${streaming}`;
+  const [lastShownFor, setLastShownFor] = useState(shownFor);
+  if (lastShownFor !== shownFor) {
+    setLastShownFor(shownFor);
+    setRevealed(false);
+  }
   const hidden = streaming && !revealed;
-  useEffect(() => setRevealed(false), [uri, streaming]);
   return (
     <div className="relative shrink-0">
       <div className={cn("transition-[filter] duration-300", hidden && "blur-md")}>{children}</div>

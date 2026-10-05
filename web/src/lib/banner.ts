@@ -47,7 +47,17 @@ export function accentVars(server: Pick<BannerServer, "id" | "accentColor">): CS
  * pictures can't be read, so they offer none.
  */
 export async function bannerColors(src: string | Blob, count = 5): Promise<number[]> {
-  const url = typeof src === "string" ? src : URL.createObjectURL(src);
+  if (typeof src === "string") return colorsAt(src, count);
+  // A file not uploaded yet is read through a temporary URL, let go once it's been drawn.
+  const url = URL.createObjectURL(src);
+  try {
+    return await colorsAt(url, count);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function colorsAt(url: string, count: number): Promise<number[]> {
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image();
@@ -69,8 +79,6 @@ export async function bannerColors(src: string | Blob, count = 5): Promise<numbe
     // A picture from another origin can't be read back (SecurityError): there's simply nothing to offer.
     if (!(err instanceof DOMException && err.name === "SecurityError")) reportError("BannerColors", "settings/welcome");
     return [];
-  } finally {
-    if (typeof src !== "string") URL.revokeObjectURL(url);
   }
 }
 
