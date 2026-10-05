@@ -573,7 +573,12 @@ impl InstanceSettingsView {
         let value = match admin::parse_cap(&state.read(cx).value(), unit) {
             Some(v) => v,
             None => {
-                let (text, v) = if bytes { ("1", admin::UNITS[1].1) } else { ("100", 100) };
+                let (text, v) = if bytes {
+                    ("1".to_owned(), admin::UNITS[1].1)
+                } else {
+                    let start = admin::starting_cap(path);
+                    (start.to_string(), start)
+                };
                 self.units.insert(path, 1);
                 state.update(cx, |s, cx| s.set_value(text, window, cx));
                 v

@@ -272,6 +272,34 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        page = page.child(self.setting(
+            "federation-sends",
+            "Messages per server a minute",
+            Some(
+                "How many messages all the people of one server on another instance may send together to channels \
+                 shared from here. That instance says who its people are, so a server there counts as one sender.",
+            ),
+            &["shared_remote_sends_per_minute"],
+            &crate::core::instance_admin::per_minute_label(defaults.shared_remote_sends_per_minute),
+            5,
+            self.cap("shared_remote_sends_per_minute", "Up to", false, p, window, cx),
+            p,
+            cx,
+        ));
+        page = page.child(self.setting(
+            "federation-people",
+            "People per server",
+            Some(
+                "How many people one server on another instance may bring to a server's shared channels. Past it, \
+                 no one new from that server can join in; those already there still can.",
+            ),
+            &["shared_remote_people"],
+            &crate::core::instance_admin::count_label(defaults.shared_remote_people),
+            6,
+            self.cap("shared_remote_people", "Up to", false, p, window, cx),
+            p,
+            cx,
+        ));
         page.into_any_element()
     }
 

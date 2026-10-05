@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 32] = [
+pub const PATHS: [&str; 40] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -157,6 +157,12 @@ pub const PATHS: [&str; 32] = [
     "default_limits.recording_bytes",
     "picture_upload_bytes",
     "picture_upload_bytes_per_day",
+    "attachment_upload_bytes",
+    "attachment_upload_bytes_per_day",
+    "voice_message_seconds",
+    "voice_message_bytes",
+    "voice_message_bytes_per_day",
+    "poll_votes_per_minute",
     "telemetry",
     "web",
     "calls",
@@ -168,6 +174,8 @@ pub const PATHS: [&str; 32] = [
     "automod_checks_per_day",
     "federation",
     "federation_blocked_hosts",
+    "shared_remote_sends_per_minute",
+    "shared_remote_people",
 ];
 
 /// A default cap, or `None` for one that isn't there.
@@ -192,6 +200,14 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "picture_upload_bytes_per_day" => s.picture_upload_bytes_per_day,
         "call_recordings_keep_days" => s.call_recordings_keep_days,
         "automod_checks_per_day" => s.automod_checks_per_day,
+        "attachment_upload_bytes" => s.attachment_upload_bytes,
+        "attachment_upload_bytes_per_day" => s.attachment_upload_bytes_per_day,
+        "voice_message_seconds" => s.voice_message_seconds,
+        "voice_message_bytes" => s.voice_message_bytes,
+        "voice_message_bytes_per_day" => s.voice_message_bytes_per_day,
+        "poll_votes_per_minute" => s.poll_votes_per_minute,
+        "shared_remote_sends_per_minute" => s.shared_remote_sends_per_minute,
+        "shared_remote_people" => s.shared_remote_people,
         _ => limit(s, path),
     }
 }
@@ -204,6 +220,14 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "picture_upload_bytes_per_day" => &mut s.picture_upload_bytes_per_day,
         "call_recordings_keep_days" => &mut s.call_recordings_keep_days,
         "automod_checks_per_day" => &mut s.automod_checks_per_day,
+        "attachment_upload_bytes" => &mut s.attachment_upload_bytes,
+        "attachment_upload_bytes_per_day" => &mut s.attachment_upload_bytes_per_day,
+        "voice_message_seconds" => &mut s.voice_message_seconds,
+        "voice_message_bytes" => &mut s.voice_message_bytes,
+        "voice_message_bytes_per_day" => &mut s.voice_message_bytes_per_day,
+        "poll_votes_per_minute" => &mut s.poll_votes_per_minute,
+        "shared_remote_sends_per_minute" => &mut s.shared_remote_sends_per_minute,
+        "shared_remote_people" => &mut s.shared_remote_people,
         _ => {
             let l = s.default_limits.get_or_insert_with(Default::default);
             match path {
@@ -391,6 +415,22 @@ pub fn format_bytes(bytes: i64) -> String {
 /// A count cap in words: "no limit" when it's off.
 pub fn count_label(n: Option<i64>) -> String {
     n.map_or_else(|| "no limit".to_owned(), group_digits)
+}
+
+/// A cap counted per minute in words: "no limit" when it's off.
+pub fn per_minute_label(n: Option<i64>) -> String {
+    n.map_or_else(|| "no limit".to_owned(), |n| format!("{} a minute", group_digits(n)))
+}
+
+/// Where a count cap starts when it's switched on: the web's placeholder.
+pub fn starting_cap(path: &str) -> i64 {
+    match path {
+        "poll_votes_per_minute" => 30,
+        "shared_remote_sends_per_minute" => 120,
+        "shared_remote_people" => 500,
+        "voice_message_seconds" => 300,
+        _ => 100,
+    }
 }
 
 /// A size cap in words: "no limit" when it's off.
