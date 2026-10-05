@@ -1457,6 +1457,69 @@ async fn devices_can_be_listed_and_signed_out() {
     instance.stop().await;
 }
 
+/// Reads a stream until it fails, giving the failure's code; heartbeats and
+/// anything else sent meanwhile are skipped.
+async fn ends_with<T>(stream: &mut tonic::Streaming<T>) -> Code {
+    loop {
+        match stream.message().await {
+            Ok(Some(_)) => continue,
+            Ok(None) => panic!("the stream ended without saying why"),
+            Err(status) => return status.code(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn signing_out_a_device_ends_its_live_streams_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (first, _, _) = sign_up(&mut c, "juan").await;
+    let phone = sign_in(&mut c, "juan", "correct horse battery").await.unwrap().token;
+    let channel = instance.channel().await;
+
+    // The phone holds every kind of stream open, each listening.
+    let mut events = c
+        .events
+        .subscribe(authed(&phone, pb::SubscribeRequest { follow_new_servers: true, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(events.message().await.unwrap().unwrap().ready.is_some());
+    let mut dms = pb::direct_message_service_client::DirectMessageServiceClient::new(channel.clone())
+        .watch(authed(&phone, pb::WatchRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(dms.message().await.unwrap().unwrap().ready);
+    let mut friends = pb::friend_service_client::FriendServiceClient::new(channel.clone())
+        .watch_friends(authed(&phone, pb::WatchFriendsRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(friends.message().await.unwrap().unwrap().ready);
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel)
+        .watch_presence(authed(&phone, pb::WatchPresenceRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    while !presence.message().await.unwrap().unwrap().ready {}
+
+    // Signed out from the other device: all four end well before a heartbeat,
+    // which no longer asks the database each time.
+    let sessions =
+        c.account.list_sessions(authed(&first, pb::ListSessionsRequest {})).await.unwrap().into_inner().sessions;
+    let phone_id = sessions.iter().find(|s| !s.current).unwrap().id.clone();
+    c.account.revoke_session(authed(&first, pb::RevokeSessionRequest { session_id: phone_id })).await.unwrap();
+    let soon = Duration::from_secs(5);
+    assert_eq!(tokio::time::timeout(soon, ends_with(&mut events)).await.unwrap(), Code::Unauthenticated);
+    assert_eq!(tokio::time::timeout(soon, ends_with(&mut dms)).await.unwrap(), Code::Unauthenticated);
+    assert_eq!(tokio::time::timeout(soon, ends_with(&mut friends)).await.unwrap(), Code::Unauthenticated);
+    assert_eq!(tokio::time::timeout(soon, ends_with(&mut presence)).await.unwrap(), Code::Unauthenticated);
+
+    instance.stop().await;
+}
+
 #[tokio::test]
 async fn two_step_sign_in() {
     use fuwa_server::twofactor;

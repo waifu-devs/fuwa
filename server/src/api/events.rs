@@ -324,8 +324,8 @@ impl EventService for Api {
                 return; // nothing left to follow
             }
 
-            let mut heartbeat = tokio::time::interval(HEARTBEAT);
-            heartbeat.tick().await;
+            let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
+            let mut session = crate::streams::SessionCheck::new(&app, &token_hash);
             loop {
                 tokio::select! {
                     _ = shutdown.cancelled() => {
@@ -337,7 +337,7 @@ impl EventService for Api {
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
                         // A session signed out from another device ends its streams too.
-                        if matches!(app.session_live(&token_hash).await, Ok(false)) {
+                        if !session.still_live(&app).await {
                             send(Err(Status::unauthenticated("this device was signed out"))).await;
                             return;
                         }
@@ -347,17 +347,18 @@ impl EventService for Api {
                     }
                     // Some session of the caller's just ended: if it's this one,
                     // the stream ends now rather than at the next heartbeat.
-                    ended = ended.recv() => {
-                        let ours = match ended {
-                            Ok(id) => *id == *account_id,
-                            Err(RecvError::Lagged(_)) => true,
-                            Err(RecvError::Closed) => return,
-                        };
-                        if ours && matches!(app.session_live(&token_hash).await, Ok(false)) {
-                            send(Err(Status::unauthenticated("this device was signed out"))).await;
-                            return;
+                    ended = ended.recv() => match ended {
+                        Ok(id) if *id == *account_id => {
+                            if matches!(app.session_live(&token_hash).await, Ok(false)) {
+                                send(Err(Status::unauthenticated("this device was signed out"))).await;
+                                return;
+                            }
                         }
-                    }
+                        Ok(_) => {}
+                        // Fell behind: ask at this stream's next heartbeat.
+                        Err(RecvError::Lagged(_)) => session.due(),
+                        Err(RecvError::Closed) => return,
+                    },
                     // Joined somewhere (an agent added to a server, say): follow
                     // it from now on, and say from where.
                     next = joined.recv(), if follow_new => {

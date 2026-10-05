@@ -183,6 +183,9 @@ async fn stay_in_touch(app: Arc<App>) {
                                 if first {
                                     first = false;
                                     backoff.reset();
+                                    // Sessions may have ended while the directory was out
+                                    // of reach, so streams here ask about theirs again.
+                                    app.recheck_sessions();
                                     link.dirty.store(true, Ordering::SeqCst);
                                     register(&app, link).await;
                                 }
