@@ -439,6 +439,34 @@ message Server {
   // recording going on and everyone's ask to record on the server: a new one
   // starts when someone presses Record again.
   bool record_video = 28;
+  // Which kinds of live tiles show here (docs/live-tiles.md), as the server
+  // decides them: someone with MANAGE_SERVER's choice, or when nobody chose,
+  // every kind but voice rooms in servers of 500 members or more.
+  LiveTileSettings live_tiles = 29;
+}
+
+// The kinds of live tiles: small cards above a server's channel list about
+// what's happening there now (docs/live-tiles.md).
+enum LiveTileKind {
+  LIVE_TILE_KIND_UNSPECIFIED = 0;
+  // A voice channel with a few people in it.
+  LIVE_TILE_KIND_VOICE = 1;
+  // A poll closing soon that the person hasn't voted in.
+  LIVE_TILE_KIND_POLL = 2;
+  // New replies in a thread the person follows.
+  LIVE_TILE_KIND_THREAD = 3;
+  // A busy channel shared with other servers.
+  LIVE_TILE_KIND_SHARED = 4;
+  // Tiles agents and webhooks keep up to date (LiveTileService).
+  LIVE_TILE_KIND_APP = 5;
+}
+
+message LiveTileSettings {
+  // Whether someone with MANAGE_SERVER chose the kinds. When not, `kinds` is
+  // the default and follows the member count.
+  bool customized = 1;
+  // The kinds that show, in no particular order.
+  repeated LiveTileKind kinds = 2;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -1209,12 +1237,86 @@ message Event {
     // (CallService.ListVoiceStates).
     VoiceStateUpdated voice_state_updated = 40;
     VoiceStateRemoved voice_state_removed = 41;
+    // Not stored either: an app's live tile was set or changed, or ended.
+    // After a reconnect, apps list them again (LiveTileService.ListLiveTiles).
+    LiveTileUpdated live_tile_updated = 42;
+    LiveTileEnded live_tile_ended = 43;
   }
 }
 
 // Someone joined a voice channel, moved to another, or muted or deafened.
 message VoiceStateUpdated {
   VoiceState state = 1;
+}
+
+// An app's live tile, as it is now. Sent at most once a second or so per
+// tile (InstanceSettings.live_tile_publish_ms): a tile changed faster than
+// that comes with its latest content.
+message LiveTileUpdated {
+  LiveTile tile = 1;
+}
+
+// A live tile an app keeps up to date in a channel: a scoreboard, a raid
+// timer, the next match of a tournament. Plain text in a fixed layout; the
+// app sends no markup, links or pictures, and its button only opens the
+// channel.
+message LiveTile {
+  // The app's own id for it, unique per app and channel.
+  string id = 1;
+  string server_id = 2;
+  string channel_id = 3;
+  // The agent's account id, or the webhook's id.
+  string source_id = 4;
+  LiveTileSource source_kind = 5;
+  // Who it's from, as shown on it: the agent's name or the webhook's.
+  string source_name = 6;
+  // Their picture, through this instance like every avatar; may be empty.
+  string source_avatar_url = 7;
+  LiveTileContent content = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  // When it goes unless the app changes it again.
+  google.protobuf.Timestamp expires_at = 10;
+}
+
+enum LiveTileSource {
+  LIVE_TILE_SOURCE_UNSPECIFIED = 0;
+  LIVE_TILE_SOURCE_AGENT = 1;
+  LIVE_TILE_SOURCE_WEBHOOK = 2;
+}
+
+// What a live tile says. The server trims each field, folds runs of spaces,
+// and takes out control, zero-width and direction characters.
+message LiveTileContent {
+  // 1 to 40 characters.
+  string title = 1;
+  // Up to 16: "67'", "Half time", "Round 3".
+  string status = 2;
+  // Happening right now: the tile shows a live dot and ranks higher.
+  bool live = 3;
+  // Up to 4.
+  repeated LiveTileRow rows = 4;
+  // 0 to 1, for a bar; unset for none.
+  optional float progress = 5;
+  // The button's label, up to 12 characters; it always opens the channel.
+  // Empty for the app's default ("Open").
+  string action = 6;
+}
+
+message LiveTileRow {
+  // Up to 24 characters.
+  string label = 1;
+  // Up to 8: a score, a count, a time.
+  string value = 2;
+}
+
+// An app's live tile was ended by the app or a moderator, or its webhook went.
+// Tiles past `expires_at` end without one; nor is one sent when the channel
+// goes (ChannelDeleted) or the agent leaves (MemberLeft).
+message LiveTileEnded {
+  string channel_id = 1;
+  // The tile's own id, with `source_id` naming whose it is.
+  string tile_id = 2;
+  string source_id = 3;
 }
 
 // Someone left the voice channel they were in.

@@ -281,6 +281,24 @@ pub fn interaction(i: &pb::Interaction) -> Value {
     }))
 }
 
+/// An app's live tile: what it says and whose it is.
+pub fn live_tile(t: &pb::LiveTile) -> Value {
+    let content = t.content.clone().unwrap_or_default();
+    trim(json!({
+        "id": t.id,
+        "channel_id": t.channel_id,
+        "source_id": t.source_id,
+        "source_name": t.source_name,
+        "title": content.title,
+        "status": content.status,
+        "live": content.live,
+        "rows": content.rows.iter().map(|r| json!({ "label": r.label, "value": r.value })).collect::<Vec<_>>(),
+        "progress": content.progress,
+        "action": content.action,
+        "expires_at": time(&t.expires_at),
+    }))
+}
+
 /// An event from a server's log: its type and what it carries.
 pub fn event(e: &pb::Event) -> Value {
     use pb::event::Payload;
@@ -321,6 +339,11 @@ pub fn event(e: &pb::Event) -> Value {
             json!({ "channel_id": p.channel_id, "message_id": p.message_id, "poll": p.poll.as_ref().map(poll) }),
         ),
         Some(Payload::VoiceStateUpdated(_)) | Some(Payload::VoiceStateRemoved(_)) => ("voice", json!({})),
+        Some(Payload::LiveTileUpdated(p)) => ("live_tile_updated", json!({ "tile": p.tile.as_ref().map(live_tile) })),
+        Some(Payload::LiveTileEnded(p)) => (
+            "live_tile_ended",
+            json!({ "channel_id": p.channel_id, "tile_id": p.tile_id, "source_id": p.source_id }),
+        ),
         Some(Payload::ThreadUpdated(p)) => (
             "thread_updated",
             json!({

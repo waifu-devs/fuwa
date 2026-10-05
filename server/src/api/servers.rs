@@ -343,6 +343,9 @@ impl ServerService for Api {
                         if let Some(on) = req.record_video {
                             conn.execute("UPDATE server SET record_video = ?1", [on]).await?;
                         }
+                        if let Some(tiles) = &req.live_tiles {
+                            conn.execute("UPDATE server SET live_tiles = ?1", [stored_tile_kinds(tiles)]).await?;
+                        }
                         let server = store::load_server(conn).await?;
                         let entry = Audit::new(pb::AuditAction::ServerUpdate, "")
                             .change("name", &before.name, &server.name)
@@ -366,7 +369,8 @@ impl ServerService for Api {
                                 format!("{},{}", server.banner_focus_x, server.banner_focus_y),
                             )
                             .change("accent_color", color_label(before.accent_color), color_label(server.accent_color))
-                            .change("record_video", before.record_video, server.record_video);
+                            .change("record_video", before.record_video, server.record_video)
+                            .change("live_tiles", tile_kinds_label(&before.live_tiles), tile_kinds_label(&server.live_tiles));
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
@@ -980,3 +984,37 @@ impl ServerService for Api {
         )
     }
 }
+
+/// Live tile kinds as the server's file keeps them: the chosen kinds as a
+/// JSON list, each once, or `None` to go back to the default.
+fn stored_tile_kinds(tiles: &pb::LiveTileSettings) -> Option<String> {
+    if !tiles.customized {
+        return None;
+    }
+    let mut kinds: Vec<i32> = tiles
+        .kinds
+        .iter()
+        .copied()
+        .filter(|k| pb::LiveTileKind::try_from(*k).is_ok_and(|k| k != pb::LiveTileKind::Unspecified))
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    Some(serde_json::Value::from(kinds).to_string())
+}
+
+/// How the audit log shows a server's live tile kinds: "default" or the kinds.
+fn tile_kinds_label(tiles: &Option<pb::LiveTileSettings>) -> String {
+    match tiles {
+        Some(tiles) if tiles.customized => {
+            let names: Vec<&str> = tiles
+                .kinds
+                .iter()
+                .filter_map(|k| pb::LiveTileKind::try_from(*k).ok())
+                .map(|k| k.as_str_name().trim_start_matches("LIVE_TILE_KIND_"))
+                .collect();
+            if names.is_empty() { "none".into() } else { names.join(", ").to_lowercase() }
+        }
+        _ => "default".into(),
+    }
+}
+

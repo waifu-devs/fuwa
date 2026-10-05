@@ -53,6 +53,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0029_polls.sql"),
     include_str!("../migrations/server/0030_record_video.sql"),
     include_str!("../migrations/server/0031_commands.sql"),
+    include_str!("../migrations/server/0032_live_tiles.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -136,6 +137,8 @@ fn may_change_rules(payload: &Payload) -> bool {
             | Payload::InteractionCreated(_)
             | Payload::VoiceStateUpdated(_)
             | Payload::VoiceStateRemoved(_)
+            | Payload::LiveTileUpdated(_)
+            | Payload::LiveTileEnded(_)
     )
 }
 
@@ -861,7 +864,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
                 sso, sso_required, sso_recheck_days, region, thread_archive_hours,
-                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding, record_video
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding, record_video, live_tiles
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -894,11 +897,31 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 accent_color: r.get(24)?,
                 has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
                 record_video: r.get(26)?,
+                live_tiles: Some(live_tile_kinds(r.get::<Option<String>>(27)?.as_deref(), r.get(8)?)),
             })
         },
     )
     .await?
     .ok_or_else(|| Error::internal("server row missing"))
+}
+
+/// Servers this big or bigger leave voice room tiles out unless someone with
+/// MANAGE_SERVER puts them back: a crowd isn't pointed at a few people talking.
+pub const BIG_SERVER: i64 = 500;
+
+/// Which kinds of live tiles a server shows: the stored choice (a JSON list
+/// of LiveTileKind numbers), or the default for its size.
+pub fn live_tile_kinds(stored: Option<&str>, members: i64) -> pb::LiveTileSettings {
+    use pb::LiveTileKind as Kind;
+    if let Some(kinds) = stored.and_then(|s| serde_json::from_str::<Vec<i32>>(s).ok()) {
+        let kinds = kinds.into_iter().filter(|k| Kind::try_from(*k).is_ok_and(|k| k != Kind::Unspecified)).collect();
+        return pb::LiveTileSettings { customized: true, kinds };
+    }
+    let mut kinds = vec![Kind::Voice, Kind::Poll, Kind::Thread, Kind::Shared, Kind::App];
+    if members >= BIG_SERVER {
+        kinds.retain(|k| *k != Kind::Voice);
+    }
+    pb::LiveTileSettings { customized: false, kinds: kinds.into_iter().map(|k| k as i32).collect() }
 }
 
 /// A server's single sign-on, as its file has it.
@@ -1378,6 +1401,8 @@ pub async fn remove_member(
     // An agent's commands go with it, and interactions it or they started
     // can no longer be answered.
     conn.execute("DELETE FROM commands WHERE agent_id = ?1", [user_id]).await?;
+    // So do its live tiles; apps drop them on MemberLeft.
+    conn.execute("DELETE FROM live_tiles WHERE source_id = ?1", [user_id]).await?;
     conn.execute("DELETE FROM interactions WHERE agent_id = ?1 OR user_id = ?1", [user_id]).await?;
     let channels = query_all(
         conn,

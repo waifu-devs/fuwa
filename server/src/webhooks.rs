@@ -3,6 +3,8 @@
 //! like Discord's, so tools made for Discord webhooks work unchanged. Served
 //! where servers are kept (a single process, or the shard holding the server,
 //! which the gateways pass these on to). See `proto/fuwa/v1/webhook.proto`.
+//! The same address with `/tile` sets (POST) or ends (DELETE) one of the
+//! webhook's live tiles (`proto/fuwa/v1/live_tile.proto`).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -11,11 +13,11 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{delete, post};
 use http::{HeaderValue, StatusCode, header};
 use serde::Deserialize;
 
-use crate::api::{WebhookPost, execute_webhook, verify_webhook};
+use crate::api::{WebhookPost, end_webhook_tile, execute_webhook, set_webhook_tile, verify_webhook};
 use crate::app::App;
 use crate::error::{Error, MISROUTED};
 use crate::id::now_ms;
@@ -29,6 +31,7 @@ const MINUTE_MS: i64 = 60_000;
 
 pub fn routes(app: Arc<App>) -> Router {
     let limiter = Arc::new(Limiter::default());
+    let tiles = app.clone();
     Router::new()
         .route(
             "/webhooks/{server_id}/{webhook_id}/{token}",
@@ -45,7 +48,75 @@ pub fn routes(app: Arc<App>) -> Router {
                 },
             ),
         )
+        .route(
+            "/webhooks/{server_id}/{webhook_id}/{token}/tile",
+            post({
+                let app = tiles.clone();
+                move |Path((server_id, webhook_id, token)): Path<(String, String, String)>, body: Bytes| {
+                    let app = app.clone();
+                    async move { set_tile(&app, &server_id, &webhook_id, &token, &body).await }
+                }
+            })
+            .merge(delete(
+                move |Path((server_id, webhook_id, token)): Path<(String, String, String)>,
+                      RawQuery(query): RawQuery| {
+                    let app = tiles.clone();
+                    async move {
+                        let id = query.as_deref().unwrap_or_default().split('&').find_map(|p| p.strip_prefix("id="));
+                        let Some(id) = id else { return answer(StatusCode::BAD_REQUEST, "say which tile with ?id=") };
+                        match end_webhook_tile(&app, &server_id, &webhook_id, &token, id).await {
+                            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                            Err(err) => failed(err),
+                        }
+                    }
+                },
+            )),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY))
+}
+
+/// A live tile as a webhook sends it (`proto/fuwa/v1/live_tile.proto`).
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct TileBody {
+    id: String,
+    title: String,
+    status: String,
+    live: bool,
+    rows: Vec<TileRow>,
+    progress: Option<f32>,
+    action: String,
+    ttl_seconds: Option<i64>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct TileRow {
+    label: String,
+    value: String,
+}
+
+impl TileBody {
+    fn content(&self) -> pb::LiveTileContent {
+        pb::LiveTileContent {
+            title: self.title.clone(),
+            status: self.status.clone(),
+            live: self.live,
+            rows: self.rows.iter().map(|r| pb::LiveTileRow { label: r.label.clone(), value: r.value.clone() }).collect(),
+            progress: self.progress,
+            action: self.action.clone(),
+        }
+    }
+}
+
+async fn set_tile(app: &Arc<App>, server_id: &str, webhook_id: &str, token: &str, body: &[u8]) -> Response {
+    let Ok(body) = serde_json::from_slice::<TileBody>(body) else {
+        return answer(StatusCode::BAD_REQUEST, "the body isn't the JSON a live tile takes");
+    };
+    match set_webhook_tile(app, server_id, webhook_id, token, &body.id, body.content(), body.ttl_seconds).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => failed(err),
+    }
 }
 
 /// The last minute of posts, per webhook.
@@ -205,7 +276,7 @@ fn failed(err: Error) -> Response {
             let status = match &err {
                 Error::InvalidArgument(_) => StatusCode::BAD_REQUEST,
                 Error::NotFound(_) => StatusCode::NOT_FOUND,
-                Error::PermissionDenied(_) => StatusCode::FORBIDDEN,
+                Error::PermissionDenied(_) | Error::FailedPrecondition(_) => StatusCode::FORBIDDEN,
                 Error::ResourceExhausted(_) => StatusCode::INSUFFICIENT_STORAGE,
                 Error::Busy | Error::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
                 _ => {
@@ -231,6 +302,20 @@ mod tests {
         assert_eq!(limiter.take("a", 2_000), Err(MINUTE_MS - 1_000));
         assert!(limiter.take("b", 2_000).is_ok());
         assert!(limiter.take("a", 1_000 + MINUTE_MS).is_ok());
+    }
+
+    #[test]
+    fn reads_tiles_and_ignores_extra_fields() {
+        let body: TileBody = serde_json::from_str(
+            r#"{"id":"final","title":"Cup final","status":"67'","live":true,
+                "rows":[{"label":"Red Foxes","value":"2"}],"progress":0.5,"color":"red"}"#,
+        )
+        .unwrap();
+        let content = body.content();
+        assert_eq!(body.id, "final");
+        assert_eq!(content.rows[0].value, "2");
+        assert_eq!(content.progress, Some(0.5));
+        assert_eq!(body.ttl_seconds, None);
     }
 
     #[test]
