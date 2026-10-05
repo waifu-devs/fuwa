@@ -17,6 +17,7 @@
     { "id": "secure-files", "date": "2026-10-04", "title": "Files in encrypted chats" },
     { "id": "agent-commands", "date": "2026-10-04", "title": "Slash commands and buttons from agents" },
     { "id": "shared-files-elsewhere", "date": "2026-10-05", "title": "Files in channels with other instances" },
-    { "id": "shared-polls", "date": "2026-10-05", "title": "Polls in shared channels" }
+    { "id": "shared-polls", "date": "2026-10-05", "title": "Polls in shared channels" },
+    { "id": "shared-emoji", "date": "2026-10-05", "title": "Custom emoji in shared channels" }
   ]
 }

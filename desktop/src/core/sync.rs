@@ -463,7 +463,7 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             rpc!(api.roles(), list_roles(pb::ListRolesRequest { server_id: id.clone() })),
         )?;
         // An instance from before custom emoji has none to list.
-        let emojis = rpc!(api.emojis(), list_emojis(pb::ListEmojisRequest { server_id: id.clone() }))
+        let emojis = rpc!(api.emojis(), list_emojis(pb::ListEmojisRequest { server_id: id.clone(), ..Default::default() }))
             .await
             .map(|r| r.emojis)
             .unwrap_or_default();

@@ -3,7 +3,7 @@
 
 use tonic::{Request, Response, Status};
 
-use super::{Api, PictureOwner, respond};
+use super::{Api, PictureOwner, Seat, respond, shared};
 use crate::db::{is_unique_violation, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
@@ -56,7 +56,20 @@ impl EmojiService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
+                let req = request.into_inner();
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                // In a channel shown from another server: that server's,
+                // for the picker there. Any other channel changes nothing.
+                if !req.channel_id.is_empty() {
+                    let conn = sdb.read()?;
+                    if let Some(link) = shared::link_of(&conn, &req.channel_id).await? {
+                        access.require_in(&req.channel_id, Permission::ViewChannels)?;
+                        let guest = shared::guest_of(&self.app, &conn, &sdb.id, &account, &access, &link).await?;
+                        drop(conn);
+                        let emojis = shared::guest_emojis(&self.app, &sdb.id, &link, guest).await?;
+                        return Ok(pb::ListEmojisResponse { emojis });
+                    }
+                }
                 Ok(pb::ListEmojisResponse { emojis: store::load_emojis(&*sdb.read()?, &sdb.id).await? })
             }
             .await,

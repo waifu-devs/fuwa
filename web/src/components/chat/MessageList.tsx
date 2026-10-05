@@ -160,7 +160,7 @@ export const MessageList = forwardRef<
   const pending = useFuwa((s) => s.instances[instanceKey]?.pending[at] ?? EMPTY);
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
-  const catalog = useCatalog(instanceKey, serverId);
+  const catalog = useCatalog(instanceKey, serverId, channel);
   const otherEmojis = useMemo(
     () => new Map([...catalog.byId].filter(([, c]) => !c.here).map(([id, c]) => [id, c.emoji])),
     [catalog],

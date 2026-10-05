@@ -20,6 +20,7 @@ use tonic::{Code, Request, Response, Status};
 use super::messages::{self, check_slowmode, load_message};
 use super::{Api, Seat, automod, respond, users};
 use crate::app::App;
+use crate::cluster::calls::MAX_OUTSIDE_EMOJIS;
 use crate::cpb::{self, shared_call::Call};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
@@ -48,6 +49,9 @@ const MAX_GUESTS: usize = 1;
 /// Letters and digits that read the same in any font, as invite codes use.
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 const CODE_LENGTH: usize = 16;
+/// Most custom emoji a home hands a guest's picker, and a guest takes from
+/// a home on another instance.
+const MAX_HOME_EMOJIS: usize = 1000;
 /// What a guest the home keeps out of a channel is told.
 const KEPT_OUT: &str = "this channel's home server has kept you out of it";
 /// What a connection that's gone answers, so the other end can let go too.
@@ -381,12 +385,7 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     message.auto_mod = None;
     // Threads stay in the channel's own server for now.
     no_threads(message);
-    message.emojis = message
-        .emojis
-        .iter()
-        .take(crate::cluster::calls::MAX_OUTSIDE_EMOJIS)
-        .filter_map(|e| their_emoji(e, pictures))
-        .collect();
+    message.emojis = message.emojis.iter().take(MAX_OUTSIDE_EMOJIS).filter_map(|e| their_emoji(e, pictures)).collect();
     message.gif = message.gif.as_ref().and_then(|gif| their_gif(gif, pictures));
     message.poll = message.poll.take().map(|poll| their_poll(poll, at, own)).transpose()?;
     if let Some(webhook) = &mut message.webhook {
@@ -476,6 +475,19 @@ fn their_emoji(emoji: &pb::Emoji, pictures: &Pictures) -> Option<pb::Emoji> {
         animated: emoji.animated,
         ..Default::default()
     })
+}
+
+/// A guest's own server's emoji from another instance, as [`their_emoji`]
+/// reads them, each still naming that server (under its address).
+fn their_emojis(emojis: &[pb::Emoji], at: &str, pictures: &Pictures) -> Vec<pb::Emoji> {
+    emojis
+        .iter()
+        .take(MAX_OUTSIDE_EMOJIS)
+        .filter_map(|emoji| {
+            let server_id = format!("{}@{at}", parse_id("server", &emoji.server_id).ok()?);
+            Some(pb::Emoji { server_id, ..their_emoji(emoji, pictures)? })
+        })
+        .collect()
 }
 
 /// A GIF in a message from another instance, through this instance's proxy.
@@ -633,6 +645,7 @@ pub fn arrived(
             their_guest(send.guest.as_mut(), at, &pictures)?;
             their_text(send)?;
             message_id(&send.reply_to_id)?;
+            send.emojis = their_emojis(&send.emojis, at, &pictures);
         }
         Some(Call::List(list)) => {
             their_guest(list.guest.as_mut(), at, &pictures)?;
@@ -647,6 +660,7 @@ pub fn arrived(
             their_guest(edit.guest.as_mut(), at, &pictures)?;
             parse_id("message", &edit.message_id)?;
             messages::check_content(&edit.content, false)?;
+            edit.emojis = their_emojis(&edit.emojis, at, &pictures);
         }
         Some(Call::Delete(delete)) => {
             their_guest(delete.guest.as_mut(), at, &pictures)?;
@@ -657,7 +671,9 @@ pub fn arrived(
             messages::check_content(&poll.content, true)?;
             poll.poll.as_ref().ok_or_else(|| Error::invalid("poll is required"))?;
             message_id(&poll.reply_to_id)?;
+            poll.emojis = their_emojis(&poll.emojis, at, &pictures);
         }
+        Some(Call::Emojis(emojis)) => their_guest(emojis.guest.as_mut(), at, &pictures)?,
         Some(Call::Vote(vote)) => {
             their_guest(vote.guest.as_mut(), at, &pictures)?;
             parse_id("message", &vote.message_id)?;
@@ -771,6 +787,10 @@ pub fn returned(
         }
         Some(Call::Vote(_) | Call::EndPoll(_)) => {
             out.poll = reply.poll.map(|poll| their_poll(poll, at, own)).transpose()?;
+            return Ok(out);
+        }
+        Some(Call::Emojis(_)) => {
+            out.emojis = reply.emojis.iter().take(MAX_HOME_EMOJIS).filter_map(|e| their_emoji(e, &pictures)).collect();
             return Ok(out);
         }
         Some(Call::Voters(_)) => {
@@ -1375,6 +1395,7 @@ pub(super) async fn guest_send(
     let text = automod::Text { all: &reviewed, content: &req.content };
     review_here(app, sdb, member, access, &channel_id, text, &pictures).await?;
     let files: Vec<String> = req.attachments.iter().map(|file| file.id.clone()).collect();
+    let emojis = own_emojis(app, &*sdb.read()?, &sdb.id, &req.content, link).await?;
     // A poll goes as a call of its own, which a home too old for polls here
     // refuses instead of keeping the message without it.
     let call = match req.poll {
@@ -1383,6 +1404,7 @@ pub(super) async fn guest_send(
             content: req.content,
             poll: Some(poll),
             reply_to_id: req.reply_to_id,
+            emojis,
         }),
         None => Call::Send(cpb::GuestSend {
             guest: Some(guest),
@@ -1390,6 +1412,7 @@ pub(super) async fn guest_send(
             attachments: req.attachments,
             embeds: req.embeds,
             reply_to_id: req.reply_to_id,
+            emojis,
             ..Default::default()
         }),
     };
@@ -1460,13 +1483,131 @@ pub(super) async fn guest_edit(
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
     review_here(app, sdb, member, access, &channel_id, automod::Text::plain(&req.content), &[]).await?;
+    let emojis = own_emojis(app, &*sdb.read()?, &sdb.id, &req.content, link).await?;
     let call = Call::Edit(cpb::GuestEdit {
         guest: Some(guest),
         message_id: req.message_id.clone(),
         content: req.content.clone(),
+        emojis,
     });
     let reply = to_home(app, &sdb.id, link, call).await?;
     shown_one(app, &sdb.id, link, reply.message).await
+}
+
+/// The custom emoji of the channel's home server, for the picker in a
+/// channel this server shows from it.
+pub(super) async fn guest_emojis(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+) -> Result<Vec<pb::Emoji>> {
+    let call = Call::Emojis(cpb::GuestEmojis { guest: Some(guest) });
+    Ok(to_home(app, server_id, link, call).await?.emojis)
+}
+
+/// This server's own custom emoji that `content` uses, for a home that
+/// doesn't have them: read from this server, so never another server's the
+/// author belongs to, and only this instance's own pictures leave for
+/// another instance.
+async fn own_emojis(
+    app: &App,
+    conn: &turso::Connection,
+    server_id: &str,
+    content: &str,
+    link: &LinkRow,
+) -> Result<Vec<pb::Emoji>> {
+    let ids: Vec<String> =
+        messages::emoji_tokens(content).into_iter().take(MAX_OUTSIDE_EMOJIS).map(str::to_string).collect();
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let public_url = &app.settings().public_url;
+    let mut emojis = store::load_emojis_by_id(conn, server_id, &ids).await?;
+    for emoji in &mut emojis {
+        *emoji = shown_emoji(std::mem::take(emoji));
+        if link.elsewhere() {
+            emoji.url = own_picture(&emoji.url, public_url);
+        }
+    }
+    emojis.retain(|emoji| !emoji.url.is_empty());
+    Ok(emojis)
+}
+
+/// An emoji as another server sees it: what shows it, not who made it.
+fn shown_emoji(emoji: pb::Emoji) -> pb::Emoji {
+    pb::Emoji {
+        id: emoji.id,
+        server_id: emoji.server_id,
+        name: emoji.name,
+        url: emoji.url,
+        animated: emoji.animated,
+        ..Default::default()
+    }
+}
+
+/// A guest's emoji as the home keeps them with its message: not the home
+/// server's own (everyone shows those from its list, [`home_emojis`]); on
+/// this instance only pictures of this instance's uploads (the guest's
+/// server read them, and this keeps a slip there from putting any other
+/// link in a message); and only ones the text uses. From another instance
+/// [`arrived`] has already put them through this instance's proxy.
+fn guest_emojis_kept(
+    had: Vec<pb::Emoji>,
+    sent: Vec<pb::Emoji>,
+    content: &str,
+    home_id: &str,
+    public_url: &str,
+    elsewhere: bool,
+) -> Vec<pb::Emoji> {
+    let uploads = format!("{}/media/", public_url.trim_end_matches('/'));
+    let sent = sent
+        .into_iter()
+        .filter(|e| {
+            e.server_id != home_id
+                && parse_id("emoji", &e.id).is_ok()
+                && (elsewhere || (e.url.starts_with(&uploads) && crate::media::id_in_url(&e.url).is_some()))
+        })
+        .map(shown_emoji)
+        .collect();
+    messages::kept_emojis(had, sent, content)
+}
+
+/// Puts the home server's own custom emoji that each message uses on it,
+/// for guests, whose apps only know their own server's: one read for the
+/// lot, at most [`MAX_OUTSIDE_EMOJIS`] on a message. One since deleted
+/// shows as its name, as it does here.
+async fn home_emojis(conn: &turso::Connection, home_id: &str, messages: &mut [pb::Message]) -> Result<()> {
+    let mut wanted: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for message in messages.iter() {
+        for id in messages::emoji_tokens(&message.content).into_iter().take(MAX_OUTSIDE_EMOJIS) {
+            if !message.emojis.iter().any(|e| e.id == id) && seen.insert(id) {
+                wanted.push(id.to_string());
+            }
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let found: HashMap<String, pb::Emoji> = store::load_emojis_by_id(conn, home_id, &wanted)
+        .await?
+        .into_iter()
+        .map(|emoji| (emoji.id.clone(), shown_emoji(emoji)))
+        .collect();
+    for message in messages {
+        for id in messages::emoji_tokens(&message.content) {
+            if message.emojis.len() >= MAX_OUTSIDE_EMOJIS {
+                break;
+            }
+            if let Some(emoji) = found.get(id)
+                && !message.emojis.iter().any(|e| e.id == id)
+            {
+                message.emojis.push(emoji.clone());
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) async fn guest_delete(
@@ -1560,6 +1701,7 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Vote(vote) => home_vote(app, &sdb, vote).await,
         Call::EndPoll(end) => home_end_poll(&sdb, end).await,
         Call::Voters(voters) => home_voters(app, &sdb, voters).await,
+        Call::Emojis(emojis) => home_emoji_list(app, &sdb, emojis).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
@@ -1756,6 +1898,7 @@ async fn home_poll(app: &Arc<App>, sdb: &ServerDb, poll: cpb::GuestPoll) -> Resu
         guest: poll.guest,
         content: poll.content,
         reply_to_id: poll.reply_to_id,
+        emojis: poll.emojis,
         ..Default::default()
     };
     home_send(app, sdb, send, Some(checked)).await
@@ -1785,6 +1928,15 @@ async fn home_send(
         return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
     }
     let mut send = send;
+    let public_url = app.settings().public_url.clone();
+    let emojis = guest_emojis_kept(
+        vec![],
+        std::mem::take(&mut send.emojis),
+        &send.content,
+        &sdb.id,
+        &public_url,
+        elsewhere.is_some(),
+    );
     let files = take_files(app, sdb, &guest, &mut send.attachments, &send.files).await?;
     let file_bytes: i64 = send.attachments.iter().map(|file| file.size).sum();
     // AutoMod reads the poll, the embeds' words and the files' names with the text.
@@ -1859,6 +2011,7 @@ async fn home_send(
                 kind: pb::MessageKind::Unspecified as i32,
                 shared: Some(pb::SharedAuthor { user: Some(user), server: Some(server) }),
                 poll: poll.clone(),
+                emojis: emojis.clone(),
                 ..Default::default()
             };
             messages::insert_message(conn, &message, now).await?;
@@ -1871,7 +2024,9 @@ async fn home_send(
         // Taken for a message that wasn't written: nothing has them.
         crate::attachments::drop_soon(app, &sdb.id, files);
     }
-    Ok(cpb::SharedReply { message: Some(message?), ..Default::default() })
+    let mut message = message?;
+    home_emojis(&*sdb.read()?, &sdb.id, std::slice::from_mut(&mut message)).await?;
+    Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
 
 /// Takes the files a guest sends into the home, before the write, checked
@@ -2075,6 +2230,7 @@ async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cp
     super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
+    home_emojis(&conn, &sdb.id, &mut messages).await?;
     let mut authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
     if user.id.contains('@') {
         let public_url = &app.settings().public_url;
@@ -2102,6 +2258,7 @@ async fn home_get(app: &App, sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::
     super::polls::mark_mine(&conn, &user.id, std::slice::from_mut(&mut message)).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
+    home_emojis(&conn, &sdb.id, std::slice::from_mut(&mut message)).await?;
     let mut author = store::user(&conn, &message.author_id).await?;
     if user.id.contains('@') {
         let public_url = &app.settings().public_url;
@@ -2154,8 +2311,11 @@ fn edited_text(message: &pb::Message, content: &str) -> String {
     messages::reviewed_text(&edited).into_owned()
 }
 
-async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
+async fn home_edit(app: &Arc<App>, sdb: &ServerDb, mut edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
     let guest = edit.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
+    let elsewhere = guest.server.as_ref().is_some_and(|s| s.id.contains('@'));
+    let public_url = app.settings().public_url.clone();
+    let sent = std::mem::take(&mut edit.emojis);
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     // Only new text the author wrote goes to a provider.
     let before = load_message(&*sdb.read()?, &sdb.id, &edit.message_id).await?;
@@ -2208,6 +2368,14 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
             }
             let old_size = messages::stored_size(&message);
             message.content = edit.content.clone();
+            message.emojis = guest_emojis_kept(
+                std::mem::take(&mut message.emojis),
+                sent.clone(),
+                &edit.content,
+                &sdb.id,
+                &public_url,
+                elsewhere,
+            );
             message.edited_at = Some(timestamp(now_ms()));
             messages::save_edit(conn, &message, old_size).await?;
             message.shared = Some(pb::SharedAuthor { user: Some(user), server: Some(server) });
@@ -2216,7 +2384,36 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
         })
         .await?
         .map_err(Error::denied)?;
+    let mut message = message;
+    home_emojis(&*sdb.read()?, &sdb.id, std::slice::from_mut(&mut message)).await?;
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
+}
+
+/// The home server's custom emoji, for a guest's picker in the channel.
+async fn home_emoji_list(app: &App, sdb: &ServerDb, call: cpb::GuestEmojis) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    // A server on another instance counts as one sender here, reads too.
+    let elsewhere = guest.server.as_ref().map(|s| s.id.clone()).filter(|id| id.contains('@'));
+    if let Some(server_id) = &elsewhere
+        && !app.federation.take_send(server_id, app.settings().limits.shared_remote_sends_per_minute)
+    {
+        return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
+    }
+    let public_url = &app.settings().public_url;
+    let mut emojis: Vec<pb::Emoji> =
+        store::load_emojis(&conn, &sdb.id).await?.into_iter().take(MAX_HOME_EMOJIS).map(shown_emoji).collect();
+    if elsewhere.is_some() {
+        for emoji in &mut emojis {
+            emoji.url = own_picture(&emoji.url, public_url);
+        }
+        emojis.retain(|emoji| !emoji.url.is_empty());
+    }
+    Ok(cpb::SharedReply { emojis, ..Default::default() })
 }
 
 async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
@@ -2806,7 +3003,8 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
             let sdb = app.servers.get(&event.server_id).await?;
             let conn = sdb.read()?;
             let home = this_server(&conn, &sdb.id).await?;
-            decorate(&conn, Some(&home), std::slice::from_mut(m)).await
+            decorate(&conn, Some(&home), std::slice::from_mut(m)).await?;
+            home_emojis(&conn, &sdb.id, std::slice::from_mut(m)).await
         }
         .await;
         if decorated.is_err() {
@@ -3620,6 +3818,70 @@ mod tests {
     /// A picture from another instance, as this one's proxy would link it.
     fn proxied(url: &str) -> String {
         format!("{OWN}/media/outside/sig?url={url}")
+    }
+
+    #[test]
+    fn guests_emoji_keep_only_their_servers_pictures_the_text_uses() {
+        let emoji = |id: &str, server_id: &str, url: &str| pb::Emoji {
+            id: id.into(),
+            server_id: server_id.into(),
+            name: "blob".into(),
+            url: url.into(),
+            creator_id: "someone".into(),
+            size: 100,
+            ..Default::default()
+        };
+        let upload = format!("{OWN}/media/01k6q7z8a1b2c3d4e5f6g7h8j9");
+        let sent = vec![
+            emoji("01K6Q7Z8A1B2C3D4E5F6G7H8J1", "guest", &upload),
+            emoji("01K6Q7Z8A1B2C3D4E5F6G7H8J2", "home", &upload),
+            emoji("01K6Q7Z8A1B2C3D4E5F6G7H8J3", "guest", "https://elsewhere.example/media/01k6q7z8a1b2c3d4e5f6g7h8j9"),
+            emoji("01K6Q7Z8A1B2C3D4E5F6G7H8J4", "guest", &format!("{OWN}/not-media/x")),
+            emoji("01K6Q7Z8A1B2C3D4E5F6G7H8J5", "guest", &upload),
+            emoji("not an id", "guest", &upload),
+        ];
+        let text = "<:blob:01K6Q7Z8A1B2C3D4E5F6G7H8J1> <:blob:01K6Q7Z8A1B2C3D4E5F6G7H8J2> <:blob:01K6Q7Z8A1B2C3D4E5F6G7H8J3> <:blob:01K6Q7Z8A1B2C3D4E5F6G7H8J4> <:blob:not an id>";
+        let kept = guest_emojis_kept(vec![], sent.clone(), text, "home", OWN, false);
+        assert_eq!(kept.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["01K6Q7Z8A1B2C3D4E5F6G7H8J1"]);
+        assert!(kept[0].creator_id.is_empty() && kept[0].size == 0);
+        // From another instance [`arrived`] has checked the pictures already.
+        let kept = guest_emojis_kept(vec![], sent, text, "home", OWN, true);
+        let ids = kept.iter().map(|e| e.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, ["01K6Q7Z8A1B2C3D4E5F6G7H8J1", "01K6Q7Z8A1B2C3D4E5F6G7H8J3", "01K6Q7Z8A1B2C3D4E5F6G7H8J4"]);
+    }
+
+    #[test]
+    fn emoji_from_another_instance_name_their_server_there() {
+        let there = Pictures { origin: "https://night-owls.example", link: &proxied };
+        let sent = vec![
+            pb::Emoji {
+                id: "01K6Q7Z8A1B2C3D4E5F6G7H8J1".into(),
+                server_id: "01K6Q7Z8A1B2C3D4E5F6G7H8J9".into(),
+                name: "blob".into(),
+                url: "https://night-owls.example/media/e".into(),
+                creator_id: "someone".into(),
+                ..Default::default()
+            },
+            pb::Emoji {
+                id: "01K6Q7Z8A1B2C3D4E5F6G7H8J2".into(),
+                server_id: "01K6Q7Z8A1B2C3D4E5F6G7H8J9@third.example".into(),
+                name: "cat".into(),
+                url: "https://night-owls.example/media/c".into(),
+                ..Default::default()
+            },
+            pb::Emoji {
+                id: "01K6Q7Z8A1B2C3D4E5F6G7H8J3".into(),
+                server_id: "01K6Q7Z8A1B2C3D4E5F6G7H8J9".into(),
+                name: "far".into(),
+                url: "https://third.example/media/f".into(),
+                ..Default::default()
+            },
+        ];
+        let read = their_emojis(&sent, "night-owls.example", &there);
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert_eq!(read[0].server_id, "01K6Q7Z8A1B2C3D4E5F6G7H8J9@night-owls.example");
+        assert_eq!(read[0].url, proxied("https://night-owls.example/media/e"));
+        assert!(read[0].creator_id.is_empty());
     }
 
     #[test]

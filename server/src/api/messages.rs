@@ -108,7 +108,7 @@ fn role_tokens(content: &str) -> Vec<&str> {
 /// The ids of the custom emoji written as `<:name:id>` or `<a:name:id>` in
 /// `content`, once each, in order. One pass: a token is at most 70 bytes, so
 /// its end is looked for only that far.
-fn emoji_tokens(content: &str) -> Vec<&str> {
+pub(super) fn emoji_tokens(content: &str) -> Vec<&str> {
     const LONGEST: usize = 70;
     let mut ids = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -165,7 +165,7 @@ async fn outside_emojis(
 
 /// An edited message's emoji from other servers: the ones it had that the
 /// new text still uses, then newly checked ones.
-fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> Vec<pb::Emoji> {
+pub(super) fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> Vec<pb::Emoji> {
     let used: std::collections::HashSet<&str> = emoji_tokens(content).into_iter().collect();
     let mut kept: Vec<pb::Emoji> = Vec::new();
     for emoji in had.into_iter().chain(checked) {
@@ -899,8 +899,9 @@ impl MessageService for Api {
                             "GIFs can't be sent in channels shared from another server yet".into(),
                         ));
                     }
-                    // Emoji from elsewhere are for this server's own channels;
-                    // the home shows its guests' custom emoji as their names.
+                    // Emoji from other servers are for this server's own
+                    // channels; this server's own go along, read here
+                    // (`shared::own_emojis`).
                     req.emojis.clear();
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });

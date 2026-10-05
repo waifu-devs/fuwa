@@ -718,7 +718,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 })
         }
         "list_roles" => list_roles(cx, sid()?).await,
-        "list_emojis" => call!(cx, emoji_service_client::EmojiServiceClient.list_emojis(pb::ListEmojisRequest { server_id: sid()? }))
+        "list_emojis" => call!(cx, emoji_service_client::EmojiServiceClient.list_emojis(pb::ListEmojisRequest { server_id: sid()?, ..Default::default() }))
             .map(|r| json!({ "emojis": r.emojis.iter().map(view::emoji).collect::<Vec<_>>() })),
         "get_profile" => {
             let req = pb::GetProfileRequest { user_id: args.text("user_id")? };

@@ -7,7 +7,8 @@
  * instance checks the sender is in that server and stores its picture link
  * with the message, so everyone in the channel sees it. Emoji from other
  * instances aren't offered: their pictures would load from someone else's
- * server.
+ * server. In a channel shown from another server the picker offers that
+ * server's emoji (through this instance) and this one's own.
  *
  * What to offer and how names and searches work is in emoji-search.ts; this
  * file loads the standard set and keeps the catalog, recently used emoji and
@@ -15,7 +16,10 @@
  */
 
 import { useMemo, useSyncExternalStore } from "react";
+import { useHomeEmojis } from "@/fuwa/homeEmojis";
 import { useFuwa } from "@/fuwa/store";
+import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
+import { instanceHas } from "@/lib/compat";
 import { catalogOf, type Catalog, type StandardGroup } from "@/lib/emoji-search";
 import { reportError, reportTiming } from "@/lib/reports";
 
@@ -70,11 +74,24 @@ export function useStandard(): StandardGroup[] | null {
 
 // ───────────────────────── Servers' own ─────────────────────────
 
-/** The catalog for writing in a server, kept until its servers or emoji change. */
-export function useCatalog(instanceKey: string, serverId: string): Catalog {
+/**
+ * The catalog for writing in a server, kept until its servers or emoji change.
+ * In a channel shown from another server, once its instance takes them
+ * there: the home's emoji, then this server's own, and no others (the home
+ * keeps only those two).
+ */
+export function useCatalog(instanceKey: string, serverId: string, channel?: Channel): Catalog {
   const servers = useFuwa((s) => s.instances[instanceKey]?.servers);
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis);
-  return useMemo(() => catalogOf(servers ?? [], emojis ?? {}, serverId), [servers, emojis, serverId]);
+  const sharedEmoji = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-emoji"));
+  const home = channel?.shared && !channel.shared.home && sharedEmoji ? channel.shared.homeServer : undefined;
+  const homeEmojis = useHomeEmojis(instanceKey, serverId, home ? (channel?.id ?? "") : "");
+  return useMemo(() => {
+    if (!home) return catalogOf(servers ?? [], emojis ?? {}, serverId);
+    const own = (servers ?? []).filter((s) => s.id === serverId);
+    const ref = { id: home.id, name: home.name, iconUrl: home.iconUrl } as Server;
+    return catalogOf([ref, ...own], { [home.id]: homeEmojis, [serverId]: emojis?.[serverId] ?? [] }, home.id);
+  }, [servers, emojis, serverId, home, homeEmojis]);
 }
 
 // ───────────────────────── Recently used and skin tone ─────────────────────────

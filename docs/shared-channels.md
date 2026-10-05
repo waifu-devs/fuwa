@@ -141,6 +141,16 @@ audit log notes an instance admin did it.
   as for its own polls. When someone's account is deleted on their own
   instance, their votes at another server's home stay, as their messages
   there do.
+- **Custom emoji** show on both sides. The home adds its own server's
+  emoji to each message it hands a guest (it doesn't keep them with the
+  message, since its own people have them), so one deleted since shows as
+  its name, as at home. A guest's own server's emoji go with what they
+  write, read from the guest's server (never another server they belong
+  to), and the home keeps them with the message, only as pictures of an
+  upload on this instance. In a channel shown from another server,
+  `ListEmojis` with its `channel_id` gives the home's emoji for the
+  picker (`GuestEmojis`); the app offers those and the guest server's own.
+  Writing the home's emoji needs nothing more: the home shows its own.
 - `Channel.shared` tells apps a channel is shared: from here with which
   servers (`home`), or from which server and channel (not `home`).
   `SharedChannelsUpdated` tells managers to re-read `ListConnections`.
