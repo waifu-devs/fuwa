@@ -328,7 +328,7 @@ impl AccountService for Api {
                 if !self.app.node()?.enable_totp(&account.id, &pending, step, &hashes).await? {
                     return Err(Error::FailedPrecondition("the setup changed meanwhile; start again".into()));
                 }
-                tracing::info!(account = %account.id, "two-step sign-in turned on");
+                tracing::info!("two-step sign-in turned on");
                 Ok(pb::EnableTwoFactorResponse { backup_codes })
             }
             .await,
@@ -347,7 +347,7 @@ impl AccountService for Api {
                 self.confirm_password(&account, &req.password).await?;
                 self.confirm_code(&account, &req.code).await?;
                 self.app.node()?.disable_totp(&account.id).await?;
-                tracing::info!(account = %account.id, "two-step sign-in turned off");
+                tracing::info!("two-step sign-in turned off");
                 Ok(pb::DisableTwoFactorResponse {})
             }
             .await,

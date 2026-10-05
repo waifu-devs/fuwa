@@ -206,7 +206,7 @@ pub async fn forget_loose(app: &App, server_id: &str, media_id: &str) {
         .await
     };
     if gone.await.is_err() {
-        tracing::warn!(media = %media_id, "couldn't forget a deleted file");
+        tracing::warn!("couldn't forget a deleted file");
     }
 }
 

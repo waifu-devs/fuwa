@@ -209,7 +209,7 @@ fn failed(err: Error) -> Response {
                 Error::ResourceExhausted(_) => StatusCode::INSUFFICIENT_STORAGE,
                 Error::Busy | Error::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
                 _ => {
-                    tracing::error!(error = %err, "a webhook post failed");
+                    tracing::error!("a webhook post failed");
                     return answer(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
                 }
             };

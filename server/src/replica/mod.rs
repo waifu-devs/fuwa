@@ -259,16 +259,16 @@ impl Replica {
             ours = !state.fenced;
             if ours
                 && state.position.is_some()
-                && let Err(err) = self.ship(&tracked, &mut state).await
+                && let Err(_) = self.ship(&tracked, &mut state).await
             {
-                tracing::warn!(file = %name, error = %err, "couldn't ship the last commits to the replica");
+                tracing::warn!("couldn't ship the last commits to the replica");
             }
         }
         if deleted
             && ours
-            && let Err(err) = self.store.put(&format!("{name}/deleted"), now_ms().to_string().into()).await
+            && let Err(_) = self.store.put(&format!("{name}/deleted"), now_ms().to_string().into()).await
         {
-            tracing::warn!(file = %name, error = %err, "couldn't mark the file deleted in the replica");
+            tracing::warn!("couldn't mark the file deleted in the replica");
         }
         let _ = std::fs::remove_file(self.position_path(name));
     }
@@ -296,7 +296,7 @@ impl Replica {
             let _ = std::fs::create_dir_all(dir);
         }
         if std::fs::write(&owed, b"").is_err() {
-            tracing::warn!(file = %name, "couldn't note a release to try again");
+            tracing::warn!("couldn't note a release to try again");
         }
         self.try_release(name).await;
     }
@@ -331,7 +331,7 @@ impl Replica {
         }
         .await;
         if released.is_err() {
-            tracing::warn!(file = %name, "couldn't delete the replica of a server that moved away; trying again later");
+            tracing::warn!("couldn't delete the replica of a server that moved away; trying again later");
             crate::reports::server_error("replica_release", Some("replica"));
             return false;
         }
@@ -378,8 +378,8 @@ impl Replica {
             if let Some(copied) = copied.as_mut() {
                 copied.remove(id);
             }
-            if let Err(err) = self.store.delete(&format!("media/{id}")).await {
-                tracing::warn!(media = %id, error = %err, "couldn't delete a picture from the replica");
+            if self.store.delete(&format!("media/{id}")).await.is_err() {
+                tracing::warn!("couldn't delete a picture from the replica");
             }
         }
     }
@@ -434,8 +434,8 @@ impl Replica {
             let _ = task.await;
         }
         self.sync_files().await;
-        if let Err(err) = self.sync_media().await {
-            tracing::warn!(error = %err, "couldn't copy new pictures to the replica");
+        if self.sync_media().await.is_err() {
+            tracing::warn!("couldn't copy new pictures to the replica");
         }
     }
 
@@ -447,25 +447,22 @@ impl Replica {
                 match self.sync(&tracked, &mut state).await {
                     Ok(()) => {
                         if state.failures > 0 {
-                            tracing::info!(file = %tracked.name, "replicating again");
+                            tracing::info!("replicating again");
                         }
                         state.failures = 0;
                     }
-                    Err(err) => {
+                    Err(_) => {
                         state.failures += 1;
                         // The first failure, then about once a minute at the default interval.
                         if state.failures % 60 == 1 {
-                            tracing::warn!(file = %tracked.name, error = %err, failures = state.failures, "couldn't replicate");
+                            tracing::warn!(failures = state.failures, "couldn't replicate");
                         }
                         if self.too_far_behind(&tracked) {
-                            tracing::warn!(
-                                file = %tracked.name,
-                                "the replica is too far behind; folding the log into the file anyway, and starting a new generation once the replica is back"
-                            );
+                            tracing::warn!("the replica is too far behind; folding the log into the file anyway, and starting a new generation once the replica is back");
                             state.position = None;
                             let _ = std::fs::remove_file(self.position_path(&tracked.name));
-                            if let Err(err) = fold(&tracked.db).await {
-                                tracing::warn!(file = %tracked.name, error = %err, "couldn't fold the log into the file");
+                            if fold(&tracked.db).await.is_err() {
+                                tracing::warn!("couldn't fold the log into the file");
                             }
                         }
                     }
@@ -533,7 +530,7 @@ impl Replica {
         };
         if !continues {
             if state.position.is_some() {
-                tracing::info!(file = %file.name, "the files on disk moved on from the replica; starting a new generation");
+                tracing::info!("the files on disk moved on from the replica; starting a new generation");
             }
             state.position = None;
             self.start_generation(file, state).await?;
@@ -645,11 +642,11 @@ impl Replica {
         self.save_position(&file.name, &position)?;
         state.position = Some(position);
         state.fence_checked = Some(Instant::now());
-        tracing::debug!(file = %file.name, %generation, bytes = base, "started a new replica generation");
+        tracing::debug!(%generation, bytes = base, "started a new replica generation");
 
         let keep: BTreeSet<String> = [Some(generation), previous].into_iter().flatten().collect();
-        if let Err(err) = self.prune(&file.name, &keep).await {
-            tracing::warn!(file = %file.name, error = %err, "couldn't delete old replica generations");
+        if self.prune(&file.name, &keep).await.is_err() {
+            tracing::warn!("couldn't delete old replica generations");
         }
         Ok(())
     }
@@ -670,11 +667,7 @@ impl Replica {
         match current {
             Some(current) if current.writer.as_deref().is_some_and(|writer| writer != self.writer) => {
                 state.fenced = true;
-                tracing::error!(
-                    file = %file.name,
-                    replica = %self.store.describe(),
-                    "another fuwa process is replicating this file to the same place; this one stopped replicating it"
-                );
+                tracing::error!(replica = %self.store.describe(), "another fuwa process is replicating this file to the same place; this one stopped replicating it");
             }
             Some(current) if current.generation != generation => state.position = None,
             _ => {}
@@ -1089,8 +1082,8 @@ pub async fn prepare(
         Part::Directory => restore_directory(store, data, key).await?,
         Part::Shard(shard) => restore_shard(store, data, key, shard).await?,
     };
-    for name in &restored.incomplete {
-        tracing::warn!(file = %name, "its replica stopped short; restored as far as it went");
+    for _ in &restored.incomplete {
+        tracing::warn!("its replica stopped short; restored as far as it went");
     }
     tracing::info!(
         node = restored.node,

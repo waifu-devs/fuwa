@@ -277,8 +277,8 @@ impl Provider {
         if stored.trim().is_empty() {
             return Provider::default();
         }
-        serde_json::from_str(stored).unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "ignoring a stored identity provider that doesn't read");
+        serde_json::from_str(stored).unwrap_or_else(|_| {
+            tracing::warn!("ignoring a stored identity provider that doesn't read");
             Provider::default()
         })
     }

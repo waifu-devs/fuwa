@@ -499,8 +499,8 @@ impl Sfu {
                 Ok(ip) => vec![ip],
                 Err(_) => match tokio::net::lookup_host((advertised.host.as_str(), port)).await {
                     Ok(found) => found.map(|addr| addr.ip()).collect(),
-                    Err(err) => {
-                        tracing::warn!(address = %advertised.host, error = %err, "couldn't look up a media address");
+                    Err(_) => {
+                        tracing::warn!(address = %advertised.host, "couldn't look up a media address");
                         vec![]
                     }
                 },
@@ -542,8 +542,8 @@ async fn accept_tcp(listener: TcpListener, packets: mpsc::Sender<Tcp>, shutdown:
             _ = shutdown.cancelled() => return,
             accepted = listener.accept() => match accepted {
                 Ok(accepted) => accepted,
-                Err(err) => {
-                    tracing::debug!(error = %err, "couldn't take a call's TCP connection");
+                Err(_) => {
+                    tracing::debug!("couldn't take a call's TCP connection");
                     continue;
                 }
             },
@@ -801,7 +801,7 @@ impl Client {
         };
         let json = serde_json::to_string(&signal).unwrap_or_default();
         if !matches!(channel.write(false, json.as_bytes()), Ok(true)) {
-            tracing::debug!(client = self.id, "couldn't tell an app something over its data channel");
+            tracing::debug!("couldn't tell an app something over its data channel");
         }
     }
 
@@ -863,7 +863,7 @@ impl Client {
                 self.offers.retain(|at| now.duration_since(*at) < OFFER_WINDOW);
                 self.offers.push_back(now);
                 if self.offers.len() > MAX_OFFERS || !offer_allowed(&sdp) {
-                    tracing::debug!(client = self.id, "an app's offer asked for too much; hanging it up");
+                    tracing::debug!("an app's offer asked for too much; hanging it up");
                     self.rtc.disconnect();
                     return;
                 }
@@ -884,15 +884,15 @@ impl Client {
                         }
                         self.say(Signal::Answer { sdp: answer.to_sdp_string() });
                     }
-                    Err(err) => tracing::debug!(client = self.id, error = %err, "an app's offer didn't work"),
+                    Err(_) => tracing::debug!("an app's offer didn't work"),
                 }
             }
             Signal::Answer { sdp } => {
                 let (Ok(answer), Some(pending)) = (SdpAnswer::from_sdp_string(&sdp), self.pending.take()) else {
                     return;
                 };
-                if let Err(err) = self.rtc.sdp_api().accept_answer(pending, answer) {
-                    tracing::debug!(client = self.id, error = %err, "an app's answer didn't work");
+                if self.rtc.sdp_api().accept_answer(pending, answer).is_err() {
+                    tracing::debug!("an app's answer didn't work");
                     self.rtc.disconnect();
                     return;
                 }
@@ -925,8 +925,8 @@ impl Client {
             self.negotiate();
             let output = match self.rtc.poll_output() {
                 Ok(output) => output,
-                Err(err) => {
-                    tracing::debug!(client = self.id, error = %err, "a call connection failed");
+                Err(_) => {
+                    tracing::debug!("a call connection failed");
                     self.rtc.disconnect();
                     return None;
                 }
@@ -1106,8 +1106,8 @@ impl Client {
         }
         let writer = self.rtc.writer(mid)?;
         let pt = writer.match_params(data.params)?;
-        if let Err(err) = writer.write(pt, data.network_time, time, data.data.clone()) {
-            tracing::debug!(client = self.id, error = %err, "couldn't pass a frame on");
+        if writer.write(pt, data.network_time, time, data.data.clone()).is_err() {
+            tracing::debug!("couldn't pass a frame on");
             self.rtc.disconnect();
         }
         ask
@@ -1121,8 +1121,8 @@ impl Client {
         let Some(mid) = self.track_from(origin, from) else { return };
         let Some(writer) = self.rtc.writer(mid) else { return };
         let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Opus).map(|p| p.pt()) else { return };
-        if let Err(err) = writer.write(pt, now, time, frame.to_vec()) {
-            tracing::debug!(client = self.id, error = %err, "couldn't pass a bridge's sound on");
+        if writer.write(pt, now, time, frame.to_vec()).is_err() {
+            tracing::debug!("couldn't pass a bridge's sound on");
         }
     }
 }
@@ -1375,9 +1375,9 @@ impl Engine {
         let Ok(receive) = Receive::new(proto, source, destination, packet) else { return };
         let input = Input::Receive(Instant::now(), receive);
         if let Some(client) = self.clients.iter_mut().find(|c| c.rtc.accepts(&input))
-            && let Err(err) = client.rtc.handle_input(input)
+            && let Err(_) = client.rtc.handle_input(input)
         {
-            tracing::debug!(client = client.id, error = %err, "a call connection failed");
+            tracing::debug!("a call connection failed");
             client.rtc.disconnect();
         }
     }
@@ -1479,7 +1479,7 @@ impl Engine {
                 Ok(candidate) => {
                     rtc.add_local_candidate(candidate);
                 }
-                Err(err) => tracing::warn!(address = %addr, error = %err, "a media address can't be used"),
+                Err(_) => tracing::warn!(address = %addr, "a media address can't be used"),
             }
         }
         let answer = rtc
@@ -1653,9 +1653,9 @@ impl Engine {
                 client.rtc.disconnect();
             }
             if client.rtc.is_alive()
-                && let Err(err) = client.rtc.handle_input(Input::Timeout(now))
+                && let Err(_) = client.rtc.handle_input(Input::Timeout(now))
             {
-                tracing::debug!(client = client.id, error = %err, "a call connection failed");
+                tracing::debug!("a call connection failed");
                 client.rtc.disconnect();
             }
         }
@@ -1774,9 +1774,9 @@ impl Engine {
     async fn transmit(&mut self, transmit: str0m::net::Transmit) {
         match transmit.proto {
             Protocol::Udp => {
-                if let Err(err) = self.udp.send_to(&transmit.contents, transmit.destination).await {
+                if self.udp.send_to(&transmit.contents, transmit.destination).await.is_err() {
                     // Never the address: it's a participant's.
-                    tracing::debug!(error = %err, "couldn't send a call packet");
+                    tracing::debug!("couldn't send a call packet");
                 }
             }
             Protocol::Tcp => {

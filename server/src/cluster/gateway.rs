@@ -397,7 +397,7 @@ impl Gateway {
                     Err(err) => Err(err),
                 };
                 if !patience.wait().await {
-                    return gave_up(parts.uri.path(), failed);
+                    return gave_up(failed);
                 }
             },
             Target::Shard => {
@@ -423,7 +423,7 @@ impl Gateway {
                         Err(status) => return grpc_error(status),
                     };
                     if !patience.wait().await {
-                        return gave_up(parts.uri.path(), failed);
+                        return gave_up(failed);
                     }
                     refresh = true;
                 }
@@ -463,12 +463,11 @@ impl Gateway {
                 std::future::poll_fn(|cx| channel.poll_ready(cx)).await?;
                 channel.call(request).await
             };
-            let err = match sent.await {
-                Ok(response) => return response.map(Body::new),
-                Err(err) => err,
-            };
+            if let Ok(response) = sent.await {
+                return response.map(Body::new);
+            }
             if !reads || !patience.wait().await {
-                tracing::warn!(error = %err, "couldn't reach the directory");
+                tracing::warn!("couldn't reach the directory");
                 return (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
                     .into_response();
             }
@@ -493,7 +492,7 @@ impl Gateway {
                     Ok(response) if response.headers().contains_key(MISROUTED) => {}
                     Ok(response) if response.headers().contains_key(NOT_READY) => {}
                     Ok(response) => return response,
-                    Err(err) => tracing::debug!(error = %err, "couldn't reach a shard for a webhook post"),
+                    Err(_) => tracing::debug!("couldn't reach a shard for a webhook post"),
                 },
                 Err(status) if status.code() == tonic::Code::Unavailable => {}
                 Err(status) if status.code() == tonic::Code::NotFound => {
@@ -686,11 +685,11 @@ async fn follow_settings(gateway: Arc<Gateway>) {
                     }
                 }
             }
-            Err(err) if away_since.elapsed() < gateway.config.cluster.ride_out => {
-                tracing::info!(directory = %gateway.directory_url, error = %err.message(), "can't reach the directory yet")
+            Err(_) if away_since.elapsed() < gateway.config.cluster.ride_out => {
+                tracing::info!(directory = %gateway.directory_url, "can't reach the directory yet")
             }
-            Err(err) => {
-                tracing::warn!(directory = %gateway.directory_url, error = %err.message(), "can't reach the directory")
+            Err(_) => {
+                tracing::warn!(directory = %gateway.directory_url, "can't reach the directory")
             }
         }
         tokio::select! {
@@ -719,20 +718,20 @@ fn grpc_error(status: Status) -> Response {
     status.into_http::<Body>()
 }
 
-fn unreachable_part(err: &tonic::transport::Error) -> Status {
-    tracing::warn!(error = %err, "a part of this instance didn't answer");
+fn unreachable_part() -> Status {
+    tracing::warn!("a part of this instance didn't answer");
     Status::unavailable(UNREACHABLE)
 }
 
 /// What a call gets once its part has been waited for long enough: the last
 /// answer it gave, or "unavailable" if it never answered.
-fn gave_up(path: &str, failed: Result<Response, tonic::transport::Error>) -> Response {
+fn gave_up(failed: Result<Response, tonic::transport::Error>) -> Response {
     match failed {
         Ok(response) => {
-            tracing::warn!(path, "a part of this instance stayed unavailable; gave up waiting");
+            tracing::warn!("a part of this instance stayed unavailable; gave up waiting");
             response
         }
-        Err(err) => grpc_error(unreachable_part(&err)),
+        Err(_) => grpc_error(unreachable_part()),
     }
 }
 
@@ -813,7 +812,7 @@ impl Events {
             };
             gateway.forget(&ids);
             if !patience.wait().await {
-                tracing::warn!(error = %status.message(), "couldn't follow servers: part of this instance stayed unavailable");
+                tracing::warn!("couldn't follow servers: part of this instance stayed unavailable");
                 return Err(status);
             }
             refresh = true;

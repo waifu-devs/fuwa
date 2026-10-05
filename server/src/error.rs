@@ -89,7 +89,7 @@ impl From<Status> for Error {
     /// all (a transport error, which carries its cause) reads as that part being down.
     fn from(status: Status) -> Self {
         if std::error::Error::source(&status).is_some() {
-            tracing::warn!(error = %status, "a part of this instance didn't answer");
+            tracing::warn!("a part of this instance didn't answer");
         }
         Self::retried(status)
     }
@@ -131,12 +131,12 @@ impl From<Error> for Status {
             }
             Error::Remote(status) => return status.clone(),
             Error::Database(_) | Error::Io(_) | Error::Internal(_) => {
-                tracing::error!(error = %err, "request failed");
                 let kind = match &err {
                     Error::Database(_) => "rpc_database",
                     Error::Io(_) => "rpc_io",
                     _ => "rpc_internal",
                 };
+                tracing::error!(kind, "request failed");
                 crate::reports::server_error(kind, None);
                 return Status::internal("something went wrong on the server");
             }

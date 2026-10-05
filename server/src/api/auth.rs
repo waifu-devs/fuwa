@@ -31,7 +31,7 @@ impl Api {
         let account = self.app.node()?.create_local_account(&username, &display_name, &hash).await?;
         let token = auth::new_token();
         self.app.node()?.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
-        tracing::info!(account = %account.id, admin = account.admin, "account created");
+        tracing::info!(admin = account.admin, "account created");
         Ok(pb::SignUpResponse { token, user: Some(account.user()), admin: account.admin })
     }
 
@@ -187,7 +187,7 @@ impl Api {
         }
         let token = auth::new_token();
         node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
-        tracing::info!(account = %account.id, created, admin = account.admin, "signed in with waifu.dev");
+        tracing::info!(created, admin = account.admin, "signed in with waifu.dev");
         Ok(pb::FinishLinkedSignInResponse { token, user: Some(account.user()), admin: account.admin, created })
     }
 
@@ -293,7 +293,7 @@ impl Api {
         }
         let token = auth::new_token();
         node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
-        tracing::info!(account = %account.id, created, admin = account.admin, "signed in with single sign-on");
+        tracing::info!(created, admin = account.admin, "signed in with single sign-on");
         Ok(pb::FinishSsoSignInResponse {
             token,
             user: Some(account.user()),

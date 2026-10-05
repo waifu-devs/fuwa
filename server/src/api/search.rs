@@ -305,7 +305,7 @@ impl Indexer {
             self.failed.insert(id.to_string(), Instant::now() + Duration::from_secs(5));
             return;
         }
-        tracing::warn!(server = %id, "couldn't update a server's search index; trying again in a minute");
+        tracing::warn!("couldn't update a server's search index; trying again in a minute");
         crate::reports::server_error("search_index", Some(place));
         self.dirty.insert(id.to_string());
         self.failed.insert(id.to_string(), Instant::now() + RETRY_AFTER);
@@ -404,7 +404,11 @@ impl Indexer {
         building.added += batch.len() as u64;
         if next.is_none() {
             let done = self.building.remove(id).expect("checked above");
-            tracing::info!(server = %id, messages = done.added, took_ms = done.started.elapsed().as_millis() as u64, "built a server's search index");
+            tracing::info!(
+                messages = done.added,
+                took_ms = done.started.elapsed().as_millis() as u64,
+                "built a server's search index"
+            );
             crate::reports::server_timing("search.backfill", done.started.elapsed());
             crate::reports::server_used("search.backfilled_messages", done.added);
         }

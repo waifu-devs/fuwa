@@ -119,8 +119,8 @@ impl App {
             }
             Link::Directory(_) => {
                 self.forget_server_presence(server_id);
-                if let Err(err) = async { self.node()?.place(server_id, None).await }.await {
-                    tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
+                if async { self.node()?.place(server_id, None).await }.await.is_err() {
+                    tracing::warn!("couldn't forget where a deleted server was");
                 }
                 self.forget_notifications(server_id, None, None).await;
                 self.drop_server_media(server_id).await;
@@ -141,7 +141,7 @@ impl App {
             self.delete_media(&ids).await
         };
         if dropped.await.is_err() {
-            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
+            tracing::warn!("couldn't delete a deleted server's pictures");
             crate::reports::server_error("server_media_drop", Some("cluster::calls"));
         }
     }
@@ -160,8 +160,8 @@ impl App {
             }
             _ => async { self.node()?.forget_notification_settings(server_id, channel_id, account_id).await }.await,
         };
-        if let Err(err) = forgotten {
-            tracing::warn!(server = %server_id, error = %err, "couldn't forget notification settings");
+        if forgotten.is_err() {
+            tracing::warn!("couldn't forget notification settings");
         }
     }
 
@@ -241,8 +241,8 @@ impl App {
             }
             _ => async { self.node()?.use_media(id, server_id).await }.await,
         };
-        if let Err(err) = kept {
-            tracing::warn!(media = %id, error = %err, "couldn't mark a picture as used");
+        if kept.is_err() {
+            tracing::warn!("couldn't mark a picture as used");
         }
     }
 
@@ -261,7 +261,7 @@ impl App {
                 server_id: server_id.to_string(),
             };
             if link.directory().drop_picture(request).await.is_err() {
-                tracing::warn!(media = %id, "couldn't delete a replaced picture");
+                tracing::warn!("couldn't delete a replaced picture");
                 // Its copy here goes anyway unless the server still uses it;
                 // the directory's row is left to the sweeps.
                 if !matches!(crate::cluster::pictures::uses(self, server_id, &id).await, Ok(true)) {
@@ -277,8 +277,8 @@ impl App {
         let row = match async { self.node()?.media(&id).await }.await {
             Ok(Some(row)) => row,
             Ok(None) => return,
-            Err(err) => {
-                tracing::warn!(media = %id, error = %err, "couldn't look up a replaced picture");
+            Err(_) => {
+                tracing::warn!("couldn't look up a replaced picture");
                 return;
             }
         };
@@ -295,8 +295,8 @@ impl App {
                 ) && row.server_id.as_deref() == Some(server_id)
             }
         };
-        if belongs && let Err(err) = self.delete_media(&[id]).await {
-            tracing::warn!(media = %row.id, error = %err, "couldn't delete a replaced picture");
+        if belongs && let Err(_) = self.delete_media(&[id]).await {
+            tracing::warn!("couldn't delete a replaced picture");
         }
     }
 
@@ -495,8 +495,8 @@ impl App {
                 Ok(mut client) => client.update_user(request).await.map(|_| ()).map_err(Error::from),
                 Err(err) => Err(err),
             };
-            if let Err(err) = updated {
-                tracing::warn!(shard = %shard_id, error = %err, "couldn't update a member's profile");
+            if updated.is_err() {
+                tracing::warn!(shard = %shard_id, "couldn't update a member's profile");
             }
         }
     }
@@ -592,7 +592,7 @@ impl App {
             };
             match found {
                 Ok(found) => described.extend(found.into_inner().servers),
-                Err(err) => tracing::warn!(shard = %shard_id, error = %err, "left a shard's servers out"),
+                Err(_) => tracing::warn!(shard = %shard_id, "left a shard's servers out"),
             }
         }
         described.sort_by(|a, b| {

@@ -482,8 +482,8 @@ pub fn spawn(
             .build()
         {
             Ok(client) => client,
-            Err(err) => {
-                tracing::warn!(error = %err, "couldn't set up the health report; it stays off");
+            Err(_) => {
+                tracing::warn!("couldn't set up the health report; it stays off");
                 return;
             }
         };
@@ -505,7 +505,7 @@ pub fn spawn(
                     tracing::info!("sent the anonymous health report ({summary})")
                 }
                 Ok(response) => tracing::debug!(status = %response.status(), "health report not taken; dropping it"),
-                Err(err) => tracing::debug!(error = %err, "health report not sent; dropping it"),
+                Err(_) => tracing::debug!("health report not sent; dropping it"),
             }
         };
         let mut every = tokio::time::interval_at(tokio::time::Instant::now() + INTERVAL, INTERVAL);

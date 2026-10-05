@@ -35,12 +35,12 @@ pub fn spawn(app: Arc<App>) {
                         tracing::info!(cleaned, "took the metadata out of pictures kept from before");
                         crate::reports::server_used("pictures_cleaned", cleaned as u64);
                     }
-                    if let Err(err) = std::fs::write(&marker, b"") {
-                        tracing::warn!(error = %err, "couldn't note that the pictures were cleaned");
+                    if std::fs::write(&marker, b"").is_err() {
+                        tracing::warn!("couldn't note that the pictures were cleaned");
                     }
                 }
-                Err(err) => {
-                    tracing::warn!(error = %err, "couldn't clean every picture kept from before; trying again next start");
+                Err(_) => {
+                    tracing::warn!("couldn't clean every picture kept from before; trying again next start");
                     crate::reports::server_error("pictures_clean", Some("media::backfill"));
                 }
             },

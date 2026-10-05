@@ -312,8 +312,8 @@ impl MediaLink {
                 Err(err) => Err(err),
             },
         };
-        if let Err(err) = result {
-            tracing::info!(room, error = %err, "couldn't hang up a call on its media part");
+        if result.is_err() {
+            tracing::info!("couldn't hang up a call on its media part");
         }
     }
 
@@ -414,8 +414,8 @@ impl MediaLink {
                 Err(err) => Err(err),
             },
         };
-        result.unwrap_or_else(|err| {
-            tracing::info!(room, error = %err, "couldn't change a call on its media part");
+        result.unwrap_or_else(|_| {
+            tracing::info!("couldn't change a call on its media part");
             false
         })
     }

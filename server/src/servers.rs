@@ -339,7 +339,7 @@ impl ServerDb {
             match result {
                 Err(err) if db::is_conflict(&err) => {
                     db::abort(&conn).await;
-                    db::retry_after(&err, &mut attempt).await?;
+                    db::retry_after(&mut attempt).await?;
                 }
                 Err(err) => {
                     db::abort(&conn).await;
@@ -401,8 +401,8 @@ impl ServerDb {
             return;
         }
         self.unfolded.store(0, Ordering::Relaxed);
-        if let Err(err) = self.fold_usage().await {
-            tracing::warn!(server = %self.id, error = %err, "couldn't fold usage changes into the totals");
+        if self.fold_usage().await.is_err() {
+            tracing::warn!("couldn't fold usage changes into the totals");
         }
         self.folding.store(false, Ordering::Release);
     }
@@ -948,11 +948,11 @@ impl Servers {
         entries.sort();
         for path in entries {
             let Some(id) = path.file_stem().and_then(|s| s.to_str()).and_then(|s| parse_id("server", s).ok()) else {
-                tracing::warn!(path = %path.display(), "skipping a file in servers/ that isn't named after a server id");
+                tracing::warn!("skipping a file in servers/ that isn't named after a server id");
                 continue;
             };
-            if let Err(err) = servers.load(&id, &path, true).await {
-                tracing::error!(server = %id, error = %err, "couldn't open server database; skipping it");
+            if servers.load(&id, &path, true).await.is_err() {
+                tracing::error!("couldn't open server database; skipping it");
             }
         }
         Ok(servers)
@@ -1761,8 +1761,8 @@ struct StoredAnswer {
 
 /// JSON from the server's file; a value that doesn't parse reads as empty.
 fn from_json<T: serde::de::DeserializeOwned + Default>(text: &str, what: &str) -> T {
-    serde_json::from_str(text).unwrap_or_else(|err| {
-        tracing::warn!(error = %err, "couldn't read the {what} in a server's file");
+    serde_json::from_str(text).unwrap_or_else(|_| {
+        tracing::warn!("couldn't read the {what} in a server's file");
         T::default()
     })
 }

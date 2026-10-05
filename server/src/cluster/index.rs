@@ -100,7 +100,7 @@ impl Index {
         for entry in entries {
             let Some(server) = entry.server else { continue };
             if let Some(other) = inner.placements.get(&server.id).filter(|on| on.as_str() != shard) {
-                tracing::warn!(server = %server.id, from = %other, to = %shard, "a server moved shards");
+                tracing::warn!(from = %other, to = %shard, "a server moved shards");
             }
             inner.placements.insert(server.id.clone(), shard.to_string());
             inner.insert(server, entry.member_ids, entry.invite_codes);

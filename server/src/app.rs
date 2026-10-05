@@ -155,7 +155,7 @@ impl App {
                     match replica.prune_media(&media_ids).await {
                         Ok(0) => {}
                         Ok(pruned) => tracing::info!(pruned, "deleted pictures from the replica that nothing knows"),
-                        Err(err) => tracing::warn!(error = %err, "couldn't tidy the pictures in the replica"),
+                        Err(_) => tracing::warn!("couldn't tidy the pictures in the replica"),
                     }
                 }
                 let (servers, link) = if role == Role::All {
@@ -748,8 +748,8 @@ fn spawn_sso_rechecks(app: Arc<App>) {
                 _ = every.tick() => {
                     let now = crate::id::now_ms();
                     for sdb in app.servers.all() {
-                        if let Err(err) = crate::api::note_lapses(&sdb, since, now).await {
-                            tracing::warn!(server = %sdb.id, error = %err, "couldn't check for single sign-ons that ran out");
+                        if crate::api::note_lapses(&sdb, since, now).await.is_err() {
+                            tracing::warn!("couldn't check for single sign-ons that ran out");
                         }
                     }
                     since = now;
@@ -771,7 +771,7 @@ fn spawn_poll_closings(app: Arc<App>) {
                     let now = crate::id::now_ms();
                     for sdb in app.servers.all() {
                         if crate::api::close_due_polls(&sdb, now).await.is_err() {
-                            tracing::warn!(server = %sdb.id, "couldn't close the anonymous polls whose time ran out");
+                            tracing::warn!("couldn't close the anonymous polls whose time ran out");
                         }
                     }
                 }
@@ -789,14 +789,14 @@ fn spawn_housekeeping(app: Arc<App>) {
             tokio::select! {
                 _ = app.shutdown.cancelled() => return,
                 _ = every.tick() => {
-                    if let Err(err) = async { app.node()?.prune_sessions().await }.await {
-                        tracing::warn!(error = %err, "couldn't prune expired sessions");
+                    if async { app.node()?.prune_sessions().await }.await.is_err() {
+                        tracing::warn!("couldn't prune expired sessions");
                     }
-                    if let Err(err) = app.sweep_devices().await {
-                        tracing::warn!(error = %err, "couldn't forget the devices of ended sessions");
+                    if app.sweep_devices().await.is_err() {
+                        tracing::warn!("couldn't forget the devices of ended sessions");
                     }
-                    if let Err(err) = app.sweep_media(crate::id::now_ms()).await {
-                        tracing::warn!(error = %err, "couldn't sweep unused uploads");
+                    if app.sweep_media(crate::id::now_ms()).await.is_err() {
+                        tracing::warn!("couldn't sweep unused uploads");
                     }
                     if async { app.friends()?.sweep(crate::id::now_ms()).await }.await.is_err() {
                         tracing::warn!("couldn't sweep friend requests that ran out");

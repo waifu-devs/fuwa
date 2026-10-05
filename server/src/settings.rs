@@ -151,8 +151,8 @@ impl Settings {
             let applied = serde_json::from_str::<Value>(json)
                 .map_err(|err| Error::invalid(err.to_string()))
                 .and_then(|value| settings.set_json(field, &value));
-            if let Err(err) = applied {
-                tracing::warn!(setting = %field, error = %err, "ignoring a stored setting");
+            if applied.is_err() {
+                tracing::warn!(setting = %field, "ignoring a stored setting");
             }
         }
         settings
@@ -167,8 +167,8 @@ impl Settings {
             if *field == "automod_providers" {
                 continue;
             }
-            if let Err(err) = settings.set_from_pb(field, from) {
-                tracing::warn!(setting = %field, error = %err, "ignoring a setting the directory sent");
+            if settings.set_from_pb(field, from).is_err() {
+                tracing::warn!(setting = %field, "ignoring a setting the directory sent");
             }
         }
         settings

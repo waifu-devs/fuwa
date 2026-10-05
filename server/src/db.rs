@@ -320,7 +320,7 @@ async fn checkpoint_with(database: &Database, attempts: u32, wait: Option<std::t
     loop {
         match pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await {
             Err(err) if is_conflict(&err) && attempt + 1 >= attempts => return Err(Error::Busy),
-            Err(err) if is_conflict(&err) => retry_after(&err, &mut attempt).await?,
+            Err(err) if is_conflict(&err) => retry_after(&mut attempt).await?,
             other => return other,
         }
     }
@@ -551,7 +551,7 @@ pub async fn transaction<T>(conn: &Connection, f: impl AsyncFnOnce(&Connection) 
         match result {
             Err(err) if is_conflict(&err) => {
                 abort(conn).await;
-                retry_after(&err, &mut attempt).await?;
+                retry_after(&mut attempt).await?;
             }
             Err(err) => {
                 abort(conn).await;
@@ -564,13 +564,13 @@ pub async fn transaction<T>(conn: &Connection, f: impl AsyncFnOnce(&Connection) 
 
 /// Waits before running a write that lost a clash again, or gives up after
 /// [`ATTEMPTS`] of them.
-pub async fn retry_after(err: &Error, attempt: &mut u32) -> Result<()> {
+pub async fn retry_after(attempt: &mut u32) -> Result<()> {
     *attempt += 1;
     if *attempt >= ATTEMPTS {
-        tracing::warn!(error = %err, attempts = ATTEMPTS, "gave up on a write that kept clashing");
+        tracing::warn!(attempts = ATTEMPTS, "gave up on a write that kept clashing");
         return Err(Error::Busy);
     }
-    tracing::debug!(error = %err, attempt = *attempt, "a write clashed with another; running it again");
+    tracing::debug!(attempt = *attempt, "a write clashed with another; running it again");
     tokio::time::sleep(backoff(*attempt)).await;
     Ok(())
 }
