@@ -246,10 +246,12 @@ async fn mentions(
     Ok((everyone, ids))
 }
 
-const MESSAGE_COLUMNS: &str =
-    "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, kind, thread_id, in_channel";
+pub(super) const MESSAGE_COLUMNS: &str = "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, \
+     kind, thread_id, in_channel, pinned_at";
 
-fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Message, Option<Vec<u8>>)> + '_ {
+pub(super) fn message_row(
+    server_id: &str,
+) -> impl Fn(&turso::Row) -> turso::Result<(pb::Message, Option<Vec<u8>>)> + '_ {
     move |r| {
         Ok((
             pb::Message {
@@ -278,6 +280,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 mention_user_ids: vec![],
                 components: vec![],
                 interaction: None,
+                pinned_at: r.get::<Option<i64>>(11)?.map(timestamp),
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -290,7 +293,7 @@ pub(super) fn decode_extras(bytes: &[u8]) -> Result<(Vec<pb::Attachment>, Vec<pb
     Ok((extras.attachments, extras.embeds))
 }
 
-fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<pb::Message> {
+pub(super) fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<pb::Message> {
     if let Some(bytes) = extras {
         let extras = Extras::decode(bytes.as_slice())?;
         message.attachments = extras.attachments;
@@ -1038,6 +1041,7 @@ impl MessageService for Api {
                             mention_user_ids,
                             components: components.clone(),
                             interaction,
+                            pinned_at: None,
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0
@@ -1391,6 +1395,29 @@ impl MessageService for Api {
         request: Request<pb::ListPollVotersRequest>,
     ) -> Result<Response<pb::ListPollVotersResponse>, Status> {
         polls::list_poll_voters(self, request).await
+    }
+
+    async fn pin_message(
+        &self,
+        request: Request<pb::PinMessageRequest>,
+    ) -> Result<Response<pb::PinMessageResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.pin_message_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn list_pins(&self, request: Request<pb::ListPinsRequest>) -> Result<Response<pb::ListPinsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.list_pins_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
     }
 
     async fn list_threads(

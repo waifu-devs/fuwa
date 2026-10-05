@@ -85,6 +85,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "voice_message_bytes_per_day", get: (s) => s.voiceMessageBytesPerDay },
   { path: "poll_votes_per_minute", get: (s) => s.pollVotesPerMinute },
   { path: "commands_per_minute", get: (s) => s.commandsPerMinute },
+  { path: "pins_per_channel", get: (s) => s.pinsPerChannel },
+  { path: "pins_per_conversation", get: (s) => s.pinsPerConversation },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -751,6 +753,31 @@ export function InstanceSettingsDialog({
               >
                 <Cap label={t("instancesettings.shared.upTo")} placeholder="20" value={draft.commandsPerMinute} onChange={(v) => patch((d) => (d.commandsPerMinute = v))} />
               </Setting>
+              <Setting
+                id="pins-per-channel"
+                title={t("instancesettings.limits.pinsPerChannel")}
+                hint={t("instancesettings.limits.pinsPerChannelHint")}
+                defaultLabel={count(lang, defaults.pinsPerChannel)}
+                delay={0.24}
+                {...resetter("pins_per_channel")}
+              >
+                <Cap label={t("instancesettings.shared.upTo")} placeholder="50" value={draft.pinsPerChannel} onChange={(v) => patch((d) => (d.pinsPerChannel = v))} />
+              </Setting>
+              <Setting
+                id="pins-per-conversation"
+                title={t("instancesettings.limits.pinsPerConversation")}
+                hint={t("instancesettings.limits.pinsPerConversationHint")}
+                defaultLabel={count(lang, defaults.pinsPerConversation)}
+                delay={0.26}
+                {...resetter("pins_per_conversation")}
+              >
+                <Cap
+                  label={t("instancesettings.shared.upTo")}
+                  placeholder="50"
+                  value={draft.pinsPerConversation}
+                  onChange={(v) => patch((d) => (d.pinsPerConversation = v))}
+                />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -945,6 +972,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "commands_per_minute":
         into.commandsPerMinute = from.commandsPerMinute;
+        break;
+      case "pins_per_channel":
+        into.pinsPerChannel = from.pinsPerChannel;
+        break;
+      case "pins_per_conversation":
+        into.pinsPerConversation = from.pinsPerConversation;
         break;
       default: {
         // Settings copied above by their own pages' functions.

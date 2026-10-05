@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEigQMKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaRIRCgl0aHJlYWRfaWQYCCABKAkSHAoUYWxzb19zZW5kX3RvX2NoYW5uZWwYCSABKAgSHgoEcG9sbBgKIAEoCzIQLmZ1d2EudjEuTmV3UG9sbBIgCgNnaWYYCyABKAsyEy5mdXdhLnYxLk1lc3NhZ2VHaWYSFgoOaW50ZXJhY3Rpb25faWQYDCABKAkSKQoKY29tcG9uZW50cxgNIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93IoEBCgdOZXdQb2xsEhAKCHF1ZXN0aW9uGAEgASgJEicKB2Fuc3dlcnMYAiADKAsyFi5mdXdhLnYxLk5ld1BvbGxBbnN3ZXISEAoIbXVsdGlwbGUYAyABKAgSEQoJYW5vbnltb3VzGAQgASgIEhYKDmR1cmF0aW9uX2hvdXJzGAUgASgFIiwKDU5ld1BvbGxBbnN3ZXISDAoEdGV4dBgBIAEoCRINCgVlbW9qaRgCIAEoCSI4ChNTZW5kTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiTgoRR2V0TWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSJWChJHZXRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZRIdCgZhdXRob3IYAiABKAsyDS5mdXdhLnYxLlVzZXIigwEKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJEhEKCXRocmVhZF9pZBgGIAEoCSKOAQoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIgCgZwYXJlbnQYBCABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiggEKFFVwZGF0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKY2hhbm5lbF9pZBgEIAEoCRIeCgZlbW9qaXMYBSADKAsyDi5mdXdhLnYxLkVtb2ppIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlIoQBChJMaXN0VGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFcXVlcnkYAyABKAkSEAoIYXJjaGl2ZWQYBCABKAgSDQoFbGltaXQYBSABKAUSFwoPYWZ0ZXJfdGhyZWFkX2lkGAYgASgJIogBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEiEKB3RocmVhZHMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIcChRuZXh0X2FmdGVyX3RocmVhZF9pZBgEIAEoCSJvChNVcGRhdGVUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRITCgZsb2NrZWQYBCABKAhIAIgBAUIJCgdfbG9ja2VkIj4KFFVwZGF0ZVRocmVhZFJlc3BvbnNlEiYKBnRocmVhZBgBIAEoCzIWLmZ1d2EudjEuVGhyZWFkU3VtbWFyeSJfChNGb2xsb3dUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRIOCgZmb2xsb3cYBCABKAgiFgoURm9sbG93VGhyZWFkUmVzcG9uc2UiLwoaTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjEKG0xpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRISCgp0aHJlYWRfaWRzGAEgAygJImAKD1ZvdGVQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgphbnN3ZXJfaWRzGAMgAygNEhIKCmNoYW5uZWxfaWQYBCABKAkiLwoQVm90ZVBvbGxSZXNwb25zZRIbCgRwb2xsGAEgASgLMg0uZnV3YS52MS5Qb2xsIksKDkVuZFBvbGxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiLgoPRW5kUG9sbFJlc3BvbnNlEhsKBHBvbGwYASABKAsyDS5mdXdhLnYxLlBvbGwihgEKFUxpc3RQb2xsVm90ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIRCglhbnN3ZXJfaWQYAyABKA0SDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkSEgoKY2hhbm5lbF9pZBgGIAEoCSJIChZMaXN0UG9sbFZvdGVyc1Jlc3BvbnNlEhwKBXVzZXJzGAEgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAIgASgIMqYHCg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2USSAoLTGlzdFRocmVhZHMSGy5mdXdhLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFRocmVhZHNSZXNwb25zZRJLCgxVcGRhdGVUaHJlYWQSHC5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlc3BvbnNlEksKDEZvbGxvd1RocmVhZBIcLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVzcG9uc2USYAoTTGlzdEZvbGxvd2VkVGhyZWFkcxIjLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QaJC5mdXdhLnYxLkxpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRI/CghWb3RlUG9sbBIYLmZ1d2EudjEuVm90ZVBvbGxSZXF1ZXN0GhkuZnV3YS52MS5Wb3RlUG9sbFJlc3BvbnNlEjwKB0VuZFBvbGwSFy5mdXdhLnYxLkVuZFBvbGxSZXF1ZXN0GhguZnV3YS52MS5FbmRQb2xsUmVzcG9uc2USUQoOTGlzdFBvbGxWb3RlcnMSHi5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEigQMKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaRIRCgl0aHJlYWRfaWQYCCABKAkSHAoUYWxzb19zZW5kX3RvX2NoYW5uZWwYCSABKAgSHgoEcG9sbBgKIAEoCzIQLmZ1d2EudjEuTmV3UG9sbBIgCgNnaWYYCyABKAsyEy5mdXdhLnYxLk1lc3NhZ2VHaWYSFgoOaW50ZXJhY3Rpb25faWQYDCABKAkSKQoKY29tcG9uZW50cxgNIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93IoEBCgdOZXdQb2xsEhAKCHF1ZXN0aW9uGAEgASgJEicKB2Fuc3dlcnMYAiADKAsyFi5mdXdhLnYxLk5ld1BvbGxBbnN3ZXISEAoIbXVsdGlwbGUYAyABKAgSEQoJYW5vbnltb3VzGAQgASgIEhYKDmR1cmF0aW9uX2hvdXJzGAUgASgFIiwKDU5ld1BvbGxBbnN3ZXISDAoEdGV4dBgBIAEoCRINCgVlbW9qaRgCIAEoCSI4ChNTZW5kTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiTgoRR2V0TWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSJWChJHZXRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZRIdCgZhdXRob3IYAiABKAsyDS5mdXdhLnYxLlVzZXIigwEKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJEhEKCXRocmVhZF9pZBgGIAEoCSKOAQoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIgCgZwYXJlbnQYBCABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiggEKFFVwZGF0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKY2hhbm5lbF9pZBgEIAEoCRIeCgZlbW9qaXMYBSADKAsyDi5mdXdhLnYxLkVtb2ppIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlIoQBChJMaXN0VGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFcXVlcnkYAyABKAkSEAoIYXJjaGl2ZWQYBCABKAgSDQoFbGltaXQYBSABKAUSFwoPYWZ0ZXJfdGhyZWFkX2lkGAYgASgJIogBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEiEKB3RocmVhZHMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIcChRuZXh0X2FmdGVyX3RocmVhZF9pZBgEIAEoCSJvChNVcGRhdGVUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRITCgZsb2NrZWQYBCABKAhIAIgBAUIJCgdfbG9ja2VkIj4KFFVwZGF0ZVRocmVhZFJlc3BvbnNlEiYKBnRocmVhZBgBIAEoCzIWLmZ1d2EudjEuVGhyZWFkU3VtbWFyeSJfChNGb2xsb3dUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRIOCgZmb2xsb3cYBCABKAgiFgoURm9sbG93VGhyZWFkUmVzcG9uc2UiLwoaTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjEKG0xpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRISCgp0aHJlYWRfaWRzGAEgAygJImAKD1ZvdGVQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgphbnN3ZXJfaWRzGAMgAygNEhIKCmNoYW5uZWxfaWQYBCABKAkiLwoQVm90ZVBvbGxSZXNwb25zZRIbCgRwb2xsGAEgASgLMg0uZnV3YS52MS5Qb2xsIksKDkVuZFBvbGxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiLgoPRW5kUG9sbFJlc3BvbnNlEhsKBHBvbGwYASABKAsyDS5mdXdhLnYxLlBvbGwihgEKFUxpc3RQb2xsVm90ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIRCglhbnN3ZXJfaWQYAyABKA0SDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkSEgoKY2hhbm5lbF9pZBgGIAEoCSJIChZMaXN0UG9sbFZvdGVyc1Jlc3BvbnNlEhwKBXVzZXJzGAEgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAIgASgIIl4KEVBpbk1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDgoGcGlubmVkGAQgASgIIjcKElBpbk1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlImwKD0xpc3RQaW5zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgl0aHJlYWRfaWQYAyABKAkSDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkiaAoQTGlzdFBpbnNSZXNwb25zZRIiCghtZXNzYWdlcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIMq4ICg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2USSAoLTGlzdFRocmVhZHMSGy5mdXdhLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFRocmVhZHNSZXNwb25zZRJLCgxVcGRhdGVUaHJlYWQSHC5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlc3BvbnNlEksKDEZvbGxvd1RocmVhZBIcLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVzcG9uc2USYAoTTGlzdEZvbGxvd2VkVGhyZWFkcxIjLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QaJC5mdXdhLnYxLkxpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRI/CghWb3RlUG9sbBIYLmZ1d2EudjEuVm90ZVBvbGxSZXF1ZXN0GhkuZnV3YS52MS5Wb3RlUG9sbFJlc3BvbnNlEjwKB0VuZFBvbGwSFy5mdXdhLnYxLkVuZFBvbGxSZXF1ZXN0GhguZnV3YS52MS5FbmRQb2xsUmVzcG9uc2USUQoOTGlzdFBvbGxWb3RlcnMSHi5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXNwb25zZRJFCgpQaW5NZXNzYWdlEhouZnV3YS52MS5QaW5NZXNzYWdlUmVxdWVzdBobLmZ1d2EudjEuUGluTWVzc2FnZVJlc3BvbnNlEj8KCExpc3RQaW5zEhguZnV3YS52MS5MaXN0UGluc1JlcXVlc3QaGS5mdXdhLnYxLkxpc3RQaW5zUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -854,6 +854,131 @@ export const ListPollVotersResponseSchema: GenMessage<ListPollVotersResponse> = 
   messageDesc(file_fuwa_v1_message, 25);
 
 /**
+ * @generated from message fuwa.v1.PinMessageRequest
+ */
+export type PinMessageRequest = Message<"fuwa.v1.PinMessageRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string message_id = 3;
+   */
+  messageId: string;
+
+  /**
+   * False unpins it.
+   *
+   * @generated from field: bool pinned = 4;
+   */
+  pinned: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.PinMessageRequest.
+ * Use `create(PinMessageRequestSchema)` to create a new message.
+ */
+export const PinMessageRequestSchema: GenMessage<PinMessageRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 26);
+
+/**
+ * @generated from message fuwa.v1.PinMessageResponse
+ */
+export type PinMessageResponse = Message<"fuwa.v1.PinMessageResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Message message = 1;
+   */
+  message?: Message$1 | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.PinMessageResponse.
+ * Use `create(PinMessageResponseSchema)` to create a new message.
+ */
+export const PinMessageResponseSchema: GenMessage<PinMessageResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 27);
+
+/**
+ * @generated from message fuwa.v1.ListPinsRequest
+ */
+export type ListPinsRequest = Message<"fuwa.v1.ListPinsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * The pins of the thread under this message instead of the channel's.
+   *
+   * @generated from field: string thread_id = 3;
+   */
+  threadId: string;
+
+  /**
+   * 1 to 100; defaults to 50.
+   *
+   * @generated from field: int32 limit = 4;
+   */
+  limit: number;
+
+  /**
+   * The page after this pinned message, from the last page.
+   *
+   * @generated from field: string after_id = 5;
+   */
+  afterId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListPinsRequest.
+ * Use `create(ListPinsRequestSchema)` to create a new message.
+ */
+export const ListPinsRequestSchema: GenMessage<ListPinsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 28);
+
+/**
+ * @generated from message fuwa.v1.ListPinsResponse
+ */
+export type ListPinsResponse = Message<"fuwa.v1.ListPinsResponse"> & {
+  /**
+   * Latest pin first, each with pinned_at.
+   *
+   * @generated from field: repeated fuwa.v1.Message messages = 1;
+   */
+  messages: Message$1[];
+
+  /**
+   * Profiles of everyone who wrote one.
+   *
+   * @generated from field: repeated fuwa.v1.User authors = 2;
+   */
+  authors: User[];
+
+  /**
+   * @generated from field: bool has_more = 3;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ListPinsResponse.
+ * Use `create(ListPinsResponseSchema)` to create a new message.
+ */
+export const ListPinsResponseSchema: GenMessage<ListPinsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 29);
+
+/**
  * Messages in a channel.
  *
  * @generated from service fuwa.v1.MessageService
@@ -984,6 +1109,29 @@ export const MessageService: GenService<{
     methodKind: "unary";
     input: typeof ListPollVotersRequestSchema;
     output: typeof ListPollVotersResponseSchema;
+  },
+  /**
+   * Pins a message to its channel, or a thread reply to its thread, or
+   * unpins it. Needs MANAGE_MESSAGES in the channel. At most
+   * InstanceSettings.pins_per_channel pins in each channel and each thread.
+   * Not in channels shown from another server, nor secure channels.
+   *
+   * @generated from rpc fuwa.v1.MessageService.PinMessage
+   */
+  pinMessage: {
+    methodKind: "unary";
+    input: typeof PinMessageRequestSchema;
+    output: typeof PinMessageResponseSchema;
+  },
+  /**
+   * A channel's pinned messages, or a thread's, the latest pin first.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ListPins
+   */
+  listPins: {
+    methodKind: "unary";
+    input: typeof ListPinsRequestSchema;
+    output: typeof ListPinsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_message, 0);
