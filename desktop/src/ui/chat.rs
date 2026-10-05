@@ -66,6 +66,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         keep_out: false,
         keeping_out: false,
         poll: None,
+        voice: None,
         sig: 0,
     }
 }
@@ -96,6 +97,7 @@ pub(crate) fn encrypted_rows(
                 m.editing = editing == Some(m.id.as_str());
                 m.edited = item.edited_at > 0;
                 m.can_delete = can_delete;
+                m.voice = item.voice.as_ref().map(|v| Rc::new(crate::ui::voice_notes::VoiceCard::of(v)));
                 rows.push(Row::Msg(Rc::new(m)));
             }
             ItemKind::Text => {}
@@ -238,6 +240,8 @@ pub struct Msg {
     pub keeping_out: bool,
     /// The poll it is, as its card draws it.
     pub poll: Option<Rc<crate::ui::polls::PollCard>>,
+    /// The voice message it is, in a private conversation.
+    pub voice: Option<Rc<crate::ui::voice_notes::VoiceCard>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -263,7 +267,8 @@ impl Row {
             Row::Note { id, text, .. } => (id, text).hash(h),
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
-                (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h)
+                (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h);
+                m.voice.as_ref().map(|v| v.digest()).hash(h);
             }
         }
     }
@@ -428,6 +433,7 @@ impl FuwaApp {
                             keep_out,
                             keeping_out,
                             poll: card.clone(),
+                            voice: None,
                             sig,
                         }),
                     };
@@ -459,6 +465,7 @@ impl FuwaApp {
                         keep_out: false,
                         keeping_out: false,
                         poll: None,
+        voice: None,
         sig: 0,
                     })));
                 }
@@ -485,7 +492,9 @@ impl FuwaApp {
                     let user = person(id);
                     Who { name: user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into()), color: None, user }
                 };
-                encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref())
+                let mut rows = encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref());
+                self.dress_voice(&mut rows);
+                rows
             }),
             Some(Target::Secure { key, server, channel }) => self.core.shared.read(|s| {
                 let Some(i) = s.instance(&key) else { return Vec::new() };
@@ -819,6 +828,19 @@ impl FuwaApp {
                 .into_any_element();
         }
         let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
+        let recording = self.recording_here();
+        // The microphone takes the send button's place while nothing's typed, as on the web.
+        let voice = (recording || (!typed && self.can_record())).then(|| self.voice_button(&p, cx));
+        let field: AnyElement = if recording {
+            self.recording_bar(&p, cx)
+        } else {
+            div()
+                .flex_1()
+                .min_w_0()
+                .py(px(4.0))
+                .child(Textarea::new(&self.composer).appearance(false))
+                .into_any_element()
+        };
         div()
             .flex_none()
             .relative()
@@ -845,8 +867,8 @@ impl FuwaApp {
                         spread_radius: px(-8.0),
                         inset: false,
                     }])
-                    .child(div().flex_1().min_w_0().py(px(4.0)).child(Textarea::new(&self.composer).appearance(false)))
-                    .child(self.emoji_button(&p, cx))
+                    .child(field)
+                    .when(!recording, |el| el.child(self.emoji_button(&p, cx)))
                     .when(self.can_poll(), |el| {
                         el.child(
                             icon_button("poll-open", "chart-column", &p)
@@ -857,22 +879,27 @@ impl FuwaApp {
                                 .on_click(cx.listener(|this, _, window, cx| this.open_poll_editor(window, cx))),
                         )
                     })
-                    .child(
-                        div()
-                            .id("send")
-                            .size(px(36.0))
-                            .flex_none()
-                            .rounded(corner(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(mix(p.muted, p.primary, ready))
-                            .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
-                            .cursor_pointer()
-                            .active(|s| s.top(px(1.0)))
-                            .on_click(cx.listener(|this, _, window, cx| this.send_from_button(window, cx)))
-                            .child(div().relative().left(px(-3.0 + 3.0 * ready)).child(icon("send").size(px(18.0)))),
-                    ),
+                    .when_some(voice, |el, voice| el.child(voice))
+                    .when(!recording && (typed || !self.can_record()), |el| {
+                        el.child(
+                            div()
+                                .id("send")
+                                .size(px(36.0))
+                                .flex_none()
+                                .rounded(corner(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(mix(p.muted, p.primary, ready))
+                                .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
+                                .cursor_pointer()
+                                .active(|s| s.top(px(1.0)))
+                                .on_click(cx.listener(|this, _, window, cx| this.send_from_button(window, cx)))
+                                .child(
+                                    div().relative().left(px(-3.0 + 3.0 * ready)).child(icon("send").size(px(18.0))),
+                                ),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -1437,6 +1464,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     let gutter = if compact { 0.0 } else { 56.0 };
     let content: AnyElement = if m.editing {
         edit_box(m, p, ctx).into_any_element()
+    } else if let Some(card) = &m.voice {
+        crate::ui::voice_notes::voice_card(&m.id, card, p, &ctx.this)
     } else if m.poll.is_some() && m.content.trim().is_empty() {
         div().into_any_element()
     } else if m.unreadable {
@@ -1586,7 +1615,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             .into_any_element()
     };
 
-    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing && m.poll.is_none();
+    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
     let can_delete = m.can_delete && !m.pending && !m.editing;
     let keep_out = m.keep_out && !m.editing;
     let actions = (can_edit || can_delete || keep_out).then(|| {
@@ -2024,6 +2053,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         keep_out: false,
         keeping_out: false,
         poll: None,
+        voice: None,
         sig: 0,
     }
 }

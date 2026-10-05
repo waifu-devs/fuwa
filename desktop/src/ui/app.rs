@@ -262,6 +262,8 @@ pub struct FuwaApp {
     pub keeping_out: Option<String>,
     /// Votes on their way, peeks, polls being ended, and the poll editor.
     pub polls: crate::ui::polls::PollState,
+    /// Voice messages being recorded, sent and played.
+    pub voice: crate::ui::voice_notes::VoiceState,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
     /// Where the @ list was closed with Escape, so it stays closed for that mention.
@@ -443,6 +445,7 @@ impl FuwaApp {
             editing: None,
             keeping_out: None,
             polls: Default::default(),
+            voice: Default::default(),
             edit_box,
             picker: None,
             picker_dismissed: None,
@@ -686,6 +689,9 @@ impl FuwaApp {
     /// Keeps the draft, the focus and the message list in step with where you are.
     fn after_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.emoji_open = false;
+        // A recording belongs to where it was started; what's playing stops with the conversation.
+        self.discard_recording(cx);
+        self.stop_voice();
         self.maybe_welcome(cx);
         let target = self.target();
         let id = target.as_ref().map(Target::id);
