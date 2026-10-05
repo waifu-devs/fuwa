@@ -5,14 +5,14 @@ import { ChannelType, Permission, type Invite, type User } from "@/gen/fuwa/v1/t
 import { deleteInvite, listInvites, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useInstance } from "@/fuwa/hooks";
-import { InviteDialog, publicBase } from "@/components/dialogs/InviteDialog";
+import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { displayName, formatLeft, formatStamp } from "@/lib/format";
 import { useI18n } from "@/i18n/react";
-import { expiresAt, inviteLink, works } from "@/lib/invites";
+import { expiresAt, inviteLink, publicBase, works } from "@/lib/invites";
 import { useNow } from "@/lib/notifications";
 import { has, hasIn } from "@/lib/permissions";
 import { toast } from "@/lib/ui";

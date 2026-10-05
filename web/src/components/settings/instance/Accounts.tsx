@@ -15,7 +15,7 @@ import {
   ShieldOffIcon,
   UsersIcon, BuildingIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { AccountFilter, type AccountSummary, type AccountTotals, type ListAccountsResponse } from "@/gen/fuwa/v1/admin_pb";
 import { AccountKind } from "@/gen/fuwa/v1/types_pb";
 import { AppBadge } from "@/components/AppBadge";
@@ -183,14 +183,14 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
           ))}
         </div>
       ) : (
-        <>
-          <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            <UsersIcon className="size-3.5" />{" "}
-            <T k={hasMore ? "instancesettings.accounts.countMore" : "instancesettings.accounts.count"} values={{ count: <Count value={accounts.length} /> }} count={accounts.length} />
-          </p>
-          <ul className="flex flex-col gap-1.5">
-            <AnimatePresence initial={false} mode="popLayout">
-              {accounts.map((a, n) => (
+        <AccountList
+          count={accounts.length}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onMore={more}
+          empty={t(emptyKey(search, filter))}
+        >
+          {accounts.map((a, n) => (
                 <AccountRow
                   key={a.user?.id}
                   account={a}
@@ -206,22 +206,8 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
                   onTurnOff={() => setPending({ account: a, action: "turn-off" })}
                   onReset={() => setPending({ account: a, action: "reset" })}
                 />
-              ))}
-            </AnimatePresence>
-          </ul>
-          <AnimatePresence>
-            {accounts.length === 0 && (
-              <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-8 text-center text-sm text-muted-foreground">
-                {t(search ? "serversettings.shared.nobodyMatches" : filter === AccountFilter.DISABLED ? "instancesettings.accounts.noneOff" : "instancesettings.accounts.none")}
-              </motion.p>
-            )}
-          </AnimatePresence>
-          {hasMore && (
-            <Button type="button" variant="outline" onClick={more} disabled={loadingMore} className="self-center rounded-xl">
-              {loadingMore && <LoaderCircleIcon className="animate-spin" />} {t("instancesettings.accounts.showMore")}
-            </Button>
-          )}
-        </>
+          ))}
+        </AccountList>
       )}
 
       <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
@@ -265,19 +251,8 @@ function AccountRow({
   onTurnOff: () => void;
   onReset: () => void;
 }) {
-  const lang = useI18n();
-  const { t } = lang;
   const id = a.user?.id ?? "";
-  const local = a.user?.kind === AccountKind.LOCAL;
-  const agent = a.user?.kind === AccountKind.AGENT;
-  const joined = midSentence(lang, formatDay(toDate(a.createdAt)));
-  const seen = activeWhen(lang, toDate(a.lastSeenAt), now);
   const offDay = a.disabledAt ? formatDay(toDate(a.disabledAt)).toLowerCase() : "";
-  const facts = [
-    t("instancesettings.accounts.servers", { count: a.servers }),
-    a.serversOwned ? t("instancesettings.accounts.owns", { count: a.serversOwned }) : null,
-    t("instancesettings.accounts.devices", { count: a.sessions }),
-  ].filter(Boolean);
   return (
     <motion.li
       layout
@@ -297,104 +272,12 @@ function AccountRow({
             <span className={cn("name-tint truncate font-bold", a.disabled && "line-through decoration-destructive/60")} style={{ "--h": hueOf(id) } as CSSProperties}>
               {displayName(a.user)}
             </span>
-            {me && <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[0.65rem] font-bold text-muted-foreground uppercase">{t("serversettings.shared.you")}</span>}
-            <AnimatePresence mode="popLayout" initial={false}>
-              {a.admin && (
-                <motion.span
-                  key="admin"
-                  initial={{ scale: 0, rotate: -40 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  exit={{ scale: 0, rotate: 40 }}
-                  transition={{ type: "spring", stiffness: 600, damping: 16 }}
-                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[0.65rem] font-bold text-primary uppercase"
-                  title={t("instancesettings.accounts.instanceAdmin")}
-                >
-                  <ShieldIcon className="size-3" /> {t("instancesettings.accounts.admin")}
-                </motion.span>
-              )}
-              {a.disabled && (
-                <motion.span
-                  key="off"
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 600, damping: 18 }}
-                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[0.65rem] font-bold text-destructive uppercase"
-                >
-                  <PowerOffIcon className="size-3" /> {t("serversettings.shared.off")}
-                </motion.span>
-              )}
-            </AnimatePresence>
-            {a.twoFactor && (
-              <span className="shrink-0 text-emerald-500" title={t("instancesettings.accounts.twoStepOn")}>
-                <ShieldCheckIcon className="size-3.5" />
-              </span>
-            )}
-            {agent && <AppBadge agent />}
-            {a.user?.kind === AccountKind.LINKED && (
-              <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.linked")}>
-                <Link2Icon className="size-3.5" />
-              </span>
-            )}
-            {a.user?.kind === AccountKind.SSO && (
-              <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.sso")}>
-                <BuildingIcon className="size-3.5" />
-              </span>
-            )}
+            <AccountBadges account={a} me={me} />
           </p>
-          <p className="truncate text-xs text-muted-foreground">
-            @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} ·{" "}
-            {seen ? t("instancesettings.accounts.joinedSeen", { day: joined, when: seen }) : t("instancesettings.accounts.joinedNow", { day: joined })}
-          </p>
-          <p className="hidden truncate text-xs text-muted-foreground/80 sm:block">{facts.join(" · ")}</p>
+          <AccountFacts account={a} me={me} now={now} />
         </div>
         {(!me || developer) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={t("instancesettings.accounts.actionsFor", { name: displayName(a.user) })}
-                disabled={busy}
-                className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
-              >
-                {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <EllipsisIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {!me && !a.admin && !a.disabled && !agent && (
-                <DropdownMenuItem onSelect={() => onAdmin(true)}>
-                  <ShieldIcon /> {t("instancesettings.accounts.makeAdmin")}
-                </DropdownMenuItem>
-              )}
-              {!me && a.admin && (
-                <DropdownMenuItem onSelect={() => onAdmin(false)}>
-                  <ShieldOffIcon /> {t("instancesettings.accounts.removeAdmin")}
-                </DropdownMenuItem>
-              )}
-              {!me && local && (
-                <DropdownMenuItem onSelect={onReset}>
-                  <KeyRoundIcon /> {t("instancesettings.accounts.resetPassword")}
-                </DropdownMenuItem>
-              )}
-              {!me && <DropdownMenuSeparator />}
-              {!me &&
-                (a.disabled ? (
-                  <DropdownMenuItem onSelect={onTurnOn}>
-                    <PowerIcon /> {t("instancesettings.accounts.turnBackOn")}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem variant="destructive" onSelect={onTurnOff}>
-                    <PowerOffIcon /> {t("accountsettings.shared.turnOff")}
-                  </DropdownMenuItem>
-                ))}
-              {developer && !me && <DropdownMenuSeparator />}
-              {developer && (
-                <DropdownMenuItem onSelect={() => copy(t, id, t("common.copy.accountId"))}>
-                  <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.accountId") })}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <AccountMenu account={a} me={me} busy={busy} developer={developer} onAdmin={onAdmin} onTurnOn={onTurnOn} onTurnOff={onTurnOff} onReset={onReset} />
         )}
       </div>
       <AnimatePresence initial={false}>
@@ -406,16 +289,235 @@ function AccountRow({
             transition={SPRING}
             className="overflow-hidden pl-[3.25rem] text-xs text-destructive/90"
           >
-            {a.disabledReason ? (
-              <T k="instancesettings.accounts.offReason" values={{ date: offDay, reason: <span className="italic">{a.disabledReason}</span> }} />
-            ) : (
-              t("instancesettings.accounts.offNoReason", { date: offDay })
-            )}
+            <OffReason reason={a.disabledReason} day={offDay} />
           </motion.p>
         )}
       </AnimatePresence>
     </motion.li>
   );
+}
+
+/** The account count, the rows, what shows with none, and "Show more". */
+function AccountList({
+  count,
+  hasMore,
+  loadingMore,
+  onMore,
+  empty,
+  children,
+}: {
+  count: number;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onMore: () => void;
+  empty: string;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+        <UsersIcon className="size-3.5" />{" "}
+        <T k={hasMore ? "instancesettings.accounts.countMore" : "instancesettings.accounts.count"} values={{ count: <Count value={count} /> }} count={count} />
+      </p>
+      <ul className="flex flex-col gap-1.5">
+        <AnimatePresence initial={false} mode="popLayout">
+          {children}
+        </AnimatePresence>
+      </ul>
+      <AnimatePresence>
+        {count === 0 && (
+          <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-8 text-center text-sm text-muted-foreground">
+            {empty}
+          </motion.p>
+        )}
+      </AnimatePresence>
+      {hasMore && (
+        <Button type="button" variant="outline" onClick={onMore} disabled={loadingMore} className="self-center rounded-xl">
+          {loadingMore && <LoaderCircleIcon className="animate-spin" />} {t("instancesettings.accounts.showMore")}
+        </Button>
+      )}
+    </>
+  );
+}
+
+/** What the list says with no accounts in it: none match, none are off, or none at all. */
+function emptyKey(search: string, filter: AccountFilter): Key {
+  if (search) return "serversettings.shared.nobodyMatches";
+  return filter === AccountFilter.DISABLED ? "instancesettings.accounts.noneOff" : "instancesettings.accounts.none";
+}
+
+/** Beside the name: you, admin, off, two-step sign-in, and how the account signs in. */
+function AccountBadges({ account: a, me }: { account: AccountSummary; me: boolean }) {
+  const { t } = useI18n();
+  const kind = a.user?.kind;
+  return (
+    <>
+      {me && <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[0.65rem] font-bold text-muted-foreground uppercase">{t("serversettings.shared.you")}</span>}
+      <AnimatePresence mode="popLayout" initial={false}>
+        {a.admin && (
+          <motion.span
+            key="admin"
+            initial={{ scale: 0, rotate: -40 }}
+            animate={{ scale: 1, rotate: 0 }}
+            exit={{ scale: 0, rotate: 40 }}
+            transition={{ type: "spring", stiffness: 600, damping: 16 }}
+            className="flex shrink-0 items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[0.65rem] font-bold text-primary uppercase"
+            title={t("instancesettings.accounts.instanceAdmin")}
+          >
+            <ShieldIcon className="size-3" /> {t("instancesettings.accounts.admin")}
+          </motion.span>
+        )}
+        {a.disabled && (
+          <motion.span
+            key="off"
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 600, damping: 18 }}
+            className="flex shrink-0 items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[0.65rem] font-bold text-destructive uppercase"
+          >
+            <PowerOffIcon className="size-3" /> {t("serversettings.shared.off")}
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {a.twoFactor && (
+        <span className="shrink-0 text-emerald-500" title={t("instancesettings.accounts.twoStepOn")}>
+          <ShieldCheckIcon className="size-3.5" />
+        </span>
+      )}
+      {kind === AccountKind.AGENT && <AppBadge agent />}
+      {kind === AccountKind.LINKED && (
+        <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.linked")}>
+          <Link2Icon className="size-3.5" />
+        </span>
+      )}
+      {kind === AccountKind.SSO && (
+        <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.sso")}>
+          <BuildingIcon className="size-3.5" />
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Under the name: the username, when they joined and were last around, and what they have here. */
+function AccountFacts({ account: a, me, now }: { account: AccountSummary; me: boolean; now: number }) {
+  const lang = useI18n();
+  const { t } = lang;
+  const joined = midSentence(lang, formatDay(toDate(a.createdAt)));
+  const seen = activeWhen(lang, toDate(a.lastSeenAt), now);
+  const facts = [
+    t("instancesettings.accounts.servers", { count: a.servers }),
+    a.serversOwned ? t("instancesettings.accounts.owns", { count: a.serversOwned }) : null,
+    t("instancesettings.accounts.devices", { count: a.sessions }),
+  ].filter(Boolean);
+  return (
+    <>
+      <p className="truncate text-xs text-muted-foreground">
+        @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} ·{" "}
+        {seen ? t("instancesettings.accounts.joinedSeen", { day: joined, when: seen }) : t("instancesettings.accounts.joinedNow", { day: joined })}
+      </p>
+      <p className="hidden truncate text-xs text-muted-foreground/80 sm:block">{facts.join(" · ")}</p>
+    </>
+  );
+}
+
+/** The row's "…" menu: admin actions on other accounts, and copying the id in developer mode. */
+function AccountMenu({
+  account: a,
+  me,
+  busy,
+  developer,
+  ...actions
+}: {
+  account: AccountSummary;
+  me: boolean;
+  busy: boolean;
+  developer: boolean;
+  onAdmin: (admin: boolean) => void;
+  onTurnOn: () => void;
+  onTurnOff: () => void;
+  onReset: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("instancesettings.accounts.actionsFor", { name: displayName(a.user) })}
+          disabled={busy}
+          className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+        >
+          {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <EllipsisIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        {!me && <AdminItems account={a} {...actions} />}
+        {developer && !me && <DropdownMenuSeparator />}
+        {developer && (
+          <DropdownMenuItem onSelect={() => copy(t, a.user?.id ?? "", t("common.copy.accountId"))}>
+            <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.accountId") })}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** What an admin can do to someone else's account: admin or not, a new password, off or on. */
+function AdminItems({
+  account: a,
+  onAdmin,
+  onTurnOn,
+  onTurnOff,
+  onReset,
+}: {
+  account: AccountSummary;
+  onAdmin: (admin: boolean) => void;
+  onTurnOn: () => void;
+  onTurnOff: () => void;
+  onReset: () => void;
+}) {
+  const { t } = useI18n();
+  const kind = a.user?.kind;
+  return (
+    <>
+      {!a.admin && !a.disabled && kind !== AccountKind.AGENT && (
+        <DropdownMenuItem onSelect={() => onAdmin(true)}>
+          <ShieldIcon /> {t("instancesettings.accounts.makeAdmin")}
+        </DropdownMenuItem>
+      )}
+      {a.admin && (
+        <DropdownMenuItem onSelect={() => onAdmin(false)}>
+          <ShieldOffIcon /> {t("instancesettings.accounts.removeAdmin")}
+        </DropdownMenuItem>
+      )}
+      {kind === AccountKind.LOCAL && (
+        <DropdownMenuItem onSelect={onReset}>
+          <KeyRoundIcon /> {t("instancesettings.accounts.resetPassword")}
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuSeparator />
+      {a.disabled ? (
+        <DropdownMenuItem onSelect={onTurnOn}>
+          <PowerIcon /> {t("instancesettings.accounts.turnBackOn")}
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem variant="destructive" onSelect={onTurnOff}>
+          <PowerOffIcon /> {t("accountsettings.shared.turnOff")}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+}
+
+/** Why an account is off and since when, if the admin said. */
+function OffReason({ reason, day }: { reason: string; day: string }) {
+  const { t } = useI18n();
+  if (!reason) return t("instancesettings.accounts.offNoReason", { date: day });
+  return <T k="instancesettings.accounts.offReason" values={{ date: day, reason: <span className="italic">{reason}</span> }} />;
 }
 
 /** Turns an account off, with a reason only admins see. */

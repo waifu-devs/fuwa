@@ -3,7 +3,7 @@ import * as React from 'react';
 import {
   useSpring,
   useTransform,
-  motion,
+  m as motion,
   useMotionValue,
   type MotionValue,
   type SpringOptions,
@@ -189,6 +189,10 @@ function SlidingNumber({
     initiallyStable ? initialNumeric : 0,
   );
 
+  const notifyNumberChange = React.useEffectEvent((value: number) => {
+    onNumberChange?.(value);
+  });
+
   React.useEffect(() => {
     if (hasAnimated) {
       const inferredDecimals =
@@ -210,7 +214,7 @@ function SlidingNumber({
 
         if (effectiveNumber !== newValue) {
           setEffectiveNumber(newValue);
-          onNumberChange?.(newValue);
+          notifyNumberChange(newValue);
         }
       });
       return () => unsubscribe();
@@ -225,7 +229,6 @@ function SlidingNumber({
     isInView,
     number,
     decimalPlaces,
-    onNumberChange,
     effectiveNumber,
     initiallyStable,
     initialNumeric,

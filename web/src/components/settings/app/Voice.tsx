@@ -9,23 +9,13 @@ import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
-import { type I18n, type Key, useI18n } from "@/i18n/react";
+import { type Key, useI18n } from "@/i18n/react";
 import { actionById, bindingOf } from "@/lib/keybinds";
 import { setPrefs, usePrefs, type InputMode } from "@/lib/prefs";
 import { cue, play } from "@/lib/sounds";
 import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { Keycaps, PrefSetting } from "./common";
-
-export const voiceSettings = (t: I18n["t"]) => [
-  { id: "devices", label: t("appsettings.voice.devices"), keywords: "input output device headset" },
-  { id: "mic-test", label: t("appsettings.voice.micTest"), keywords: "check level meter" },
-  { id: "input-mode", label: t("appsettings.voice.inputMode"), keywords: "voice activity push to talk ptt" },
-  { id: "sensitivity", label: t("appsettings.voice.sensitivity"), keywords: "threshold gate noise" },
-  { id: "processing", label: t("appsettings.voice.processing"), keywords: "echo noise suppression gain" },
-  { id: "camera", label: t("appsettings.voice.camera"), keywords: "video webcam mirror preview" },
-  { id: "call-sounds", label: t("appsettings.voice.callSounds"), keywords: "ring ringtone join leave" },
-];
 
 /** A device; `label` is empty until the browser has been allowed to name it, so it goes by its place in the list. */
 type Device = { id: string; label: string; n: number };
@@ -230,7 +220,9 @@ function CameraTest() {
 function Meter({ level, threshold, open }: { level: number; threshold?: number; open: boolean }) {
   const { t } = useI18n();
   return (
-    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={Math.round(level)} aria-label={t("appsettings.voice.micLevel")}>
+    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted">
+      {/* The real meter is for screen readers; the bars below draw it. */}
+      <meter className="sr-only" min={-100} max={0} value={Math.round(level)} aria-label={t("appsettings.voice.micLevel")} />
       <motion.div
         className={cn("absolute inset-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
         animate={{ x: `${meterAt(level) * 100 - 100}%` }}

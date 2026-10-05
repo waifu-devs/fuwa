@@ -20,7 +20,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
@@ -46,6 +46,7 @@ import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { insertAtCaret } from "@/lib/caret";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
+import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
 import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
 import { UserAvatar } from "@/components/Icons";
@@ -99,6 +100,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
     if (status === "ready" && known) void prepareConversation(instanceKey, conversationId).catch(() => {});
   }, [status, known, instanceKey, conversationId]);
 
+  const them = partner?.username ?? t("dms-calls.dm.view.them");
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
@@ -112,24 +114,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             <ChevronLeftIcon className="size-5" />
           </button>
         )}
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span
-            key={partner?.id ?? "none"}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={SPRING}
-            className="flex min-w-0 shrink items-center gap-2.5"
-          >
-            <UserAvatar user={partner} className="size-8 text-xs" />
-            <span className="min-w-0">
-              <h1 className="truncate leading-tight font-extrabold">
-                <SwapText className="truncate align-bottom">{partner ? displayName(partner) : t("dms-calls.dm.view.untitled")}</SwapText>
-              </h1>
-              {partner && <p className="truncate text-xs leading-tight text-muted-foreground">@{partner.username}</p>}
-            </span>
-          </motion.span>
-        </AnimatePresence>
+        <PartnerName partner={partner} />
         <span className="flex-1" />
         {conversation && status === "ready" && <CallButton instanceKey={instanceKey} conversationId={conversationId} />}
         {conversation && <TrustPill instanceKey={instanceKey} conversationId={conversationId} onOpen={() => setSheet(true)} />}
@@ -141,23 +126,52 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
           <EncryptedComposer
             instanceKey={instanceKey}
             id={conversation.id}
-            placeholder={t("dms-calls.dm.view.placeholder", { name: partner?.username ?? t("dms-calls.dm.view.them") })}
+            placeholder={t("dms-calls.dm.view.placeholder", { name: them })}
             promise={t("dms-calls.dm.view.promise")}
             voice
             files
-            dropTo={`@${partner?.username ?? t("dms-calls.dm.view.them")}`}
+            dropTo={`@${them}`}
           />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
-      ) : status === "unsupported" || status === "failed" ? (
-        <Unavailable text={problem ?? t("dms-calls.dm.unavailable")} />
-      ) : status === "ready" ? (
-        <Unavailable text={t("dms-calls.dm.view.notHere")} icon={UserRoundXIcon} />
       ) : (
-        <Starting />
+        <NoConversation status={status} problem={problem} />
       )}
     </div>
   );
+}
+
+/** Who the conversation is with, in the header; it slides over when that changes. */
+function PartnerName({ partner }: { partner: User | undefined }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={partner?.id ?? "none"}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={SPRING}
+        className="flex min-w-0 shrink items-center gap-2.5"
+      >
+        <UserAvatar user={partner} className="size-8 text-xs" />
+        <span className="min-w-0">
+          <h1 className="truncate leading-tight font-extrabold">
+            <SwapText className="truncate align-bottom">{partner ? displayName(partner) : t("dms-calls.dm.view.untitled")}</SwapText>
+          </h1>
+          {partner && <p className="truncate text-xs leading-tight text-muted-foreground">@{partner.username}</p>}
+        </span>
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+/** In place of a conversation that can't show: encryption isn't working here, it isn't yours, or it's still starting. */
+function NoConversation({ status, problem }: { status: string; problem: string | null }) {
+  const { t } = useI18n();
+  if (status === "unsupported" || status === "failed") return <Unavailable text={problem ?? t("dms-calls.dm.unavailable")} />;
+  if (status === "ready") return <Unavailable text={t("dms-calls.dm.view.notHere")} icon={UserRoundXIcon} />;
+  return <Starting />;
 }
 
 /** The lock in the header: encrypted always; verified once you've checked the safety number; a warning if it changed. */
@@ -350,8 +364,8 @@ export function EncryptedMessages({
   }, [list, pending, me.id]);
 
   // Only what arrives after opening animates in.
-  const initial = useRef<Set<number> | null>(null);
-  if (initial.current === null && items) initial.current = new Set(items.map((i) => i.seq));
+  const [initial, setInitial] = useState<Set<number> | null>(null);
+  if (initial === null && items) setInitial(new Set(items.map((i) => i.seq)));
 
   // A long conversation opens with its latest rows drawn; scrolling up reveals the rest.
   const [hidden, setHidden] = useState<number | null>(null);
@@ -425,7 +439,7 @@ export function EncryptedMessages({
                   />
                 );
               const item = row.item;
-              const animate = !initial.current?.has(item.seq);
+              const animate = !initial?.has(item.seq);
               if (!isMessage(item)) return <SystemLine key={row.key} item={item} text={describe(item)} animate={animate} />;
               const mine = item.senderId === me.id;
               return (
@@ -587,9 +601,6 @@ const DmRow = memo(function DmRow({
   actions: DmActions;
   threads?: ThreadHooks;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const { t } = useI18n();
   return (
     <motion.div
       {...(animate ? enter : {})}
@@ -598,99 +609,146 @@ const DmRow = memo(function DmRow({
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
-        {item.deleted ? (
-          <p className="text-sm text-muted-foreground italic">{t("dms-calls.dm.deleted")}</p>
-        ) : item.kind === "voice" && item.voice ? (
-          <DmVoice instanceKey={instanceKey} item={item} />
-        ) : editing ? (
-          <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />
-        ) : (
-          <>
-            {(item.content || !item.files) && <MessageBody content={item.content} display={display} />}
-            {item.editedAt > 0 && (
-              <span className="text-[0.7rem] text-muted-foreground" title={formatFull(new Date(item.editedAt))}>
-                {" "}
-                {t("dms-calls.dm.row.edited")}
-              </span>
-            )}
-            {item.sharedBy && (
-              <span
-                className="ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.65rem] font-bold text-muted-foreground"
-                title={t("dms-calls.dm.row.sharedTitle")}
-              >
-                <HistoryIcon className="size-3" />
-                {t("dms-calls.dm.row.shared")}
-              </span>
-            )}
-            {item.files && <SealedFiles instanceKey={instanceKey} files={item.files} animate={animate} />}
-          </>
-        )}
+        <DmRowBody item={item} display={display} instanceKey={instanceKey} animate={animate} editing={editing} actions={actions} />
         {!editing && threads?.under(item)}
       </MessageLine>
       {!editing && !item.deleted && (
-        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
-          {confirming ? (
-            <motion.span
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ type: "spring", stiffness: 600, damping: 32 }}
-              className="flex items-center gap-0.5"
-            >
-              <span className="px-2 text-xs font-bold text-destructive">{deleteQuestion}</span>
-              <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
-                <CheckIcon />
-              </ToolButton>
-              <ToolButton label={t("dms-calls.dm.row.keep")} onClick={() => setConfirming(false)}>
-                <XIcon />
-              </ToolButton>
-            </motion.span>
-          ) : (
-            <>
-              {item.kind === "text" && !!item.content && (
-                <ToolButton
-                  label={copied ? t("dms-calls.dm.row.copied") : t("dms-calls.dm.row.copy")}
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(item.content);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1200);
-                  }}
-                >
-                  <AnimatePresence mode="wait" initial={false}>
-                    <motion.span
-                      key={copied ? "copied" : "copy"}
-                      initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
-                      animate={{ scale: 1, rotate: 0, opacity: 1 }}
-                      exit={{ scale: 0.3, opacity: 0 }}
-                      transition={{ type: "spring", stiffness: 700, damping: 22 }}
-                      className="grid place-items-center"
-                    >
-                      {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
-                    </motion.span>
-                  </AnimatePresence>
-                </ToolButton>
-              )}
-              {threads?.canStart(item) && (
-                <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
-                  <MessageSquareReplyIcon />
-                </ToolButton>
-              )}
-              {mine && item.kind === "text" && (
-                <ToolButton label={t("dms-calls.dm.row.edit")} onClick={() => actions.edit(item.seq)}>
-                  <PencilIcon />
-                </ToolButton>
-              )}
-              {deletable && (
-                <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => setConfirming(true)}>
-                  <Trash2Icon />
-                </ToolButton>
-              )}
-            </>
-          )}
-        </div>
+        <DmRowTools item={item} mine={mine} deletable={deletable} deleteQuestion={deleteQuestion} actions={actions} threads={threads} />
       )}
     </motion.div>
   );
 });
+
+/** What a message row says: the message, its edit box, or that it was deleted. */
+function DmRowBody({
+  item,
+  display,
+  instanceKey,
+  animate,
+  editing,
+  actions,
+}: {
+  item: Item;
+  display: MessageDisplay;
+  instanceKey: string;
+  animate: boolean;
+  editing: boolean;
+  actions: DmActions;
+}) {
+  const { t } = useI18n();
+  if (item.deleted) return <p className="text-sm text-muted-foreground italic">{t("dms-calls.dm.deleted")}</p>;
+  if (item.kind === "voice" && item.voice) return <DmVoice instanceKey={instanceKey} item={item} />;
+  if (editing) return <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />;
+  return (
+    <>
+      {(item.content || !item.files) && <MessageBody content={item.content} display={display} />}
+      {item.editedAt > 0 && (
+        <span className="text-[0.7rem] text-muted-foreground" title={formatFull(new Date(item.editedAt))}>
+          {" "}
+          {t("dms-calls.dm.row.edited")}
+        </span>
+      )}
+      {item.sharedBy && (
+        <span
+          className="ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.65rem] font-bold text-muted-foreground"
+          title={t("dms-calls.dm.row.sharedTitle")}
+        >
+          <HistoryIcon className="size-3" />
+          {t("dms-calls.dm.row.shared")}
+        </span>
+      )}
+      {item.files && <SealedFiles instanceKey={instanceKey} files={item.files} animate={animate} />}
+    </>
+  );
+}
+
+/** The tools over a message on hover: copy, thread, edit, delete (which asks first). */
+function DmRowTools({
+  item,
+  mine,
+  deletable,
+  deleteQuestion,
+  actions,
+  threads,
+}: {
+  item: Item;
+  mine: boolean;
+  deletable: boolean;
+  deleteQuestion: string;
+  actions: DmActions;
+  threads?: ThreadHooks;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const { t } = useI18n();
+  return (
+    <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+      {confirming ? (
+        <motion.span
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ type: "spring", stiffness: 600, damping: 32 }}
+          className="flex items-center gap-0.5"
+        >
+          <span className="px-2 text-xs font-bold text-destructive">{deleteQuestion}</span>
+          <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
+            <CheckIcon />
+          </ToolButton>
+          <ToolButton label={t("dms-calls.dm.row.keep")} onClick={() => setConfirming(false)}>
+            <XIcon />
+          </ToolButton>
+        </motion.span>
+      ) : (
+        <>
+          {item.kind === "text" && !!item.content && <CopyTool text={item.content} />}
+          {threads?.canStart(item) && (
+            <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
+              <MessageSquareReplyIcon />
+            </ToolButton>
+          )}
+          {mine && item.kind === "text" && (
+            <ToolButton label={t("dms-calls.dm.row.edit")} onClick={() => actions.edit(item.seq)}>
+              <PencilIcon />
+            </ToolButton>
+          )}
+          {deletable && (
+            <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => setConfirming(true)}>
+              <Trash2Icon />
+            </ToolButton>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Copies a message's text, and ticks for a moment. */
+function CopyTool({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
+  return (
+    <ToolButton
+      label={copied ? t("dms-calls.dm.row.copied") : t("dms-calls.dm.row.copy")}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={copied ? "copied" : "copy"}
+          initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
+          animate={{ scale: 1, rotate: 0, opacity: 1 }}
+          exit={{ scale: 0.3, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 700, damping: 22 }}
+          className="grid place-items-center"
+        >
+          {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+        </motion.span>
+      </AnimatePresence>
+    </ToolButton>
+  );
+}
 
 /** A voice message in a conversation: played from this instance, opened on this device. */
 function DmVoice({ instanceKey, item }: { instanceKey: string; item: Item }) {
@@ -703,17 +761,6 @@ function DmVoice({ instanceKey, item }: { instanceKey: string; item: Item }) {
       <VoiceProblem id={id} />
     </>
   );
-}
-
-/** Where the messages from before this device joined came from: passed on by a member, or this account's backup. */
-/** Or, with none here, "restorable" if the account's backup could bring them. */
-export type Earlier = "shared" | "backup" | "restorable" | null;
-
-export function earlierFrom(items: Item[] | undefined, locked: boolean): Earlier {
-  if (items?.some((i) => i.sharedBy)) return "shared";
-  const joined = items?.findLast((i) => i.kind === "joined");
-  if (joined && items!.some((i) => isMessage(i) && i.seq < joined.seq)) return "backup";
-  return locked ? "restorable" : null;
 }
 
 /** What changed about the conversation's devices, in words. */
@@ -826,23 +873,7 @@ function PendingDm({
   );
 }
 
-/**
- * Where you write in an encrypted conversation or secure channel. Sending
- * seals the message (a lock clicks shut) and flies it off. `locked` says why
- * you can't write here at all (no permission to), if you can't.
- */
-export function EncryptedComposer({
-  instanceKey,
-  id,
-  placeholder,
-  promise,
-  locked = "",
-  action,
-  thread,
-  voice = false,
-  files = false,
-  dropTo = "",
-}: {
+type ComposerProps = {
   instanceKey: string;
   id: string;
   placeholder: string;
@@ -858,11 +889,35 @@ export function EncryptedComposer({
   action?: ReactNode;
   /** In a secure channel's thread: the thread's message, and the channel's name for "Also send to #channel". */
   thread?: { parent: number; channelName: string };
-}) {
+};
+
+/**
+ * Where you write in an encrypted conversation or secure channel. Sending
+ * seals the message (a lock clicks shut) and flies it off. `locked` says why
+ * you can't write here at all (no permission to), if you can't.
+ */
+export function EncryptedComposer(props: ComposerProps) {
+  const draft = props.thread ? `${props.id}#${props.thread.parent}` : props.id;
+  // Each conversation (or thread) gets its own box, starting from its draft.
+  return <ComposerBox key={draft} draft={draft} {...props} />;
+}
+
+function ComposerBox({
+  instanceKey,
+  id,
+  draft,
+  placeholder,
+  promise,
+  locked = "",
+  action,
+  thread,
+  voice = false,
+  files = false,
+  dropTo = "",
+}: ComposerProps & { draft: string }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const stuck = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
   const blocked = locked || stuck;
-  const draft = thread ? `${id}#${thread.parent}` : id;
   const [text, setText] = useState(() => drafts.get(draft) ?? "");
   const [alsoChannel, setAlsoChannel] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -873,12 +928,14 @@ export function EncryptedComposer({
   const { t } = useI18n();
 
   useEffect(() => {
-    setText(drafts.get(draft) ?? "");
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
-  }, [draft]);
-  useEffect(() => {
-    drafts.set(draft, text);
-  }, [draft, text]);
+  }, []);
+  // What's typed is kept per conversation, for coming back to it.
+  const write = (next: SetStateAction<string>) => {
+    const value = typeof next === "function" ? next(text) : next;
+    setText(value);
+    drafts.set(draft, value);
+  };
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -890,7 +947,6 @@ export function EncryptedComposer({
   const content = text.trim();
   const tooLong = text.length > MAX_DM;
   const ready = (!!content || picked.length > 0) && !tooLong && status === "ready";
-  const takeFiles = useCallback((list: File[]) => pickFiles(draft, list), [draft]);
 
   function send() {
     if (!ready) return;
@@ -925,45 +981,16 @@ export function EncryptedComposer({
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-      {files && dropTo && !blocked && status === "ready" && (
-        <DropOverlay channelName={dropTo} onFiles={takeFiles} note={t("dms-calls.dm.composer.drop")} />
-      )}
-      <AnimatePresence initial={false}>{files && !blocked && picked.length > 0 && <PickedTray key="picked" draft={draft} files={picked} />}</AnimatePresence>
+      {files && !blocked && <ComposerFiles draft={draft} picked={picked} dropTo={status === "ready" ? dropTo : ""} />}
       <AnimatePresence mode="popLayout" initial={false}>
         {blocked ? (
-          <motion.div
+          <BlockedNotice
             key="blocked"
-            initial={{ opacity: 0, y: 12, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={SPRING}
-            role="status"
-            className="flex items-center gap-3 rounded-2xl border border-dashed bg-muted/40 px-3 py-2.5"
-          >
-            <motion.span
-              initial={{ rotate: -20, scale: 0.6 }}
-              animate={{ rotate: [0, -10, 8, 0], scale: 1 }}
-              transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.1 } }}
-              className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"
-            >
-              <KeyRoundIcon className="size-[18px]" />
-            </motion.span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold">{locked ? t("dms-calls.dm.composer.locked") : t("dms-calls.dm.composer.blocked")}</p>
-              <p className="text-xs text-muted-foreground">{blocked}</p>
-            </div>
-            {action !== undefined
-              ? action
-              : !locked && (
-                  <button
-                    type="button"
-                    onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
-                    className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
-                  >
-                    {t("dms-calls.dm.composer.tryAgain")}
-                  </button>
-                )}
-          </motion.div>
+            locked={locked}
+            why={blocked}
+            action={action}
+            onRetry={() => void prepareConversation(instanceKey, id).catch(() => {})}
+          />
         ) : (
           <motion.div
             key="composer"
@@ -985,26 +1012,17 @@ export function EncryptedComposer({
               data-composer
               rows={1}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => write(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={placeholder}
               aria-label={placeholder}
               className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"
             />
             <AnimatePresence>
-              {text.length > MAX_DM - 500 && (
-                <motion.span
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className={cn("mb-2 text-xs tabular-nums", tooLong ? "font-bold text-destructive" : "text-muted-foreground")}
-                >
-                  {MAX_DM - text.length}
-                </motion.span>
-              )}
+              {text.length > MAX_DM - 500 && <CharsLeft key="left" left={MAX_DM - text.length} />}
             </AnimatePresence>
             {files && <EncryptedAttach draft={draft} disabled={status !== "ready"} />}
-            <TimestampPicker onPick={(token) => insertAtCaret(box, setText, token)} />
+            <TimestampPicker onPick={(token) => insertAtCaret(box, write, token)} />
             {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
@@ -1013,53 +1031,164 @@ export function EncryptedComposer({
                 disabled={status !== "ready"}
               />
             ) : (
-              <motion.button
-                type="button"
-                onClick={send}
-                disabled={!ready}
-                aria-label={t("dms-calls.dm.composer.send")}
-                whileTap={{ scale: 0.85 }}
-                initial={false}
-                animate={{ scale: ready ? 1 : 0.9 }}
-                transition={{ type: "spring", stiffness: 600, damping: 20 }}
-                className={cn(
-                  "relative mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
-                  ready ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
-                )}
-              >
-                <motion.span animate={plane} className="block">
-                  <SendHorizontalIcon className="size-[18px]" />
-                </motion.span>
-              </motion.button>
+              <SendButton ready={ready} plane={plane} onSend={send} />
             )}
           </motion.div>
         )}
       </AnimatePresence>
-      <div className={cn("mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground transition-opacity", blocked && "invisible opacity-0")}>
-        {thread && (
-          <label className="flex min-w-0 shrink cursor-pointer items-center gap-1.5 font-bold">
-            <input
-              type="checkbox"
-              checked={alsoChannel}
-              onChange={(e) => setAlsoChannel(e.target.checked)}
-              className="size-3.5 accent-[var(--primary)]"
-            />
-            <span className="truncate">{t("dms-calls.dm.composer.alsoSend", { channel: thread.channelName })}</span>
-          </label>
-        )}
-        <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
-          <T
-            k="dms-calls.dm.composer.keys"
-            values={{
-              send: <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b>,
-              newLine: <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b>,
-            }}
-          />
-        </p>
-        <p className="ml-auto flex shrink-0 items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
-          <LockKeyholeIcon className="size-3" /> {error ?? promise}
-        </p>
-      </div>
+      <ComposerFooter
+        hidden={!!blocked}
+        channelName={thread?.channelName}
+        alsoChannel={alsoChannel}
+        onAlsoChannel={setAlsoChannel}
+        sendWith={sendWith}
+        note={error ?? promise}
+      />
     </div>
+  );
+}
+
+/** Files waiting to be sealed and sent, and the overlay that takes dropped ones (when `dropTo` says where). */
+function ComposerFiles({ draft, picked, dropTo }: { draft: string; picked: File[]; dropTo: string }) {
+  const { t } = useI18n();
+  const takeFiles = useCallback((list: File[]) => pickFiles(draft, list), [draft]);
+  return (
+    <>
+      {dropTo && <DropOverlay channelName={dropTo} onFiles={takeFiles} note={t("dms-calls.dm.composer.drop")} />}
+      <AnimatePresence initial={false}>{picked.length > 0 && <PickedTray key="picked" draft={draft} files={picked} />}</AnimatePresence>
+    </>
+  );
+}
+
+/** How many characters are left, once it's getting close; red past the limit. */
+function CharsLeft({ left }: { left: number }) {
+  return (
+    <motion.span
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.8 }}
+      className={cn("mb-2 text-xs tabular-nums", left < 0 ? "font-bold text-destructive" : "text-muted-foreground")}
+    >
+      {left}
+    </motion.span>
+  );
+}
+
+/** Under the box: "Also send to #channel" in a thread, which keys send, and the promise (or what went wrong). */
+function ComposerFooter({
+  hidden,
+  channelName,
+  alsoChannel,
+  onAlsoChannel,
+  sendWith,
+  note,
+}: {
+  hidden: boolean;
+  channelName?: string;
+  alsoChannel: boolean;
+  onAlsoChannel: (on: boolean) => void;
+  sendWith: string;
+  note: string;
+}) {
+  const { t } = useI18n();
+  const inThread = channelName !== undefined;
+  return (
+    <div className={cn("mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground transition-opacity", hidden && "invisible opacity-0")}>
+      {inThread && (
+        <label className="flex min-w-0 shrink cursor-pointer items-center gap-1.5 font-bold">
+          <input
+            type="checkbox"
+            checked={alsoChannel}
+            onChange={(e) => onAlsoChannel(e.target.checked)}
+            className="size-3.5 accent-[var(--primary)]"
+          />
+          <span className="truncate">{t("dms-calls.dm.composer.alsoSend", { channel: channelName })}</span>
+        </label>
+      )}
+      <KeysHint sendWith={sendWith} className={cn("hidden min-w-0 flex-1 truncate", !inThread && "sm:block")} />
+      <p className="ml-auto flex shrink-0 items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+        <LockKeyholeIcon className="size-3" /> {note}
+      </p>
+    </div>
+  );
+}
+
+/** In place of the box when you can't write: why, and a way to try again. */
+function BlockedNotice({ locked, why, action, onRetry }: { locked: string; why: string; action?: ReactNode; onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={SPRING}
+      role="status"
+      className="flex items-center gap-3 rounded-2xl border border-dashed bg-muted/40 px-3 py-2.5"
+    >
+      <motion.span
+        initial={{ rotate: -20, scale: 0.6 }}
+        animate={{ rotate: [0, -10, 8, 0], scale: 1 }}
+        transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.1 } }}
+        className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"
+      >
+        <KeyRoundIcon className="size-[18px]" />
+      </motion.span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">{locked ? t("dms-calls.dm.composer.locked") : t("dms-calls.dm.composer.blocked")}</p>
+        <p className="text-xs text-muted-foreground">{why}</p>
+      </div>
+      {action !== undefined
+        ? action
+        : !locked && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
+            >
+              {t("dms-calls.dm.composer.tryAgain")}
+            </button>
+          )}
+    </motion.div>
+  );
+}
+
+/** The send button: grows when there's something to send; the plane flies off when it goes. */
+function SendButton({ ready, plane, onSend }: { ready: boolean; plane: ReturnType<typeof useAnimationControls>; onSend: () => void }) {
+  const { t } = useI18n();
+  return (
+    <motion.button
+      type="button"
+      onClick={onSend}
+      disabled={!ready}
+      aria-label={t("dms-calls.dm.composer.send")}
+      whileTap={{ scale: 0.85 }}
+      initial={false}
+      animate={{ scale: ready ? 1 : 0.9 }}
+      transition={{ type: "spring", stiffness: 600, damping: 20 }}
+      className={cn(
+        "relative mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
+        ready ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
+      )}
+    >
+      <motion.span animate={plane} className="block">
+        <SendHorizontalIcon className="size-[18px]" />
+      </motion.span>
+    </motion.button>
+  );
+}
+
+/** Which keys send and which start a new line, as set in the app's settings. */
+function KeysHint({ sendWith, className }: { sendWith: string; className: string }) {
+  const enter = sendWith === "enter";
+  return (
+    <p className={className}>
+      <T
+        k="dms-calls.dm.composer.keys"
+        values={{
+          send: <b>{enter ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b>,
+          newLine: <b>{enter ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b>,
+        }}
+      />
+    </p>
   );
 }

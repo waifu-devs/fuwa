@@ -719,11 +719,12 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
   const toggles = SHAREABLE.filter(
     (s) => (s.permission !== Permission.CREATE_POLLS || pollsShared) && (s.permission !== Permission.CREATE_THREADS || threadsShared),
   );
+  const allowed = new Set(c.allowed);
   if (!c.home)
     return (
       <ul className="flex flex-wrap gap-1.5 pl-[3.25rem]">
         {SHAREABLE.map((s, n) => (
-          <Capability key={s.permission} on={c.allowed.includes(s.permission)} label={t(s.label)} icon={s.icon} index={n} />
+          <Capability key={s.permission} on={allowed.has(s.permission)} label={t(s.label)} icon={s.icon} index={n} />
         ))}
       </ul>
     );
@@ -741,7 +742,7 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
   return (
     <div className="grid gap-1.5 rounded-xl bg-muted/40 p-2 sm:grid-cols-2">
       {toggles.map((s) => {
-        const on = c.allowed.includes(s.permission);
+        const on = allowed.has(s.permission);
         return (
           <label key={s.permission} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-background/60">
             <motion.span animate={{ scale: on ? 1 : 0.9, opacity: on ? 1 : 0.5 }} transition={SPRING} className={cn("grid size-6 place-items-center rounded-md", on ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>

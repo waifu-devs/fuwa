@@ -51,16 +51,17 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
   const byId = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
   const layout = useMemo(() => layoutOf(channels), [channels]);
   const list = useRef<HTMLDivElement>(null);
-  const [selected, setSelected] = useState<string | null>(initial || (layout.loose[0] ?? null));
+  const [chosen, setSelected] = useState<string | null>(initial || (layout.loose[0] ?? null));
+  // A channel asked for from outside (its menu, a link) becomes the chosen one.
+  const [asked, setAsked] = useState(initial);
+  if (asked !== initial) {
+    setAsked(initial);
+    if (initial) setSelected(initial);
+  }
+  // One that's gone (deleted, or hidden from you now) leaves nothing chosen.
+  const selected = chosen && byId.has(chosen) ? chosen : null;
   const [creating, setCreating] = useState<string | null>(null);
   const editor = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (initial) setSelected(initial);
-  }, [initial]);
-  useEffect(() => {
-    if (selected && !byId.has(selected)) setSelected(null);
-  }, [byId, selected]);
 
   const save = (next: Layout) => void run(reorderChannels(instanceKey, serverId, placements(next))).catch((err: FuwaError) => toast(err.message));
   useArrange({ container: list, enabled: arrange, layout, onArrange: save, handle: "[data-arrange-handle]" });
@@ -135,7 +136,7 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
       </div>
       <div ref={editor} className="min-w-0 scroll-mt-4">
         <AnimatePresence mode="wait" initial={false}>
-          {selected && byId.get(selected) ? (
+          {selected ? (
             <motion.div key={selected} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={SPRING}>
               <ChannelSettings
                 instanceKey={instanceKey}
@@ -367,22 +368,19 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
   const [draft, setDraft] = useState(() => draftOf(channel));
   const base = useMemo(() => draftOf(channel), [channel]);
   const save = useAction(updateChannel);
-  const remove = useAction(deleteChannel);
-  const [confirming, setConfirming] = useState(false);
   const system = useInstance(instanceKey)?.servers.find((s) => s.id === serverId)?.systemChannelId === channel.id;
   const categories = channels.filter((c) => c.type === ChannelType.CATEGORY);
 
   // A change saved elsewhere lands in the draft, except in fields being edited here.
-  const previous = useRef(base);
-  useEffect(() => {
-    const before = previous.current;
-    previous.current = base;
+  const [before, setBefore] = useState(base);
+  if (before !== base) {
+    setBefore(base);
     setDraft((d) => {
       const next = { ...base };
       for (const k of Object.keys(d) as (keyof Draft)[]) if (d[k] !== before[k]) (next as Record<string, unknown>)[k] = d[k];
       return next;
     });
-  }, [base]);
+  }
 
   const changed = (Object.keys(base) as (keyof Draft)[]).filter((k) => draft[k] !== base[k]);
   const set = (patch: Partial<Draft>) => {
@@ -401,9 +399,6 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
     });
     if (done) setDraft(draftOf(done));
   }
-
-  const index = Math.max(0, SLOW.findIndex((s) => s >= draft.slowmode));
-  const parentName = categories.find((c) => c.id === draft.parentId)?.name ?? t("serversettings.channels.noCategory");
 
   return (
     <div className="flex flex-col">
@@ -424,113 +419,139 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
           <Textarea id="channel-edit-topic" rows={3} maxLength={1024} value={draft.topic} onChange={(e) => set({ topic: e.target.value })} className="rounded-xl" />
         </Row>
       )}
-      {!category && (
-        <Row label={t("serversettings.channels.category")}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="group flex h-11 items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60">
-                <FolderIcon className="size-4 text-muted-foreground" />
-                <span className="flex-1 truncate font-bold">{parentName}</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-              <DropdownMenuRadioGroup value={draft.parentId} onValueChange={(parentId) => set({ parentId })}>
-                <DropdownMenuRadioItem value="">{t("serversettings.channels.noCategory")}</DropdownMenuRadioItem>
-                {categories.map((c) => (
-                  <DropdownMenuRadioItem key={c.id} value={c.id}>
-                    {c.name}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </Row>
-      )}
-      {texty && (
-        <Row
-          id="slowmode"
-          label={t("serversettings.nav.slowmode")}
-          hint={t("serversettings.channels.slowmodeHint")}
-        >
-          <div className="flex items-center gap-3">
-            <motion.span
-              animate={draft.slowmode ? { x: [0, 3, 0], rotate: [0, -4, 0] } : { x: 0, rotate: 0 }}
-              transition={draft.slowmode ? { duration: 2.4 - Math.min(index, 12) * 0.12, repeat: Infinity, ease: "easeInOut" } : SPRING}
-              className={cn("grid size-10 shrink-0 place-items-center rounded-xl transition-colors", draft.slowmode ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}
-            >
-              <SnailIcon className="size-5" />
-            </motion.span>
-            <Slider
-              label={t("serversettings.nav.slowmode")}
-              min={0}
-              max={SLOW.length - 1}
-              value={index}
-              onChange={(i) => set({ slowmode: SLOW[i]! })}
-              format={(i) => slowLabel(lang, SLOW[i]!)}
-              marks={[
-                { value: 0, label: t("serversettings.shared.off") },
-                { value: 4, label: shortDuration(lang, SLOW[4]!) },
-                { value: 7, label: shortDuration(lang, SLOW[7]!) },
-                { value: 11, label: shortDuration(lang, SLOW[11]!) },
-                { value: 13, label: shortDuration(lang, SLOW[13]!) },
-              ]}
-              className="min-w-0 flex-1 px-2"
-            />
-            <span className="min-w-20 shrink-0 text-right text-sm font-bold whitespace-nowrap tabular-nums">{slowLabel(lang, draft.slowmode)}</span>
-          </div>
-        </Row>
-      )}
-      <div className="py-5">
-        <AnimatePresence mode="wait" initial={false}>
-          {confirming ? (
-            <motion.div
-              key="confirm"
-              initial={{ opacity: 0, y: 8, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={SPRING}
-              className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4"
-            >
-              <p className="flex items-center gap-2 font-bold text-destructive">
-                <TriangleAlertIcon className="size-4" />{" "}
-                {category ? t("serversettings.channels.deleteCategoryAsk", { name: channel.name }) : t("serversettings.channels.deleteChannelAsk", { name: channel.name })}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {category
-                  ? t("serversettings.channels.deleteCategoryHint")
-                  : system
-                    ? t("serversettings.channels.deleteSystemHint")
-                    : t("serversettings.channels.deleteChannelHint")}
-              </p>
-              {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" onClick={() => setConfirming(false)} className="rounded-xl">
-                  {t("serversettings.shared.keepIt")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  disabled={remove.pending}
-                  onClick={async () => {
-                    if ((await remove.go(instanceKey, serverId, channel.id)) !== undefined) toast(category ? t("serversettings.shared.deleted", { name: channel.name }) : t("serversettings.shared.deletedChannel", { name: channel.name }));
-                  }}
-                  className="rounded-xl font-bold"
-                >
-                  {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} {t("serversettings.shared.delete")}
-                </Button>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Button type="button" variant="ghost" onClick={() => setConfirming(true)} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
-                <Trash2Icon className="transition-transform group-hover:-rotate-12" />{" "}
-                {category ? t("serversettings.channels.deleteCategory") : t("serversettings.channels.deleteChannel")}
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {!category && <CategoryRow categories={categories} value={draft.parentId} onChange={(parentId) => set({ parentId })} />}
+      {texty && <SlowmodeRow value={draft.slowmode} onChange={(slowmode) => set({ slowmode })} />}
+      <DeleteZone instanceKey={instanceKey} serverId={serverId} channel={channel} system={system} />
       <SaveBar count={changed.length} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={() => setDraft(base)} />
+    </div>
+  );
+}
+
+/** Which category a channel sits in, or none. */
+function CategoryRow({ categories, value, onChange }: { categories: Channel[]; value: string; onChange: (parentId: string) => void }) {
+  const { t } = useI18n();
+  const parentName = categories.find((c) => c.id === value)?.name ?? t("serversettings.channels.noCategory");
+  return (
+    <Row label={t("serversettings.channels.category")}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="group flex h-11 items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60">
+            <FolderIcon className="size-4 text-muted-foreground" />
+            <span className="flex-1 truncate font-bold">{parentName}</span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            <DropdownMenuRadioItem value="">{t("serversettings.channels.noCategory")}</DropdownMenuRadioItem>
+            {categories.map((c) => (
+              <DropdownMenuRadioItem key={c.id} value={c.id}>
+                {c.name}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </Row>
+  );
+}
+
+/** Slow mode: how long people wait between messages; the snail creeps faster the longer it is. */
+function SlowmodeRow({ value, onChange }: { value: number; onChange: (seconds: number) => void }) {
+  const lang = useI18n();
+  const { t } = lang;
+  const index = Math.max(0, SLOW.findIndex((s) => s >= value));
+  return (
+    <Row
+      id="slowmode"
+      label={t("serversettings.nav.slowmode")}
+      hint={t("serversettings.channels.slowmodeHint")}
+    >
+      <div className="flex items-center gap-3">
+        <motion.span
+          animate={value ? { x: [0, 3, 0], rotate: [0, -4, 0] } : { x: 0, rotate: 0 }}
+          transition={value ? { duration: 2.4 - Math.min(index, 12) * 0.12, repeat: Infinity, ease: "easeInOut" } : SPRING}
+          className={cn("grid size-10 shrink-0 place-items-center rounded-xl transition-colors", value ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}
+        >
+          <SnailIcon className="size-5" />
+        </motion.span>
+        <Slider
+          label={t("serversettings.nav.slowmode")}
+          min={0}
+          max={SLOW.length - 1}
+          value={index}
+          onChange={(i) => onChange(SLOW[i]!)}
+          format={(i) => slowLabel(lang, SLOW[i]!)}
+          marks={[
+            { value: 0, label: t("serversettings.shared.off") },
+            { value: 4, label: shortDuration(lang, SLOW[4]!) },
+            { value: 7, label: shortDuration(lang, SLOW[7]!) },
+            { value: 11, label: shortDuration(lang, SLOW[11]!) },
+            { value: 13, label: shortDuration(lang, SLOW[13]!) },
+          ]}
+          className="min-w-0 flex-1 px-2"
+        />
+        <span className="min-w-20 shrink-0 text-right text-sm font-bold whitespace-nowrap tabular-nums">{slowLabel(lang, value)}</span>
+      </div>
+    </Row>
+  );
+}
+
+/** Deleting the channel or category, once you've said yes. */
+function DeleteZone({ instanceKey, serverId, channel, system }: { instanceKey: string; serverId: string; channel: Channel; system: boolean }) {
+  const { t } = useI18n();
+  const category = channel.type === ChannelType.CATEGORY;
+  const remove = useAction(deleteChannel);
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="py-5">
+      <AnimatePresence mode="wait" initial={false}>
+        {confirming ? (
+          <motion.div
+            key="confirm"
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={SPRING}
+            className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4"
+          >
+            <p className="flex items-center gap-2 font-bold text-destructive">
+              <TriangleAlertIcon className="size-4" />{" "}
+              {category ? t("serversettings.channels.deleteCategoryAsk", { name: channel.name }) : t("serversettings.channels.deleteChannelAsk", { name: channel.name })}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {category
+                ? t("serversettings.channels.deleteCategoryHint")
+                : system
+                  ? t("serversettings.channels.deleteSystemHint")
+                  : t("serversettings.channels.deleteChannelHint")}
+            </p>
+            {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setConfirming(false)} className="rounded-xl">
+                {t("serversettings.shared.keepIt")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={remove.pending}
+                onClick={async () => {
+                  if ((await remove.go(instanceKey, serverId, channel.id)) !== undefined) toast(category ? t("serversettings.shared.deleted", { name: channel.name }) : t("serversettings.shared.deletedChannel", { name: channel.name }));
+                }}
+                className="rounded-xl font-bold"
+              >
+                {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} {t("serversettings.shared.delete")}
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(true)} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
+              <Trash2Icon className="transition-transform group-hover:-rotate-12" />{" "}
+              {category ? t("serversettings.channels.deleteCategory") : t("serversettings.channels.deleteChannel")}
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

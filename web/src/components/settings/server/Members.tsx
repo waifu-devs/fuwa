@@ -183,7 +183,6 @@ function MemberRow({
   const until = timedOutUntil(m, now);
   const can = useModeration(instanceKey, m.serverId, m);
   const developer = usePrefs((p) => p.developerMode);
-  const punish = can.timeout || can.kick || can.ban;
   return (
     <motion.li
       layout
@@ -225,47 +224,70 @@ function MemberRow({
         )}
       </AnimatePresence>
       {(can.any || developer) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("serversettings.members.actionsFor", { name: memberName(m) })}
-              className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
-            >
-              <EllipsisIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {can.nickname && (
-              <DropdownMenuItem onSelect={() => onModerate("nickname")}>
-                <PencilIcon /> {t("serversettings.members.changeNickname")}
-              </DropdownMenuItem>
-            )}
-            {can.nickname && punish && <DropdownMenuSeparator />}
-            {can.timeout && (
-              <DropdownMenuItem onSelect={() => onModerate("timeout")}>
-                <HourglassIcon /> {until ? t("serversettings.members.changeTimeout") : t("serversettings.members.timeOut")}
-              </DropdownMenuItem>
-            )}
-            {can.kick && (
-              <DropdownMenuItem variant="destructive" onSelect={() => onModerate("kick")}>
-                <DoorOpenIcon /> {t("serversettings.members.kick")}
-              </DropdownMenuItem>
-            )}
-            {can.ban && (
-              <DropdownMenuItem variant="destructive" onSelect={() => onModerate("ban")}>
-                <GavelIcon /> {t("serversettings.members.ban")}
-              </DropdownMenuItem>
-            )}
-            {developer && can.any && <DropdownMenuSeparator />}
-            {developer && (
-              <DropdownMenuItem onSelect={() => copy(lang.t, id, lang.t("common.copy.userId"))}>
-                <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.userId") })}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MemberMenu id={id} name={memberName(m)} can={can} timedOut={!!until} developer={developer} onModerate={onModerate} />
       )}
     </motion.li>
+  );
+}
+
+/** A member's "…" menu: what you may do to them, and copying their id in developer mode. */
+function MemberMenu({
+  id,
+  name,
+  can,
+  timedOut,
+  developer,
+  onModerate,
+}: {
+  id: string;
+  name: string;
+  can: ReturnType<typeof useModeration>;
+  timedOut: boolean;
+  developer: boolean;
+  onModerate: (action: ModAction) => void;
+}) {
+  const { t } = useI18n();
+  const punish = can.timeout || can.kick || can.ban;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("serversettings.members.actionsFor", { name })}
+          className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+        >
+          <EllipsisIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {can.nickname && (
+          <DropdownMenuItem onSelect={() => onModerate("nickname")}>
+            <PencilIcon /> {t("serversettings.members.changeNickname")}
+          </DropdownMenuItem>
+        )}
+        {can.nickname && punish && <DropdownMenuSeparator />}
+        {can.timeout && (
+          <DropdownMenuItem onSelect={() => onModerate("timeout")}>
+            <HourglassIcon /> {timedOut ? t("serversettings.members.changeTimeout") : t("serversettings.members.timeOut")}
+          </DropdownMenuItem>
+        )}
+        {can.kick && (
+          <DropdownMenuItem variant="destructive" onSelect={() => onModerate("kick")}>
+            <DoorOpenIcon /> {t("serversettings.members.kick")}
+          </DropdownMenuItem>
+        )}
+        {can.ban && (
+          <DropdownMenuItem variant="destructive" onSelect={() => onModerate("ban")}>
+            <GavelIcon /> {t("serversettings.members.ban")}
+          </DropdownMenuItem>
+        )}
+        {developer && can.any && <DropdownMenuSeparator />}
+        {developer && (
+          <DropdownMenuItem onSelect={() => copy(t, id, t("common.copy.userId"))}>
+            <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.userId") })}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

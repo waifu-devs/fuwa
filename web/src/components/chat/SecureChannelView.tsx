@@ -23,7 +23,8 @@ import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel, setSec
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa, type DmMember, type DmState, type PendingMessage } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
-import { EncryptedComposer, EncryptedMessages, earlierFrom, Starting, Unavailable, type Earlier, type ThreadHooks } from "@/components/dm/DmView";
+import { EncryptedComposer, EncryptedMessages, Starting, Unavailable, type ThreadHooks } from "@/components/dm/DmView";
+import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { SecureAlsoSent, SecureRepliesRow, SecureThreadList, SecureThreadPanel, useArchiveHours, useThreadNote } from "@/components/chat/SecureThreads";
 import { ThreadsButton } from "@/components/chat/Threads";
 import { Padlock } from "@/components/dm/Padlock";

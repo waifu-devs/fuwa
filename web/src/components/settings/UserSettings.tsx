@@ -23,7 +23,8 @@ import {
   ImageIcon,
   WandSparklesIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
+import type { User } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { Accessibility } from "@/components/settings/app/Accessibility";
 import { Advanced } from "@/components/settings/app/Advanced";
@@ -36,7 +37,8 @@ import { Keybinds } from "@/components/settings/app/Keybinds";
 import { keybindSettings } from "@/components/settings/app/keybind-settings";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
-import { Voice, voiceSettings } from "@/components/settings/app/Voice";
+import { Voice } from "@/components/settings/app/Voice";
+import { voiceSettings } from "@/components/settings/app/voice-settings";
 import { LinkedSignIn, Password, Session } from "@/components/settings/Account";
 import { hasPassword } from "@/lib/accounts";
 import { Agents } from "@/components/settings/account/Agents";
@@ -171,6 +173,148 @@ function appSections(t: I18n["t"]): SettingsSection[] {
   ];
 }
 
+/** The account group's sections, for the instance on screen (`where`, in words). */
+function accountSections(t: I18n["t"], me: User, where: string, linkedIssuer: string | undefined): SettingsSection[] {
+  return [
+    {
+      id: "profile",
+      label: t("settings.nav.profile"),
+      icon: UserRoundIcon,
+      description: t("settings.nav.profileAbout", { instance: where }),
+      keywords: "name avatar picture",
+      settings: [
+        { id: "display-name", label: t("settings.nav.displayName") },
+        { id: "pronouns", label: t("settings.nav.pronouns") },
+        { id: "avatar", label: t("settings.nav.avatar"), keywords: "picture photo upload image gif" },
+        { id: "banner", label: t("settings.nav.banner"), keywords: "header picture upload image" },
+        { id: "profile-color", label: t("settings.nav.profileColor"), keywords: "accent" },
+        { id: "profile-effect", label: t("settings.nav.profileEffect"), keywords: "sparkles petals stars hearts snow confetti animation decoration" },
+        { id: "status", label: t("settings.nav.status"), keywords: "away busy" },
+        { id: "about-me", label: t("settings.nav.aboutMe"), keywords: "bio description" },
+      ],
+    },
+    {
+      id: "server-profiles",
+      label: t("settings.nav.serverProfiles"),
+      icon: IdCardIcon,
+      description: t("settings.nav.serverProfilesAbout"),
+      keywords: "per server identity",
+      settings: [{ id: "nickname", label: t("settings.nav.nickname"), keywords: "server name" }],
+    },
+    {
+      id: "devices",
+      label: t("settings.nav.devices"),
+      icon: MonitorSmartphoneIcon,
+      description: t("settings.nav.devicesAbout", { instance: where }),
+      keywords: "sessions sign out log out phone browser",
+    },
+    ...(hasPassword(me)
+      ? [
+          {
+            id: "security",
+            label: t("settings.nav.twoStep"),
+            icon: ShieldCheckIcon,
+            description: t("settings.nav.twoStepAbout"),
+            keywords: "2fa mfa totp authenticator backup codes security",
+            settings: [
+              { id: "two-step", label: t("settings.nav.twoStep"), keywords: "2fa authenticator" },
+              { id: "backup-codes", label: t("settings.nav.backupCodes"), keywords: "recovery" },
+            ],
+          },
+          {
+            id: "password",
+            label: t("settings.nav.password"),
+            icon: KeyRoundIcon,
+            description: t("settings.nav.passwordAbout", { instance: where }),
+            keywords: "security change",
+          },
+        ]
+      : [
+          {
+            id: "linked",
+            label: t("settings.nav.linked"),
+            icon: Flower2Icon,
+            description: t("settings.nav.linkedAbout", { instance: where, issuer: issuerName(linkedIssuer) }),
+            keywords: "waifu.dev linked password 2fa security",
+          },
+        ]),
+    {
+      id: "server-notifications",
+      label: t("settings.nav.serverNotifications"),
+      icon: BellRingIcon,
+      description: t("settings.nav.serverNotificationsAbout"),
+      keywords: "mute mentions everyone here alerts",
+    },
+    {
+      id: "agents",
+      label: t("settings.nav.agents"),
+      icon: BotIcon,
+      description: t("settings.nav.agentsAbout"),
+      keywords: "bot bots token api key automation integration developer",
+    },
+    {
+      id: "friends",
+      label: t("settings.nav.friends"),
+      icon: HeartHandshakeIcon,
+      description: t("settings.nav.friendsAbout"),
+      keywords: "friend requests direct messages dm online status mutual block",
+      settings: [
+        { id: "friend-requests", label: t("settings.nav.friendRequests"), keywords: "requests add" },
+        { id: "direct-messages", label: t("settings.nav.directMessages"), keywords: "dm messages" },
+        { id: "friends-see", label: t("settings.nav.friendsSee"), keywords: "online mutual" },
+      ],
+    },
+    {
+      id: "privacy",
+      label: t("settings.nav.privacy"),
+      icon: DatabaseIcon,
+      description: t("settings.nav.privacyAbout", { instance: where }),
+      keywords: "export download delete account gdpr activity rich presence game playing status",
+      settings: [
+        { id: "activity-sharing", label: t("settings.nav.activity"), keywords: "rich presence activity game playing listening discord share" },
+        { id: "export", label: t("settings.nav.export"), keywords: "export json" },
+        { id: "delete-account", label: t("settings.nav.deleteAccount"), keywords: "remove close" },
+      ],
+    },
+  ];
+}
+
+/** Each App settings page, by section. */
+const APP_PAGES: Record<string, (key: string | undefined) => ReactNode> = {
+  appearance: (key) => <Appearance instanceKey={key} />,
+  themes: (key) => <Themes instanceKey={key} />,
+  backdrop: (key) => <Backgrounds instanceKey={key} />,
+  accessibility: () => <Accessibility />,
+  chat: () => <Chat />,
+  language: () => <Language />,
+  notifications: () => <Notifications />,
+  voice: () => <Voice />,
+  keybinds: () => <Keybinds />,
+  streamer: (key) => <Streamer instanceKey={key} />,
+  advanced: () => <Advanced />,
+};
+
+/** Each account page, by section; they need the instance on screen. */
+const ACCOUNT_PAGES: Record<string, (key: string) => ReactNode> = {
+  profile: (key) => <Profile instanceKey={key} />,
+  "server-profiles": (key) => <ServerProfiles instanceKey={key} />,
+  devices: (key) => <Devices instanceKey={key} />,
+  security: (key) => <Security instanceKey={key} />,
+  password: (key) => <Password instanceKey={key} />,
+  linked: (key) => <LinkedSignIn instanceKey={key} />,
+  "server-notifications": (key) => <ServerNotifications instanceKey={key} />,
+  agents: (key) => <Agents instanceKey={key} />,
+  friends: (key) => <FriendPrivacy instanceKey={key} />,
+  privacy: (key) => <Privacy instanceKey={key} />,
+  session: (key) => <Session instanceKey={key} />,
+};
+
+function sectionPage(section: string, key: string | undefined) {
+  if (Object.hasOwn(APP_PAGES, section)) return APP_PAGES[section]!(key);
+  if (key && Object.hasOwn(ACCOUNT_PAGES, section)) return ACCOUNT_PAGES[section]!(key);
+  return null;
+}
+
 const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "password", "server-notifications", "agents", "privacy", "session"]);
 
 /**
@@ -194,111 +338,7 @@ export function UserSettings() {
 
   const groups: SettingsGroup[] = [{ label: t("settings.nav.app"), sections: appSections(t) }];
   if (key && me) {
-    groups.push({
-      label: t("settings.nav.account", { instance: where }),
-      sections: [
-        {
-          id: "profile",
-          label: t("settings.nav.profile"),
-          icon: UserRoundIcon,
-          description: t("settings.nav.profileAbout", { instance: where }),
-          keywords: "name avatar picture",
-          settings: [
-            { id: "display-name", label: t("settings.nav.displayName") },
-            { id: "pronouns", label: t("settings.nav.pronouns") },
-            { id: "avatar", label: t("settings.nav.avatar"), keywords: "picture photo upload image gif" },
-            { id: "banner", label: t("settings.nav.banner"), keywords: "header picture upload image" },
-            { id: "profile-color", label: t("settings.nav.profileColor"), keywords: "accent" },
-            { id: "profile-effect", label: t("settings.nav.profileEffect"), keywords: "sparkles petals stars hearts snow confetti animation decoration" },
-            { id: "status", label: t("settings.nav.status"), keywords: "away busy" },
-            { id: "about-me", label: t("settings.nav.aboutMe"), keywords: "bio description" },
-          ],
-        },
-        {
-          id: "server-profiles",
-          label: t("settings.nav.serverProfiles"),
-          icon: IdCardIcon,
-          description: t("settings.nav.serverProfilesAbout"),
-          keywords: "per server identity",
-          settings: [{ id: "nickname", label: t("settings.nav.nickname"), keywords: "server name" }],
-        },
-        {
-          id: "devices",
-          label: t("settings.nav.devices"),
-          icon: MonitorSmartphoneIcon,
-          description: t("settings.nav.devicesAbout", { instance: where }),
-          keywords: "sessions sign out log out phone browser",
-        },
-        ...(hasPassword(me)
-          ? [
-              {
-                id: "security",
-                label: t("settings.nav.twoStep"),
-                icon: ShieldCheckIcon,
-                description: t("settings.nav.twoStepAbout"),
-                keywords: "2fa mfa totp authenticator backup codes security",
-                settings: [
-                  { id: "two-step", label: t("settings.nav.twoStep"), keywords: "2fa authenticator" },
-                  { id: "backup-codes", label: t("settings.nav.backupCodes"), keywords: "recovery" },
-                ],
-              },
-              {
-                id: "password",
-                label: t("settings.nav.password"),
-                icon: KeyRoundIcon,
-                description: t("settings.nav.passwordAbout", { instance: where }),
-                keywords: "security change",
-              },
-            ]
-          : [
-              {
-                id: "linked",
-                label: t("settings.nav.linked"),
-                icon: Flower2Icon,
-                description: t("settings.nav.linkedAbout", { instance: where, issuer: issuerName(node?.auth?.linkedIssuer) }),
-                keywords: "waifu.dev linked password 2fa security",
-              },
-            ]),
-        {
-          id: "server-notifications",
-          label: t("settings.nav.serverNotifications"),
-          icon: BellRingIcon,
-          description: t("settings.nav.serverNotificationsAbout"),
-          keywords: "mute mentions everyone here alerts",
-        },
-        {
-          id: "agents",
-          label: t("settings.nav.agents"),
-          icon: BotIcon,
-          description: t("settings.nav.agentsAbout"),
-          keywords: "bot bots token api key automation integration developer",
-        },
-        {
-          id: "friends",
-          label: t("settings.nav.friends"),
-          icon: HeartHandshakeIcon,
-          description: t("settings.nav.friendsAbout"),
-          keywords: "friend requests direct messages dm online status mutual block",
-          settings: [
-            { id: "friend-requests", label: t("settings.nav.friendRequests"), keywords: "requests add" },
-            { id: "direct-messages", label: t("settings.nav.directMessages"), keywords: "dm messages" },
-            { id: "friends-see", label: t("settings.nav.friendsSee"), keywords: "online mutual" },
-          ],
-        },
-        {
-          id: "privacy",
-          label: t("settings.nav.privacy"),
-          icon: DatabaseIcon,
-          description: t("settings.nav.privacyAbout", { instance: where }),
-          keywords: "export download delete account gdpr activity rich presence game playing status",
-          settings: [
-            { id: "activity-sharing", label: t("settings.nav.activity"), keywords: "rich presence activity game playing listening discord share" },
-            { id: "export", label: t("settings.nav.export"), keywords: "export json" },
-            { id: "delete-account", label: t("settings.nav.deleteAccount"), keywords: "remove close" },
-          ],
-        },
-      ],
-    });
+    groups.push({ label: t("settings.nav.account", { instance: where }), sections: accountSections(t, me, where, node?.auth?.linkedIssuer) });
     groups.push({ sections: [{ id: "session", label: t("settings.nav.signOut"), icon: LogOutIcon, danger: true, keywords: "log out remove" }] });
   }
 
@@ -315,28 +355,7 @@ export function UserSettings() {
       section={section}
       onSectionChange={setSettingsSection}
     >
-      {section === "appearance" && <Appearance instanceKey={key} />}
-      {section === "themes" && <Themes instanceKey={key} />}
-      {section === "backdrop" && <Backgrounds instanceKey={key} />}
-      {section === "accessibility" && <Accessibility />}
-      {section === "chat" && <Chat />}
-      {section === "language" && <Language />}
-      {section === "notifications" && <Notifications />}
-      {section === "voice" && <Voice />}
-      {section === "keybinds" && <Keybinds />}
-      {section === "streamer" && <Streamer instanceKey={key} />}
-      {section === "advanced" && <Advanced />}
-      {key && section === "profile" && <Profile instanceKey={key} />}
-      {key && section === "server-profiles" && <ServerProfiles instanceKey={key} />}
-      {key && section === "devices" && <Devices instanceKey={key} />}
-      {key && section === "security" && <Security instanceKey={key} />}
-      {key && section === "password" && <Password instanceKey={key} />}
-      {key && section === "linked" && <LinkedSignIn instanceKey={key} />}
-      {key && section === "server-notifications" && <ServerNotifications instanceKey={key} />}
-      {key && section === "agents" && <Agents instanceKey={key} />}
-      {key && section === "friends" && <FriendPrivacy instanceKey={key} />}
-      {key && section === "privacy" && <Privacy instanceKey={key} />}
-      {key && section === "session" && <Session instanceKey={key} />}
+      {sectionPage(section, key)}
     </SettingsScreen>
   );
 }

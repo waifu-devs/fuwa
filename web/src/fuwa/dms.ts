@@ -49,6 +49,9 @@ export async function prepareConversation(key: string, id: string) {
   }
 }
 
+/** A pending message's id on this device only; it never leaves it. */
+const newNonce = () => crypto.randomUUID?.() ?? `${Date.now()}-${crypto.getRandomValues(new Uint32Array(1))[0]}`;
+
 const setPending = (key: string, id: string, fn: (list: PendingMessage[]) => PendingMessage[]) =>
   updateDms(key, (d) => ({ ...d, pending: { ...d.pending, [id]: fn(d.pending[id] ?? []) } }));
 
@@ -60,7 +63,7 @@ export async function sendDm(key: string, id: string, text: string, target?: Thr
   // Every send counts the same: the instance that keeps the records also gets these counts, so a separate one for
   // thread replies would let it match them against records by time.
   reportUsage("dm.send");
-  const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  const nonce = newNonce();
   setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null, ...target }]);
   try {
     await ready(key).send(id, { text, ...target });
@@ -156,7 +159,7 @@ export async function sendVoiceDm(key: string, id: string, clip: Clip, replyTo =
 
 async function sendVoice(key: string, id: string, out: Outgoing) {
   const { clip, replyTo } = out;
-  const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  const nonce = newNonce();
   clips.set(nonce, out);
   setPending(key, id, (list) => [
     ...list,
@@ -295,7 +298,7 @@ export async function sendDmFiles(key: string, id: string, files: File[], text: 
 }
 
 async function sendFiles(key: string, id: string, out: OutgoingFiles) {
-  const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  const nonce = newNonce();
   outgoingFiles.set(nonce, out);
   setPending(key, id, (list) => [
     ...list,

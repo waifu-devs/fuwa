@@ -52,7 +52,6 @@ export function EncryptionDialog({
   const members = useFuwa((s) => s.instances[instanceKey]?.dms.members[id] ?? NO_MEMBERS);
   const partner = conversation.users.find((u) => u.id !== me?.id);
   const [devices, setDevices] = useState<Map<string, Device>>(new Map());
-  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -153,30 +152,7 @@ export function EncryptionDialog({
               <Button size="sm" variant={isVerified ? "outline" : "default"} disabled={busy} onClick={() => void toggle()} className="btn rounded-xl font-bold">
                 {isVerified ? t("dms-calls.dm.encryption.clear") : t("dms-calls.dm.encryption.mark")}
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="rounded-xl font-bold"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(groups.join(" "));
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1200);
-                }}
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={copied ? "copied" : "copy"}
-                    initial={{ scale: 0.3, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.3, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 700, damping: 22 }}
-                    className="grid place-items-center"
-                  >
-                    {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
-                  </motion.span>
-                </AnimatePresence>
-                {copied ? t("dms-calls.dm.encryption.copied") : t("dms-calls.dm.encryption.copy")}
-              </Button>
+              <CopyNumber text={groups.join(" ")} />
             </div>
           )}
         </section>
@@ -238,5 +214,37 @@ export function EncryptionDialog({
         </section>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Copies the safety number, to compare it somewhere else; ticks for a moment. */
+function CopyNumber({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="rounded-xl font-bold"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={copied ? "copied" : "copy"}
+          initial={{ scale: 0.3, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.3, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 700, damping: 22 }}
+          className="grid place-items-center"
+        >
+          {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+        </motion.span>
+      </AnimatePresence>
+      {copied ? t("dms-calls.dm.encryption.copied") : t("dms-calls.dm.encryption.copy")}
+    </Button>
   );
 }

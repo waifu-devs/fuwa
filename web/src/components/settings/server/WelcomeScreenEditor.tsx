@@ -1,20 +1,12 @@
-import { create } from "@bufbuild/protobuf";
 import { ChevronDownIcon, GripVerticalIcon, HashIcon, PlusIcon, SmilePlusIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
-import {
-  ChannelType,
-  WelcomeChannelSchema,
-  WelcomeScreenSchema,
-  type Channel,
-  type Emoji,
-  type Server,
-  type WelcomeScreen,
-} from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, type Channel, type Emoji, type Server } from "@/gen/fuwa/v1/types_pb";
 import { useInstance } from "@/fuwa/hooks";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
+import type { Row, WelcomeDraft } from "@/components/settings/server/welcome-draft";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,37 +23,6 @@ import { cn } from "@/lib/utils";
 const MAX_CHANNELS = 5;
 const DESCRIPTION_MAX = 300;
 const NOTE_MAX = 60;
-
-/** A suggested channel being edited, with a key that survives reordering. */
-type Row = { key: string; channelId: string; description: string; emoji: string };
-
-/** The welcome screen as it's being edited. */
-export type WelcomeDraft = { enabled: boolean; description: string; list: Row[] };
-
-export const welcomeDraft = (screen: WelcomeScreen): WelcomeDraft => ({
-  enabled: screen.enabled,
-  description: screen.description,
-  list: screen.channels.map((c, n) => ({ key: `${n}-${c.channelId}`, channelId: c.channelId, description: c.description, emoji: c.emoji })),
-});
-
-const same = (a: Row[], b: Row[]) =>
-  a.length === b.length && a.every((r, n) => r.channelId === b[n]!.channelId && r.description === b[n]!.description && r.emoji === b[n]!.emoji);
-
-/** How many of the welcome screen's settings differ from what's saved. */
-export const welcomeChanges = (draft: WelcomeDraft, saved: WelcomeScreen) => {
-  const was = welcomeDraft(saved);
-  return [draft.enabled !== was.enabled, draft.description !== was.description, !same(draft.list, was.list)].filter(Boolean).length;
-};
-
-/** The draft as the server takes it. */
-export const welcomeScreen = (draft: WelcomeDraft): WelcomeScreen =>
-  create(WelcomeScreenSchema, {
-    enabled: draft.enabled,
-    description: draft.description.trim(),
-    channels: draft.list
-      .filter((r) => r.channelId)
-      .map((r) => create(WelcomeChannelSchema, { channelId: r.channelId, description: r.description.trim(), emoji: r.emoji })),
-  });
 
 /**
  * What new members see first: a few words and up to five channels to start

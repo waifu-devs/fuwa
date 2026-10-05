@@ -1,6 +1,7 @@
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePageVisible } from "@/hooks/use-page-visible";
 import { CUSTOM, hasBackdrop, isShader, type Backdrop, type Effect, type ShaderEffect } from "@/lib/backdrop";
 import { shaderId, type CustomShader } from "@/lib/effects/custom";
 import type { Colors, Painter, Source } from "@/lib/effects/gpu";
@@ -44,17 +45,6 @@ export function AppBackdrop() {
     <BackdropLayers backdrop={backdrop} tokens={tokens} running={visible && !covered} still={still} className="app-backdrop" />,
     document.body,
   );
-}
-
-/** Whether the page is on screen (not a background tab or a minimized window). */
-export function usePageVisible() {
-  const [visible, setVisible] = useState(() => typeof document === "undefined" || !document.hidden);
-  useEffect(() => {
-    const update = () => setVisible(!document.hidden);
-    document.addEventListener("visibilitychange", update);
-    return () => document.removeEventListener("visibilitychange", update);
-  }, []);
-  return visible;
 }
 
 /** The layers of a backdrop, filling their parent: picture, dimming, effect. Also used for previews. */
@@ -287,7 +277,7 @@ function turn([r, g, b]: number[], degrees: number): number[] {
 }
 
 /** The colors effects draw with: the primary, a neighbour of it, and the page. */
-export function colorsOf(tokens: ThemeTokens): Colors {
+function colorsOf(tokens: ThemeTokens): Colors {
   const primary = rgb(tokens.primary);
   return { c1: [...primary, 1], c2: [...turn(primary, 48), 1], c3: [...rgb(tokens.background), 1], c4: [...rgb(tokens.foreground), 1] };
 }
