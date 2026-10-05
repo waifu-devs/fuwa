@@ -177,6 +177,17 @@
   "limits.pinsPerChannelHint": "How many messages can be pinned in one channel, and in one thread. Unpinning one makes room.",
   "limits.pinsPerConversation": "Pins per direct message",
   "limits.pinsPerConversationHint": "How many messages can be pinned in one direct-message conversation. The instance only keeps which messages are pinned, never what they say.",
+  "limits.liveTilesPerChannel": "Live tiles per channel",
+  "limits.liveTilesPerChannelHint": "How many tiles apps (agents and webhooks) can keep in one channel at once.",
+  "limits.liveTileUpdates": "Live tile changes",
+  "limits.liveTileUpdatesHint": "How many times a minute one app can set or end tiles in a server.",
+  "limits.liveTilePublish": "Live tile pace",
+  "limits.liveTilePublishHint": "The shortest time between two updates of one tile reaching the people who see it. Changes in between are kept, and the latest goes out when the time is up, so a busy scoreboard can't flood everyone.",
+  "limits.liveTilePublishLabel": "Milliseconds",
+  "limits.liveTilePublishEvery": {
+    "one": "Once every {count} ms",
+    "other": "Once every {count} ms"
+  },
   "privacy.label": "Send the usage signal daily and error reports hourly",
   "privacy.hint": "Helps Waifu Devs see how fuwa is used and fix what breaks. Counts only: no names, messages, ids or addresses. Off, apps on this instance send no reports either.",
   "privacy.counts": "How many accounts, servers, channels and messages",

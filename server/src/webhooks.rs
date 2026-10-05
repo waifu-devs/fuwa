@@ -102,7 +102,11 @@ impl TileBody {
             title: self.title.clone(),
             status: self.status.clone(),
             live: self.live,
-            rows: self.rows.iter().map(|r| pb::LiveTileRow { label: r.label.clone(), value: r.value.clone() }).collect(),
+            rows: self
+                .rows
+                .iter()
+                .map(|r| pb::LiveTileRow { label: r.label.clone(), value: r.value.clone() })
+                .collect(),
             progress: self.progress,
             action: self.action.clone(),
         }

@@ -10,6 +10,9 @@ import {
   CommandOptionType,
   InteractionKind,
   type InteractionContext,
+  FailedPreconditionError,
+  LiveTileKind,
+  LiveTileSource,
   MediaPurpose,
   FuwaError,
   NotFoundError,
@@ -237,6 +240,47 @@ test("an agent answers slash commands and buttons", async () => {
   assert.equal(used[1]?.messageId, answer.id);
 
   await agent.setCommands(serverId, []);
+  await agent.stop();
+});
+
+test("an agent keeps a live tile up to date, and a webhook can too", async () => {
+  const agent = newAgent();
+  await agent.start();
+  const tile = agent.liveTile(serverId, channelId, "final");
+  const listed = async () => (await person.liveTiles.listLiveTiles({ serverId })).tiles;
+
+  const set = await tile.set({ title: "Cup final", status: "67'", live: true, rows: [{ label: "Red Foxes", value: "2" }], progress: 0.5 });
+  assert.equal(set.sourceId, agent.me.id);
+  await tile.set({ title: "Cup final", status: "70'", live: true, rows: [{ label: "Red Foxes", value: "3" }] });
+  const [seen] = await listed();
+  assert.equal(seen?.sourceName, "Helper");
+  assert.equal(seen?.sourceKind, LiveTileSource.AGENT);
+  assert.deepEqual([seen?.content?.status, seen?.content?.rows[0]?.value, seen?.content?.progress], ["70'", "3", undefined]);
+
+  // A server that turned apps' tiles off takes none and lists none.
+  await person.servers.updateServer({ serverId, liveTiles: { customized: true, kinds: [LiveTileKind.VOICE, LiveTileKind.POLL] } });
+  await assert.rejects(tile.set({ title: "Cup final" }), FailedPreconditionError);
+  assert.deepEqual(await listed(), []);
+  await person.servers.updateServer({ serverId, liveTiles: { customized: false } });
+
+  // A webhook posts its tile over plain HTTP, into its own channel under its name.
+  const { webhook } = await person.webhooks.createWebhook({ serverId, channelId, name: "Scores" });
+  const address = `${instance.url}/webhooks/${serverId}/${webhook!.id}/${webhook!.token}/tile`;
+  const posted = await fetch(address, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "semi", title: "Semi final", status: "HT", rows: [{ label: "Blue Owls", value: "1" }] }),
+  });
+  assert.equal(posted.status, 204);
+  const both = await listed();
+  assert.deepEqual(both.map((t) => [t.sourceName, t.id]).sort(), [["Helper", "final"], ["Scores", "semi"]]);
+  assert.equal((await fetch(`${address}?id=semi`, { method: "DELETE" })).status, 204);
+  const wrong = await fetch(address.replace(webhook!.token, "x".repeat(64)), { method: "POST", body: JSON.stringify({ id: "a", title: "b" }) });
+  assert.equal(wrong.status, 404);
+
+  await tile.end();
+  assert.deepEqual(await listed(), []);
+  await person.webhooks.deleteWebhook({ serverId, webhookId: webhook!.id });
   await agent.stop();
 });
 

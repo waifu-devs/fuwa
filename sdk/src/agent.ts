@@ -4,6 +4,7 @@ import { EventFollower, type EventKind, type EventPayload } from "./events.js";
 import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
+import type { LiveTile, LiveTileContentSchema } from "./gen/fuwa/v1/types_pb.js";
 import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
   AccountKind,
@@ -19,6 +20,14 @@ import { messages, type MessagePagesOptions, type MessageWithAuthor } from "./pa
 import { parseCommand, mentions, type ParsedCommand } from "./text.js";
 import { uploadPicture, type UploadOptions } from "./upload.js";
 import { VoiceConnection, type JoinVoiceOptions } from "./voice.js";
+
+/** One live tile of the agent's (`agent.liveTile`). */
+export interface LiveTileHandle {
+  /** Puts the tile up or changes it: title (40 characters), status (16), live, up to 4 rows of label (24) and value (8), progress 0 to 1, a button label (12). */
+  set(content: MessageInitShape<typeof LiveTileContentSchema>, options?: { ttlSeconds?: number }): Promise<LiveTile>;
+  /** Takes it down; one already gone is fine. */
+  end(): Promise<void>;
+}
 
 export interface AgentOptions extends Omit<FuwaOptions, "token"> {
   /**
@@ -329,6 +338,28 @@ export class Agent {
   async setCommands(serverId: string, commands: MessageInitShape<typeof CommandSchema>[]): Promise<Command[]> {
     const res = await this.api.commands.setCommands({ serverId, commands });
     return res.commands;
+  }
+
+  /**
+   * One of the agent's live tiles in a channel: a small card above the
+   * server's channel list, such as a match's scoreboard. `set` puts it up or
+   * changes it (plain text in a fixed layout; it goes after `ttlSeconds`,
+   * two hours unless given, without a change), `end` takes it down. The
+   * server must show tiles from apps, and the agent needs Send Messages there.
+   */
+  liveTile(serverId: string, channelId: string, tileId: string): LiveTileHandle {
+    const api = this.api;
+    return {
+      async set(content, options = {}) {
+        const ttlSeconds = options.ttlSeconds === undefined ? undefined : BigInt(options.ttlSeconds);
+        const { tile } = await api.liveTiles.setLiveTile({ serverId, channelId, tileId, content, ttlSeconds });
+        if (!tile) throw toFuwaError(new Error("the instance didn't return the tile"));
+        return tile;
+      },
+      async end() {
+        await api.liveTiles.endLiveTile({ serverId, channelId, tileId });
+      },
+    };
   }
 
   /** Answers a message in its channel. */

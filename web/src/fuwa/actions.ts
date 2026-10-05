@@ -975,6 +975,8 @@ export const updateServer = (
     accentColor?: number;
     /** Recordings on the server keep cameras and shared screens too. */
     recordVideo?: boolean;
+    /** Which kinds of live tiles everyone here sees (LiveTileKind numbers); not customized goes back to the default. */
+    liveTiles?: { customized: boolean; kinds: number[] };
   },
 ) =>
   Effect.gen(function* () {

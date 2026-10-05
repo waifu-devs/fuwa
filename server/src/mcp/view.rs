@@ -341,10 +341,9 @@ pub fn event(e: &pb::Event) -> Value {
         ),
         Some(Payload::VoiceStateUpdated(_)) | Some(Payload::VoiceStateRemoved(_)) => ("voice", json!({})),
         Some(Payload::LiveTileUpdated(p)) => ("live_tile_updated", json!({ "tile": p.tile.as_ref().map(live_tile) })),
-        Some(Payload::LiveTileEnded(p)) => (
-            "live_tile_ended",
-            json!({ "channel_id": p.channel_id, "tile_id": p.tile_id, "source_id": p.source_id }),
-        ),
+        Some(Payload::LiveTileEnded(p)) => {
+            ("live_tile_ended", json!({ "channel_id": p.channel_id, "tile_id": p.tile_id, "source_id": p.source_id }))
+        }
         Some(Payload::ThreadUpdated(p)) => (
             "thread_updated",
             json!({

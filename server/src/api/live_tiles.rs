@@ -47,7 +47,8 @@ pub(super) struct Source {
 /// Characters a tile never shows: controls, zero-width ones and the ones
 /// that turn text around, so a tile can't hide words or pass as another.
 fn hidden(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    c.is_control()
+        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 /// One field of a tile: hidden characters out, runs of spaces folded, at
@@ -169,11 +170,8 @@ fn tile_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<pb::LiveTi
 /// webhooks under their own name. Tiles whose agent or webhook is gone are
 /// dropped.
 async fn named(conn: &turso::Connection, mut tiles: Vec<pb::LiveTile>) -> Result<Vec<pb::LiveTile>> {
-    let agents: Vec<&str> = tiles
-        .iter()
-        .filter(|t| t.source_kind == LiveTileSource::Agent as i32)
-        .map(|t| t.source_id.as_str())
-        .collect();
+    let agents: Vec<&str> =
+        tiles.iter().filter(|t| t.source_kind == LiveTileSource::Agent as i32).map(|t| t.source_id.as_str()).collect();
     let people = users(conn, &agents).await?;
     let hooks: HashMap<String, (String, String, String)> =
         query_all(conn, "SELECT id, name, avatar_url, channel_id FROM webhooks", (), |r| {
@@ -193,7 +191,8 @@ async fn named(conn: &turso::Connection, mut tiles: Vec<pb::LiveTile>) -> Result
             true
         } else {
             let Some(user) = people.iter().find(|u| u.id == tile.source_id) else { return false };
-            tile.source_name = if user.display_name.is_empty() { user.username.clone() } else { user.display_name.clone() };
+            tile.source_name =
+                if user.display_name.is_empty() { user.username.clone() } else { user.display_name.clone() };
             tile.source_avatar_url = user.avatar_url.clone();
             true
         }
@@ -232,6 +231,13 @@ pub(super) async fn set_tile(
             let now = now_ms();
             conn.execute("DELETE FROM live_tiles WHERE expires_at <= ?1", [now]).await?;
             if let Some(cap) = per_channel {
+                // Every capped write here touches this row, so two racing ones clash.
+                conn.execute(
+                    "INSERT INTO live_tile_channels (channel_id, changed_at) VALUES (?1, ?2)
+                     ON CONFLICT (channel_id) DO UPDATE SET changed_at = excluded.changed_at",
+                    (channel.id.as_str(), now),
+                )
+                .await?;
                 let others = query_one(
                     conn,
                     "SELECT count(*) FROM live_tiles WHERE channel_id = ?1 AND NOT (source_id = ?2 AND tile_id = ?3)",
@@ -276,14 +282,22 @@ pub(super) async fn set_tile(
         })
         .await?
         .map_err(Error::denied)?;
-    let event = tile_event(&tile.server_id, &tile.source_id, Payload::LiveTileUpdated(pb::LiveTileUpdated {
-        tile: Some(tile.clone()),
-    }));
-    publish_update(app, key(&tile.server_id, &tile.channel_id, &tile.source_id, &tile.id), event, settings.live_tile_publish_ms);
+    let event = tile_event(
+        &tile.server_id,
+        &tile.source_id,
+        Payload::LiveTileUpdated(pb::LiveTileUpdated { tile: Some(tile.clone()) }),
+    );
+    publish_update(
+        app,
+        key(&tile.server_id, &tile.channel_id, &tile.source_id, &tile.id),
+        event,
+        settings.live_tile_publish_ms,
+    );
     Ok(tile)
 }
 
-/// Ends one tile and tells its channel, if it was there.
+/// Ends one tile and tells its channel, if it was there. A moderator's end
+/// (`audit`, with the channel's name) is in the audit log, in the same write.
 pub(super) async fn end_tile(
     app: &Arc<App>,
     sdb: &Arc<ServerDb>,
@@ -291,16 +305,24 @@ pub(super) async fn end_tile(
     channel_id: &str,
     source_id: &str,
     tile_id: &str,
+    audit: Option<&str>,
 ) -> Result<bool> {
     let ended = sdb
         .write(actor_id, async |conn, _events| {
-            Ok(conn
+            let ended = conn
                 .execute(
                     "DELETE FROM live_tiles WHERE channel_id = ?1 AND source_id = ?2 AND tile_id = ?3",
                     (channel_id, source_id, tile_id),
                 )
                 .await?
-                > 0)
+                > 0;
+            if let (true, Some(channel_name)) = (ended, audit) {
+                let entry = store::Audit::new(pb::AuditAction::LiveTileEnd, source_id)
+                    .channel(channel_name.to_string())
+                    .change("tile", tile_id, "");
+                store::audit(conn, actor_id, entry).await?;
+            }
+            Ok(ended)
         })
         .await?;
     if ended {
@@ -376,7 +398,7 @@ fn hold(map: &mut HashMap<String, Outgoing>, key: &str, event: pb::Event, now: i
     }
     if now - entry.sent_at >= gap {
         entry.sent_at = now;
-        return Hold::Send(event);
+        return Hold::Send(Box::new(event));
     }
     entry.waiting = Some(event);
     Hold::Later(entry.sent_at + gap - now)
@@ -384,7 +406,7 @@ fn hold(map: &mut HashMap<String, Outgoing>, key: &str, event: pb::Event, now: i
 
 #[derive(Debug)]
 enum Hold {
-    Send(pb::Event),
+    Send(Box<pb::Event>),
     Later(i64),
     Held,
 }
@@ -412,7 +434,7 @@ fn publish_update(app: &Arc<App>, key: String, event: pb::Event, gap_ms: Option<
     };
     let decided = hold(outgoing().get_or_insert_with(HashMap::new), &key, event, now_ms(), gap);
     match decided {
-        Hold::Send(event) => app.hub.publish([event]),
+        Hold::Send(event) => app.hub.publish([*event]),
         Hold::Held => {}
         Hold::Later(wait) => {
             let app = app.clone();
@@ -472,14 +494,18 @@ impl LiveTileService for Api {
                 let source = Source {
                     id: account.id.clone(),
                     kind: LiveTileSource::Agent,
-                    name: if account.display_name.is_empty() { account.username.clone() } else { account.display_name.clone() },
+                    name: if account.display_name.is_empty() {
+                        account.username.clone()
+                    } else {
+                        account.display_name.clone()
+                    },
                     avatar_url: account.avatar_url.clone(),
                     role_ids: member.role_ids.clone(),
                     manager: access.has(Permission::ManageServer),
                 };
                 let content = req.content.unwrap_or_default();
-                let tile =
-                    set_tile(&self.app, &sdb, &source, &req.channel_id, &req.tile_id, &content, req.ttl_seconds).await?;
+                let tile = set_tile(&self.app, &sdb, &source, &req.channel_id, &req.tile_id, &content, req.ttl_seconds)
+                    .await?;
                 Ok(pb::SetLiveTileResponse { tile: Some(tile) })
             }
             .await,
@@ -502,20 +528,12 @@ impl LiveTileService for Api {
                 let source_id = if req.source_id.is_empty() { account.id.clone() } else { req.source_id.clone() };
                 if source_id == account.id {
                     pace(&sdb.id, &account.id, now_ms(), self.app.settings().limits.live_tile_updates_per_minute)?;
-                    end_tile(&self.app, &sdb, &account.id, &req.channel_id, &source_id, &tile_id).await?;
+                    end_tile(&self.app, &sdb, &account.id, &req.channel_id, &source_id, &tile_id, None).await?;
                 } else {
                     access.require_in(&req.channel_id, Permission::ManageMessages)?;
-                    let ended = end_tile(&self.app, &sdb, &account.id, &req.channel_id, &source_id, &tile_id).await?;
-                    if ended {
-                        let channel = load_channel(&*sdb.read()?, &sdb.id, &req.channel_id).await?;
-                        sdb.write(&account.id, async |conn, _events| {
-                            let entry = store::Audit::new(pb::AuditAction::LiveTileEnd, &source_id)
-                                .channel(channel.as_ref().map(|c| c.name.clone()).unwrap_or_default())
-                                .change("tile", &tile_id, "");
-                            store::audit(conn, &account.id, entry).await
-                        })
-                        .await?;
-                    }
+                    let channel = load_channel(&*sdb.read()?, &sdb.id, &req.channel_id).await?;
+                    let name = channel.map(|c| c.name).unwrap_or_default();
+                    end_tile(&self.app, &sdb, &account.id, &req.channel_id, &source_id, &tile_id, Some(&name)).await?;
                 }
                 Ok(pb::EndLiveTileResponse {})
             }

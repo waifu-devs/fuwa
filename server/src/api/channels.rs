@@ -328,6 +328,7 @@ impl ChannelService for Api {
                 conn.execute("DELETE FROM channels WHERE id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM live_tiles WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                conn.execute("DELETE FROM live_tile_channels WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // A deleted category's channels move to the top level.
                 let children = query_all(conn, "SELECT id FROM channels WHERE parent_id = ?1", [req.channel_id.as_str()], |r| {
                     r.get::<String>(0)

@@ -424,12 +424,18 @@ pub async fn set_webhook_tile(
 }
 
 /// Ends one of the webhook's live tiles, if `token` is its token.
-pub async fn end_webhook_tile(app: &Arc<App>, server_id: &str, webhook_id: &str, token: &str, tile_id: &str) -> Result<()> {
+pub async fn end_webhook_tile(
+    app: &Arc<App>,
+    server_id: &str,
+    webhook_id: &str,
+    token: &str,
+    tile_id: &str,
+) -> Result<()> {
     let sdb = app.servers.get(server_id).await?;
     let webhook = webhook_with_token(&sdb, webhook_id, token).await?;
     let tile_id = live_tiles::tile_id(tile_id)?;
     live_tiles::pace(&sdb.id, &webhook.id, now_ms(), app.settings().limits.live_tile_updates_per_minute)?;
-    live_tiles::end_tile(app, &sdb, &webhook.id, &webhook.channel_id, &webhook.id, &tile_id).await?;
+    live_tiles::end_tile(app, &sdb, &webhook.id, &webhook.channel_id, &webhook.id, &tile_id, None).await?;
     Ok(())
 }
 

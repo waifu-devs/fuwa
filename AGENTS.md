@@ -213,10 +213,26 @@
     (`shared::no_pings` drops them from shared copies). Runs and presses per
     account a minute are capped by `commands_per_minute`. Web:
     `components/chat/Commands.tsx`.
+    Live tiles (`api/live_tiles.rs`, `LiveTileService`, docs/live-tiles.md):
+    which kinds a server shows is `server.live_tiles` (JSON, NULL for the
+    default, resolved in `load_server` with `BIG_SERVER`); the tiles agents
+    and webhooks set are the server file's `live_tiles` (content as
+    protobuf, an `expires_at`). Setting or ending one is the exception to
+    "every write pushes an event": like voice states, `LiveTileUpdated` and
+    `LiveTileEnded` go to the `Hub` with sequence 0, scoped by channel, the
+    updates of one tile held to `live_tile_publish_ms` apart (latest wins).
+    Only agents and webhooks set tiles, only in the server's own unshared
+    text and announcement channels; AutoMod's word, link and ping rules can
+    refuse the text (`automod::tile_blocked`, block only). Removing a member,
+    deleting a channel, or deleting or moving a webhook takes its tiles.
+    Web: `lib/live-tiles.ts` (pure: which tiles, ranking),
+    `lib/live-tiles-store.ts` (each person's switches, on the device) and
+    `components/LiveTiles.tsx`.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
-    with the right token). Served where servers are kept; gateways pass these
+    with the right token), and `/tile` on the same address to set (POST) or
+    end (DELETE) one of its live tiles. Served where servers are kept; gateways pass these
     on to the shard holding the server (`Gateway::pass_to_shard`).
     `api/webhooks.rs` keeps the webhooks (`webhooks`, in the server file,
     tokens in the clear like invite codes; changes are audit-only) and posts

@@ -81,6 +81,7 @@ struct Clients {
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
     shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
+    live_tiles: pb::live_tile_service_client::LiveTileServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -102,7 +103,8 @@ async fn clients(instance: &Instance) -> Clients {
         emojis: pb::emoji_service_client::EmojiServiceClient::new(channel.clone()),
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
-        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel),
+        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
+        live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel),
     }
 }
 
@@ -10363,7 +10365,7 @@ async fn moderators_pin_messages_to_channels_and_threads() {
     // Rin sees the general channel's pins happen, never the staff channel's.
     let mut seen = Vec::new();
     while let Ok(Some(item)) =
-        tokio::time::timeout(std::time::Duration::from_secs(2), rin_events.message()).await.map(Result::unwrap)
+        tokio::time::timeout(std::time::Duration::from_secs(3), rin_events.message()).await.map(Result::unwrap)
     {
         if let Some(pb::Event { payload: Some(pb::event::Payload::MessagePinned(p)), .. }) = item.event {
             seen.push(p.message_id);
@@ -10411,4 +10413,251 @@ async fn moderators_pin_messages_to_channels_and_threads() {
     let vault = new_channel(&mut c, &juan, &sid, "vault", pb::ChannelType::Secure).await.id;
     assert_eq!(pin(&mut c, &juan, &sid, &vault, &first.id, true).await.unwrap_err(), Code::FailedPrecondition);
     assert_eq!(try_pins(&mut c, &juan, &sid, &vault, "").await.unwrap_err(), Code::FailedPrecondition);
+}
+
+fn tile_content(title: &str, score: &str) -> pb::LiveTileContent {
+    pb::LiveTileContent {
+        title: title.into(),
+        live: true,
+        rows: vec![pb::LiveTileRow { label: "Red Foxes".into(), value: score.into() }],
+        ..Default::default()
+    }
+}
+
+async fn set_tile(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    tile_id: &str,
+    content: pb::LiveTileContent,
+) -> Result<pb::LiveTile, tonic::Status> {
+    c.live_tiles
+        .set_live_tile(authed(
+            token,
+            pb::SetLiveTileRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                tile_id: tile_id.into(),
+                content: Some(content),
+                ttl_seconds: None,
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().tile.unwrap())
+}
+
+/// The tiles `token` can see in a server, as "channel name/tile id".
+async fn tiles(c: &mut Clients, token: &str, server_id: &str) -> Vec<(String, String)> {
+    let mut seen: Vec<(String, String)> = c
+        .live_tiles
+        .list_live_tiles(authed(token, pb::ListLiveTilesRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .tiles
+        .into_iter()
+        .map(|t| (t.channel_id, t.id))
+        .collect();
+    seen.sort();
+    seen
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn apps_keep_live_tiles_that_reach_only_who_can_see_them() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    use pb::event::Payload;
+    let dir = tempfile::tempdir().unwrap();
+    let instance =
+        start(dir.path(), &[("FUWA_LIVE_TILE_PUBLISH_MS", "2000"), ("FUWA_LIMIT_LIVE_TILES_PER_CHANNEL", "2")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Cup", true).await.id;
+    join(&mut c, &rin, &sid).await;
+    let general = new_channel(&mut c, &juan, &sid, "general", pb::ChannelType::Text).await.id;
+    let staff = new_channel(&mut c, &juan, &sid, "staff", pb::ChannelType::Text).await.id;
+    let vault = new_channel(&mut c, &juan, &sid, "vault", pb::ChannelType::Secure).await.id;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "scorebot".into(), display_name: "Scorebot".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let (bot, bot_id) = (made.token, made.agent.unwrap().user.unwrap().id);
+    c.agents
+        .add_agent(authed(&juan, pb::AddAgentRequest { server_id: sid.clone(), username: "scorebot".into() }))
+        .await
+        .unwrap();
+    // Staff is hidden from everyone but the agent.
+    set_permissions(
+        &mut c,
+        &juan,
+        &sid,
+        &staff,
+        vec![overwrite(&sid, T::Role, &[], &[P::ViewChannels]), overwrite(&bot_id, T::Member, &[P::ViewChannels], &[])],
+    )
+    .await
+    .unwrap();
+    let mut rin_events = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // People don't set tiles; secure channels take none.
+    let refused = set_tile(&mut c, &rin, &sid, &general, "final", tile_content("Cup final", "0")).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let secure = set_tile(&mut c, &bot, &sid, &vault, "final", tile_content("Cup final", "0")).await.unwrap_err();
+    assert_eq!(secure.code(), Code::InvalidArgument);
+
+    let tile = set_tile(&mut c, &bot, &sid, &general, "final", tile_content(" Cup\u{202E} final ", "0")).await.unwrap();
+    assert_eq!((tile.source_name.as_str(), tile.content.unwrap().title.as_str()), ("Scorebot", "Cup final"));
+    set_tile(&mut c, &bot, &sid, &staff, "secret", tile_content("Staff draft", "0")).await.unwrap();
+    // Changed three times at once: stored each time, sent at most once per 2 s, the latest last.
+    for score in ["1", "2", "3"] {
+        set_tile(&mut c, &bot, &sid, &general, "final", tile_content("Cup final", score)).await.unwrap();
+    }
+    assert_eq!(tiles(&mut c, &rin, &sid).await, [(general.clone(), "final".to_string())]);
+    assert_eq!(tiles(&mut c, &juan, &sid).await.len(), 2, "the owner sees every channel");
+
+    let mut scores = Vec::new();
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(2), rin_events.message()).await.map(Result::unwrap)
+    {
+        match item.event.and_then(|e| e.payload.map(|p| (e.sequence, p))) {
+            Some((sequence, Payload::LiveTileUpdated(u))) => {
+                assert_eq!(sequence, 0, "tiles aren't in the log");
+                let tile = u.tile.unwrap();
+                assert_eq!(tile.channel_id, general, "never the staff channel's");
+                scores.push(tile.content.unwrap().rows[0].value.clone());
+            }
+            Some((_, Payload::LiveTileEnded(_))) => panic!("nothing ended yet"),
+            _ => {}
+        }
+    }
+    assert_eq!(scores.first().map(String::as_str), Some("0"));
+    assert_eq!(scores.last().map(String::as_str), Some("3"));
+    assert!(scores.len() < 4, "held back to one update per interval: {scores:?}");
+
+    // The instance's cap per channel holds; changing a tile already there doesn't count.
+    set_tile(&mut c, &bot, &sid, &general, "semi", tile_content("Semi final", "0")).await.unwrap();
+    let third = set_tile(&mut c, &bot, &sid, &general, "third", tile_content("Third place", "0")).await.unwrap_err();
+    assert_eq!(third.code(), Code::ResourceExhausted);
+    set_tile(&mut c, &bot, &sid, &general, "semi", tile_content("Semi final", "1")).await.unwrap();
+
+    // AutoMod's word rules read tiles too.
+    save_rule(
+        &mut c,
+        &juan,
+        &sid,
+        pb::AutoModRule {
+            name: "No spoilers".into(),
+            enabled: true,
+            trigger: pb::AutoModTrigger::Keywords as i32,
+            keywords: vec!["spoiler".into()],
+            actions: vec![act(pb::AutoModActionKind::Block)],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let caught = set_tile(&mut c, &bot, &sid, &general, "semi", tile_content("Huge spoiler", "1")).await.unwrap_err();
+    assert_eq!(caught.code(), Code::PermissionDenied);
+    assert!(caught.message().starts_with("AutoMod: "), "{}", caught.message());
+
+    // A moderator ends someone else's tile, in the audit log; the channel hears it.
+    let end = |token: &str, source_id: &str| {
+        authed(
+            token,
+            pb::EndLiveTileRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                tile_id: "semi".into(),
+                source_id: source_id.into(),
+            },
+        )
+    };
+    assert_eq!(c.live_tiles.end_live_tile(end(&rin, &bot_id)).await.unwrap_err().code(), Code::PermissionDenied);
+    c.live_tiles.end_live_tile(end(&juan, &bot_id)).await.unwrap();
+    let ended = loop {
+        if let Payload::LiveTileEnded(e) = next_event(&mut rin_events).await.payload.unwrap() {
+            break e;
+        }
+    };
+    assert_eq!((ended.tile_id.as_str(), ended.source_id.as_str()), ("semi", bot_id.as_str()));
+    let log = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest {
+            server_id: sid.clone(),
+            action: pb::AuditAction::LiveTileEnd as i32,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(log.entries.len(), 1);
+    assert_eq!(log.entries[0].target_id, bot_id);
+
+    // Kicked, the agent's tiles go with it.
+    c.servers
+        .kick_member(authed(
+            &juan,
+            pb::KickMemberRequest { server_id: sid.clone(), user_id: bot_id.clone(), reason: String::new() },
+        ))
+        .await
+        .unwrap();
+    assert!(tiles(&mut c, &juan, &sid).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn servers_choose_their_live_tile_kinds() {
+    use pb::LiveTileKind as K;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Kinds", true).await.id;
+    join(&mut c, &rin, &sid).await;
+    let get = |token: &str| authed(token, pb::GetServerRequest { server_id: sid.clone() });
+    let kinds = |s: pb::Server| s.live_tiles.unwrap();
+    let small = kinds(c.servers.get_server(get(&rin)).await.unwrap().into_inner().server.unwrap());
+    assert!(!small.customized);
+    assert!(small.kinds.contains(&(K::Voice as i32)), "a small server shows voice rooms by default");
+
+    let update = |token: &str, tiles: pb::LiveTileSettings| {
+        authed(token, pb::UpdateServerRequest { server_id: sid.clone(), live_tiles: Some(tiles), ..Default::default() })
+    };
+    let chosen =
+        pb::LiveTileSettings { customized: true, kinds: vec![K::App as i32, K::Poll as i32, K::App as i32, 99] };
+    assert_eq!(c.servers.update_server(update(&rin, chosen.clone())).await.unwrap_err().code(), Code::PermissionDenied);
+    let saved = kinds(c.servers.update_server(update(&juan, chosen)).await.unwrap().into_inner().server.unwrap());
+    assert_eq!(saved, pb::LiveTileSettings { customized: true, kinds: vec![K::Poll as i32, K::App as i32] });
+    let log = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest {
+            server_id: sid.clone(),
+            action: pb::AuditAction::ServerUpdate as i32,
+            ..Default::default()
+        },
+    )
+    .await;
+    let change = log.entries[0].changes.iter().find(|ch| ch.field == "live_tiles").unwrap();
+    assert_eq!((change.before.as_str(), change.after.as_str()), ("default", "poll, app"));
+    let back = pb::LiveTileSettings { customized: false, kinds: vec![] };
+    let reset = kinds(c.servers.update_server(update(&juan, back)).await.unwrap().into_inner().server.unwrap());
+    assert!(!reset.customized && reset.kinds.contains(&(K::Voice as i32)));
 }

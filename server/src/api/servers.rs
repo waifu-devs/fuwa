@@ -1017,4 +1017,3 @@ fn tile_kinds_label(tiles: &Option<pb::LiveTileSettings>) -> String {
         _ => "default".into(),
     }
 }
-

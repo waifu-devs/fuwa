@@ -1713,6 +1713,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::MessageDelete => ("message-square-x", red),
         A::MessagePin => ("pin", sky),
         A::MessageUnpin => ("pin-off", sky),
+        A::LiveTileEnd => ("radio", sky),
         A::OwnershipTransfer => ("crown", amber),
         A::InviteCreate => ("link", green),
         A::InviteDelete => ("link-2-off", red),
@@ -1977,6 +1978,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::MessageUnpin => {
             format!("{actor} unpinned a message by {target} in {}", named_channel(&entry.channel_name))
         }
+        A::LiveTileEnd => format!("{actor} ended a live tile from {target} in {}", named_channel(&entry.channel_name)),
         A::OwnershipTransfer => format!("{actor} handed the server to {target}"),
         A::InviteCreate if !entry.channel_name.is_empty() => {
             format!("{actor} made an invite to {}", named_channel(&entry.channel_name))

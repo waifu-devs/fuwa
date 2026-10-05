@@ -86,6 +86,7 @@ can't do in the apps' API, it can't do here.
 | `list_messages`, `get_message` | `MessageService.ListMessages` (pages by `before_id` / `after_id`), `GetMessage` |
 | `send_message`, `update_message`, `delete_message` | `MessageService.SendMessage`, `UpdateMessage`, `DeleteMessage` |
 | `pin_message`, `list_pins` | `MessageService.PinMessage`, `ListPins` |
+| `set_live_tile`, `end_live_tile`, `list_live_tiles` | `LiveTileService.SetLiveTile`, `EndLiveTile`, `ListLiveTiles` ([docs/live-tiles.md](live-tiles.md)) |
 | `list_events` | `EventService.ListEvents` (a cursor, see below) |
 | `list_members` | `ServerService.ListMembers`, a page at a time |
 | `list_roles`, `list_emojis`, `get_profile` | `RoleService.ListRoles`, `EmojiService.ListEmojis`, `AuthService.GetProfile` |

@@ -20,3 +20,11 @@ CREATE TABLE live_tiles (
     PRIMARY KEY (channel_id, source_id, tile_id)
 );
 CREATE INDEX live_tiles_expiry ON live_tiles (expires_at);
+
+-- One row per channel with tiles, written by every new tile there while
+-- the instance caps tiles per channel: two tiles set at once then clash
+-- on it and one runs again, so the cap holds.
+CREATE TABLE live_tile_channels (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    changed_at INTEGER NOT NULL
+);

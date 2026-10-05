@@ -45,6 +45,7 @@ import {
   SlidersHorizontalIcon,
   BanIcon,
   type LucideIcon,
+  RadioTowerIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -123,6 +124,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.ONBOARDING_UPDATE]: { label: "serversettings.audit.kind.onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
   [AuditAction.MESSAGE_PIN]: { label: "serversettings.audit.kind.messagePin", icon: PinIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.MESSAGE_UNPIN]: { label: "serversettings.audit.kind.messageUnpin", icon: PinOffIcon, tint: "bg-muted text-muted-foreground" },
+  [AuditAction.LIVE_TILE_END]: { label: "serversettings.audit.kind.liveTileEnd", icon: RadioTowerIcon, tint: "bg-lime-500/15 text-lime-600" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -656,6 +658,8 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       return say("serversettings.audit.s.messagePin", { target, channel: named });
     case AuditAction.MESSAGE_UNPIN:
       return say("serversettings.audit.s.messageUnpin", { target, channel: named });
+    case AuditAction.LIVE_TILE_END:
+      return say("serversettings.audit.s.liveTileEnd", { target, channel: named });
     default:
       return say("serversettings.audit.s.unknown");
   }

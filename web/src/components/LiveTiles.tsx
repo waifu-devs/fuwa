@@ -1,60 +1,70 @@
 import { useNavigate } from "@tanstack/react-router";
-import { BellOffIcon, BotIcon, CalendarClockIcon, TrophyIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, VideoIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { BellOffIcon, BotIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, RotateCcwIcon, TrophyIcon, VideoIcon, Volume2Icon, WebhookIcon } from "lucide-react";
+import { AnimatePresence, LayoutGroup, m as motion, useReducedMotion } from "motion/react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { joinCall } from "@/calls/engine";
 import { useCalls } from "@/calls/state";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
 import { UserAvatar } from "@/components/Icons";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { loadFollowed, run } from "@/fuwa/actions";
+import { loadFollowed, run, updateServer } from "@/fuwa/actions";
 import { usePresenceSettings } from "@/fuwa/presence";
 import { notificationKey, useFuwa } from "@/fuwa/store";
 import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
 import { useI18n } from "@/i18n/react";
+import { instanceHas } from "@/lib/compat";
 import { formatTime } from "@/lib/format";
-import { BIG_SERVER, collectTiles, enabledKinds, EVENT_AHEAD_MS, pickTiles, POLL_SOON_MS, sampleTiles, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
-import { hideTile, setServerKind, setServerQuiet, setTilesMode, useLiveTilesLocal } from "@/lib/live-tiles-store";
+import { BIG_SERVER, collectTiles, kindNumbers, pickTiles, POLL_SOON_MS, serverKinds, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
+import { hideTile, setServerQuiet, setTilesOn, useLiveTilesLocal } from "@/lib/live-tiles-store";
+import { toast } from "@/lib/ui";
 import { isMuted, useNow } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
 import { requestThread } from "@/lib/threads";
 import { cn } from "@/lib/utils";
 
 /**
- * Live tiles at the top of a server's channel list (see lib/live-tiles.ts):
- * a draft behind a switch in this browser, so nothing shows unless someone
- * turned it on. Quiet by design: at most three, none while you're on Do not
- * disturb or have the server muted, and each one hides with a click.
+ * Live tiles at the top of a server's channel list (see lib/live-tiles.ts),
+ * on instances that have them. Quiet by design: at most three, only the kinds
+ * the server shows, none while you're on Do not disturb or have the server
+ * muted, and each one hides with a click.
  */
 
 const KIND: Record<TileKind, { icon: typeof Volume2Icon; tint: string }> = {
-  event: { icon: CalendarClockIcon, tint: "from-fuchsia-500 to-pink-500" },
   voice: { icon: Volume2Icon, tint: "from-emerald-500 to-teal-500" },
   poll: { icon: ChartColumnIcon, tint: "from-amber-500 to-orange-500" },
   thread: { icon: MessagesSquareIcon, tint: "from-sky-500 to-indigo-500" },
   shared: { icon: RadioTowerIcon, tint: "from-violet-500 to-purple-500" },
-  custom: { icon: TrophyIcon, tint: "from-lime-500 to-emerald-600" },
+  app: { icon: TrophyIcon, tint: "from-lime-500 to-emerald-600" },
 };
 
-const NO_VOICE: never[] = [];
+const NONE: never[] = [];
 
-export function LiveTiles({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const { mode, hidden, quiet, kinds: choices } = useLiveTilesLocal();
-  const members = useFuwa((s) => Number(s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.memberCount ?? 0));
-  const kinds = useMemo(() => enabledKinds(choices[serverId], members), [choices, serverId, members]);
-  if (mode === "off" || quiet.has(serverId) || kinds.size === 0) return null;
-  return <Strip instanceKey={instanceKey} serverId={serverId} demo={mode === "demo"} hidden={hidden} kinds={kinds} />;
+/** Whether the instance has live tiles at all (older ones don't). */
+const useTilesHere = (instanceKey: string) => useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "live-tiles"));
+
+/** The kinds a server shows, as its setting says. */
+function useServerKinds(instanceKey: string, serverId: string) {
+  const setting = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.liveTiles);
+  return useMemo(() => ({ customized: !!setting?.customized, kinds: serverKinds(setting?.kinds) }), [setting]);
 }
 
-function Strip({ instanceKey, serverId, demo, hidden, kinds }: { instanceKey: string; serverId: string; demo: boolean; hidden: ReadonlySet<string>; kinds: ReadonlySet<TileKind> }) {
+export function LiveTiles({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { on, hidden, quiet } = useLiveTilesLocal();
+  const here = useTilesHere(instanceKey);
+  const { kinds } = useServerKinds(instanceKey, serverId);
+  if (!here || !on || quiet.has(serverId) || kinds.size === 0) return null;
+  return <Strip instanceKey={instanceKey} serverId={serverId} hidden={hidden} kinds={kinds} />;
+}
+
+function Strip({ instanceKey, serverId, hidden, kinds }: { instanceKey: string; serverId: string; hidden: ReadonlySet<string>; kinds: ReadonlySet<TileKind> }) {
   const { t } = useI18n();
-  // A minute is fine for countdowns in minutes; rooms and threads move with the store.
-  // Demo samples move every second (the sample match); real tiles are fine at 15 seconds.
-  const now = useNow(demo ? 1_000 : 15_000);
-  const [anchor] = useState(Date.now);
+  // Countdowns are in minutes and apps' tiles run out by the minute; rooms, threads and apps' changes move with the store.
+  const now = useNow(15_000);
+  const apps = useFuwa((s) => s.instances[instanceKey]?.liveTiles[serverId] ?? NONE);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
-  const voice = useFuwa((s) => s.instances[instanceKey]?.voice[serverId] ?? NO_VOICE);
+  const voice = useFuwa((s) => s.instances[instanceKey]?.voice[serverId] ?? NONE);
   const messages = useFuwa((s) => s.instances[instanceKey]?.messages);
   const threadParents = useFuwa((s) => s.instances[instanceKey]?.threadParents);
   const followed = useFuwa((s) => s.instances[instanceKey]?.followed[serverId]);
@@ -81,21 +91,12 @@ function Strip({ instanceKey, serverId, demo, hidden, kinds }: { instanceKey: st
         unread,
         inChannel,
         muted: (id) => isMuted(notifications[notificationKey(serverId, id)], now),
+        apps,
       },
       now,
     );
-    const words = {
-      eventTitle: t("tiles.event.sampleTitle"),
-      app: t("tiles.sample.app"),
-      match: t("tiles.sample.match"),
-      home: t("tiles.sample.home"),
-      away: t("tiles.sample.away"),
-      watch: t("tiles.sample.watch"),
-      fullTime: t("tiles.sample.fullTime"),
-    };
-    const all = demo ? [...real, ...sampleTiles(channels, anchor, now, words)] : real;
-    return pickTiles(all, hidden, now, kinds);
-  }, [channels, voice, messages, threadParents, followed, threadUnread, unread, notifications, inChannel, serverId, now, demo, anchor, hidden, kinds, t]);
+    return pickTiles(real, hidden, now, kinds);
+  }, [channels, voice, messages, threadParents, followed, threadUnread, unread, notifications, inChannel, serverId, now, apps, hidden, kinds]);
 
   const serverMuted = isMuted(notifications?.[notificationKey(serverId)], now);
   const shown = dnd || serverMuted ? [] : tiles;
@@ -181,21 +182,14 @@ function TileCard({ tile, index, instanceKey, serverId, now }: { tile: Tile; ind
       data-tile={tile.kind}
       className="group relative overflow-hidden rounded-xl border bg-card/80 shadow-xs"
     >
-      {tile.kind === "event" && <Sweep />}
+      {tile.kind === "app" && tile.live && <Sweep />}
       <div className="flex items-start gap-2 p-2">
         <button type="button" onClick={open} className="flex min-w-0 flex-1 items-start gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-lg">
           <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br text-white shadow-sm", tint)}>
             <Icon className="size-4 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm leading-5 font-bold">{body.title}</span>
-              {tile.sample && (
-                <span title={t("tiles.strip.sampleTitle")} className="shrink-0 rounded-full border border-dashed px-1.5 text-[0.6rem] leading-4 font-bold text-muted-foreground uppercase">
-                  {t("tiles.strip.sample")}
-                </span>
-              )}
-            </span>
+            <span className="block truncate text-sm leading-5 font-bold">{body.title}</span>
             <span className="block truncate text-xs leading-4 text-muted-foreground">{body.line}</span>
           </span>
         </button>
@@ -269,34 +263,26 @@ function describe(tile: Tile, now: number, t: ReturnType<typeof useI18n>["t"], i
         action: t("tiles.shared.open"),
         left: null,
       };
-    case "custom":
+    case "app": {
+      const From = tile.webhook ? WebhookIcon : BotIcon;
+      const status = tile.live ? [t("tiles.app.live"), tile.status].filter(Boolean).join(" · ") : tile.status;
       return {
         title: tile.title,
         line: (
-          <span className="inline-flex items-center gap-1">
-            <BotIcon className="size-3" />
-            {t("tiles.custom.by", { app: tile.app })}
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <From className="size-3 shrink-0" />
+            <span className="truncate">{t("tiles.app.by", { app: tile.app })}</span>
           </span>
         ),
-        rows: <Scoreboard rows={tile.rows} />,
+        rows: tile.rows.length > 0 ? <Scoreboard rows={tile.rows} /> : undefined,
         extra: (
-          <span className="inline-flex items-center gap-1.5 font-bold tabular-nums">
+          <span className="inline-flex min-w-0 items-center gap-1.5 font-bold tabular-nums">
             {tile.live && <LiveDot />}
-            {tile.live ? `${t("tiles.custom.live")} · ${tile.status}` : tile.status}
+            <span className="truncate">{status}</span>
           </span>
         ),
-        action: tile.action,
+        action: tile.action || t("tiles.app.open"),
         left: tile.progress,
-      };
-        case "event": {
-      const until = tile.startsAt - now;
-      const minutes = Math.max(1, Math.ceil(until / 60_000));
-      return {
-        title: tile.title,
-        line: until <= 0 ? t("tiles.event.now") : t("tiles.event.startsIn", { count: minutes }),
-        extra: <span className="truncate">{t("tiles.event.going", { count: tile.going })}</span>,
-        action: t("tiles.event.open"),
-        left: until <= 0 ? null : until / EVENT_AHEAD_MS,
       };
     }
   }
@@ -395,7 +381,7 @@ function TileMenu({ tile, serverId }: { tile: Tile; serverId: string }) {
           <BellOffIcon /> {t("tiles.strip.quiet")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => setTilesMode("off")}>
+        <DropdownMenuItem onSelect={() => setTilesOn(false)}>
           <PowerOffIcon /> {t("tiles.strip.off")}
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -403,19 +389,36 @@ function TileMenu({ tile, serverId }: { tile: Tile; serverId: string }) {
   );
 }
 
-/** In the server's menu while tiles are on in this browser: show them here or not. */
+/**
+ * In the server's menu: tiles here or not, for you; and for whoever can
+ * manage the server, which kinds everyone here sees (a server setting).
+ */
 export function LiveTilesMenuItem({ instanceKey, serverId, manage }: { instanceKey: string; serverId: string; manage: boolean }) {
   const { t } = useI18n();
-  const { mode, quiet, kinds: choices } = useLiveTilesLocal();
-  const members = useFuwa((s) => Number(s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.memberCount ?? 0));
-  if (mode === "off") return null;
-  const kinds = enabledKinds(choices[serverId], members);
+  const { on, quiet } = useLiveTilesLocal();
+  const here = useTilesHere(instanceKey);
+  const { customized, kinds } = useServerKinds(instanceKey, serverId);
+  if (!here) return null;
+  const save = (next: { customized: boolean; kinds: number[] }) =>
+    run(updateServer(instanceKey, serverId, { liveTiles: next })).catch((e: { message?: string }) => toast(e.message ?? t("tiles.menu.failed")));
+  const toggle = (kind: TileKind, show: boolean) => {
+    const next = new Set(kinds);
+    if (show) next.add(kind);
+    else next.delete(kind);
+    void save({ customized: true, kinds: kindNumbers(next) });
+  };
   return (
     <>
-      <DropdownMenuCheckboxItem checked={!quiet.has(serverId)} onCheckedChange={(on) => setServerQuiet(serverId, !on)} onSelect={(e) => e.preventDefault()}>
+      <DropdownMenuCheckboxItem
+        checked={on && !quiet.has(serverId)}
+        onCheckedChange={(show) => {
+          if (show && !on) setTilesOn(true);
+          setServerQuiet(serverId, !show);
+        }}
+        onSelect={(e) => e.preventDefault()}
+      >
         {t("tiles.menu.show")}
       </DropdownMenuCheckboxItem>
-      {/* For whoever can manage the server: which kinds of tiles everyone here sees. */}
       {manage && (
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -425,15 +428,21 @@ export function LiveTilesMenuItem({ instanceKey, serverId, manage }: { instanceK
             {TILE_KINDS.map((kind) => {
               const Icon = KIND[kind].icon;
               return (
-                <DropdownMenuCheckboxItem key={kind} checked={kinds.has(kind)} onCheckedChange={(on) => setServerKind(serverId, kind, on)} onSelect={(e) => e.preventDefault()}>
+                <DropdownMenuCheckboxItem key={kind} checked={kinds.has(kind)} onCheckedChange={(show) => toggle(kind, show)} onSelect={(e) => e.preventDefault()}>
                   <Icon /> {t(`tiles.kind.${kind}`)}
                 </DropdownMenuCheckboxItem>
               );
             })}
+            {customized && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void save({ customized: false, kinds: [] })}>
+                  <RotateCcwIcon /> {t("tiles.menu.reset")}
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuLabel className="text-xs leading-4 font-normal text-muted-foreground">
-              {t("tiles.menu.bigServer", { count: BIG_SERVER })}
-              <br />
-              {t("tiles.menu.draft")}
+              {customized ? t("tiles.menu.everyone") : t("tiles.menu.bigServer", { count: BIG_SERVER })}
             </DropdownMenuLabel>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
@@ -443,15 +452,13 @@ export function LiveTilesMenuItem({ instanceKey, serverId, manage }: { instanceK
 }
 
 /**
- * While tiles are on, the channel list slides down and up as they come and go
- * (a layout animation: transforms only). Off, the list renders as it always did.
+ * While tiles show, the channel list slides down and up as they come and go
+ * (a layout animation: transforms only). Without them, the list renders as it always did.
  */
 export function LiveTilesGroup({ children }: { children: ReactNode }) {
-  const { mode } = useLiveTilesLocal();
-  if (mode === "off") return children;
-  return (
-    <LayoutGroup id="live-tiles">{children}</LayoutGroup>
-  );
+  const { on } = useLiveTilesLocal();
+  if (!on) return children;
+  return <LayoutGroup id="live-tiles">{children}</LayoutGroup>;
 }
 
 /** An app's rows, such as teams and scores: a value that changes rolls to its new one. */

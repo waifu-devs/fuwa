@@ -15,6 +15,7 @@ import type {
   Server,
   User,
   VoiceState,
+  LiveTile,
 } from "@/gen/fuwa/v1/types_pb";
 import { equals } from "@bufbuild/protobuf";
 import { ApplicationStatus, ChannelType, UserSchema } from "@/gen/fuwa/v1/types_pb";
@@ -197,6 +198,8 @@ export type InstanceState = {
   applied: Record<string, Applied>;
   /** Per server: who's in its voice channels, in the order they joined. */
   voice: Record<string, VoiceState[]>;
+  /** Per server: apps' live tiles, as listed when the stream starts and sent since. */
+  liveTiles: Record<string, LiveTile[]>;
   /**
    * Per server whose shared channels a manager looked at: its connections,
    * share codes and people kept out. Read again when the server says they changed.
@@ -269,6 +272,7 @@ export function emptyInstance(key: string, url: string, account = ""): InstanceS
     applications: {},
     applied: {},
     voice: {},
+    liveTiles: {},
     shared: {},
     dms: emptyDms(),
     friends: emptyFriends(),
@@ -427,6 +431,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     synced: without(i.synced, serverId),
     applications: without(i.applications, serverId),
     voice: without(i.voice, serverId),
+    liveTiles: without(i.liveTiles, serverId),
     shared: without(i.shared, serverId),
     messages: keep(i.messages),
     pending: keep(i.pending),
@@ -507,6 +512,9 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         voice: i.voice[sid]?.some((v) => v.channelId === id)
           ? { ...i.voice, [sid]: i.voice[sid]!.filter((v) => v.channelId !== id) }
           : i.voice,
+        liveTiles: i.liveTiles[sid]?.some((t) => t.channelId === id)
+          ? { ...i.liveTiles, [sid]: i.liveTiles[sid]!.filter((t) => t.channelId !== id) }
+          : i.liveTiles,
       };
     }
     case "messageCreated":
@@ -669,8 +677,22 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       const next = list.filter((v) => !(v.userId === userId && (!channelId || v.channelId === channelId)));
       return next.length === list.length ? i : { ...i, voice: { ...i.voice, [sid]: next } };
     }
+    case "liveTileUpdated": {
+      const tile = p.value.tile;
+      return tile ? withLiveTile(i, sid, tile) : i;
+    }
+    case "liveTileEnded": {
+      const list = i.liveTiles[sid] ?? [];
+      const { channelId, tileId, sourceId } = p.value;
+      const next = list.filter((t) => !(t.channelId === channelId && t.id === tileId && t.sourceId === sourceId));
+      return next.length === list.length ? i : { ...i, liveTiles: { ...i.liveTiles, [sid]: next } };
+    }
     case "memberLeft": {
       if (p.value.userId === i.me?.id) return removeServer(i, sid);
+      // An agent's tiles go with it.
+      if (i.liveTiles[sid]?.some((t) => t.sourceId === p.value.userId)) {
+        i = { ...i, liveTiles: { ...i.liveTiles, [sid]: i.liveTiles[sid]!.filter((t) => t.sourceId !== p.value.userId) } };
+      }
       const list = i.members[sid] ?? [];
       const voice = i.voice[sid]?.some((v) => v.userId === p.value.userId)
         ? { ...i.voice, [sid]: i.voice[sid]!.filter((v) => v.userId !== p.value.userId) }
@@ -694,6 +716,15 @@ export function withVoiceState(i: InstanceState, serverId: string, state: VoiceS
   const at = list.findIndex((v) => v.userId === state.userId);
   const next = at === -1 ? [...list, state] : list.map((v, n) => (n === at ? state : v));
   return { ...i, voice: { ...i.voice, [serverId]: next } };
+}
+
+/** An app set or changed a tile: one per app, channel and tile id. */
+export function withLiveTile(i: InstanceState, serverId: string, tile: LiveTile): InstanceState {
+  const list = i.liveTiles[serverId] ?? [];
+  const same = (t: LiveTile) => t.id === tile.id && t.channelId === tile.channelId && t.sourceId === tile.sourceId;
+  const at = list.findIndex(same);
+  const next = at === -1 ? [...list, tile] : list.map((t, n) => (n === at ? tile : t));
+  return { ...i, liveTiles: { ...i.liveTiles, [serverId]: next } };
 }
 
 export const isCategory = (c: Channel) => c.type === ChannelType.CATEGORY;
