@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { T, useI18n } from "@/i18n/react";
+import { instanceHas } from "@/lib/compat";
 import { memberName } from "@/lib/format";
 import {
   above,
@@ -43,6 +44,7 @@ import {
   type Access,
   type Bits,
 } from "@/lib/permissions";
+import { flip, NO_SWITCHES, permissionPatch, switched } from "@/lib/role-edits";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -303,17 +305,21 @@ const draftOf = (r: Role): Draft => ({
 
 /**
  * Your edits over the role as saved. A change saved elsewhere shows at once,
- * except in fields being edited here.
+ * except in fields being edited here. Permissions are one field but many
+ * switches, so they're kept as the switches flipped here.
  */
 function useRoleDraft(instanceKey: string, serverId: string, role: Role) {
   const { t } = useI18n();
   const base = useMemo(() => draftOf(role), [role]);
-  const [edits, setEdits] = useState<Partial<Draft>>({});
+  const [edits, setEdits] = useState<Partial<Omit<Draft, "permissions">>>({});
+  const [switches, setSwitches] = useState(NO_SWITCHES);
   const save = useAction(updateRole);
-  const draft: Draft = { ...base, ...edits };
+  const sendsChanges = instanceHas(useInstance(instanceKey)?.node?.versions, "role-permission-changes");
+  const draft: Draft = { ...base, ...edits, permissions: switched(switches, base.permissions) };
 
   const changed = (Object.keys(base) as (keyof Draft)[]).filter((k) => draft[k] !== base[k]);
-  const set = (patch: Partial<Draft>) => {
+  const set = ({ permissions, ...patch }: Partial<Draft>) => {
+    if (permissions !== undefined) setSwitches((s) => flip(s, draft.permissions, permissions, base.permissions));
     setEdits((e) => {
       const next: Partial<Draft> = { ...e, ...patch };
       // A field put back as it's saved isn't being edited any more.
@@ -326,18 +332,25 @@ function useRoleDraft(instanceKey: string, serverId: string, role: Role) {
   async function submit() {
     const name = draft.name.trim();
     if (!name) return save.setError(t("serversettings.roles.needsName"));
+    const { grant, revoke, permissions } = permissionPatch(draft.permissions, base.permissions, sendsChanges);
     const done = await save.go(instanceKey, serverId, role.id, {
       ...(draft.name !== base.name && { name }),
       ...(draft.color !== base.color && { color: draft.color }),
       ...(draft.hoist !== base.hoist && { hoist: draft.hoist }),
       ...(draft.mentionable !== base.mentionable && { mentionable: draft.mentionable }),
-      ...(draft.permissions !== base.permissions && { permissions: toList(draft.permissions) }),
+      ...(grant !== undefined && { grant: toList(grant), revoke: toList(revoke!) }),
+      ...(permissions !== undefined && { permissions: toList(permissions) }),
     });
     // The saved role is in the store already, so it's the base now.
-    if (done) setEdits({});
+    if (done) discard();
   }
 
-  return { draft, set, changed, submit, discard: () => setEdits({}), save };
+  function discard() {
+    setEdits({});
+    setSwitches(NO_SWITCHES);
+  }
+
+  return { draft, set, changed, submit, discard, save };
 }
 
 /** The role's dot and name as they'll look. */

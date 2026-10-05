@@ -230,7 +230,11 @@ pub struct RolePatch {
     pub color: Option<Option<u32>>,
     pub hoist: Option<bool>,
     pub mentionable: Option<bool>,
+    /// Every permission, for instances without "role-permission-changes".
     pub permissions: Option<Vec<i32>>,
+    /// Permissions to switch on and off, leaving the rest as they are.
+    pub grant: Vec<i32>,
+    pub revoke: Vec<i32>,
 }
 
 impl Core {
@@ -286,6 +290,8 @@ impl Core {
                 permissions: patch.permissions.map(|permissions| pb::PermissionSet { permissions }),
                 hoist: patch.hoist,
                 mentionable: patch.mentionable,
+                grant: patch.grant,
+                revoke: patch.revoke,
             })
         )
         .await?;
