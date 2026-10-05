@@ -12,6 +12,7 @@ import { Mention, remarkMentions, ServerLookProvider, type ServerLook } from "@/
 import { UserAvatar } from "@/components/Icons";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
 import { Count } from "@/components/motion";
+import { T, useI18n } from "@/i18n/react";
 import { remarkSearchHits } from "@/components/search/highlight";
 import { SearchField } from "@/components/search/SearchBar";
 import { displayName, formatStamp, memberName, toDate } from "@/lib/format";
@@ -63,6 +64,7 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
   const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
   const roles = useRoles(instanceKey, serverId);
   const navigate = useNavigate();
+  const { t, number } = useI18n();
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const look = useMemo<ServerLook>(() => {
@@ -77,13 +79,13 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
     results.forEach((result, index) => {
       const channelId = result.message?.channelId ?? "";
       if (channelId !== last) {
-        out.push({ kind: "channel", key: `c-${index}-${channelId}`, channelId, name: channels.find((c) => c.id === channelId)?.name ?? "channel" });
+        out.push({ kind: "channel", key: `c-${index}-${channelId}`, channelId, name: channels.find((c) => c.id === channelId)?.name ?? t("chattools.search.channel") });
         last = channelId;
       }
       out.push({ kind: "result", key: result.message?.id ?? `r-${index}`, result, index });
     });
     return out;
-  }, [results, channels]);
+  }, [results, channels, t]);
 
   const { scroller, layout, visible, measure, setView } = useWindowedRows(rows, run);
 
@@ -127,8 +129,7 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
         <PanelHeader instanceKey={instanceKey} serverId={serverId} sheet={sheet} />
         {sheet && query && !loading && !error && (
           <p className="px-4 pt-2 text-sm font-bold">
-            <Count value={total} />
-            {atLeast && "+"} {total === 1 && !atLeast ? "result" : "results"}
+            <T k={atLeast ? "chattools.search.resultsAtLeast" : "chattools.search.results"} values={{ count: <Count value={total} /> }} count={total} />
           </p>
         )}
         <AnimatePresence initial={false}>
@@ -142,7 +143,7 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
             >
               <HourglassIcon className="size-3.5 shrink-0" />
               <span>
-                Older messages are still being added to search ({indexedPercent}%). Recent ones are all here.
+                {t("chattools.search.indexing", { percent: number(indexedPercent / 100, { style: "percent" }) })}
               </span>
             </motion.p>
           )}
@@ -225,6 +226,7 @@ function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; se
   const loading = useSearch((s) => s.loading);
   const loadingMore = useSearch((s) => s.more);
   const query = useSearch((s) => s.query);
+  const { t } = useI18n();
   return (
     <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
       {sheet ? (
@@ -232,19 +234,17 @@ function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; se
       ) : (
         <h2 className="flex min-w-0 flex-1 items-baseline gap-1.5 font-extrabold">
           {loading && !loadingMore ? (
-            <span className="text-muted-foreground">Searching…</span>
+            <span className="text-muted-foreground">{t("chattools.search.searching")}</span>
           ) : (
-            <>
-              <Count value={total} />
-              {atLeast && <span className="-ml-1.5">+</span>}
-              <span>{total === 1 && !atLeast ? "result" : "results"}</span>
-            </>
+            <span>
+              <T k={atLeast ? "chattools.search.resultsAtLeast" : "chattools.search.results"} values={{ count: <Count value={total} /> }} count={total} />
+            </span>
           )}
         </h2>
       )}
       <motion.button
         type="button"
-        aria-label="Close search"
+        aria-label={t("chattools.search.close")}
         onClick={closeSearch}
         whileTap={{ scale: 0.85 }}
         className="grid size-8 shrink-0 place-items-center self-start rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -261,6 +261,7 @@ function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; se
  */
 function LookFurther() {
   const show = useSearch((s) => !!s.cursor && !s.loading && !s.error && s.results.length < 12);
+  const { t } = useI18n();
   if (!show) return null;
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center px-4 py-3">
@@ -269,7 +270,7 @@ function LookFurther() {
         onClick={() => void loadMoreResults()}
         className="rounded-full bg-muted px-4 py-1.5 text-sm font-bold text-muted-foreground transition hover:bg-primary/10 hover:text-primary active:scale-95"
       >
-        Look further back
+        {t("chattools.search.further")}
       </button>
     </motion.div>
   );
@@ -283,18 +284,19 @@ function PanelState({ sheet }: { sheet: boolean }) {
   const empty = useSearch((s) => s.results.length === 0);
   const further = useSearch((s) => !!s.cursor);
   const nothing = !loading && !error && empty && !!query;
+  const { t } = useI18n();
   return (
     <>
       {loading && <Skeleton />}
-      {error && <Empty icon={<SearchXIcon className="size-6" />} title="Couldn't search" text={error} />}
+      {error && <Empty icon={<SearchXIcon className="size-6" />} title={t("chattools.search.failed")} text={error} />}
       {nothing &&
         (further ? (
-          <Empty icon={<SearchXIcon className="size-6" />} title="Nothing in the newest messages" text="Older ones haven't been searched yet." />
+          <Empty icon={<SearchXIcon className="size-6" />} title={t("chattools.search.nothingNewest")} text={t("chattools.search.olderNotSearched")} />
         ) : (
-          <Empty icon={<SearchXIcon className="size-6" />} title="Nothing found" text="Try other words, or fewer filters." />
+          <Empty icon={<SearchXIcon className="size-6" />} title={t("chattools.search.nothingFound")} text={t("chattools.search.tryOther")} />
         ))}
       {!sheet && !query && !loading && !error && (
-        <Empty icon={<HashIcon className="size-6" />} title="Search this server" text="Type words, or filters like from:, in: and has:, then press Enter." />
+        <Empty icon={<HashIcon className="size-6" />} title={t("chattools.search.start")} text={t("chattools.search.startAbout")} />
       )}
     </>
   );
@@ -326,6 +328,7 @@ const ResultRow = memo(function ResultRow({
   const message = result.message!;
   const date = toDate(message.createdAt);
   const text = useMemo(() => markRanges(message.content, result.highlights), [message.content, result.highlights]);
+  const { t } = useI18n();
   return (
     <motion.div
       key={run}
@@ -354,7 +357,7 @@ const ResultRow = memo(function ResultRow({
               {message.attachments.map((a) => (
                 <span key={a.id} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                   <PaperclipIcon className="size-3 shrink-0" />
-                  <span className="truncate">{a.voice ? `Voice message (${clock(a.voice.durationMs)})` : a.filename}</span>
+                  <span className="truncate">{a.voice ? t("chattools.search.voiceMessage", { duration: clock(a.voice.durationMs) }) : a.filename}</span>
                 </span>
               ))}
             </span>
@@ -364,7 +367,7 @@ const ResultRow = memo(function ResultRow({
           )}
         </span>
         <span className="pointer-events-none absolute top-2 right-2 flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[0.7rem] font-bold text-primary-foreground opacity-0 transition-[opacity,transform] duration-150 group-hover/result:translate-x-0 group-hover/result:opacity-100 group-focus-visible/result:opacity-100 translate-x-1">
-          Jump <ArrowRightIcon className="size-3" />
+          {t("chattools.search.jump")} <ArrowRightIcon className="size-3" />
         </span>
       </button>
     </motion.div>

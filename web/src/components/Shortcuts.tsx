@@ -15,8 +15,10 @@ import { ContextMenuHost } from "@/components/ContextMenu";
 import { ServerIcon } from "@/components/Icons";
 import { Count, EASE_OUT, SPRING } from "@/components/motion";
 import { Keycaps } from "@/components/settings/app/common";
+import { i18n } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { fuzzy } from "@/lib/fuzzy";
-import { ACTIONS, GROUPS, actionById, bindingOf, bindings, comboOf, composerKeys, normalize } from "@/lib/keybinds";
+import { ACTIONS, GROUPS, actionById, actionName, bindingOf, bindings, comboOf, composerKeys, groupName, normalize } from "@/lib/keybinds";
 import { setDmNotificationTarget, setFriendsNotificationTarget, setNotificationTarget } from "@/lib/notify";
 import { getPrefs, setPrefs, usePrefs } from "@/lib/prefs";
 import { hidesPersonal, shownAddress } from "@/lib/streamer";
@@ -140,13 +142,13 @@ export function AppOverlays() {
         const x = list[wrap((at === -1 && by < 0 ? 0 : at) + by * n, list.length)]!;
         if ((s.instances[x.instance]?.unread[x.channel.id] ?? 0) > 0) return void go({ instance: x.instance, server: x.server.id, channel: x.channel.id });
       }
-      toast("You're all caught up");
+      toast(i18n().t("chattools.shortcuts.caughtUp"));
     }
 
     const run: Record<string, () => void> = {
       quickSwitcher: () => setSwitcher(!getUi().switcher),
       searchServer: () => {
-        if (!runCommand("focusSearch")) toast("Open a server's channel to search it");
+        if (!runCommand("focusSearch")) toast(i18n().t("chattools.shortcuts.searchWhere"));
       },
       previousServer: () => stepServer(-1),
       nextServer: () => stepServer(1),
@@ -157,8 +159,11 @@ export function AppOverlays() {
       markServerRead: () => {
         const { instance, server } = hereRef.current;
         if (!instance || !server) return;
-        const name = store.get().instances[instance]?.servers.find((x) => x.id === server)?.name ?? "the server";
-        toast(markServerRead(instance, server) > 0 ? `Marked ${name} as read` : `Nothing unread in ${name}`);
+        const name = store.get().instances[instance]?.servers.find((x) => x.id === server)?.name;
+        const { t } = i18n();
+        const marked = markServerRead(instance, server) > 0;
+        if (name === undefined) toast(marked ? t("chattools.shortcuts.markedReadThis") : t("chattools.shortcuts.nothingUnreadThis"));
+        else toast(marked ? t("chattools.shortcuts.markedRead", { server: name }) : t("chattools.shortcuts.nothingUnread", { server: name }));
       },
       focusComposer: () => document.querySelector<HTMLTextAreaElement>("[data-composer]")?.focus(),
       toggleMembers: () => runCommand("toggleMembers"),
@@ -176,7 +181,7 @@ export function AppOverlays() {
         const on = !getPrefs().streamer;
         setPrefs({ streamer: on });
         if (on) hideStreamerBanner(false);
-        toast(on ? "Streamer mode on" : "Streamer mode off");
+        toast(on ? i18n().t("chattools.shortcuts.streamerOn") : i18n().t("chattools.shortcuts.streamerOff"));
       },
     };
 
@@ -233,6 +238,7 @@ export function AppOverlays() {
 function ShortcutSheet() {
   const open = useUi((u) => u.shortcuts);
   const p = usePrefs((x) => x);
+  const { t } = useI18n();
   let row = 0;
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setShortcuts}>
@@ -267,23 +273,23 @@ function ShortcutSheet() {
                     <KeyboardIcon className="size-5" />
                   </motion.span>
                   <div className="min-w-0 flex-1">
-                    <DialogPrimitive.Title className="text-lg font-extrabold">Keyboard shortcuts</DialogPrimitive.Title>
-                    <p className="text-xs text-muted-foreground">They work in the browser and the app. Change any of them in settings.</p>
+                    <DialogPrimitive.Title className="text-lg font-extrabold">{t("chattools.shortcuts.title")}</DialogPrimitive.Title>
+                    <p className="text-xs text-muted-foreground">{t("chattools.shortcuts.about")}</p>
                   </div>
-                  <DialogPrimitive.Close className="group grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Close">
+                  <DialogPrimitive.Close className="group grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label={t("common.close")}>
                     <XIcon className="size-5 transition-transform duration-300 group-hover:rotate-90" />
                   </DialogPrimitive.Close>
                 </header>
                 <div className="grid gap-x-10 gap-y-6 px-5 py-4 sm:grid-cols-2 sm:px-8">
                   {GROUPS.map((group) => (
                     <section key={group} className="flex flex-col">
-                      <h3 className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{group}</h3>
+                      <h3 className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{groupName(t, group)}</h3>
                       {ACTIONS.filter((a) => a.group === group).map((action) => {
                         const combo = bindingOf(action, p);
                         const extra = p.customKeybinds.filter((c) => c.action === action.id);
                         return (
-                          <SheetRow key={action.id} index={row++} label={action.label}>
-                            {combo ? <Keycaps combo={combo} /> : !extra.length && <span className="text-xs text-muted-foreground">Not set</span>}
+                          <SheetRow key={action.id} index={row++} label={actionName(t, action)}>
+                            {combo ? <Keycaps combo={combo} /> : !extra.length && <span className="text-xs text-muted-foreground">{t("chattools.shortcuts.notSet")}</span>}
                             {extra.map((c) => (
                               <Keycaps key={c.id} combo={c.combo} className="rounded-lg bg-primary/10 p-0.5" />
                             ))}
@@ -291,8 +297,8 @@ function ShortcutSheet() {
                         );
                       })}
                       {group === "Chat" &&
-                        composerKeys(p.sendWith).map((k) => (
-                          <SheetRow key={k.label} index={row++} label={k.label} muted>
+                        composerKeys(t, p.sendWith).map((k) => (
+                          <SheetRow key={k.id} index={row++} label={k.label} muted>
                             <Keycaps combo={k.combo} />
                           </SheetRow>
                         ))}
@@ -303,10 +309,10 @@ function ShortcutSheet() {
                   <p className="min-w-0 flex-1 text-xs text-muted-foreground">
                     {bindingOf(actionById("shortcuts")!, p) ? (
                       <span className="inline-flex flex-wrap items-center gap-1">
-                        Open this anytime with <Keycaps combo={bindingOf(actionById("shortcuts")!, p)!} />
+                        <T k="chattools.shortcuts.openAnytime" values={{ keys: <Keycaps combo={bindingOf(actionById("shortcuts")!, p)!} /> }} />
                       </span>
                     ) : (
-                      "Give this sheet a shortcut in Keybinds."
+                      t("chattools.shortcuts.noShortcut")
                     )}
                   </p>
                   <button
@@ -314,7 +320,7 @@ function ShortcutSheet() {
                     onClick={() => openSettings("keybinds")}
                     className="group flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition hover:brightness-110 active:scale-95"
                   >
-                    <SparklesIcon className="size-4 transition-transform group-hover:rotate-12" /> Change keybinds
+                    <SparklesIcon className="size-4 transition-transform group-hover:rotate-12" /> {t("chattools.shortcuts.change")}
                   </button>
                 </footer>
               </motion.div>
@@ -357,6 +363,7 @@ type Item = {
 
 function QuickSwitcher({ here }: { here: Here }) {
   const open = useUi((u) => u.switcher);
+  const { t } = useI18n();
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setSwitcher}>
       <AnimatePresence>
@@ -380,7 +387,7 @@ function QuickSwitcher({ here }: { here: Here }) {
                   transition={SPRING}
                   className="pointer-events-auto flex max-h-[70vh] w-full max-w-xl flex-col self-start overflow-hidden rounded-2xl border bg-popover text-popover-foreground shadow-2xl outline-none"
                 >
-                  <DialogPrimitive.Title className="sr-only">Find a server or channel</DialogPrimitive.Title>
+                  <DialogPrimitive.Title className="sr-only">{t("chattools.switcher.title")}</DialogPrimitive.Title>
                   <Switcher here={here} />
                 </motion.div>
               </DialogPrimitive.Content>
@@ -399,6 +406,7 @@ function Switcher({ here }: { here: Here }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   const items = useMemo(() => {
     const where = (key: string) => s.instances[key]?.node?.name ?? shownAddress(key);
@@ -478,8 +486,8 @@ function Switcher({ here }: { here: Here }) {
               pick(items[active]);
             }
           }}
-          placeholder="Where to?"
-          aria-label="Find a server or channel"
+          placeholder={t("chattools.switcher.placeholder")}
+          aria-label={t("chattools.switcher.title")}
           aria-controls="switcher-results"
           aria-activedescendant={items[active] ? `switcher-${active}` : undefined}
           className="h-14 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted-foreground"
@@ -488,12 +496,12 @@ function Switcher({ here }: { here: Here }) {
       <div ref={list} id="switcher-results" role="listbox" className="scroll-thin flex-1 overflow-y-auto p-2">
         {!query && items.length > 0 && (
           <p className="px-2 pt-1 pb-1.5 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
-            {items[0]?.unread && items[0].kind === "channel" ? "Unread first" : "Jump to"}
+            {items[0]?.unread && items[0].kind === "channel" ? t("chattools.switcher.unreadFirst") : t("chattools.switcher.jumpTo")}
           </p>
         )}
         {items.length === 0 ? (
           <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="px-3 py-8 text-center text-sm text-muted-foreground">
-            {query ? `Nothing called “${query}”` : "Join a server and its channels show up here."}
+            {query ? t("chattools.switcher.nothingCalled", { query }) : t("chattools.switcher.empty")}
           </motion.p>
         ) : (
           items.map((item, n) => (
@@ -504,16 +512,16 @@ function Switcher({ here }: { here: Here }) {
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t bg-muted/40 px-4 py-2 text-[0.7rem] text-muted-foreground">
         <span className="flex items-center gap-1">
           <ArrowUpIcon className="size-3" />
-          <ArrowDownIcon className="size-3" /> move
+          <ArrowDownIcon className="size-3" /> {t("chattools.switcher.move")}
         </span>
         <span className="flex items-center gap-1">
-          <CornerDownLeftIcon className="size-3" /> go
+          <CornerDownLeftIcon className="size-3" /> {t("chattools.switcher.go")}
         </span>
         <span>
-          <b className="text-foreground">#</b> channels only
+          <T k="chattools.switcher.channelsOnly" values={{ mark: <b className="text-foreground">#</b> }} />
         </span>
         <span>
-          <b className="text-foreground">*</b> servers only
+          <T k="chattools.switcher.serversOnly" values={{ mark: <b className="text-foreground">*</b> }} />
         </span>
       </footer>
     </>
@@ -609,6 +617,7 @@ export function StreamerBanner() {
   const on = usePrefs((p) => p.streamer);
   const hiddenBanner = useUi((u) => u.streamerBannerHidden);
   const show = on && !hiddenBanner;
+  const { t } = useI18n();
   return (
     <AnimatePresence initial={false}>
       {show && (
@@ -623,21 +632,21 @@ export function StreamerBanner() {
             <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}>
               <TvMinimalPlayIcon className="size-4" />
             </motion.span>
-            <span className="truncate">Streamer mode is on</span>
+            <span className="truncate">{t("chattools.streamer.on")}</span>
             <span className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 onClick={() => hideStreamerBanner()}
                 className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs transition hover:bg-white/20 active:scale-95"
               >
-                <EyeOffIcon className="size-3.5" /> Hide
+                <EyeOffIcon className="size-3.5" /> {t("chattools.streamer.hide")}
               </button>
               <button
                 type="button"
                 onClick={() => setPrefs({ streamer: false })}
                 className="rounded-full bg-white/25 px-2.5 py-0.5 text-xs transition hover:bg-white/35 active:scale-95"
               >
-                Turn off
+                {t("chattools.streamer.turnOff")}
               </button>
             </span>
           </div>

@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import { useFuwa } from "@/fuwa/store";
 import { closeSearch, openSearch, runSearch, searchableChannel, searchPlace, useSearch } from "@/fuwa/search";
 import { UserAvatar } from "@/components/Icons";
+import { type I18n, type Key, useI18n } from "@/i18n/react";
 import { fuzzy } from "@/lib/fuzzy";
 import { comboLabel, bindingOf, actionById } from "@/lib/keybinds";
 import { memberName } from "@/lib/format";
@@ -54,12 +55,23 @@ type Suggestion = {
   open?: boolean;
 };
 
-type Group = { title: string; items: Suggestion[]; clear?: () => void };
+type Group = { id: string; title: string; items: Suggestion[]; clear?: () => void };
+
+/** What each filter takes, in words. `has:`'s are its values, typed as they are, so they stay as written. */
+const HINTS: Record<FilterKey, Key | null> = {
+  from: "chattools.search.hint.member",
+  in: "chattools.search.hint.channel",
+  mentions: "chattools.search.hint.member",
+  has: null,
+  before: "chattools.search.hint.date",
+  during: "chattools.search.hint.date",
+  after: "chattools.search.hint.date",
+};
 
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function suggestionsFor(token: string, input: string, members: Member[], channelNames: string[], recent: string[]): Group[] {
+function suggestionsFor(t: I18n["t"], token: string, input: string, members: Member[], channelNames: string[], recent: string[]): Group[] {
   const colon = token.indexOf(":");
   if (colon > 0) {
     const key = token.slice(0, colon).toLowerCase() as FilterKey;
@@ -87,7 +99,7 @@ function suggestionsFor(token: string, input: string, members: Member[], channel
           icon: null,
           insert: `${key}:${name}`,
         }));
-      return items.length ? [{ title: key === "from" ? "From" : "Mentions", items }] : [];
+      return items.length ? [{ id: key, title: key === "from" ? t("chattools.search.group.from") : t("chattools.search.group.mentions"), items }] : [];
     }
     if (key === "in") {
       const items = channelNames
@@ -96,7 +108,7 @@ function suggestionsFor(token: string, input: string, members: Member[], channel
         .sort((a, b) => b.score - a.score)
         .slice(0, 6)
         .map(({ name }) => ({ key: `in:${name}`, label: name, icon: <HashIcon className="size-4" />, insert: `in:${name}` }));
-      return items.length ? [{ title: "In channel", items }] : [];
+      return items.length ? [{ id: "in", title: t("chattools.search.group.in"), items }] : [];
     }
     if (key === "has") {
       const items = HAS_VALUES.filter((h) => h.aliases.some((a) => a.startsWith(value.toLowerCase()))).map((h) => ({
@@ -105,16 +117,16 @@ function suggestionsFor(token: string, input: string, members: Member[], channel
         icon: <PaperclipIcon className="size-4" />,
         insert: `has:${h.value}`,
       }));
-      return items.length ? [{ title: "Has", items }] : [];
+      return items.length ? [{ id: "has", title: t("chattools.search.group.has"), items }] : [];
     }
     const now = new Date();
     const days = [
       { value: "today", hint: isoDay(now) },
       { value: "yesterday", hint: isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)) },
-      { value: isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7)), hint: "a week ago" },
+      { value: isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7)), hint: t("chattools.search.aWeekAgo") },
     ].filter((d) => d.value.startsWith(value.toLowerCase()));
     return days.length
-      ? [{ title: "Date", items: days.map((d) => ({ key: `${key}:${d.value}`, label: d.value, hint: d.hint, icon: <CalendarIcon className="size-4" />, insert: `${key}:${d.value}` })) }]
+      ? [{ id: "date", title: t("chattools.search.group.date"), items: days.map((d) => ({ key: `${key}:${d.value}`, label: d.value, hint: d.hint, icon: <CalendarIcon className="size-4" />, insert: `${key}:${d.value}` })) }]
       : [];
   }
   const groups: Group[] = [];
@@ -122,16 +134,16 @@ function suggestionsFor(token: string, input: string, members: Member[], channel
     key: f.key,
     label: (
       <span>
-        <span className="font-bold">{f.key}:</span> <span className="text-muted-foreground">{f.hint}</span>
+        <span className="font-bold">{f.key}:</span> <span className="text-muted-foreground">{HINTS[f.key] ? t(HINTS[f.key]!) : f.hint}</span>
       </span>
     ),
     icon: ICON[f.key],
     insert: `${f.key}:`,
     open: true,
   }));
-  if (keys.length && (token || !input.trim())) groups.push({ title: "Search options", items: keys });
+  if (keys.length && (token || !input.trim())) groups.push({ id: "options", title: t("chattools.search.group.options"), items: keys });
   if (!input.trim() && recent.length)
-    groups.push({ title: "Recent", items: recent.map((q) => ({ key: `recent:${q}`, label: q, icon: <ClockIcon className="size-4" />, search: q })) });
+    groups.push({ id: "recent", title: t("chattools.search.group.recent"), items: recent.map((q) => ({ key: `recent:${q}`, label: q, icon: <ClockIcon className="size-4" />, search: q })) });
   return groups;
 }
 
@@ -163,6 +175,7 @@ export function SearchField({
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id ?? "");
   const place = searchPlace(instanceKey, meId, serverId);
   const combo = usePrefs((p) => bindingOf(actionById("searchServer")!, p));
+  const { t } = useI18n();
 
   // A search started elsewhere (a recent one, the phone's button) shows its words here.
   const [lastShown, setLastShown] = useState(shown);
@@ -177,8 +190,8 @@ export function SearchField({
   const recent = useMemo(() => (meId && recentVersion >= 0 ? recentSearches(place) : []), [meId, place, recentVersion]);
   const token = tokenAt(input, caret).text;
   const groups = useMemo(
-    () => (focused ? suggestionsFor(token, input, members, channelNames, recent) : []),
-    [focused, token, input, members, channelNames, recent],
+    () => (focused ? suggestionsFor(t, token, input, members, channelNames, recent) : []),
+    [t, focused, token, input, members, channelNames, recent],
   );
   const flat = groups.flatMap((g) => g.items);
   const open = focused && flat.length > 0;
@@ -264,10 +277,10 @@ export function SearchField({
           onMouseDown={(e) => e.preventDefault()}
         >
           {groups.map((g) => (
-            <div key={g.title} className="py-1">
+            <div key={g.id} className="py-1">
               <div className="flex items-center justify-between px-2 pb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">
                 {g.title}
-                {g.title === "Recent" && (
+                {g.id === "recent" && (
                   <button
                     type="button"
                     className="rounded px-1 normal-case hover:text-foreground"
@@ -276,7 +289,7 @@ export function SearchField({
                       setRecentVersion((v) => v + 1);
                     }}
                   >
-                    Clear
+                    {t("chattools.search.clearRecent")}
                   </button>
                 )}
               </div>
@@ -303,7 +316,7 @@ export function SearchField({
                     {s.search !== undefined && (
                       <button
                         type="button"
-                        aria-label="Forget this search"
+                        aria-label={t("chattools.search.forget")}
                         onClick={() => {
                           rememberSearch(place, s.search!, true);
                           setRecentVersion((v) => v + 1);
@@ -345,8 +358,8 @@ export function SearchField({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
-          placeholder="Search"
-          aria-label="Search this server's messages"
+          placeholder={t("chattools.search.placeholder")}
+          aria-label={t("chattools.search.label")}
           role="combobox"
           aria-controls={listId}
           aria-autocomplete="list"
@@ -361,7 +374,7 @@ export function SearchField({
             <motion.button
               key="clear"
               type="button"
-              aria-label="Clear the search"
+              aria-label={t("chattools.search.clear")}
               initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.5 }}
@@ -395,6 +408,7 @@ export function SearchField({
 /** The header's search: the field from tablets up, a button on phones (the panel has the field there). */
 export function SearchBar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const wide = useMediaQuery("(min-width: 640px)");
+  const { t } = useI18n();
   useEffect(() => {
     if (wide) return;
     return onCommand("focusSearch", () => openSearch(instanceKey, serverId));
@@ -403,7 +417,7 @@ export function SearchBar({ instanceKey, serverId }: { instanceKey: string; serv
   return (
     <motion.button
       type="button"
-      aria-label="Search"
+      aria-label={t("chattools.search.open")}
       onClick={() => openSearch(instanceKey, serverId)}
       whileTap={{ scale: 0.85 }}
       className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"

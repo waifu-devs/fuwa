@@ -44,6 +44,7 @@ import type { Emoji } from "@/gen/fuwa/v1/types_pb";
 import { EmojiImage } from "@/components/EmojiImage";
 import { ServerIcon } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
+import { type Key, useI18n } from "@/i18n/react";
 import { emojiToken } from "@/lib/emoji";
 import {
   choiceName,
@@ -89,7 +90,25 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
   flags: FlagIcon,
 };
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
-const TONE_NAMES = ["Default", "Light", "Medium-light", "Medium", "Medium-dark", "Dark"];
+const TONE_NAMES: Key[] = [
+  "chattools.emoji.tone.default",
+  "chattools.emoji.tone.light",
+  "chattools.emoji.tone.mediumLight",
+  "chattools.emoji.tone.medium",
+  "chattools.emoji.tone.mediumDark",
+  "chattools.emoji.tone.dark",
+];
+/** The standard set's categories by id; the data's own English name stands in for any other. */
+const GROUP_NAMES: Record<string, Key> = {
+  people: "chattools.emoji.group.people",
+  nature: "chattools.emoji.group.nature",
+  food: "chattools.emoji.group.food",
+  activities: "chattools.emoji.group.activities",
+  travel: "chattools.emoji.group.travel",
+  objects: "chattools.emoji.group.objects",
+  symbols: "chattools.emoji.group.symbols",
+  flags: "chattools.emoji.group.flags",
+};
 
 type Section = { id: string; title: string; server?: ServerRef; icon?: LucideIcon; choices: Choice[] };
 type Row =
@@ -227,6 +246,7 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
   const scroller = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const id = useId();
+  const { t } = useI18n();
   const searching = query.trim().length > 0;
 
   useEffect(() => {
@@ -237,7 +257,14 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
   const sections = useMemo<Section[]>(() => {
     if (searching) {
       const found = searchCatalog(query, catalog, groups);
-      return [{ id: "results", title: found.length ? `${found.length} found` : "Nothing found", icon: SearchIcon, choices: found }];
+      return [
+        {
+          id: "results",
+          title: found.length ? t("chattools.emoji.found", { count: found.length }) : t("chattools.emoji.nothingFound"),
+          icon: SearchIcon,
+          choices: found,
+        },
+      ];
     }
     const byChar = new Map<string, StandardEmoji>();
     for (const g of groups ?? []) for (const e of g.emojis) byChar.set(e.char, e);
@@ -248,11 +275,16 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
       return standard ? [standardChoice(standard)] : [];
     });
     return [
-      { id: "recent", title: "Recently used", icon: ClockIcon, choices: recent.slice(0, COLS * 2) },
+      { id: "recent", title: t("chattools.emoji.recent"), icon: ClockIcon, choices: recent.slice(0, COLS * 2) },
       ...catalog.sections.map((s) => ({ id: `s:${s.server.id}`, title: s.server.name, server: s.server, choices: s.emojis.map(customChoice) })),
-      ...(groups ?? []).map((g) => ({ id: g.id, title: g.name, icon: GROUP_ICONS[g.id], choices: g.emojis.map(standardChoice) })),
+      ...(groups ?? []).map((g) => ({
+        id: g.id,
+        title: Object.hasOwn(GROUP_NAMES, g.id) ? t(GROUP_NAMES[g.id]!) : g.name,
+        icon: Object.hasOwn(GROUP_ICONS, g.id) ? GROUP_ICONS[g.id] : undefined,
+        choices: g.emojis.map(standardChoice),
+      })),
     ];
-  }, [searching, query, catalog, groups, recentKeys]);
+  }, [searching, query, catalog, groups, recentKeys, t]);
 
   const layout = useMemo(() => layOut(sections), [sections]);
   const viewport = 18 * 16 - PAD * 2;
@@ -319,8 +351,8 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Find an emoji"
-            aria-label="Find an emoji"
+            placeholder={t("chattools.emoji.find")}
+            aria-label={t("chattools.emoji.find")}
             role="combobox"
             aria-expanded
             aria-controls={listId}
@@ -357,7 +389,7 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
             transition={{ duration: 0.18 }}
             id={listId}
             role="listbox"
-            aria-label="Emoji"
+            aria-label={t("chattools.emoji.list")}
             className="relative"
             style={{ height: Math.max(layout.height, 40) }}
           >
@@ -394,9 +426,9 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
             )}
           </motion.div>
           {searching && !layout.flat.length && (
-            <p className="py-10 text-center text-sm text-muted-foreground">No emoji called “{query.trim().replace(/^:|:$/g, "")}”.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">{t("chattools.emoji.noneCalled", { query: query.trim().replace(/^:|:$/g, "") })}</p>
           )}
-          {!groups && !searching && <p className="py-3 text-center text-xs text-muted-foreground">Loading the rest…</p>}
+          {!groups && !searching && <p className="py-3 text-center text-xs text-muted-foreground">{t("chattools.emoji.loading")}</p>}
         </div>
       </div>
 
@@ -526,11 +558,12 @@ function useGridKeys(
 /** The skin tone for standard emoji, picked from a row of hands. */
 function ToneButton({ tone }: { tone: number }) {
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
   return (
     <div className="relative">
       <motion.button
         type="button"
-        aria-label={`Skin tone: ${TONE_NAMES[tone]}`}
+        aria-label={t("chattools.emoji.skinToneIs", { tone: t(TONE_NAMES[tone] ?? TONE_NAMES[0]!) })}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         whileHover={{ scale: 1.12, rotate: -8 }}
@@ -543,7 +576,7 @@ function ToneButton({ tone }: { tone: number }) {
         {open && (
           <motion.div
             role="radiogroup"
-            aria-label="Skin tone"
+            aria-label={t("chattools.emoji.skinTone")}
             initial={{ opacity: 0, scale: 0.85, y: -4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: -4 }}
@@ -557,7 +590,7 @@ function ToneButton({ tone }: { tone: number }) {
                 type="button"
                 role="radio"
                 aria-checked={n === tone}
-                aria-label={TONE_NAMES[n]}
+                aria-label={t(TONE_NAMES[n] ?? TONE_NAMES[0]!)}
                 initial={{ opacity: 0, scale: 0.5 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ ...SPRING, delay: n * 0.025 }}
@@ -592,8 +625,9 @@ function CategoryRail({
   layoutId: string;
   onJump: (sectionId: string) => void;
 }) {
+  const { t } = useI18n();
   return (
-    <nav aria-label="Emoji categories" className="scroll-thin flex gap-0.5 overflow-x-auto border-b px-2 py-1.5">
+    <nav aria-label={t("chattools.emoji.categories")} className="scroll-thin flex gap-0.5 overflow-x-auto border-b px-2 py-1.5">
       {tops.map(({ id }) => {
         const section = sections.find((s) => s.id === id)!;
         const on = current === id;
@@ -623,6 +657,7 @@ function CategoryRail({
 
 /** The emoji you're on, big, with the name to type and where it's from. */
 function Preview({ shown, tone }: { shown: Choice | undefined; tone: number }) {
+  const { t } = useI18n();
   return (
     <div className="flex h-12 items-center gap-2.5 border-t px-3 text-sm">
       <AnimatePresence mode="popLayout" initial={false}>
@@ -643,13 +678,13 @@ function Preview({ shown, tone }: { shown: Choice | undefined; tone: number }) {
                 <span className="block truncate font-bold">:{choiceName(shown)}:</span>
                 {shown.kind === "custom" && (
                   <span className="block truncate text-xs text-muted-foreground">
-                    {shown.custom.here ? "From this server" : `From ${shown.custom.server.name}`}
+                    {shown.custom.here ? t("chattools.emoji.fromHere") : t("chattools.emoji.fromServer", { server: shown.custom.server.name })}
                   </span>
                 )}
               </span>
             </>
           ) : (
-            <span className="text-muted-foreground">Pick one, or type : in a message</span>
+            <span className="text-muted-foreground">{t("chattools.emoji.hint")}</span>
           )}
         </motion.div>
       </AnimatePresence>

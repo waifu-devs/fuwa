@@ -7,6 +7,7 @@ import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { UserAvatar } from "@/components/Icons";
 import { CountUp, SPRING } from "@/components/motion";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { type I18n, T, useI18n } from "@/i18n/react";
 import { displayName, formatFull, toDate } from "@/lib/format";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -17,12 +18,12 @@ import { PollPlace, type PollPlaceValue } from "./pollPlace";
 const BAR = { type: "spring", stiffness: 140, damping: 24, mass: 0.9 } as const;
 
 /** "47 minutes left", "5 hours left", "3 days left". */
-function left(ms: number): string {
+function left(t: I18n["t"], ms: number): string {
   const minutes = Math.max(1, Math.ceil(ms / 60_000));
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} left`;
+  if (minutes < 60) return t("chattools.poll.minutesLeft", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours} ${hours === 1 ? "hour" : "hours"} left`;
-  return `${Math.round(hours / 24)} days left`;
+  if (hours < 48) return t("chattools.poll.hoursLeft", { count: hours });
+  return t("chattools.poll.daysLeft", { count: Math.round(hours / 24) });
 }
 
 /** Now, ticking while a poll counts down to its end, and once more the moment it ends. */
@@ -52,6 +53,7 @@ function useNow(endsAt: number): number {
  */
 export function PollCard({ message, mine, animate }: { message: Message; mine: boolean; animate: boolean }) {
   const place = useContext(PollPlace);
+  const { t } = useI18n();
   const poll = message.poll!;
   const endsAt = poll.endsAt ? toDate(poll.endsAt).getTime() : 0;
   const now = useNow(poll.endedAt ? 0 : endsAt);
@@ -97,17 +99,20 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
   }
 
   const counting = closed && poll.anonymous && total === 0 && poll.voters > 0n;
+  const running = endsAt ? left(t, endsAt - now) : t("chattools.poll.noEnd");
   const status = counting
-    ? "Counting the votes…"
+    ? t("chattools.poll.counting")
     : poll.endedAt
-      ? `Ended ${formatFull(toDate(poll.endedAt))}`
+      ? t("chattools.poll.ended", { time: formatFull(toDate(poll.endedAt)) })
       : closed
-        ? `Ended ${formatFull(new Date(endsAt))}`
-        : `${endsAt ? left(endsAt - now) : "Runs until it's ended"}${hidden ? " · results show at the end" : ""}`;
+        ? t("chattools.poll.ended", { time: formatFull(new Date(endsAt)) })
+        : hidden
+          ? t("chattools.poll.hiddenUntilEnd", { status: running })
+          : running;
 
   return (
     <motion.section
-      aria-label={`Poll: ${poll.question}`}
+      aria-label={t("chattools.poll.label", { question: poll.question })}
       initial={animate ? { opacity: 0, y: 8, scale: 0.98 } : false}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={SPRING}
@@ -115,7 +120,7 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
     >
       <PollHeader poll={poll} closed={closed} />
 
-      <div role={poll.multiple ? "group" : "radiogroup"} aria-label="Answers" className="flex flex-col gap-1.5">
+      <div role={poll.multiple ? "group" : "radiogroup"} aria-label={t("chattools.poll.answers")} className="flex flex-col gap-1.5">
         {poll.answers.map((answer, n) => (
           <AnswerRow
             key={answer.id}
@@ -154,24 +159,21 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
 
 /** What kind of poll it is, shown before you vote: one or many, anonymous or public, and once it's over. */
 function PollHeader({ poll, closed }: { poll: Poll; closed: boolean }) {
+  const { t } = useI18n();
   return (
     <header className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5 text-[0.7rem] font-extrabold text-muted-foreground">
         <span className="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2 py-0.5 text-primary">
           <BarChart3Icon className="size-3" />
-          Poll
+          {t("chattools.poll.badge")}
         </span>
-        <span className="rounded-full bg-muted px-2 py-0.5">{poll.multiple ? "Pick any" : "Pick one"}</span>
+        <span className="rounded-full bg-muted px-2 py-0.5">{poll.multiple ? t("chattools.poll.pickAny") : t("chattools.poll.pickOne")}</span>
         <span
           className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"
-          title={
-            poll.anonymous
-              ? "Nobody here, moderators and admins included, can see who voted for what. Results show when it ends."
-              : "Everyone here can see who voted for what"
-          }
+          title={poll.anonymous ? t("chattools.poll.anonymousAbout") : t("chattools.poll.publicAbout")}
         >
           {poll.anonymous ? <EyeOffIcon className="size-3" /> : <EyeIcon className="size-3" />}
-          {poll.anonymous ? "Anonymous" : "Public votes"}
+          {poll.anonymous ? t("chattools.poll.anonymous") : t("chattools.poll.public")}
         </span>
         <AnimatePresence initial={false}>
           {closed && (
@@ -184,7 +186,7 @@ function PollHeader({ poll, closed }: { poll: Poll; closed: boolean }) {
               className="inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-background"
             >
               <FlagIcon className="size-3" />
-              Final results
+              {t("chattools.poll.final")}
             </motion.span>
           )}
         </AnimatePresence>
@@ -221,31 +223,32 @@ function PollFooter({
   total: number;
 }) {
   const [voters, setVoters] = useState(false);
+  const { t } = useI18n();
   return (
     <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
       <span className="font-bold tabular-nums">
-        <CountUp value={Number(poll.voters)} /> {poll.voters === 1n ? "vote" : "votes"}
+        <T k="chattools.poll.votes" values={{ count: <CountUp value={Number(poll.voters)} /> }} count={Number(poll.voters)} />
       </span>
       <span aria-hidden>·</span>
       <span>{status}</span>
       <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
-        {busy && <LoaderCircleIcon aria-label="Voting" className="size-3.5 animate-spin" />}
+        {busy && <LoaderCircleIcon aria-label={t("chattools.poll.voting")} className="size-3.5 animate-spin" />}
         {canPeek && (
           <FooterButton onClick={onPeek}>
             <BarChart3Icon className="size-3.5" />
-            Show results
+            {t("chattools.poll.showResults")}
           </FooterButton>
         )}
         {canTakeBack && (
           <FooterButton onClick={onTakeBack}>
             <UndoIcon className="size-3.5" />
-            Take back vote
+            {t("chattools.poll.takeBack")}
           </FooterButton>
         )}
         {!poll.anonymous && total > 0 && (
           <FooterButton onClick={() => setVoters(true)}>
             <UsersIcon className="size-3.5" />
-            Who voted
+            {t("chattools.poll.whoVoted")}
           </FooterButton>
         )}
         {place && <EndButton place={place} messageId={messageId} shown={canEnd} />}
@@ -259,6 +262,7 @@ function PollFooter({
 function EndButton({ place, messageId, shown }: { place: PollPlaceValue; messageId: string; shown: boolean }) {
   const [confirm, setConfirm] = useState(false);
   const [ending, setEnding] = useState(false);
+  const { t } = useI18n();
   async function end() {
     setEnding(true);
     try {
@@ -281,11 +285,11 @@ function EndButton({ place, messageId, shown }: { place: PollPlaceValue; message
           transition={SPRING}
           className="flex items-center gap-1"
         >
-          <span className="font-bold text-destructive">End it now?</span>
-          <FooterButton danger onClick={end} label="End poll">
+          <span className="font-bold text-destructive">{t("chattools.poll.endNow")}</span>
+          <FooterButton danger onClick={end} label={t("chattools.poll.end")}>
             {ending ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
           </FooterButton>
-          <FooterButton onClick={() => setConfirm(false)} label="Keep it running">
+          <FooterButton onClick={() => setConfirm(false)} label={t("chattools.poll.keepRunning")}>
             <XIcon className="size-3.5" />
           </FooterButton>
         </motion.span>
@@ -294,7 +298,7 @@ function EndButton({ place, messageId, shown }: { place: PollPlaceValue; message
         <motion.span key="end" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <FooterButton onClick={() => setConfirm(true)}>
             <FlagIcon className="size-3.5" />
-            End poll
+            {t("chattools.poll.end")}
           </FooterButton>
         </motion.span>
       )}
@@ -348,6 +352,7 @@ function AnswerRow({
   onPick: () => void;
 }) {
   const percent = Math.round(share * 100);
+  const { t } = useI18n();
   return (
     <motion.button
       type="button"
@@ -421,7 +426,7 @@ function AnswerRow({
               animate={{ scale: 1, rotate: [0, -12, 8, 0], y: 0 }}
               transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.15 } }}
               className="text-amber-500"
-              aria-label="Most votes"
+              aria-label={t("chattools.poll.mostVotes")}
             >
               <TrophyIcon className="size-4" />
             </motion.span>
@@ -435,6 +440,7 @@ function AnswerRow({
 
 /** An answer's votes and share, sliding in once results show. */
 function Numbers({ shown, votes, percent }: { shown: boolean; votes: bigint; percent: number }) {
+  const { t, number } = useI18n();
   return (
     <AnimatePresence initial={false}>
       {shown && (
@@ -445,13 +451,13 @@ function Numbers({ shown, votes, percent }: { shown: boolean; votes: bigint; per
           exit={{ opacity: 0, x: 8 }}
           transition={SPRING}
           className="flex shrink-0 items-baseline gap-1.5 tabular-nums"
-          title={`${votes} ${votes === 1n ? "vote" : "votes"}`}
+          title={t("chattools.poll.votes", { count: Number(votes) })}
         >
           <span className="text-xs text-muted-foreground">
             <CountUp value={Number(votes)} />
           </span>
           <span className="w-9 text-right text-xs font-extrabold">
-            <CountUp value={percent} format={(v) => `${Math.round(v)}%`} />
+            <CountUp value={percent} format={(v) => number(Math.round(v) / 100, { style: "percent" })} />
           </span>
         </motion.span>
       )}
@@ -474,11 +480,12 @@ function VotersDialog({
   poll: Poll;
 }) {
   const [answerId, setAnswerId] = useState(poll.answers[0]?.id ?? 0);
+  const { t, number } = useI18n();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader title="Who voted" description={poll.question} />
-        <div role="tablist" aria-label="Answers" className="scroll-thin -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
+        <DialogHeader title={t("chattools.poll.whoVoted")} description={poll.question} />
+        <div role="tablist" aria-label={t("chattools.poll.answers")} className="scroll-thin -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
           {poll.answers.map((a) => {
             const active = a.id === answerId;
             return (
@@ -496,7 +503,7 @@ function VotersDialog({
                 {active && <motion.span layoutId={`voters-${messageId}`} transition={SPRING} className="absolute inset-0 rounded-full bg-primary" />}
                 {a.emoji && <EmojiGlyph value={a.emoji} emojis={place.emojis} className="relative size-4" />}
                 <span className="relative max-w-[10rem] truncate">{a.text}</span>
-                <span className="relative tabular-nums opacity-80">{a.votes.toString()}</span>
+                <span className="relative tabular-nums opacity-80">{number(Number(a.votes))}</span>
               </button>
             );
           })}
@@ -511,6 +518,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
   const [users, setUsers] = useState<User[] | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let live = true;
@@ -540,7 +548,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
 
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!users) return <LoaderCircleIcon className="mx-auto my-6 size-5 animate-spin text-muted-foreground" />;
-  if (!users.length) return <p className="py-6 text-center text-sm text-muted-foreground">Nobody picked this one yet.</p>;
+  if (!users.length) return <p className="py-6 text-center text-sm text-muted-foreground">{t("chattools.poll.nobodyPicked")}</p>;
   return (
     <ul className="scroll-thin flex max-h-80 flex-col gap-1 overflow-y-auto">
       {users.map((user, n) => (
@@ -559,7 +567,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
       {more && (
         <li>
           <button type="button" onClick={loadMore} className="w-full rounded-xl py-2 text-xs font-bold text-primary hover:bg-primary/10">
-            Show more
+            {t("chattools.poll.showMore")}
           </button>
         </li>
       )}

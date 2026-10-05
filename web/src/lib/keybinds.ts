@@ -246,12 +246,12 @@ export function problemWith(combo: string, p: Prefs, except: { action?: string; 
   return null;
 }
 
-/** Keys that only work inside the message box, listed on the overlay but not rebindable. */
-export function composerKeys(sendWith: Prefs["sendWith"]): { label: string; combo: string }[] {
+/** Keys that only work inside the message box, listed on the overlay but not rebindable. `t` is the app's language. */
+export function composerKeys(t: I18n["t"], sendWith: Prefs["sendWith"]): { id: string; label: string; combo: string }[] {
   return [
-    { label: "Send the message", combo: sendWith === "enter" ? "Enter" : "Mod+Enter" },
-    { label: "New line", combo: sendWith === "enter" ? "Shift+Enter" : "Enter" },
-    { label: "Edit your last message", combo: "ArrowUp" },
-    { label: "Stop editing", combo: "Escape" },
+    { id: "send", label: t("chattools.shortcuts.composer.send"), combo: sendWith === "enter" ? "Enter" : "Mod+Enter" },
+    { id: "newLine", label: t("chattools.shortcuts.composer.newLine"), combo: sendWith === "enter" ? "Shift+Enter" : "Enter" },
+    { id: "editLast", label: t("chattools.shortcuts.composer.editLast"), combo: "ArrowUp" },
+    { id: "stopEditing", label: t("chattools.shortcuts.composer.stopEditing"), combo: "Escape" },
   ];
 }
