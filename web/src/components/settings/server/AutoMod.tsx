@@ -21,7 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
-import { useEffect, useMemo, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import type { AutoModProvider } from "@/gen/fuwa/v1/automod_pb";
 import {
   AutoModActionKind,
@@ -38,7 +38,7 @@ import { deleteAutoModRule, listAutoModRules, run, saveAutoModRule, testAutoModR
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -225,7 +225,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                 {t("serversettings.automod.noProvider")}
               </motion.p>
             )}
-            <AnimatePresence initial={false}>
+            <AnimatePresence mode="popLayout" initial={false}>
               {mine.map((rule) => (
                 <RuleCard
                   key={rule.id}
@@ -271,6 +271,7 @@ function RuleCard({
   isNew = false,
   onSaved,
   onDeleted,
+  ref,
 }: {
   instanceKey: string;
   serverId: string;
@@ -279,6 +280,7 @@ function RuleCard({
   isNew?: boolean;
   onSaved: (rule: AutoModRule) => void;
   onDeleted: () => void;
+  ref?: Ref<HTMLDivElement>;
 }) {
   const { t } = useI18n();
   // The edits, kept with the saved rule they started from: a newly saved rule starts them over.
@@ -340,10 +342,11 @@ function RuleCard({
 
   return (
     <motion.div
-      layout
+      ref={ref}
+      layout="position"
       initial={{ opacity: 0, y: -8, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95, height: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
       transition={SPRING}
     >
       <motion.div
@@ -363,13 +366,11 @@ function RuleCard({
           onOpen={() => setOpen((o) => !o)}
           onToggle={(on) => void toggle(on)}
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {open && (
             <motion.div
               key="body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              {...SLIDE_IN}
               transition={{ ...SPRING, opacity: { duration: 0.15 } }}
             >
               <div className="flex flex-col gap-5 border-t p-4">
@@ -963,7 +964,7 @@ function ActionCard({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("rounded-2xl border p-3 transition-colors", on ? "border-primary/40 bg-primary/5" : "hover:border-primary/20")}>
+    <motion.div layout="position" transition={SPRING} className={cn("rounded-2xl border p-3 transition-colors", on ? "border-primary/40 bg-primary/5" : "hover:border-primary/20")}>
       <label className="flex cursor-pointer items-center gap-3">
         <motion.span
           animate={on ? { scale: [1, 1.2, 1], rotate: [0, -10, 0] } : { scale: 1 }}
@@ -981,20 +982,14 @@ function ActionCard({
         </span>
         <Switch checked={on} onCheckedChange={onToggle} />
       </label>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {on && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="pt-3">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1146,15 +1141,9 @@ function ProviderPicker({
 function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
   const { t } = useI18n();
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {provider?.pictures && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={SPRING}
-          className="overflow-hidden"
-        >
+        <motion.div {...SLIDE_IN} transition={SPRING}>
           <label
             className={cn(
               "flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition-colors",
@@ -1227,7 +1216,8 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
               key={label.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ ...SPRING, delay: n * 0.03 }}
+              layout="position"
+              transition={{ ...SPRING, delay: n * 0.03, layout: SPRING }}
               className={cn("rounded-2xl border p-3 transition-colors", off ? "bg-transparent" : "border-primary/25 bg-primary/[0.03]")}
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -1267,15 +1257,9 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                   })}
                 </div>
               </div>
-              <AnimatePresence initial={false}>
+              <AnimatePresence mode="popLayout" initial={false}>
                 {!off && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={SPRING}
-                    className="overflow-hidden"
-                  >
+                  <motion.div {...SLIDE_IN} transition={SPRING}>
                     <div className="flex items-center gap-3 pt-2.5">
                       <span className="shrink-0 text-xs text-muted-foreground">{t("serversettings.automod.howSure")}</span>
                       <input
@@ -1365,9 +1349,9 @@ function SmartActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </Field>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {blocks && (
-          <motion.div key="block" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div key="block" {...SLIDE_IN} transition={SPRING}>
             <Field label={t("serversettings.automod.blockedTold")}>
               <Input
                 value={block?.message ?? ""}
@@ -1380,7 +1364,7 @@ function SmartActions({
           </motion.div>
         )}
         {timesOut && (
-          <motion.div key="time-out" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div key="time-out" layout="position" {...SLIDE_IN} transition={SPRING}>
             <Field label={t("serversettings.automod.timeOutLength")}>
               <Chips
                 label={t("serversettings.automod.timeOutLength")}

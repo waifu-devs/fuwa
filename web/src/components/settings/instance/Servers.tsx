@@ -31,7 +31,7 @@ import { ServerIcon } from "@/components/Icons";
 import { SharedGlyph } from "@/components/chat/Shared";
 import { ConfirmDialog, StateChip } from "@/components/settings/server/SharedChannels";
 import { Count, CountUp } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -226,7 +226,7 @@ function ServerRow({
   const full = cap !== null && share >= 0.9;
   return (
     <motion.li
-      layout
+      layout="position"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0, transition: { ...SPRING, delay: Math.min(index, 14) * 0.02 } }}
       exit={{ opacity: 0, scale: 0.96, x: -24, transition: { duration: 0.25 } }}
@@ -285,15 +285,9 @@ function ServerRow({
           />
         </span>
       </button>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <Details instanceKey={instanceKey} entry={entry} regions={regions} onMoved={onMoved} onLimits={onLimits} onDeleted={onDeleted} onLeave={onLeave} />
           </motion.div>
         )}
@@ -402,14 +396,12 @@ function Details({
           <div className="shimmer h-40 rounded-xl" />
         )}
         {save.error && <p className="text-sm text-destructive first-letter:uppercase">{save.error}</p>}
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {changed > 0 && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              {...SLIDE_IN}
               transition={SPRING}
-              className="flex justify-end gap-2 overflow-hidden"
+              className="flex justify-end gap-2"
             >
               <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={save.pending} onClick={() => own && setDraft(own)}>
                 {t("settings.controls.discard")}
@@ -450,9 +442,9 @@ function Details({
           <Trash2Icon className="transition-transform group-hover:-rotate-12" /> {t("serversettings.shared.delete")}
         </Button>
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {deleting && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <DeleteServer instanceKey={instanceKey} name={s.name} serverId={s.id} onDeleted={onDeleted} />
           </motion.div>
         )}
@@ -481,14 +473,14 @@ function Shares({ instanceKey, serverId }: { instanceKey: string; serverId: stri
     <div className="flex flex-col gap-2">
       <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("serversettings.nav.shared")}</p>
       <ul className="flex flex-col gap-2">
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {shares.map((c, n) => (
             <motion.li
               key={c.id}
               layout
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -16, height: 0, marginTop: -8 }}
+              exit={{ opacity: 0, x: -16 }}
               transition={{ ...SPRING, delay: n * 0.04 }}
               className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-muted/50 px-3 py-2"
             >
@@ -604,15 +596,9 @@ function MoveRegion({
           );
         })}
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {target && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4">
               <div className="flex items-center gap-2 text-sm font-bold">
                 <span className="truncate">{here}</span>

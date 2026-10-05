@@ -16,7 +16,7 @@ import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
 import { useSsoLocked } from "@/components/join/SsoGate";
 import { Count, SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
@@ -173,7 +173,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             ))}
           </div>
         ) : (
-          <ul className="flex flex-col gap-0.5">
+          <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-0.5">
             <ChannelGroups
               instanceKey={instanceKey}
               groups={groups}
@@ -186,7 +186,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               onCreate={(parentId) => setCreating({ parentId })}
               onMenuEdit={edit}
             />
-          </ul>
+          </motion.ul>
         )}
       </div>
       <CallPanel />
@@ -448,16 +448,14 @@ function ServerDialogs({
 /** People waiting to be let in, for whoever can let them in: opens their applications. */
 function ApplicationsNotice({ show, waiting, onOpen }: { show: boolean; waiting: number; onOpen: () => void }) {
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.button
           type="button"
           onClick={onOpen}
-          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-          animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
-          className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+          className="group mb-3 flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
         >
           <span className="relative grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
             <ClipboardListIcon className="size-4" />
@@ -482,17 +480,16 @@ function ApplicationsNotice({ show, waiting, onOpen }: { show: boolean; waiting:
 function SsoNotice({ server, onOpen }: { server: Server | undefined; onOpen: () => void }) {
   const { t } = useI18n();
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {server && (
         <motion.button
           type="button"
           data-testid="sso-sidebar-locked"
           onClick={onOpen}
-          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-          animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          layout="position"
+          {...SLIDE_IN}
           transition={SPRING}
-          className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+          className="group mb-3 flex w-full items-center gap-2 rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
         >
           <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
             <LockKeyholeIcon className="size-4 transition-transform group-hover:-rotate-12" />
@@ -732,9 +729,9 @@ function ChannelRow({
         <motion.span
           aria-hidden
           initial={false}
-          animate={{ height: dot ? 8 : 0, opacity: dot ? 1 : 0 }}
+          animate={{ scaleY: dot ? 1 : 0, opacity: dot ? 1 : 0 }}
           transition={SPRING}
-          className="absolute top-1/2 -left-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
+          className="absolute top-1/2 -left-2 h-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
         />
         <ChannelGlyph icon={Icon} locked={locked} active={active} />
         <span className="truncate">{channel.name}</span>
