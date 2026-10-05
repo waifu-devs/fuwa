@@ -108,7 +108,7 @@ async fn shown_to(app: &App, viewer: &str, record: &mut pb::ConversationRecord) 
     Ok(true)
 }
 
-/// Most pins one page of ListPins holds.
+/// Most pins one page of ListRecordPins holds.
 const MAX_PINS_PAGE: i32 = 100;
 
 fn malformed(err: wire::Malformed) -> Error {
