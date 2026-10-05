@@ -9,6 +9,7 @@
 pub mod account;
 pub mod api;
 pub mod arrange;
+pub mod attachments;
 pub mod backgrounds;
 pub mod calls;
 pub mod compat;
@@ -700,6 +701,18 @@ impl Core {
         channel_id: &str,
         content: &str,
     ) -> Result<(), Problem> {
+        self.send_message_with(key, server_id, channel_id, content, Vec::new()).await
+    }
+
+    /// Sends a message with files already uploaded for this server.
+    pub async fn send_message_with(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        content: &str,
+        attachments: Vec<pb::Attachment>,
+    ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -709,6 +722,7 @@ impl Core {
             nonce,
             content: content.into(),
             emojis: emojis.clone(),
+            attachments: attachments.clone(),
             created_at_ms: dms::now_ms(),
             failed: None,
         };
@@ -720,6 +734,7 @@ impl Core {
                 channel_id: channel_id.into(),
                 content: content.into(),
                 emojis,
+                attachments,
                 ..Default::default()
             })
         )

@@ -147,6 +147,16 @@ pub enum Dialog {
         server: String,
         channel: String,
     },
+    /// A picture from a message, opened large.
+    Picture {
+        key: String,
+        url: String,
+        name: String,
+        width: i32,
+        height: i32,
+        /// The file's size in bytes, as its message says.
+        bytes: i64,
+    },
     /// Who voted for each answer of a public poll.
     PollVoters {
         key: String,
@@ -264,6 +274,8 @@ pub struct FuwaApp {
     pub polls: crate::ui::polls::PollState,
     /// Voice messages being recorded, sent and played.
     pub voice: crate::ui::voice_notes::VoiceState,
+    /// Files picked to go with the next message.
+    pub files: crate::ui::attachments::Files,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
     pub time_style: crate::core::timestamps::Style,
@@ -451,6 +463,7 @@ impl FuwaApp {
             keeping_out: None,
             polls: Default::default(),
             voice: Default::default(),
+            files: Default::default(),
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
@@ -701,6 +714,7 @@ impl FuwaApp {
         self.discard_recording(cx);
         self.stop_voice();
         self.time_picker = None;
+        self.forget_files_elsewhere();
         self.maybe_welcome(cx);
         let target = self.target();
         let id = target.as_ref().map(Target::id);
@@ -836,9 +850,16 @@ impl FuwaApp {
     pub(crate) fn send_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.target() else { return };
         let text = self.composer.read(cx).value().trim().to_owned();
-        if text.is_empty() {
+        if text.is_empty() && !self.has_files() {
             return;
         }
+        let files = match self.take_files() {
+            Ok(files) => files,
+            Err(why) => {
+                self.toast("paperclip", "Not sent yet".into(), why.into(), None, None, cx);
+                return;
+            }
+        };
         if let Target::Dm { key, conversation: id } | Target::Secure { key, channel: id, .. } = &target {
             let conversation = id;
             let blocked =
@@ -856,9 +877,11 @@ impl FuwaApp {
         match target {
             Target::Channel { key, server, channel } => {
                 let text = self.encode_mentions(&text);
-                self.run(cx, async move { core.send_message(&key, &server, &channel, &text).await }, |_, _, cx| {
-                    cx.notify()
-                });
+                self.run(
+                    cx,
+                    async move { core.send_message_with(&key, &server, &channel, &text, files).await },
+                    |_, _, cx| cx.notify(),
+                );
             }
             Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
                 self.run(
@@ -876,14 +899,19 @@ impl FuwaApp {
 
     pub fn retry(&mut self, nonce: u64, cx: &mut Context<Self>) {
         let Some(Target::Channel { key, server, channel }) = self.target() else { return };
-        let Some(content) = self.core.shared.read(|s| {
-            s.instance(&key)?.pending.get(&channel)?.iter().find(|p| p.nonce == nonce).map(|p| p.content.clone())
+        let Some((content, files)) = self.core.shared.read(|s| {
+            let p = s.instance(&key)?.pending.get(&channel)?.iter().find(|p| p.nonce == nonce)?;
+            Some((p.content.clone(), p.attachments.clone()))
         }) else {
             return;
         };
         self.core.dismiss_pending(&key, &channel, nonce);
         let core = self.core.clone();
-        self.run(cx, async move { core.send_message(&key, &server, &channel, &content).await }, |_, _, cx| cx.notify());
+        self.run(
+            cx,
+            async move { core.send_message_with(&key, &server, &channel, &content, files).await },
+            |_, _, cx| cx.notify(),
+        );
     }
 
     /// At a shared channel's home: keeps someone from another server out of it.
@@ -1385,7 +1413,9 @@ impl FuwaApp {
                     cx.notify();
                 }
             }
-            Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } => self.close_dialog(cx),
+            Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } | Dialog::Picture { .. } => {
+                self.close_dialog(cx)
+            }
             Dialog::Poll { .. } => self.send_poll(cx),
             Dialog::Moderate { key, server, user_id, action } => {
                 let reason: String = value.chars().take(512).collect();
