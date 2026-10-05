@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/ui";
 import { ago, formatBytes } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type I18n, T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
@@ -43,24 +43,25 @@ export const FEDERATION_FIELDS: { path: string; get: (s: InstanceSettings) => un
   },
 ];
 
-export const FEDERATION_SECTION = {
+/** The Other instances page in the settings menu, in the app's language. */
+export const federationSection = (t: I18n["t"]) => ({
   id: "federation",
-  label: "Other instances",
+  label: t("instancesettings.nav.federation"),
   icon: NetworkIcon,
-  description: "Let servers here share channels with servers on other fuwa instances.",
+  description: t("instancesettings.nav.federationAbout"),
   keywords: "federation federate instances share channels across key fingerprint block",
   settings: [
-    { id: "federation", label: "Talk to other instances", keywords: "federation on off" },
-    { id: "federation-identity", label: "This instance's key", keywords: "fingerprint key address rotate replace" },
-    { id: "federation-check", label: "Check an instance", keywords: "test reach ping" },
-    { id: "federation-peers", label: "Instances this one knows", keywords: "pinned peers" },
-    { id: "federation-blocked", label: "Blocked instances", keywords: "block list deny" },
-    { id: "federation-sends", label: "Messages per server a minute", keywords: "limit cap rate flood shared remote" },
-    { id: "federation-people", label: "People per server", keywords: "limit cap shared remote guests" },
-    { id: "federation-files", label: "Files per server a day", keywords: "limit cap shared remote attachments bytes" },
-    { id: "federation-fetches", label: "Files fetched at once", keywords: "limit cap shared remote attachments busy" },
+    { id: "federation", label: t("instancesettings.nav.federationOn"), keywords: "federation on off" },
+    { id: "federation-identity", label: t("instancesettings.nav.federationIdentity"), keywords: "fingerprint key address rotate replace" },
+    { id: "federation-check", label: t("instancesettings.nav.federationCheck"), keywords: "test reach ping" },
+    { id: "federation-peers", label: t("instancesettings.nav.federationPeers"), keywords: "pinned peers" },
+    { id: "federation-blocked", label: t("instancesettings.nav.federationBlocked"), keywords: "block list deny" },
+    { id: "federation-sends", label: t("instancesettings.nav.federationSends"), keywords: "limit cap rate flood shared remote" },
+    { id: "federation-people", label: t("instancesettings.nav.federationPeople"), keywords: "limit cap shared remote guests" },
+    { id: "federation-files", label: t("instancesettings.nav.federationFiles"), keywords: "limit cap shared remote attachments bytes" },
+    { id: "federation-fetches", label: t("instancesettings.nav.federationFetches"), keywords: "limit cap shared remote attachments busy" },
   ],
-};
+});
 
 /** One host per line, trimmed, lowercased, each once. */
 const hosts = (list: string[]) => [...new Set(list.map((h) => h.trim().toLowerCase()).filter(Boolean))];
@@ -90,6 +91,7 @@ export function FederationSettings({
   resetter: (...paths: string[]) => Reset;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const privateField = usePrivateField();
   const [info, setInfo] = useState<GetFederationResponse | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -126,23 +128,24 @@ export function FederationSettings({
         >
           <NetworkIcon className="size-4" />
         </motion.span>
-        <p className="text-muted-foreground">
-          With this on, this instance talks to other fuwa instances so servers can share channels across them. Only the instances talk: apps here never connect to
-          another instance, and no one's address is passed on. Every call is signed with this instance's key and checked against the key pinned for the other one.
-          With shared channels on too, a server here can share a channel with a server on another instance, and messages pass between the two through the instances. Below you can check that two instances reach each other.
-        </p>
+        <p className="text-muted-foreground">{t("instancesettings.federation.intro")}</p>
       </motion.div>
 
-      <Setting id="federation" title="Talk to other instances" defaultLabel={defaults?.federation ? "on" : "off"} {...resetter("federation")}>
+      <Setting
+        id="federation"
+        title={t("instancesettings.nav.federationOn")}
+        defaultLabel={t(defaults?.federation ? "instancesettings.shared.on" : "instancesettings.shared.off")}
+        {...resetter("federation")}
+      >
         <Toggle
           checked={draft.federation}
           onChange={(on) => patch((d) => (d.federation = on))}
-          label="Share channels with other instances"
-          hint="Off, this instance answers other instances with nothing but “off”. Turning it off later stops every call between instances."
+          label={t("instancesettings.federation.label")}
+          hint={t("instancesettings.federation.hint")}
         />
       </Setting>
 
-      <Setting id="federation-identity" title="This instance's key" delay={0.04} badge={false}>
+      <Setting id="federation-identity" title={t("instancesettings.nav.federationIdentity")} delay={0.04} badge={false}>
         {infoError ? (
           <p className="text-xs text-muted-foreground first-letter:uppercase">{infoError}</p>
         ) : !info ? (
@@ -151,7 +154,16 @@ export function FederationSettings({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={SPRING} className="flex flex-col gap-3">
             {info.origin ? (
               <p className="text-sm">
-                Other instances know this one as <b className="font-mono text-xs"><Private text={shown(info.origin)} /></b>.
+                <T
+                  k="instancesettings.federation.knownAs"
+                  values={{
+                    origin: (
+                      <b className="font-mono text-xs">
+                        <Private text={shown(info.origin)} />
+                      </b>
+                    ),
+                  }}
+                />
               </p>
             ) : (
               <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -169,9 +181,7 @@ export function FederationSettings({
                 ))}
               </code>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Before sharing with another instance, compare fingerprints with its admins somewhere you trust: theirs shows here once the two have met.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("instancesettings.federation.compare")}</p>
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="outline"
@@ -180,10 +190,10 @@ export function FederationSettings({
                 disabled={!info.origin}
                 onClick={() => setRotating(true)}
               >
-                <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> Rotate key
+                <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> {t("instancesettings.federation.rotate")}
               </Button>
               <span className="text-xs text-muted-foreground">
-                {info.rotatedAt ? `Last rotated ${ago(lang, timestampDate(info.rotatedAt))}.` : "Never rotated."}
+                {info.rotatedAt ? t("instancesettings.federation.lastRotated", { when: ago(lang, timestampDate(info.rotatedAt)) }) : t("instancesettings.federation.neverRotated")}
               </span>
             </div>
           </motion.div>
@@ -193,21 +203,21 @@ export function FederationSettings({
       <ConfirmDialog
         open={rotating}
         onOpenChange={setRotating}
-        title="Rotate this instance's key?"
-        body="A new key replaces this one, and the old key vouches for it, so instances that know this one move to the new key by themselves. Signed calls on their way when it changes are turned away once. Rotating doesn't help if the key was stolen: then other instances' admins check this one again and compare the new fingerprint with you somewhere you trust."
-        action="Rotate it"
+        title={t("instancesettings.federation.rotateAsk")}
+        body={t("instancesettings.federation.rotateBody")}
+        action={t("instancesettings.federation.rotateIt")}
         onConfirm={async () => {
           const r = await run(rotateFederationKey(instanceKey));
           setReads((n) => n + 1);
-          toast(`New key ${r.fingerprint.split(" ").slice(0, 2).join(" ")}…`);
+          toast(t("instancesettings.federation.newKey", { fingerprint: r.fingerprint.split(" ").slice(0, 2).join(" ") }));
         }}
       />
 
       <CheckCard instanceKey={instanceKey} enabled={saved.federation} onChecked={(r) => setInfo((i) => (i ? withPeer(i, r.peer) : i))} />
 
-      <Setting id="federation-peers" title="Instances this one knows" delay={0.12} badge={false}>
+      <Setting id="federation-peers" title={t("instancesettings.nav.federationPeers")} delay={0.12} badge={false}>
         {!info || info.peers.length === 0 ? (
-          <p className="text-xs text-muted-foreground">None yet. An instance shows here once an admin here checks it.</p>
+          <p className="text-xs text-muted-foreground">{t("instancesettings.federation.noPeers")}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             <AnimatePresence initial={false}>
@@ -217,7 +227,7 @@ export function FederationSettings({
             </AnimatePresence>
             {info.peers.length > shownPeers && (
               <Button variant="ghost" size="sm" className="self-start rounded-full" onClick={() => setShownPeers((n) => n + PAGE)}>
-                Show {Math.min(PAGE, info.peers.length - shownPeers)} more
+                {t("instancesettings.federation.showMore", { count: Math.min(PAGE, info.peers.length - shownPeers) })}
               </Button>
             )}
           </ul>
@@ -226,9 +236,9 @@ export function FederationSettings({
 
       <Setting
         id="federation-blocked"
-        title="Blocked instances"
-        hint="Host names, one a line. This instance never calls them and turns their calls away."
-        defaultLabel="none"
+        title={t("instancesettings.nav.federationBlocked")}
+        hint={t("instancesettings.federation.blockedHint")}
+        defaultLabel={t("instancesettings.shared.none")}
         delay={0.16}
         {...resetter("federation_blocked_hosts")}
       >
@@ -246,36 +256,42 @@ export function FederationSettings({
 
       <Setting
         id="federation-sends"
-        title="Messages per server a minute"
-        hint="How many messages all the people of one server on another instance may send together to channels shared from here. That instance says who its people are, so a server there counts as one sender."
-        defaultLabel={defaults?.sharedRemoteSendsPerMinute === undefined ? "no limit" : `${defaults.sharedRemoteSendsPerMinute.toLocaleString()} a minute`}
+        title={t("instancesettings.nav.federationSends")}
+        hint={t("instancesettings.federation.sendsHint")}
+        defaultLabel={
+          defaults?.sharedRemoteSendsPerMinute === undefined
+            ? t("instancesettings.shared.noLimit")
+            : t("instancesettings.shared.perMinute", { count: Number(defaults.sharedRemoteSendsPerMinute) })
+        }
         delay={0.2}
         {...resetter("shared_remote_sends_per_minute")}
       >
-        <Cap label="Up to" placeholder="120" value={draft.sharedRemoteSendsPerMinute} onChange={(v) => patch((d) => (d.sharedRemoteSendsPerMinute = v))} />
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="120" value={draft.sharedRemoteSendsPerMinute} onChange={(v) => patch((d) => (d.sharedRemoteSendsPerMinute = v))} />
       </Setting>
 
       <Setting
         id="federation-people"
-        title="People per server"
-        hint="How many people one server on another instance may bring to a server's shared channels. Past it, no one new from that server can join in; those already there still can."
-        defaultLabel={defaults?.sharedRemotePeople === undefined ? "no limit" : defaults.sharedRemotePeople.toLocaleString()}
+        title={t("instancesettings.nav.federationPeople")}
+        hint={t("instancesettings.federation.peopleHint")}
+        defaultLabel={defaults?.sharedRemotePeople === undefined ? t("instancesettings.shared.noLimit") : lang.number(Number(defaults.sharedRemotePeople))}
         delay={0.24}
         {...resetter("shared_remote_people")}
       >
-        <Cap label="Up to" placeholder="500" value={draft.sharedRemotePeople} onChange={(v) => patch((d) => (d.sharedRemotePeople = v))} />
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="500" value={draft.sharedRemotePeople} onChange={(v) => patch((d) => (d.sharedRemotePeople = v))} />
       </Setting>
 
       <Setting
         id="federation-files"
-        title="Files per server a day"
-        hint="How much one server on another instance may send in files to channels shared from here in a day (UTC). The files are kept here, under the home server's room for files."
-        defaultLabel={defaults?.sharedRemoteFileBytesPerDay === undefined ? "no limit" : formatBytes(lang, Number(defaults.sharedRemoteFileBytesPerDay))}
+        title={t("instancesettings.nav.federationFiles")}
+        hint={t("instancesettings.federation.filesHint")}
+        defaultLabel={
+          defaults?.sharedRemoteFileBytesPerDay === undefined ? t("instancesettings.shared.noLimit") : formatBytes(lang, Number(defaults.sharedRemoteFileBytesPerDay))
+        }
         delay={0.28}
         {...resetter("shared_remote_file_bytes_per_day")}
       >
         <Cap
-          label="Up to"
+          label={t("instancesettings.shared.upTo")}
           bytes
           value={draft.sharedRemoteFileBytesPerDay}
           onChange={(v) => patch((d) => (d.sharedRemoteFileBytesPerDay = v))}
@@ -284,14 +300,14 @@ export function FederationSettings({
 
       <Setting
         id="federation-fetches"
-        title="Files fetched at once"
-        hint="How many files this instance fetches from other instances at the same time, for shared channels; each instance gets at most half, and the rest wait their turn. Leave it empty for no limit."
-        defaultLabel={defaults?.sharedFileFetchesInFlight === undefined ? "no limit" : defaults.sharedFileFetchesInFlight.toLocaleString()}
+        title={t("instancesettings.nav.federationFetches")}
+        hint={t("instancesettings.federation.fetchesHint")}
+        defaultLabel={defaults?.sharedFileFetchesInFlight === undefined ? t("instancesettings.shared.noLimit") : lang.number(Number(defaults.sharedFileFetchesInFlight))}
         delay={0.32}
         {...resetter("shared_file_fetches_in_flight")}
       >
         <Cap
-          label="Up to"
+          label={t("instancesettings.shared.upTo")}
           placeholder="8"
           value={draft.sharedFileFetchesInFlight}
           onChange={(v) => patch((d) => (d.sharedFileFetchesInFlight = v))}
@@ -309,7 +325,8 @@ function withPeer(info: GetFederationResponse, peer: FederationPeer | undefined)
 
 function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
   const lang = useI18n();
-  const heard = peer.lastHeard ? ago(lang, timestampDate(peer.lastHeard)) : "never";
+  const { t } = lang;
+  const heard = peer.lastHeard ? t("instancesettings.federation.heard", { when: ago(lang, timestampDate(peer.lastHeard)) }) : t("instancesettings.federation.heardNever");
   const lastMove = peer.moves.at(-1);
   return (
     <motion.li
@@ -329,7 +346,7 @@ function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
           <Private text={shown(peer.origin)} />
           {peer.blocked && (
             <span className="flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
-              <BanIcon className="size-3" /> Blocked
+              <BanIcon className="size-3" /> {t("instancesettings.federation.blocked")}
             </span>
           )}
           {peer.needsCheck && (
@@ -339,33 +356,38 @@ function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
               transition={SPRING}
               className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300"
             >
-              <ShieldAlertIcon className="size-3" /> Check again
+              <ShieldAlertIcon className="size-3" /> {t("instancesettings.federation.checkAgain")}
             </motion.span>
           )}
         </span>
         <code className="block truncate font-mono text-[11px] text-muted-foreground">{peer.fingerprint}</code>
         {peer.needsCheck && (
-          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-            Its key changed in a way its old key didn't vouch for, so nothing goes either way. Compare its new fingerprint with its admins somewhere you trust, then check it above.
-          </p>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{t("instancesettings.federation.needsCheck")}</p>
         )}
         {lastMove && (
           <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
             <KeyRoundIcon className="size-3 shrink-0" />
             <span className="truncate">
-              Moved to this key {lastMove.movedAt ? ago(lang, timestampDate(lastMove.movedAt)) : ""} from <code className="font-mono">{lastMove.previousFingerprint.split(" ").slice(0, 2).join(" ")}…</code>
-              {peer.moves.length > 1 && ` (${peer.moves.length} moves)`}
+              <T
+                k={peer.moves.length > 1 ? "instancesettings.federation.movedMany" : "instancesettings.federation.moved"}
+                values={{
+                  when: lastMove.movedAt ? ago(lang, timestampDate(lastMove.movedAt)) : "",
+                  fingerprint: <code className="font-mono">{lastMove.previousFingerprint.split(" ").slice(0, 2).join(" ")}…</code>,
+                  count: peer.moves.length,
+                }}
+              />
             </span>
           </p>
         )}
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground">Heard from {heard}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{heard}</span>
     </motion.li>
   );
 }
 
 /** Reaches another instance and back with a signed call. */
 function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; enabled: boolean; onChecked: (r: CheckInstanceResponse) => void }) {
+  const { t } = useI18n();
   const privateField = usePrivateField();
   const [address, setAddress] = useState("");
   const [pending, setPending] = useState(false);
@@ -388,8 +410,8 @@ function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; e
   return (
     <Setting
       id="federation-check"
-      title="Check an instance"
-      hint="Fetches its key and pins it here, then sends it a signed greeting there and back. The other instance only checks the greeting: it pins this one's key when its own admins check this instance."
+      title={t("instancesettings.nav.federationCheck")}
+      hint={t("instancesettings.federation.checkHint")}
       delay={0.08}
       badge={false}
     >
@@ -409,10 +431,10 @@ function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; e
         />
         <Button type="submit" className="shrink-0 rounded-xl" disabled={!enabled || !address.trim() || pending}>
           {pending ? <LoaderCircleIcon className="size-4 animate-spin" /> : <RadarIcon className="size-4" />}
-          Check
+          {t("instancesettings.federation.check")}
         </Button>
       </form>
-      {!enabled && <p className="text-xs text-muted-foreground">Turn on “Share channels with other instances” and save first.</p>}
+      {!enabled && <p className="text-xs text-muted-foreground">{t("instancesettings.federation.turnOnFirst", { setting: t("instancesettings.federation.label") })}</p>}
       <AnimatePresence mode="popLayout" initial={false}>
         {result && (
           <motion.div
@@ -429,11 +451,19 @@ function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; e
             {"ok" in result ? <CheckIcon className="mt-0.5 size-3.5 shrink-0" /> : <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />}
             {"ok" in result ? (
               <span>
-                Reached <b><Private text={shown(result.ok.peer?.origin ?? "")} /></b> and back in {result.ok.roundTripMs.toString()} ms. Its key:{" "}
-                <code className="font-mono">{result.ok.peer?.fingerprint}</code>.{" "}
-                {result.ok.knownThere
-                  ? "It knows this instance too, so signed calls go both ways."
-                  : "It doesn't know this instance yet: its admins check this one from their side to pin its key."}
+                <T
+                  k="instancesettings.federation.reached"
+                  values={{
+                    origin: (
+                      <b>
+                        <Private text={shown(result.ok.peer?.origin ?? "")} />
+                      </b>
+                    ),
+                    ms: result.ok.roundTripMs.toString(),
+                    fingerprint: <code className="font-mono">{result.ok.peer?.fingerprint}</code>,
+                  }}
+                />{" "}
+                {t(result.ok.knownThere ? "instancesettings.federation.knownThere" : "instancesettings.federation.notKnownThere")}
               </span>
             ) : (
               <span className="first-letter:uppercase">{result.error}</span>

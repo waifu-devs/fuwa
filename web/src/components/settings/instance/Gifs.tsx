@@ -11,7 +11,7 @@ import { GifImage } from "@/components/chat/GifImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatBytes } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type I18n, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, Setting, SPRING } from "../controls";
 
@@ -32,19 +32,20 @@ export const GIF_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; 
   },
 ];
 
-export const GIF_SECTION = {
+/** The GIFs page in the settings menu, in the app's language. */
+export const gifSection = (t: I18n["t"]) => ({
   id: "gifs",
-  label: "GIFs",
+  label: t("instancesettings.nav.gifs"),
   icon: FilmIcon,
-  description: "GIF search in the composer, through this instance.",
+  description: t("instancesettings.nav.gifsAbout"),
   keywords: "gif giphy klipy tenor search animated",
   settings: [
-    { id: "gif-provider", label: "GIF search provider", keywords: "giphy klipy" },
-    { id: "gif-key", label: "Provider key", keywords: "api key secret" },
-    { id: "gif-rating", label: "Rating", keywords: "nsfw safe content filter" },
-    { id: "gif-caps", label: "GIF caps", keywords: "size limit rate searches per day" },
+    { id: "gif-provider", label: t("instancesettings.nav.gifProvider"), keywords: "giphy klipy" },
+    { id: "gif-key", label: t("instancesettings.nav.gifKey"), keywords: "api key secret" },
+    { id: "gif-rating", label: t("instancesettings.nav.gifRating"), keywords: "nsfw safe content filter" },
+    { id: "gif-caps", label: t("instancesettings.nav.gifCaps"), keywords: "size limit rate searches per day" },
   ],
-};
+});
 
 const RATING_LABEL: Record<string, string> = { g: "G", pg: "PG", "pg-13": "PG-13", r: "R" };
 
@@ -69,6 +70,7 @@ export function GifSettings({
   resetter: (...paths: string[]) => Reset;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const g = gifsOf(draft);
   const was = gifsOf(saved);
   const def = gifsOf(defaults);
@@ -86,18 +88,18 @@ export function GifSettings({
     <>
       <Setting
         id="gif-provider"
-        title="GIF search provider"
-        hint="Where the GIF button's search, trending and moods come from. This instance asks the provider for everyone and hands back every picture itself, so the provider never sees anyone's address, account or what they send, and apps load nothing from it. A GIF someone sends is stored here, without its metadata, so it stays after the provider drops it."
-        defaultLabel={providerLabel(def.provider)}
+        title={t("instancesettings.nav.gifProvider")}
+        hint={t("instancesettings.gifs.providerHint")}
+        defaultLabel={providerLabel(t, def.provider)}
         {...reset}
       >
         <Choice
           value={g.provider}
           onChange={(provider) => edit((x) => (x.provider = provider))}
           options={[
-            { value: GifProvider.UNSPECIFIED, label: "Off", hint: "No GIF button. GIFs already sent still show.", icon: <PowerOffIcon className="size-4" /> },
-            { value: GifProvider.GIPHY, label: "GIPHY", hint: "Recommended: the biggest library. Free key at developers.giphy.com.", icon: <SparklesIcon className="size-4" /> },
-            { value: GifProvider.KLIPY, label: "Klipy", hint: "A Tenor-style library. Free key from klipy.com.", icon: <FilmIcon className="size-4" /> },
+            { value: GifProvider.UNSPECIFIED, label: t("serversettings.shared.off"), hint: t("instancesettings.gifs.offHint"), icon: <PowerOffIcon className="size-4" /> },
+            { value: GifProvider.GIPHY, label: "GIPHY", hint: t("instancesettings.gifs.giphyHint"), icon: <SparklesIcon className="size-4" /> },
+            { value: GifProvider.KLIPY, label: "Klipy", hint: t("instancesettings.gifs.klipyHint"), icon: <FilmIcon className="size-4" /> },
           ]}
         />
       </Setting>
@@ -106,10 +108,10 @@ export function GifSettings({
           <motion.div key="on" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={SPRING}>
             <Setting
               id="gif-key"
-              title={`${name} key`}
-              hint={`Kept on this instance (encrypted with its files when it encrypts them) and never sent back to any app, this page included. ${name}'s terms ask for "Powered by ${name}" by results; the picker shows it.`}
+              title={t("instancesettings.gifs.keyTitle", { name })}
+              hint={t("instancesettings.gifs.keyHint", { name })}
               delay={0.02}
-              defaultLabel={def.apiKeySet ? "set" : "none"}
+              defaultLabel={t(def.apiKeySet ? "instancesettings.shared.set" : "instancesettings.shared.none")}
               {...reset}
             >
               <div className="relative">
@@ -122,20 +124,20 @@ export function GifSettings({
                   placeholder={
                     was.apiKeySet && was.provider === g.provider
                       ? was.apiKeyHint
-                        ? `Saved, ending in ${was.apiKeyHint}. Type to replace it`
-                        : "Saved. Type to replace it"
-                      : `Paste your ${name} key`
+                        ? t("instancesettings.shared.savedEnding", { hint: was.apiKeyHint })
+                        : t("instancesettings.shared.saved")
+                      : t("instancesettings.gifs.paste", { name })
                   }
                   className={cn("h-10 rounded-xl pl-9 font-mono text-sm", privateField, keyMissing && "ring-2 ring-amber-500/50")}
                 />
               </div>
-              {keyMissing && <p className="text-xs text-amber-600 dark:text-amber-400">GIFs stay off until a key is saved.</p>}
+              {keyMissing && <p className="text-xs text-amber-600 dark:text-amber-400">{t("instancesettings.gifs.keyMissing")}</p>}
               <TryIt instanceKey={instanceKey} settings={g} />
             </Setting>
             <Setting
               id="gif-rating"
-              title="Rating"
-              hint="The most a result may be rated. The provider decides ratings; AutoMod's picture checks still look at what's sent."
+              title={t("instancesettings.nav.gifRating")}
+              hint={t("instancesettings.gifs.ratingHint")}
               delay={0.04}
               defaultLabel={RATING_LABEL[def.rating || "pg-13"]}
               {...reset}
@@ -144,29 +146,29 @@ export function GifSettings({
                 value={g.rating || "pg-13"}
                 onChange={(rating) => edit((x) => (x.rating = rating))}
                 options={[
-                  { value: "g", label: "G", hint: "For everyone.", icon: <ShieldIcon className="size-4" /> },
-                  { value: "pg", label: "PG", hint: "Mild.", icon: <ShieldIcon className="size-4" /> },
-                  { value: "pg-13", label: "PG-13", hint: "The usual.", icon: <ShieldIcon className="size-4" /> },
-                  { value: "r", label: "R", hint: "Anything but adult.", icon: <ShieldIcon className="size-4" /> },
+                  { value: "g", label: "G", hint: t("instancesettings.gifs.ratingG"), icon: <ShieldIcon className="size-4" /> },
+                  { value: "pg", label: "PG", hint: t("instancesettings.gifs.ratingPg"), icon: <ShieldIcon className="size-4" /> },
+                  { value: "pg-13", label: "PG-13", hint: t("instancesettings.gifs.ratingPg13"), icon: <ShieldIcon className="size-4" /> },
+                  { value: "r", label: "R", hint: t("instancesettings.gifs.ratingR"), icon: <ShieldIcon className="size-4" /> },
                 ]}
               />
             </Setting>
             <Setting
               id="gif-caps"
-              title="Caps"
-              hint="Off means no cap. Searches kept from the last ten minutes don't count toward the daily calls."
+              title={t("instancesettings.gifs.caps")}
+              hint={t("instancesettings.gifs.capsHint")}
               delay={0.06}
-              defaultLabel="no caps"
+              defaultLabel={t("instancesettings.gifs.noCaps")}
               {...reset}
             >
               <div className="grid gap-3 sm:grid-cols-3">
-                <Cap label="Largest GIF stored" bytes value={g.gifBytes} onChange={(v) => edit((x) => (x.gifBytes = v))} />
-                <Cap label="Searches a minute, each" value={g.searchesPerMinute} onChange={(v) => edit((x) => (x.searchesPerMinute = v))} />
-                <Cap label="Calls to the provider a day" value={g.providerCallsPerDay} onChange={(v) => edit((x) => (x.providerCallsPerDay = v))} />
+                <Cap label={t("instancesettings.gifs.largest")} bytes value={g.gifBytes} onChange={(v) => edit((x) => (x.gifBytes = v))} />
+                <Cap label={t("instancesettings.gifs.searches")} value={g.searchesPerMinute} onChange={(v) => edit((x) => (x.searchesPerMinute = v))} />
+                <Cap label={t("instancesettings.gifs.calls")} value={g.providerCallsPerDay} onChange={(v) => edit((x) => (x.providerCallsPerDay = v))} />
               </div>
               {g.gifBytes !== undefined && (
                 <p className="text-xs text-muted-foreground">
-                  Bigger GIFs are stored at the provider's smaller size, or refused when even that is over {formatBytes(lang, Number(g.gifBytes))}.
+                  {t("instancesettings.gifs.bigger", { size: formatBytes(lang, Number(g.gifBytes)) })}
                 </p>
               )}
             </Setting>
@@ -177,12 +179,13 @@ export function GifSettings({
   );
 }
 
-function providerLabel(p: GifProvider) {
-  return p === GifProvider.GIPHY ? "GIPHY" : p === GifProvider.KLIPY ? "Klipy" : "off";
+function providerLabel(t: I18n["t"], p: GifProvider) {
+  return p === GifProvider.GIPHY ? "GIPHY" : p === GifProvider.KLIPY ? "Klipy" : t("instancesettings.shared.off");
 }
 
 /** Asks the provider for a few trending GIFs with what's typed, before it's saved. */
 function TryIt({ instanceKey, settings }: { instanceKey: string; settings: GifSetup }) {
+  const { t } = useI18n();
   const [state, setState] = useState<"idle" | "trying" | TestGifProviderResponse>("idle");
   async function go() {
     setState("trying");
@@ -198,7 +201,7 @@ function TryIt({ instanceKey, settings }: { instanceKey: string; settings: GifSe
       <div className="flex items-center gap-3">
         <Button type="button" variant="outline" size="sm" onClick={go} disabled={state === "trying"} className="btn h-9 rounded-xl px-4 font-bold">
           {state === "trying" ? <LoaderCircleIcon className="size-4 animate-spin" /> : <SparklesIcon className="size-4" />}
-          Try it
+          {t("instancesettings.gifs.tryIt")}
         </Button>
         <AnimatePresence mode="popLayout" initial={false}>
           {result && (
@@ -211,7 +214,7 @@ function TryIt({ instanceKey, settings }: { instanceKey: string; settings: GifSe
               className={cn("flex items-center gap-1.5 text-sm font-bold", result.ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}
             >
               {result.ok ? <CircleCheckIcon className="size-4" /> : <CircleXIcon className="size-4" />}
-              {result.ok ? `Works · ${result.elapsedMs} ms` : result.error}
+              {result.ok ? t("instancesettings.gifs.works", { ms: String(result.elapsedMs) }) : result.error}
             </motion.span>
           )}
         </AnimatePresence>

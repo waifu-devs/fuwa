@@ -11,6 +11,7 @@ import { SPRING } from "@/components/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { formatStamp, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -22,12 +23,13 @@ const TEXT_MAX = 300;
 /** How long it stays up. `keep` leaves an existing end where it is. */
 type Ends = "keep" | "never" | number;
 const HOUR = 3_600_000;
-const LENGTHS: { value: Ends; label: string }[] = [
-  { value: "never", label: "Until taken down" },
-  { value: HOUR, label: "1 hour" },
-  { value: 4 * HOUR, label: "4 hours" },
-  { value: 24 * HOUR, label: "1 day" },
-  { value: 7 * 24 * HOUR, label: "1 week" },
+/** Labels are catalog keys. */
+const LENGTHS: { value: Ends; label: Key }[] = [
+  { value: "never", label: "instancesettings.announcement.untilDown" },
+  { value: HOUR, label: "instancesettings.announcement.hour" },
+  { value: 4 * HOUR, label: "instancesettings.announcement.fourHours" },
+  { value: 24 * HOUR, label: "instancesettings.announcement.day" },
+  { value: 7 * 24 * HOUR, label: "instancesettings.announcement.week" },
 ];
 
 /**
@@ -36,6 +38,7 @@ const LENGTHS: { value: Ends; label: string }[] = [
  * people who closed it; new words bring it back for everyone.
  */
 export function Announcement({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const now = useNow(15_000);
   const current = inst?.node?.announcement;
@@ -56,7 +59,7 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
     (ends !== "keep" && (ends === "never" ? !!live.endsAt : true));
   const draft = create(AnnouncementSchema, {
     id: trimmed === live?.text ? live.id : "draft",
-    text: trimmed || "Your announcement shows here.",
+    text: trimmed || t("instancesettings.announcement.previewText"),
     tone,
     endsAt: endsAt ? timestampFromDate(endsAt) : undefined,
   });
@@ -68,22 +71,23 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
     const next = await save.go(instanceKey, { text: trimmed, tone, endsAt });
     if (next === undefined) return;
     setEnds(next?.endsAt ? "keep" : "never");
-    toast(live ? "Announcement updated" : "Announcement is up");
+    toast(t(live ? "instancesettings.announcement.updated" : "instancesettings.announcement.up"));
   }
 
   async function takeDown() {
     if ((await save.go(instanceKey, { text: "", tone })) === undefined) return;
     setText("");
     setEnds("never");
-    toast("Announcement taken down");
+    toast(t("instancesettings.announcement.down"));
   }
 
+  const fixed = LENGTHS.map((l) => ({ value: l.value, label: t(l.label) }));
   const lengths: { value: Ends; label: string }[] =
-    live?.endsAt ? [{ value: "keep", label: `Until ${endsLabel(toDate(live.endsAt))}` }, ...LENGTHS] : LENGTHS;
+    live?.endsAt ? [{ value: "keep", label: t("instancesettings.announcement.until", { time: endsLabel(toDate(live.endsAt)) }) }, ...fixed] : fixed;
 
   return (
     <form onSubmit={submit} className="flex flex-col">
-      <Setting id="announcement-preview" title="Preview" hint="What everyone on this instance sees at the top of the app." badge={false}>
+      <Setting id="announcement-preview" title={t("settings.controls.preview")} hint={t("instancesettings.announcement.previewHint")} badge={false}>
         <div className="relative overflow-hidden rounded-2xl border bg-background/40">
           <BannerBody announcement={draft} preview onClose={tone === AnnouncementTone.CRITICAL ? undefined : () => {}} />
           <div className="flex h-20 gap-2 p-3 opacity-50" aria-hidden>
@@ -108,20 +112,22 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
               {live && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60" />}
             </span>
             {live
-              ? `Up since ${formatStamp(toDate(live.createdAt))}${live.endsAt ? `, until ${endsLabel(toDate(live.endsAt))}` : ""}`
-              : "Nothing is up right now."}
+              ? live.endsAt
+                ? t("instancesettings.announcement.upSinceUntil", { time: formatStamp(toDate(live.createdAt)), end: endsLabel(toDate(live.endsAt)) })
+                : t("instancesettings.announcement.upSince", { time: formatStamp(toDate(live.createdAt)) })
+              : t("instancesettings.announcement.nothingUp")}
           </motion.p>
         </AnimatePresence>
       </Setting>
 
-      <Setting id="announcement-text" title="Message" hint="Bold, italics, code and links work. Keep it to a line or two." badge={false} delay={0.04}>
+      <Setting id="announcement-text" title={t("instancesettings.announcement.message")} hint={t("instancesettings.announcement.messageHint")} badge={false} delay={0.04}>
         <div className="relative">
           <Textarea
             id="announcement-text"
             rows={2}
             maxLength={TEXT_MAX}
             value={text}
-            placeholder="We're moving to a bigger server tonight at 10 PM. Expect a few minutes offline."
+            placeholder={t("instancesettings.announcement.placeholder")}
             onChange={(e) => {
               setText(e.target.value);
               save.setError(null);
@@ -132,20 +138,20 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
         </div>
       </Setting>
 
-      <Setting id="announcement-tone" title="Tone" badge={false} delay={0.08}>
+      <Setting id="announcement-tone" title={t("instancesettings.announcement.tone")} badge={false} delay={0.08}>
         <Choice
           value={tone}
           onChange={setTone}
           options={[
-            { value: AnnouncementTone.INFO, label: "Info", hint: "News and small notes. People can close it.", icon: <MegaphoneIcon className="size-4" /> },
-            { value: AnnouncementTone.WARNING, label: "Heads-up", hint: "Maintenance or a change coming soon.", icon: <TriangleAlertIcon className="size-4" /> },
-            { value: AnnouncementTone.CRITICAL, label: "Urgent", hint: "Something is wrong now. Nobody can close it.", icon: <SirenIcon className="size-4" /> },
+            { value: AnnouncementTone.INFO, label: t("instancesettings.announcement.info"), hint: t("instancesettings.announcement.infoHint"), icon: <MegaphoneIcon className="size-4" /> },
+            { value: AnnouncementTone.WARNING, label: t("instancesettings.announcement.warning"), hint: t("instancesettings.announcement.warningHint"), icon: <TriangleAlertIcon className="size-4" /> },
+            { value: AnnouncementTone.CRITICAL, label: t("instancesettings.announcement.critical"), hint: t("instancesettings.announcement.criticalHint"), icon: <SirenIcon className="size-4" /> },
           ]}
         />
       </Setting>
 
-      <Setting id="announcement-ends" title="Comes down" hint="It disappears from every client by itself at the end." badge={false} delay={0.12}>
-        <Chips label="Comes down" value={ends} onChange={setEnds} options={lengths} />
+      <Setting id="announcement-ends" title={t("instancesettings.announcement.comesDown")} hint={t("instancesettings.announcement.comesDownHint")} badge={false} delay={0.12}>
+        <Chips label={t("instancesettings.announcement.comesDown")} value={ends} onChange={setEnds} options={lengths} />
         <AnimatePresence initial={false}>
           {endsAt && ends !== "keep" && (
             <motion.p
@@ -155,7 +161,7 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
               transition={SPRING}
               className="overflow-hidden text-xs text-muted-foreground"
             >
-              Comes down <b>{formatStamp(endsAt)}</b>, counted from when you put it up.
+              <T k="instancesettings.announcement.comesDownAt" values={{ time: <b>{formatStamp(endsAt)}</b> }} />
             </motion.p>
           )}
         </AnimatePresence>
@@ -167,7 +173,7 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
           {live && (
             <motion.span initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="mr-auto">
               <Button type="button" variant="ghost" disabled={save.pending} onClick={takeDown} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
-                <MegaphoneOffIcon className="transition-transform group-hover:-rotate-12" /> Take it down
+                <MegaphoneOffIcon className="transition-transform group-hover:-rotate-12" /> {t("instancesettings.announcement.takeDown")}
               </Button>
             </motion.span>
           )}
@@ -180,7 +186,7 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
               <MegaphoneIcon />
             </motion.span>
           )}
-          {live ? "Update" : "Put it up"}
+          {t(live ? "instancesettings.announcement.update" : "instancesettings.announcement.putUp")}
         </Button>
       </div>
     </form>
