@@ -1863,6 +1863,15 @@ async fn profiles_nicknames_and_notification_settings() {
         .update_notification_settings(authed(&mika, change(&channel.id, Default::default(), &["muted"])))
         .await
         .unwrap();
+    let all = c
+        .account
+        .get_notification_settings(authed(&mika, pb::GetNotificationSettingsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings;
+    assert_eq!(all.len(), 1);
+    assert!(all.iter().all(|s| s.channel_id.is_empty()), "only the server's own row is left");
     let outsider =
         c.account.update_notification_settings(authed(&juan, change("", Default::default(), &["bogus"]))).await;
     assert_eq!(outsider.unwrap_err().code(), Code::InvalidArgument);
@@ -2594,7 +2603,9 @@ async fn server_settings_and_moderation() {
         .await;
     assert_eq!(hidden.unwrap_err().code(), Code::PermissionDenied);
 
-    // Handing the server on: the new owner owns it, the old one stays as an admin.
+    // Handing the server on: the new owner owns it, the old one keeps their roles.
+    let kept = create_role(&mut c, &juan, &sid, "Founders", &[]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &owner_id, &kept.id).await.unwrap();
     let transfer = |token: &str, user: &str| {
         authed(token, pb::TransferOwnershipRequest { server_id: sid.clone(), user_id: user.into() })
     };
@@ -2614,7 +2625,7 @@ async fn server_settings_and_moderation() {
         .members;
     assert_eq!(members[0].user.as_ref().unwrap().id, mika_user.id, "the owner ranks first");
     let roles_of = |id: &str| members.iter().find(|m| m.user.as_ref().unwrap().id == id).unwrap().role_ids.clone();
-    assert!(roles_of(&owner_id).is_empty(), "the old owner keeps their roles, which were none");
+    assert_eq!(roles_of(&owner_id), std::slice::from_ref(&kept.id), "the old owner keeps their roles");
     // The old owner no longer hands out roles, and can leave like anyone else.
     let roles = c.roles.list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() })).await.unwrap();
     let admin_role = roles.into_inner().roles.into_iter().find(|r| r.name == "Admin").unwrap();
@@ -5953,6 +5964,19 @@ async fn webhooks_post_into_channels() {
             .code(),
         Code::PermissionDenied
     );
+    let gone = message.id.clone();
+    c.messages
+        .delete_message(authed(
+            &owner,
+            pb::DeleteMessageRequest {
+                channel_id: String::new(),
+                server_id: server.id.clone(),
+                message_id: gone.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert!(!messages(&mut c, &member, &server.id, &general.id).await.iter().any(|m| m.id == gone));
 
     // Moving it and resetting its address.
     let moved = c
