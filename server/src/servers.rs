@@ -1734,7 +1734,9 @@ pub async fn load_emojis_by_id(conn: &Connection, server_id: &str, ids: &[String
         found.extend(query_all(conn, &sql, values, emoji_row(server_id)).await?);
     }
     // In the order asked for, as one at a time gave them.
-    found.sort_by_key(|emoji| ids.iter().position(|id| *id == emoji.id));
+    let order: std::collections::HashMap<&str, usize> =
+        ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+    found.sort_by_key(|emoji| order.get(emoji.id.as_str()).copied());
     Ok(found)
 }
 
