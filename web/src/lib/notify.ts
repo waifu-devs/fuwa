@@ -2,6 +2,7 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { LeaveReason, MessageKind, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
 import { doNotDisturb } from "@/fuwa/presence";
+import { i18n } from "@/i18n/i18n";
 import { displayName, memberName } from "@/lib/format";
 import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
@@ -147,7 +148,8 @@ export const setFriendsNotificationTarget = (open: OpenFriends) => {
  */
 export function onFriendNews(key: string, user: User | undefined, what: "asked" | "accepted") {
   const name = displayName(user);
-  const text = what === "asked" ? `${name} wants to be friends` : `${name} accepted your friend request`;
+  const { t } = i18n();
+  const text = what === "asked" ? t("workspace.notify.friendAsked", { name }) : t("workspace.notify.friendAccepted", { name });
   playSome("mention", 600);
   if (!document.hidden && document.hasFocus()) {
     toast(text);
@@ -170,8 +172,9 @@ export function onFriendNews(key: string, user: User | undefined, what: "asked" 
 
 /** Tells you when an owner or admin took you out of a server. Called with its name, which is gone from the store by then. */
 export function onRemoved(serverName: string, reason: LeaveReason) {
-  if (reason === LeaveReason.KICKED) toast(`You were removed from ${serverName}`);
-  else if (reason === LeaveReason.BANNED) toast(`You were banned from ${serverName}`);
+  const { t } = i18n();
+  if (reason === LeaveReason.KICKED) toast(t("workspace.notify.kicked", { server: serverName }));
+  else if (reason === LeaveReason.BANNED) toast(t("workspace.notify.banned", { server: serverName }));
 }
 
 function notify(
@@ -192,8 +195,17 @@ function notify(
   const author = app ?? (member ? memberName(member) : displayName(inst.users[authorId]));
   const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
-    const n = new Notification(`${author}${thread ? " replied in a thread" : ""}${channel ? ` in #${channel.name}` : ""}`, {
-      body: `${mention ? "Mentioned you: " : ""}${body.length > 160 ? `${body.slice(0, 159)}…` : body}`,
+    const { t } = i18n();
+    const title = thread
+      ? channel
+        ? t("workspace.notify.titleThreadIn", { author, channel: channel.name })
+        : t("workspace.notify.titleThread", { author })
+      : channel
+        ? t("workspace.notify.titleIn", { author, channel: channel.name })
+        : author;
+    const text = body.length > 160 ? `${body.slice(0, 159)}…` : body;
+    const n = new Notification(title, {
+      body: mention ? t("workspace.notify.mentioned", { text }) : text,
       icon: "/favicon.svg",
       tag: thread || channelId,
     });
@@ -212,7 +224,7 @@ function notify(
 export function testNotification() {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return false;
   try {
-    new Notification("fuwa", { body: "This is how messages will reach you ✨", icon: "/favicon.svg", tag: "fuwa-test" });
+    new Notification("fuwa", { body: i18n().t("workspace.notify.test"), icon: "/favicon.svg", tag: "fuwa-test" });
     return true;
   } catch {
     return false;

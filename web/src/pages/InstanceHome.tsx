@@ -21,10 +21,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseInvite } from "@/lib/invites";
 import { HostedBadge } from "@/components/HostedBadge";
+import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /** An instance's front page: sign in if needed, then browse and create servers. */
 export function InstanceHome({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const { compact, setNavOpen } = useLayout();
 
@@ -45,7 +47,7 @@ export function InstanceHome({ instanceKey }: { instanceKey: string }) {
     <div className="scroll-thin h-full overflow-y-auto">
       {compact && (
         <button type="button" onClick={() => setNavOpen(true)} className="m-2 flex items-center gap-1 rounded-full px-3 py-2 text-sm font-bold text-muted-foreground hover:bg-muted">
-          <ChevronLeftIcon className="size-4" /> Servers
+          <ChevronLeftIcon className="size-4" /> {t("workspace.home.servers")}
         </button>
       )}
       <Browse instanceKey={instanceKey} />
@@ -58,6 +60,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function UnknownInstance({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   // A streamer mode link (/~name) only means something on the device that made it.
   if (instanceKey.startsWith("~"))
     return (
@@ -66,12 +69,10 @@ function UnknownInstance({ instanceKey }: { instanceKey: string }) {
           <span className="float grid size-14 place-items-center rounded-full bg-primary/15 text-primary">
             <TvMinimalPlayIcon className="size-7" />
           </span>
-          <h1 className="text-xl font-extrabold">This link hides its server</h1>
-          <p className="text-sm text-muted-foreground">
-            It was copied while streamer mode was on, so it names the server by a nickname that only works on the device it came from.
-          </p>
+          <h1 className="text-xl font-extrabold">{t("workspace.home.hiddenTitle")}</h1>
+          <p className="text-sm text-muted-foreground">{t("workspace.home.hiddenAbout")}</p>
           <Button asChild className="btn mt-1 rounded-xl font-bold">
-            <Link to="/">Go to your servers</Link>
+            <Link to="/">{t("workspace.home.goHome")}</Link>
           </Button>
         </div>
       </Centered>
@@ -80,9 +81,9 @@ function UnknownInstance({ instanceKey }: { instanceKey: string }) {
     <Centered>
       <div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-xl sm:p-8">
         <h1 className="mb-1 text-xl font-extrabold">
-          Connect to <Private text={instanceKey.replaceAll("~", "/")} />?
+          <T k="workspace.home.connectTo" values={{ address: <Private text={instanceKey.replaceAll("~", "/")} /> }} />
         </h1>
-        <p className="mb-5 text-sm text-muted-foreground">You aren't signed in to this fuwa server in this browser yet.</p>
+        <p className="mb-5 text-sm text-muted-foreground">{t("workspace.home.notSignedIn")}</p>
         <Connect initialUrl={instanceKey.replaceAll("~", "/")} />
       </div>
     </Centered>
@@ -90,6 +91,7 @@ function UnknownInstance({ instanceKey }: { instanceKey: string }) {
 }
 
 function Browse({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey)!;
   const [servers, setServers] = useState<Server[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,14 +119,12 @@ function Browse({ instanceKey }: { instanceKey: string }) {
               <HostedBadge url={inst.url} className="sm:ml-1" />
             </p>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              Welcome to <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText>
+              <T k="workspace.home.welcome" values={{ name: <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText> }} />
             </h1>
-            <p className="mt-2 max-w-xl text-muted-foreground">
-              Find a community to join, or start your own. Everything here lives on this fuwa server.
-            </p>
+            <p className="mt-2 max-w-xl text-muted-foreground">{t("workspace.home.about")}</p>
           </div>
           <Button size="lg" onClick={() => setCreating(true)} className="btn h-11 shrink-0 rounded-xl font-bold">
-            <PlusIcon /> Create a server
+            <PlusIcon /> {t("workspace.home.create")}
           </Button>
         </div>
       </section>
@@ -132,10 +132,10 @@ function Browse({ instanceKey }: { instanceKey: string }) {
       <HaveInvite instanceKey={instanceKey} />
 
       <div className="mt-8 mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-extrabold">Browse servers</h2>
+        <h2 className="text-lg font-extrabold">{t("workspace.home.browse")}</h2>
         <div className="relative sm:w-72">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="h-10 rounded-xl pl-9" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("workspace.home.search")} className="h-10 rounded-xl pl-9" />
         </div>
       </div>
 
@@ -149,9 +149,9 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         </div>
       ) : shown.length === 0 ? (
         <div className="grid place-items-center rounded-3xl border border-dashed p-10 text-center">
-          <p className="font-bold">{q ? "Nothing matches that." : "No public servers here yet."}</p>
+          <p className="font-bold">{q ? t("workspace.home.noMatch") : t("workspace.home.noServers")}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {q ? "Try another word." : "Make the first one, and set who can join to “Anyone here” so people can find it."}
+            {q ? t("workspace.home.tryAnother") : t("workspace.home.makeFirst")}
           </p>
         </div>
       ) : (
@@ -179,6 +179,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
 
 /** Servers that stay out of Browse are joined by invite: paste a link (from any fuwa server) or a code. */
 function HaveInvite({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [text, setText] = useState("");
   const [shake, setShake] = useState(0);
@@ -200,8 +201,8 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
           <TicketIcon className="size-5 -rotate-12" />
         </span>
         <span>
-          <span className="block font-extrabold">Have an invite?</span>
-          <span className="block text-xs text-muted-foreground">{bad ? "That doesn't look like an invite link." : "Paste the link or its code."}</span>
+          <span className="block font-extrabold">{t("workspace.home.invite.title")}</span>
+          <span className="block text-xs text-muted-foreground">{bad ? t("workspace.home.invite.bad") : t("workspace.home.invite.hint")}</span>
         </span>
       </span>
       <div key={shake} className={cn("flex flex-1 gap-2", shake > 0 && "shake")}>
@@ -212,7 +213,7 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
             setBad(false);
           }}
           placeholder="https://chat.example.com/invite/…"
-          aria-label="Invite link or code"
+          aria-label={t("workspace.home.invite.label")}
           aria-invalid={bad}
           autoCapitalize="none"
           autoCorrect="off"
@@ -220,7 +221,7 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
           className={cn("h-10 flex-1 rounded-xl", privateField)}
         />
         <Button type="submit" disabled={!text.trim()} className="group h-10 rounded-xl font-bold">
-          Open <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
+          {t("workspace.home.invite.open")} <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
         </Button>
       </div>
     </form>
@@ -228,6 +229,7 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
 }
 
 function ServerCard({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   return (
     <Tilt className="card-pop tilt h-full overflow-hidden rounded-3xl border bg-card">
@@ -238,12 +240,12 @@ function ServerCard({ instanceKey, server }: { instanceKey: string; server: Serv
           <div className="min-w-0">
             <p className="truncate text-lg font-extrabold">{server.name}</p>
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
-              <UsersIcon className="size-3.5" /> <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"}
+              <UsersIcon className="size-3.5" /> <T k="workspace.home.members" values={{ count: <Count value={Number(server.memberCount)} /> }} count={Number(server.memberCount)} />
             </p>
           </div>
         </div>
         <p className="line-clamp-3 flex-1 text-sm text-muted-foreground">
-          {server.description ? <InlineMarkdown>{server.description}</InlineMarkdown> : "No description yet."}
+          {server.description ? <InlineMarkdown>{server.description}</InlineMarkdown> : t("workspace.home.noDescription")}
         </p>
         <ServerDoor server={server} />
         <JoinButton

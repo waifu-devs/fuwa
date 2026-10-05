@@ -11,10 +11,12 @@ import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SsoGate, useSsoLocked } from "@/components/join/SsoGate";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/react";
 import { has } from "@/lib/permissions";
 
 /** A server with no channel picked: go to its first text channel once they're loaded. */
 export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const [creating, setCreating] = useState(false);
@@ -32,20 +34,20 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
     <div className="grid h-full place-items-center p-6 text-center">
       {compact && (
         <button type="button" onClick={() => setNavOpen(true)} className="absolute top-2 left-2 flex items-center gap-1 rounded-full px-3 py-2 text-sm font-bold text-muted-foreground hover:bg-muted">
-          <ChevronLeftIcon className="size-4" /> Channels
+          <ChevronLeftIcon className="size-4" /> {t("workspace.serverIndex.channels")}
         </button>
       )}
       <div className="flex flex-col items-center gap-3">
         <span className="float grid size-16 place-items-center rounded-full bg-primary/15 text-primary">
           <HashIcon className="size-8" />
         </span>
-        <p className="text-lg font-extrabold">No channels yet</p>
+        <p className="text-lg font-extrabold">{t("workspace.serverIndex.empty")}</p>
         {has(access, Permission.MANAGE_CHANNELS) ? (
           <Button onClick={() => setCreating(true)} className="btn rounded-xl font-bold">
-            <PlusIcon /> Create a channel
+            <PlusIcon /> {t("workspace.serverIndex.create")}
           </Button>
         ) : (
-          <p className="text-sm text-muted-foreground">None that you can see, anyway. Someone who runs the server can make one, or let you in.</p>
+          <p className="text-sm text-muted-foreground">{t("workspace.serverIndex.noneVisible")}</p>
         )}
       </div>
       <CreateChannelDialog open={creating} onOpenChange={setCreating} instanceKey={instanceKey} serverId={serverId} />

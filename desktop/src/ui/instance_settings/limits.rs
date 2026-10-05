@@ -160,12 +160,29 @@ impl InstanceSettingsView {
                 cx,
             ));
         }
+        // Agents' commands, on instances that run them.
+        if self.instance_has("agent-commands") {
+            page = page.child(self.setting(
+                "commands-per-minute",
+                "Agent commands per minute",
+                Some(
+                    "How many times one account may run agents' slash commands or press their buttons in a minute. \
+                     Each one wakes an agent up.",
+                ),
+                &["commands_per_minute"],
+                &per_minute_label(defaults.commands_per_minute),
+                9,
+                self.cap("commands_per_minute", "Up to", false, p, window, cx),
+                p,
+                cx,
+            ));
+        }
         page.into_any_element()
     }
 }
 
 /// Every cap a page shows: (path, a size), for the boxes they're typed in.
-pub(super) const CAPS: [(&str, bool); 19] = [
+pub(super) const CAPS: [(&str, bool); 22] = [
     ("servers_per_account", false),
     ("default_limits.members", false),
     ("default_limits.channels", false),
@@ -183,8 +200,11 @@ pub(super) const CAPS: [(&str, bool); 19] = [
     ("voice_message_bytes", true),
     ("voice_message_bytes_per_day", true),
     ("poll_votes_per_minute", false),
+    ("commands_per_minute", false),
     ("shared_remote_sends_per_minute", false),
     ("shared_remote_people", false),
+    ("shared_remote_file_bytes_per_day", true),
+    ("shared_file_fetches_in_flight", false),
 ];
 
 #[cfg(test)]

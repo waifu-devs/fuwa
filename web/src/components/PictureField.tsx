@@ -7,8 +7,9 @@ import { SPRING } from "@/components/motion";
 import { PictureCropper } from "@/components/PictureCropper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PICTURE, PICTURE_TYPES, type PictureKind } from "@/lib/pictures";
+import { PICTURE_TYPES, type PictureKind } from "@/lib/pictures";
 import { shownPicture } from "@/lib/shown";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const PURPOSE: Record<PictureKind, MediaPurpose> = {
@@ -67,7 +68,7 @@ export function PictureField({
   const [broken, setBroken] = useState(false);
   const shake = useAnimationControls();
   const cancel = useRef<(() => void) | null>(null);
-  const label = PICTURE[kind].label;
+  const { t } = useI18n();
   const busy = !!upload && !upload.done;
 
   useEffect(() => setBroken(false), [value]);
@@ -81,7 +82,7 @@ export function PictureField({
   function choose(file: File | undefined) {
     if (!file || disabled || busy) return;
     setError(null);
-    if (!PICTURE_TYPES.includes(file.type)) return fail("Pick a PNG, JPEG, GIF, WebP or AVIF picture.");
+    if (!PICTURE_TYPES.includes(file.type)) return fail(t("workspace.picture.wrongType"));
     // A GIF would stop moving if it were redrawn, so it goes up as it is.
     if (file.type === "image/gif") return void send(file);
     setPicked(URL.createObjectURL(file));
@@ -108,7 +109,7 @@ export function PictureField({
       if (!live) return;
       setUpload(null);
       URL.revokeObjectURL(preview);
-      fail(((err as Error).message || "the upload didn't go through").replace(/^./, (c) => c.toUpperCase()));
+      fail(((err as Error).message || t("workspace.picture.uploadFailed")).replace(/^./, (c) => c.toUpperCase()));
     }
   }
 
@@ -143,7 +144,7 @@ export function PictureField({
     <motion.button
       type="button"
       id={id}
-      aria-label={value ? `Change the ${label}` : `Upload ${label === "avatar" ? "an" : "a"} ${label}`}
+      aria-label={value ? t(`workspace.picture.change.${kind}`) : t(`workspace.picture.upload.${kind}`)}
       disabled={disabled || busy}
       onClick={() => input.current?.click()}
       animate={dragging ? { scale: 1.06 } : { scale: 1 }}
@@ -187,7 +188,7 @@ export function PictureField({
           <motion.span animate={dragging ? { y: [0, -3, 0] } : { y: 0 }} transition={{ duration: 0.8, repeat: dragging ? Infinity : 0 }}>
             {dragging ? <ImageUpIcon className="size-5" /> : <CameraIcon className="size-5 transition-transform group-hover:scale-110" />}
           </motion.span>
-          {dragging ? "Drop it" : "Change"}
+          {dragging ? t("workspace.picture.dropIt") : t("workspace.picture.changeShort")}
         </span>
       </span>
       <AnimatePresence>
@@ -239,7 +240,7 @@ export function PictureField({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Button type="button" variant="outline" disabled={disabled || busy} onClick={() => input.current?.click()} className="group rounded-xl">
               <ImageUpIcon className="transition-transform group-hover:-translate-y-0.5" />
-              {value ? "Change" : "Upload"}
+              {value ? t("workspace.picture.changeShort") : t("workspace.picture.uploadShort")}
             </Button>
             <AnimatePresence initial={false}>
               {value && (
@@ -266,7 +267,7 @@ export function PictureField({
               onClick={() => setLinking((l) => !l)}
               className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs font-bold text-muted-foreground transition hover:text-foreground"
             >
-              <LinkIcon className="size-3.5" /> {showLink ? "Hide link" : "Use a link"}
+              <LinkIcon className="size-3.5" /> {showLink ? t("workspace.picture.hideLink") : t("workspace.picture.useLink")}
             </button>
           </div>
         )}
@@ -280,7 +281,7 @@ export function PictureField({
                 type="url"
                 inputMode="url"
                 placeholder="https://…"
-                aria-label={`Link to the ${label}`}
+                aria-label={t(`workspace.picture.link.${kind}`)}
                 value={value}
                 disabled={disabled || busy}
                 onChange={(e) => onChange(e.target.value)}
@@ -296,7 +297,7 @@ export function PictureField({
                     exit={{ scale: 0, opacity: 0 }}
                     transition={SPRING}
                     onClick={() => onChange("")}
-                    aria-label="Clear the link"
+                    aria-label={t("workspace.picture.clearLink")}
                     className="absolute top-[calc(50%+2px)] right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
                   >
                     <XIcon className="size-4" />

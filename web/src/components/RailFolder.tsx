@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FOLDER_COLORS, FOLDER_NAME_MAX, folderHex, folderLabel, type RailFolder } from "@/lib/rail";
 import { setFolderOpen, useFolderOpen } from "@/lib/rail-open";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const folderStyle = (folder: Pick<RailFolder, "color">) => ({ "--folder": folderHex(folder.color) ?? "var(--primary)" }) as CSSProperties;
@@ -45,9 +46,10 @@ export function FolderBlock({
   onMenu: (e: React.MouseEvent) => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const open = useFolderOpen(instance, folder.id);
   const [hover, setHover] = useState(false);
-  const label = folderLabel(folder, servers);
+  const label = folderLabel(t, folder, servers);
   // Discord's left pill: shown for a closed folder holding the server on screen, or unread ones.
   const pill = !open && activeInside ? 40 : hover ? 20 : !open && unread > 0 ? 8 : 0;
   const tiles = folder.servers.slice(0, 4).flatMap((id) => {
@@ -78,7 +80,11 @@ export function FolderBlock({
             <button
               type="button"
               aria-expanded={open}
-              aria-label={`${label}, folder of ${folder.servers.length}${unread ? `, ${unread} unread` : ""}`}
+              aria-label={
+                unread
+                  ? t("workspace.rail.folder.ariaUnread", { name: label, count: folder.servers.length, unread })
+                  : t("workspace.rail.folder.aria", { name: label, count: folder.servers.length })
+              }
               onClick={() => setFolderOpen(instance, folder.id, !open)}
               onContextMenu={onMenu}
               className="relative rounded-[16px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -152,6 +158,7 @@ export function RailMenu({
   onNewFolder: (server: string) => void;
   onLeaveFolder: (server: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <DropdownMenu open={open && !!target} onOpenChange={(o) => !o && onClose()} modal={false}>
       <DropdownMenuTrigger asChild>
@@ -161,25 +168,25 @@ export function RailMenu({
         {target?.kind === "folder" && (
           <>
             <DropdownMenuItem onSelect={() => onToggle(target.id)}>
-              <FolderIcon /> Open or close
+              <FolderIcon /> {t("workspace.rail.folder.openClose")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onEdit(target.id)}>
-              <PaletteIcon /> Rename and recolor
+              <PaletteIcon /> {t("workspace.rail.folder.edit")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => onDissolve(target.id)}>
-              <Trash2Icon /> Dissolve folder
+              <Trash2Icon /> {t("workspace.rail.folder.dissolve")}
             </DropdownMenuItem>
           </>
         )}
         {target?.kind === "server" &&
           (target.folder ? (
             <DropdownMenuItem onSelect={() => onLeaveFolder(target.id)}>
-              <FolderMinusIcon /> Take out of folder
+              <FolderMinusIcon /> {t("workspace.rail.takeOut")}
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem onSelect={() => onNewFolder(target.id)}>
-              <FolderPlusIcon /> Put in a new folder
+              <FolderPlusIcon /> {t("workspace.rail.newFolder")}
             </DropdownMenuItem>
           ))}
       </DropdownMenuContent>
@@ -199,10 +206,11 @@ export function FolderDialog({
   onOpenChange: (open: boolean) => void;
   onSave: (name: string, color: number) => void;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog open={!!folder} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
-        <DialogHeader title="Folder" description="Only you see your folders, on every device you sign in on." />
+        <DialogHeader title={t("workspace.rail.folder.title")} description={t("workspace.rail.folder.about")} />
         {folder && <FolderForm key={folder.id} folder={folder} servers={servers} onSave={onSave} />}
       </DialogContent>
     </Dialog>
@@ -210,6 +218,7 @@ export function FolderDialog({
 }
 
 function FolderForm({ folder, servers, onSave }: { folder: RailFolder; servers: Map<string, Server>; onSave: (name: string, color: number) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState(folder.name);
   const [color, setColor] = useState(folder.color);
   const tiles = folder.servers.slice(0, 4).flatMap((id) => {
@@ -227,26 +236,26 @@ function FolderForm({ folder, servers, onSave }: { folder: RailFolder; servers: 
           <FolderTile open={false} tiles={tiles} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <Label htmlFor="folder-name">Name</Label>
+          <Label htmlFor="folder-name">{t("workspace.rail.folder.name")}</Label>
           <Input
             id="folder-name"
             value={name}
             maxLength={FOLDER_NAME_MAX}
-            placeholder={folderLabel({ ...folder, name: "" }, servers)}
+            placeholder={folderLabel(t, { ...folder, name: "" }, servers)}
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
         </div>
       </div>
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-2 text-sm font-bold">Color</legend>
+        <legend className="mb-2 text-sm font-bold">{t("workspace.rail.folder.color")}</legend>
         <div className="flex flex-wrap gap-2">
           {FOLDER_COLORS.map((c) => (
             <button
               key={c}
               type="button"
               aria-pressed={color === c}
-              aria-label={c ? folderHex(c)! : "Theme accent"}
+              aria-label={c ? folderHex(c)! : t("workspace.rail.folder.themeAccent")}
               onClick={() => setColor(c)}
               style={folderStyle({ color: c })}
               className={cn(
@@ -259,7 +268,7 @@ function FolderForm({ folder, servers, onSave }: { folder: RailFolder; servers: 
           ))}
         </div>
       </fieldset>
-      <Button type="submit">Save</Button>
+      <Button type="submit">{t("workspace.rail.folder.save")}</Button>
     </form>
   );
 }

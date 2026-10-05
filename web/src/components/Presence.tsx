@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityKind, PresenceStatus, type Activity, type Presence } from "@/gen/fuwa/v1/presence_pb";
 import { usePresence } from "@/fuwa/presence";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { i18n, type Key } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { shownPicture } from "@/lib/shown";
 import { reportUsage } from "@/lib/reports";
 import { cn } from "@/lib/utils";
@@ -22,18 +24,19 @@ const SHOWN: Record<number, Shown> = {
   [PresenceStatus.DO_NOT_DISTURB]: "dnd",
 };
 
-export const STATUS_LABEL: Record<Shown | "invisible", string> = {
-  online: "Online",
-  idle: "Idle",
-  dnd: "Do not disturb",
-  offline: "Offline",
-  invisible: "Invisible",
+export const STATUS_LABEL: Record<Shown | "invisible", Key> = {
+  online: "workspace.presence.status.online",
+  idle: "workspace.presence.status.idle",
+  dnd: "workspace.presence.status.dnd",
+  offline: "workspace.presence.status.offline",
+  invisible: "workspace.presence.status.invisible",
 };
 
 export const shownOf = (presence: Presence | undefined): Shown => (presence ? (SHOWN[presence.status] ?? "offline") : "offline");
 
 /** The dot itself, for a status already known. */
 export function StatusDot({ status, className }: { status: Shown; className?: string }) {
+  const { t } = useI18n();
   return (
     <motion.span
       key={status}
@@ -41,8 +44,8 @@ export function StatusDot({ status, className }: { status: Shown; className?: st
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 600, damping: 16 }}
       role="img"
-      aria-label={STATUS_LABEL[status]}
-      title={STATUS_LABEL[status]}
+      aria-label={t(STATUS_LABEL[status])}
+      title={t(STATUS_LABEL[status])}
       data-status={status}
       className={cn("presence-dot", className)}
     />
@@ -71,20 +74,21 @@ export function PresenceDot({
   return <StatusDot status={status} className={cn("ring-[3px] ring-card", className)} />;
 }
 
-const VERB: Record<number, string> = {
-  [ActivityKind.PLAYING]: "Playing",
-  [ActivityKind.STREAMING]: "Streaming",
-  [ActivityKind.LISTENING]: "Listening to",
-  [ActivityKind.WATCHING]: "Watching",
-  [ActivityKind.COMPETING]: "Competing in",
+/** "Playing {name}", "Listening to {name}"… by kind. */
+const LINE: Record<number, Key> = {
+  [ActivityKind.PLAYING]: "workspace.presence.line.playing",
+  [ActivityKind.STREAMING]: "workspace.presence.line.streaming",
+  [ActivityKind.LISTENING]: "workspace.presence.line.listening",
+  [ActivityKind.WATCHING]: "workspace.presence.line.watching",
+  [ActivityKind.COMPETING]: "workspace.presence.line.competing",
 };
 
-const HEADING: Record<number, string> = {
-  [ActivityKind.PLAYING]: "Playing a game",
-  [ActivityKind.STREAMING]: "Streaming",
-  [ActivityKind.LISTENING]: "Listening",
-  [ActivityKind.WATCHING]: "Watching",
-  [ActivityKind.COMPETING]: "Competing",
+const HEADING: Record<number, Key> = {
+  [ActivityKind.PLAYING]: "workspace.presence.heading.playing",
+  [ActivityKind.STREAMING]: "workspace.presence.heading.streaming",
+  [ActivityKind.LISTENING]: "workspace.presence.heading.listening",
+  [ActivityKind.WATCHING]: "workspace.presence.heading.watching",
+  [ActivityKind.COMPETING]: "workspace.presence.heading.competing",
 };
 
 const ICON: Record<number, LucideIcon> = {
@@ -94,9 +98,6 @@ const ICON: Record<number, LucideIcon> = {
   [ActivityKind.WATCHING]: TvIcon,
   [ActivityKind.COMPETING]: TrophyIcon,
 };
-
-/** "Playing", "Listening to"… */
-export const activityVerb = (a: Activity) => VERB[a.kind] ?? "Playing";
 
 // ─────────────── Timers ───────────────
 
@@ -145,7 +146,9 @@ export function ActivityTimer({ activity, className }: { activity: Activity; cla
   useEffect(() => {
     const el = ref.current;
     if (!el || (!start && !end)) return;
-    return watchTimer(el, () => (end ? `${clockText(end - Date.now())} left` : `${clockText(Date.now() - start)} elapsed`));
+    return watchTimer(el, () =>
+      end ? i18n().t("workspace.presence.left", { time: clockText(end - Date.now()) }) : i18n().t("workspace.presence.elapsed", { time: clockText(Date.now() - start) }),
+    );
   }, [start, end]);
   if (!start && !end) return null;
   return <span ref={ref} className={cn("tabular-nums", className)} />;
@@ -157,7 +160,7 @@ export function ActivityTimer({ activity, className }: { activity: Activity; cla
 export function ActivityLine({ activity, className }: { activity: Activity; className?: string }) {
   return (
     <span className={cn("truncate", className)}>
-      {activityVerb(activity)} <b className="font-bold text-foreground/85">{activity.name}</b>
+      <T k={(Object.hasOwn(LINE, activity.kind) ? LINE[activity.kind] : undefined) ?? LINE[ActivityKind.PLAYING]!} values={{ name: <b className="font-bold text-foreground/85">{activity.name}</b> }} />
     </span>
   );
 }
@@ -184,13 +187,14 @@ export function ActivityCards({ instanceKey, userId }: { instanceKey: string; us
 }
 
 export function ActivityCard({ activity: a }: { activity: Activity }) {
+  const { t } = useI18n();
   const Icon = ICON[a.kind] ?? Gamepad2Icon;
   const large = shownPicture(a.largeImageUrl);
   const small = shownPicture(a.smallImageUrl);
   const [leaving, setLeaving] = useState<{ label: string; url: string } | null>(null);
   return (
     <div className="mt-3 rounded-2xl bg-muted/60 p-3">
-      <p className="mb-2 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{HEADING[a.kind] ?? "Playing a game"}</p>
+      <p className="mb-2 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t((Object.hasOwn(HEADING, a.kind) ? HEADING[a.kind] : undefined) ?? HEADING[ActivityKind.PLAYING]!)}</p>
       <div className="flex items-center gap-3">
         <span className="relative shrink-0">
           {large ? (
@@ -217,7 +221,7 @@ export function ActivityCard({ activity: a }: { activity: Activity }) {
           {(a.state || a.partyMax > 0) && (
             <span className="block truncate">
               {a.state}
-              {a.partyMax > 0 && ` (${a.partySize} of ${a.partyMax})`}
+              {a.partyMax > 0 && ` ${t("workspace.presence.party", { size: a.partySize, max: a.partyMax })}`}
             </span>
           )}
           <ActivityTimer activity={a} className="block text-xs text-muted-foreground" />
@@ -254,6 +258,7 @@ const hostOf = (url: string) => {
 /** Before following a link someone's activity carries: says where it goes. */
 function LeaveDialog({ link, onClose }: { link: { label: string; url: string } | null; onClose: () => void }) {
   // Kept while the dialog closes, so its text doesn't vanish mid-animation.
+  const { t } = useI18n();
   const [shown, setShown] = useState(link);
   if (link && link !== shown) setShown(link);
   const host = shown ? hostOf(shown.url) : "";
@@ -261,11 +266,11 @@ function LeaveDialog({ link, onClose }: { link: { label: string; url: string } |
   return (
     <Dialog open={!!link} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        <DialogHeader title={`Open ${host || "this link"}?`} description="This link comes from a game or app, not from fuwa. That site will see your IP address." />
+        <DialogHeader title={t("workspace.presence.leave.title", { host: host || t("workspace.presence.leave.thisLink") })} description={t("workspace.presence.leave.about")} />
         <p className="rounded-xl bg-muted px-3 py-2 font-mono text-xs break-all">{shown?.url}</p>
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-bold transition hover:bg-muted">
-            Stay here
+            {t("workspace.presence.leave.stay")}
           </button>
           <button
             type="button"
@@ -278,7 +283,7 @@ function LeaveDialog({ link, onClose }: { link: { label: string; url: string } |
             }}
             className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition hover:brightness-110 disabled:opacity-50"
           >
-            Open {host}
+            {t("workspace.presence.leave.open", { host })}
           </button>
         </div>
       </DialogContent>

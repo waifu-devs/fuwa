@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArrange } from "@/hooks/use-arrange";
 import { layoutOf, placements } from "@/lib/arrange";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { isMuted, MUTE_FOR, muteForLabel, mutedHint, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
@@ -86,13 +86,13 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
     <>
       {isMuted(settings, now) ? (
         <DropdownMenuItem onSelect={() => void mute(false)}>
-          <BellIcon /> Unmute server
+          <BellIcon /> {t("workspace.sidebar.unmuteServer")}
           <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedHint(t, settings, now)}</span>
         </DropdownMenuItem>
       ) : (
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
-            <BellOffIcon /> Mute server
+            <BellOffIcon /> {t("workspace.sidebar.muteServer")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-52">
             {MUTE_FOR.map((m) => (
@@ -104,7 +104,7 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
         </DropdownMenuSub>
       )}
       <DropdownMenuItem onSelect={() => openSettings("server-notifications", serverId)}>
-        <BellRingIcon /> Notification settings
+        <BellRingIcon /> {t("workspace.sidebar.notificationSettings")}
       </DropdownMenuItem>
     </>
   );
@@ -172,12 +172,15 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                 <SwapText className="truncate align-bottom">{server?.name ?? "…"}</SwapText>
               </span>
               <span className="block truncate text-xs text-muted-foreground">
-                {server && (
-                  <>
-                    <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"} ·{" "}
-                  </>
+                {server ? (
+                  <T
+                    k="workspace.sidebar.membersOn"
+                    values={{ count: <Count value={Number(server.memberCount)} />, place: nodeName ?? <Private text={instanceKey} /> }}
+                    count={Number(server.memberCount)}
+                  />
+                ) : (
+                  (nodeName ?? <Private text={instanceKey} />)
                 )}
-                {nodeName ?? <Private text={instanceKey} />}
               </span>
             </span>
             <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
@@ -186,18 +189,18 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         <DropdownMenuContent align="start" className="w-60">
           {inviteTo !== null && (
             <DropdownMenuItem onSelect={() => setInviting(inviteTo)} className="font-bold text-primary focus:text-primary [&_svg]:text-primary">
-              <UserPlusIcon /> Invite people
+              <UserPlusIcon /> {t("workspace.sidebar.invite")}
             </DropdownMenuItem>
           )}
           {inviteTo !== null && <DropdownMenuSeparator />}
           {settingsTabs.length > 0 && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: settingsTabs[0]! })}>
-              <SettingsIcon /> Server settings
+              <SettingsIcon /> {t("workspace.sidebar.serverSettings")}
             </DropdownMenuItem>
           )}
           {reviews && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: "applications" })}>
-              <ClipboardListIcon /> Applications
+              <ClipboardListIcon /> {t("workspace.sidebar.applications")}
               {waiting > 0 && (
                 <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.65rem] font-extrabold text-white">
                   <Count value={waiting} max={99} />
@@ -207,33 +210,33 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           )}
           {usage && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: "usage" })}>
-              <ChartColumnIcon /> Usage
+              <ChartColumnIcon /> {t("workspace.sidebar.usage")}
             </DropdownMenuItem>
           )}
           {canCreate && (
             <DropdownMenuItem onSelect={() => setCreating({ parentId: "" })}>
-              <PlusIcon /> Create channel
+              <PlusIcon /> {t("workspace.sidebar.createChannel")}
             </DropdownMenuItem>
           )}
           {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
           {server?.hasRules && (
             <DropdownMenuItem onSelect={() => setReading(true)}>
-              <ScrollTextIcon /> Server rules
+              <ScrollTextIcon /> {t("workspace.sidebar.rules")}
             </DropdownMenuItem>
           )}
           {(server?.hasWelcomeScreen || server?.hasOnboarding) && (
             <DropdownMenuItem onSelect={() => setWelcoming(true)}>
-              <PartyPopperIcon /> {server.hasOnboarding ? "Channels & roles" : "Welcome screen"}
+              <PartyPopperIcon /> {server.hasOnboarding ? t("workspace.sidebar.channelsRoles") : t("workspace.sidebar.welcomeScreen")}
             </DropdownMenuItem>
           )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
-            <IdCardIcon /> Edit server profile
+            <IdCardIcon /> {t("workspace.sidebar.editServerProfile")}
           </DropdownMenuItem>
           {developer && (
             <DropdownMenuItem onSelect={() => copy(t, serverId, t("common.copy.serverId"))}>
-              <FingerprintIcon /> Copy server ID
+              <FingerprintIcon /> {t("workspace.sidebar.copyServerId")}
             </DropdownMenuItem>
           )}
           {!owner && <DropdownMenuSeparator />}
@@ -246,7 +249,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                   navigate({ to: "/$instance", params: { instance: instanceKey } });
               }}
             >
-              <DoorOpenIcon /> Leave server
+              <DoorOpenIcon /> {t("workspace.sidebar.leaveServer")}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -269,7 +272,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                 <motion.span aria-hidden animate={{ scale: [1, 1.6], opacity: [0.6, 0] }} transition={{ duration: 1.6, repeat: Infinity }} className="absolute inset-0 rounded-lg bg-primary" />
               </span>
               <span className="min-w-0 flex-1 truncate">
-                <Count value={waiting} /> {waiting === 1 ? "person wants" : "people want"} to join
+                <T k="workspace.sidebar.waiting" values={{ count: <Count value={waiting} /> }} count={waiting} />
               </span>
               <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
             </motion.button>
@@ -293,7 +296,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
                 <LockKeyholeIcon className="size-4 transition-transform group-hover:-rotate-12" />
               </span>
-              <span className="min-w-0 flex-1 truncate">Sign in with {server.ssoName || "your organization"}</span>
+              <span className="min-w-0 flex-1 truncate">{t("workspace.sidebar.ssoSignIn", { provider: server.ssoName || t("workspace.sidebar.ssoYourOrganization") })}</span>
               <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
             </motion.button>
           )}
@@ -403,6 +406,7 @@ function CategoryRow({
   onMenuEdit: ChannelMenuActions["edit"];
   ref?: Ref<HTMLLIElement>;
 }) {
+  const { t } = useI18n();
   const menu = useContextMenu("category", () =>
     categoryMenu(
       { instanceKey, serverId: category.serverId, category },
@@ -449,7 +453,7 @@ function CategoryRow({
         <button
           type="button"
           data-arrange-skip
-          aria-label={`Create a channel in ${category.name}`}
+          aria-label={t("workspace.sidebar.createIn", { category: category.name })}
           onClick={onAdd}
           className="grid size-5 place-items-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:rotate-90 hover:text-foreground"
         >
@@ -488,6 +492,7 @@ function ChannelRow({
   /** Opens its settings (or its permissions) from its right-click menu. */
   onMenuEdit: ChannelMenuActions["edit"];
 }) {
+  const { t } = useI18n();
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
   const { compact, setNavOpen } = useLayout();
@@ -538,7 +543,7 @@ function ChannelRow({
           transition={SPRING}
           className="absolute top-1/2 -left-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
         />
-        <span className="relative shrink-0" title={locked ? "Private channel" : undefined}>
+        <span className="relative shrink-0" title={locked ? t("workspace.sidebar.privateChannel") : undefined}>
           <Icon
             className={cn(
               "size-[18px] opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
@@ -565,8 +570,8 @@ function ChannelRow({
           <span
             role="button"
             tabIndex={-1}
-            aria-label={`Invite people to #${channel.name}`}
-            title="Invite people"
+            aria-label={t("workspace.sidebar.inviteTo", { channel: channel.name })}
+            title={t("workspace.sidebar.invite")}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -584,8 +589,8 @@ function ChannelRow({
           <span
             role="button"
             tabIndex={-1}
-            aria-label={`Edit #${channel.name}`}
-            title="Edit channel"
+            aria-label={t("workspace.sidebar.editChannelNamed", { channel: channel.name })}
+            title={t("workspace.sidebar.editChannel")}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -610,7 +615,7 @@ function ChannelRow({
               exit={{ scale: 0, rotate: 30 }}
               transition={{ type: "spring", stiffness: 600, damping: 18 }}
               className="ml-auto shrink-0"
-              aria-label="Muted"
+              aria-label={t("workspace.sidebar.muted")}
             >
               <BellOffIcon className="size-3.5" />
             </motion.span>

@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AnimatePresence, motion } from "motion/react";
 import { XIcon } from "lucide-react";
 import { createContext, useContext, type ReactNode } from "react";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -41,6 +42,7 @@ export function DialogContent({
   wide?: boolean;
 }) {
   const open = useContext(OpenContext);
+  const { t } = useI18n();
   return (
     <AnimatePresence>
       {open && (
@@ -70,7 +72,7 @@ export function DialogContent({
                 {children}
                 <DialogPrimitive.Close className="absolute top-4 right-4 grid size-8 place-items-center rounded-full text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground">
                   <XIcon className="size-4" />
-                  <span className="sr-only">Close</span>
+                  <span className="sr-only">{t("common.close")}</span>
                 </DialogPrimitive.Close>
               </motion.div>
             </DialogPrimitive.Content>

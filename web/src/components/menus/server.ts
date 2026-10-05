@@ -1,4 +1,5 @@
 import { CheckCheckIcon, DoorOpenIcon, IdCardIcon, SettingsIcon, UserPlusIcon } from "lucide-react";
+import { i18n } from "@/i18n/i18n";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, markServerRead, run } from "@/fuwa/actions";
 import { accessNow, getInstance } from "@/fuwa/hooks";
@@ -28,14 +29,15 @@ export function serverMenu(ctx: MenuContexts["server"]): MenuSection[] {
     ? ""
     : (openableChannels(channels).find((c) => hasIn(access, c.id, Permission.CREATE_INVITE))?.id ?? null);
   const tabs = settingsTabsFor(access, !!inst?.admin);
+  const { t } = i18n();
   return withExtensions("server", ctx, [
     {
       id: "primary",
       items: items(
-        { id: "mark-read", label: "Mark as read", icon: CheckCheckIcon, disabled: !unread, onSelect: () => markServerRead(instanceKey, server.id) },
+        { id: "mark-read", label: t("workspace.menu.markRead"), icon: CheckCheckIcon, disabled: !unread, onSelect: () => markServerRead(instanceKey, server.id) },
         inviteTo !== null && {
           id: "invite",
-          label: "Invite people",
+          label: t("workspace.menu.invite"),
           icon: UserPlusIcon,
           onSelect: () => openMenuDialog({ kind: "invite", instanceKey, serverId: server.id, channelId: inviteTo }),
         },
@@ -47,11 +49,11 @@ export function serverMenu(ctx: MenuContexts["server"]): MenuSection[] {
       items: items(
         tabs.length > 0 && {
           id: "settings",
-          label: "Server settings",
+          label: t("workspace.menu.server.settings"),
           icon: SettingsIcon,
           onSelect: () => openMenuDialog({ kind: "server-settings", instanceKey, server, tab: tabs[0]! }),
         },
-        { id: "server-profile", label: "Edit server profile", icon: IdCardIcon, onSelect: () => openSettings("server-profiles", server.id) },
+        { id: "server-profile", label: t("workspace.menu.server.editProfile"), icon: IdCardIcon, onSelect: () => openSettings("server-profiles", server.id) },
       ),
     },
     { id: "developer", items: items(copyIdItem(server.id, "server")) },
@@ -60,14 +62,14 @@ export function serverMenu(ctx: MenuContexts["server"]): MenuSection[] {
       items: items(
         !access.owner && {
           id: "leave",
-          label: "Leave server",
+          label: t("workspace.menu.server.leave"),
           icon: DoorOpenIcon,
           danger: true,
           onSelect: () =>
             confirmFirst({
-              title: `Leave ${server.name}?`,
-              body: "You'll need an invite, or to find it again in Browse, to come back.",
-              action: "Leave server",
+              title: t("workspace.menu.server.leaveTitle", { name: server.name }),
+              body: t("workspace.menu.server.leaveBody"),
+              action: t("workspace.menu.server.leave"),
               run: async () => {
                 await run(leaveServer(instanceKey, server.id));
                 // Off the server's pages, if you were on one.

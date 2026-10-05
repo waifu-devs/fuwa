@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { centered, clampCrop, cropped, MAX_ZOOM, PICTURE, placement, zoomAround, type Crop, type PictureKind } from "@/lib/pictures";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -26,6 +27,7 @@ export function PictureCropper({
   onCancel: () => void;
   onDone: (picture: Blob) => void;
 }) {
+  const { t } = useI18n();
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -38,18 +40,17 @@ export function PictureCropper({
     let live = true;
     const img = new Image();
     img.onload = () => live && setImage(img);
-    img.onerror = () => live && setFailed("That file isn't a picture this browser can open.");
+    img.onerror = () => live && setFailed(t("workspace.picture.notPicture"));
     img.src = src;
     return () => {
       live = false;
     };
-  }, [src]);
+  }, [src, t]);
 
-  const shape = PICTURE[kind];
   return (
     <Dialog open={!!src} onOpenChange={(open) => !open && !saving && onCancel()}>
       <DialogContent wide={kind === "banner"}>
-        <DialogHeader title={`Frame your ${shape.label}`} description="Drag to move it and zoom to fit. It's saved just as the frame shows." />
+        <DialogHeader title={t(`workspace.picture.frame.${kind}`)} description={t("workspace.picture.frameAbout")} />
         {failed ? (
           <p className="rounded-2xl bg-destructive/10 p-4 text-sm font-bold text-destructive">{failed}</p>
         ) : (
@@ -62,9 +63,9 @@ export function PictureCropper({
               if (!image) return;
               setSaving(true);
               try {
-                onDone(await cropped(image, crop, kind, frame));
+                onDone(await cropped(t, image, crop, kind, frame));
               } catch (err) {
-                setFailed(err instanceof Error ? err.message : "Couldn't crop that picture.");
+                setFailed(err instanceof Error ? err.message : t("workspace.picture.cropFailed"));
                 setSaving(false);
               }
             }}
@@ -88,6 +89,7 @@ function Framer({
   onCancel: () => void;
   onDone: (crop: Crop, frame: { width: number; height: number }) => void;
 }) {
+  const { t, number } = useI18n();
   const shape = PICTURE[kind];
   const box = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
@@ -183,7 +185,7 @@ function Framer({
         ref={box}
         tabIndex={0}
         role="application"
-        aria-label={`Frame your ${shape.label}: drag or use the arrow keys to move, scroll or + and - to zoom`}
+        aria-label={t(`workspace.picture.frameAria.${kind}`)}
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
@@ -242,7 +244,7 @@ function Framer({
               transition={SPRING}
               className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-xs font-bold whitespace-nowrap text-white"
             >
-              <MoveIcon className="size-3.5" /> Drag to move
+              <MoveIcon className="size-3.5" /> {t("workspace.picture.dragToMove")}
             </motion.span>
           )}
         </AnimatePresence>
@@ -251,7 +253,7 @@ function Framer({
       <div className="flex items-center gap-3">
         <button
           type="button"
-          aria-label="Zoom out"
+          aria-label={t("workspace.picture.zoomOut")}
           disabled={!ready || shown.zoom <= 1}
           onClick={() => zoomTo(shown.zoom / 1.25)}
           className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
@@ -259,18 +261,18 @@ function Framer({
           <ZoomOutIcon className="size-4" />
         </button>
         <Slider
-          label="Zoom"
+          label={t("workspace.picture.zoom")}
           value={shown.zoom}
           min={1}
           max={MAX_ZOOM}
           step={0.01}
-          format={(z) => `${Math.round(z * 100)}%`}
+          format={(z) => number(Math.round(z * 100) / 100, { style: "percent" })}
           onChange={zoomTo}
           className="flex-1"
         />
         <button
           type="button"
-          aria-label="Zoom in"
+          aria-label={t("workspace.picture.zoomIn")}
           disabled={!ready || shown.zoom >= MAX_ZOOM}
           onClick={() => zoomTo(shown.zoom * 1.25)}
           className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
@@ -287,13 +289,13 @@ function Framer({
           onClick={() => size && setCrop(centered(size))}
           className="group mr-auto rounded-xl"
         >
-          <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-180" /> Reset
+          <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-180" /> {t("workspace.picture.reset")}
         </Button>
         <Button type="button" variant="ghost" disabled={saving} onClick={onCancel} className="rounded-xl">
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="button" disabled={!ready || saving} onClick={() => onDone(shown, frame)} className="btn group rounded-xl px-4 font-bold">
-          <CheckIcon className="transition-transform group-hover:scale-125" /> Use it
+          <CheckIcon className="transition-transform group-hover:scale-125" /> {t("workspace.picture.useIt")}
         </Button>
       </div>
     </div>

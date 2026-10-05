@@ -18,7 +18,7 @@ import { Private } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
-import { i18n } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { expiresAt, timeLeft } from "@/lib/invites";
 import { accentVars } from "@/lib/banner";
 import { allowPicturesFrom } from "@/lib/shown";
@@ -34,6 +34,8 @@ type Found = Effect.Effect.Success<ReturnType<typeof lookUpInvite>>;
  * make one right here, then go straight in.
  */
 export function InvitePage({ instanceKey, code }: { instanceKey: string; code: string }) {
+  const lang = useI18n();
+  const { t } = lang;
   const navigate = useNavigate();
   const { compact, setNavOpen } = useLayout();
   const [found, setFound] = useState<Found | null>(null);
@@ -87,7 +89,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
       />
       {compact && (
         <button type="button" onClick={() => setNavOpen(true)} className="m-2 flex items-center gap-1 rounded-full px-3 py-2 text-sm font-bold text-muted-foreground hover:bg-muted">
-          <ChevronLeftIcon className="size-4" /> Servers
+          <ChevronLeftIcon className="size-4" /> {t("workspace.invitePage.servers")}
         </button>
       )}
       <div className="grid min-h-[calc(100%-3.5rem)] place-items-center p-4 sm:min-h-full">
@@ -123,7 +125,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                   >
                     <UserAvatar user={found.inviter} className="size-5 text-[0.55rem]" />
                     <span className="truncate">
-                      <b className="text-white">{displayName(found.inviter)}</b> invited you to join
+                      <T k="workspace.invitePage.invitedYou" values={{ name: <b className="text-white">{displayName(found.inviter)}</b> }} />
                     </span>
                   </motion.p>
                 )}
@@ -140,8 +142,8 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 <h1 className="relative mt-1 text-2xl font-extrabold tracking-tight">{found.server.name}</h1>
                 <p className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <UsersIcon className="size-3.5" /> <Count value={Number(found.server.memberCount)} />{" "}
-                    {found.server.memberCount === 1n ? "member" : "members"}
+                    <UsersIcon className="size-3.5" />{" "}
+                    <T k="workspace.invitePage.members" values={{ count: <Count value={Number(found.server.memberCount)} /> }} count={Number(found.server.memberCount)} />
                   </span>
                   {found.channelName && (
                     <span className="flex items-center gap-0.5 font-bold text-foreground">
@@ -159,7 +161,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 {!signedOut && (
                   <p className="relative flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
                     <span>
-                      on <b>{found.node.name}</b> · <Private text={instanceKey} />
+                      <T k="workspace.invitePage.on" values={{ name: <b>{found.node.name}</b>, address: <Private text={instanceKey} /> }} />
                     </span>
                     <HostedBadge url={found.url} className="ml-1" />
                   </p>
@@ -168,7 +170,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
               <div className="border-t bg-background/40 p-6 sm:p-8">
                 {signedOut ? (
                   <div className="flex flex-col gap-3">
-                    <p className="text-center text-sm text-muted-foreground">Sign in, or make an account on this fuwa server, to join.</p>
+                    <p className="text-center text-sm text-muted-foreground">{t("workspace.invitePage.signIn")}</p>
                     <Account
                       url={found.url}
                       node={found.node}
@@ -190,14 +192,14 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                     inviteCode={code}
                     auto={justSignedIn}
                     size="lg"
-                    openLabel="You're already in. Open it"
+                    openLabel={t("workspace.invitePage.alreadyIn")}
                     onOpen={open}
                   />
                 )}
                 {(() => {
                   const until = expiresAt(found.invite);
                   return until ? (
-                    <p className="mt-3 text-center text-xs text-muted-foreground">This invite expires in {timeLeft(i18n(), until.getTime() - Date.now())}.</p>
+                    <p className="mt-3 text-center text-xs text-muted-foreground">{t("workspace.invitePage.expiresIn", { time: timeLeft(lang, until.getTime() - Date.now()) })}</p>
                   ) : null;
                 })()}
               </div>
@@ -230,6 +232,7 @@ function knownInstance(address: string): boolean {
 
 /** Asks before opening an invite on an instance this browser has never talked to. */
 function Elsewhere({ address, onContinue }: { address: string; onContinue: () => void }) {
+  const { t } = useI18n();
   let host = address;
   try {
     host = new URL(normalizeUrl(address)).host;
@@ -254,19 +257,18 @@ function Elsewhere({ address, onContinue }: { address: string; onContinue: () =>
           <GlobeIcon className="size-7" />
         </motion.span>
       </motion.span>
-      <h1 className="text-xl font-extrabold">Open this invite on another fuwa?</h1>
+      <h1 className="text-xl font-extrabold">{t("workspace.invitePage.elsewhere.title")}</h1>
       <p className="text-sm text-muted-foreground">
-        This invite is for a server on <b className="text-foreground [overflow-wrap:anywhere]">{host}</b>, which you haven't added yet. Opening it
-        connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link.
+        <T k="workspace.invitePage.elsewhere.about" values={{ host: <b className="text-foreground [overflow-wrap:anywhere]">{host}</b> }} />
       </p>
       <div className="mt-1 flex w-full flex-col gap-2 sm:flex-row-reverse">
         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="flex-1">
           <Button onClick={onContinue} className="btn w-full rounded-xl font-bold">
-            Continue to {host}
+            {t("workspace.invitePage.elsewhere.continue", { host })}
           </Button>
         </motion.div>
         <Button asChild variant="ghost" className="flex-1 rounded-xl font-bold">
-          <Link to="/">Go back</Link>
+          <Link to="/">{t("workspace.invitePage.elsewhere.back")}</Link>
         </Button>
       </div>
     </motion.div>
@@ -274,6 +276,7 @@ function Elsewhere({ address, onContinue }: { address: string; onContinue: () =>
 }
 
 function Broken({ problem }: { problem: FuwaError }) {
+  const { t } = useI18n();
   const gone = problem.code === Code.NotFound;
   return (
     <motion.div
@@ -291,12 +294,12 @@ function Broken({ problem }: { problem: FuwaError }) {
       >
         <Link2OffIcon className="size-7" />
       </motion.span>
-      <h1 className="text-xl font-extrabold">{gone ? "This invite doesn't work anymore" : "Couldn't open this invite"}</h1>
+      <h1 className="text-xl font-extrabold">{gone ? t("workspace.invitePage.broken.gone") : t("workspace.invitePage.broken.failed")}</h1>
       <p className="text-sm text-muted-foreground first-letter:uppercase">
-        {gone ? "It may have expired, been used up, or been taken back. Ask whoever sent it for a new one." : problem.message}
+        {gone ? t("workspace.invitePage.broken.goneAbout") : problem.message}
       </p>
       <Button asChild className="btn mt-1 rounded-xl font-bold">
-        <Link to="/">Go to your servers</Link>
+        <Link to="/">{t("workspace.invitePage.broken.home")}</Link>
       </Button>
     </motion.div>
   );

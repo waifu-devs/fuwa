@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 41] = [
+pub const PATHS: [&str; 46] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -148,6 +148,8 @@ pub const PATHS: [&str; 41] = [
     "agent_creation",
     "shared_channels",
     "mcp",
+    "profile_effects",
+    "rich_presence",
     "servers_per_account",
     "default_limits.members",
     "default_limits.channels",
@@ -163,6 +165,7 @@ pub const PATHS: [&str; 41] = [
     "voice_message_bytes",
     "voice_message_bytes_per_day",
     "poll_votes_per_minute",
+    "commands_per_minute",
     "telemetry",
     "web",
     "calls",
@@ -177,6 +180,8 @@ pub const PATHS: [&str; 41] = [
     "federation_blocked_hosts",
     "shared_remote_sends_per_minute",
     "shared_remote_people",
+    "shared_remote_file_bytes_per_day",
+    "shared_file_fetches_in_flight",
 ];
 
 /// A default cap, or `None` for one that isn't there.
@@ -207,8 +212,11 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "voice_message_bytes" => s.voice_message_bytes,
         "voice_message_bytes_per_day" => s.voice_message_bytes_per_day,
         "poll_votes_per_minute" => s.poll_votes_per_minute,
+        "commands_per_minute" => s.commands_per_minute,
         "shared_remote_sends_per_minute" => s.shared_remote_sends_per_minute,
         "shared_remote_people" => s.shared_remote_people,
+        "shared_remote_file_bytes_per_day" => s.shared_remote_file_bytes_per_day,
+        "shared_file_fetches_in_flight" => s.shared_file_fetches_in_flight,
         _ => limit(s, path),
     }
 }
@@ -227,8 +235,11 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "voice_message_bytes" => &mut s.voice_message_bytes,
         "voice_message_bytes_per_day" => &mut s.voice_message_bytes_per_day,
         "poll_votes_per_minute" => &mut s.poll_votes_per_minute,
+        "commands_per_minute" => &mut s.commands_per_minute,
         "shared_remote_sends_per_minute" => &mut s.shared_remote_sends_per_minute,
         "shared_remote_people" => &mut s.shared_remote_people,
+        "shared_remote_file_bytes_per_day" => &mut s.shared_remote_file_bytes_per_day,
+        "shared_file_fetches_in_flight" => &mut s.shared_file_fetches_in_flight,
         _ => {
             let l = s.default_limits.get_or_insert_with(Default::default);
             match path {
@@ -265,6 +276,8 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "agent_creation" => a.agent_creation != b.agent_creation,
         "shared_channels" => a.shared_channels != b.shared_channels,
         "mcp" => a.mcp != b.mcp,
+        "profile_effects" => a.profile_effects != b.profile_effects,
+        "rich_presence" => a.rich_presence != b.rich_presence,
         "telemetry" => a.telemetry != b.telemetry,
         "web" => a.web != b.web,
         "calls" => a.calls != b.calls,
@@ -306,6 +319,8 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "agent_creation" => into.agent_creation = from.agent_creation,
         "shared_channels" => into.shared_channels = from.shared_channels,
         "mcp" => into.mcp = from.mcp,
+        "profile_effects" => into.profile_effects = from.profile_effects,
+        "rich_presence" => into.rich_presence = from.rich_presence,
         "telemetry" => into.telemetry = from.telemetry,
         "web" => into.web = from.web,
         "calls" => into.calls = from.calls,
@@ -429,6 +444,8 @@ pub fn per_minute_label(n: Option<i64>) -> String {
 pub fn starting_cap(path: &str) -> i64 {
     match path {
         "poll_votes_per_minute" => 30,
+        "commands_per_minute" => 20,
+        "shared_file_fetches_in_flight" => 8,
         "shared_remote_sends_per_minute" => 120,
         "shared_remote_people" => 500,
         "voice_message_seconds" => 300,

@@ -11,7 +11,7 @@ import { usePrivateField } from "@/components/Private";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
-import { i18n } from "@/i18n/i18n";
+import { useI18n } from "@/i18n/react";
 import { DEFAULT_INVITE, EXPIRE_AFTER, MAX_USES, expiresAt, inviteLink, timeLeft, works } from "@/lib/invites";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,8 @@ export function InviteDialog({
   /** The channel it opens for newcomers, or none for the server. */
   channelId?: string;
 }) {
+  const lang = useI18n();
+  const { t } = lang;
   const inst = useInstance(instanceKey);
   const server = inst?.servers.find((s) => s.id === serverId);
   const channel = channelId ? inst?.channels[serverId]?.find((c) => c.id === channelId) : undefined;
@@ -98,7 +100,7 @@ export function InviteDialog({
         clearTimeout(copiedTimer.current);
         copiedTimer.current = setTimeout(() => setCopied(false), 1600);
       },
-      () => toast("Couldn't copy the link"),
+      () => toast(t("workspace.invite.copyFailed")),
     );
   }
 
@@ -130,7 +132,7 @@ export function InviteDialog({
                 </motion.span>
               )}
               <span className="min-w-0">
-                <span className="block truncate">Invite people to {server?.name ?? "this server"}</span>
+                <span className="block truncate">{t("workspace.invite.title", { server: server?.name ?? t("workspace.invite.thisServer") })}</span>
                 {channel && (
                   <span className="flex items-center gap-1 text-sm font-bold text-muted-foreground">
                     <HashIcon className="size-3.5" />
@@ -140,10 +142,10 @@ export function InviteDialog({
               </span>
             </span>
           }
-          description="Send this link to anyone. It works even when the server isn't in Browse."
+          description={t("workspace.invite.about")}
         />
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Invite link</span>
+          <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("workspace.invite.link")}</span>
           <div
             className={cn(
               "flex items-center gap-2 rounded-xl border bg-background/60 p-1.5 pl-3 transition-colors duration-300",
@@ -186,7 +188,7 @@ export function InviteDialog({
                     className="flex items-center gap-1.5"
                   >
                     {copied ? <CheckIcon className="size-4" strokeWidth={3} /> : <CopyIcon className="size-4" />}
-                    {copied ? "Copied" : "Copy"}
+                    {copied ? t("workspace.invite.copied") : t("workspace.invite.copy")}
                   </motion.span>
                 </AnimatePresence>
               </Button>
@@ -207,8 +209,13 @@ export function InviteDialog({
           <p className="text-xs text-muted-foreground">
             {invite ? (
               <>
-                {until ? `Your invite link expires in ${timeLeft(i18n(), until.getTime() - Date.now())}` : "Your invite link never expires"}
-                {limit > 0 ? `, after ${limit} ${limit === 1 ? "use" : "uses"}.` : "."}{" "}
+                {until
+                  ? limit > 0
+                    ? t("workspace.invite.expiresInUses", { time: timeLeft(lang, until.getTime() - Date.now()), count: limit })
+                    : t("workspace.invite.expiresIn", { time: timeLeft(lang, until.getTime() - Date.now()) })
+                  : limit > 0
+                    ? t("workspace.invite.neverUses", { count: limit })
+                    : t("workspace.invite.never")}{" "}
               </>
             ) : null}
             <button
@@ -217,7 +224,7 @@ export function InviteDialog({
               aria-expanded={editing}
               className="inline-flex items-center gap-0.5 font-bold text-primary hover:underline"
             >
-              Edit invite link
+              {t("workspace.invite.edit")}
               <ChevronDownIcon className={cn("size-3.5 transition-transform duration-300", editing && "rotate-180")} />
             </button>
           </p>
@@ -233,21 +240,24 @@ export function InviteDialog({
             >
               <div className="mt-4 flex flex-col gap-4 rounded-2xl border bg-muted/30 p-4">
                 <div className="flex flex-col gap-2">
-                  <span className="text-sm font-bold">Expire after</span>
+                  <span className="text-sm font-bold">{t("workspace.invite.expireAfter")}</span>
                   <Chips
-                    label="Expire after"
+                    label={t("workspace.invite.expireAfter")}
                     value={options.maxAgeSeconds}
-                    options={EXPIRE_AFTER}
+                    options={EXPIRE_AFTER.map((o) => ({ value: o.value, label: t(o.label) }))}
                     onChange={(maxAgeSeconds) => setOptions((o) => ({ ...o, maxAgeSeconds }))}
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <span className="text-sm font-bold">How many people</span>
-                  <Chips label="How many people" value={options.maxUses} options={MAX_USES} onChange={(maxUses) => setOptions((o) => ({ ...o, maxUses }))} />
+                  <span className="text-sm font-bold">{t("workspace.invite.howMany")}</span>
+                  <Chips
+                    label={t("workspace.invite.howMany")}
+                    value={options.maxUses}
+                    options={MAX_USES.map((n) => ({ value: n, label: n ? t("workspace.invite.uses.count", { count: n }) : t("workspace.invite.uses.none") }))} onChange={(maxUses) => setOptions((o) => ({ ...o, maxUses }))} />
                 </div>
                 <Button type="button" onClick={() => void generate()} disabled={making} className="btn self-end rounded-xl font-bold">
                   {making ? <LoaderCircleIcon className="animate-spin" /> : <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" />}
-                  Generate a new link
+                  {t("workspace.invite.generate")}
                 </Button>
               </div>
             </motion.div>

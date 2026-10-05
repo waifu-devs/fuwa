@@ -3,13 +3,15 @@
  * itself (a center point and a zoom over the image), and drawing the result.
  */
 
+import type { I18n } from "@/i18n/i18n";
+
 export type PictureKind = "avatar" | "banner" | "icon";
 
 /** The size each kind is saved at, and the shape people see it in. */
-export const PICTURE: Record<PictureKind, { width: number; height: number; round: boolean; label: string }> = {
-  avatar: { width: 512, height: 512, round: true, label: "avatar" },
-  banner: { width: 1500, height: 600, round: false, label: "banner" },
-  icon: { width: 512, height: 512, round: false, label: "server icon" },
+export const PICTURE: Record<PictureKind, { width: number; height: number; round: boolean }> = {
+  avatar: { width: 512, height: 512, round: true },
+  banner: { width: 1500, height: 600, round: false },
+  icon: { width: 512, height: 512, round: false },
 };
 
 /** What pictures can be, as the server takes them. */
@@ -67,7 +69,7 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
  * Draws the cropped part of the image at the kind's size, as WebP where the
  * browser can make it (much smaller) and PNG where it can't.
  */
-export async function cropped(image: HTMLImageElement, crop: Crop, kind: PictureKind, frame: Size): Promise<Blob> {
+export async function cropped(t: I18n["t"], image: HTMLImageElement, crop: Crop, kind: PictureKind, frame: Size): Promise<Blob> {
   const out = PICTURE[kind];
   const scale = coverScale(image, frame) * crop.zoom;
   const sw = frame.width / scale;
@@ -76,13 +78,13 @@ export async function cropped(image: HTMLImageElement, crop: Crop, kind: Picture
   canvas.width = out.width;
   canvas.height = out.height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("this browser can't crop pictures");
+  if (!ctx) throw new Error(t("workspace.picture.cantCrop"));
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(image, crop.cx - sw / 2, crop.cy - sh / 2, sw, sh, 0, 0, out.width, out.height);
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.9));
   if (blob && blob.type === "image/webp") return blob;
   const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!png) throw new Error("this browser couldn't save the crop");
+  if (!png) throw new Error(t("workspace.picture.cantSave"));
   return png;
 }
 

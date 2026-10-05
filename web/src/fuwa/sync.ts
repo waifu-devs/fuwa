@@ -12,6 +12,7 @@ import { followFriends } from "./friends";
 import { startPresence } from "./presence";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
+import { i18n } from "@/i18n/i18n";
 import {
   addServer,
   applyEvent,
@@ -213,7 +214,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
           e.token = null;
           persist();
           void wipeDms(key);
-          patchInstance(key, { connection: "signed-out", problem: "Your session ended. Sign in again." });
+          patchInstance(key, { connection: "signed-out", problem: i18n().t("workspace.session.ended") });
         } else {
           patchInstance(key, { connection: "offline", problem: err.message });
         }

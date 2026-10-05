@@ -14,6 +14,7 @@ import { CallPanel } from "@/components/calls/CallPanel";
 import { DmList } from "@/components/dm/DmList";
 import { HostedBadge } from "@/components/HostedBadge";
 import { lazyComponent } from "@/components/lazy";
+import { useI18n } from "@/i18n/react";
 
 const InstanceSettingsDialog = lazyComponent(
   () => import("@/components/settings/InstanceSettingsDialog").then((m) => m.InstanceSettingsDialog),
@@ -40,6 +41,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
   const { compact, setNavOpen } = useLayout();
   const [settings, setSettings] = useState(false);
   const address = useAddress(instanceKey);
+  const { t } = useI18n();
   if (!inst) return null;
   return (
     <>
@@ -57,11 +59,11 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
           <button
             type="button"
             onClick={() => setSettings(true)}
-            title="Instance settings"
+            title={t("workspace.instanceSidebar.settings")}
             className="group grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
           >
             <SettingsIcon className="size-4 transition-transform duration-500 ease-out group-hover:rotate-90" />
-            <span className="sr-only">Instance settings</span>
+            <span className="sr-only">{t("workspace.instanceSidebar.settings")}</span>
           </button>
         )}
       </header>
@@ -75,7 +77,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
           onClick={() => compact && setNavOpen(false)}
           className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-bold text-muted-foreground transition hover:bg-muted hover:text-foreground data-[status=active]:bg-primary/15 data-[status=active]:text-primary"
         >
-          <CompassIcon className="size-4" /> Browse servers
+          <CompassIcon className="size-4" /> {t("workspace.instanceSidebar.browse")}
         </Link>
         <DmList instanceKey={instanceKey} />
         <AnimatePresence initial={false}>
@@ -86,7 +88,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
               exit={{ opacity: 0 }}
               className="mt-4 mb-1 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase"
             >
-              Your servers
+              {t("workspace.instanceSidebar.yourServers")}
             </motion.p>
           )}
         </AnimatePresence>
@@ -106,6 +108,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
 function FriendsLink({ instanceKey, onOpen }: { instanceKey: string; onOpen: () => void }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.friends.status ?? "off");
   const waiting = useFuwa((s) => waitingForYou(s.instances[instanceKey]?.friends.list ?? []));
+  const { t } = useI18n();
   if (status === "off" || status === "unsupported") return null;
   return (
     <Link
@@ -114,7 +117,7 @@ function FriendsLink({ instanceKey, onOpen }: { instanceKey: string; onOpen: () 
       onClick={onOpen}
       className="group flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-bold text-muted-foreground transition hover:bg-muted hover:text-foreground data-[status=active]:bg-primary/15 data-[status=active]:text-primary"
     >
-      <UsersIcon className="size-4 transition-transform duration-300 group-hover:scale-110" /> Friends
+      <UsersIcon className="size-4 transition-transform duration-300 group-hover:scale-110" /> {t("workspace.instanceSidebar.friends")}
       <AnimatePresence>
         {waiting > 0 && (
           <motion.span
@@ -123,7 +126,7 @@ function FriendsLink({ instanceKey, onOpen }: { instanceKey: string; onOpen: () 
             animate={{ scale: 1 }}
             exit={{ scale: 0 }}
             transition={{ type: "spring", stiffness: 600, damping: 18 }}
-            title={waiting === 1 ? "A friend request is waiting" : `${waiting} friend requests are waiting`}
+            title={t("workspace.instanceSidebar.requestsWaiting", { count: waiting })}
             className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[0.7rem] font-extrabold text-primary-foreground"
           >
             <Count value={waiting} max={99} />
