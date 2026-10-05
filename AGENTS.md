@@ -569,7 +569,9 @@
     codes), `server_settings/shared.rs` the Shared channels page (paste a
     code, see where it leads, ask to connect; approve, turn down and
     disconnect; what each side may do; codes still out; people kept out)
-    and the Share tab, with `shared_marks.rs` drawing the linked rings, the
+    and the Share tab, `server_settings/recordings.rs` the Recordings page
+    (sound only, or cameras and screens too where the instance allows it,
+    beside the files an hour makes), with `shared_marks.rs` drawing the linked rings, the
     sidebar badge, the header pill and the other server's tag beside a name
     (a server picture only from this instance), `secure.rs` a secure
     channel's header, start, device lines and the dialog of who can read it

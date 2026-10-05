@@ -37,6 +37,7 @@ mod automod;
 mod channels;
 mod emoji;
 mod onboarding;
+mod recordings;
 pub(crate) mod roles;
 pub(crate) use roles::switch;
 mod shared;
@@ -71,6 +72,7 @@ enum Page {
     Emoji,
     Integrations,
     Shared,
+    Recordings,
     Members,
     Bans,
     AutoMod,
@@ -88,6 +90,7 @@ impl Page {
             Page::Emoji => "Emoji",
             Page::Integrations => "Integrations",
             Page::Shared => "Shared channels",
+            Page::Recordings => "Recordings",
             Page::Members => "Members",
             Page::Bans => "Bans",
             Page::AutoMod => "AutoMod",
@@ -105,6 +108,7 @@ impl Page {
             Page::Emoji => "face-slightly-smiling-plus",
             Page::Integrations => "webhook",
             Page::Shared => "link-2",
+            Page::Recordings => "video",
             Page::Members => "users",
             Page::Bans => "gavel",
             Page::AutoMod => "bot",
@@ -128,6 +132,7 @@ impl Page {
             Page::Shared => {
                 "Channels shown in another server, or from one. Messages stay with the server the channel comes from."
             }
+            Page::Recordings => "What recordings on the server keep: sound, or cameras and shared screens too.",
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
             Page::AutoMod => {
@@ -139,7 +144,7 @@ impl Page {
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 8] = [
+const SETTINGS: [Page; 9] = [
     Page::Overview,
     Page::Welcome,
     Page::Invites,
@@ -148,6 +153,7 @@ const SETTINGS: [Page; 8] = [
     Page::Emoji,
     Page::Integrations,
     Page::Shared,
+    Page::Recordings,
 ];
 const MODERATION: [Page; 4] = [Page::Members, Page::Bans, Page::AutoMod, Page::AuditLog];
 
@@ -181,6 +187,7 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if access.has(P::ManageServer) {
         out.push(Page::Shared);
+        out.push(Page::Recordings);
     }
     if members {
         out.push(Page::Members);
@@ -246,6 +253,7 @@ pub struct ServerSettingsView {
     welcome: welcome::Welcome,
     onboard: onboarding::Onboard,
     shared: shared::Shared,
+    recordings: recordings::Recordings,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
     _subscriptions: Vec<Subscription>,
@@ -335,6 +343,7 @@ impl ServerSettingsView {
             onboard,
             channels,
             shared,
+            recordings: Default::default(),
             bar: None,
             _subscriptions: subscriptions,
         }
@@ -364,6 +373,7 @@ impl ServerSettingsView {
             Page::Invites => self.load_invites(cx),
             Page::Bans => self.load_bans(cx),
             Page::AuditLog => self.load_audit(false, cx),
+            Page::Recordings => self.recordings.draft = None,
             _ => {}
         }
         cx.notify();
@@ -1233,7 +1243,11 @@ impl Render for ServerSettingsView {
             cx.defer_in(window, |_, _, cx| cx.emit(ServerSettingsEvent::Close));
             return div().into_any_element();
         };
-        let allowed = pages(&access);
+        let mut allowed = pages(&access);
+        // Instances from before video in recordings have nothing to choose.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
+            allowed.retain(|pg| *pg != Page::Recordings);
+        }
         // Requests waiting on this server's approval, counted on the menu once the list is read.
         let requests = self.core.shared.read(|s| {
             s.instance(&self.key)
@@ -1362,6 +1376,7 @@ impl Render for ServerSettingsView {
                 both.into_any_element()
             }
             Page::Shared => self.shared_page(&p, window, cx),
+            Page::Recordings => self.recordings_page(&server, &p, cx),
             Page::Members => self.members_page(&p, cx),
             Page::Bans => self.bans_page(&p, cx),
             Page::AutoMod => self.automod_page(&p, window, cx),
@@ -1768,6 +1783,7 @@ fn field_label(field: &str) -> String {
         "allowed" => "Allowed",
         "mention_limit" => "Ping limit",
         "actions" => "Actions",
+        "record_video" => "Recordings keep",
         other => other,
     }
     .to_owned()
@@ -1779,6 +1795,7 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     match field {
         "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" => yes_no(raw),
+        "record_video" => if raw == "true" { "Sound and video" } else { "Sound only" }.into(),
         "role" => match raw {
             "1" => "Member".into(),
             "2" => "Admin".into(),
@@ -1885,7 +1902,13 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
     };
     match entry.action() {
         A::ServerUpdate => {
-            if only("applications") {
+            if only("record_video") {
+                if change("record_video").is_some_and(|c| c.after == "true") {
+                    format!("{actor} turned on recording cameras and screens")
+                } else {
+                    format!("{actor} made recordings sound only")
+                }
+            } else if only("applications") {
                 if change("applications").is_some_and(|c| c.after == "true") {
                     format!("{actor} made people apply to join")
                 } else {
@@ -2079,6 +2102,7 @@ mod tests {
                 Page::Emoji,
                 Page::Integrations,
                 Page::Shared,
+                Page::Recordings,
                 Page::Members,
                 Page::Bans,
                 Page::AutoMod,
