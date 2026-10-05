@@ -391,6 +391,19 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
                 return Outcome::Unread { channel_id: message.channel_id.clone() };
             }
         }
+        Payload::PollUpdated(pb::PollUpdated {
+            channel_id,
+            message_id,
+            poll: Some(poll),
+            voter_id,
+            voter_answer_ids,
+            ..
+        }) => {
+            // Events never carry your own vote, except as the voter of a public poll.
+            let mine = (!voter_id.is_empty() && i.me.as_ref().is_some_and(|me| me.id == *voter_id))
+                .then_some(voter_answer_ids.as_slice());
+            crate::core::polls::with_poll(i, channel_id, message_id, poll, mine);
+        }
         Payload::MessageDeleted(p) => {
             if let Some(loaded) = i.messages.get_mut(&p.channel_id) {
                 loaded.items.retain(|m| m.id != p.message_id);

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use fuwa_desktop::core::config::Paths;
 use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
 use fuwa_desktop::core::moderation::{Action, timed_out_until};
+use fuwa_desktop::core::polls;
 use fuwa_desktop::core::reports;
 use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
@@ -335,6 +336,52 @@ fn two_people_talk_in_a_server_and_in_private() {
         s.instance(&key).unwrap().dms.safety.get(&conversation).is_some_and(|n| n.len() == 60)
     });
     assert_eq!(safety(&alice), safety(&bob));
+
+    // Alice asks a question; Bob votes, Alice sees the count live and who
+    // voted, then ends it. Bob's own pick stays with him.
+    {
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        wait(&alice, async move { core.load_messages(&key, &sid, &cid, false).await }).unwrap();
+    }
+    {
+        let draft = polls::Draft {
+            question: "Snacks tonight?".into(),
+            answers: vec![("Chips".into(), "🥔".into()), ("Fruit".into(), String::new())],
+            ..Default::default()
+        };
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        wait(&alice, async move { core.send_poll(&key, &sid, &cid, &draft).await }).unwrap();
+    }
+    let poll_of = |s: &Store| {
+        s.instance(&key).unwrap().messages[&general].items.iter().find_map(|m| Some((m.id.clone(), m.poll.clone()?)))
+    };
+    until(&bob, "the poll", |s| poll_of(s).is_some());
+    let (poll_id, poll) = bob.shared.read(|s| poll_of(s).unwrap());
+    assert_eq!(
+        (poll.question.as_str(), poll.answers.len(), poll.answers[0].emoji.as_str()),
+        ("Snacks tonight?", 2, "🥔")
+    );
+    let fruit = poll.answers[1].id;
+    {
+        let (core, key, sid, cid, mid) =
+            (bob.clone(), key.clone(), server.id.clone(), general.clone(), poll_id.clone());
+        wait(&bob, async move { core.vote_poll(&key, &sid, &cid, &mid, vec![fruit]).await }).unwrap();
+    }
+    assert_eq!(bob.shared.read(|s| poll_of(s).unwrap().1.my_answer_ids), vec![fruit]);
+    until(&alice, "Bob's vote", |s| poll_of(s).is_some_and(|(_, p)| p.voters == 1 && p.answers[1].votes == 1));
+    assert!(alice.shared.read(|s| poll_of(s).unwrap().1.my_answer_ids.is_empty()));
+    let (voters, more) = {
+        let (core, key, sid, mid) = (alice.clone(), key.clone(), server.id.clone(), poll_id.clone());
+        wait(&alice, async move { core.poll_voters(&key, &sid, &mid, fruit, "").await }).unwrap()
+    };
+    assert_eq!((voters.iter().map(|u| u.id.clone()).collect::<Vec<_>>(), more), (vec![bob_id.clone()], false));
+    {
+        let (core, key, sid, cid, mid) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), poll_id.clone());
+        wait(&alice, async move { core.end_poll(&key, &sid, &cid, &mid).await }).unwrap();
+    }
+    until(&bob, "the poll ending", |s| poll_of(s).is_some_and(|(_, p)| p.ended_at.is_some()));
+    assert_eq!(bob.shared.read(|s| poll_of(s).unwrap().1.my_answer_ids), vec![fruit]);
 
     // Alice owns the server, so she may time Bob out, kick or ban him; he
     // may do nothing to her. A time-out reaches Bob live, and so does a kick.

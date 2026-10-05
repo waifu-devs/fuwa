@@ -65,6 +65,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         from: None,
         keep_out: false,
         keeping_out: false,
+        poll: None,
         sig: 0,
     }
 }
@@ -235,6 +236,8 @@ pub struct Msg {
     pub keep_out: bool,
     /// Asking whether to keep this author out.
     pub keeping_out: bool,
+    /// The poll it is, as its card draws it.
+    pub poll: Option<Rc<crate::ui::polls::PollCard>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -302,6 +305,8 @@ impl FuwaApp {
                         .clone()
                 };
                 let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+                let can_vote = !guest_side && !i.access(&server).pending;
+                let now = crate::core::dms::now_ms();
                 let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
                 // My roles, which decide whether a role mention pings me.
                 let mine: Vec<String> = i.my_member(&server).map(|m| m.role_ids.clone()).unwrap_or_default();
@@ -363,7 +368,22 @@ impl FuwaApp {
                     let keep_out = keeps_out && from.is_some() && hook.is_none();
                     let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
                     let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
+                    let mut card = m.poll.as_ref().map(|poll| {
+                        crate::ui::polls::PollCard::of(
+                            poll,
+                            &m.id,
+                            m.author_id == me,
+                            can_vote,
+                            manage && !guest_side,
+                            &self.polls,
+                            &look,
+                            now,
+                        )
+                    });
                     let mut h = DefaultHasher::new();
+                    if let Some(card) = &card {
+                        card.digest(&mut h);
+                    }
                     (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
                     m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
                     (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
@@ -377,6 +397,11 @@ impl FuwaApp {
                         Some((key, was)) => (key, Some(was)),
                         None => (m.id.clone(), None),
                     };
+                    // A changed poll's bars grow from where they were.
+                    if let (Some(card), Some(old)) = (card.as_mut(), was.as_ref().and_then(|w| w.poll.as_ref())) {
+                        card.from = old.shares();
+                    }
+                    let card = card.map(Rc::new);
                     let msg = match was {
                         Some(was) if was.sig == sig => was,
                         _ => Rc::new(Msg {
@@ -402,6 +427,7 @@ impl FuwaApp {
                             from: from.clone(),
                             keep_out,
                             keeping_out,
+                            poll: card.clone(),
                             sig,
                         }),
                     };
@@ -432,7 +458,8 @@ impl FuwaApp {
                         from: None,
                         keep_out: false,
                         keeping_out: false,
-                        sig: 0,
+                        poll: None,
+        sig: 0,
                     })));
                 }
                 *built = kept;
@@ -555,6 +582,7 @@ impl FuwaApp {
         self.list.digest = digest;
         self.list.rows = digests;
         self.fresh.retain(|_, at| at.elapsed() < Duration::from_secs(2));
+        self.poll_tick(&rows, cx);
         self.rows = Rc::new(rows);
     }
 
@@ -819,6 +847,16 @@ impl FuwaApp {
                     }])
                     .child(div().flex_1().min_w_0().py(px(4.0)).child(Textarea::new(&self.composer).appearance(false)))
                     .child(self.emoji_button(&p, cx))
+                    .when(self.can_poll(), |el| {
+                        el.child(
+                            icon_button("poll-open", "chart-column", &p)
+                                .size(px(36.0))
+                                .tooltip(|window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new("Make a poll").build(window, cx)
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| this.open_poll_editor(window, cx))),
+                        )
+                    })
                     .child(
                         div()
                             .id("send")
@@ -1191,6 +1229,20 @@ impl FuwaApp {
             .into_any_element()
     }
 
+    /// Polls go in a server's plain channels, never shared ones, for those who may make them,
+    /// on an instance that has them.
+    fn can_poll(&self) -> bool {
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return false };
+        self.core.shared.read(|s| {
+            s.instance(&key).is_some_and(|i| {
+                let versions = i.node.as_ref().and_then(|n| n.versions.as_ref());
+                crate::core::compat::instance_has(versions, "polls", &crate::core::compat::FEATURES)
+                    && i.access(&server).has_in(&channel, pb::Permission::CreatePolls)
+                    && i.channel(&server, &channel).is_some_and(|c| c.shared.is_none())
+            })
+        })
+    }
+
     fn send_from_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |state, cx| state.focus(window, cx));
         let text = self.composer.read(cx).value().to_string();
@@ -1385,6 +1437,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     let gutter = if compact { 0.0 } else { 56.0 };
     let content: AnyElement = if m.editing {
         edit_box(m, p, ctx).into_any_element()
+    } else if m.poll.is_some() && m.content.trim().is_empty() {
+        div().into_any_element()
     } else if m.unreadable {
         div().italic().text_color(p.muted_foreground).child(m.content.clone()).into_any_element()
     } else {
@@ -1461,6 +1515,9 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     if !m.embeds.is_empty() {
         body = body.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p));
     }
+    if let Some(card) = &m.poll {
+        body = body.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this));
+    }
     if let Some(reason) = &m.failed {
         let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
         let nonce = m.nonce;
@@ -1529,7 +1586,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             .into_any_element()
     };
 
-    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing;
+    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing && m.poll.is_none();
     let can_delete = m.can_delete && !m.pending && !m.editing;
     let keep_out = m.keep_out && !m.editing;
     let actions = (can_edit || can_delete || keep_out).then(|| {
@@ -1966,6 +2023,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         from: None,
         keep_out: false,
         keeping_out: false,
+        poll: None,
         sig: 0,
     }
 }
