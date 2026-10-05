@@ -1,5 +1,5 @@
 import { RouterProvider } from "@tanstack/react-router";
-import { LazyMotion, MotionConfig } from "motion/react";
+import { domMax, LazyMotion, MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppBackdrop } from "@/components/Backdrop";
@@ -22,15 +22,11 @@ watchUnread();
 refreshOnFocus();
 startReports(reportTarget);
 
-// The animation features download beside the language's strings; the first paint waits for both, so nothing shows unanimated.
-const motionFeatures = import("@/lib/motion-features").then((m) => m.default);
-const loadMotion = () => motionFeatures;
-
 function App() {
   // Springs and slides calm down to fades when the system asks for less motion, or the Motion setting says so.
   const reduce = usePrefs((p) => p.reduceMotion);
   return (
-    <LazyMotion features={loadMotion}>
+    <LazyMotion features={domMax}>
       <MotionConfig reducedMotion={reduce === "system" ? "user" : reduce}>
         <RouterProvider router={router} />
         <AppBackdrop />
@@ -44,7 +40,7 @@ subscribePrefs(() => void switchLanguage(getPrefs().language));
 window.addEventListener("languagechange", () => void switchLanguage(getPrefs().language));
 
 // The first paint waits for the language's strings (a small same-origin file), so the app doesn't flash in English.
-void Promise.allSettled([switchLanguage(getPrefs().language), motionFeatures]).finally(() =>
+void switchLanguage(getPrefs().language).finally(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App />
