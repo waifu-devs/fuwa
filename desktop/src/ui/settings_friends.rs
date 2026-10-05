@@ -11,25 +11,60 @@ use gpui_kit::{
 };
 
 use crate::core::friends::FriendsStatus;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::motion;
 use crate::ui::settings::{SettingsView, toggle_row};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{error_line, icon};
 
-type Choice = (i32, &'static str, &'static str, &'static str);
+type Choice = (i32, &'static str, String, String);
 
-const REQUESTS: [Choice; 3] = [
-    (pb::FriendRequestsFrom::Unspecified as i32, "earth", "Everyone", "Anyone on this instance"),
-    (pb::FriendRequestsFrom::SharedServers as i32, "server", "Server friends", "People in a server with you"),
-    (pb::FriendRequestsFrom::Nobody as i32, "ban", "Nobody", "You can still send them"),
-];
+fn requests() -> [Choice; 3] {
+    [
+        (
+            pb::FriendRequestsFrom::Unspecified as i32,
+            "earth",
+            t("accountsettings.friends.everyone"),
+            t("accountsettings.friends.everyoneHint"),
+        ),
+        (
+            pb::FriendRequestsFrom::SharedServers as i32,
+            "server",
+            t("accountsettings.friends.serverFriends"),
+            t("accountsettings.friends.serverFriendsHint"),
+        ),
+        (
+            pb::FriendRequestsFrom::Nobody as i32,
+            "ban",
+            t("accountsettings.friends.nobody"),
+            t("accountsettings.friends.nobodyHint"),
+        ),
+    ]
+}
 
-const MESSAGES: [Choice; 3] = [
-    (pb::DirectMessagesFrom::Unspecified as i32, "users", "Everyone", "Friends and people in a server with you"),
-    (pb::DirectMessagesFrom::Friends as i32, "heart", "Friends only", "Only friends can start one"),
-    (pb::DirectMessagesFrom::Nobody as i32, "message-circle-off", "Nobody new", "Conversations you have keep going"),
-];
+fn messages() -> [Choice; 3] {
+    [
+        (
+            pb::DirectMessagesFrom::Unspecified as i32,
+            "users",
+            t("accountsettings.friends.everyone"),
+            t("accountsettings.friends.messagesEveryoneHint"),
+        ),
+        (
+            pb::DirectMessagesFrom::Friends as i32,
+            "heart",
+            t("accountsettings.friends.friendsOnly"),
+            t("accountsettings.friends.friendsOnlyHint"),
+        ),
+        (
+            pb::DirectMessagesFrom::Nobody as i32,
+            "message-circle-off",
+            t("accountsettings.friends.nobodyNew"),
+            t("accountsettings.friends.nobodyNewHint"),
+        ),
+    ]
+}
 
 impl SettingsView {
     pub(crate) fn friends_page(&mut self, p: &Palette, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -39,7 +74,7 @@ impl SettingsView {
                 .rounded(corner(16.0))
                 .bg(p.secondary)
                 .text_color(p.muted_foreground)
-                .child("Sign in to an instance first. Your friends live there.")
+                .child(t("desktop.friends.signInFirst"))
                 .into_any_element();
         };
         let (status, settings) = self.core.shared.read(|s| {
@@ -60,7 +95,7 @@ impl SettingsView {
                         .rounded(corner(16.0))
                         .bg(p.secondary)
                         .text_color(p.muted_foreground)
-                        .child("This instance runs a version of fuwa from before friends."),
+                        .child(t("accountsettings.friends.unsupported")),
                 )
                 .into_any_element();
         }
@@ -69,9 +104,9 @@ impl SettingsView {
 
         body = body.child(motion::rise(
             section(
-                "Who can send you friend requests",
-                "Requests from anyone else never reach you; they're told you aren't taking them.",
-                choices("friend-requests", &REQUESTS, current.requests_from, loaded, &key, p, cx, |s, v| {
+                &t("settings.nav.friendRequests"),
+                &t("accountsettings.friends.requestsHint"),
+                choices("friend-requests", &requests(), current.requests_from, loaded, &key, p, cx, |s, v| {
                     s.requests_from = v
                 }),
                 p,
@@ -82,9 +117,9 @@ impl SettingsView {
         ));
         body = body.child(motion::rise(
             section(
-                "Who can start a conversation with you",
-                "Direct messages stay end-to-end encrypted whoever sends them.",
-                choices("friend-dms", &MESSAGES, current.direct_messages_from, loaded, &key, p, cx, |s, v| {
+                &t("settings.nav.directMessages"),
+                &t("accountsettings.friends.messagesHint"),
+                choices("friend-dms", &messages(), current.direct_messages_from, loaded, &key, p, cx, |s, v| {
                     s.direct_messages_from = v
                 }),
                 p,
@@ -96,7 +131,7 @@ impl SettingsView {
         let (k1, k2) = (key.clone(), key.clone());
         body = body.child(motion::rise(
             section(
-                "What your friends see",
+                &t("settings.nav.friendsSee"),
                 "",
                 div()
                     .flex()
@@ -104,8 +139,8 @@ impl SettingsView {
                     .gap(px(10.0))
                     .child(toggle_row(
                         "friends-online",
-                        "Show when I'm online",
-                        "Friends see a green dot while you have fuwa open. Nobody else ever does.",
+                        &t("accountsettings.friends.showOnline"),
+                        &t("accountsettings.friends.showOnlineHint"),
                         !current.hide_online,
                         p,
                         cx,
@@ -113,8 +148,8 @@ impl SettingsView {
                     ))
                     .child(toggle_row(
                         "friends-mutual",
-                        "Show mutual friends",
-                        "On profiles, only when you, they and the friend you share all allow it.",
+                        &t("accountsettings.friends.showMutual"),
+                        &t("accountsettings.friends.showMutualHint"),
                         !current.hide_mutual_friends,
                         p,
                         cx,
@@ -128,12 +163,7 @@ impl SettingsView {
             8.0,
         ));
         body.when_some(error_line(self.friends_error.as_deref(), p), |el, line| el.child(line))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(p.muted_foreground)
-                    .child("Blocking someone, from their profile or your friends list, stops them whatever these say."),
-            )
+            .child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.friends.blockingNote")))
             .into_any_element()
     }
 
@@ -153,9 +183,8 @@ impl SettingsView {
         content = if allowed {
             content.child(toggle_row(
                 "activity-share",
-                "Show what I'm doing",
-                "Games and apps this app sees, shown to people who share a server with you. Nothing is kept: \
-                 it's gone when you stop.",
+                &t("settings.nav.activity"),
+                &t("desktop.friends.activityHint"),
                 on,
                 p,
                 cx,
@@ -169,7 +198,7 @@ impl SettingsView {
                     .bg(p.secondary)
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child(format!("{name} doesn't show what people are doing. Your status still shows.")),
+                    .child(t_with("accountsettings.privacy.activityOff", &[("instance", Arg::Str(&name))])),
             )
         };
         if on && !servers.is_empty() {
@@ -179,7 +208,7 @@ impl SettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child("SHARE MY ACTIVITY HERE"),
+                    .child(t("accountsettings.privacy.shareHere").to_uppercase()),
             );
             for server in &servers {
                 let shared = !settings.hidden_server_ids.contains(&server.id);
@@ -220,7 +249,7 @@ impl SettingsView {
         }
         Some(
             motion::rise(
-                section("What you're doing", "", content.into_any_element(), p),
+                section(&t("desktop.friends.whatYoureDoing"), "", content.into_any_element(), p),
                 "friends-activity",
                 std::time::Duration::ZERO,
                 8.0,
@@ -254,7 +283,9 @@ impl SettingsView {
         cx.spawn(async move |this, cx| {
             let Ok(result) = rx.await else { return };
             let _ = this.update(cx, |this, cx| {
-                this.friends_error = result.err().map(|e| format!("Couldn't save that: {}", e.message));
+                this.friends_error = result
+                    .err()
+                    .map(|e| t_with("accountsettings.privacy.saveFailed", &[("error", Arg::Str(&e.message))]));
                 cx.notify();
             });
         })
@@ -306,7 +337,8 @@ fn choices(
     div()
         .flex()
         .gap(px(8.0))
-        .children(options.iter().enumerate().map(|(n, &(v, glyph, label, hint))| {
+        .children(options.iter().enumerate().map(|(n, (v, glyph, label, hint))| {
+            let (v, glyph) = (*v, *glyph);
             let on = v == value;
             let key = key.to_owned();
             div()
@@ -338,7 +370,7 @@ fn choices(
                         .items_center()
                         .gap(px(8.0))
                         .child(icon(glyph).size(px(16.0)).text_color(if on { p.primary } else { p.muted_foreground }))
-                        .child(div().flex_1().font_weight(FontWeight::BOLD).text_sm().child(label))
+                        .child(div().flex_1().font_weight(FontWeight::BOLD).text_sm().child(label.clone()))
                         .when(on, |el| {
                             el.child(motion::once(
                                 icon("check").size(px(14.0)).text_color(p.primary),
@@ -348,7 +380,7 @@ fn choices(
                             ))
                         }),
                 )
-                .child(div().text_xs().text_color(p.muted_foreground).child(hint))
+                .child(div().text_xs().text_color(p.muted_foreground).child(hint.clone()))
         }))
         .into_any_element()
 }

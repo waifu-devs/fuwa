@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 
 use crate::core::account::{ProfilePatch, picture_type};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::store::{Connection, user_name};
 use crate::pb;
 use crate::ui::motion;
@@ -48,14 +49,17 @@ impl AccountForm {
         Self {
             key: None,
             loaded: None,
-            name: cx.new(|cx| InputState::new(window, cx).placeholder("How people see you")),
-            pronouns: cx.new(|cx| InputState::new(window, cx).placeholder("she/her, they/them…")),
-            status: cx.new(|cx| InputState::new(window, cx).placeholder("What are you up to?")),
+            name: cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.account.namePlaceholder"))),
+            pronouns: cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.account.pronounsPlaceholder"))),
+            status: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t("accountsettings.profile.statusPlaceholder"))),
             bio: cx.new(|cx| {
-                TextareaState::new(window, cx).auto_grow(3, 10).placeholder("A little about you. Markdown works.")
+                TextareaState::new(window, cx).auto_grow(3, 10).placeholder(t("desktop.account.bioPlaceholder"))
             }),
-            current: cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Your password now")),
-            new: cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("At least 8 characters")),
+            current: cx.new(|cx| {
+                InputState::new(window, cx).masked(true).placeholder(t("desktop.account.currentPlaceholder"))
+            }),
+            new: cx.new(|cx| InputState::new(window, cx).masked(true).placeholder(t("desktop.account.newPlaceholder"))),
             sessions: None,
             busy: false,
             uploading: false,
@@ -220,7 +224,11 @@ impl SettingsView {
                             .child(
                                 primary_button(
                                     "avatar-pick",
-                                    if f.uploading { "Uploading…" } else { "Change picture" },
+                                    if f.uploading {
+                                        t("serversettings.emoji.uploading")
+                                    } else {
+                                        t("desktop.account.changePicture")
+                                    },
                                     p,
                                 )
                                 .h(px(36.0))
@@ -229,22 +237,17 @@ impl SettingsView {
                                 .on_click(cx.listener(|this, _, window, cx| this.pick_avatar(window, cx))),
                             )
                             .when(!me.avatar_url.is_empty(), |el| {
-                                el.child(soft_button("avatar-remove", "Remove", p).on_click(cx.listener(
-                                    |this, _, _, cx| {
+                                el.child(soft_button("avatar-remove", t("system.picture.remove"), p).on_click(
+                                    cx.listener(|this, _, _, cx| {
                                         this.save_profile(
                                             ProfilePatch { avatar_url: Some(String::new()), ..ProfilePatch::default() },
                                             cx,
                                         )
-                                    },
-                                )))
+                                    }),
+                                ))
                             }),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child("PNG, JPEG, GIF or WebP. Square pictures look best."),
-                    ),
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.account.pictureTypes"))),
             );
         let body = div()
             .flex()
@@ -256,12 +259,20 @@ impl SettingsView {
                 div()
                     .flex()
                     .gap(px(14.0))
-                    .child(div().flex_1().child(labeled("Display name", Input::new(&f.name).large(), p)))
-                    .child(div().w(px(200.0)).child(labeled("Pronouns", Input::new(&f.pronouns).large(), p))),
+                    .child(div().flex_1().child(labeled(
+                        &t("settings.nav.displayName"),
+                        Input::new(&f.name).large(),
+                        p,
+                    )))
+                    .child(div().w(px(200.0)).child(labeled(
+                        &t("settings.nav.pronouns"),
+                        Input::new(&f.pronouns).large(),
+                        p,
+                    ))),
             )
-            .child(labeled("Status", Input::new(&f.status).large(), p))
+            .child(labeled(&t("desktop.account.status"), Input::new(&f.status).large(), p))
             .child(labeled(
-                "About me",
+                &t("settings.nav.aboutMe"),
                 div()
                     .px(px(12.0))
                     .py(px(10.0))
@@ -278,8 +289,13 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(primary_button("profile-save", if f.busy { "Saving…" } else { "Save changes" }, p).on_click(
-                        cx.listener(|this, _, _, cx| {
+                    .child(
+                        primary_button(
+                            "profile-save",
+                            if f.busy { t("settings.controls.saving") } else { t("settings.controls.save") },
+                            p,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
                             let f = &this.account;
                             let patch = ProfilePatch {
                                 display_name: Some(f.name.read(cx).value().trim().to_owned()),
@@ -289,8 +305,8 @@ impl SettingsView {
                                 avatar_url: None,
                             };
                             this.save_profile(patch, cx);
-                        }),
-                    ))
+                        })),
+                    )
                     .when(saved, |el| {
                         el.child(motion::rise(
                             div()
@@ -301,7 +317,7 @@ impl SettingsView {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.success)
                                 .child(icon("check").size(px(16.0)))
-                                .child("Saved"),
+                                .child(t("desktop.account.saved")),
                             "profile-saved",
                             Duration::ZERO,
                             6.0,
@@ -345,7 +361,7 @@ impl SettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose a picture".into()),
+            prompt: Some(t("desktop.account.choosePicture").into()),
         });
         let core = self.core.clone();
         cx.spawn(async move |this, cx| {
@@ -354,7 +370,7 @@ impl SettingsView {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = picture_type(&name) else {
                 let _ = this.update(cx, |this, cx| {
-                    this.account.error = Some("That isn't a picture fuwa can use (PNG, JPEG, GIF or WebP).".into());
+                    this.account.error = Some(t("desktop.account.notAPicture"));
                     cx.notify();
                 });
                 return;
@@ -401,11 +417,7 @@ impl SettingsView {
                 .rounded(corner(16.0))
                 .bg(p.secondary)
                 .child(icon("link").size(px(18.0)).text_color(p.primary))
-                .child(
-                    div()
-                        .text_sm()
-                        .child("You sign in here with waifu.dev, so there's no password to change on this instance."),
-                )
+                .child(div().text_sm().child(t("desktop.account.linkedPassword")))
                 .into_any_element()
         } else {
             div()
@@ -417,12 +429,12 @@ impl SettingsView {
                         .flex()
                         .gap(px(14.0))
                         .child(div().flex_1().child(labeled(
-                            "Current password",
+                            &t("accountsettings.password.current"),
                             Input::new(&f.current).large().mask_toggle(),
                             p,
                         )))
                         .child(div().flex_1().child(labeled(
-                            "New password",
+                            &t("accountsettings.password.new"),
                             Input::new(&f.new).large().mask_toggle(),
                             p,
                         ))),
@@ -434,7 +446,7 @@ impl SettingsView {
                         .items_center()
                         .gap(px(12.0))
                         .child(
-                            primary_button("password-save", "Change password", p)
+                            primary_button("password-save", t("accountsettings.password.change"), p)
                                 .on_click(cx.listener(|this, _, window, cx| this.change_password(window, cx))),
                         )
                         .when(f.password_saved, |el| {
@@ -447,7 +459,7 @@ impl SettingsView {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.success)
                                     .child(icon("check").size(px(16.0)))
-                                    .child("Changed. Your other devices were signed out."),
+                                    .child(t("desktop.account.passwordChanged")),
                             )
                         }),
                 )
@@ -457,7 +469,8 @@ impl SettingsView {
         let mut devices = div().flex().flex_col().gap(px(10.0));
         match &f.sessions {
             None => {
-                devices = devices.child(div().text_sm().text_color(p.muted_foreground).child("Getting your devices…"))
+                devices = devices
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.account.gettingDevices")))
             }
             Some(list) => {
                 for (n, session) in list.iter().enumerate() {
@@ -493,17 +506,24 @@ impl SettingsView {
                                     .flex_col()
                                     .child(div().font_weight(FontWeight::BOLD).child(label))
                                     .child(div().text_sm().text_color(p.muted_foreground).child(if session.current {
-                                        "This computer, right now".to_owned()
+                                        t("desktop.account.thisComputer")
                                     } else if seen > 0 {
-                                        format!("Last seen {}", when(seen).to_lowercase())
+                                        t_with(
+                                            "desktop.account.lastSeen",
+                                            &[("when", Arg::Str(&when(seen).to_lowercase()))],
+                                        )
                                     } else {
-                                        "Signed in".to_owned()
+                                        t("desktop.account.signedIn")
                                     })),
                             )
                             .when(!session.current, |el| {
                                 el.child(
-                                    soft_button(SharedString::from(format!("revoke-{id}")), "Sign out", p)
-                                        .on_click(cx.listener(move |this, _, _, cx| this.revoke(Some(id.clone()), cx))),
+                                    soft_button(
+                                        SharedString::from(format!("revoke-{id}")),
+                                        t("accountsettings.shared.signOut"),
+                                        p,
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| this.revoke(Some(id.clone()), cx))),
                                 )
                             }),
                         SharedString::from(format!("session-{}", session.id)),
@@ -519,13 +539,13 @@ impl SettingsView {
             .flex_col()
             .gap(px(28.0))
             .when_some(self.account_picker(&key, p, cx), |el, picker| el.child(picker))
-            .child(section("Password", password, p))
+            .child(section(&t("settings.nav.password"), password, p))
             .child(section(
-                "Signed-in devices",
+                &t("desktop.account.signedInDevices"),
                 div().flex().flex_col().gap(px(12.0)).child(devices).when(others, |el| {
                     el.child(
                         div().child(
-                            soft_button("revoke-all", "Sign out everywhere else", p)
+                            soft_button("revoke-all", t("desktop.account.signOutElsewhere"), p)
                                 .child(icon("log-out").size(px(16.0)))
                                 .on_click(cx.listener(|this, _, _, cx| this.revoke(None, cx))),
                         ),
@@ -541,7 +561,7 @@ impl SettingsView {
         let current = self.account.current.read(cx).value().to_string();
         let new = self.account.new.read(cx).value().to_string();
         if current.is_empty() || new.is_empty() {
-            self.account.password_error = Some("Fill in both passwords.".into());
+            self.account.password_error = Some(t("desktop.account.fillBoth"));
             cx.notify();
             return;
         }
@@ -619,7 +639,7 @@ fn signed_out(p: &Palette) -> impl IntoElement {
         .rounded(corner(16.0))
         .bg(p.secondary)
         .text_color(p.muted_foreground)
-        .child("Sign in to an instance first. Your account lives there.")
+        .child(t("desktop.account.signInFirst"))
 }
 
 /// A device, from what it said it was when it signed in.
@@ -639,21 +659,28 @@ pub fn device_label(agent: &str) -> (&'static str, String) {
         ""
     };
     let (glyph, app) = if lower.starts_with("fuwa-desktop") {
-        ("monitor", "fuwa desktop")
+        ("monitor", t("common.device.desktop"))
     } else if lower.contains("android") || lower.contains("iphone") || lower.contains("mobile") {
-        ("smartphone", "Browser")
+        ("smartphone", t("desktop.account.browser"))
     } else if lower.contains("firefox") {
-        ("globe", "Firefox")
+        ("globe", "Firefox".to_owned())
     } else if lower.contains("edg/") {
-        ("globe", "Edge")
+        ("globe", "Edge".to_owned())
     } else if lower.contains("chrome") {
-        ("globe", "Chrome")
+        ("globe", "Chrome".to_owned())
     } else if lower.contains("safari") {
-        ("globe", "Safari")
+        ("globe", "Safari".to_owned())
     } else {
-        ("laptop", "A device")
+        ("laptop", t("desktop.account.aDevice"))
     };
-    (glyph, if os.is_empty() { app.to_owned() } else { format!("{app} on {os}") })
+    (
+        glyph,
+        if os.is_empty() {
+            app
+        } else {
+            t_with("common.device.on", &[("browser", Arg::Str(&app)), ("os", Arg::Str(os))])
+        },
+    )
 }
 
 #[cfg(test)]

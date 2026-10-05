@@ -509,42 +509,131 @@ mod tests {
         }
     }
 
-    /// Every key the app asks for exists in English.
-    #[test]
-    fn keys_in_the_code_exist() {
+    /// Every `.rs` file under src/ but this one, with its text.
+    fn sources() -> Vec<(String, String)> {
         fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
             for entry in std::fs::read_dir(dir).unwrap().flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     walk(&path, out);
                 } else if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("i18n.rs") {
-                    let text = std::fs::read_to_string(&path).unwrap();
-                    for call in ["t(\"", "t_with(\""] {
-                        for (at, _) in text.match_indices(call) {
-                            // Our functions, not `expect("…")` or a method of the same name.
-                            let before = text[..at].chars().next_back().unwrap_or(' ');
-                            if before.is_alphanumeric() || before == '_' || before == '.' {
-                                continue;
-                            }
-                            let rest = &text[at + call.len()..];
-                            if let Some(end) = rest.find('"') {
-                                out.push((path.display().to_string(), rest[..end].to_string()));
-                            }
-                        }
-                    }
+                    out.push((path.display().to_string(), std::fs::read_to_string(&path).unwrap()));
                 }
             }
         }
-        let mut used = Vec::new();
-        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut used);
-        let shaped = |key: &str| {
-            key.split('.').count() >= 2
-                && key.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric()))
-        };
-        for (file, key) in used {
-            if shaped(&key) {
-                assert!(ENGLISH.contains_key(&key), "{file}: \"{key}\" isn't in locales/en");
+        let mut out = Vec::new();
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut out);
+        out
+    }
+
+    /// Every `t("key")` and `t_with("key", ...)` in a file, as (function, key, the text after the key).
+    fn literal_calls(text: &str) -> Vec<(&'static str, &str, &str)> {
+        let mut out = Vec::new();
+        for name in ["t", "t_with"] {
+            for (at, _) in text.match_indices(&format!("{name}(")) {
+                // Our functions, not `expect("…")` or a method of the same name.
+                let before = text[..at].chars().next_back().unwrap_or(' ');
+                if before.is_alphanumeric() || before == '_' || before == '.' {
+                    continue;
+                }
+                // The key may sit on the next line once rustfmt wraps the call.
+                let Some(rest) = text[at + name.len() + 1..].trim_start().strip_prefix('"') else { continue };
+                if let Some(end) = rest.find('"') {
+                    out.push((name, &rest[..end], &rest[end + 1..]));
+                }
             }
         }
+        out
+    }
+
+    fn shaped(key: &str) -> bool {
+        key.split('.').count() >= 2
+            && key.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric()))
+    }
+
+    /// The `{name}` placeholders `fill` would fill in a template.
+    fn placeholders(text: &str) -> std::collections::BTreeSet<String> {
+        let out = std::cell::RefCell::new(std::collections::BTreeSet::new());
+        fill(text, |name| {
+            out.borrow_mut().insert(name.to_string());
+            None
+        });
+        out.into_inner()
+    }
+
+    /// Every key the app asks for exists in English.
+    #[test]
+    fn keys_in_the_code_exist() {
+        for (file, text) in sources() {
+            for (_, key, _) in literal_calls(&text) {
+                if shaped(key) {
+                    assert!(ENGLISH.contains_key(key), "{file}: \"{key}\" isn't in locales/en");
+                }
+            }
+        }
+    }
+
+    /// Each call fills exactly the placeholders its English has: `t` only for
+    /// keys without any, `t_with` naming every one (and `count` for plurals).
+    #[test]
+    fn calls_fill_their_placeholders() {
+        let mut problems = Vec::new();
+        for (file, text) in sources() {
+            for (call, key, rest) in literal_calls(&text) {
+                let Some(entry) = ENGLISH.get(key) else { continue };
+                let (mut wanted, plural) = match entry {
+                    Entry::Text(text) => (placeholders(text), false),
+                    Entry::Plural(forms) => (forms.values().flat_map(|f| placeholders(f)).collect(), true),
+                };
+                if plural {
+                    wanted.insert("count".to_string());
+                }
+                if call == "t" {
+                    if !wanted.is_empty() {
+                        problems.push(format!("{file}: t(\"{key}\") has {wanted:?} to fill; use t_with"));
+                    }
+                    continue;
+                }
+                // The args: `, &[ ... ]` right after the key, up to the matching `]`.
+                let Some(list) = rest.trim_start().strip_prefix(',').map(str::trim_start) else {
+                    problems.push(format!("{file}: t_with(\"{key}\" has no args"));
+                    continue;
+                };
+                let Some(list) = list.strip_prefix("&[") else {
+                    problems.push(format!("{file}: t_with(\"{key}\", ...) needs its args written in place, as &[...]"));
+                    continue;
+                };
+                let mut depth = 1;
+                let end = list
+                    .char_indices()
+                    .find(|&(_, c)| {
+                        match c {
+                            '[' => depth += 1,
+                            ']' => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0
+                    })
+                    .map_or(list.len(), |(i, _)| i);
+                let list = &list[..end];
+                // Each `("name"` that starts an arg (after `[` or `,`), not a call like `format!("…")`.
+                // rustfmt may break the line between the `(` and the name.
+                let given: std::collections::BTreeSet<String> = list
+                    .match_indices('(')
+                    .filter(|(at, _)| {
+                        let before = list[..*at].trim_end();
+                        before.is_empty() || before.ends_with(',')
+                    })
+                    .filter_map(|(at, _)| {
+                        let name = list[at + 1..].trim_start().strip_prefix('"')?;
+                        name.find('"').map(|end| name[..end].to_string())
+                    })
+                    .collect();
+                if given != wanted {
+                    problems.push(format!("{file}: t_with(\"{key}\") fills {given:?}, its English has {wanted:?}"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 }

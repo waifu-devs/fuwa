@@ -12,19 +12,22 @@ use gpui_kit::{
 };
 
 use crate::core::config::Prefs;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::reports::{self, Pending};
 use crate::ui::motion;
 use crate::ui::settings::{SettingsView, section, toggle_row};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{icon, soft_button};
 
-/// What a report holds, and what it never does.
-const SENT: [(&str, &str); 4] = [
-    ("triangle-alert", "Kinds of errors and where in the app they happened"),
-    ("timer", "How long things took: starting up, catching up, slow frames and requests"),
-    ("mouse-pointer-click", "How often a few features are used"),
-    ("info", "The app's version and your OS family (Windows, macOS or Linux)"),
-];
+/// What a report holds.
+fn sent() -> [(&'static str, String); 4] {
+    [
+        ("triangle-alert", t("desktop.privacy.sentErrors")),
+        ("timer", t("desktop.privacy.sentTimings")),
+        ("mouse-pointer-click", t("desktop.privacy.sentUsage")),
+        ("info", t("desktop.privacy.sentVersion")),
+    ]
+}
 
 impl SettingsView {
     pub(crate) fn privacy_page(
@@ -40,11 +43,11 @@ impl SettingsView {
         let destination = self.core.report_destination().map(|key| {
             let name = self.core.shared.read(|s| s.instance(&key).map(|i| i.name()));
             // Streamer mode keeps addresses off screen, and a name may be one.
-            name.filter(|_| !prefs.streamer_mode).unwrap_or_else(|| "your instance".into())
+            name.filter(|_| !prefs.streamer_mode).unwrap_or_else(|| t("desktop.settings.yourInstance"))
         });
 
         let mut what = div().flex().flex_col().gap(px(10.0));
-        for (n, (glyph, line)) in SENT.into_iter().enumerate() {
+        for (n, (glyph, line)) in sent().into_iter().enumerate() {
             what = what.child(motion::rise(
                 div()
                     .flex()
@@ -88,9 +91,7 @@ impl SettingsView {
                     .bg(p.secondary)
                     .text_sm()
                     .child(icon("eye-off").size(px(16.0)).mt(px(2.0)).text_color(p.muted_foreground))
-                    .child(div().flex_1().min_w_0().child(
-                        "Never messages, names, file names, ids or addresses. It goes only to your own instance, which adds it to its hourly report to Waifu Devs, and nothing is sent while the instance's own telemetry is off.",
-                    )),
+                    .child(div().flex_1().min_w_0().child(t("desktop.privacy.never"))),
             );
 
         // Dims away when off, and comes back with a spring.
@@ -98,17 +99,31 @@ impl SettingsView {
         let chips = div()
             .flex()
             .gap(px(10.0))
-            .child(chip("errors", "triangle-alert", pending.errors, "error", "errors", p))
-            .child(chip("timings", "timer", pending.timings, "timing", "timings", p))
-            .child(chip("usage", "mouse-pointer-click", pending.usage, "feature use", "feature uses", p));
+            .child(chip(
+                "errors",
+                "triangle-alert",
+                pending.errors,
+                t_with("desktop.privacy.errors", &[("count", Arg::Num(i64::from(pending.errors)))]),
+                p,
+            ))
+            .child(chip(
+                "timings",
+                "timer",
+                pending.timings,
+                t_with("desktop.privacy.timings", &[("count", Arg::Num(i64::from(pending.timings)))]),
+                p,
+            ))
+            .child(chip(
+                "usage",
+                "mouse-pointer-click",
+                pending.usage,
+                t_with("desktop.privacy.usage", &[("count", Arg::Num(i64::from(pending.usage)))]),
+                p,
+            ));
         let (dot, status) = match (&destination, on) {
-            (_, false) => (p.muted_foreground, "Off: nothing is counted, and what was waiting is gone.".to_owned()),
-            (Some(name), true) => (p.success, format!("Goes to {name} every 10 minutes.")),
-            (None, true) => (
-                p.primary,
-                "No instance you're signed in to takes reports right now (its telemetry is off), so they wait here, up to 64 of each."
-                    .to_owned(),
-            ),
+            (_, false) => (p.muted_foreground, t("desktop.privacy.off")),
+            (Some(name), true) => (p.success, t_with("desktop.privacy.goesTo", &[("instance", Arg::Str(name))])),
+            (None, true) => (p.primary, t("desktop.privacy.nowhere")),
         };
         let pulse = on && destination.is_some();
         let dot = div().flex_none().mt(px(5.0)).size(px(8.0)).rounded_full().bg(dot);
@@ -137,25 +152,27 @@ impl SettingsView {
             .gap(px(28.0))
             .child(toggle_row(
                 "share-reports",
-                "Help fix bugs",
-                "Sends anonymous counts of what went wrong and what was slow to your own instance, so Waifu Devs can find and fix it.",
+                &t("appsettings.advanced.reports"),
+                &t("desktop.privacy.reportsHint"),
                 on,
                 p,
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.share_reports = on),
             ))
-            .child(section("What's sent", what, p))
-            .child(section("Waiting to send", preview, p))
+            .child(section(&t("appsettings.advanced.sent"), what, p))
+            .child(section(&t("appsettings.advanced.waiting"), preview, p))
             .child(toggle_row(
                 "game-activity",
-                "Show what you're playing",
-                "Games and apps that report to Discord on this computer can show what you're doing here too, once you allow each one. Who sees it follows your status settings on each instance.",
+                &t("desktop.privacy.gameActivity"),
+                &t("desktop.privacy.gameActivityHint"),
                 prefs.game_activity,
                 p,
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.game_activity = on),
             ))
-            .when(!prefs.game_answers.is_empty(), |el| el.child(section("Games", games(prefs, p, cx), p)))
+            .when(!prefs.game_answers.is_empty(), |el| {
+                el.child(section(&t("desktop.privacy.games"), games(prefs, p, cx), p))
+            })
             .into_any_element()
     }
 }
@@ -166,7 +183,7 @@ fn games(prefs: &Prefs, p: &Palette, cx: &mut Context<SettingsView>) -> impl Int
     for (n, (key, allowed)) in prefs.game_answers.iter().enumerate() {
         let name = match key.split_once(':') {
             Some(("program", name)) => name.to_owned(),
-            Some((_, id)) => format!("A game (Discord id {id})"),
+            Some((_, id)) => t_with("desktop.privacy.game", &[("id", Arg::Str(id))]),
             None => key.clone(),
         };
         let key = key.clone();
@@ -187,18 +204,19 @@ fn games(prefs: &Prefs, p: &Palette, cx: &mut Context<SettingsView>) -> impl Int
                 }))
                 .child(div().flex_1().min_w_0().text_sm().text_ellipsis().whitespace_nowrap().child(name))
                 .child(div().text_sm().text_color(p.muted_foreground).child(if *allowed {
-                    "Allowed"
+                    t("desktop.privacy.allowed")
                 } else {
-                    "Not allowed"
+                    t("desktop.privacy.notAllowed")
                 }))
-                .child(soft_button(SharedString::from(format!("forget-game-{n}")), "Ask again", p).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        let key = key.clone();
-                        this.set(cx, move |pr| {
-                            pr.game_answers.remove(&key);
-                        })
-                    }),
-                )),
+                .child(
+                    soft_button(SharedString::from(format!("forget-game-{n}")), t("desktop.privacy.askAgain"), p)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let key = key.clone();
+                            this.set(cx, move |pr| {
+                                pr.game_answers.remove(&key);
+                            })
+                        })),
+                ),
         );
     }
     list
@@ -206,7 +224,7 @@ fn games(prefs: &Prefs, p: &Palette, cx: &mut Context<SettingsView>) -> impl Int
 
 /// One count waiting to go out. A new number rises into place, and the chip
 /// glows for a moment as it changes.
-fn chip(id: &'static str, glyph: &'static str, count: u32, one: &str, many: &str, p: &Palette) -> impl IntoElement {
+fn chip(id: &'static str, glyph: &'static str, count: u32, label: String, p: &Palette) -> impl IntoElement {
     let changed = SharedString::from(format!("pending-{id}-{count}"));
     let glow = alpha(p.primary, 0.20);
     div()
@@ -251,13 +269,6 @@ fn chip(id: &'static str, glyph: &'static str, count: u32, one: &str, many: &str
                     Duration::ZERO,
                     14.0,
                 )))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(if count == 1 { one.to_owned() } else { many.to_owned() }),
-                ),
+                .child(div().text_xs().text_color(p.muted_foreground).whitespace_nowrap().text_ellipsis().child(label)),
         )
 }
