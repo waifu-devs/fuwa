@@ -92,7 +92,7 @@ pub fn open_link(url: &str, cx: &mut gpui_kit::App) {
     if safe_link(url) {
         cx.open_url(url);
     } else {
-        tracing::warn!(url, "not opening a link that isn't a web page or mail address");
+        tracing::warn!("not opening a link that isn't a web page or mail address");
     }
 }
 

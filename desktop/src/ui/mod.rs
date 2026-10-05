@@ -10,6 +10,7 @@ mod backdrop;
 mod banner;
 mod call_bar;
 pub(crate) mod chat;
+mod commands;
 mod compose;
 mod connect;
 mod context_menu;

@@ -71,6 +71,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         voice: None,
         attachments: Vec::new(),
         thread: ThreadBits::default(),
+        agent: None,
         sig: 0,
     }
 }
@@ -277,6 +278,8 @@ pub struct Msg {
     pub attachments: Vec<pb::Attachment>,
     /// Its thread, or the thread it's in.
     pub thread: ThreadBits,
+    /// An agent's buttons, and over its answer who used what.
+    pub agent: Option<Rc<crate::ui::commands::AgentBits>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -518,8 +521,12 @@ impl FuwaApp {
                 also_sent: thread.is_some() && !is_parent && m.also_in_channel,
                 can_thread: m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
             };
+            let agent = crate::ui::commands::AgentBits::of(i, &server, m, can_vote, &self.commands).map(Rc::new);
             let mut h = DefaultHasher::new();
             bits.digest(&mut h);
+            if let Some(agent) = &agent {
+                agent.digest(&mut h);
+            }
             if let Some(card) = &card {
                 card.digest(&mut h);
             }
@@ -571,6 +578,7 @@ impl FuwaApp {
                     voice: None,
                     attachments: m.attachments.clone(),
                     thread: bits.clone(),
+                    agent: agent.clone(),
                     sig,
                 }),
             };
@@ -608,6 +616,7 @@ impl FuwaApp {
                 voice: None,
                 attachments: p.attachments.clone(),
                 thread: ThreadBits::default(),
+                agent: None,
                 sig: 0,
             })));
         }
@@ -942,7 +951,9 @@ impl FuwaApp {
     ) -> impl IntoElement {
         let p = pal(cx);
         let focused = self.composer.read(cx).focus_handle(cx).is_focused(window);
-        let typed = !self.composer.read(cx).value().trim().is_empty();
+        // A picked command takes the box's place, with its options as fields.
+        let command = self.command_form_here();
+        let typed = if command { self.command_ready(cx) } else { !self.composer.read(cx).value().trim().is_empty() };
         let ring = motion::follow("composer-ring", if focused { 1.0 } else { 0.0 }, window, cx);
         let ready = motion::follow("composer-send", if typed { 1.0 } else { 0.0 }, window, cx);
         if let Some(blocked) = blocked {
@@ -978,10 +989,15 @@ impl FuwaApp {
         let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
         let time_panel = self.time_picker_panel(&p, cx);
         let tray = self.file_tray(&p, cx);
-        let recording = self.recording_here();
+        let recording = !command && self.recording_here();
         // The microphone takes the send button's place while nothing's typed, as on the web.
-        let voice = (recording || (!typed && self.can_record())).then(|| self.voice_button(&p, cx));
-        let field: AnyElement = if recording {
+        let voice = (!command && (recording || (!typed && self.can_record()))).then(|| self.voice_button(&p, cx));
+        let commands_list = if self.picker.is_none() { self.command_list_view(&p, cx) } else { None };
+        let picks = self.command_picks_view(&p, window, cx);
+        let form = self.command_form_view(&p, cx);
+        let field: AnyElement = if let Some(form) = form {
+            form
+        } else if recording {
             self.recording_bar(&p, cx)
         } else {
             div()
@@ -997,6 +1013,8 @@ impl FuwaApp {
             .px(px(20.0))
             .pb(px(20.0))
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
+            .children(commands_list)
+            .children(picks)
             .children(emoji_panel)
             .children(time_panel)
             .children(tray)
@@ -1022,9 +1040,11 @@ impl FuwaApp {
                     }])
                     .map(|el| self.droppable(el, &p, cx))
                     .child(field)
-                    .when(!recording && self.can_attach(), |el| el.child(self.attach_button(&p, cx)))
-                    .when(!recording, |el| el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx)))
-                    .when(self.can_poll(), |el| {
+                    .when(!command && !recording && self.can_attach(), |el| el.child(self.attach_button(&p, cx)))
+                    .when(!command && !recording, |el| {
+                        el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
+                    })
+                    .when(!command && self.can_poll(), |el| {
                         el.child(
                             icon_button("poll-open", "chart-column", &p)
                                 .size(px(36.0))
@@ -1035,7 +1055,7 @@ impl FuwaApp {
                         )
                     })
                     .when_some(voice, |el, voice| el.child(voice))
-                    .when(!recording && (typed || !self.can_record()), |el| {
+                    .when(command || (!recording && (typed || !self.can_record())), |el| {
                         el.child(
                             div()
                                 .id("send")
@@ -1049,7 +1069,13 @@ impl FuwaApp {
                                 .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
                                 .cursor_pointer()
                                 .active(|s| s.top(px(1.0)))
-                                .on_click(cx.listener(|this, _, window, cx| this.send_from_button(window, cx)))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if this.commands.form.is_some() {
+                                        this.run_picked_command(window, cx)
+                                    } else {
+                                        this.send_from_button(window, cx)
+                                    }
+                                }))
                                 .child(
                                     div().relative().left(px(-3.0 + 3.0 * ready)).child(icon("send").size(px(18.0))),
                                 ),
@@ -1450,7 +1476,10 @@ fn group(rows: &mut [Row]) {
         match row {
             Row::Msg(m) => {
                 let author = m.user.as_ref().map(|u| u.id.clone()).unwrap_or_else(|| m.name.clone());
-                let head = !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
+                // An agent's answer starts its own group, under who used what.
+                let used = m.agent.as_ref().is_some_and(|a| a.used.is_some());
+                let head =
+                    used || !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
                 if m.head != head {
                     Rc::make_mut(m).head = head;
                 }
@@ -1735,6 +1764,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     if m.thread.also_in.is_some() || m.thread.also_sent {
         body = body.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
     }
+    if let Some(used) = m.agent.as_ref().and_then(|a| crate::ui::commands::used_line(&m.id, a, p)) {
+        body = body.child(used);
+    }
     if m.head {
         body = body.child(
             div()
@@ -1766,6 +1798,13 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     }
     if let Some(card) = &m.poll {
         body = body.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this));
+    }
+    if let Some(buttons) = m
+        .agent
+        .as_ref()
+        .and_then(|a| crate::ui::commands::buttons_view(&m.id, a, p, &ctx.this, &ctx.key, ctx.server.as_deref()))
+    {
+        body = body.child(buttons);
     }
     if !m.attachments.is_empty() {
         body = body.child(crate::ui::attachments::attachments_view(
@@ -2355,6 +2394,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         voice: None,
         attachments: Vec::new(),
         thread: ThreadBits::default(),
+        agent: None,
         sig: 0,
     }
 }

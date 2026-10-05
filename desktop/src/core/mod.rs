@@ -12,6 +12,7 @@ pub mod arrange;
 pub mod attachments;
 pub mod backgrounds;
 pub mod calls;
+pub mod commands;
 pub mod compat;
 pub mod config;
 pub mod dms;
