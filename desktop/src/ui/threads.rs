@@ -188,6 +188,9 @@ impl FuwaApp {
     pub(crate) fn close_thread(&mut self, cx: &mut Context<Self>) {
         if let Some(open) = self.threads.open.take() {
             self.core.focus_thread(&open.key, None);
+            if self.pins.as_ref().is_some_and(|p| p.of_thread(&open.id)) {
+                self.pins = None;
+            }
         }
         self.threads.rows = Rc::new(Vec::new());
         self.threads.built.clear();
@@ -540,7 +543,7 @@ impl FuwaApp {
     pub(crate) fn thread_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.threads.open.clone()?;
         let p = pal(cx);
-        let (name, locked, archived, following, manage, loading) = self.core.shared.read(|s| {
+        let (name, locked, archived, following, manage, loading, pins_here) = self.core.shared.read(|s| {
             let i = s.instance(&open.key)?;
             let channel = i.channel(&open.server, &open.channel)?;
             let parent = i
@@ -556,6 +559,8 @@ impl FuwaApp {
                 threads::follows(i, &open.server, &open.id),
                 i.access(&open.server).has_in(&open.channel, pb::Permission::ManageMessages),
                 i.messages.get(&threads::thread_key(&open.id)).is_none_or(|l| l.loading && l.items.is_empty()),
+                // A shared channel's pins are its home's; a guest doesn't list them.
+                i.has("pins") && channel.shared.as_ref().is_none_or(|s| s.home),
             ))
         })?;
 
@@ -612,6 +617,16 @@ impl FuwaApp {
                             .build(window, cx)
                         })
                         .on_click(cx.listener(move |this, _, _, cx| this.lock_open_thread(!locked, cx))),
+                )
+            })
+            .when(pins_here, |el| {
+                el.child(
+                    icon_button("thread-pins", "pin", &p)
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chattools.pins.button"))
+                                .build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.open_thread_pins(cx))),
                 )
             })
             .child(
