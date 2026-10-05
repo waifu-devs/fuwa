@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, useSyncExt
 import type { MessageListHandle } from "@/components/chat/MessageList";
 import { loadFollowed, loadMessages, run } from "@/fuwa/actions";
 import { store } from "@/fuwa/store";
+import { i18n } from "@/i18n/i18n";
 import { toast } from "@/lib/ui";
 import type { ThreadSummary } from "@/gen/fuwa/v1/types_pb";
 import { toDate } from "@/lib/format";
@@ -98,5 +99,5 @@ export async function jumpToParent(
     if (!loaded?.hasMore) break;
     await run(loadMessages(instanceKey, serverId, channelId, true)).catch(() => {});
   }
-  toast("That message is too far back to jump to");
+  toast(i18n().t("chat.threads.jumpTooFar"));
 }

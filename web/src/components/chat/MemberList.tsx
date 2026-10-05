@@ -18,12 +18,13 @@ import { ActivityLine, PresenceDot } from "@/components/Presence";
 import { useOnline, usePresence } from "@/fuwa/presence";
 import { useMemberMenu } from "@/components/menus/member";
 import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { colorOf, hoistedRole } from "@/lib/permissions";
 
 const EMPTY: Member[] = [];
 
-type Section = { id: string; role: Role | null; label?: string; members: Member[] };
+type Section = { id: string; role: Role | null; label?: Key; members: Member[] };
 
 /** One line of the list: a section's heading or a member, at its place from the top. */
 type Item =
@@ -71,8 +72,8 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
       } else rest.push(m);
     }
     const out: Section[] = roles.filter((r) => byRole.has(r.id)).map((r) => ({ id: r.id, role: r, members: byRole.get(r.id)! }));
-    if (rest.length) out.push({ id: "members", role: null, label: online ? "Online" : "Members", members: rest });
-    if (offline.length) out.push({ id: "offline", role: null, label: "Offline", members: offline });
+    if (rest.length) out.push({ id: "members", role: null, label: online ? "chat.members.online" : "chat.members.members", members: rest });
+    if (offline.length) out.push({ id: "offline", role: null, label: "chat.members.offline", members: offline });
     return out;
   }, [members, roles, online]);
 
@@ -168,10 +169,14 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
 }
 
 function SectionHeading({ section }: { section: Section }) {
+  const { t } = useI18n();
   return (
     <h3 className="flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
       {section.role && <RoleDot role={section.role} className="size-2" />}
-      <span className="truncate">{section.role?.name ?? section.label ?? "Members"}</span> — <Count value={section.members.length} />
+      <T
+        k="chat.members.heading"
+        values={{ name: <span className="truncate">{section.role?.name ?? t(section.label ?? "chat.members.members")}</span>, count: <Count value={section.members.length} /> }}
+      />
     </h3>
   );
 }
@@ -197,6 +202,7 @@ const MemberRow = memo(function MemberRow({
   const presence = usePresence(instanceKey, m.user?.id);
   const tracked = useOnline(instanceKey) !== null;
   const menu = useMemberMenu(instanceKey, m.serverId, m.user, m);
+  const { t } = useI18n();
   return (
     <motion.div
       initial={enter ? { opacity: 0, x: 16 } : false}
@@ -220,7 +226,7 @@ const MemberRow = memo(function MemberRow({
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1">
               <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
-              {owner && <CrownIcon aria-label="Owner" className="size-3 shrink-0 text-amber-400" />}
+              {owner && <CrownIcon aria-label={t("chat.author.owner")} className="size-3 shrink-0 text-amber-400" />}
               {isAgent(m.user) && <AppBadge agent />}
               <TimedOutMark member={m} now={now} />
             </span>
@@ -240,6 +246,7 @@ const MemberRow = memo(function MemberRow({
 
 /** An hourglass by the names of members who are timed out. */
 function TimedOutMark({ member, now }: { member: Member; now: number }) {
+  const { t } = useI18n();
   const until = timedOutUntil(member, now);
   return (
     <AnimatePresence>
@@ -249,10 +256,10 @@ function TimedOutMark({ member, now }: { member: Member; now: number }) {
           animate={{ scale: 1, rotate: 0 }}
           exit={{ scale: 0, rotate: 90 }}
           transition={{ type: "spring", stiffness: 600, damping: 18 }}
-          title={`Timed out until ${formatStamp(until)}`}
+          title={t("chat.members.timedOutUntil", { time: formatStamp(until) })}
           className="shrink-0 text-amber-500"
         >
-          <HourglassIcon className="size-3" aria-label="Timed out" />
+          <HourglassIcon className="size-3" aria-label={t("chat.members.timedOut")} />
         </motion.span>
       )}
     </AnimatePresence>

@@ -3,6 +3,7 @@ import { createContext, use, useMemo, type ReactNode } from "react";
 import type { Emoji, Member, Role, User } from "@/gen/fuwa/v1/types_pb";
 import { EmojiImage } from "@/components/EmojiImage";
 import { ProfilePopover } from "@/components/ProfilePopover";
+import { useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
 import { colorOf, cssColor } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
@@ -128,6 +129,7 @@ export function Mention(props: MentionProps) {
   const look = useServerLook();
   const mode = usePrefs((p) => p.roleColors);
   const carried = use(MessageEmojiContext);
+  const { t } = useI18n();
   if (kind === "emoji") {
     const emoji =
       look.emojis?.find((e) => e.id === target) ?? carried.find((e) => e.id === target) ?? look.otherEmojis?.get(target);
@@ -136,7 +138,7 @@ export function Mention(props: MentionProps) {
   }
   if (kind === "role") {
     const role = look.roles.find((r) => r.id === target);
-    if (!role) return <span className={cn(chip, "bg-muted text-muted-foreground")}>@deleted-role</span>;
+    if (!role) return <span className={cn(chip, "bg-muted text-muted-foreground")}>{t("chat.mentions.deletedRole")}</span>;
     const mine = !!look.me?.roleIds.includes(role.id);
     const color = role.color !== undefined && mode !== "off" ? cssColor(role.color) : null;
     return (
@@ -144,7 +146,7 @@ export function Mention(props: MentionProps) {
         whileHover={{ y: -1 }}
         className={cn(chip, !color && "bg-primary/15 text-primary", mine && "ring-1 ring-current/40")}
         style={color ? { color, backgroundColor: `color-mix(in srgb, ${color} ${mine ? 24 : 15}%, transparent)` } : undefined}
-        title={`Role: ${role.name}`}
+        title={t("chat.mentions.role", { name: role.name })}
       >
         @{role.name}
       </motion.span>

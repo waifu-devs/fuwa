@@ -55,7 +55,7 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
   const serverLevel = serverLevelKey
     ? t(serverLevelKey)
     : serverDefault === NotificationLevel.MENTIONS
-      ? "Only @mentions, the server's default"
+      ? t("chat.bell.mentionsDefault")
       : undefined;
 
   return (
@@ -64,8 +64,14 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
         <motion.button
           type="button"
           whileTap={{ scale: 0.85 }}
-          aria-label={muted ? `Notifications for #${channel.name}: ${serverMuted && !channelMuted ? "server muted" : "muted"}` : `Notifications for #${channel.name}`}
-          title={muted ? (channelMuted ? mutedLabel(t, settings, now) : serverUntil ? t("common.notify.serverMutedUntil", { time: serverUntil }) : t("common.notify.serverMuted")) : "Notification settings"}
+          aria-label={
+            muted
+              ? serverMuted && !channelMuted
+                ? t("chat.bell.labelServerMuted", { channel: channel.name })
+                : t("chat.bell.labelMuted", { channel: channel.name })
+              : t("chat.bell.label", { channel: channel.name })
+          }
+          title={muted ? (channelMuted ? mutedLabel(t, settings, now) : serverUntil ? t("common.notify.serverMutedUntil", { time: serverUntil }) : t("common.notify.serverMuted")) : t("chat.bell.settings")}
           className={cn(
             "grid size-9 place-items-center rounded-full transition-colors hover:bg-muted data-[state=open]:bg-muted",
             muted ? "text-amber-500" : "text-muted-foreground",
@@ -80,13 +86,13 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
         <DropdownMenuLabel className="truncate text-xs text-muted-foreground">#{channel.name}</DropdownMenuLabel>
         {channelMuted ? (
           <DropdownMenuItem onSelect={() => void change({ mutedUntil: false })}>
-            <BellIcon /> Unmute channel
+            <BellIcon /> {t("chat.bell.unmute")}
             <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedHint(t, settings, now)}</span>
           </DropdownMenuItem>
         ) : (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <BellOffIcon /> Mute channel
+              <BellOffIcon /> {t("chat.bell.mute")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-52">
               {MUTE_FOR.map((m) => (
@@ -106,8 +112,8 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
         <DropdownMenuRadioGroup value={String(level)} onValueChange={(v) => void change({ level: Number(v) as NotificationLevel })}>
           <DropdownMenuRadioItem value={String(NotificationLevel.UNSPECIFIED)}>
             <span className="min-w-0">
-              <span className="block">Use the server's</span>
-              <span className="block text-xs text-muted-foreground">{serverLevel ?? "This device decides"}</span>
+              <span className="block">{t("chat.bell.useServer")}</span>
+              <span className="block text-xs text-muted-foreground">{serverLevel ?? t("chat.bell.deviceDecides")}</span>
             </span>
           </DropdownMenuRadioItem>
           {LEVELS.map((l) => (
@@ -118,7 +124,7 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openSettings("server-notifications", serverId)}>
-          <SettingsIcon /> Notification settings
+          <SettingsIcon /> {t("chat.bell.settings")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
