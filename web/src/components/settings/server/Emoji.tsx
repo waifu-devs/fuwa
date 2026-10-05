@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EMOJI_NAME, emojiPicture, nameFromFile } from "@/lib/emoji";
 import { displayName, formatBytes } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { PICTURE_TYPES } from "@/lib/pictures";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ type Pending = { key: string; preview: string; name: string; sent: number; error
  * everyone can use them as `:name:`. They count in the server's files.
  */
 export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const emojis = inst?.emojis[serverId];
   const members = inst?.members[serverId];
@@ -47,7 +48,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
   async function add(files: File[]) {
     const pictures = files.filter((f) => PICTURE_TYPES.includes(f.type));
     if (pictures.length < files.length) {
-      toast("Emoji are PNG, JPEG, GIF, WebP or AVIF pictures.");
+      toast(t("serversettings.emoji.badType"));
       void shake.start({ x: [0, -8, 7, -5, 3, 0], transition: { duration: 0.4 } });
     }
     const taken = new Set((emojis ?? []).map((e) => e.name.toLowerCase()));
@@ -70,7 +71,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
       update({ sent: 1 });
       setTimeout(() => setPending((list) => list.filter((p) => p.key !== key)), 500);
     } catch (err) {
-      update({ error: (err as FuwaError).message || "that didn't go up" });
+      update({ error: (err as FuwaError).message || t("serversettings.emoji.uploadFailed") });
     }
   }
 
@@ -113,12 +114,10 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
         >
           <SmilePlusIcon className="size-6 transition group-hover:rotate-12" />
         </motion.span>
-        <span className="font-extrabold">{dragging ? "Let go to add them" : "Drop pictures here, or pick some"}</span>
-        <span className="max-w-sm text-xs text-muted-foreground">
-          Several at once is fine. Each is shrunk to 128 pixels; GIFs keep moving. The file name becomes the emoji's name, and you can change it.
-        </span>
+        <span className="font-extrabold">{dragging ? t("serversettings.emoji.letGo") : t("serversettings.emoji.drop")}</span>
+        <span className="max-w-sm text-xs text-muted-foreground">{t("serversettings.emoji.dropHint")}</span>
         <span className="mt-1 flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold tabular-nums">
-          <Count value={count} /> {cap !== null ? `of ${cap}` : "emoji"}
+          <T k={cap !== null ? "serversettings.emoji.countOf" : "serversettings.emoji.count"} values={{ count: <Count value={count} />, cap }} count={count} />
         </span>
       </motion.button>
       <input
@@ -148,8 +147,8 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
           >
             🫥
           </motion.span>
-          <p className="font-bold">No emoji yet</p>
-          <p className="text-sm text-muted-foreground">Add the first and it shows up when people type a colon.</p>
+          <p className="font-bold">{t("serversettings.emoji.none")}</p>
+          <p className="text-sm text-muted-foreground">{t("serversettings.emoji.noneHint")}</p>
         </motion.div>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
@@ -174,7 +173,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
                 <span className="relative min-w-0 flex-1">
                   <span className="block truncate font-bold">:{p.name}:</span>
                   <span className={cn("block truncate text-xs", p.error ? "text-destructive first-letter:uppercase" : "text-muted-foreground")}>
-                    {p.error ?? (p.sent >= 1 ? "Added" : "Uploading…")}
+                    {p.error ?? (p.sent >= 1 ? t("serversettings.emoji.added") : t("serversettings.emoji.uploading"))}
                   </span>
                 </span>
                 {p.error ? (
@@ -182,7 +181,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
                     type="button"
                     variant="ghost"
                     size="icon"
-                    aria-label="Dismiss"
+                    aria-label={t("serversettings.emoji.dismiss")}
                     className="relative rounded-full"
                     onClick={() => setPending((list) => list.filter((x) => x.key !== p.key))}
                   >
@@ -213,7 +212,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
       )}
       {cap !== null && full && (
         <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-          <ImagePlusIcon className="size-3.5" /> This server has all the emoji it can hold. Delete one to make room.
+          <ImagePlusIcon className="size-3.5" /> {t("serversettings.emoji.full")}
         </p>
       )}
     </div>
@@ -223,6 +222,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
 /** One emoji: its picture, a name you can change in place, who added it, and delete. */
 function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: string; serverId: string; emoji: EmojiT; creator: Parameters<typeof UserAvatar>[0]["user"] }) {
   const lang = useI18n();
+  const { t } = lang;
   const [name, setName] = useState(emoji.name);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -234,7 +234,7 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
     if (name === emoji.name) return;
     if (!valid) {
       void shake.start({ x: [0, -6, 5, -3, 0], transition: { duration: 0.35 } });
-      toast("Emoji names are 2 to 32 letters, digits and underscores.");
+      toast(t("serversettings.emoji.badName"));
       return setName(emoji.name);
     }
     setSaving(true);
@@ -270,7 +270,7 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
           <span className="text-muted-foreground">:</span>
           <Input
             value={name}
-            aria-label={`Name of :${emoji.name}:`}
+            aria-label={t("serversettings.emoji.nameOf", { name: emoji.name })}
             maxLength={32}
             spellCheck={false}
             onChange={(e) => setName(e.target.value.replace(/\s+/g, "_"))}
@@ -290,8 +290,8 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
         <span className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
           <UserAvatar user={creator} className="size-4" />
           <span className="truncate">
-            {creator ? displayName(creator) : "Someone"} · {formatBytes(lang, Number(emoji.size))}
-            {emoji.animated && " · moves"}
+            {creator ? displayName(creator) : t("common.someone")} · {formatBytes(lang, Number(emoji.size))}
+            {emoji.animated && ` · ${t("serversettings.emoji.moves")}`}
           </span>
         </span>
       </span>
@@ -299,9 +299,9 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
         {confirm ? (
           <motion.span key="sure" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex gap-1">
             <Button type="button" size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs font-bold" onClick={() => void remove()}>
-              Delete
+              {t("serversettings.shared.delete")}
             </Button>
-            <Button type="button" size="icon" variant="ghost" aria-label="Keep it" className="size-8 rounded-full" onClick={() => setConfirm(false)}>
+            <Button type="button" size="icon" variant="ghost" aria-label={t("serversettings.shared.keepIt")} className="size-8 rounded-full" onClick={() => setConfirm(false)}>
               <XIcon />
             </Button>
           </motion.span>
@@ -311,7 +311,7 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
               type="button"
               size="icon"
               variant="ghost"
-              aria-label={`Delete :${emoji.name}:`}
+              aria-label={t("serversettings.emoji.deleteNamed", { name: emoji.name })}
               className="size-8 rounded-full text-muted-foreground opacity-60 transition hover:text-destructive group-hover:opacity-100"
               onClick={() => setConfirm(true)}
             >

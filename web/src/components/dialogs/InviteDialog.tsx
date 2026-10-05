@@ -11,6 +11,7 @@ import { usePrivateField } from "@/components/Private";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { i18n } from "@/i18n/i18n";
 import { DEFAULT_INVITE, EXPIRE_AFTER, MAX_USES, expiresAt, inviteLink, timeLeft, works } from "@/lib/invites";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -206,7 +207,7 @@ export function InviteDialog({
           <p className="text-xs text-muted-foreground">
             {invite ? (
               <>
-                {until ? `Your invite link expires in ${timeLeft(until.getTime() - Date.now())}` : "Your invite link never expires"}
+                {until ? `Your invite link expires in ${timeLeft(i18n(), until.getTime() - Date.now())}` : "Your invite link never expires"}
                 {limit > 0 ? `, after ${limit} ${limit === 1 ? "use" : "uses"}.` : "."}{" "}
               </>
             ) : null}

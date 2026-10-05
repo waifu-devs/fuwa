@@ -10,11 +10,13 @@ import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { T, useI18n } from "@/i18n/react";
 import { displayName, formatDay, toDate } from "@/lib/format";
 import { toast } from "@/lib/ui";
 
 /** Who is kept out of the server, why, and by whom; unbanning lets them join again. */
 export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const [bans, setBans] = useState<Ban[] | null>(null);
   const [moderators, setModerators] = useState<Record<string, User>>({});
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId:
     try {
       await run(unbanMember(instanceKey, serverId, id));
       setBans((list) => list?.filter((b) => b.user?.id !== id) ?? null);
-      toast(`Unbanned ${displayName(ban.user)}; they can join again`);
+      toast(t("serversettings.bans.unbanned", { name: displayName(ban.user) }));
     } catch (err) {
       toast((err as FuwaError).message);
     } finally {
@@ -66,8 +68,8 @@ export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId:
         >
           <ShieldCheckIcon className="size-8" />
         </motion.span>
-        <p className="font-extrabold">No bans</p>
-        <p className="max-w-xs text-sm text-muted-foreground">Everyone's welcome so far. Ban someone from the Members page or their profile card.</p>
+        <p className="font-extrabold">{t("serversettings.bans.none")}</p>
+        <p className="max-w-xs text-sm text-muted-foreground">{t("serversettings.bans.noneHint")}</p>
       </motion.div>
     );
 
@@ -75,10 +77,10 @@ export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId:
     <div className="flex flex-col gap-4">
       <div className="relative">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search bans" aria-label="Search bans" className="h-10 rounded-xl pl-9" />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("serversettings.bans.search")} aria-label={t("serversettings.bans.search")} className="h-10 rounded-xl pl-9" />
       </div>
       <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-        <GavelIcon className="size-3.5" /> <Count value={bans.length} /> {bans.length === 1 ? "ban" : "bans"}
+        <GavelIcon className="size-3.5" /> <T k="serversettings.bans.count" values={{ count: <Count value={bans.length} /> }} count={bans.length} />
       </p>
       <ul className="flex flex-col gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
@@ -105,9 +107,11 @@ export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId:
                   <p className="truncate font-bold">
                     {displayName(ban.user)} <span className="text-xs font-normal text-muted-foreground">@{ban.user?.username}</span>
                   </p>
-                  <p className="text-sm break-words">{ban.reason || <span className="text-muted-foreground italic">No reason given</span>}</p>
+                  <p className="text-sm break-words">{ban.reason || <span className="text-muted-foreground italic">{t("serversettings.bans.noReason")}</span>}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Banned by {by ? displayName(by) : "someone"} · {formatDay(toDate(ban.createdAt))}
+                    {by
+                      ? t("serversettings.bans.bannedBy", { name: displayName(by), date: formatDay(toDate(ban.createdAt)) })
+                      : t("serversettings.bans.bannedBySomeone", { date: formatDay(toDate(ban.createdAt)) })}
                   </p>
                 </div>
                 <Button
@@ -119,14 +123,14 @@ export function Bans({ instanceKey, serverId }: { instanceKey: string; serverId:
                   className="group/unban shrink-0 rounded-xl"
                 >
                   {lifting === id ? <LoaderCircleIcon className="animate-spin" /> : <UndoIcon className="transition-transform duration-300 group-hover/unban:-rotate-45" />}
-                  Unban
+                  {t("serversettings.bans.unban")}
                 </Button>
               </motion.li>
             );
           })}
         </AnimatePresence>
       </ul>
-      {!shown.length && <p className="py-6 text-center text-sm text-muted-foreground">Nobody matches that.</p>}
+      {!shown.length && <p className="py-6 text-center text-sm text-muted-foreground">{t("serversettings.shared.nobodyMatches")}</p>}
     </div>
   );
 }

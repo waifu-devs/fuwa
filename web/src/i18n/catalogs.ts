@@ -4,6 +4,7 @@ import englishAppsettings from "../../../locales/en/appsettings.json";
 import englishCommon from "../../../locales/en/common.json";
 import englishConnect from "../../../locales/en/connect.json";
 import englishJoin from "../../../locales/en/join.json";
+import englishServersettings from "../../../locales/en/serversettings.json";
 import englishSettings from "../../../locales/en/settings.json";
 import englishShell from "../../../locales/en/shell.json";
 
@@ -19,7 +20,7 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
 
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
-export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, common: englishCommon, connect: englishConnect, join: englishJoin, settings: englishSettings, shell: englishShell } as const;
+export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, common: englishCommon, connect: englishConnect, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell } as const;
 export type Namespaces = typeof ENGLISH;
 export const english: Catalog = flatten(ENGLISH);
 

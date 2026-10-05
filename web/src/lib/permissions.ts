@@ -7,6 +7,7 @@ import {
   type PermissionOverwrite,
   type Role,
 } from "@/gen/fuwa/v1/types_pb";
+import type { Key } from "@/i18n/i18n";
 
 /**
  * Roles and permissions: what a member of a community server can do,
@@ -93,126 +94,107 @@ export const TALK: Bits = [
 export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), 0);
 export const toList = (bits: Bits): P[] => KNOWN.filter((p) => bits & bit(p));
 
-type PermissionInfo = { label: string; about: string; channel?: string };
+/** A permission's name, what it does, and (`channel`) what it does in one channel's settings where that reads differently; catalog keys (serversettings.permission.*). */
+type PermissionInfo = { label: Key; about: Key; channel?: Key };
 
-/** How a permission reads in the app. `channel` is its wording in a channel's settings, where it differs. */
+/** How a permission reads in the app. */
 export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
-  [P.ADMINISTRATOR]: {
-    label: "Administrator",
-    about: "Every permission, in every channel, whatever a channel says. Still only over roles and people ranked below. Give it with care.",
-  },
-  [P.MANAGE_SERVER]: {
-    label: "Manage server",
-    about: "Change the server's name, icon, description, AutoMod and welcome screen, and see its usage. AutoMod leaves them alone.",
-  },
+  [P.ADMINISTRATOR]: { label: "serversettings.permission.administrator", about: "serversettings.permission.administratorAbout" },
+  [P.MANAGE_SERVER]: { label: "serversettings.permission.manageServer", about: "serversettings.permission.manageServerAbout" },
   [P.MANAGE_ROLES]: {
-    label: "Manage roles",
-    about: "Create and edit roles ranked below their own and hand them out, with only the permissions they have.",
-    channel: "Change who can do what in this channel.",
+    label: "serversettings.permission.manageRoles",
+    about: "serversettings.permission.manageRolesAbout",
+    channel: "serversettings.permission.manageRolesChannel",
   },
-  [P.VIEW_AUDIT_LOG]: { label: "View audit log", about: "Read the record of every change made in the server." },
-  [P.CHANGE_NICKNAME]: { label: "Change nickname", about: "Set their own nickname in this server." },
-  [P.MANAGE_NICKNAMES]: { label: "Manage nicknames", about: "Change the nicknames of people ranked below them." },
-  [P.KICK_MEMBERS]: { label: "Kick members", about: "Remove people ranked below them. They can join again." },
-  [P.BAN_MEMBERS]: { label: "Ban members", about: "Remove people ranked below them for good, and lift bans." },
-  [P.TIME_OUT_MEMBERS]: { label: "Time out members", about: "Stop people ranked below them from talking for a while." },
+  [P.VIEW_AUDIT_LOG]: { label: "serversettings.permission.viewAuditLog", about: "serversettings.permission.viewAuditLogAbout" },
+  [P.CHANGE_NICKNAME]: { label: "serversettings.permission.changeNickname", about: "serversettings.permission.changeNicknameAbout" },
+  [P.MANAGE_NICKNAMES]: { label: "serversettings.permission.manageNicknames", about: "serversettings.permission.manageNicknamesAbout" },
+  [P.KICK_MEMBERS]: { label: "serversettings.permission.kickMembers", about: "serversettings.permission.kickMembersAbout" },
+  [P.BAN_MEMBERS]: { label: "serversettings.permission.banMembers", about: "serversettings.permission.banMembersAbout" },
+  [P.TIME_OUT_MEMBERS]: { label: "serversettings.permission.timeOutMembers", about: "serversettings.permission.timeOutMembersAbout" },
   [P.MANAGE_CHANNELS]: {
-    label: "Manage channels",
-    about: "Create, edit, move and delete channels. Also skips slow mode.",
-    channel: "Edit or delete this channel. Also skips its slow mode.",
+    label: "serversettings.permission.manageChannels",
+    about: "serversettings.permission.manageChannelsAbout",
+    channel: "serversettings.permission.manageChannelsChannel",
   },
   [P.VIEW_CHANNELS]: {
-    label: "View channels",
-    about: "See channels and read their messages, unless a channel says otherwise.",
-    channel: "See this channel and read its messages.",
+    label: "serversettings.permission.viewChannels",
+    about: "serversettings.permission.viewChannelsAbout",
+    channel: "serversettings.permission.viewChannelsChannel",
   },
-  [P.SEND_MESSAGES]: { label: "Send messages", about: "Write in channels, and reply in threads." },
+  [P.SEND_MESSAGES]: { label: "serversettings.permission.sendMessages", about: "serversettings.permission.sendMessagesAbout" },
   [P.CREATE_THREADS]: {
-    label: "Start threads",
-    about: "Start a thread of replies under a message. Replying in a thread that's there needs Send messages.",
-    channel: "Start a thread of replies under a message in this channel.",
+    label: "serversettings.permission.createThreads",
+    about: "serversettings.permission.createThreadsAbout",
+    channel: "serversettings.permission.createThreadsChannel",
   },
   [P.CREATE_POLLS]: {
-    label: "Create polls",
-    about: "Ask a question with answers people vote on. Anyone who can see the channel can vote.",
-    channel: "Ask a question in this channel with answers people vote on.",
+    label: "serversettings.permission.createPolls",
+    about: "serversettings.permission.createPollsAbout",
+    channel: "serversettings.permission.createPollsChannel",
   },
-  [P.EMBED_LINKS]: { label: "Embed links", about: "Post links." },
-  [P.ATTACH_FILES]: { label: "Attach files", about: "Upload files and pictures with their messages." },
-  [P.MENTION_EVERYONE]: {
-    label: "Mention everyone",
-    about: "Ping everyone with @everyone or @here, and any role, even ones that can't be mentioned.",
-  },
-  [P.MANAGE_MESSAGES]: { label: "Manage messages", about: "Delete other people's messages. Also skips slow mode." },
+  [P.EMBED_LINKS]: { label: "serversettings.permission.embedLinks", about: "serversettings.permission.embedLinksAbout" },
+  [P.ATTACH_FILES]: { label: "serversettings.permission.attachFiles", about: "serversettings.permission.attachFilesAbout" },
+  [P.MENTION_EVERYONE]: { label: "serversettings.permission.mentionEveryone", about: "serversettings.permission.mentionEveryoneAbout" },
+  [P.MANAGE_MESSAGES]: { label: "serversettings.permission.manageMessages", about: "serversettings.permission.manageMessagesAbout" },
   [P.CREATE_INVITE]: {
-    label: "Create invite",
-    about: "Make invite links that let people join, even when the server isn't in Browse.",
-    channel: "Make invite links that open this channel.",
+    label: "serversettings.permission.createInvite",
+    about: "serversettings.permission.createInviteAbout",
+    channel: "serversettings.permission.createInviteChannel",
   },
-  [P.MANAGE_EMOJI]: { label: "Manage emoji", about: "Add, rename and delete the server's own emoji." },
-  [P.CONNECT]: { label: "Connect", about: "Join voice channels.", channel: "Join this voice channel." },
-  [P.SPEAK]: {
-    label: "Speak",
-    about: "Talk in voice channels. Without it they can join and listen.",
-    channel: "Talk in this voice channel. Without it they can join and listen.",
-  },
-  [P.VIDEO]: {
-    label: "Video",
-    about: "Turn their camera on and share their screen in voice channels.",
-    channel: "Turn their camera on and share their screen in this voice channel.",
-  },
-  [P.RECORD]: {
-    label: "Record",
-    about:
-      "Record voice channels on their device or on the server, and download and delete the server's recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software.",
-    channel:
-      "Record this voice channel on their device or on the server, and download and delete its recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software.",
-  },
+  [P.MANAGE_EMOJI]: { label: "serversettings.permission.manageEmoji", about: "serversettings.permission.manageEmojiAbout" },
+  [P.CONNECT]: { label: "serversettings.permission.connect", about: "serversettings.permission.connectAbout", channel: "serversettings.permission.connectChannel" },
+  [P.SPEAK]: { label: "serversettings.permission.speak", about: "serversettings.permission.speakAbout", channel: "serversettings.permission.speakChannel" },
+  [P.VIDEO]: { label: "serversettings.permission.video", about: "serversettings.permission.videoAbout", channel: "serversettings.permission.videoChannel" },
+  [P.RECORD]: { label: "serversettings.permission.record", about: "serversettings.permission.recordAbout", channel: "serversettings.permission.recordChannel" },
   [P.MUTE_MEMBERS]: {
-    label: "Mute members",
-    about: "Mute or deafen people ranked below them in voice channels, for everyone.",
-    channel: "Mute or deafen people ranked below them in this voice channel.",
+    label: "serversettings.permission.muteMembers",
+    about: "serversettings.permission.muteMembersAbout",
+    channel: "serversettings.permission.muteMembersChannel",
   },
   [P.MOVE_MEMBERS]: {
-    label: "Move members",
-    about: "Disconnect people ranked below them from voice channels.",
-    channel: "Disconnect people ranked below them from this voice channel.",
+    label: "serversettings.permission.moveMembers",
+    about: "serversettings.permission.moveMembersAbout",
+    channel: "serversettings.permission.moveMembersChannel",
   },
-  [P.MANAGE_WEBHOOKS]: {
-    label: "Manage webhooks",
-    about: "Make, change and delete webhooks, and see their addresses, which let other apps post in any channel.",
-  },
+  [P.MANAGE_WEBHOOKS]: { label: "serversettings.permission.manageWebhooks", about: "serversettings.permission.manageWebhooksAbout" },
 };
 
-export const permissionInfo = (p: P): PermissionInfo => (p === P.UNSPECIFIED ? { label: "", about: "" } : PERMISSIONS[p]);
-export const permissionLabel = (p: P) => permissionInfo(p).label;
+/** A known permission's catalog keys (every permission the settings pages list is one). */
+export const permissionInfo = (p: P): PermissionInfo => PERMISSIONS[p as Exclude<P, P.UNSPECIFIED>];
+/** A permission's name in the app's language, or "" for one this app doesn't know. */
+export const permissionLabel = (t: (key: Key) => string, p: P) => {
+  const info = p === P.UNSPECIFIED ? undefined : PERMISSIONS[p];
+  return info ? t(info.label) : "";
+};
 
-/** Permissions as the settings pages group them. */
-export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
+/** Permissions as the settings pages group them; titles are catalog keys. */
+export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
   {
-    title: "Server",
+    title: "serversettings.permission.group.server",
     permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_WEBHOOKS, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
   },
   {
-    title: "Membership",
+    title: "serversettings.permission.group.membership",
     permissions: [P.CREATE_INVITE, P.CHANGE_NICKNAME, P.MANAGE_NICKNAMES, P.KICK_MEMBERS, P.BAN_MEMBERS, P.TIME_OUT_MEMBERS],
   },
   {
-    title: "Text channels",
+    title: "serversettings.permission.group.textChannels",
     permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
-  { title: "Advanced", permissions: [P.ADMINISTRATOR] },
+  { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "serversettings.permission.group.advanced", permissions: [P.ADMINISTRATOR] },
 ];
 
-/** The channel permissions, grouped for a channel's settings. */
-export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
-  { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
+/** The channel permissions, grouped for a channel's settings: everything channels share, then what text and voice channels each have. */
+export const CHANNEL_GROUPS: { kind: "general" | "text" | "voice"; title: Key; permissions: P[] }[] = [
+  { kind: "general", title: "serversettings.permission.group.general", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
   {
-    title: "Text",
+    kind: "text",
+    title: "serversettings.permission.group.text",
     permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { kind: "voice", title: "serversettings.permission.group.voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
 
 /** What one member can do in one server. */

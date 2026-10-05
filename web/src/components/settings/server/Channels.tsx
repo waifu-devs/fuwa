@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 
 /** Discord's slow mode stops, in seconds. */
 const SLOW = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600];
-const slowLabel = (lang: Lang, seconds: number) => (seconds ? formatDuration(lang, seconds) : "Off");
+const slowLabel = (lang: Lang, seconds: number) => (seconds ? formatDuration(lang, seconds) : lang.t("serversettings.shared.off"));
 
 /**
  * Every channel, dragged into order by its handle (or moved with the arrow
@@ -43,6 +43,7 @@ const slowLabel = (lang: Lang, seconds: number) => (seconds ? formatDuration(lan
 export function Channels({ instanceKey, serverId, initial: opened }: { instanceKey: string; serverId: string; initial?: string | null }) {
   // "<id>:permissions" opens a channel's permissions, as its right-click menu asks.
   const [initial, initialTab] = (opened ?? "").split(":") as [string, Tab | undefined];
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const arrange = has(access, Permission.MANAGE_CHANNELS);
@@ -88,7 +89,7 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
         active={selected === id}
         onPick={() => pick(id)}
         onKeyMove={(e) => moveKey(e, id)}
-        position={`${list.indexOf(id) + 1} of ${list.length}`}
+        position={t("serversettings.shared.position", { index: list.indexOf(id) + 1, total: list.length })}
         movable={arrange}
         locked={isPrivate(channel, serverId)}
       />
@@ -101,11 +102,11 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            {arrange ? "Drag by the handle, into or out of categories, or focus it and use the arrow keys." : "Pick a channel to change who can see and use it."}
+            {arrange ? t("serversettings.channels.introArrange") : t("serversettings.channels.introPick")}
           </p>
           {arrange && (
             <Button type="button" size="sm" onClick={() => setCreating("")} className="btn shrink-0 rounded-xl font-bold">
-              <PlusIcon /> New
+              <PlusIcon /> {t("serversettings.shared.new")}
             </Button>
           )}
         </div>
@@ -122,7 +123,7 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
                 onPick={() => pick(category.id)}
                 onAdd={() => setCreating(category.id)}
                 onKeyMove={(e) => moveKey(e, category.id)}
-                position={`${ids.indexOf(category.id) + 1} of ${ids.length}`}
+                position={t("serversettings.shared.position", { index: ids.indexOf(category.id) + 1, total: ids.length })}
                 movable={arrange}
                 locked={isPrivate(channel, serverId)}
                 canAdd={hasIn(access, category.id, Permission.MANAGE_CHANNELS)}
@@ -146,7 +147,7 @@ export function Channels({ instanceKey, serverId, initial: opened }: { instanceK
             </motion.div>
           ) : (
             <motion.p key="none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-10 text-center text-sm text-muted-foreground">
-              Pick a channel to change it.
+              {t("serversettings.channels.pick")}
             </motion.p>
           )}
         </AnimatePresence>
@@ -201,7 +202,7 @@ function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, mov
       transition={SPRING}
       className={cn("relative flex items-center gap-0.5 rounded-lg bg-background", parent && "ml-3")}
     >
-      {movable && <Grip label={`Move #${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
+      {movable && <Grip label={lang.t("serversettings.channels.move", { channel: channel.name, position })} onKeyMove={onKeyMove} />}
       <button
         type="button"
         onClick={onPick}
@@ -215,7 +216,7 @@ function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, mov
         <span className="relative truncate">{channel.name}</span>
         <PrivateMark on={locked} />
         {channel.slowmodeSeconds > 0 && (
-          <span className="relative ml-auto flex shrink-0 items-center gap-0.5 text-[0.7rem] text-muted-foreground" title={`Slow mode: ${slowLabel(lang, channel.slowmodeSeconds)}`}>
+          <span className="relative ml-auto flex shrink-0 items-center gap-0.5 text-[0.7rem] text-muted-foreground" title={lang.t("serversettings.channels.slowmodeIs", { time: slowLabel(lang, channel.slowmodeSeconds) })}>
             <SnailIcon className="size-3" /> {shortDuration(lang, channel.slowmodeSeconds)}
           </span>
         )}
@@ -226,6 +227,7 @@ function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, mov
 
 /** A lock that pops in beside a channel once it's private. */
 function PrivateMark({ on }: { on: boolean }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence initial={false}>
       {on && (
@@ -235,7 +237,7 @@ function PrivateMark({ on }: { on: boolean }) {
           exit={{ scale: 0 }}
           transition={{ type: "spring", stiffness: 600, damping: 18 }}
           className="relative shrink-0 text-muted-foreground"
-          title="Private"
+          title={t("serversettings.channels.private")}
         >
           <LockIcon className="size-3" />
         </motion.span>
@@ -255,6 +257,7 @@ function CategoryItem({
   locked,
   canAdd,
 }: ItemProps & { onAdd: () => void; canAdd: boolean }) {
+  const { t } = useI18n();
   return (
     <motion.div
       layout="position"
@@ -263,7 +266,7 @@ function CategoryItem({
       transition={SPRING}
       className="group relative mt-2 flex items-center gap-0.5 rounded-lg bg-background"
     >
-      {movable && <Grip label={`Move category ${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
+      {movable && <Grip label={t("serversettings.channels.moveCategory", { category: channel.name, position })} onKeyMove={onKeyMove} />}
       <button
         type="button"
         onClick={onPick}
@@ -280,7 +283,7 @@ function CategoryItem({
       {canAdd && (
         <button
           type="button"
-          aria-label={`Create a channel in ${channel.name}`}
+          aria-label={t("serversettings.channels.createIn", { category: channel.name })}
           onClick={onAdd}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground"
         >
@@ -295,15 +298,16 @@ type Tab = "overview" | "permissions" | "share";
 
 /** The parts of a channel's settings you may open there. */
 function useChannelTabs(instanceKey: string, serverId: string, channel: Channel): { value: Tab; label: string }[] {
+  const { t } = useI18n();
   const access = useAccess(instanceKey, serverId);
   const sharingOn = useSharingOn(instanceKey);
   const texty = channel.type === ChannelType.TEXT || channel.type === ChannelType.ANNOUNCEMENT;
   // Sharing takes managing the server and the channel, while the instance allows it (or it's shared already).
   const share = texty && has(access, Permission.MANAGE_SERVER) && hasIn(access, channel.id, Permission.MANAGE_CHANNELS) && (sharingOn || !!channel.shared);
   return [
-    ...(hasIn(access, channel.id, Permission.MANAGE_CHANNELS) ? [{ value: "overview" as const, label: "Overview" }] : []),
-    ...(hasIn(access, channel.id, Permission.MANAGE_ROLES) ? [{ value: "permissions" as const, label: "Permissions" }] : []),
-    ...(share ? [{ value: "share" as const, label: "Share" }] : []),
+    ...(hasIn(access, channel.id, Permission.MANAGE_CHANNELS) ? [{ value: "overview" as const, label: t("serversettings.nav.overview") }] : []),
+    ...(hasIn(access, channel.id, Permission.MANAGE_ROLES) ? [{ value: "permissions" as const, label: t("serversettings.shared.permissions") }] : []),
+    ...(share ? [{ value: "share" as const, label: t("serversettings.channels.share") }] : []),
   ];
 }
 
@@ -321,9 +325,10 @@ function ChannelSettings({
   channels: Channel[];
   initialTab?: Tab;
 }) {
+  const { t } = useI18n();
   const tabs = useChannelTabs(instanceKey, serverId, channel);
   const [tab, setTab] = useState<Tab>(initialTab ?? tabs[0]?.value ?? "overview");
-  const shown = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
+  const shown = tabs.some((x) => x.value === tab) ? tab : tabs[0]?.value;
   const Icon = channel.type === ChannelType.CATEGORY ? FolderIcon : (CHANNEL_ICON[channel.type] ?? HashIcon);
   return (
     <div className="flex flex-col">
@@ -332,14 +337,14 @@ function ChannelSettings({
           <Icon className="size-5 shrink-0 text-muted-foreground" />
           <span className="truncate">{channel.name}</span>
         </h3>
-        {tabs.length > 1 && <Segmented label="Channel settings" value={shown ?? "overview"} onChange={setTab} options={tabs} />}
+        {tabs.length > 1 && <Segmented label={t("serversettings.channels.settings")} value={shown ?? "overview"} onChange={setTab} options={tabs} />}
       </div>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={shown} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
           {shown === "overview" && <ChannelEditor instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
           {shown === "share" && <ChannelShare instanceKey={instanceKey} serverId={serverId} channel={channel} />}
           {shown === "permissions" && <ChannelPermissions instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
-          {!shown && <p className="py-10 text-center text-sm text-muted-foreground">You can't change this one.</p>}
+          {!shown && <p className="py-10 text-center text-sm text-muted-foreground">{t("serversettings.channels.cantChange")}</p>}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -354,6 +359,7 @@ const slug = (name: string) => name.toLowerCase().replace(/\s+/g, "-").replace(/
 
 function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
   const lang = useI18n();
+  const { t } = lang;
   const category = channel.type === ChannelType.CATEGORY;
   /** Categories and voice channels keep their names as typed. */
   const free = category || channel.type === ChannelType.VOICE;
@@ -386,7 +392,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
 
   async function submit() {
     const name = free ? draft.name.trim() : slug(draft.name);
-    if (!name) return save.setError("a channel needs a name");
+    if (!name) return save.setError(t("serversettings.channels.needsName"));
     const done = await save.go(instanceKey, serverId, channel.id, {
       ...(draft.name !== base.name && { name }),
       ...(draft.topic !== base.topic && { topic: draft.topic.trim() }),
@@ -397,11 +403,11 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
   }
 
   const index = Math.max(0, SLOW.findIndex((s) => s >= draft.slowmode));
-  const parentName = categories.find((c) => c.id === draft.parentId)?.name ?? "No category";
+  const parentName = categories.find((c) => c.id === draft.parentId)?.name ?? t("serversettings.channels.noCategory");
 
   return (
     <div className="flex flex-col">
-      <Row label={category ? "Category name" : "Channel name"} htmlFor="channel-edit-name">
+      <Row label={category ? t("serversettings.channels.categoryName") : t("serversettings.channels.channelName")} htmlFor="channel-edit-name">
         <div className="relative">
           {!category && <HashIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />}
           <Input
@@ -414,12 +420,12 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
         </div>
       </Row>
       {texty && (
-        <Row label="Topic" htmlFor="channel-edit-topic" hint="Shown at the top of the channel. Markdown works.">
+        <Row label={t("serversettings.channels.topic")} htmlFor="channel-edit-topic" hint={t("serversettings.channels.topicHint")}>
           <Textarea id="channel-edit-topic" rows={3} maxLength={1024} value={draft.topic} onChange={(e) => set({ topic: e.target.value })} className="rounded-xl" />
         </Row>
       )}
       {!category && (
-        <Row label="Category">
+        <Row label={t("serversettings.channels.category")}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="group flex h-11 items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60">
@@ -429,7 +435,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
               <DropdownMenuRadioGroup value={draft.parentId} onValueChange={(parentId) => set({ parentId })}>
-                <DropdownMenuRadioItem value="">No category</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="">{t("serversettings.channels.noCategory")}</DropdownMenuRadioItem>
                 {categories.map((c) => (
                   <DropdownMenuRadioItem key={c.id} value={c.id}>
                     {c.name}
@@ -443,8 +449,8 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
       {texty && (
         <Row
           id="slowmode"
-          label="Slow mode"
-          hint="How long members wait between messages. People who can manage messages or channels here don't wait."
+          label={t("serversettings.nav.slowmode")}
+          hint={t("serversettings.channels.slowmodeHint")}
         >
           <div className="flex items-center gap-3">
             <motion.span
@@ -455,18 +461,18 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
               <SnailIcon className="size-5" />
             </motion.span>
             <Slider
-              label="Slow mode"
+              label={t("serversettings.nav.slowmode")}
               min={0}
               max={SLOW.length - 1}
               value={index}
               onChange={(i) => set({ slowmode: SLOW[i]! })}
               format={(i) => slowLabel(lang, SLOW[i]!)}
               marks={[
-                { value: 0, label: "Off" },
-                { value: 4, label: "30s" },
-                { value: 7, label: "5m" },
-                { value: 11, label: "1h" },
-                { value: 13, label: "6h" },
+                { value: 0, label: t("serversettings.shared.off") },
+                { value: 4, label: shortDuration(lang, SLOW[4]!) },
+                { value: 7, label: shortDuration(lang, SLOW[7]!) },
+                { value: 11, label: shortDuration(lang, SLOW[11]!) },
+                { value: 13, label: shortDuration(lang, SLOW[13]!) },
               ]}
               className="min-w-0 flex-1 px-2"
             />
@@ -486,35 +492,39 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
               className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4"
             >
               <p className="flex items-center gap-2 font-bold text-destructive">
-                <TriangleAlertIcon className="size-4" /> Delete {category ? channel.name : `#${channel.name}`}?
+                <TriangleAlertIcon className="size-4" />{" "}
+                {category ? t("serversettings.channels.deleteCategoryAsk", { name: channel.name }) : t("serversettings.channels.deleteChannelAsk", { name: channel.name })}
               </p>
               <p className="text-sm text-muted-foreground">
                 {category
-                  ? "Its channels stay, outside any category."
-                  : `Every message in it goes too, for everyone.${system ? " Join messages stop until you pick another channel for them." : ""}`}
+                  ? t("serversettings.channels.deleteCategoryHint")
+                  : system
+                    ? t("serversettings.channels.deleteSystemHint")
+                    : t("serversettings.channels.deleteChannelHint")}
               </p>
               {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => setConfirming(false)} className="rounded-xl">
-                  Keep it
+                  {t("serversettings.shared.keepIt")}
                 </Button>
                 <Button
                   type="button"
                   variant="destructive"
                   disabled={remove.pending}
                   onClick={async () => {
-                    if ((await remove.go(instanceKey, serverId, channel.id)) !== undefined) toast(`Deleted ${category ? channel.name : `#${channel.name}`}`);
+                    if ((await remove.go(instanceKey, serverId, channel.id)) !== undefined) toast(category ? t("serversettings.shared.deleted", { name: channel.name }) : t("serversettings.shared.deletedChannel", { name: channel.name }));
                   }}
                   className="rounded-xl font-bold"
                 >
-                  {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} Delete
+                  {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} {t("serversettings.shared.delete")}
                 </Button>
               </div>
             </motion.div>
           ) : (
             <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Button type="button" variant="ghost" onClick={() => setConfirming(true)} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
-                <Trash2Icon className="transition-transform group-hover:-rotate-12" /> Delete {category ? "category" : "channel"}
+                <Trash2Icon className="transition-transform group-hover:-rotate-12" />{" "}
+                {category ? t("serversettings.channels.deleteCategory") : t("serversettings.channels.deleteChannel")}
               </Button>
             </motion.div>
           )}
