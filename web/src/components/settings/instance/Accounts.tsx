@@ -39,7 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { useI18n } from "@/i18n/react";
+import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { activeWhen } from "@/lib/devices";
 import { displayName, formatDay, hueOf, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -50,6 +50,10 @@ import { cn } from "@/lib/utils";
 const PAGE = 50;
 const REASON_MAX = 512;
 
+/** "Today" and "Yesterday" in the middle of a sentence: "joined today". */
+const midSentence = ({ t }: I18n, day: string) =>
+  day === t("common.time.today") || day === t("common.time.yesterday") ? day.toLowerCase() : day;
+
 type Pending = { account: AccountSummary; action: "turn-off" | "reset" } | null;
 
 /**
@@ -57,6 +61,7 @@ type Pending = { account: AccountSummary; action: "turn-off" | "reset" } | null;
  * give it a new password, or turn it off so it can't sign in.
  */
 export function Accounts({ instanceKey }: { instanceKey: string }) {
+  const { t, number } = useI18n();
   const inst = useInstance(instanceKey);
   const myId = inst?.me?.id;
   const now = useNow(60_000);
@@ -75,8 +80,8 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
 
   // Search as you type, once typing pauses.
   useEffect(() => {
-    const t = setTimeout(() => setSearch(query.trim()), 250);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setSearch(query.trim()), 250);
+    return () => clearTimeout(timer);
   }, [query]);
 
   function take(res: ListAccountsResponse, more: boolean) {
@@ -140,7 +145,8 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
     }
   }
 
-  const count = (n: bigint | undefined) => (n === undefined ? "" : ` · ${Number(n).toLocaleString()}`);
+  /** A filter's name, with how many accounts it has once that's known. */
+  const option = (bare: Key, counted: Key, n: bigint | undefined) => (n === undefined ? t(bare) : t(counted, { count: number(Number(n)) }));
 
   return (
     <div className="flex flex-col gap-4">
@@ -150,19 +156,19 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name or username"
-            aria-label="Search accounts"
+            placeholder={t("instancesettings.accounts.search")}
+            aria-label={t("instancesettings.accounts.searchLabel")}
             className="h-10 rounded-xl pl-9"
           />
         </div>
         <Segmented
-          label="Show"
+          label={t("instancesettings.accounts.show")}
           value={filter}
           onChange={setFilter}
           options={[
-            { value: AccountFilter.UNSPECIFIED, label: `All${count(totals?.all)}` },
-            { value: AccountFilter.ADMINS, label: `Admins${count(totals?.admins)}` },
-            { value: AccountFilter.DISABLED, label: `Turned off${count(totals?.disabled)}` },
+            { value: AccountFilter.UNSPECIFIED, label: option("instancesettings.accounts.all", "instancesettings.accounts.allCount", totals?.all) },
+            { value: AccountFilter.ADMINS, label: option("instancesettings.accounts.admins", "instancesettings.accounts.adminsCount", totals?.admins) },
+            { value: AccountFilter.DISABLED, label: option("instancesettings.accounts.off", "instancesettings.accounts.offCount", totals?.disabled) },
           ]}
         />
       </div>
@@ -178,8 +184,8 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
       ) : (
         <>
           <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            <UsersIcon className="size-3.5" /> <Count value={accounts.length} />
-            {hasMore ? "+" : ""} {accounts.length === 1 ? "account" : "accounts"}
+            <UsersIcon className="size-3.5" />{" "}
+            <T k={hasMore ? "instancesettings.accounts.countMore" : "instancesettings.accounts.count"} values={{ count: <Count value={accounts.length} /> }} count={accounts.length} />
           </p>
           <ul className="flex flex-col gap-1.5">
             <AnimatePresence initial={false} mode="popLayout">
@@ -193,9 +199,9 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
                   busy={busy === a.user?.id}
                   developer={developer}
                   onAdmin={(admin) =>
-                    change(a, { admin }, admin ? `${displayName(a.user)} is an instance admin now` : `${displayName(a.user)} isn't an admin anymore`)
+                    change(a, { admin }, t(admin ? "instancesettings.accounts.madeAdmin" : "instancesettings.accounts.unmadeAdmin", { name: displayName(a.user) }))
                   }
-                  onTurnOn={() => change(a, { disabled: false }, `${displayName(a.user)} can sign in again`)}
+                  onTurnOn={() => change(a, { disabled: false }, t("instancesettings.accounts.turnedOn", { name: displayName(a.user) }))}
                   onTurnOff={() => setPending({ account: a, action: "turn-off" })}
                   onReset={() => setPending({ account: a, action: "reset" })}
                 />
@@ -205,13 +211,13 @@ export function Accounts({ instanceKey }: { instanceKey: string }) {
           <AnimatePresence>
             {accounts.length === 0 && (
               <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-8 text-center text-sm text-muted-foreground">
-                {search ? "Nobody matches that." : filter === AccountFilter.DISABLED ? "No account is turned off." : "No accounts here."}
+                {t(search ? "serversettings.shared.nobodyMatches" : filter === AccountFilter.DISABLED ? "instancesettings.accounts.noneOff" : "instancesettings.accounts.none")}
               </motion.p>
             )}
           </AnimatePresence>
           {hasMore && (
             <Button type="button" variant="outline" onClick={more} disabled={loadingMore} className="self-center rounded-xl">
-              {loadingMore && <LoaderCircleIcon className="animate-spin" />} Show more
+              {loadingMore && <LoaderCircleIcon className="animate-spin" />} {t("instancesettings.accounts.showMore")}
             </Button>
           )}
         </>
@@ -259,15 +265,17 @@ function AccountRow({
   onReset: () => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const id = a.user?.id ?? "";
   const local = a.user?.kind === AccountKind.LOCAL;
   const agent = a.user?.kind === AccountKind.AGENT;
-  const joined = formatDay(toDate(a.createdAt)).replace(/^(Today|Yesterday)$/, (d) => d.toLowerCase());
+  const joined = midSentence(lang, formatDay(toDate(a.createdAt)));
   const seen = activeWhen(lang, toDate(a.lastSeenAt), now);
+  const offDay = a.disabledAt ? formatDay(toDate(a.disabledAt)).toLowerCase() : "";
   const facts = [
-    `${a.servers} ${a.servers === 1 ? "server" : "servers"}`,
-    a.serversOwned ? `owns ${a.serversOwned}` : null,
-    `${a.sessions} ${a.sessions === 1 ? "device" : "devices"} signed in`,
+    t("instancesettings.accounts.servers", { count: a.servers }),
+    a.serversOwned ? t("instancesettings.accounts.owns", { count: a.serversOwned }) : null,
+    t("instancesettings.accounts.devices", { count: a.sessions }),
   ].filter(Boolean);
   return (
     <motion.li
@@ -288,7 +296,7 @@ function AccountRow({
             <span className={cn("name-tint truncate font-bold", a.disabled && "line-through decoration-destructive/60")} style={{ "--h": hueOf(id) } as CSSProperties}>
               {displayName(a.user)}
             </span>
-            {me && <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[0.65rem] font-bold text-muted-foreground uppercase">You</span>}
+            {me && <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[0.65rem] font-bold text-muted-foreground uppercase">{t("serversettings.shared.you")}</span>}
             <AnimatePresence mode="popLayout" initial={false}>
               {a.admin && (
                 <motion.span
@@ -298,9 +306,9 @@ function AccountRow({
                   exit={{ scale: 0, rotate: 40 }}
                   transition={{ type: "spring", stiffness: 600, damping: 16 }}
                   className="flex shrink-0 items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[0.65rem] font-bold text-primary uppercase"
-                  title="Instance admin"
+                  title={t("instancesettings.accounts.instanceAdmin")}
                 >
-                  <ShieldIcon className="size-3" /> Admin
+                  <ShieldIcon className="size-3" /> {t("instancesettings.accounts.admin")}
                 </motion.span>
               )}
               {a.disabled && (
@@ -312,29 +320,30 @@ function AccountRow({
                   transition={{ type: "spring", stiffness: 600, damping: 18 }}
                   className="flex shrink-0 items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[0.65rem] font-bold text-destructive uppercase"
                 >
-                  <PowerOffIcon className="size-3" /> Off
+                  <PowerOffIcon className="size-3" /> {t("serversettings.shared.off")}
                 </motion.span>
               )}
             </AnimatePresence>
             {a.twoFactor && (
-              <span className="shrink-0 text-emerald-500" title="Two-step sign-in is on">
+              <span className="shrink-0 text-emerald-500" title={t("instancesettings.accounts.twoStepOn")}>
                 <ShieldCheckIcon className="size-3.5" />
               </span>
             )}
             {agent && <AppBadge agent />}
             {a.user?.kind === AccountKind.LINKED && (
-              <span className="shrink-0 text-muted-foreground" title="Signs in through waifu.dev">
+              <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.linked")}>
                 <Link2Icon className="size-3.5" />
               </span>
             )}
             {a.user?.kind === AccountKind.SSO && (
-              <span className="shrink-0 text-muted-foreground" title="Signs in with single sign-on">
+              <span className="shrink-0 text-muted-foreground" title={t("instancesettings.accounts.sso")}>
                 <BuildingIcon className="size-3.5" />
               </span>
             )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} · joined {joined} · {seen ? `active ${seen}` : "active now"}
+            @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} ·{" "}
+            {seen ? t("instancesettings.accounts.joinedSeen", { day: joined, when: seen }) : t("instancesettings.accounts.joinedNow", { day: joined })}
           </p>
           <p className="hidden truncate text-xs text-muted-foreground/80 sm:block">{facts.join(" · ")}</p>
         </div>
@@ -343,7 +352,7 @@ function AccountRow({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label={`Actions for ${displayName(a.user)}`}
+                aria-label={t("instancesettings.accounts.actionsFor", { name: displayName(a.user) })}
                 disabled={busy}
                 className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
               >
@@ -353,34 +362,34 @@ function AccountRow({
             <DropdownMenuContent align="end" className="w-56">
               {!me && !a.admin && !a.disabled && !agent && (
                 <DropdownMenuItem onSelect={() => onAdmin(true)}>
-                  <ShieldIcon /> Make instance admin
+                  <ShieldIcon /> {t("instancesettings.accounts.makeAdmin")}
                 </DropdownMenuItem>
               )}
               {!me && a.admin && (
                 <DropdownMenuItem onSelect={() => onAdmin(false)}>
-                  <ShieldOffIcon /> Remove admin
+                  <ShieldOffIcon /> {t("instancesettings.accounts.removeAdmin")}
                 </DropdownMenuItem>
               )}
               {!me && local && (
                 <DropdownMenuItem onSelect={onReset}>
-                  <KeyRoundIcon /> Reset password
+                  <KeyRoundIcon /> {t("instancesettings.accounts.resetPassword")}
                 </DropdownMenuItem>
               )}
               {!me && <DropdownMenuSeparator />}
               {!me &&
                 (a.disabled ? (
                   <DropdownMenuItem onSelect={onTurnOn}>
-                    <PowerIcon /> Turn back on
+                    <PowerIcon /> {t("instancesettings.accounts.turnBackOn")}
                   </DropdownMenuItem>
                 ) : (
                   <DropdownMenuItem variant="destructive" onSelect={onTurnOff}>
-                    <PowerOffIcon /> Turn off
+                    <PowerOffIcon /> {t("accountsettings.shared.turnOff")}
                   </DropdownMenuItem>
                 ))}
               {developer && !me && <DropdownMenuSeparator />}
               {developer && (
-                <DropdownMenuItem onSelect={() => copy(lang.t, id, lang.t("common.copy.accountId"))}>
-                  <FingerprintIcon /> Copy account ID
+                <DropdownMenuItem onSelect={() => copy(t, id, t("common.copy.accountId"))}>
+                  <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.accountId") })}
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -396,8 +405,11 @@ function AccountRow({
             transition={SPRING}
             className="overflow-hidden pl-[3.25rem] text-xs text-destructive/90"
           >
-            Turned off {a.disabledAt ? formatDay(toDate(a.disabledAt)).toLowerCase() : ""}
-            {a.disabledReason ? <>: <span className="italic">{a.disabledReason}</span></> : ", no reason given."}
+            {a.disabledReason ? (
+              <T k="instancesettings.accounts.offReason" values={{ date: offDay, reason: <span className="italic">{a.disabledReason}</span> }} />
+            ) : (
+              t("instancesettings.accounts.offNoReason", { date: offDay })
+            )}
           </motion.p>
         )}
       </AnimatePresence>
@@ -407,6 +419,7 @@ function AccountRow({
 
 /** Turns an account off, with a reason only admins see. */
 function TurnOff({ instanceKey, account, onDone }: { instanceKey: string; account: AccountSummary; onDone: (next?: AccountSummary) => void }) {
+  const { t } = useI18n();
   const [reason, setReason] = useState("");
   const save = useAction(updateAccount);
   const power = useAnimationControls();
@@ -417,25 +430,25 @@ function TurnOff({ instanceKey, account, onDone }: { instanceKey: string; accoun
     void power.start({ rotate: [0, 180], scale: [1, 0.8, 1], transition: { duration: 0.4 } });
     const next = await save.go(instanceKey, account.user?.id ?? "", { disabled: true, admin: account.admin ? false : undefined, reason: reason.trim() });
     if (!next) return;
-    toast(`${name} is turned off`);
+    toast(t("instancesettings.accounts.turnedOff", { name }));
     onDone(next);
   }
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <DialogHeader title={`Turn off ${name}`} description="They're signed out on every device and can't sign in until an admin turns the account back on. Their messages and servers stay." />
+      <DialogHeader title={t("instancesettings.accounts.turnOffTitle", { name })} description={t("instancesettings.accounts.turnOffHint")} />
       <Who account={account} />
-      {account.admin && <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">They stop being an instance admin too.</p>}
+      {account.admin && <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">{t("instancesettings.accounts.turnOffAdmin")}</p>}
       <div className="flex flex-col gap-2">
         <Label htmlFor="turn-off-reason" className="flex items-center justify-between font-bold">
-          Reason <span className="text-xs font-normal text-muted-foreground">Optional, only admins see it</span>
+          {t("instancesettings.accounts.reason")} <span className="text-xs font-normal text-muted-foreground">{t("instancesettings.accounts.reasonHint")}</span>
         </Label>
         <Textarea id="turn-off-reason" rows={2} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} className="rounded-xl" />
       </div>
       {save.error && <p className="text-sm text-destructive first-letter:uppercase">{save.error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" disabled={save.pending} onClick={() => onDone()} className="rounded-xl">
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" variant="destructive" disabled={save.pending} className="rounded-xl font-bold">
           {save.pending ? (
@@ -445,7 +458,7 @@ function TurnOff({ instanceKey, account, onDone }: { instanceKey: string; accoun
               <PowerOffIcon />
             </motion.span>
           )}
-          Turn off
+          {t("accountsettings.shared.turnOff")}
         </Button>
       </div>
     </form>
@@ -454,6 +467,7 @@ function TurnOff({ instanceKey, account, onDone }: { instanceKey: string; accoun
 
 /** A new random password for someone locked out, shown once. */
 function ResetPassword({ instanceKey, account, onDone }: { instanceKey: string; account: AccountSummary; onDone: () => void }) {
+  const { t } = useI18n();
   const [twoFactor, setTwoFactor] = useState(false);
   const [password, setPassword] = useState<string | null>(null);
   const reset = useAction(resetAccountPassword);
@@ -468,11 +482,11 @@ function ResetPassword({ instanceKey, account, onDone }: { instanceKey: string; 
   if (password) {
     return (
       <div className="flex flex-col gap-4">
-        <DialogHeader title={`${name}'s new password`} description="Send it to them privately. It's shown only this once; they can change it in their account settings after signing in." />
+        <DialogHeader title={t("instancesettings.accounts.newPasswordTitle", { name })} description={t("instancesettings.accounts.newPasswordHint")} />
         <NewPassword password={password} />
-        {twoFactor && <p className="text-sm text-muted-foreground">Two-step sign-in is off for them now. They can set it up again after signing in.</p>}
+        {twoFactor && <p className="text-sm text-muted-foreground">{t("instancesettings.accounts.twoStepOff")}</p>}
         <Button type="button" onClick={onDone} className="btn self-end rounded-xl px-5 font-bold">
-          Done
+          {t("accountsettings.shared.done")}
         </Button>
       </div>
     );
@@ -480,25 +494,25 @@ function ResetPassword({ instanceKey, account, onDone }: { instanceKey: string; 
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <DialogHeader title={`Reset ${name}'s password`} description="They get a new random password and are signed out everywhere. Their old password stops working." />
+      <DialogHeader title={t("instancesettings.accounts.resetTitle", { name })} description={t("instancesettings.accounts.resetHint")} />
       <Who account={account} />
       {account.twoFactor && (
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors hover:border-primary/30">
           <Switch checked={twoFactor} onCheckedChange={setTwoFactor} className="mt-0.5" />
           <span className="flex flex-col gap-0.5">
-            <span className="text-sm font-bold">Also turn off two-step sign-in</span>
-            <span className="text-xs text-muted-foreground">For someone who lost their authenticator app and their backup codes.</span>
+            <span className="text-sm font-bold">{t("instancesettings.accounts.alsoTwoStep")}</span>
+            <span className="text-xs text-muted-foreground">{t("instancesettings.accounts.alsoTwoStepHint")}</span>
           </span>
         </label>
       )}
       {reset.error && <p className="text-sm text-destructive first-letter:uppercase">{reset.error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" disabled={reset.pending} onClick={onDone} className="rounded-xl">
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={reset.pending} className="btn group rounded-xl font-bold">
           {reset.pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon className="transition-transform duration-300 group-hover:-rotate-45" />}
-          Reset password
+          {t("instancesettings.accounts.resetPassword")}
         </Button>
       </div>
     </form>
@@ -516,7 +530,7 @@ function NewPassword({ password }: { password: string }) {
     <div className="flex items-center gap-2">
       <div className="relative min-w-0 flex-1">
         <code
-          aria-label="New password"
+          aria-label={t("instancesettings.accounts.newPassword")}
           className={cn(
             "block rounded-xl bg-muted px-3 py-3 text-center font-mono text-lg font-bold tracking-wider transition-[filter] duration-300",
             hidden && "blur-md select-none",
@@ -544,7 +558,7 @@ function NewPassword({ password }: { password: string }) {
               onClick={() => setRevealed(true)}
               className="absolute inset-0 flex items-center justify-center gap-2 rounded-xl bg-background/50 text-xs font-bold backdrop-blur-sm"
             >
-              <EyeIcon className="size-4" /> Hidden by streamer mode. Show it anyway
+              <EyeIcon className="size-4" /> {t("instancesettings.accounts.hiddenShow")}
             </motion.button>
           )}
         </AnimatePresence>
@@ -554,7 +568,7 @@ function NewPassword({ password }: { password: string }) {
         variant="outline"
         size="icon"
         className="size-12 shrink-0 rounded-xl"
-        aria-label="Copy the password"
+        aria-label={t("common.copyThing", { what: t("common.copy.password") })}
         onClick={() => {
           copy(t, password, t("common.copy.password"));
           setCopied(true);

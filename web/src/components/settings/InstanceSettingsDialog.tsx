@@ -36,7 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Private, usePrivateField } from "@/components/Private";
 import { formatBytes, type Lang } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { canReturnTo, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
@@ -46,10 +46,10 @@ import { providerReady } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
-import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
-import { GIF_FIELDS, GIF_SECTION, GifSettings } from "./instance/Gifs";
-import { FEDERATION_FIELDS, FEDERATION_SECTION, FederationSettings } from "./instance/Federation";
-import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
+import { CALL_FIELDS, callSection, CallSettings } from "./instance/Calls";
+import { GIF_FIELDS, gifSection, GifSettings } from "./instance/Gifs";
+import { FEDERATION_FIELDS, federationSection, FederationSettings } from "./instance/Federation";
+import { MODERATION_FIELDS, moderationSection, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
 
@@ -96,8 +96,9 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
   FIELDS.filter((f) => f.get(draft) !== f.get(saved)).map((f) => f.path);
 
-const count = (n: bigint | undefined) => (n === undefined ? "no limit" : Number(n).toLocaleString());
-const size = (lang: Lang, n: bigint | undefined) => (n === undefined ? "no limit" : formatBytes(lang, Number(n)));
+const count = (lang: I18n, n: bigint | undefined) => (n === undefined ? lang.t("instancesettings.shared.noLimit") : lang.number(Number(n)));
+const size = (lang: Lang, n: bigint | undefined) => (n === undefined ? lang.t("instancesettings.shared.noLimit") : formatBytes(lang, Number(n)));
+const onOff = (t: I18n["t"], on: boolean | undefined) => t(on ? "instancesettings.shared.on" : "instancesettings.shared.off");
 
 /**
  * Everything an admin can change about a fuwa instance while it runs. Each
@@ -114,6 +115,7 @@ export function InstanceSettingsDialog({
   instanceKey: string;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const inst = useInstance(instanceKey);
   const [config, setConfig] = useState<InstanceConfig | null>(null);
   const [draft, setDraft] = useState<InstanceSettings | null>(null);
@@ -187,106 +189,106 @@ export function InstanceSettingsDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={name}
-      subtitle="Instance settings"
+      subtitle={t("instancesettings.nav.subtitle")}
       section={tab}
       onSectionChange={setTab}
       groups={[
         {
-          label: "Instance",
+          label: t("instancesettings.nav.instance"),
           sections: [
             {
               id: "general",
-              label: "General",
+              label: t("instancesettings.nav.general"),
               icon: SlidersHorizontalIcon,
-              description: `What everyone on ${name} gets. Changes apply right away.`,
+              description: t("instancesettings.nav.generalAbout", { name }),
               settings: [
-                { id: "name", label: "Name" },
-                { id: "public-url", label: "Public address", keywords: "url domain" },
-                { id: "web", label: "Web app" },
-                { id: "origins", label: "Sites that can connect", keywords: "cors origins allowed" },
+                { id: "name", label: t("instancesettings.nav.name") },
+                { id: "public-url", label: t("instancesettings.nav.publicUrl"), keywords: "url domain" },
+                { id: "web", label: t("instancesettings.nav.web") },
+                { id: "origins", label: t("instancesettings.nav.origins"), keywords: "cors origins allowed" },
               ],
             },
             {
               id: "sign-ups",
-              label: "Sign-ups",
+              label: t("instancesettings.nav.signUps"),
               icon: UserPlusIcon,
-              description: "Who can join this instance and what they can make.",
+              description: t("instancesettings.nav.signUpsAbout"),
               settings: [
-                { id: "local-accounts", label: "Standalone accounts", keywords: "sign up password" },
-                { id: "linked-accounts", label: "waifu.dev accounts", keywords: "linked sign in sign up" },
-                { id: "linked-issuer", label: "Sign-in provider", keywords: "issuer openauth waifu.dev linked" },
-                { id: "server-creation", label: "Who can create servers" },
-                { id: "servers-per-account", label: "Servers per account" },
-                { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
-                { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
-                { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
-                { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
-                { id: "rich-presence", label: "Rich presence", keywords: "activity playing game status discord presence" },
+                { id: "local-accounts", label: t("instancesettings.nav.localAccounts"), keywords: "sign up password" },
+                { id: "linked-accounts", label: t("instancesettings.nav.linkedAccounts"), keywords: "linked sign in sign up" },
+                { id: "linked-issuer", label: t("instancesettings.nav.linkedIssuer"), keywords: "issuer openauth waifu.dev linked" },
+                { id: "server-creation", label: t("instancesettings.nav.serverCreation") },
+                { id: "servers-per-account", label: t("instancesettings.nav.serversPerAccount") },
+                { id: "agent-creation", label: t("instancesettings.nav.agentCreation"), keywords: "bots integrations" },
+                { id: "mcp", label: t("instancesettings.nav.mcp"), keywords: "mcp claude ai model context protocol" },
+                { id: "shared-channels", label: t("serversettings.nav.shared"), keywords: "share connect servers slack connect" },
+                { id: "profile-effects", label: t("instancesettings.nav.profileEffects"), keywords: "sparkles petals animation card decoration" },
+                { id: "rich-presence", label: t("instancesettings.nav.richPresence"), keywords: "activity playing game status discord presence" },
               ],
             },
             {
               id: "sso",
-              label: "Single sign-on",
+              label: t("serversettings.nav.sso"),
               icon: BuildingIcon,
-              description: "Let people sign in here through your organization's identity provider.",
+              description: t("instancesettings.nav.ssoAbout"),
               keywords: "sso saml oidc openid okta entra azure google workspace keycloak authentik identity provider",
               settings: [
-                { id: "sso-accounts", label: "Single sign-on accounts", keywords: "sso sign up" },
-                { id: "sso-protocol", label: "Identity provider", keywords: "saml oidc openid" },
-                { id: "sso-domains", label: "Email domains", keywords: "sso allowed" },
-                { id: "sso-test", label: "Test sign-in", keywords: "sso check" },
+                { id: "sso-accounts", label: t("instancesettings.nav.ssoAccounts"), keywords: "sso sign up" },
+                { id: "sso-protocol", label: t("serversettings.nav.ssoProtocol"), keywords: "saml oidc openid" },
+                { id: "sso-domains", label: t("serversettings.nav.ssoDomains"), keywords: "sso allowed" },
+                { id: "sso-test", label: t("instancesettings.nav.ssoTest"), keywords: "sso check" },
               ],
             },
             {
               id: "limits",
-              label: "Limits",
+              label: t("serversettings.nav.limits"),
               icon: GaugeIcon,
-              description: "Caps every server starts with.",
+              description: t("instancesettings.nav.limitsAbout"),
               settings: [
-                { id: "default-limits", label: "Default caps for every server", keywords: "members channels storage attachments" },
-                { id: "picture-uploads", label: "Largest picture upload", keywords: "avatar banner icon image size" },
+                { id: "default-limits", label: t("instancesettings.nav.defaultLimits"), keywords: "members channels storage attachments" },
+                { id: "picture-uploads", label: t("instancesettings.nav.pictureUploads"), keywords: "avatar banner icon image size" },
               ],
             },
             {
               id: "privacy",
-              label: "Privacy",
+              label: t("instancesettings.nav.privacy"),
               icon: ShieldCheckIcon,
-              description: "What this instance tells Waifu Devs.",
-              settings: [{ id: "telemetry", label: "Anonymous usage signal and reports", keywords: "telemetry analytics errors performance" }],
+              description: t("instancesettings.nav.privacyAbout"),
+              settings: [{ id: "telemetry", label: t("instancesettings.nav.telemetry"), keywords: "telemetry analytics errors performance" }],
             },
-            CALL_SECTION,
-            MODERATION_SECTION,
-            FEDERATION_SECTION,
-            GIF_SECTION,
+            callSection(t),
+            moderationSection(t),
+            federationSection(t),
+            gifSection(t),
           ],
         },
         {
-          label: "Manage",
+          label: t("instancesettings.nav.manage"),
           sections: [
             {
               id: "accounts",
-              label: "Accounts",
+              label: t("instancesettings.nav.accounts"),
               icon: UsersIcon,
-              description: "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
+              description: t("instancesettings.nav.accountsAbout"),
               keywords: "users people disable ban reset password admin",
             },
             {
               id: "servers",
-              label: "Servers",
+              label: t("instancesettings.nav.servers"),
               icon: ServerIcon,
-              description: "Every server on this instance, whether you're in it or not.",
+              description: t("instancesettings.nav.serversAbout"),
               keywords: "communities export backup delete caps usage storage",
             },
             {
               id: "announcement",
-              label: "Announcement",
+              label: t("instancesettings.nav.announcement"),
               icon: MegaphoneIcon,
-              description: "A banner at the top of the app for everyone on this instance.",
+              description: t("instancesettings.nav.announcementAbout"),
               keywords: "banner maintenance notice news",
               settings: [
-                { id: "announcement-text", label: "Announcement message" },
-                { id: "announcement-tone", label: "Announcement tone", keywords: "urgent warning info" },
-                { id: "announcement-ends", label: "When the announcement comes down", keywords: "expire end" },
+                { id: "announcement-text", label: t("instancesettings.nav.announcementText") },
+                { id: "announcement-tone", label: t("instancesettings.nav.announcementTone"), keywords: "urgent warning info" },
+                { id: "announcement-ends", label: t("instancesettings.nav.announcementEnds"), keywords: "expire end" },
               ],
             },
           ],
@@ -325,13 +327,13 @@ export function InstanceSettingsDialog({
           {tab === "general" && (
             <>
               <NewerRelease node={inst?.node} />
-              <Setting id="name" title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
+              <Setting id="name" title={t("instancesettings.nav.name")} hint={t("instancesettings.general.nameHint")} defaultLabel={defaults.name} {...resetter("name")}>
                 <Input value={draft.name} maxLength={64} onChange={(e) => patch((d) => (d.name = e.target.value))} className="h-10 rounded-xl" />
               </Setting>
               <Setting
                 id="public-url"
-                title="Public address"
-                hint="The URL people use to reach this instance. Uploaded pictures are linked through it, so set it before people upload."
+                title={t("instancesettings.nav.publicUrl")}
+                hint={t("instancesettings.general.publicUrlHint")}
                 defaultLabel={privateField ? HIDDEN_ADDRESS : defaults.publicUrl}
                 delay={0.04}
                 {...resetter("public_url")}
@@ -346,17 +348,13 @@ export function InstanceSettingsDialog({
                   />
                 </div>
               </Setting>
-              <Setting id="web" title="Web app" delay={0.08} defaultLabel={defaults.web ? "on" : "off"} {...resetter("web")}>
+              <Setting id="web" title={t("instancesettings.nav.web")} delay={0.08} defaultLabel={onOff(t, defaults.web)} {...resetter("web")}>
                 <Toggle
                   checked={draft.web}
                   disabled={!config.startup?.webBuiltIn}
                   onChange={(web) => patch((d) => (d.web = web))}
-                  label="Open the app at this address"
-                  hint={
-                    config.startup?.webBuiltIn
-                      ? "Turned off, people can still use this instance from the app on another fuwa instance."
-                      : "This build of fuwa doesn't include the web app."
-                  }
+                  label={t("instancesettings.general.webLabel")}
+                  hint={t(config.startup?.webBuiltIn ? "instancesettings.general.webHint" : "instancesettings.general.webNotBuilt")}
                 />
               </Setting>
               <Origins
@@ -372,38 +370,38 @@ export function InstanceSettingsDialog({
             <>
               <Setting
                 id="local-accounts"
-                title="Standalone accounts"
-                hint="A username and password kept on this instance only."
-                defaultLabel={ACCOUNTS_LABEL[defaults.localAccounts]}
+                title={t("instancesettings.nav.localAccounts")}
+                hint={t("instancesettings.signUps.localHint")}
+                defaultLabel={labelOf(t, ACCOUNTS_LABEL, defaults.localAccounts)}
                 {...resetter("local_accounts")}
               >
                 <Choice
                   value={draft.localAccounts}
                   onChange={(v) => patch((d) => (d.localAccounts = v))}
                   options={[
-                    { value: LocalAccounts.OPEN, label: "Open", hint: "Anyone can sign up.", icon: <DoorOpenIcon className="size-4" /> },
-                    { value: LocalAccounts.CLOSED, label: "Closed", hint: "Existing accounts only.", icon: <DoorClosedIcon className="size-4" /> },
+                    { value: LocalAccounts.OPEN, label: t("instancesettings.signUps.open"), hint: t("instancesettings.signUps.localOpenHint"), icon: <DoorOpenIcon className="size-4" /> },
+                    { value: LocalAccounts.CLOSED, label: t("instancesettings.signUps.closed"), hint: t("instancesettings.signUps.localClosedHint"), icon: <DoorClosedIcon className="size-4" /> },
                     {
                       value: LocalAccounts.OFF,
-                      label: "Off",
-                      hint: "No standalone accounts.",
+                      label: t("serversettings.shared.off"),
+                      hint: t("instancesettings.signUps.localOffHint"),
                       icon: <LockIcon className="size-4" />,
                       disabled:
                         draft.localAccounts === LocalAccounts.OFF || linkedWorks(draft) || ssoWorks(draft)
                           ? undefined
-                          : "Needs waifu.dev sign-in or single sign-on working first.",
+                          : t("instancesettings.signUps.localOffNeeds"),
                     },
                   ]}
                 />
                 <Notice show={draft.localAccounts === LocalAccounts.OFF && saved?.localAccounts !== LocalAccounts.OFF && hasPasswordHere}>
-                  You sign in here with a password. Once you sign out, you'll need another way in here to get back in.
+                  {t("instancesettings.signUps.localOffNotice")}
                 </Notice>
               </Setting>
               <Setting
                 id="linked-accounts"
-                title="waifu.dev accounts"
-                hint="People sign in with their waifu.dev account, and get an account here the first time."
-                defaultLabel={ACCOUNTS_LABEL[defaults.linkedAccounts]}
+                title={t("instancesettings.nav.linkedAccounts")}
+                hint={t("instancesettings.signUps.linkedHint")}
+                defaultLabel={labelOf(t, ACCOUNTS_LABEL, defaults.linkedAccounts)}
                 delay={0.04}
                 {...resetter("linked_accounts")}
               >
@@ -411,28 +409,28 @@ export function InstanceSettingsDialog({
                   value={draft.linkedAccounts}
                   onChange={(v) => patch((d) => (d.linkedAccounts = v))}
                   options={[
-                    { value: LinkedAccounts.OPEN, label: "Open", hint: "Anyone with waifu.dev.", icon: <Flower2Icon className="size-4" /> },
-                    { value: LinkedAccounts.CLOSED, label: "Closed", hint: "Linked accounts only.", icon: <DoorClosedIcon className="size-4" /> },
+                    { value: LinkedAccounts.OPEN, label: t("instancesettings.signUps.open"), hint: t("instancesettings.signUps.linkedOpenHint"), icon: <Flower2Icon className="size-4" /> },
+                    { value: LinkedAccounts.CLOSED, label: t("instancesettings.signUps.closed"), hint: t("instancesettings.signUps.linkedClosedHint"), icon: <DoorClosedIcon className="size-4" /> },
                     {
                       value: LinkedAccounts.OFF,
-                      label: "Off",
-                      hint: "No waifu.dev sign-in.",
+                      label: t("serversettings.shared.off"),
+                      hint: t("instancesettings.signUps.linkedOffHint"),
                       icon: <LockIcon className="size-4" />,
                       disabled:
                         draft.linkedAccounts === LinkedAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF || ssoWorks(draft)
                           ? undefined
-                          : "Needs standalone accounts on first.",
+                          : t("instancesettings.signUps.linkedOffNeeds"),
                     },
                   ]}
                 />
                 <Notice show={draft.linkedAccounts !== LinkedAccounts.OFF && !canReturnTo(draft.publicUrl)}>
-                  waifu.dev can only send people back to an https address. Set the public address under General to turn this on.
+                  {t("instancesettings.signUps.linkedNotice")}
                 </Notice>
               </Setting>
               <Setting
                 id="linked-issuer"
-                title="Sign-in provider"
-                hint="The OpenAuth issuer waifu.dev sign-ins go through. Accounts already linked stay tied to the one they came from."
+                title={t("instancesettings.nav.linkedIssuer")}
+                hint={t("instancesettings.signUps.issuerHint")}
                 defaultLabel={defaults.linkedIssuer}
                 delay={0.08}
                 {...resetter("linked_issuer")}
@@ -450,8 +448,8 @@ export function InstanceSettingsDialog({
               </Setting>
               <Setting
                 id="server-creation"
-                title="Who can create servers"
-                defaultLabel={CREATION_LABEL[defaults.serverCreation]}
+                title={t("instancesettings.nav.serverCreation")}
+                defaultLabel={labelOf(t, CREATION_LABEL, defaults.serverCreation)}
                 delay={0.12}
                 {...resetter("server_creation")}
               >
@@ -459,27 +457,27 @@ export function InstanceSettingsDialog({
                   value={draft.serverCreation}
                   onChange={(v) => patch((d) => (d.serverCreation = v))}
                   options={[
-                    { value: ServerCreation.EVERYONE, label: "Everyone", hint: "Any signed-in account.", icon: <UsersIcon className="size-4" /> },
-                    { value: ServerCreation.ADMINS, label: "Admins", hint: "Instance admins only.", icon: <CrownIcon className="size-4" /> },
-                    { value: ServerCreation.DISABLED, label: "Nobody", hint: "No new servers.", icon: <BanIcon className="size-4" /> },
+                    { value: ServerCreation.EVERYONE, label: t("instancesettings.signUps.everyone"), hint: t("instancesettings.signUps.serverEveryoneHint"), icon: <UsersIcon className="size-4" /> },
+                    { value: ServerCreation.ADMINS, label: t("instancesettings.signUps.admins"), hint: t("instancesettings.signUps.adminsHint"), icon: <CrownIcon className="size-4" /> },
+                    { value: ServerCreation.DISABLED, label: t("instancesettings.signUps.nobody"), hint: t("instancesettings.signUps.serverNobodyHint"), icon: <BanIcon className="size-4" /> },
                   ]}
                 />
               </Setting>
               <Setting
                 id="servers-per-account"
-                title="Servers per account"
-                hint="How many servers one account may own."
-                defaultLabel={count(defaults.serversPerAccount)}
+                title={t("instancesettings.nav.serversPerAccount")}
+                hint={t("instancesettings.signUps.serversPerAccountHint")}
+                defaultLabel={count(lang, defaults.serversPerAccount)}
                 delay={0.16}
                 {...resetter("servers_per_account")}
               >
-                <Cap label="Up to" value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
               </Setting>
               <Setting
                 id="agent-creation"
-                title="Who can make agents"
-                hint="Agents are accounts programs drive, such as bots. Agents already made keep working."
-                defaultLabel={AGENT_CREATION_LABEL[defaults.agentCreation]}
+                title={t("instancesettings.nav.agentCreation")}
+                hint={t("instancesettings.signUps.agentHint")}
+                defaultLabel={labelOf(t, AGENT_CREATION_LABEL, defaults.agentCreation)}
                 delay={0.2}
                 {...resetter("agent_creation")}
               >
@@ -487,66 +485,66 @@ export function InstanceSettingsDialog({
                   value={draft.agentCreation}
                   onChange={(v) => patch((d) => (d.agentCreation = v))}
                   options={[
-                    { value: AgentCreation.EVERYONE, label: "Everyone", hint: "Any signed-in person.", icon: <BotIcon className="size-4" /> },
-                    { value: AgentCreation.ADMINS, label: "Admins", hint: "Instance admins only.", icon: <CrownIcon className="size-4" /> },
-                    { value: AgentCreation.DISABLED, label: "Nobody", hint: "No new agents.", icon: <BanIcon className="size-4" /> },
+                    { value: AgentCreation.EVERYONE, label: t("instancesettings.signUps.everyone"), hint: t("instancesettings.signUps.agentEveryoneHint"), icon: <BotIcon className="size-4" /> },
+                    { value: AgentCreation.ADMINS, label: t("instancesettings.signUps.admins"), hint: t("instancesettings.signUps.adminsHint"), icon: <CrownIcon className="size-4" /> },
+                    { value: AgentCreation.DISABLED, label: t("instancesettings.signUps.nobody"), hint: t("instancesettings.signUps.agentNobodyHint"), icon: <BanIcon className="size-4" /> },
                   ]}
                 />
               </Setting>
               <Setting
                 id="mcp"
-                title="Agents through MCP"
-                defaultLabel={defaults.mcp ? "on" : "off"}
+                title={t("instancesettings.nav.mcp")}
+                defaultLabel={onOff(t, defaults.mcp)}
                 delay={0.22}
                 {...resetter("mcp")}
               >
                 <Toggle
                   checked={draft.mcp}
                   onChange={(on) => patch((d) => (d.mcp = on))}
-                  label="Agents can use this instance as an MCP server"
-                  hint="AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent has. Server managers can still pick which agents may use theirs."
+                  label={t("instancesettings.signUps.mcpLabel")}
+                  hint={t("instancesettings.signUps.mcpHint")}
                 />
               </Setting>
               <Setting
                 id="shared-channels"
-                title="Shared channels"
-                defaultLabel={defaults.sharedChannels ? "on" : "off"}
+                title={t("serversettings.nav.shared")}
+                defaultLabel={onOff(t, defaults.sharedChannels)}
                 delay={0.24}
                 {...resetter("shared_channels")}
               >
                 <Toggle
                   checked={draft.sharedChannels}
                   onChange={(on) => patch((d) => (d.sharedChannels = on))}
-                  label="Servers can share channels with each other"
-                  hint="Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; channels already shared stay until either side ends them."
+                  label={t("instancesettings.signUps.sharedLabel")}
+                  hint={t("instancesettings.signUps.sharedHint")}
                 />
               </Setting>
               <Setting
                 id="profile-effects"
-                title="Profile effects"
-                defaultLabel={defaults.profileEffects ? "on" : "off"}
+                title={t("instancesettings.nav.profileEffects")}
+                defaultLabel={onOff(t, defaults.profileEffects)}
                 delay={0.28}
                 {...resetter("profile_effects")}
               >
                 <Toggle
                   checked={draft.profileEffects}
                   onChange={(on) => patch((d) => (d.profileEffects = on))}
-                  label="People can put an effect on their profile card"
-                  hint="Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
+                  label={t("instancesettings.signUps.effectsLabel")}
+                  hint={t("instancesettings.signUps.effectsHint")}
                 />
               </Setting>
               <Setting
                 id="rich-presence"
-                title="Rich presence"
-                defaultLabel={defaults.richPresence ? "on" : "off"}
+                title={t("instancesettings.nav.richPresence")}
+                defaultLabel={onOff(t, defaults.richPresence)}
                 delay={0.32}
                 {...resetter("rich_presence")}
               >
                 <Toggle
                   checked={draft.richPresence}
                   onChange={(on) => patch((d) => (d.richPresence = on))}
-                  label="People can show what they're doing"
-                  hint="Games and apps people's desktop apps see, shown to people they share a server with, once each person turns it on. Kept in memory only. Turned off, nobody's activity shows; statuses still do."
+                  label={t("instancesettings.signUps.presenceLabel")}
+                  hint={t("instancesettings.signUps.presenceHint")}
                 />
               </Setting>
             </>
@@ -555,9 +553,9 @@ export function InstanceSettingsDialog({
             <>
               <Setting
                 id="sso-accounts"
-                title="Single sign-on accounts"
-                hint="People sign in through the identity provider below, and get an account here the first time."
-                defaultLabel={ACCOUNTS_LABEL[defaults.ssoAccounts]}
+                title={t("instancesettings.nav.ssoAccounts")}
+                hint={t("instancesettings.sso.accountsHint")}
+                defaultLabel={labelOf(t, ACCOUNTS_LABEL, defaults.ssoAccounts)}
                 {...resetter("sso_accounts")}
               >
                 <Choice
@@ -566,47 +564,47 @@ export function InstanceSettingsDialog({
                   options={[
                     {
                       value: SsoAccounts.OPEN,
-                      label: "Open",
-                      hint: "Anyone the provider lets in.",
+                      label: t("instancesettings.signUps.open"),
+                      hint: t("instancesettings.sso.openHint"),
                       icon: <BuildingIcon className="size-4" />,
-                      disabled: providerReady(draft.ssoProvider) ? undefined : "Set up the identity provider first.",
+                      disabled: providerReady(draft.ssoProvider) ? undefined : t("instancesettings.sso.setUpFirst"),
                     },
                     {
                       value: SsoAccounts.CLOSED,
-                      label: "Closed",
-                      hint: "Accounts made before only.",
+                      label: t("instancesettings.signUps.closed"),
+                      hint: t("instancesettings.sso.closedHint"),
                       icon: <DoorClosedIcon className="size-4" />,
-                      disabled: providerReady(draft.ssoProvider) ? undefined : "Set up the identity provider first.",
+                      disabled: providerReady(draft.ssoProvider) ? undefined : t("instancesettings.sso.setUpFirst"),
                     },
                     {
                       value: SsoAccounts.OFF,
-                      label: "Off",
-                      hint: "No single sign-on.",
+                      label: t("serversettings.shared.off"),
+                      hint: t("instancesettings.sso.offHint"),
                       icon: <LockIcon className="size-4" />,
                       disabled:
                         draft.ssoAccounts === SsoAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF || linkedWorks(draft)
                           ? undefined
-                          : "Needs another way in first.",
+                          : t("instancesettings.sso.offNeeds"),
                     },
                   ]}
                 />
                 <Notice show={draft.ssoAccounts !== SsoAccounts.OFF && draft.ssoAccounts !== SsoAccounts.UNSPECIFIED && !canReturnTo(draft.publicUrl)}>
-                  Identity providers send people back to this instance's public address, which has to be https. Set it under General.
+                  {t("instancesettings.sso.notice")}
                 </Notice>
               </Setting>
               <IdentityProviderForm
                 value={fullProvider(draft.ssoProvider)}
                 onChange={patchProvider}
                 serviceProvider={config.ssoServiceProvider}
-                offHint="No provider set up."
+                offHint={t("instancesettings.sso.noProvider")}
                 test={{
                   onTest: () => void test.go(inst!.url, window.location.pathname, { key: instanceKey }),
                   pending: test.pending,
                   error: test.error,
                   blocked: changed.includes("sso_provider")
-                    ? "Save first; the test uses the saved provider."
+                    ? t("instancesettings.sso.saveFirst")
                     : !providerReady(saved?.ssoProvider)
-                      ? "Fill it in and save first."
+                      ? t("instancesettings.sso.fillFirst")
                       : undefined,
                 }}
               />
@@ -616,16 +614,16 @@ export function InstanceSettingsDialog({
             <>
               <Setting
                 id="default-limits"
-                title="Default caps for every server"
-                hint="A server can get its own caps from its settings. With a cap off, it's unlimited."
-                defaultLabel={[
-                  `${count(defaults.defaultLimits?.members)} members`,
-                  `${count(defaults.defaultLimits?.channels)} channels`,
-                  `${size(lang, defaults.defaultLimits?.storageBytes)} storage`,
-                  `${size(lang, defaults.defaultLimits?.attachmentBytes)} files`,
-                  `${count(defaults.defaultLimits?.emojis)} emoji`,
-                  `${size(lang, defaults.defaultLimits?.recordingBytes)} recordings`,
-                ].join(", ")}
+                title={t("instancesettings.nav.defaultLimits")}
+                hint={t("instancesettings.limits.defaultHint")}
+                defaultLabel={t("instancesettings.limits.defaults", {
+                  members: count(lang, defaults.defaultLimits?.members),
+                  channels: count(lang, defaults.defaultLimits?.channels),
+                  storage: size(lang, defaults.defaultLimits?.storageBytes),
+                  files: size(lang, defaults.defaultLimits?.attachmentBytes),
+                  emoji: count(lang, defaults.defaultLimits?.emojis),
+                  recordings: size(lang, defaults.defaultLimits?.recordingBytes),
+                })}
                 {...resetter(
                   "default_limits.members",
                   "default_limits.channels",
@@ -636,34 +634,34 @@ export function InstanceSettingsDialog({
                 )}
               >
                 <div className="flex flex-col gap-3">
-                  <Cap label="Members" value={draft.defaultLimits?.members} onChange={(v) => patch((d) => (d.defaultLimits!.members = v))} />
-                  <Cap label="Channels" value={draft.defaultLimits?.channels} onChange={(v) => patch((d) => (d.defaultLimits!.channels = v))} />
-                  <Cap label="Storage" bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
-                  <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
-                  <Cap label="Emoji" value={draft.defaultLimits?.emojis} onChange={(v) => patch((d) => (d.defaultLimits!.emojis = v))} />
-                  <Cap label="Recordings" bytes value={draft.defaultLimits?.recordingBytes} onChange={(v) => patch((d) => (d.defaultLimits!.recordingBytes = v))} />
+                  <Cap label={t("serversettings.nav.members")} value={draft.defaultLimits?.members} onChange={(v) => patch((d) => (d.defaultLimits!.members = v))} />
+                  <Cap label={t("serversettings.nav.channels")} value={draft.defaultLimits?.channels} onChange={(v) => patch((d) => (d.defaultLimits!.channels = v))} />
+                  <Cap label={t("serversettings.usage.storage")} bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
+                  <Cap label={t("serversettings.limits.files")} bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
+                  <Cap label={t("serversettings.nav.emoji")} value={draft.defaultLimits?.emojis} onChange={(v) => patch((d) => (d.defaultLimits!.emojis = v))} />
+                  <Cap label={t("serversettings.nav.recordings")} bytes value={draft.defaultLimits?.recordingBytes} onChange={(v) => patch((d) => (d.defaultLimits!.recordingBytes = v))} />
                 </div>
               </Setting>
               <Setting
                 id="picture-uploads"
-                title="Largest picture upload"
-                hint="Avatars, banners and server icons. The app crops pictures and saves them small, so only GIFs, which go up as they are, get near a few megabytes."
+                title={t("instancesettings.nav.pictureUploads")}
+                hint={t("instancesettings.limits.pictureHint")}
                 defaultLabel={size(lang, defaults.pictureUploadBytes)}
                 delay={0.04}
                 {...resetter("picture_upload_bytes")}
               >
-                <Cap label="Up to" bytes value={draft.pictureUploadBytes} onChange={(v) => patch((d) => (d.pictureUploadBytes = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} bytes value={draft.pictureUploadBytes} onChange={(v) => patch((d) => (d.pictureUploadBytes = v))} />
               </Setting>
               <Setting
                 id="picture-uploads-per-day"
-                title="Pictures per day"
-                hint="How much one account may upload in a day (UTC), so nobody can fill this instance's disk."
+                title={t("instancesettings.limits.picturesPerDay")}
+                hint={t("instancesettings.limits.picturesPerDayHint")}
                 defaultLabel={size(lang, defaults.pictureUploadBytesPerDay)}
                 delay={0.08}
                 {...resetter("picture_upload_bytes_per_day")}
               >
                 <Cap
-                  label="Up to"
+                  label={t("instancesettings.shared.upTo")}
                   bytes
                   value={draft.pictureUploadBytesPerDay}
                   onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
@@ -671,24 +669,24 @@ export function InstanceSettingsDialog({
               </Setting>
               <Setting
                 id="attachment-uploads"
-                title="Largest file in a message"
-                hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
+                title={t("instancesettings.limits.attachment")}
+                hint={t("instancesettings.limits.attachmentHint")}
                 defaultLabel={size(lang, defaults.attachmentUploadBytes)}
                 delay={0.12}
                 {...resetter("attachment_upload_bytes")}
               >
-                <Cap label="Up to" bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
               </Setting>
               <Setting
                 id="attachment-uploads-per-day"
-                title="Files per day"
-                hint="How much one account may send in files in a day (UTC), apart from pictures."
+                title={t("instancesettings.limits.attachmentPerDay")}
+                hint={t("instancesettings.limits.attachmentPerDayHint")}
                 defaultLabel={size(lang, defaults.attachmentUploadBytesPerDay)}
                 delay={0.16}
                 {...resetter("attachment_upload_bytes_per_day")}
               >
                 <Cap
-                  label="Up to"
+                  label={t("instancesettings.shared.upTo")}
                   bytes
                   value={draft.attachmentUploadBytesPerDay}
                   onChange={(v) => patch((d) => (d.attachmentUploadBytesPerDay = v))}
@@ -696,34 +694,38 @@ export function InstanceSettingsDialog({
               </Setting>
               <Setting
                 id="voice-message-seconds"
-                title="Longest voice message"
-                hint="In direct messages. Apps stop recording here; voice messages are end-to-end encrypted, so this instance can't check their length itself."
-                defaultLabel={defaults.voiceMessageSeconds === undefined ? "no limit" : `${count(defaults.voiceMessageSeconds)} seconds`}
+                title={t("instancesettings.limits.voiceSeconds")}
+                hint={t("instancesettings.limits.voiceSecondsHint")}
+                defaultLabel={
+                  defaults.voiceMessageSeconds === undefined
+                    ? t("instancesettings.shared.noLimit")
+                    : t("instancesettings.limits.seconds", { count: Number(defaults.voiceMessageSeconds) })
+                }
                 delay={0.2}
                 {...resetter("voice_message_seconds")}
               >
-                <Cap label="Seconds" value={draft.voiceMessageSeconds} onChange={(v) => patch((d) => (d.voiceMessageSeconds = v))} />
+                <Cap label={t("instancesettings.limits.secondsLabel")} value={draft.voiceMessageSeconds} onChange={(v) => patch((d) => (d.voiceMessageSeconds = v))} />
               </Setting>
               <Setting
                 id="voice-message-bytes"
-                title="Biggest voice message"
-                hint="Its encrypted file, which this instance does see. A minute of voice is about 240 KB."
+                title={t("instancesettings.limits.voiceBytes")}
+                hint={t("instancesettings.limits.voiceBytesHint")}
                 defaultLabel={size(lang, defaults.voiceMessageBytes)}
                 delay={0.24}
                 {...resetter("voice_message_bytes")}
               >
-                <Cap label="Up to" bytes value={draft.voiceMessageBytes} onChange={(v) => patch((d) => (d.voiceMessageBytes = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} bytes value={draft.voiceMessageBytes} onChange={(v) => patch((d) => (d.voiceMessageBytes = v))} />
               </Setting>
               <Setting
                 id="voice-message-bytes-per-day"
-                title="Voice messages a day"
-                hint="What one account may send in a day (UTC), counted apart from pictures and files."
+                title={t("instancesettings.limits.voicePerDay")}
+                hint={t("instancesettings.limits.voicePerDayHint")}
                 defaultLabel={size(lang, defaults.voiceMessageBytesPerDay)}
                 delay={0.28}
                 {...resetter("voice_message_bytes_per_day")}
               >
                 <Cap
-                  label="Up to"
+                  label={t("instancesettings.shared.upTo")}
                   bytes
                   value={draft.voiceMessageBytesPerDay}
                   onChange={(v) => patch((d) => (d.voiceMessageBytesPerDay = v))}
@@ -731,23 +733,23 @@ export function InstanceSettingsDialog({
               </Setting>
               <Setting
                 id="poll-votes-per-minute"
-                title="Poll votes per minute"
-                hint="How many times one account may vote, change or take back a vote in polls in a minute. Every vote is a live update to everyone in the channel."
-                defaultLabel={defaults.pollVotesPerMinute === undefined ? "no limit" : `${defaults.pollVotesPerMinute.toLocaleString()} a minute`}
+                title={t("instancesettings.limits.pollVotes")}
+                hint={t("instancesettings.limits.pollVotesHint")}
+                defaultLabel={perMinute(t, defaults.pollVotesPerMinute)}
                 delay={0.2}
                 {...resetter("poll_votes_per_minute")}
               >
-                <Cap label="Up to" placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
               </Setting>
               <Setting
                 id="commands-per-minute"
-                title="Agent commands per minute"
-                hint="How many times one account may run agents' slash commands or press their buttons in a minute. Each one wakes an agent up."
-                defaultLabel={defaults.commandsPerMinute === undefined ? "no limit" : `${defaults.commandsPerMinute.toLocaleString()} a minute`}
+                title={t("instancesettings.limits.commands")}
+                hint={t("instancesettings.limits.commandsHint")}
+                defaultLabel={perMinute(t, defaults.commandsPerMinute)}
                 delay={0.22}
                 {...resetter("commands_per_minute")}
               >
-                <Cap label="Up to" placeholder="20" value={draft.commandsPerMinute} onChange={(v) => patch((d) => (d.commandsPerMinute = v))} />
+                <Cap label={t("instancesettings.shared.upTo")} placeholder="20" value={draft.commandsPerMinute} onChange={(v) => patch((d) => (d.commandsPerMinute = v))} />
               </Setting>
             </>
           )}
@@ -763,15 +765,15 @@ export function InstanceSettingsDialog({
           )}
           {tab === "privacy" && (
             <>
-              <Setting id="telemetry" title="Anonymous usage signal and reports" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
+              <Setting id="telemetry" title={t("instancesettings.nav.telemetry")} defaultLabel={onOff(t, defaults.telemetry)} {...resetter("telemetry")}>
                 <Toggle
                   checked={draft.telemetry}
                   onChange={(telemetry) => patch((d) => (d.telemetry = telemetry))}
-                  label="Send the usage signal daily and error reports hourly"
-                  hint="Helps Waifu Devs see how fuwa is used and fix what breaks. Counts only: no names, messages, ids or addresses. Off, apps on this instance send no reports either."
+                  label={t("instancesettings.privacy.label")}
+                  hint={t("instancesettings.privacy.hint")}
                 />
                 <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
-                  {["How many accounts, servers, channels and messages", "Storage used, in bytes", "Which account and server options are on", "fuwa version, OS and a random install id", "Kinds of errors and where, and how long requests took (server and apps)"].map(
+                  {TELEMETRY_LINES.map(
                     (line, n) => (
                       <motion.li
                         key={line}
@@ -780,7 +782,7 @@ export function InstanceSettingsDialog({
                         transition={{ ...SPRING, delay: 0.1 + n * 0.05 }}
                         className="flex items-center gap-2"
                       >
-                        <ShieldCheckIcon className="size-3.5 shrink-0 text-primary" /> {line}
+                        <ShieldCheckIcon className="size-3.5 shrink-0 text-primary" /> {t(line)}
                       </motion.li>
                     ),
                   )}
@@ -791,7 +793,7 @@ export function InstanceSettingsDialog({
                   rel="noreferrer"
                   className="text-xs font-bold text-primary underline-offset-4 hover:underline"
                 >
-                  Every field it sends
+                  {t("instancesettings.privacy.fields")}
                 </a>
               </Setting>
             </>
@@ -802,11 +804,26 @@ export function InstanceSettingsDialog({
   );
 }
 
-const ACCOUNTS_LABEL: Record<number, string> = {
-  [LocalAccounts.OPEN]: "open",
-  [LocalAccounts.CLOSED]: "closed",
-  [LocalAccounts.OFF]: "off",
+/** What the telemetry sends, as catalog keys. */
+const TELEMETRY_LINES: readonly Key[] = [
+  "instancesettings.privacy.counts",
+  "instancesettings.privacy.storage",
+  "instancesettings.privacy.options",
+  "instancesettings.privacy.version",
+  "instancesettings.privacy.errors",
+];
+
+const ACCOUNTS_LABEL: Record<number, Key> = {
+  [LocalAccounts.OPEN]: "instancesettings.shared.open",
+  [LocalAccounts.CLOSED]: "instancesettings.shared.closed",
+  [LocalAccounts.OFF]: "instancesettings.shared.off",
 };
+/** A choice's default in words, from one of the tables here; a value without a word shows nothing, as before. */
+const labelOf = (t: I18n["t"], table: Record<number, Key>, value: number) => (table[value] ? t(table[value]) : undefined);
+
+/** "30 a minute", or "no limit". */
+const perMinute = (t: I18n["t"], n: bigint | undefined) =>
+  n === undefined ? t("instancesettings.shared.noLimit") : t("instancesettings.shared.perMinute", { count: Number(n) });
 
 /** Whether waifu.dev sign-in would work with these settings: on, with an https public address. */
 const linkedWorks = (s: InstanceSettings) => s.linkedAccounts !== LinkedAccounts.OFF && canReturnTo(s.publicUrl);
@@ -834,16 +851,16 @@ function Notice({ show, children }: { show: boolean; children: ReactNode }) {
   );
 }
 
-const AGENT_CREATION_LABEL: Record<number, string> = {
-  [AgentCreation.EVERYONE]: "everyone",
-  [AgentCreation.ADMINS]: "admins",
-  [AgentCreation.DISABLED]: "nobody",
+const AGENT_CREATION_LABEL: Record<number, Key> = {
+  [AgentCreation.EVERYONE]: "instancesettings.shared.everyone",
+  [AgentCreation.ADMINS]: "instancesettings.shared.admins",
+  [AgentCreation.DISABLED]: "instancesettings.shared.nobody",
 };
 
-const CREATION_LABEL: Record<number, string> = {
-  [ServerCreation.EVERYONE]: "everyone",
-  [ServerCreation.ADMINS]: "admins",
-  [ServerCreation.DISABLED]: "nobody",
+const CREATION_LABEL: Record<number, Key> = {
+  [ServerCreation.EVERYONE]: "instancesettings.shared.everyone",
+  [ServerCreation.ADMINS]: "instancesettings.shared.admins",
+  [ServerCreation.DISABLED]: "instancesettings.shared.nobody",
 };
 
 /** Settings copied by a function of their own, beside the switch below. */
@@ -954,6 +971,7 @@ function Origins({
   defaultLabel: string;
   reset: { changed: boolean; onReset: () => void; resetting: boolean };
 }) {
+  const { t } = useI18n();
   const any = draft.allowedOrigins.includes("*");
   const privateField = usePrivateField();
   const [list, setList] = useState(any ? "" : draft.allowedOrigins.join("\n"));
@@ -963,9 +981,9 @@ function Origins({
   return (
     <Setting
       id="origins"
-      title="Sites that can connect"
-      hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser. Signing in with waifu.dev from another site only works for sites listed here by name."
-      defaultLabel={defaultLabel === "*" ? "any site" : defaultLabel}
+      title={t("instancesettings.nav.origins")}
+      hint={t("instancesettings.origins.hint")}
+      defaultLabel={defaultLabel === "*" ? t("instancesettings.origins.anySiteDefault") : defaultLabel}
       delay={0.12}
       {...reset}
     >
@@ -978,8 +996,8 @@ function Origins({
           })
         }
         options={[
-          { value: "any", label: "Any site", hint: "Every fuwa app can connect.", icon: <GlobeIcon className="size-4" /> },
-          { value: "list", label: "Only these", hint: "Other apps are blocked.", icon: <LockIcon className="size-4" /> },
+          { value: "any", label: t("instancesettings.origins.any"), hint: t("instancesettings.origins.anyHint"), icon: <GlobeIcon className="size-4" /> },
+          { value: "list", label: t("instancesettings.origins.list"), hint: t("instancesettings.origins.listHint"), icon: <LockIcon className="size-4" /> },
         ]}
       />
       <motion.div initial={false} animate={{ height: any ? 0 : "auto", opacity: any ? 0 : 1 }} transition={SPRING} className="overflow-hidden">
@@ -993,7 +1011,9 @@ function Origins({
           }}
           className={cn("rounded-xl font-mono text-xs", privateField)}
         />
-        <p className="mt-1.5 text-xs text-muted-foreground">One per line, like https://chat.example.com. This page (<Private text={window.location.origin} />) always works when served by this instance.</p>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          <T k="instancesettings.origins.note" values={{ page: <Private text={window.location.origin} /> }} />
+        </p>
       </motion.div>
     </Setting>
   );
@@ -1001,14 +1021,15 @@ function Origins({
 
 /** How the process was started: read-only, set by whoever runs the instance. */
 function Startup({ config }: { config: InstanceConfig }) {
+  const { t } = useI18n();
   const s = config.startup;
   if (!s) return null;
   const facts: { label: string; value: ReactNode; good?: boolean }[] = [
-    { label: "Version", value: s.version },
-    { label: "Port", value: s.port },
-    { label: "Encryption at rest", value: s.encryption ? "on" : "off", good: s.encryption },
-    { label: "Admin token", value: s.adminToken ? "set" : "not set" },
-    { label: "Hosting", value: s.hosted ? "Waifu Devs" : "self-hosted" },
+    { label: t("instancesettings.startup.version"), value: s.version },
+    { label: t("instancesettings.startup.port"), value: s.port },
+    { label: t("instancesettings.startup.encryption"), value: onOff(t, s.encryption), good: s.encryption },
+    { label: t("instancesettings.startup.adminToken"), value: t(s.adminToken ? "instancesettings.shared.set" : "instancesettings.startup.notSet") },
+    { label: t("instancesettings.startup.hosting"), value: s.hosted ? "Waifu Devs" : t("instancesettings.startup.selfHosted") },
   ];
   return (
     <motion.section
@@ -1017,8 +1038,8 @@ function Startup({ config }: { config: InstanceConfig }) {
       transition={{ ...SPRING, delay: 0.16 }}
       className="mt-2 rounded-2xl border border-dashed p-4"
     >
-      <h3 className="text-sm font-extrabold">Set when the instance starts</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">Changed only by whoever runs it, through FUWA_* environment variables.</p>
+      <h3 className="text-sm font-extrabold">{t("instancesettings.startup.title")}</h3>
+      <p className="mt-0.5 text-xs text-muted-foreground">{t("instancesettings.startup.hint")}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {facts.map((f, n) => (
           <motion.span

@@ -73,17 +73,18 @@ export function IdentityProviderForm({
   /** What "Off" means here. */
   offHint: string;
 }) {
+  const { t } = useI18n();
   const on = value.protocol !== SsoProtocol.UNSPECIFIED;
   return (
     <div className="flex flex-col">
-      <Setting id="sso-protocol" title="Identity provider" hint="Okta, Microsoft Entra ID, Google Workspace, Keycloak, Authentik and most others speak one of these." badge={false}>
+      <Setting id="sso-protocol" title={t("serversettings.nav.ssoProtocol")} hint={t("instancesettings.provider.protocolHint")} badge={false}>
         <Choice
           value={value.protocol}
           onChange={(protocol) => onChange((p) => (p.protocol = protocol))}
           options={[
-            { value: SsoProtocol.UNSPECIFIED, label: "Off", hint: offHint, icon: <PowerOffIcon className="size-4" /> },
-            { value: SsoProtocol.OIDC, label: "OpenID Connect", hint: "A client ID and secret.", icon: <KeyRoundIcon className="size-4" /> },
-            { value: SsoProtocol.SAML, label: "SAML 2.0", hint: "Metadata and a certificate.", icon: <FileBadgeIcon className="size-4" /> },
+            { value: SsoProtocol.UNSPECIFIED, label: t("serversettings.shared.off"), hint: offHint, icon: <PowerOffIcon className="size-4" /> },
+            { value: SsoProtocol.OIDC, label: "OpenID Connect", hint: t("instancesettings.provider.oidcHint"), icon: <KeyRoundIcon className="size-4" /> },
+            { value: SsoProtocol.SAML, label: "SAML 2.0", hint: t("instancesettings.provider.samlHint"), icon: <FileBadgeIcon className="size-4" /> },
           ]}
         />
       </Setting>
@@ -97,7 +98,7 @@ export function IdentityProviderForm({
             transition={SPRING}
             className="flex flex-col"
           >
-            <Setting id="sso-name" title="Name" hint="What sign-in buttons call it." badge={false} delay={0.03}>
+            <Setting id="sso-name" title={t("instancesettings.nav.name")} hint={t("instancesettings.provider.nameHint")} badge={false} delay={0.03}>
               <Input
                 value={value.name}
                 maxLength={40}
@@ -111,8 +112,8 @@ export function IdentityProviderForm({
             {value.protocol === SsoProtocol.OIDC ? <OidcFields value={value} onChange={onChange} /> : <SamlFields value={value} onChange={onChange} />}
             <Setting
               id="sso-domains"
-              title="Email domains"
-              hint="Only people whose verified email is on one of these get in. Leave it empty to let in anyone the provider signs in."
+              title={t("serversettings.nav.ssoDomains")}
+              hint={t("instancesettings.provider.domainsHint")}
               badge={false}
               delay={0.12}
             >
@@ -129,9 +130,10 @@ export function IdentityProviderForm({
 
 /** A live "Continue with ..." as people will see it. */
 function ButtonPreview({ name }: { name: string }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-      <span className="shrink-0">Shows as</span>
+      <span className="shrink-0">{t("instancesettings.provider.showsAs")}</span>
       <span className="flex h-9 min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-foreground px-3 text-sm font-extrabold text-background">
         <BuildingIcon className="size-4 shrink-0 text-primary" />
         <AnimatePresence mode="popLayout" initial={false}>
@@ -143,7 +145,7 @@ function ButtonPreview({ name }: { name: string }) {
             transition={{ duration: 0.16 }}
             className="truncate"
           >
-            Continue with {name || "…"}
+            {t("connect.provider.continueWith", { name: name || "…" })}
           </motion.span>
         </AnimatePresence>
       </span>
@@ -152,10 +154,11 @@ function ButtonPreview({ name }: { name: string }) {
 }
 
 function OidcFields({ value, onChange }: { value: IdentityProvider; onChange: (fn: (p: IdentityProvider) => void) => void }) {
+  const { t } = useI18n();
   const o = value.oidc!;
   return (
     <>
-      <Setting id="sso-issuer" title="Issuer" hint="Its /.well-known/openid-configuration says where everything else is." badge={false} delay={0.06}>
+      <Setting id="sso-issuer" title="Issuer" hint={t("instancesettings.provider.issuerHint")} badge={false} delay={0.06}>
         <Field icon={<GlobeLockIcon className="size-4" />}>
           <Input
             value={o.issuer}
@@ -167,21 +170,21 @@ function OidcFields({ value, onChange }: { value: IdentityProvider; onChange: (f
           />
         </Field>
       </Setting>
-      <Setting id="sso-client" title="Client" hint="From the app you register for fuwa at the provider, as a confidential web app." badge={false} delay={0.09}>
+      <Setting id="sso-client" title="Client" hint={t("instancesettings.provider.clientHint")} badge={false} delay={0.09}>
         <div className="grid gap-2 sm:grid-cols-2">
           <Input value={o.clientId} placeholder="Client ID" onChange={(e) => onChange((p) => (p.oidc!.clientId = e.target.value))} className="h-10 rounded-xl" />
           <Input
             value={o.clientSecret}
             type="password"
             autoComplete="off"
-            placeholder={o.clientSecretSet ? "Secret kept (type to replace)" : "Client secret"}
+            placeholder={o.clientSecretSet ? t("instancesettings.provider.secretKept") : "Client secret"}
             onChange={(e) => onChange((p) => (p.oidc!.clientSecret = e.target.value))}
             className="h-10 rounded-xl"
           />
         </div>
         <Input
           value={o.extraScopes}
-          placeholder="More scopes, if your provider needs them (openid email profile are always asked for)"
+          placeholder={t("instancesettings.provider.scopes")}
           onChange={(e) => onChange((p) => (p.oidc!.extraScopes = e.target.value))}
           className="h-10 rounded-xl text-sm"
         />
@@ -191,6 +194,7 @@ function OidcFields({ value, onChange }: { value: IdentityProvider; onChange: (f
 }
 
 function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (fn: (p: IdentityProvider) => void) => void }) {
+  const { t } = useI18n();
   const s = value.saml!;
   const [pasting, setPasting] = useState(false);
   const [xml, setXml] = useState("");
@@ -199,13 +203,13 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
 
   function fill() {
     const found = readSamlMetadata(xml);
-    if (!found || (!found.entityId && !found.ssoUrl)) return setProblem("That doesn't look like identity provider metadata.");
+    if (!found || (!found.entityId && !found.ssoUrl)) return setProblem(t("instancesettings.provider.notMetadata"));
     onChange((p) => {
       p.saml!.entityId = found.entityId || p.saml!.entityId;
       p.saml!.ssoUrl = found.ssoUrl || p.saml!.ssoUrl;
       p.saml!.certificates = found.certificates || p.saml!.certificates;
     });
-    setProblem(found.ssoUrl ? null : "Filled in what it had; it lists no HTTP-Redirect sign-in URL.");
+    setProblem(found.ssoUrl ? null : t("instancesettings.provider.noRedirect"));
     setPasting(false);
     setXml("");
     setFilled((n) => n + 1);
@@ -213,29 +217,29 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
 
   return (
     <>
-      <Setting id="sso-metadata" title="Provider metadata" hint="Paste the XML your provider offers to fill in the rest." badge={false} delay={0.06}>
+      <Setting id="sso-metadata" title={t("instancesettings.provider.metadata")} hint={t("instancesettings.provider.metadataHint")} badge={false} delay={0.06}>
         <AnimatePresence initial={false} mode="popLayout">
           {pasting ? (
             <motion.div key="paste" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-2 overflow-hidden">
               <Textarea autoFocus rows={5} value={xml} onChange={(e) => setXml(e.target.value)} placeholder="<EntityDescriptor …>" className="rounded-xl font-mono text-xs" />
               <div className="flex gap-2">
                 <Button type="button" onClick={fill} disabled={!xml.trim()} className="btn rounded-xl font-bold">
-                  Fill in
+                  {t("instancesettings.provider.fillIn")}
                 </Button>
                 <Button type="button" variant="ghost" onClick={() => setPasting(false)} className="rounded-xl font-bold">
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             </motion.div>
           ) : (
             <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
               <Button type="button" variant="outline" onClick={() => setPasting(true)} className="group rounded-xl font-bold">
-                <ClipboardPasteIcon className="transition-transform group-hover:-rotate-12" /> Paste metadata
+                <ClipboardPasteIcon className="transition-transform group-hover:-rotate-12" /> {t("instancesettings.provider.pasteMetadata")}
               </Button>
               <AnimatePresence>
                 {filled > 0 && !problem && (
                   <motion.span key={filled} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={SPRING} className="flex items-center gap-1 text-xs font-bold text-emerald-500">
-                    <CheckIcon className="size-3.5" strokeWidth={3} /> Filled in
+                    <CheckIcon className="size-3.5" strokeWidth={3} /> {t("instancesettings.provider.filledIn")}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -244,7 +248,7 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
         </AnimatePresence>
         {problem && <p className="text-xs text-amber-600 dark:text-amber-400">{problem}</p>}
       </Setting>
-      <Setting id="sso-entity" title="Entity ID and sign-in URL" hint="The provider's entity ID (the Issuer its responses carry) and where people sign in (HTTP-Redirect)." badge={false} delay={0.09}>
+      <Setting id="sso-entity" title={t("instancesettings.provider.entity")} hint={t("instancesettings.provider.entityHint")} badge={false} delay={0.09}>
         <Glow key={`e${filled}`} on={filled > 0}>
           <Input value={s.entityId} placeholder="https://idp.acme.com/metadata" onChange={(e) => onChange((p) => (p.saml!.entityId = e.target.value))} className="h-10 rounded-xl" data-testid="saml-entity" />
         </Glow>
@@ -252,7 +256,7 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
           <Input value={s.ssoUrl} type="url" placeholder="https://idp.acme.com/sso/redirect" onChange={(e) => onChange((p) => (p.saml!.ssoUrl = e.target.value))} className="h-10 rounded-xl" />
         </Glow>
       </Setting>
-      <Setting id="sso-certificates" title="Signing certificates" hint="Responses must be signed by one of these, with RSA or ECDSA over SHA-256 or stronger. Up to four, PEM." badge={false} delay={0.1}>
+      <Setting id="sso-certificates" title={t("instancesettings.provider.certificates")} hint={t("instancesettings.provider.certificatesHint")} badge={false} delay={0.1}>
         <Glow key={`c${filled}`} on={filled > 0} delay={0.12}>
           <Textarea
             rows={4}
@@ -292,6 +296,7 @@ function Field({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 
 /** Email domains as chips: type and press Enter (or a comma), click one to take it off. */
 function Domains({ value, onChange }: { value: string[]; onChange: (domains: string[]) => void }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   function add() {
     const fresh = text.split(/[\s,]+/).map(cleanDomain).filter((d) => d && !value.includes(d));
@@ -312,7 +317,7 @@ function Domains({ value, onChange }: { value: string[]; onChange: (domains: str
             transition={SPRING}
             onClick={() => onChange(value.filter((x) => x !== d))}
             className="group flex items-center gap-1 rounded-full bg-primary/15 py-1 pr-1.5 pl-2.5 text-xs font-bold text-primary"
-            aria-label={`Remove ${d}`}
+            aria-label={t("instancesettings.provider.removeDomain", { domain: d })}
           >
             @{d}
             <XIcon className="size-3 transition-transform group-hover:rotate-90" />
@@ -340,12 +345,13 @@ function Domains({ value, onChange }: { value: string[]; onChange: (domains: str
 
 /** What to enter at the provider, each with a copy button. */
 function TellProvider({ protocol, sp }: { protocol: SsoProtocol; sp: ServiceProvider | undefined }) {
+  const { t } = useI18n();
   if (!sp) return null;
   const rows =
     protocol === SsoProtocol.OIDC
       ? [{ label: "Redirect URI", value: sp.oidcRedirectUri }]
       : [
-          { label: "Entity ID (and metadata URL)", value: sp.samlEntityId },
+          { label: t("instancesettings.provider.entityAndMetadata"), value: sp.samlEntityId },
           { label: "Assertion Consumer Service (HTTP-POST)", value: sp.samlAcsUrl },
         ];
   return (
@@ -355,9 +361,9 @@ function TellProvider({ protocol, sp }: { protocol: SsoProtocol; sp: ServiceProv
       transition={{ ...SPRING, delay: 0.15 }}
       className="my-4 rounded-2xl border border-dashed p-4"
     >
-      <h3 className="text-sm font-extrabold">Tell your provider</h3>
+      <h3 className="text-sm font-extrabold">{t("instancesettings.provider.tell")}</h3>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        {protocol === SsoProtocol.OIDC ? "Allow this redirect URI on the app you registered." : "Add fuwa as a service provider with these. Sign the response or the assertion; don't encrypt it."}
+        {t(protocol === SsoProtocol.OIDC ? "instancesettings.provider.tellOidc" : "instancesettings.provider.tellSaml")}
       </p>
       <div className="mt-3 flex flex-col gap-2">
         {rows.map((r, n) => (
@@ -388,7 +394,7 @@ function CopyRow({ label, value, delay }: { label: string; value: string; delay:
             copy(t, value, label);
             setCopied(true);
           }}
-          aria-label={`Copy ${label}`}
+          aria-label={t("common.copyThing", { what: label })}
           className={cn("grid size-8 shrink-0 place-items-center rounded-lg transition-colors", copied ? "text-emerald-500" : "text-muted-foreground hover:bg-background hover:text-foreground")}
         >
           <AnimatePresence mode="popLayout" initial={false}>
@@ -404,12 +410,13 @@ function CopyRow({ label, value, delay }: { label: string; value: string; delay:
 
 /** Signs in through the saved provider to see that it works. */
 function TestRow({ onTest, pending, error, blocked }: { onTest: () => void; pending: boolean; error: string | null; blocked?: string }) {
+  const { t } = useI18n();
   return (
-    <Setting id="sso-test" title="Test sign-in" hint="Signs in through the provider as yourself and shows who it said you are." badge={false} delay={0.18}>
+    <Setting id="sso-test" title={t("instancesettings.nav.ssoTest")} hint={t("instancesettings.provider.testHint")} badge={false} delay={0.18}>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="outline" onClick={onTest} disabled={pending || !!blocked} className="group rounded-xl font-bold" data-testid="sso-test">
           {pending ? <LoaderCircleIcon className="animate-spin" /> : <FlaskConicalIcon className="transition-transform group-hover:-rotate-12" />}
-          Test sign-in
+          {t("instancesettings.nav.ssoTest")}
         </Button>
         {blocked && <span className="text-xs text-muted-foreground">{blocked}</span>}
       </div>

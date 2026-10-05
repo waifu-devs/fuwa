@@ -4,6 +4,7 @@ import type { InstanceConfig, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import { usePrivateField } from "@/components/Private";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { type I18n, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
@@ -40,20 +41,21 @@ export const CALL_FIELDS: { path: string; get: (s: InstanceSettings) => unknown;
   },
 ];
 
-export const CALL_SECTION = {
+/** The Calls page in the settings menu, in the app's language. */
+export const callSection = (t: I18n["t"]) => ({
   id: "calls",
-  label: "Calls",
+  label: t("instancesettings.nav.calls"),
   icon: AudioLinesIcon,
-  description: "Voice channels and calls in direct messages.",
+  description: t("instancesettings.nav.callsAbout"),
   keywords: "voice webrtc stun turn ice media",
   settings: [
-    { id: "calls-on", label: "Calls", keywords: "voice enable" },
-    { id: "call-recordings", label: "Recording on the server", keywords: "record recordings tracks podcast" },
-    { id: "call-recordings-keep", label: "Keep recordings for", keywords: "retention expire delete days old recordings" },
-    { id: "ice-urls", label: "STUN and TURN servers", keywords: "ice nat relay firewall" },
-    { id: "turn-secret", label: "TURN secret", keywords: "coturn relay password" },
+    { id: "calls-on", label: t("instancesettings.nav.calls"), keywords: "voice enable" },
+    { id: "call-recordings", label: t("instancesettings.nav.callRecordings"), keywords: "record recordings tracks podcast" },
+    { id: "call-recordings-keep", label: t("instancesettings.nav.callRecordingsKeep"), keywords: "retention expire delete days old recordings" },
+    { id: "ice-urls", label: t("instancesettings.nav.iceUrls"), keywords: "ice nat relay firewall" },
+    { id: "turn-secret", label: t("instancesettings.nav.turnSecret"), keywords: "coturn relay password" },
   ],
-};
+});
 
 /** Calls on an instance: whether they're on, and how apps get through firewalls to its media server. */
 export function CallSettings({
@@ -69,21 +71,25 @@ export function CallSettings({
   patch: (fn: (d: InstanceSettings) => void) => void;
   resetter: (...paths: string[]) => Reset;
 }) {
+  const { t } = useI18n();
+  const on = (value: boolean) => t(value ? "instancesettings.shared.on" : "instancesettings.shared.off");
   const privateField = usePrivateField();
   const startup = config.startup;
   const media = startup?.mediaPort
-    ? `port ${startup.mediaPort}${startup.mediaAddresses.length ? ` on ${startup.mediaAddresses.join(", ")}` : ""}`
+    ? startup.mediaAddresses.length
+      ? t("instancesettings.calls.portOn", { port: String(startup.mediaPort), addresses: startup.mediaAddresses.join(", ") })
+      : t("instancesettings.calls.port", { port: String(startup.mediaPort) })
     : startup?.mediaAddresses.length
       ? startup.mediaAddresses.join(", ")
       : null;
   return (
     <>
-      <Setting id="calls-on" title="Calls" defaultLabel={defaults.calls ? "on" : "off"} {...resetter("calls")}>
+      <Setting id="calls-on" title={t("instancesettings.nav.calls")} defaultLabel={on(defaults.calls)} {...resetter("calls")}>
         <Toggle
           checked={draft.calls}
           onChange={(calls) => patch((d) => (d.calls = calls))}
-          label="Let people talk in voice channels and call in direct messages"
-          hint="Turning it off hangs up every call within a few seconds."
+          label={t("instancesettings.calls.label")}
+          hint={t("instancesettings.calls.hint")}
         />
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -93,60 +99,64 @@ export function CallSettings({
         >
           <ServerIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0">
-            <b>Media server: </b>
+            <b>{t("instancesettings.calls.mediaServer")} </b>
             {media ? (
               <span className={cn("break-words text-muted-foreground", privateField)}>{media}</span>
             ) : (
-              <span className="text-amber-600 dark:text-amber-400">not running, so calls can't connect. Whoever runs this instance sets it up (FUWA_MEDIA_PORT, or FUWA_MEDIA_URL for a split instance).</span>
+              <span className="text-amber-600 dark:text-amber-400">{t("instancesettings.calls.notRunning")}</span>
             )}
-            <span className="mt-0.5 block text-xs text-muted-foreground">Set when the instance starts. Calls in direct messages are end-to-end encrypted: it only ever forwards sound it can't read.</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">{t("instancesettings.calls.setAtStart")}</span>
           </span>
         </motion.div>
       </Setting>
       <Setting
         id="call-recordings"
-        title="Recording on the server"
+        title={t("instancesettings.nav.callRecordings")}
         delay={0.02}
-        defaultLabel={defaults.callRecordings ? "on" : "off"}
+        defaultLabel={on(defaults.callRecordings)}
         {...resetter("call_recordings")}
       >
         <Toggle
           checked={draft.callRecordings}
           onChange={(on) => patch((d) => (d.callRecordings = on))}
-          label="Let people with Record keep voice channels' recordings on this instance"
-          hint="One Ogg Opus track per person, kept with the server's files (sealed when the instance encrypts its files). Nobody has Record until a server's admins grant it. Turning this off stops recordings going on now; the ones kept stay. How much each server may keep is a cap under Limits."
+          label={t("instancesettings.calls.recordLabel")}
+          hint={t("instancesettings.calls.recordHint")}
         />
       </Setting>
       <Setting
         id="call-recording-video"
-        title="Video in recordings"
+        title={t("instancesettings.calls.video")}
         delay={0.025}
-        defaultLabel={defaults.callRecordingVideo ? "on" : "off"}
+        defaultLabel={on(defaults.callRecordingVideo)}
         {...resetter("call_recording_video")}
       >
         <Toggle
           checked={draft.callRecordingVideo}
           onChange={(on) => patch((d) => (d.callRecordingVideo = on))}
-          label="Let servers keep cameras and shared screens in their recordings too"
-          hint="Each server's admins choose it under Recordings in their settings. A WebM file per camera and screen, next to the sound: an hour of a camera takes several times the room of the sound, against the same caps under Limits. Turning this off turns it off in every server and ends the recordings filming now."
+          label={t("instancesettings.calls.videoLabel")}
+          hint={t("instancesettings.calls.videoHint")}
         />
       </Setting>
       <Setting
         id="call-recordings-keep"
-        title="Keep recordings for"
-        hint="Finished recordings older than this delete themselves, files and copies included. Off keeps them until someone deletes them."
+        title={t("instancesettings.nav.callRecordingsKeep")}
+        hint={t("instancesettings.calls.keepHint")}
         delay={0.03}
-        defaultLabel={defaults.callRecordingsKeepDays === undefined ? "until deleted" : `${defaults.callRecordingsKeepDays} days`}
+        defaultLabel={
+          defaults.callRecordingsKeepDays === undefined
+            ? t("instancesettings.calls.untilDeleted")
+            : t("instancesettings.calls.days", { count: Number(defaults.callRecordingsKeepDays) })
+        }
         {...resetter("call_recordings_keep_days")}
       >
-        <Cap label="Days" value={draft.callRecordingsKeepDays} onChange={(v) => patch((d) => (d.callRecordingsKeepDays = v))} />
+        <Cap label={t("instancesettings.calls.daysLabel")} value={draft.callRecordingsKeepDays} onChange={(v) => patch((d) => (d.callRecordingsKeepDays = v))} />
       </Setting>
       <Setting
         id="ice-urls"
-        title="STUN and TURN servers"
-        hint="For people behind strict firewalls: a TURN server relays their sound when nothing else gets through. One per line, as stun:, turn: or turns: addresses."
+        title={t("instancesettings.nav.iceUrls")}
+        hint={t("instancesettings.calls.iceHint")}
         delay={0.04}
-        defaultLabel={defaults.iceUrls.join(", ") || "none"}
+        defaultLabel={defaults.iceUrls.join(", ") || t("instancesettings.shared.none")}
         {...resetter("ice_urls")}
       >
         <div className="relative">
@@ -163,10 +173,10 @@ export function CallSettings({
       </Setting>
       <Setting
         id="turn-secret"
-        title="TURN secret"
-        hint="The shared secret your TURN server (such as coturn with use-auth-secret) checks. Apps get a new password from it for each call, good for an hour, that names no account."
+        title={t("instancesettings.nav.turnSecret")}
+        hint={t("instancesettings.calls.turnHint")}
         delay={0.08}
-        defaultLabel={defaults.turnSecretSet ? "set" : "none"}
+        defaultLabel={t(defaults.turnSecretSet ? "instancesettings.shared.set" : "instancesettings.shared.none")}
         {...resetter("turn_secret")}
       >
         <div className="relative">
@@ -179,9 +189,9 @@ export function CallSettings({
             placeholder={
               draft.turnSecretSet
                 ? draft.turnSecretHint
-                  ? `Saved, ending in ${draft.turnSecretHint}. Type to replace it`
-                  : "Saved. Type to replace it"
-                : "No TURN secret"
+                  ? t("instancesettings.shared.savedEnding", { hint: draft.turnSecretHint })
+                  : t("instancesettings.shared.saved")
+                : t("instancesettings.calls.noSecret")
             }
             className="h-10 rounded-xl pl-9"
           />
