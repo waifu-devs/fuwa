@@ -18,6 +18,7 @@ import { Private } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
+import { i18n } from "@/i18n/i18n";
 import { expiresAt, timeLeft } from "@/lib/invites";
 import { accentVars } from "@/lib/banner";
 import { allowPicturesFrom } from "@/lib/shown";
@@ -196,7 +197,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 {(() => {
                   const until = expiresAt(found.invite);
                   return until ? (
-                    <p className="mt-3 text-center text-xs text-muted-foreground">This invite expires in {timeLeft(until.getTime() - Date.now())}.</p>
+                    <p className="mt-3 text-center text-xs text-muted-foreground">This invite expires in {timeLeft(i18n(), until.getTime() - Date.now())}.</p>
                   ) : null;
                 })()}
               </div>

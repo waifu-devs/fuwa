@@ -1,6 +1,7 @@
 import type { Invite } from "@/gen/fuwa/v1/types_pb";
 import { instanceKey, normalizeUrl } from "@/fuwa/saved";
-import { toDate } from "@/lib/format";
+import type { Key } from "@/i18n/i18n";
+import { formatDuration, type Lang, toDate } from "@/lib/format";
 
 /** How long a new invite lasts, in seconds; 0 is forever. */
 export const EXPIRE_AFTER = [
@@ -27,14 +28,14 @@ export const MAX_USES = [
 /** What a fresh invite starts as, like Discord's: a week, for anyone. */
 export const DEFAULT_INVITE = { maxAgeSeconds: 7 * 86_400, maxUses: 0 };
 
-/** The smallest account ages a server can ask for before letting someone in. */
-export const ACCOUNT_AGES = [
-  { value: 0, label: "Any age" },
-  { value: 600, label: "10 minutes" },
-  { value: 3600, label: "1 hour" },
-  { value: 86_400, label: "1 day" },
-  { value: 7 * 86_400, label: "1 week" },
-] as const;
+/** The smallest account ages a server can ask for before letting someone in; labels are catalog keys. */
+export const ACCOUNT_AGES: readonly { value: number; label: Key }[] = [
+  { value: 0, label: "serversettings.access.age.any" },
+  { value: 600, label: "serversettings.access.age.tenMinutes" },
+  { value: 3600, label: "serversettings.access.age.hour" },
+  { value: 86_400, label: "serversettings.access.age.day" },
+  { value: 7 * 86_400, label: "serversettings.access.age.week" },
+];
 
 /**
  * An invite's address: on the instance itself, so it opens in any browser,
@@ -69,9 +70,9 @@ export function parseInvite(text: string, here: string): { instance: string; cod
   }
 }
 
-/** Time until something, in its largest unit, rounded: "45 minutes", "6 hours", "7 days". */
-export function timeLeft(ms: number) {
+/** Time until something, in its largest unit, rounded, in the app's language: "45 minutes", "6 hours", "7 days". */
+export function timeLeft(lang: Lang, ms: number) {
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  const [n, unit] = minutes >= 1440 ? [Math.round(minutes / 1440), "day"] : minutes >= 60 ? [Math.round(minutes / 60), "hour"] : [minutes, "minute"];
-  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+  const seconds = minutes >= 1440 ? Math.round(minutes / 1440) * 86_400 : minutes >= 60 ? Math.round(minutes / 60) * 3600 : minutes * 60;
+  return formatDuration(lang, seconds);
 }

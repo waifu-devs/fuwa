@@ -62,107 +62,111 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { displayName, formatDuration, formatStamp, type Lang, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { cssColor, permissionLabel } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-type Kind = { label: string; icon: LucideIcon; tint: string };
+type Kind = { label: Key; icon: LucideIcon; tint: string };
 
 const KINDS: Record<AuditAction, Kind> = {
-  [AuditAction.UNSPECIFIED]: { label: "Anything", icon: ScrollTextIcon, tint: "bg-muted text-muted-foreground" },
-  [AuditAction.SERVER_UPDATE]: { label: "Server settings", icon: SettingsIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.CHANNEL_CREATE]: { label: "New channels", icon: FolderPlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.CHANNEL_UPDATE]: { label: "Channel changes", icon: HashIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.CHANNEL_DELETE]: { label: "Deleted channels", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.CHANNELS_REORDER]: { label: "Channel order", icon: ArrowDownUpIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.CHANNEL_PERMISSIONS_UPDATE]: { label: "Channel permissions", icon: LockIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.ROLE_CREATE]: { label: "New roles", icon: ShieldPlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.ROLE_UPDATE]: { label: "Role changes", icon: ShieldIcon, tint: "bg-violet-500/15 text-violet-500" },
-  [AuditAction.ROLE_DELETE]: { label: "Deleted roles", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.ROLES_REORDER]: { label: "Role order", icon: ArrowDownUpIcon, tint: "bg-violet-500/15 text-violet-500" },
-  [AuditAction.MEMBER_ROLES_UPDATE]: { label: "Roles given and taken", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
-  [AuditAction.MEMBER_UPDATE]: { label: "Nicknames", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
-  [AuditAction.MEMBER_TIME_OUT]: { label: "Time-outs", icon: HourglassIcon, tint: "bg-amber-500/15 text-amber-500" },
-  [AuditAction.MEMBER_KICK]: { label: "Kicks", icon: DoorOpenIcon, tint: "bg-orange-500/15 text-orange-500" },
-  [AuditAction.MEMBER_BAN]: { label: "Bans", icon: GavelIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.MEMBER_UNBAN]: { label: "Unbans", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.MESSAGE_DELETE]: { label: "Deleted messages", icon: MessageSquareXIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.OWNERSHIP_TRANSFER]: { label: "Ownership", icon: CrownIcon, tint: "bg-amber-500/15 text-amber-500" },
-  [AuditAction.INVITE_CREATE]: { label: "New invites", icon: LinkIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.INVITE_DELETE]: { label: "Revoked invites", icon: Link2OffIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.APPLICATION_APPROVE]: { label: "Applications let in", icon: UserCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.APPLICATION_REJECT]: { label: "Applications turned down", icon: UserXIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.JOIN_FORM_UPDATE]: { label: "Rules and questions", icon: ClipboardListIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.WELCOME_SCREEN_UPDATE]: { label: "Welcome screen", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
-  [AuditAction.AUTO_MOD_RULE_CREATE]: { label: "New AutoMod rules", icon: ShieldCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.AUTO_MOD_RULE_UPDATE]: { label: "AutoMod changes", icon: ShieldAlertIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.AUTO_MOD_RULE_DELETE]: { label: "Deleted AutoMod rules", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.AUTO_MOD_TIME_OUT]: { label: "AutoMod time-outs", icon: BotIcon, tint: "bg-amber-500/15 text-amber-500" },
-  [AuditAction.AUTO_MOD_MESSAGE_DELETE]: { label: "Taken down by AutoMod", icon: BotIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.EMOJI_CREATE]: { label: "New emoji", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.EMOJI_UPDATE]: { label: "Renamed emoji", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.EMOJI_DELETE]: { label: "Deleted emoji", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.WEBHOOK_CREATE]: { label: "New webhooks", icon: WebhookIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.WEBHOOK_UPDATE]: { label: "Webhook changes", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.WEBHOOK_DELETE]: { label: "Deleted webhooks", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.AGENT_ADD]: { label: "Agents added", icon: BotIcon, tint: "bg-violet-500/15 text-violet-500" },
-  [AuditAction.SHARE_CODE_CREATE]: { label: "New share codes", icon: KeyRoundIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.SHARE_CODE_DELETE]: { label: "Deleted share codes", icon: KeySquareIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.SHARED_CHANNEL_REQUEST]: { label: "Shared channel requests", icon: SendIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.SHARED_CHANNEL_APPROVE]: { label: "Shared channels approved", icon: HandshakeIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.SHARED_CHANNEL_DISCONNECT]: { label: "Shared channels ended", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "Shared channel changes", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "Kept out of shared channels", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
-  [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "Let back into shared channels", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.THREAD_LOCK]: { label: "Locked threads", icon: LockIcon, tint: "bg-amber-500/15 text-amber-500" },
-  [AuditAction.THREAD_UNLOCK]: { label: "Unlocked threads", icon: LockOpenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
-  [AuditAction.THREAD_DELETE]: { label: "Deleted threads", icon: MessagesSquareIcon, tint: "bg-destructive/15 text-destructive" },
-  [AuditAction.POLL_END]: { label: "Ended polls", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
-  [AuditAction.ONBOARDING_UPDATE]: { label: "Onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
+  [AuditAction.UNSPECIFIED]: { label: "serversettings.audit.kind.anything", icon: ScrollTextIcon, tint: "bg-muted text-muted-foreground" },
+  [AuditAction.SERVER_UPDATE]: { label: "serversettings.audit.kind.serverUpdate", icon: SettingsIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.CHANNEL_CREATE]: { label: "serversettings.audit.kind.channelCreate", icon: FolderPlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.CHANNEL_UPDATE]: { label: "serversettings.audit.kind.channelUpdate", icon: HashIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.CHANNEL_DELETE]: { label: "serversettings.audit.kind.channelDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.CHANNELS_REORDER]: { label: "serversettings.audit.kind.channelsReorder", icon: ArrowDownUpIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.CHANNEL_PERMISSIONS_UPDATE]: { label: "serversettings.audit.kind.channelPermissions", icon: LockIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.ROLE_CREATE]: { label: "serversettings.audit.kind.roleCreate", icon: ShieldPlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.ROLE_UPDATE]: { label: "serversettings.audit.kind.roleUpdate", icon: ShieldIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.ROLE_DELETE]: { label: "serversettings.audit.kind.roleDelete", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.ROLES_REORDER]: { label: "serversettings.audit.kind.rolesReorder", icon: ArrowDownUpIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.MEMBER_ROLES_UPDATE]: { label: "serversettings.audit.kind.memberRoles", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.MEMBER_UPDATE]: { label: "serversettings.audit.kind.memberUpdate", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.MEMBER_TIME_OUT]: { label: "serversettings.audit.kind.timeOut", icon: HourglassIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.MEMBER_KICK]: { label: "serversettings.audit.kind.kick", icon: DoorOpenIcon, tint: "bg-orange-500/15 text-orange-500" },
+  [AuditAction.MEMBER_BAN]: { label: "serversettings.audit.kind.ban", icon: GavelIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.MEMBER_UNBAN]: { label: "serversettings.audit.kind.unban", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.MESSAGE_DELETE]: { label: "serversettings.audit.kind.messageDelete", icon: MessageSquareXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.OWNERSHIP_TRANSFER]: { label: "serversettings.audit.kind.ownership", icon: CrownIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.INVITE_CREATE]: { label: "serversettings.audit.kind.inviteCreate", icon: LinkIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.INVITE_DELETE]: { label: "serversettings.audit.kind.inviteDelete", icon: Link2OffIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.APPLICATION_APPROVE]: { label: "serversettings.audit.kind.applicationApprove", icon: UserCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.APPLICATION_REJECT]: { label: "serversettings.audit.kind.applicationReject", icon: UserXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.JOIN_FORM_UPDATE]: { label: "serversettings.audit.kind.joinForm", icon: ClipboardListIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.WELCOME_SCREEN_UPDATE]: { label: "serversettings.audit.kind.welcome", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
+  [AuditAction.AUTO_MOD_RULE_CREATE]: { label: "serversettings.audit.kind.automodCreate", icon: ShieldCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.AUTO_MOD_RULE_UPDATE]: { label: "serversettings.audit.kind.automodUpdate", icon: ShieldAlertIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.AUTO_MOD_RULE_DELETE]: { label: "serversettings.audit.kind.automodDelete", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.AUTO_MOD_TIME_OUT]: { label: "serversettings.audit.kind.automodTimeOut", icon: BotIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.AUTO_MOD_MESSAGE_DELETE]: { label: "serversettings.audit.kind.automodTakedown", icon: BotIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.EMOJI_CREATE]: { label: "serversettings.audit.kind.emojiCreate", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.EMOJI_UPDATE]: { label: "serversettings.audit.kind.emojiUpdate", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.EMOJI_DELETE]: { label: "serversettings.audit.kind.emojiDelete", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.WEBHOOK_CREATE]: { label: "serversettings.audit.kind.webhookCreate", icon: WebhookIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.WEBHOOK_UPDATE]: { label: "serversettings.audit.kind.webhookUpdate", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.WEBHOOK_DELETE]: { label: "serversettings.audit.kind.webhookDelete", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.AGENT_ADD]: { label: "serversettings.audit.kind.agentAdd", icon: BotIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.SHARE_CODE_CREATE]: { label: "serversettings.audit.kind.shareCodeCreate", icon: KeyRoundIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SHARE_CODE_DELETE]: { label: "serversettings.audit.kind.shareCodeDelete", icon: KeySquareIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SHARED_CHANNEL_REQUEST]: { label: "serversettings.audit.kind.sharedRequest", icon: SendIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SHARED_CHANNEL_APPROVE]: { label: "serversettings.audit.kind.sharedApprove", icon: HandshakeIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SHARED_CHANNEL_DISCONNECT]: { label: "serversettings.audit.kind.sharedDisconnect", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "serversettings.audit.kind.sharedUpdate", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "serversettings.audit.kind.sharedBlock", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
+  [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "serversettings.audit.kind.sharedUnblock", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.THREAD_LOCK]: { label: "serversettings.audit.kind.threadLock", icon: LockIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.THREAD_UNLOCK]: { label: "serversettings.audit.kind.threadUnlock", icon: LockOpenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.THREAD_DELETE]: { label: "serversettings.audit.kind.threadDelete", icon: MessagesSquareIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.POLL_END]: { label: "serversettings.audit.kind.pollEnd", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.ONBOARDING_UPDATE]: { label: "serversettings.audit.kind.onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
 };
 
-const FIELD: Record<string, string> = {
-  name: "Name",
-  description: "Description",
-  icon_url: "Icon",
-  discoverable: "Shown in Browse",
-  default_notifications: "Default notifications",
-  system_channel_id: "Join messages",
-  topic: "Topic",
-  encryption: "End-to-end encryption",
-  share_history: "Shares earlier messages",
-  parent_id: "Category",
-  position: "Position",
-  slowmode_seconds: "Slow mode",
-  nickname: "Nickname",
-  role: "Role",
-  timed_out_until: "Timed out until",
-  owner_id: "Owner",
-  color: "Color",
-  permissions: "Permissions",
-  hoist: "Shown apart",
-  mentionable: "Anyone can mention it",
-  max_uses: "How many people",
-  expires_at: "Expires",
-  uses: "People it let in",
-  min_account_age_seconds: "Minimum account age",
-  thread_archive_hours: "Archive quiet threads after",
-  record_video: "Recordings keep",
-  applications: "Apply to join",
-  linked_only: "waifu.dev accounts only",
-  rules: "Rules",
-  avatar_url: "Picture",
-  channel_id: "Posts in",
-  token: "Address",
-  questions: "Questions",
-  enabled: "On",
-  channels: "Channels",
-  keywords: "Words",
-  allowed: "Allowed",
-  mention_limit: "Ping limit",
-  server: "Server",
-  actions: "Actions",
+/** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
+const FIELD: Record<string, Key> = {
+  name: "serversettings.overview.name",
+  description: "serversettings.nav.description",
+  icon_url: "serversettings.audit.field.icon",
+  discoverable: "serversettings.audit.field.discoverable",
+  default_notifications: "serversettings.nav.defaultNotifications",
+  system_channel_id: "serversettings.nav.joinMessages",
+  topic: "serversettings.channels.topic",
+  encryption: "serversettings.audit.field.encryption",
+  share_history: "serversettings.audit.field.shareHistory",
+  parent_id: "serversettings.channels.category",
+  position: "serversettings.audit.field.position",
+  slowmode_seconds: "serversettings.nav.slowmode",
+  nickname: "settings.nav.nickname",
+  role: "serversettings.audit.field.role",
+  timed_out_until: "serversettings.audit.field.timedOutUntil",
+  owner_id: "serversettings.shared.owner",
+  color: "serversettings.audit.field.color",
+  permissions: "serversettings.shared.permissions",
+  hoist: "serversettings.audit.field.hoist",
+  mentionable: "serversettings.audit.field.mentionable",
+  max_uses: "serversettings.audit.field.maxUses",
+  expires_at: "serversettings.audit.field.expires",
+  uses: "serversettings.audit.field.uses",
+  min_account_age_seconds: "serversettings.nav.accountAge",
+  thread_archive_hours: "serversettings.audit.field.threadArchive",
+  record_video: "serversettings.audit.field.recordVideo",
+  applications: "serversettings.nav.applyToJoin",
+  linked_only: "serversettings.nav.linkedOnly",
+  rules: "serversettings.nav.rules",
+  avatar_url: "serversettings.audit.field.picture",
+  channel_id: "serversettings.audit.field.postsIn",
+  token: "serversettings.audit.field.address",
+  questions: "serversettings.audit.field.questions",
+  enabled: "serversettings.audit.field.enabled",
+  channels: "serversettings.nav.channels",
+  keywords: "serversettings.audit.field.keywords",
+  allowed: "serversettings.audit.field.allowed",
+  mention_limit: "serversettings.audit.field.mentionLimit",
+  server: "serversettings.invites.server",
+  actions: "serversettings.audit.field.actions",
 };
+
+/** A changed field's name in the app's language. */
+const fieldName = (t: Lang["t"], field: string) => (Object.hasOwn(FIELD, field) ? t(FIELD[field]!) : field);
 
 /** Entries for things made or removed show just the one side of each change. */
 const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
@@ -177,10 +181,11 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
-const OLD_RANK: Record<string, string> = { "1": "Member", "2": "Admin", "3": "Owner" };
+const OLD_RANK: Record<string, Key> = { "1": "serversettings.audit.rank.member", "2": "serversettings.audit.rank.admin", "3": "serversettings.shared.owner" };
 
 /** Everything people did with their permissions, newest first, with who and what to filter by. */
 export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const channels = inst?.channels[serverId];
   const roles = useRoles(instanceKey, serverId);
@@ -223,14 +228,14 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
     return [...seen.values()];
   }, [inst?.members, serverId, entries, users, ownerId]);
 
-  const actorLabel = actor ? displayName(users[actor] ?? actors.find((u) => u.id === actor)) : "Anyone";
+  const actorLabel = actor ? displayName(users[actor] ?? actors.find((u) => u.id === actor)) : t("serversettings.audit.anyone");
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-2">
-        <Filter label="By" value={actorLabel}>
+        <Filter label={t("serversettings.audit.by")} value={actorLabel}>
           <DropdownMenuRadioGroup value={actor} onValueChange={setActor}>
-            <DropdownMenuRadioItem value="">Anyone</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="">{t("serversettings.audit.anyone")}</DropdownMenuRadioItem>
             {actors.map((u) => (
               <DropdownMenuRadioItem key={u.id} value={u.id}>
                 <UserAvatar user={u} className="size-5" /> {displayName(u)}
@@ -238,11 +243,11 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
             ))}
           </DropdownMenuRadioGroup>
         </Filter>
-        <Filter label="What" value={KINDS[action].label}>
+        <Filter label={t("serversettings.audit.what")} value={t(KINDS[action].label)}>
           <DropdownMenuRadioGroup value={String(action)} onValueChange={(v) => setAction(Number(v) as AuditAction)}>
             {Object.entries(KINDS).map(([value, kind]) => (
               <DropdownMenuRadioItem key={value} value={value}>
-                <kind.icon /> {kind.label}
+                <kind.icon /> {t(kind.label)}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
@@ -254,10 +259,8 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
       {entries && !entries.length && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-2 py-12 text-center">
           <ScrollTextIcon className="size-8 text-muted-foreground" />
-          <p className="font-extrabold">Nothing here yet</p>
-          <p className="text-sm text-muted-foreground">
-            {actor || action ? "Nothing matches these filters." : "Changes to settings, channels and members show up here."}
-          </p>
+          <p className="font-extrabold">{t("serversettings.audit.empty")}</p>
+          <p className="text-sm text-muted-foreground">{actor || action ? t("serversettings.audit.noMatch") : t("serversettings.audit.emptyHint")}</p>
         </motion.div>
       )}
       {entries && entries.length > 0 && (
@@ -286,7 +289,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
           onClick={() => load({ actorId: actor, action, beforeId: entries[entries.length - 1]!.id }, true)}
           className="self-center rounded-xl"
         >
-          {loading && <LoaderCircleIcon className="animate-spin" />} Show older
+          {loading && <LoaderCircleIcon className="animate-spin" />} {t("serversettings.audit.older")}
         </Button>
       )}
     </div>
@@ -371,7 +374,7 @@ function Entry({
             <div className="flex flex-col gap-1.5 border-t px-3 py-2.5 pl-15 text-sm">
               {entry.reason && (
                 <p>
-                  <span className="text-muted-foreground">Reason: </span>
+                  <span className="text-muted-foreground">{lang.t("serversettings.audit.reason")} </span>
                   {entry.reason}
                 </p>
               )}
@@ -383,7 +386,7 @@ function Entry({
                   transition={{ delay: n * 0.04 }}
                   className="flex flex-wrap items-center gap-1.5"
                 >
-                  <span className="text-muted-foreground">{FIELD[change.field] ?? change.field}:</span>
+                  <span className="text-muted-foreground">{fieldName(lang.t, change.field)}:</span>
                   {ONE_SIDE[entry.action] ? (
                     <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
                   ) : (
@@ -409,41 +412,52 @@ function Entry({
 
 /** A value from the log, in words. */
 function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
-  if (field === "discoverable" || field === "enabled") return raw === "true" ? "Yes" : "No";
-  if (field === "role") return OLD_RANK[raw] ?? (raw ? entry.roleName : "None");
-  if (field === "hoist" || field === "mentionable") return raw === "true" ? "Yes" : "No";
-  if (field === "color") return raw || "None";
+  const { t } = lang;
+  const yesNo = () => (raw === "true" ? t("serversettings.audit.value.yes") : t("serversettings.audit.value.no"));
+  const none = t("serversettings.audit.value.none");
+  if (field === "discoverable" || field === "enabled") return yesNo();
+  if (field === "role") return Object.hasOwn(OLD_RANK, raw) ? t(OLD_RANK[raw]!) : raw ? entry.roleName : none;
+  if (field === "hoist" || field === "mentionable") return yesNo();
+  if (field === "color") return raw || none;
   if (field === "permissions") {
     const names = raw
       .split(",")
       .filter(Boolean)
-      .map((n) => permissionLabel(Number(n) as Permission));
-    return names.length ? names.join(", ") : "None";
+      .map((n) => permissionLabel(t, Number(n) as Permission));
+    return names.length ? names.join(", ") : none;
   }
   if (field === "default_notifications")
-    return Number(raw) === NotificationLevel.MENTIONS ? "Only @mentions" : Number(raw) === NotificationLevel.ALL ? "All messages" : "Each person's own";
-  if (field === "avatar_url") return raw ? "A picture" : "None";
-  if (field === "token") return "Replaced";
+    return Number(raw) === NotificationLevel.MENTIONS
+      ? t("common.notify.mentions")
+      : Number(raw) === NotificationLevel.ALL
+        ? t("common.notify.all")
+        : t("serversettings.audit.value.eachOwn");
+  if (field === "avatar_url") return raw ? t("serversettings.audit.value.aPicture") : none;
+  if (field === "token") return t("serversettings.audit.value.replaced");
   if (field === "system_channel_id" || field === "parent_id" || field === "channel_id") {
-    if (!raw) return "None";
+    if (!raw) return none;
     const channel = channels.find((c) => c.id === raw);
-    return channel ? (field === "parent_id" ? channel.name : `#${channel.name}`) : "A deleted channel";
+    return channel ? (field === "parent_id" ? channel.name : `#${channel.name}`) : t("serversettings.audit.value.deletedChannel");
   }
-  if (field === "slowmode_seconds") return raw === "0" ? "Off" : formatDuration(lang, Number(raw));
+  if (field === "slowmode_seconds") return raw === "0" ? t("serversettings.shared.off") : formatDuration(lang, Number(raw));
   if (field === "timed_out_until") {
-    if (!raw) return "Not timed out";
+    if (!raw) return t("serversettings.audit.value.notTimedOut");
     const until = Number(raw);
-    return formatStamp(new Date(until)) + ` (${formatDuration(lang, Math.round((until - toDate(entry.createdAt).getTime()) / 1000))})`;
+    return t("serversettings.audit.value.until", {
+      time: formatStamp(new Date(until)),
+      duration: formatDuration(lang, Math.round((until - toDate(entry.createdAt).getTime()) / 1000)),
+    });
   }
   if (field === "owner_id") return displayName(users[raw]);
-  if (field === "max_uses") return raw === "0" ? "No limit" : raw;
-  if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : "Never";
-  if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(lang, Number(raw));
-  if (field === "thread_archive_hours") return raw === "0" ? "Never" : formatDuration(lang, Number(raw) * 3600);
-  if (field === "record_video") return raw === "true" ? "Sound and video" : "Sound only";
-  return raw || "Nothing";
+  if (field === "max_uses") return raw === "0" ? t("settings.controls.noLimit") : raw;
+  if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : t("serversettings.shared.never");
+  if (field === "min_account_age_seconds") return raw === "0" ? t("serversettings.access.age.any") : formatDuration(lang, Number(raw));
+  if (field === "thread_archive_hours") return raw === "0" ? t("serversettings.shared.never") : formatDuration(lang, Number(raw) * 3600);
+  if (field === "record_video") return raw === "true" ? t("serversettings.audit.value.soundVideo") : t("serversettings.audit.value.soundOnly");
+  return raw || t("serversettings.audit.value.nothing");
 }
 
+/** What an entry says happened: a sentence per kind of change, with the people, roles and channels in bold. */
 function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
   const actor = <b>{displayName(users[entry.actorId])}</b>;
   const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
@@ -452,10 +466,15 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
   const roleId = entry.action === AuditAction.MEMBER_ROLES_UPDATE ? given?.after || given?.before : entry.targetId;
   const current = roles.find((r) => r.id === roleId);
   const tint = current?.color !== undefined ? { color: cssColor(current.color) } : undefined;
-  const role = <b style={tint}>{current?.name ?? (entry.roleName || "a role")}</b>;
+  const role = <b style={tint}>{current?.name ?? (entry.roleName || lang.t("serversettings.audit.aRole"))}</b>;
   const target = <b>{displayName(users[entry.targetId])}</b>;
   const known = channels.find((c) => c.id === entry.targetId);
   const channel = <b>{known ? (known.type === ChannelType.CATEGORY ? known.name : `#${known.name}`) : `#${entry.channelName}`}</b>;
+  // The channel by the name the entry kept, for things that may be gone now.
+  const named = <b>#{entry.channelName}</b>;
+  const automod = <b>AutoMod</b>;
+  const say = (k: Key, values: Record<string, ReactNode> = {}, count?: number) => <T k={k} values={{ actor, ...values }} count={count} />;
+  const seconds = (until: string) => Math.round((Number(until) - toDate(entry.createdAt).getTime()) / 1000);
   switch (entry.action) {
     case AuditAction.SERVER_UPDATE: {
       const listed = change("discoverable");
@@ -463,295 +482,179 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       const apply = change("applications");
       const linked = change("linked_only");
       const video = change("record_video");
-      if (video && entry.changes.length === 1)
-        return video.after === "true" ? <>{actor} turned on recording cameras and screens</> : <>{actor} made recordings sound only</>;
-      if (apply && entry.changes.length === 1)
-        return apply.after === "true" ? <>{actor} made people apply to join</> : <>{actor} let people join without applying</>;
-      if (linked && entry.changes.length === 1)
-        return linked.after === "true" ? <>{actor} let in waifu.dev accounts only</> : <>{actor} let in accounts made on this instance too</>;
-      if (listed && entry.changes.length === 1)
-        return listed.after === "true" ? <>{actor} listed the server in Browse</> : <>{actor} made the server invite only</>;
-      if (age && entry.changes.length === 1)
-        return age.after === "0" ? (
-          <>{actor} let in accounts of any age</>
-        ) : (
-          <>
-            {actor} let in accounts once they're {formatDuration(lang, Number(age.after))} old
-          </>
-        );
-      return <>{actor} changed the server's settings</>;
+      const only = entry.changes.length === 1;
+      if (video && only) return say(video.after === "true" ? "serversettings.audit.s.recordVideoOn" : "serversettings.audit.s.recordSoundOnly");
+      if (apply && only) return say(apply.after === "true" ? "serversettings.audit.s.applyOn" : "serversettings.audit.s.applyOff");
+      if (linked && only) return say(linked.after === "true" ? "serversettings.audit.s.linkedOnlyOn" : "serversettings.audit.s.linkedOnlyOff");
+      if (listed && only) return say(listed.after === "true" ? "serversettings.audit.s.listed" : "serversettings.audit.s.inviteOnly");
+      if (age && only)
+        return age.after === "0"
+          ? say("serversettings.audit.s.anyAge")
+          : say("serversettings.audit.s.minAge", { duration: formatDuration(lang, Number(age.after)) });
+      return say("serversettings.audit.s.serverUpdate");
     }
     case AuditAction.CHANNEL_CREATE:
-      return <>{actor} created {channel}</>;
+      return say("serversettings.audit.s.channelCreate", { channel });
     case AuditAction.CHANNEL_UPDATE: {
       const slow = change("slowmode_seconds");
       if (slow && entry.changes.length === 1)
-        return slow.after === "0" ? <>{actor} turned off slow mode in {channel}</> : <>{actor} set slow mode in {channel} to {formatDuration(lang, Number(slow.after))}</>;
-      return <>{actor} changed {channel}</>;
+        return slow.after === "0"
+          ? say("serversettings.audit.s.slowOff", { channel })
+          : say("serversettings.audit.s.slowSet", { channel, duration: formatDuration(lang, Number(slow.after)) });
+      return say("serversettings.audit.s.channelUpdate", { channel });
     }
     case AuditAction.CHANNEL_DELETE:
-      return <>{actor} deleted <b>#{entry.channelName}</b></>;
+      return say("serversettings.audit.s.channelDelete", { channel: named });
     case AuditAction.CHANNELS_REORDER:
-      return <>{actor} rearranged the channels</>;
+      return say("serversettings.audit.s.channelsReorder");
     case AuditAction.MEMBER_UPDATE: {
       const rank = change("role");
-      if (rank && entry.changes.length === 1)
-        return rank.after === "2" ? <>{actor} made {target} an admin</> : <>{actor} made {target} a member again</>;
-      return <>{actor} changed {target}'s nickname</>;
+      if (rank && entry.changes.length === 1) return say(rank.after === "2" ? "serversettings.audit.s.madeAdmin" : "serversettings.audit.s.madeMember", { target });
+      return say("serversettings.audit.s.nickname", { target });
     }
     case AuditAction.MEMBER_ROLES_UPDATE: {
       // Picked in the server's onboarding: role names, comma-separated.
       const picked = change("roles");
       if (picked)
-        return picked.after ? (
-          <>
-            {target} picked <b>{picked.after}</b> in onboarding
-          </>
-        ) : (
-          <>
-            {target} unpicked <b>{picked.before}</b> in onboarding
-          </>
-        );
-      return given?.after ? (
-        <>
-          {actor} gave {target} {role}
-        </>
-      ) : (
-        <>
-          {actor} took {role} from {target}
-        </>
-      );
+        return picked.after
+          ? say("serversettings.audit.s.picked", { target, roles: <b>{picked.after}</b> })
+          : say("serversettings.audit.s.unpicked", { target, roles: <b>{picked.before}</b> });
+      return say(given?.after ? "serversettings.audit.s.roleGive" : "serversettings.audit.s.roleTake", { target, role });
     }
     case AuditAction.ROLE_CREATE:
-      return <>{actor} created the role {role}</>;
+      return say("serversettings.audit.s.roleCreate", { role });
     case AuditAction.ROLE_UPDATE: {
       const renamed = change("name");
       if (renamed && entry.changes.length === 1)
-        return (
-          <>
-            {actor} renamed <b style={tint}>{renamed.before}</b> to <b style={tint}>{renamed.after}</b>
-          </>
-        );
-      if (change("permissions") && entry.changes.length === 1) return <>{actor} changed what {role} can do</>;
-      return <>{actor} changed {role}</>;
+        return say("serversettings.audit.s.renamed", { before: <b style={tint}>{renamed.before}</b>, after: <b style={tint}>{renamed.after}</b> });
+      if (change("permissions") && entry.changes.length === 1) return say("serversettings.audit.s.rolePermissions", { role });
+      return say("serversettings.audit.s.roleUpdate", { role });
     }
     case AuditAction.ROLE_DELETE:
-      return <>{actor} deleted the role {role}</>;
+      return say("serversettings.audit.s.roleDelete", { role });
     case AuditAction.ROLES_REORDER:
-      return <>{actor} rearranged the roles</>;
+      return say("serversettings.audit.s.rolesReorder");
     case AuditAction.CHANNEL_PERMISSIONS_UPDATE:
-      return <>{actor} changed who can do what in {channel}</>;
+      return say("serversettings.audit.s.channelPermissions", { channel });
     case AuditAction.MEMBER_TIME_OUT: {
       const until = change("timed_out_until");
-      if (!until?.after) return <>{actor} ended {target}'s time-out</>;
-      const seconds = Math.round((Number(until.after) - toDate(entry.createdAt).getTime()) / 1000);
-      return <>{actor} timed out {target} for {formatDuration(lang, seconds)}</>;
+      if (!until?.after) return say("serversettings.audit.s.timeOutEnd", { target });
+      return say("serversettings.audit.s.timeOut", { target, duration: formatDuration(lang, seconds(until.after)) });
     }
     case AuditAction.MEMBER_KICK:
-      return <>{actor} kicked {target}</>;
+      return say("serversettings.audit.s.kick", { target });
     case AuditAction.MEMBER_BAN: {
       const deleted = Number(change("deleted_messages")?.after ?? 0);
-      return (
-        <>
-          {actor} banned {target}
-          {deleted > 0 && ` and deleted ${deleted} ${deleted === 1 ? "message" : "messages"}`}
-        </>
-      );
+      return deleted > 0 ? say("serversettings.audit.s.banDeleted", { target, count: deleted }, deleted) : say("serversettings.audit.s.ban", { target });
     }
     case AuditAction.MEMBER_UNBAN:
-      return <>{actor} unbanned {target}</>;
+      return say("serversettings.audit.s.unban", { target });
     case AuditAction.MESSAGE_DELETE:
-      return (
-        <>
-          {actor} deleted a message by {target} in <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.messageDelete", { target, channel: named });
     case AuditAction.OWNERSHIP_TRANSFER:
-      return <>{actor} handed the server to {target}</>;
+      return say("serversettings.audit.s.ownership", { target });
     case AuditAction.INVITE_CREATE:
-      return entry.channelName ? (
-        <>
-          {actor} made an invite to <b>#{entry.channelName}</b>
-        </>
-      ) : (
-        <>{actor} made an invite</>
-      );
+      return entry.channelName ? say("serversettings.audit.s.inviteCreateIn", { channel: named }) : say("serversettings.audit.s.inviteCreate");
     case AuditAction.INVITE_DELETE:
-      return entry.channelName ? (
-        <>
-          {actor} revoked an invite to <b>#{entry.channelName}</b>
-        </>
-      ) : (
-        <>{actor} revoked an invite</>
-      );
+      return entry.channelName ? say("serversettings.audit.s.inviteDeleteIn", { channel: named }) : say("serversettings.audit.s.inviteDelete");
     case AuditAction.APPLICATION_APPROVE:
-      return <>{actor} let {target} in</>;
+      return say("serversettings.audit.s.applicationApprove", { target });
     case AuditAction.APPLICATION_REJECT:
-      return <>{actor} turned down {target}'s application</>;
+      return say("serversettings.audit.s.applicationReject", { target });
     case AuditAction.JOIN_FORM_UPDATE: {
       const rules = change("rules");
       const questions = change("questions");
-      if (rules && !questions) return <>{actor} changed the rules</>;
-      if (questions && !rules) return <>{actor} changed the questions</>;
-      return <>{actor} changed the rules and questions</>;
+      if (rules && !questions) return say("serversettings.audit.s.rulesChanged");
+      if (questions && !rules) return say("serversettings.audit.s.questionsChanged");
+      return say("serversettings.audit.s.joinFormChanged");
     }
     case AuditAction.WELCOME_SCREEN_UPDATE: {
       const on = change("enabled");
-      if (on && entry.changes.length === 1)
-        return on.after === "true" ? <>{actor} turned on the welcome screen</> : <>{actor} turned off the welcome screen</>;
-      return <>{actor} changed the welcome screen</>;
+      if (on && entry.changes.length === 1) return say(on.after === "true" ? "serversettings.audit.s.welcomeOn" : "serversettings.audit.s.welcomeOff");
+      return say("serversettings.audit.s.welcomeChanged");
     }
     case AuditAction.ONBOARDING_UPDATE: {
       const on = change("enabled");
-      if (on && entry.changes.length === 1)
-        return on.after === "true" ? <>{actor} turned on onboarding</> : <>{actor} turned off onboarding</>;
-      return <>{actor} changed the onboarding</>;
+      if (on && entry.changes.length === 1) return say(on.after === "true" ? "serversettings.audit.s.onboardingOn" : "serversettings.audit.s.onboardingOff");
+      return say("serversettings.audit.s.onboardingChanged");
     }
     case AuditAction.AUTO_MOD_RULE_CREATE:
-      return <>{actor} added the AutoMod rule <b>{change("name")?.after}</b></>;
+      return say("serversettings.audit.s.automodCreate", { name: <b>{change("name")?.after}</b> });
     case AuditAction.AUTO_MOD_RULE_UPDATE: {
       const on = change("enabled");
-      const name = <b>{change("name")?.after || "a rule"}</b>;
+      const name = <b>{change("name")?.after || lang.t("serversettings.audit.aRule")}</b>;
       if (on && entry.changes.filter((c) => c.field !== "name").length === 1)
-        return on.after === "true" ? <>{actor} turned on the AutoMod rule {name}</> : <>{actor} paused the AutoMod rule {name}</>;
-      return <>{actor} changed the AutoMod rule {name}</>;
+        return say(on.after === "true" ? "serversettings.audit.s.automodOn" : "serversettings.audit.s.automodPaused", { name });
+      return say("serversettings.audit.s.automodChanged", { name });
     }
     case AuditAction.AUTO_MOD_RULE_DELETE:
-      return <>{actor} deleted the AutoMod rule <b>{change("name")?.before}</b></>;
+      return say("serversettings.audit.s.automodDelete", { name: <b>{change("name")?.before}</b> });
     case AuditAction.AUTO_MOD_TIME_OUT: {
       const until = change("timed_out_until");
-      const seconds = until ? Math.round((Number(until.after) - toDate(entry.createdAt).getTime()) / 1000) : 0;
-      return (
-        <>
-          <b>AutoMod</b> timed out {target}
-          {seconds > 0 && ` for ${formatDuration(lang, seconds)}`}
-          {entry.channelName && (
-            <>
-              {" "}
-              in <b>#{entry.channelName}</b>
-            </>
-          )}
-        </>
-      );
+      const length = until ? seconds(until.after) : 0;
+      const duration = formatDuration(lang, length);
+      if (length > 0)
+        return entry.channelName
+          ? say("serversettings.audit.s.automodTimeOutForIn", { automod, target, duration, channel: named })
+          : say("serversettings.audit.s.automodTimeOutFor", { automod, target, duration });
+      return entry.channelName
+        ? say("serversettings.audit.s.automodTimeOutIn", { automod, target, channel: named })
+        : say("serversettings.audit.s.automodTimeOut", { automod, target });
     }
     case AuditAction.AUTO_MOD_MESSAGE_DELETE:
-      return (
-        <>
-          <b>AutoMod</b> took down a message from {target}
-          {entry.channelName && (
-            <>
-              {" "}
-              in <b>#{entry.channelName}</b>
-            </>
-          )}
-        </>
-      );
+      return entry.channelName
+        ? say("serversettings.audit.s.automodTakedownIn", { automod, target, channel: named })
+        : say("serversettings.audit.s.automodTakedown", { automod, target });
     case AuditAction.EMOJI_CREATE:
-      return <>{actor} added the emoji <b>:{change("name")?.after}:</b></>;
+      return say("serversettings.audit.s.emojiCreate", { name: <b>:{change("name")?.after}:</b> });
     case AuditAction.EMOJI_UPDATE: {
       const renamed = change("name");
-      return (
-        <>
-          {actor} renamed <b>:{renamed?.before}:</b> to <b>:{renamed?.after}:</b>
-        </>
-      );
+      return say("serversettings.audit.s.renamed", { before: <b>:{renamed?.before}:</b>, after: <b>:{renamed?.after}:</b> });
     }
     case AuditAction.EMOJI_DELETE:
-      return <>{actor} deleted the emoji <b>:{change("name")?.before}:</b></>;
+      return say("serversettings.audit.s.emojiDelete", { name: <b>:{change("name")?.before}:</b> });
     case AuditAction.WEBHOOK_CREATE:
-      return (
-        <>
-          {actor} made the webhook <b>{change("name")?.after}</b> for <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.webhookCreate", { name: <b>{change("name")?.after}</b>, channel: named });
     case AuditAction.WEBHOOK_UPDATE: {
-      if (change("token")) return <>{actor} gave a webhook in <b>#{entry.channelName}</b> a new address</>;
+      if (change("token")) return say("serversettings.audit.s.webhookToken", { channel: named });
       const renamed = change("name");
       if (renamed && entry.changes.length === 1)
-        return (
-          <>
-            {actor} renamed the webhook <b>{renamed.before}</b> to <b>{renamed.after}</b>
-          </>
-        );
-      return <>{actor} changed a webhook in <b>#{entry.channelName}</b></>;
+        return say("serversettings.audit.s.webhookRenamed", { before: <b>{renamed.before}</b>, after: <b>{renamed.after}</b> });
+      return say("serversettings.audit.s.webhookUpdate", { channel: named });
     }
     case AuditAction.WEBHOOK_DELETE:
-      return <>{actor} deleted the webhook <b>{change("name")?.before}</b></>;
+      return say("serversettings.audit.s.webhookDelete", { name: <b>{change("name")?.before}</b> });
     case AuditAction.AGENT_ADD:
-      return <>{actor} added the agent {target}</>;
+      return say("serversettings.audit.s.agentAdd", { target });
     case AuditAction.SHARE_CODE_CREATE:
-      return <>{actor} made a share code for <b>#{entry.channelName}</b></>;
+      return say("serversettings.audit.s.shareCodeCreate", { channel: named });
     case AuditAction.SHARE_CODE_DELETE:
-      return <>{actor} deleted a share code for <b>#{entry.channelName}</b></>;
+      return say("serversettings.audit.s.shareCodeDelete", { channel: named });
     case AuditAction.SHARED_CHANNEL_REQUEST:
-      return (
-        <>
-          {actor} asked to add <b>#{entry.channelName}</b> from <b>{change("server")?.after || "another server"}</b>
-        </>
-      );
+      return say("serversettings.audit.s.sharedRequest", { channel: named, server: <b>{change("server")?.after || lang.t("serversettings.audit.anotherServer")}</b> });
     case AuditAction.SHARED_CHANNEL_APPROVE:
-      return (
-        <>
-          {actor} shared <b>#{entry.channelName}</b> with <b>{change("server")?.after || "another server"}</b>
-        </>
-      );
-    case AuditAction.SHARED_CHANNEL_DISCONNECT:
-      return (
-        <>
-          {actor} ended sharing <b>#{entry.channelName}</b>
-          {change("server")?.after && (
-            <>
-              {" "}
-              with <b>{change("server")!.after}</b>
-            </>
-          )}
-        </>
-      );
+      return say("serversettings.audit.s.sharedApprove", { channel: named, server: <b>{change("server")?.after || lang.t("serversettings.audit.anotherServer")}</b> });
+    case AuditAction.SHARED_CHANNEL_DISCONNECT: {
+      const other = change("server")?.after;
+      return other
+        ? say("serversettings.audit.s.sharedDisconnectWith", { channel: named, server: <b>{other}</b> })
+        : say("serversettings.audit.s.sharedDisconnect", { channel: named });
+    }
     case AuditAction.SHARED_CHANNEL_UPDATE:
-      return <>{actor} changed what the other server's people may do in <b>#{entry.channelName}</b></>;
+      return say("serversettings.audit.s.sharedUpdate", { channel: named });
     case AuditAction.SHARED_CHANNEL_BLOCK:
-      return (
-        <>
-          {actor} kept {target} out of <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.sharedBlock", { target, channel: named });
     case AuditAction.SHARED_CHANNEL_UNBLOCK:
-      return (
-        <>
-          {actor} let {target} back into <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.sharedUnblock", { target, channel: named });
     case AuditAction.POLL_END:
-      return (
-        <>
-          {actor} ended {target}'s poll
-          {entry.channelName && (
-            <>
-              {" "}
-              in <b>#{entry.channelName}</b>
-            </>
-          )}
-        </>
-      );
+      return entry.channelName ? say("serversettings.audit.s.pollEndIn", { target, channel: named }) : say("serversettings.audit.s.pollEnd", { target });
     case AuditAction.THREAD_LOCK:
-      return (
-        <>
-          {actor} locked {target}'s thread in <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.threadLock", { target, channel: named });
     case AuditAction.THREAD_UNLOCK:
-      return (
-        <>
-          {actor} unlocked {target}'s thread in <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.threadUnlock", { target, channel: named });
     case AuditAction.THREAD_DELETE:
-      return (
-        <>
-          {actor} deleted {target}'s thread in <b>#{entry.channelName}</b>
-        </>
-      );
+      return say("serversettings.audit.s.threadDelete", { target, channel: named });
     default:
-      return <>{actor} did something</>;
+      return say("serversettings.audit.s.unknown");
   }
 }

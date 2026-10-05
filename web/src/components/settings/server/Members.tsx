@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { formatDay, formatLeft, formatStamp, memberName, timedOutUntil, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { colorOf, standing } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
@@ -48,6 +48,7 @@ type Filter = "all" | "timed-out";
  * and bans, only on people ranked below you.
  */
 export function Members({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const members = inst?.members[serverId] ?? EMPTY;
   const roles = useRoles(instanceKey, serverId);
@@ -80,8 +81,8 @@ export function Members({ instanceKey, serverId }: { instanceKey: string; server
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search members"
-            aria-label="Search members"
+            placeholder={t("serversettings.members.search")}
+            aria-label={t("serversettings.members.search")}
             className="h-10 rounded-xl pl-9"
           />
         </div>
@@ -95,31 +96,31 @@ export function Members({ instanceKey, serverId }: { instanceKey: string; server
               )}
             >
               {picked ? <RoleDot role={picked} /> : <FilterIcon className="size-4 text-muted-foreground" />}
-              <span className="max-w-32 truncate">{picked?.name ?? "Any role"}</span>
+              <span className="max-w-32 truncate">{picked?.name ?? t("serversettings.members.anyRole")}</span>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="max-h-72 w-52 overflow-y-auto">
             {[null, ...roles.filter((r) => r.id !== serverId)].map((r) => (
               <DropdownMenuItem key={r?.id ?? "any"} onSelect={() => setRole(r?.id ?? null)}>
                 {r ? <RoleDot role={r} /> : <FilterIcon />}
-                <span className="flex-1 truncate">{r?.name ?? "Any role"}</span>
+                <span className="flex-1 truncate">{r?.name ?? t("serversettings.members.anyRole")}</span>
                 {(r?.id ?? null) === role && <CheckIcon className="size-4 text-primary" />}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
         <Segmented
-          label="Show"
+          label={t("serversettings.members.show")}
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "all", label: "All" },
-            { value: "timed-out", label: timedOut ? `Timed out · ${timedOut}` : "Timed out" },
+            { value: "all", label: t("serversettings.members.all") },
+            { value: "timed-out", label: timedOut ? t("serversettings.members.timedOutCount", { count: timedOut }) : t("serversettings.members.timedOut") },
           ]}
         />
       </div>
       <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-        <UsersIcon className="size-3.5" /> <Count value={shown.length} /> {shown.length === 1 ? "member" : "members"}
+        <UsersIcon className="size-3.5" /> <T k="serversettings.shared.members" values={{ count: <Count value={shown.length} /> }} count={shown.length} />
       </p>
       <ul className="flex flex-col gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
@@ -140,7 +141,7 @@ export function Members({ instanceKey, serverId }: { instanceKey: string; server
       <AnimatePresence>
         {shown.length === 0 && (
           <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-8 text-center text-sm text-muted-foreground">
-            {filter === "timed-out" && !query && !picked ? "Nobody is timed out." : "Nobody matches that."}
+            {filter === "timed-out" && !query && !picked ? t("serversettings.members.noneTimedOut") : t("serversettings.shared.nobodyMatches")}
           </motion.p>
         )}
       </AnimatePresence>
@@ -173,7 +174,11 @@ function MemberRow({
   onModerate: (action: ModAction) => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const id = m.user?.id ?? "";
+  // "joined today", in lowercase mid-sentence, like the rest of the line.
+  const day = formatDay(toDate(m.joinedAt));
+  const joined = day === t("common.time.today") || day === t("common.time.yesterday") ? day.toLocaleLowerCase(lang.locale) : day;
   const until = timedOutUntil(m, now);
   const can = useModeration(instanceKey, m.serverId, m);
   const developer = usePrefs((p) => p.developerMode);
@@ -191,10 +196,10 @@ function MemberRow({
       <div className="min-w-0 flex-1">
         <p className="flex min-w-0 items-center gap-1.5">
           <RoleName id={id} name={memberName(m)} color={color} />
-          {owner && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
+          {owner && <CrownIcon aria-label={t("serversettings.shared.owner")} className="size-3.5 shrink-0 text-amber-400" />}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          @{m.user?.username} · joined {formatDay(toDate(m.joinedAt)).replace(/^(Today|Yesterday)$/, (d) => d.toLowerCase())}
+          {t("serversettings.members.line", { username: m.user?.username ?? "", date: joined })}
         </p>
         <div className="mt-1.5 empty:hidden">
           <MemberRoles instanceKey={instanceKey} member={m} compact />
@@ -210,7 +215,7 @@ function MemberRow({
             transition={SPRING}
             disabled={!can.timeout}
             onClick={() => onModerate("timeout")}
-            title={`Timed out until ${formatStamp(until)}`}
+            title={t("serversettings.members.timedOutUntil", { time: formatStamp(until) })}
             className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-1 text-xs font-bold text-amber-600 tabular-nums transition enabled:hover:bg-amber-500/25 dark:text-amber-400"
           >
             <HourglassIcon className="size-3.5 animate-[spin_3s_ease-in-out_infinite]" />
@@ -223,7 +228,7 @@ function MemberRow({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label={`Actions for ${memberName(m)}`}
+              aria-label={t("serversettings.members.actionsFor", { name: memberName(m) })}
               className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
             >
               <EllipsisIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />
@@ -232,29 +237,29 @@ function MemberRow({
           <DropdownMenuContent align="end" className="w-52">
             {can.nickname && (
               <DropdownMenuItem onSelect={() => onModerate("nickname")}>
-                <PencilIcon /> Change nickname
+                <PencilIcon /> {t("serversettings.members.changeNickname")}
               </DropdownMenuItem>
             )}
             {can.nickname && punish && <DropdownMenuSeparator />}
             {can.timeout && (
               <DropdownMenuItem onSelect={() => onModerate("timeout")}>
-                <HourglassIcon /> {until ? "Change time-out" : "Time out"}
+                <HourglassIcon /> {until ? t("serversettings.members.changeTimeout") : t("serversettings.members.timeOut")}
               </DropdownMenuItem>
             )}
             {can.kick && (
               <DropdownMenuItem variant="destructive" onSelect={() => onModerate("kick")}>
-                <DoorOpenIcon /> Kick
+                <DoorOpenIcon /> {t("serversettings.members.kick")}
               </DropdownMenuItem>
             )}
             {can.ban && (
               <DropdownMenuItem variant="destructive" onSelect={() => onModerate("ban")}>
-                <GavelIcon /> Ban
+                <GavelIcon /> {t("serversettings.members.ban")}
               </DropdownMenuItem>
             )}
             {developer && can.any && <DropdownMenuSeparator />}
             {developer && (
               <DropdownMenuItem onSelect={() => copy(lang.t, id, lang.t("common.copy.userId"))}>
-                <FingerprintIcon /> Copy user ID
+                <FingerprintIcon /> {t("common.copyThing", { what: t("common.copy.userId") })}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

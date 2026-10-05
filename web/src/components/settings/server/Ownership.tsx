@@ -9,6 +9,7 @@ import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { T, useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ const EMPTY: Member[] = [];
 
 /** Hands the server to another member. The owner stays on as an admin. */
 export function Ownership({ instanceKey, server, onDone }: { instanceKey: string; server: Server; onDone: () => void }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const members = inst?.members[server.id] ?? EMPTY;
   const me = members.find((m) => m.user?.id === inst?.me?.id);
@@ -37,30 +39,28 @@ export function Ownership({ instanceKey, server, onDone }: { instanceKey: string
     e.preventDefault();
     if (!picked?.user || !armed) return;
     if ((await transfer.go(instanceKey, server.id, picked.user.id)) === undefined) return;
-    toast(`${memberName(picked)} owns ${server.name} now`);
+    toast(t("serversettings.ownership.done", { name: memberName(picked), server: server.name }));
     onDone();
   }
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-5">
-      <p className="text-sm text-muted-foreground">
-        They get everything you can do now, including deleting the server. You stay on as an admin, and only they can hand it back.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("serversettings.ownership.intro")}</p>
 
       <div className="flex items-center justify-center gap-4 rounded-3xl border bg-background/40 px-4 py-6">
-        <Seat member={me} label="You" crowned={!picked} />
+        <Seat member={me} label={t("serversettings.shared.you")} crowned={!picked} />
         <motion.span animate={picked ? { x: [0, 6, 0] } : { x: 0 }} transition={{ duration: 1.2, repeat: picked ? Infinity : 0 }}>
           <ArrowRightIcon className={cn("size-5 transition-colors", picked ? "text-amber-500" : "text-muted-foreground/40")} />
         </motion.span>
-        <Seat member={picked ?? undefined} label={picked ? memberName(picked) : "Pick someone"} crowned={!!picked} />
+        <Seat member={picked ?? undefined} label={picked ? memberName(picked) : t("serversettings.ownership.pick")} crowned={!!picked} />
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a member" aria-label="Find a member" className="h-10 rounded-xl pl-9" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("serversettings.ownership.find")} aria-label={t("serversettings.ownership.find")} className="h-10 rounded-xl pl-9" />
         </div>
-        <ul role="radiogroup" aria-label="New owner" className="flex flex-col gap-1">
+        <ul role="radiogroup" aria-label={t("serversettings.ownership.newOwner")} className="flex flex-col gap-1">
           {others.map((m) => {
             const active = picked?.user?.id === m.user?.id;
             return (
@@ -89,7 +89,7 @@ export function Ownership({ instanceKey, server, onDone }: { instanceKey: string
               </li>
             );
           })}
-          {!others.length && <li className="px-3 py-4 text-center text-sm text-muted-foreground">Nobody else is here yet.</li>}
+          {!others.length && <li className="px-3 py-4 text-center text-sm text-muted-foreground">{t("serversettings.ownership.nobody")}</li>}
         </ul>
       </div>
 
@@ -104,7 +104,10 @@ export function Ownership({ instanceKey, server, onDone }: { instanceKey: string
           >
             <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
               <Label htmlFor="confirm-transfer" className="text-sm">
-                Type <b>{picked.user?.username}</b> to hand {server.name} to {memberName(picked)}
+                <T
+                  k="serversettings.ownership.confirm"
+                  values={{ username: <b>{picked.user?.username}</b>, server: server.name, name: memberName(picked) }}
+                />
               </Label>
               <Input
                 id="confirm-transfer"
@@ -116,7 +119,7 @@ export function Ownership({ instanceKey, server, onDone }: { instanceKey: string
               {transfer.error && <p className="text-sm text-destructive first-letter:uppercase">{transfer.error}</p>}
               <motion.div className="self-end" initial={false} animate={armed ? { scale: [1, 1.08, 1] } : { scale: 1 }} transition={{ duration: 0.35 }}>
                 <Button type="submit" disabled={!armed || transfer.pending} className="rounded-xl bg-amber-500 font-bold text-white hover:bg-amber-500/90">
-                  {transfer.pending ? <LoaderCircleIcon className="animate-spin" /> : <CrownIcon />} Transfer ownership
+                  {transfer.pending ? <LoaderCircleIcon className="animate-spin" /> : <CrownIcon />} {t("serversettings.nav.ownership")}
                 </Button>
               </motion.div>
             </div>

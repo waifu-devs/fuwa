@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { T, useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
 import { accessOf, bit, canSee, CHANNEL_GROUPS, fromList, inChannel, mayChange, permissionInfo, toList, type Bits } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ const key = (list: Overwrite[]) =>
 type State = "allow" | "inherit" | "deny";
 
 export function ChannelPermissions({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const roles = useRoles(instanceKey, serverId);
   const access = useAccess(instanceKey, serverId);
@@ -155,19 +157,11 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
             </motion.span>
           </AnimatePresence>
           <span className="min-w-0 flex-1">
-            {synced ? (
-              <>
-                Same as its category, <b>{parent.name}</b>
-              </>
-            ) : (
-              <>
-                Its own rules, apart from <b>{parent.name}</b>. Its category's apply first.
-              </>
-            )}
+            <T k={synced ? "serversettings.channelPermissions.synced" : "serversettings.channelPermissions.apart"} values={{ category: <b>{parent.name}</b> }} />
           </span>
           {!synced && (
             <Button type="button" size="sm" variant="ghost" className="h-7 rounded-lg" onClick={() => setDraft(fromWire(parent.permissionOverwrites))}>
-              Match the category
+              {t("serversettings.channelPermissions.match")}
             </Button>
           )}
         </motion.div>
@@ -187,18 +181,20 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
             </AnimatePresence>
           </motion.span>
           <span className="min-w-0 flex-1">
-            <span className="block font-extrabold">Private {category ? "category" : "channel"}</span>
+            <span className="block font-extrabold">
+              {category ? t("serversettings.channelPermissions.privateCategory") : t("serversettings.channelPermissions.privateChannel")}
+            </span>
             <span className="block text-sm text-muted-foreground">
-              {category ? "Only the roles and people you pick see it and the channels that follow it." : "Only the roles and people you pick see it."}
+              {category ? t("serversettings.channelPermissions.privateCategoryHint") : t("serversettings.channelPermissions.privateChannelHint")}
             </span>
           </span>
-          <Switch checked={isPrivate} disabled={!may(Permission.VIEW_CHANNELS)} onCheckedChange={setPrivate} aria-label="Private" />
+          <Switch checked={isPrivate} disabled={!may(Permission.VIEW_CHANNELS)} onCheckedChange={setPrivate} aria-label={t("serversettings.channels.private")} />
         </label>
         <AnimatePresence initial={false}>
           {isPrivate && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
               <div className="mt-4 flex flex-col gap-2 border-t pt-4">
-                <p className="text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">Who can see it</p>
+                <p className="text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("serversettings.channelPermissions.whoCanSee")}</p>
                 <ul className="flex flex-wrap gap-1.5">
                   <AnimatePresence initial={false} mode="popLayout">
                     {viewers.map((o) => (
@@ -214,7 +210,7 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                         <TargetBadge overwrite={o} role={roleOf(o.targetId)} member={memberOf(o.targetId)} />
                         <button
                           type="button"
-                          aria-label="Remove"
+                          aria-label={t("serversettings.channelPermissions.remove")}
                           disabled={!may(Permission.VIEW_CHANNELS)}
                           onClick={() => put(o.targetId, o.member, (x) => ({ ...x, allow: x.allow & ~VIEW }))}
                           className="grid size-6 place-items-center rounded-full text-muted-foreground transition hover:rotate-90 hover:bg-destructive/10 hover:text-destructive"
@@ -228,13 +224,13 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                         roles={roles.filter((r) => r.id !== serverId && !((find(r.id)?.allow ?? 0) & VIEW))}
                         members={members.filter((m) => !((find(m.user?.id ?? "")?.allow ?? 0) & VIEW))}
                         onAdd={(id, member) => add(id, member, true)}
-                        label="Add who can see it"
+                        label={t("serversettings.channelPermissions.addViewer")}
                         compact
                       />
                     </motion.li>
                   </AnimatePresence>
                 </ul>
-                {!viewers.length && <p className="text-sm text-muted-foreground">Nobody but the owner and administrators, for now.</p>}
+                {!viewers.length && <p className="text-sm text-muted-foreground">{t("serversettings.channelPermissions.nobodyYet")}</p>}
               </div>
             </motion.div>
           )}
@@ -249,7 +245,8 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
             exit={{ opacity: 0, y: -6 }}
             className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
           >
-            <TriangleAlertIcon className="size-4 shrink-0" /> Saving this hides the {category ? "category" : "channel"} from you too. Add one of your roles to keep it.
+            <TriangleAlertIcon className="size-4 shrink-0" />{" "}
+            {category ? t("serversettings.channelPermissions.losingCategory") : t("serversettings.channelPermissions.losingChannel")}
           </motion.p>
         )}
       </AnimatePresence>
@@ -257,14 +254,14 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h4 className="font-extrabold">Advanced permissions</h4>
-            <p className="text-sm text-muted-foreground">Allow or deny each permission here for a role or a person. The rest follows their roles.</p>
+            <h4 className="font-extrabold">{t("serversettings.channelPermissions.advanced")}</h4>
+            <p className="text-sm text-muted-foreground">{t("serversettings.channelPermissions.advancedHint")}</p>
           </div>
           <AddTarget
             roles={roles.filter((r) => r.id !== serverId && !find(r.id))}
             members={members.filter((m) => !find(m.user?.id ?? ""))}
             onAdd={(id, member) => add(id, member, false)}
-            label="Add a role or person"
+            label={t("serversettings.channelPermissions.addTarget")}
           />
         </div>
         <div className="grid gap-3 md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
@@ -309,9 +306,9 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                 transition={SPRING}
                 className="min-w-0 rounded-2xl border bg-background/40 p-3"
               >
-                {CHANNEL_GROUPS.filter((g) => category || (g.title === "Voice") === (channel.type === ChannelType.VOICE) || g.title === "General").map((group) => (
-                  <div key={group.title} className="mb-2 last:mb-0">
-                    <p className="mb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{group.title}</p>
+                {CHANNEL_GROUPS.filter((g) => category || (g.kind === "voice") === (channel.type === ChannelType.VOICE) || g.kind === "general").map((group) => (
+                  <div key={group.kind} className="mb-2 last:mb-0">
+                    <p className="mb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t(group.title)}</p>
                     <ul>
                       {group.permissions.map((p) => {
                         const info = permissionInfo(p);
@@ -319,13 +316,13 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                         return (
                           <li key={p} className="flex items-center gap-3 border-b border-border/50 py-2 last:border-b-0">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-bold">{info.label}</p>
-                              <p className="text-xs text-muted-foreground">{info.channel ?? info.about}</p>
+                              <p className="text-sm font-bold">{t(info.label)}</p>
+                              <p className="text-xs text-muted-foreground">{t(info.channel ?? info.about)}</p>
                             </div>
                             <TriState
                               value={state}
                               disabled={!may(p)}
-                              label={info.label}
+                              label={t(info.label)}
                               onChange={(next) =>
                                 put(selectedOverwrite.targetId, selectedOverwrite.member, (o) => ({
                                   ...o,
@@ -348,7 +345,8 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                     onClick={() => removeTarget(selected)}
                     className="group mt-1 rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
                   >
-                    <Trash2Icon className="transition-transform group-hover:-rotate-12" /> Remove from this {category ? "category" : "channel"}
+                    <Trash2Icon className="transition-transform group-hover:-rotate-12" />{" "}
+                    {category ? t("serversettings.channelPermissions.removeFromCategory") : t("serversettings.channelPermissions.removeFromChannel")}
                   </Button>
                 )}
               </motion.div>
@@ -362,17 +360,18 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
 }
 
 function TargetBadge({ overwrite, role, member }: { overwrite: Overwrite; role?: Role; member?: Member }) {
+  const { t } = useI18n();
   if (overwrite.member)
     return (
       <>
         {member ? <UserAvatar user={member.user} className="size-5" /> : <UserIcon className="size-4" />}
-        <span className="truncate">{member ? memberName(member) : "Someone who left"}</span>
+        <span className="truncate">{member ? memberName(member) : t("serversettings.channelPermissions.someoneLeft")}</span>
       </>
     );
   return (
     <>
       <RoleDot role={role ?? {}} />
-      <span className="truncate">{role?.name ?? "A deleted role"}</span>
+      <span className="truncate">{role?.name ?? t("serversettings.channelPermissions.deletedRole")}</span>
     </>
   );
 }
@@ -390,6 +389,7 @@ function AddTarget({
   label: string;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   if (!roles.length && !members.length) return null;
   return (
     <DropdownMenu>
@@ -404,19 +404,19 @@ function AddTarget({
           </button>
         ) : (
           <Button type="button" size="sm" variant="outline" className="shrink-0 rounded-xl font-bold">
-            <PlusIcon /> Add
+            <PlusIcon /> {t("serversettings.channelPermissions.add")}
           </Button>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="max-h-80 w-60 overflow-y-auto">
-        {roles.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">Roles</DropdownMenuLabel>}
+        {roles.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">{t("serversettings.nav.roles")}</DropdownMenuLabel>}
         {roles.map((r) => (
           <DropdownMenuItem key={r.id} onSelect={() => onAdd(r.id, false)}>
             <RoleDot role={r} /> <span className="truncate">{r.name}</span>
           </DropdownMenuItem>
         ))}
         {roles.length > 0 && members.length > 0 && <DropdownMenuSeparator />}
-        {members.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">People</DropdownMenuLabel>}
+        {members.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">{t("serversettings.nav.people")}</DropdownMenuLabel>}
         {members.slice(0, 50).map((m) => (
           <DropdownMenuItem key={m.user?.id} onSelect={() => onAdd(m.user?.id ?? "", true)}>
             <UserAvatar user={m.user} className="size-5" /> <span className="truncate">{memberName(m)}</span>
@@ -429,11 +429,12 @@ function AddTarget({
 
 /** Deny, follow their roles, or allow, with the choice sliding between the three. */
 function TriState({ value, onChange, disabled, label }: { value: State; onChange: (v: State) => void; disabled: boolean; label: string }) {
+  const { t } = useI18n();
   const group = useId();
   const options: { value: State; icon: typeof CheckIcon; name: string; tint: string }[] = [
-    { value: "deny", icon: XIcon, name: "Deny", tint: "bg-destructive text-white" },
-    { value: "inherit", icon: SlashIcon, name: "Follow their roles", tint: "bg-muted-foreground/25 text-foreground" },
-    { value: "allow", icon: CheckIcon, name: "Allow", tint: "bg-emerald-500 text-white" },
+    { value: "deny", icon: XIcon, name: t("serversettings.channelPermissions.deny"), tint: "bg-destructive text-white" },
+    { value: "inherit", icon: SlashIcon, name: t("serversettings.channelPermissions.inherit"), tint: "bg-muted-foreground/25 text-foreground" },
+    { value: "allow", icon: CheckIcon, name: t("serversettings.channelPermissions.allow"), tint: "bg-emerald-500 text-white" },
   ];
   return (
     <div role="radiogroup" aria-label={label} className={cn("flex shrink-0 rounded-lg border bg-muted/40 p-0.5", disabled && "opacity-50")}>
@@ -446,7 +447,7 @@ function TriState({ value, onChange, disabled, label }: { value: State; onChange
             role="radio"
             aria-checked={on}
             aria-label={o.name}
-            title={disabled ? "You can only change permissions you have here" : o.name}
+            title={disabled ? t("serversettings.channelPermissions.notYours") : o.name}
             disabled={disabled}
             onClick={() => onChange(o.value)}
             className={cn("relative grid size-7 place-items-center rounded-md transition-colors", !on && "text-muted-foreground enabled:hover:text-foreground")}

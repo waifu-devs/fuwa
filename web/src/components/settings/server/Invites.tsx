@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
  * and can revoke everyone's; otherwise just your own.
  */
 export function Invites({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const channels = inst?.channels[serverId] ?? [];
@@ -66,11 +67,11 @@ export function Invites({ instanceKey, serverId }: { instanceKey: string; server
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-md text-sm text-muted-foreground">
-          {manager ? "Everyone's links are here. Revoke one and it stops letting people in right away." : "Only your own links show here."}
+          {manager ? t("serversettings.invites.everyone") : t("serversettings.invites.own")}
         </p>
         {target !== null && (
           <Button onClick={() => setMaking(target)} className="btn rounded-xl font-bold">
-            <PlusIcon /> Create invite
+            <PlusIcon /> {t("serversettings.invites.create")}
           </Button>
         )}
       </div>
@@ -91,8 +92,8 @@ export function Invites({ instanceKey, serverId }: { instanceKey: string; server
           <span className="float grid size-12 place-items-center rounded-full bg-primary/15 text-primary">
             <LinkIcon className="size-6" />
           </span>
-          <p className="font-bold">No invite links right now</p>
-          <p className="max-w-sm text-sm text-muted-foreground">Make one to let people in, even while the server stays out of Browse.</p>
+          <p className="font-bold">{t("serversettings.invites.none")}</p>
+          <p className="max-w-sm text-sm text-muted-foreground">{t("serversettings.invites.noneHint")}</p>
         </motion.div>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -145,6 +146,7 @@ function Row({
   onRevoke: () => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const [copied, setCopied] = useState(false);
   const until = expiresAt(invite);
   const left = until ? until.getTime() - now : null;
@@ -155,7 +157,7 @@ function Row({
         setCopied(true);
         setTimeout(() => setCopied(false), 1400);
       },
-      () => toast("Couldn't copy the link"),
+      () => toast(t("serversettings.invites.copyFailed")),
     );
   }
   return (
@@ -176,11 +178,15 @@ function Row({
           </span>
         </span>
       </span>
-      <span className="flex basis-32 items-center gap-1 text-sm text-muted-foreground" title={channelName ? `Opens #${channelName}` : "Opens the server"}>
+      <span className="flex basis-32 items-center gap-1 text-sm text-muted-foreground" title={channelName ? t("serversettings.invites.opens", { channel: channelName }) : t("serversettings.invites.opensServer")}>
         {invite.channelId ? <HashIcon className="size-3.5 shrink-0" /> : <ServerGlyph className="size-3.5 shrink-0" />}
-        <span className="truncate">{invite.channelId ? (channelName ?? "a deleted channel") : "Server"}</span>
+        <span className="truncate">{invite.channelId ? (channelName ?? t("serversettings.invites.deletedChannel")) : t("serversettings.invites.server")}</span>
       </span>
-      <span className="flex basis-24 flex-col gap-1" title={invite.maxUses ? `${invite.uses} of ${invite.maxUses} uses` : `${invite.uses} uses, no limit`}>
+      <span className="flex basis-24 flex-col gap-1" title={
+          invite.maxUses
+            ? t("serversettings.invites.usesOf", { uses: invite.uses, count: invite.maxUses })
+            : t("serversettings.invites.usesNoLimit", { count: invite.uses })
+        }>
         <span className="flex items-center gap-1 text-sm tabular-nums">
           <b>{invite.uses}</b>
           <span className="text-muted-foreground">/</span>
@@ -197,17 +203,17 @@ function Row({
       </span>
       <span
         className={cn("flex basis-24 items-center gap-1 text-sm tabular-nums", left !== null && left < 3_600_000 ? "text-amber-500" : "text-muted-foreground")}
-        title={until ? `Expires ${formatStamp(until)}` : "Never expires"}
+        title={until ? t("serversettings.invites.expires", { time: formatStamp(until) }) : t("serversettings.invites.neverExpires")}
       >
         {left !== null ? <TimerIcon className="size-3.5" /> : <InfinityIcon className="size-3.5" />}
-        {left !== null ? formatLeft(lang, left) : "Never"}
+        {left !== null ? formatLeft(lang, left) : t("serversettings.shared.never")}
       </span>
       <span className="ml-auto flex items-center gap-1">
         <button
           type="button"
           onClick={copyLink}
-          aria-label="Copy invite link"
-          title="Copy invite link"
+          aria-label={t("serversettings.invites.copy")}
+          title={t("serversettings.invites.copy")}
           className={cn(
             "grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90",
             copied && "text-emerald-500 hover:text-emerald-500",
@@ -222,8 +228,8 @@ function Row({
         <button
           type="button"
           onClick={onRevoke}
-          aria-label="Revoke invite"
-          title="Revoke invite"
+          aria-label={t("serversettings.invites.revoke")}
+          title={t("serversettings.invites.revoke")}
           className="grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:rotate-90 hover:bg-destructive/10 hover:text-destructive active:scale-90"
         >
           <XIcon className="size-4" />
