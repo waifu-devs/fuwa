@@ -84,7 +84,7 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
         shards.moves.write().unwrap_or_else(|p| p.into_inner()).remove(&server_id);
         return Err(err);
     }
-    tracing::info!(server = %server_id, %from, %to, region = %shards.region(region), "moving a server");
+    tracing::info!(%from, %to, region = %shards.region(region), "moving a server");
 
     let request = cpb::AdoptServerRequest { server_id: server_id.clone(), from_url };
     let entry = match to_client.adopt_server(request).await.map(|r| r.into_inner().entry) {
@@ -94,7 +94,7 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
                 Err(status) => Error::from(status),
                 _ => Error::internal("the new shard didn't say what it took"),
             };
-            tracing::warn!(server = %server_id, %from, %to, error = %err, "a move failed; undoing it");
+            tracing::warn!(%from, %to, "a move failed; undoing it");
             undo(app, shards, &moved).await;
             return Err(err);
         }
@@ -102,7 +102,7 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
 
     moved.committed = true;
     if let Err(err) = node.save_move(&moved).await {
-        tracing::warn!(server = %server_id, error = %err, "couldn't place a moved server; undoing the move");
+        tracing::warn!("couldn't place a moved server; undoing the move");
         undo(app, shards, &moved).await;
         return Err(err);
     }
@@ -116,9 +116,9 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
         async move { client.release_server(request).await }
     })
     .await;
-    if let Err(status) = &released {
+    if released.is_err() {
         // It's told again when it next registers.
-        tracing::warn!(server = %server_id, %from, error = %status.message(), "the old shard hasn't let go of a moved server yet");
+        tracing::warn!(%from, "the old shard hasn't let go of a moved server yet");
     }
     // The new shard replicates it from now on.
     let request = cpb::ReleaseServerRequest { server_id: server_id.clone(), keep: true };
@@ -127,14 +127,14 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
         async move { client.release_server(request).await }
     })
     .await;
-    if let Err(status) = &kept {
-        tracing::warn!(server = %server_id, %to, error = %status.message(), "the new shard hasn't started replicating a moved server yet");
+    if kept.is_err() {
+        tracing::warn!(%to, "the new shard hasn't started replicating a moved server yet");
     }
     shards.moves.write().unwrap_or_else(|p| p.into_inner()).insert(server_id.clone(), (moved, false));
     if released.is_ok() && kept.is_ok() {
         settled(app, &server_id).await;
     }
-    tracing::info!(server = %server_id, %from, %to, "moved a server");
+    tracing::info!(%from, %to, "moved a server");
     Ok(server)
 }
 
@@ -173,8 +173,8 @@ pub async fn settled(app: &App, server_id: &str) {
         }
         moves.remove(server_id);
     }
-    if let Err(err) = async { app.node()?.end_move(server_id).await }.await {
-        tracing::warn!(server = %server_id, error = %err, "couldn't note that a move is over");
+    if async { app.node()?.end_move(server_id).await }.await.is_err() {
+        tracing::warn!("couldn't note that a move is over");
     }
 }
 
@@ -317,7 +317,7 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
     let id = parse_id("server_id", server_id)?;
     if keep {
         if app.servers.freeze(&id, false) {
-            tracing::info!(server = %id, "a move didn't happen; the server takes changes here again");
+            tracing::info!("a move didn't happen; the server takes changes here again");
         }
         let adopted = app.servers.replicate_adopted(&id).await?;
         if adopted && let Some(replica) = app.servers.replica() {
@@ -332,9 +332,9 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
             // couldn't be taken then.
             match super::pictures::take_all(app, &id).await {
                 Ok(0) => {}
-                Ok(taken) => tracing::info!(server = %id, taken, "took a moved server's pictures from the directory"),
-                Err(err) => {
-                    tracing::warn!(server = %id, error = %err, "couldn't take a moved server's pictures");
+                Ok(taken) => tracing::info!(taken, "took a moved server's pictures from the directory"),
+                Err(_) => {
+                    tracing::warn!("couldn't take a moved server's pictures");
                     crate::reports::server_error("server_picture_take", Some("cluster::moves"));
                 }
             }
@@ -352,7 +352,7 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
     app.servers.release(&id).await?;
     remove_dir(&recordings_dir(&app.config.data_path, &id))?;
     remove_dir(&super::pictures::server_dir(&app.config.data_path, &id))?;
-    tracing::info!(server = %id, "let go of a server that moved to another shard");
+    tracing::info!("let go of a server that moved to another shard");
     Ok(())
 }
 
@@ -360,16 +360,16 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
 /// away, and takes changes again to any frozen for a move that's over.
 pub async fn after_registering(app: &App, answer: &cpb::RegisterShardResponse) {
     for server_id in &answer.moved_away {
-        if let Err(err) = release(app, server_id, false).await {
-            tracing::warn!(server = %server_id, error = %err, "couldn't let go of a server that moved away");
+        if release(app, server_id, false).await.is_err() {
+            tracing::warn!("couldn't let go of a server that moved away");
         }
     }
     for server_id in app.servers.frozen().into_iter().chain(app.servers.unreplicated()) {
         if !answer.moving.contains(&server_id)
             && !answer.moved_away.contains(&server_id)
-            && let Err(err) = release(app, &server_id, true).await
+            && let Err(_) = release(app, &server_id, true).await
         {
-            tracing::warn!(server = %server_id, error = %err, "couldn't carry on with a server after a move");
+            tracing::warn!("couldn't carry on with a server after a move");
         }
     }
 }
@@ -429,12 +429,12 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cp
     .await;
     match opened {
         Ok(entry) => {
-            tracing::info!(server = %id, files = names.len(), "took over a server from another shard");
+            tracing::info!(files = names.len(), "took over a server from another shard");
             Ok(entry)
         }
         Err(err) => {
-            if let Err(cleanup) = release(app, &id, false).await {
-                tracing::warn!(server = %id, error = %cleanup, "couldn't tidy up after a failed move");
+            if release(app, &id, false).await.is_err() {
+                tracing::warn!("couldn't tidy up after a failed move");
             }
             for name in &names {
                 let _ = std::fs::remove_file(data.join(name));

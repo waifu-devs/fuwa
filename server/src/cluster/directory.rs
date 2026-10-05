@@ -546,7 +546,7 @@ impl DirectoryService for Internal {
                 // file may only be moving to another shard.
                 let gone = self.app.index.register(&req.shard_id, req.servers);
                 if !gone.is_empty() {
-                    tracing::info!(shard = %req.shard_id, servers = ?gone, "servers no longer on this shard");
+                    tracing::info!(shard = %req.shard_id, servers = gone.len(), "servers no longer on this shard");
                 }
                 let shards = self.shards()?;
                 if !shards.left.read().unwrap_or_else(|p| p.into_inner()).is_empty() {

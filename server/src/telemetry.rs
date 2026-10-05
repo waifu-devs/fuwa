@@ -132,8 +132,8 @@ pub fn spawn(app: Arc<App>) {
             .build()
         {
             Ok(client) => client,
-            Err(err) => {
-                tracing::warn!(error = %err, "couldn't set up the usage signal; it stays off");
+            Err(_) => {
+                tracing::warn!("couldn't set up the usage signal; it stays off");
                 return;
             }
         };
@@ -147,8 +147,8 @@ pub fn spawn(app: Arc<App>) {
             if !app.settings().telemetry {
                 continue;
             }
-            if let Err(err) = send(&app, &client).await {
-                tracing::debug!(error = %err, "usage signal not sent; trying again tomorrow");
+            if send(&app, &client).await.is_err() {
+                tracing::debug!("usage signal not sent; trying again tomorrow");
             }
         }
     });

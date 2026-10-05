@@ -337,7 +337,7 @@ impl SsoService for Api {
                         Ok(member)
                     })
                     .await?;
-                tracing::info!(server = %sdb.id, account = %account.id, "signed in through a server's single sign-on");
+                tracing::info!("signed in through a server's single sign-on");
                 Ok(pb::FinishServerSsoResponse { identity: Some(identity.to_pb(now)), member })
             }
             .await,

@@ -462,7 +462,7 @@ where
         match call().await {
             Err(status) if unreachable(&status) => {
                 if !patience.wait().await {
-                    tracing::warn!(error = %status, waited = ?within, "a part of this instance didn't answer in time");
+                    tracing::warn!(waited = ?within, "a part of this instance didn't answer in time");
                     return Err(Error::retried(status).into());
                 }
             }

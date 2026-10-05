@@ -123,7 +123,7 @@ impl View {
         match self.load().await {
             Ok(Some(access)) => self.access = access,
             Ok(None) => {}
-            Err(err) => tracing::warn!(server = %self.sdb.id, error = %err, "couldn't work out a member's permissions"),
+            Err(_) => tracing::warn!("couldn't work out a member's permissions"),
         }
         let after = self.access.visible();
         let own = channel_of(payload);

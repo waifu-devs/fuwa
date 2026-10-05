@@ -118,9 +118,9 @@ impl Link {
     /// have missed it, so the shard registers again soon.
     pub async fn tell<T>(&self, what: &str, call: impl AsyncFnOnce(DirectoryClient) -> Result<T, Status>) {
         self.changes.fetch_add(1, Ordering::SeqCst);
-        if let Err(err) = call(self.directory()).await {
+        if call(self.directory()).await.is_err() {
             self.dirty.store(true, Ordering::SeqCst);
-            tracing::warn!(error = %err, "couldn't tell the directory {what}; will register again");
+            tracing::warn!("couldn't tell the directory {what}; will register again");
         }
     }
 }
@@ -192,9 +192,9 @@ async fn stay_in_touch(app: Arc<App>) {
                                 tracing::info!("the directory closed its connection; waiting for it to come back");
                                 break;
                             }
-                            Err(err) => {
+                            Err(_) => {
                                 away_since = Instant::now();
-                                tracing::info!(error = %err.message(), "lost the directory; waiting for it to come back");
+                                tracing::info!("lost the directory; waiting for it to come back");
                                 break;
                             }
                         },
@@ -204,11 +204,11 @@ async fn stay_in_touch(app: Arc<App>) {
                     }
                 }
             }
-            Err(err) if away_since.elapsed() < link.ride_out => {
-                tracing::info!(directory = %link.directory_url, error = %err.message(), "can't reach the directory yet")
+            Err(_) if away_since.elapsed() < link.ride_out => {
+                tracing::info!(directory = %link.directory_url, "can't reach the directory yet")
             }
-            Err(err) => {
-                tracing::warn!(directory = %link.directory_url, error = %err.message(), "can't reach the directory")
+            Err(_) => {
+                tracing::warn!(directory = %link.directory_url, "can't reach the directory")
             }
         }
         tokio::select! {
@@ -241,9 +241,9 @@ async fn register(app: &App, link: &Link) {
         }
         .await;
         match registered {
-            Err(err) => {
+            Err(_) => {
                 link.dirty.store(true, Ordering::SeqCst);
-                tracing::warn!(error = %err, "couldn't register with the directory");
+                tracing::warn!("couldn't register with the directory");
                 return;
             }
             Ok(count) if link.changes.load(Ordering::SeqCst) == before => {
@@ -306,7 +306,7 @@ pub async fn take_servers(config: &Config) -> Result<()> {
                 tracing::info!(directory = %directory_url, "waiting for the directory");
             }
             Err(Error::Remote(status)) if passing(&status) => {
-                tracing::warn!(error = %status.message(), "taking over servers failed; trying again");
+                tracing::warn!("taking over servers failed; trying again");
             }
             Err(err) => return Err(err),
         }
@@ -403,8 +403,8 @@ pub async fn update_user(servers: &Servers, user: &pb::User, server_ids: &[Strin
                 Ok(())
             })
             .await;
-        if let Err(err) = updated {
-            tracing::warn!(server = %server_id, error = %err, "couldn't update a member's profile");
+        if updated.is_err() {
+            tracing::warn!("couldn't update a member's profile");
         }
     }
 }

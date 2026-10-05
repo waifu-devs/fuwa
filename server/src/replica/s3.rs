@@ -65,16 +65,15 @@ const ENCODE: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.
 
 impl S3 {
     pub fn new(config: S3Config) -> Result<Self> {
-        let (scheme, rest) =
-            config.endpoint.split_once("://").filter(|(scheme, _)| matches!(*scheme, "https" | "http")).ok_or_else(
-                || Error::internal(format!("FUWA_S3_ENDPOINT {:?} must start with https://", config.endpoint)),
-            )?;
+        let (scheme, rest) = config
+            .endpoint
+            .split_once("://")
+            .filter(|(scheme, _)| matches!(*scheme, "https" | "http"))
+            .ok_or_else(|| Error::internal("FUWA_S3_ENDPOINT must start with https://"))?;
         let host = rest.trim_end_matches('/').to_string();
-        if host.is_empty() || host.contains('/') {
-            return Err(Error::internal(format!(
-                "FUWA_S3_ENDPOINT {:?} must be just a scheme and host",
-                config.endpoint
-            )));
+        // No user:password@ either: the host shows up in errors.
+        if host.is_empty() || host.contains('/') || host.contains('@') {
+            return Err(Error::internal("FUWA_S3_ENDPOINT must be just a scheme and host"));
         }
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))

@@ -133,8 +133,8 @@ fn fetchable(url: &str, public_only: bool) -> Result<reqwest::Url> {
     Ok(parsed)
 }
 
-fn unreachable(err: reqwest::Error) -> Error {
-    tracing::info!(error = %err, "couldn't reach an identity provider");
+fn unreachable(_: reqwest::Error) -> Error {
+    tracing::info!("couldn't reach an identity provider");
     Error::Unavailable("the identity provider can't be reached right now; try again soon".into())
 }
 
@@ -414,9 +414,8 @@ pub async fn identify(
     }
     let response = request.form(&form).send().await.map_err(unreachable)?;
     if !response.status().is_success() {
-        let answer = read_capped(response).await.unwrap_or_default();
-        let answer = String::from_utf8_lossy(&answer);
-        tracing::info!(answer = %answer.chars().take(300).collect::<String>(), "an identity provider refused a code");
+        let _ = read_capped(response).await;
+        tracing::info!("an identity provider refused a code");
         return Err(Error::FailedPrecondition(
             "the identity provider didn't take this sign-in; check the client ID and secret, then start again".into(),
         ));

@@ -131,8 +131,8 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-fn unreachable(err: reqwest::Error) -> Error {
-    tracing::warn!(error = %err, "couldn't reach the linked accounts issuer");
+fn unreachable(_: reqwest::Error) -> Error {
+    tracing::warn!("couldn't reach the linked accounts issuer");
     Error::Unavailable("waifu.dev can't be reached right now; try again soon".into())
 }
 
@@ -152,8 +152,8 @@ pub async fn identify(issuer: &str, client_id: &str, code: &str, verifier: &str)
         .await
         .map_err(unreachable)?;
     if response.status().is_client_error() {
-        let answer = response.text().await.unwrap_or_default();
-        tracing::info!(answer = %answer.chars().take(200).collect::<String>(), "the issuer refused a sign-in code");
+        let _ = response.text().await;
+        tracing::info!("the issuer refused a sign-in code");
         return Err(Error::FailedPrecondition("waifu.dev didn't take this sign-in; start again".into()));
     }
     let tokens: Tokens = response.error_for_status().map_err(unreachable)?.json().await.map_err(unreachable)?;

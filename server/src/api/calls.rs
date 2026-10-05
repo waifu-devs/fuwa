@@ -133,8 +133,8 @@ async fn rebridge(app: &App, server_id: &str, place: &Place, tx: &Listener) -> O
         let place = current.filter(|p| p.session_id == place.session_id)?;
         match app.media_link.bridge(&place, false).await {
             Ok(events) => return Some(events),
-            Err(err) if Instant::now() < until => {
-                tracing::debug!(error = %err, "a voice bridge couldn't open again yet");
+            Err(_) if Instant::now() < until => {
+                tracing::debug!("a voice bridge couldn't open again yet");
                 wait = (wait * 2).min(Duration::from_secs(4));
             }
             Err(_) => return None,
@@ -158,7 +158,7 @@ pub fn spawn_voice_sweeper(app: Arc<App>) {
                 _ = app.shutdown.cancelled() => return,
                 _ = every.tick() => {
                     for (scope, place) in app.voice.expire(Instant::now()) {
-                        tracing::debug!(room = %place.room, "a place in a call ran out");
+                        tracing::debug!("a place in a call ran out");
                         app.media_link.close(&place.room, Some(&place.state.user_id), Some(&place.session_id)).await;
                         gone(&app, &scope, &place).await;
                     }

@@ -162,7 +162,7 @@ async fn come_back(app: &Arc<App>, scope: Scope, state: String, answer: Answer) 
         }
         Err(Error::Misrouted) => return misrouted(),
         Err(err) => {
-            tracing::info!(error = %err, "a single sign-on answer was refused");
+            tracing::info!("a single sign-on answer was refused");
             pairs.push(("error", public_message(&err)));
         }
     }

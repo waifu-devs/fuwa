@@ -176,7 +176,7 @@ impl ServerService for Api {
                 let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url, None).await?;
                 let server = self.app.create_server(&account.user(), new, req.region.trim()).await?;
                 self.keep_picture(icon.as_deref(), Some(&server.id)).await;
-                tracing::info!(server = %server.id, owner = %account.id, "server created");
+                tracing::info!("server created");
                 Ok(pb::CreateServerResponse { server: Some(server) })
             }
             .await,
@@ -436,7 +436,7 @@ impl ServerService for Api {
                 crate::cluster::pictures::drop_all(&self.app, &sdb.id).await;
                 crate::attachments::drop_soon(&self.app, &sdb.id, files);
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
-                tracing::info!(server = %sdb.id, "server deleted");
+                tracing::info!("server deleted");
                 Ok(pb::DeleteServerResponse {})
             }
             .await,
@@ -701,7 +701,7 @@ impl ServerService for Api {
                 .await?;
                 self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                 self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;
-                tracing::info!(server = %sdb.id, user = %req.user_id, by = %account.id, "member kicked");
+                tracing::info!("member kicked");
                 Ok(pb::KickMemberResponse {})
             }
             .await,
@@ -812,7 +812,7 @@ impl ServerService for Api {
                     self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                     self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;
                 }
-                tracing::info!(server = %sdb.id, user = %req.user_id, by = %account.id, deleted, "member banned");
+                tracing::info!(deleted, "member banned");
                 Ok(pb::BanMemberResponse { ban: Some(ban), deleted_messages: deleted })
             }
             .await,
@@ -973,7 +973,7 @@ impl ServerService for Api {
                     })
                     .await?;
                 self.app.server_changed(&server).await;
-                tracing::info!(server = %sdb.id, from = %account.id, to = %req.user_id, "ownership handed on");
+                tracing::info!("ownership handed on");
                 Ok(pb::TransferOwnershipResponse { server: Some(server) })
             }
             .await,

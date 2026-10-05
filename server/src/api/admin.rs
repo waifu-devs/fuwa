@@ -511,7 +511,7 @@ impl AdminService for Api {
         }
         let size = std::fs::metadata(&path).map_err(Error::from)?.len() as i64;
         // No account id: these logs can be public.
-        tracing::info!(server = %sdb.id, bytes = size, "server exported");
+        tracing::info!(bytes = size, "server exported");
 
         let filename = format!("{}.db", file_slug(&server.name));
         let (tx, rx) = mpsc::channel::<Result<pb::ExportServerResponse, Status>>(4);
@@ -587,7 +587,7 @@ impl AdminService for Api {
                     pb::Announcement { id, text: body, tone: tone as i32, created_at, ends_at: next.ends_at };
                 self.app.node()?.set_announcement(Some(&announcement)).await?;
                 self.app.replace_announcement(Some(announcement.clone()));
-                tracing::info!(id = %announcement.id, "announcement put up");
+                tracing::info!("announcement put up");
                 Ok(pb::SetAnnouncementResponse { announcement: Some(announcement) })
             }
             .await,

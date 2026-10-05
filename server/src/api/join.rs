@@ -630,7 +630,7 @@ impl JoinService for Api {
                 if used_up {
                     self.app.index_invite(&sdb.id, code, false).await;
                 }
-                tracing::info!(server = %sdb.id, account = %account.id, "applied to join");
+                tracing::info!("applied to join");
                 Ok(pb::ApplyToJoinResponse { application: Some(application) })
             }
             .await,

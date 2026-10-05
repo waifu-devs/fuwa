@@ -146,7 +146,7 @@ impl Api {
             })
             .await?;
         self.app.membership_changed(&user.id, &sdb.id, true).await;
-        tracing::info!(server = %sdb.id, agent = %user.id, by = %account.id, "agent added");
+        tracing::info!("agent added");
         Ok(member)
     }
 }
@@ -268,7 +268,7 @@ impl AgentService for Api {
                 }
                 let token = auth::new_token();
                 let account = node.create_agent(&owner.id, &username, &display_name, &auth::hash_token(&token)).await?;
-                tracing::info!(agent = %account.id, owner = %owner.id, "agent created");
+                tracing::info!("agent created");
                 let row = self.own_agent(&owner, &account.id).await?;
                 Ok(pb::CreateAgentResponse { agent: Some(self.agent_pb(row)), token })
             }

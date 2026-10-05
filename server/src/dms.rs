@@ -1088,7 +1088,7 @@ impl DmDb {
             match result {
                 Err(err) if db::is_conflict(&err) => {
                     db::abort(&conn).await;
-                    db::retry_after(&err, &mut attempt).await?;
+                    db::retry_after(&mut attempt).await?;
                 }
                 Err(err) => {
                     db::abort(&conn).await;

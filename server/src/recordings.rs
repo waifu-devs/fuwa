@@ -436,7 +436,7 @@ async fn reconcile(app: &Arc<App>) {
                 changed.push(rec.server_id.clone());
             }
             if !(asked && as_it_says) && !rec.stop.is_cancelled() {
-                tracing::debug!(server = %rec.server_id, channel = %rec.channel_id, "a recording stops");
+                tracing::debug!("a recording stops");
                 rec.stop.cancel();
             }
         }
@@ -455,8 +455,8 @@ async fn reconcile(app: &Arc<App>) {
     }
     for (server_id, channel_id, by) in starting {
         let video = filmed.contains(&server_id);
-        if let Err(err) = start(app, &server_id, &channel_id, &by, video).await {
-            tracing::warn!(server = %server_id, channel = %channel_id, error = %err, "couldn't start a recording");
+        if start(app, &server_id, &channel_id, &by, video).await.is_err() {
+            tracing::warn!("couldn't start a recording");
         }
     }
 }
@@ -469,16 +469,16 @@ pub async fn sweep(app: &Arc<App>) {
     for sdb in app.servers.all() {
         let rows = match sdb.recordings_ended_before(before, SWEPT).await {
             Ok(rows) => rows,
-            Err(err) => {
-                tracing::warn!(server = %sdb.id, error = %err, "couldn't look for old recordings");
+            Err(_) => {
+                tracing::warn!("couldn't look for old recordings");
                 continue;
             }
         };
         for row in rows {
             match delete(app, &sdb, &row).await {
-                Ok(()) => tracing::debug!(server = %sdb.id, recording = %row.id, "an old recording deleted itself"),
-                Err(err) => {
-                    tracing::warn!(server = %sdb.id, recording = %row.id, error = %err, "couldn't delete an old recording")
+                Ok(()) => tracing::debug!("an old recording deleted itself"),
+                Err(_) => {
+                    tracing::warn!("couldn't delete an old recording")
                 }
             }
         }
@@ -544,7 +544,7 @@ async fn start(app: &Arc<App>, server_id: &str, channel_id: &str, by: &str, vide
         let _ = std::fs::remove_dir(&dir);
         return Err(err);
     }
-    tracing::info!(server = %sdb.id, channel = %channel_id, recording = %row.id, "a recording starts");
+    tracing::info!("a recording starts");
     let id = row.id.clone();
     let task = tokio::spawn(record(app.clone(), sdb, row, dir, stop, tracks));
     if let Some(live) = app.recordings.lock().get_mut(&id) {
@@ -592,7 +592,7 @@ async fn record(
             }
             match app.media_link.bridge(&place, row.video).await {
                 Ok(opened) => events = Some(opened),
-                Err(err) => tracing::debug!(error = %err, "a recording's bridge couldn't open yet"),
+                Err(_) => tracing::debug!("a recording's bridge couldn't open yet"),
             }
             wait = (wait * 2).clamp(Duration::from_millis(250), Duration::from_secs(4));
             continue;
@@ -612,8 +612,8 @@ async fn record(
                             let file = dir.join(file_name(v.key(), Part::Sound, row.sealed));
                             match Track::create(&file, key.as_ref(), &row.id, v.key()) {
                                 Ok(track) => v.insert(track),
-                                Err(err) => {
-                                    tracing::warn!(recording = %row.id, error = %err, "couldn't start a track");
+                                Err(_) => {
+                                    tracing::warn!("couldn't start a track");
                                     continue;
                                 }
                             }
@@ -686,10 +686,10 @@ async fn record(
     }
     let stored: Vec<Stored> = by_user.into_iter().map(|(user_id, stored)| Stored { user_id, ..stored }).collect();
     drop((writing, filming));
-    if let Err(err) = end_row(&app, &sdb, &row, &stored, now_ms()).await {
-        tracing::warn!(recording = %row.id, error = %err, "couldn't finish a recording");
+    if end_row(&app, &sdb, &row, &stored, now_ms()).await.is_err() {
+        tracing::warn!("couldn't finish a recording");
     }
-    tracing::info!(server = %sdb.id, recording = %row.id, tracks = stored.len(), "a recording ended");
+    tracing::info!(tracks = stored.len(), "a recording ended");
     app.recordings.lock().remove(&row.id);
 }
 
@@ -703,10 +703,8 @@ async fn end_row(app: &App, sdb: &ServerDb, row: &RecordingRow, stored: &[Stored
         for track in stored {
             for part in track.parts() {
                 let file = file_name(&track.user_id, part, row.sealed);
-                if let Err(err) =
-                    replica.store().put_file(&replica_key(&sdb.id, &row.id, &file), &dir.join(&file)).await
-                {
-                    tracing::warn!(recording = %row.id, error = %err, "couldn't copy a recording to the replica");
+                if replica.store().put_file(&replica_key(&sdb.id, &row.id, &file), &dir.join(&file)).await.is_err() {
+                    tracing::warn!("couldn't copy a recording to the replica");
                 }
             }
         }
@@ -843,8 +841,8 @@ pub async fn delete(app: &App, sdb: &ServerDb, row: &RecordingRow) -> Result<()>
         for track in &tracks {
             for part in track.parts() {
                 let key = replica_key(&sdb.id, &row.id, &file_name(&track.user_id, part, row.sealed));
-                replica.store().delete(&key).await.map_err(|err| {
-                    tracing::warn!(recording = %row.id, error = %err, "couldn't delete a recording from the replica");
+                replica.store().delete(&key).await.map_err(|_| {
+                    tracing::warn!("couldn't delete a recording from the replica");
                     Error::Unavailable("couldn't delete the recording's copy; try again".into())
                 })?;
             }
@@ -941,8 +939,8 @@ impl Track {
         };
         match file.write_all(&bytes) {
             Ok(()) => self.size += bytes.len() as u64,
-            Err(err) => {
-                tracing::warn!(error = %err, "a recording's track stopped: couldn't write");
+            Err(_) => {
+                tracing::warn!("a recording's track stopped: couldn't write");
                 self.file = None;
             }
         }
