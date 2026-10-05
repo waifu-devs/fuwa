@@ -609,7 +609,7 @@ function HostLine({ host, testId }: { host: string; testId?: string }) {
 
 /**
  * "Continue with Google / X / Twitch", for each the instance's admins turned
- * on, each naming the site it sends you to. Comes back to /auth/provider/done.
+ * on. Comes back to /auth/provider/done.
  */
 function SocialButtons({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
   const providers = node.auth?.providers ?? [];
@@ -623,41 +623,23 @@ function SocialButtons({ url, node, returnTo }: { url: string; node: Node; retur
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 28, delay: n * 0.05 }}
         >
-          <ProviderSignIn url={url} id={provider.id} name={provider.name} host={provider.host} closed={!provider.signUp} returnTo={returnTo} />
+          <ProviderSignIn url={url} id={provider.id} name={provider.name} returnTo={returnTo} />
         </motion.div>
       ))}
     </div>
   );
 }
 
-function ProviderSignIn({
-  url,
-  id,
-  name,
-  host,
-  closed,
-  returnTo,
-}: {
-  url: string;
-  id: string;
-  name: string;
-  host: string;
-  closed: boolean;
-  returnTo?: string;
-}) {
+function ProviderSignIn({ url, id, name, returnTo }: { url: string; id: string; name: string; returnTo?: string }) {
   const start = useAction(startProviderSignIn);
   return (
-    <div className="flex flex-col gap-1.5">
-      <ProviderButton
-        name={name}
-        icon={<ProviderMark id={id} className="size-[18px] transition-transform duration-500 group-hover:scale-110" />}
-        onGo={() => start.go(url, id, returnTo ?? null)}
-        error={start.error}
-        closed={closed}
-        testId={`provider-sign-in-${id}`}
-      />
-      {host && <HostLine host={host} />}
-    </div>
+    <ProviderButton
+      name={name}
+      icon={<ProviderMark id={id} className="size-[18px] transition-transform duration-500 group-hover:scale-110" />}
+      onGo={() => start.go(url, id, returnTo ?? null)}
+      error={start.error}
+      testId={`provider-sign-in-${id}`}
+    />
   );
 }
 
