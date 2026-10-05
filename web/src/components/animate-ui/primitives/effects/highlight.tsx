@@ -281,20 +281,9 @@ function Highlight<T extends React.ElementType = 'div'>({
             {boundsState && (
               <motion.div
                 data-slot="motion-highlight"
-                animate={{
-                  top: boundsState.top,
-                  left: boundsState.left,
-                  width: boundsState.width,
-                  height: boundsState.height,
-                  opacity: 1,
-                }}
-                initial={{
-                  top: boundsState.top,
-                  left: boundsState.left,
-                  width: boundsState.width,
-                  height: boundsState.height,
-                  opacity: 0,
-                }}
+                layout
+                animate={{ opacity: 1 }}
+                initial={{ opacity: 0 }}
                 exit={{
                   opacity: 0,
                   transition: {
@@ -303,7 +292,16 @@ function Highlight<T extends React.ElementType = 'div'>({
                   },
                 }}
                 transition={transition}
-                style={{ position: 'absolute', zIndex: 0, ...style }}
+                style={{
+                  position: 'absolute',
+                  zIndex: 0,
+                  ...style,
+                  // The box moves and resizes with a layout animation, which motion runs as transforms.
+                  top: boundsState.top,
+                  left: boundsState.left,
+                  width: boundsState.width,
+                  height: boundsState.height,
+                }}
                 className={cn(className, activeClassNameState)}
               />
             )}
