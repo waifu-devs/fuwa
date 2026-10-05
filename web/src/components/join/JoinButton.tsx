@@ -15,6 +15,21 @@ import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
+/** Which button to show: what you are to this server, and what it asks of people joining. */
+function useJoinKind(instanceKey: string, server: Server, joined: boolean) {
+  const inst = useInstance(instanceKey);
+  const me = inst?.me;
+  const applied = inst?.applied[server.id];
+  return kindOf({
+    joined,
+    member: !!inst?.servers.some((s) => s.id === server.id),
+    linkedOnly: !!server.linkedOnly && !!me && me.kind !== AccountKind.LINKED,
+    waiting: applied?.status === ApplicationStatus.PENDING,
+    sso: server.ssoRequired && !signedInForServer(accountKey(instanceKey, me?.id ?? ""), server.id),
+    applications: server.applications,
+  });
+}
+
 /**
  * The one way into a server, as Browse cards and invite pages show it: Join,
  * Apply to join, or where your application stands. Servers for waifu.dev
@@ -44,9 +59,7 @@ export function JoinButton({
 }) {
   const inst = useInstance(instanceKey);
   const { t } = useI18n();
-  const member = !!inst?.servers.some((s) => s.id === server.id);
   const applied = inst?.applied[server.id];
-  const local = inst?.me && inst.me.kind !== AccountKind.LINKED;
   const join = useAction(joinServer);
   const sso = useAction(startServerSso);
   const withdraw = useAction(withdrawApplication);
@@ -71,14 +84,7 @@ export function JoinButton({
     setTimeout(() => onOpen(s), 650);
   }
 
-  const kind = kindOf({
-    joined,
-    member,
-    linkedOnly: !!server.linkedOnly && !!local,
-    waiting: applied?.status === ApplicationStatus.PENDING,
-    sso: server.ssoRequired && !signedInForServer(accountKey(instanceKey, inst?.me?.id ?? ""), server.id),
-    applications: server.applications,
-  });
+  const kind = useJoinKind(instanceKey, server, joined);
 
   const tried = useRef(false);
   useEffect(() => {

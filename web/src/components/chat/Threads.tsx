@@ -11,7 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ListThreadsResponse } from "@/gen/fuwa/v1/message_pb";
 import { Permission, type Channel, type Message, type ThreadSummary, type User } from "@/gen/fuwa/v1/types_pb";
 import { focusThread, followThread, listThreads, loadFollowed, lockThread, run } from "@/fuwa/actions";
@@ -272,6 +272,36 @@ function whereKey(archived: boolean, locked: boolean): Key {
   return locked ? "chat.threads.whereLocked" : "chat.threads.where";
 }
 
+/** A thread's pins, where this instance keeps them; in a shared channel only the home lists them. */
+function ThreadPins({
+  instanceKey,
+  serverId,
+  channel,
+  threadId,
+  canUnpin,
+  list,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  threadId: string;
+  canUnpin: boolean;
+  list: RefObject<MessageListHandle | null>;
+}) {
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins")) && !(channel.shared && !channel.shared.home);
+  if (!pinsHere) return null;
+  return (
+    <ChannelPinsButton
+      instanceKey={instanceKey}
+      serverId={serverId}
+      channelId={channel.id}
+      threadId={threadId}
+      canUnpin={canUnpin}
+      onJump={(id) => void list.current?.jumpTo(id)}
+    />
+  );
+}
+
 /**
  * A thread beside its channel: the message it's under, its replies (drawn
  * a window at a time, as the channel is) and a composer of its own, with
@@ -304,7 +334,6 @@ export function ThreadPanel({
   // Only the channel's home locks its threads.
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) && !(channel.shared && !channel.shared.home);
   const list = useRef<MessageListHandle>(null);
-  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins")) && !(channel.shared && !channel.shared.home);
   const locked = !!parent?.thread?.locked;
   const archived = isArchived(parent?.thread, useArchiveHours(instanceKey, serverId));
 
@@ -354,16 +383,7 @@ export function ThreadPanel({
             {locked ? <LockIcon /> : <LockOpenIcon />}
           </PanelButton>
         )}
-        {pinsHere && !!parent?.thread && (
-          <ChannelPinsButton
-            instanceKey={instanceKey}
-            serverId={serverId}
-            channelId={channel.id}
-            threadId={threadId}
-            canUnpin={manager}
-            onJump={(id) => void list.current?.jumpTo(id)}
-          />
-        )}
+        {!!parent?.thread && <ThreadPins instanceKey={instanceKey} serverId={serverId} channel={channel} threadId={threadId} canUnpin={manager} list={list} />}
         <PanelButton label={t("chat.threads.jump")} onClick={() => onJump(threadId)}>
           <CornerUpLeftIcon />
         </PanelButton>

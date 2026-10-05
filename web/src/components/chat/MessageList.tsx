@@ -1082,30 +1082,7 @@ function MessageTools({
   return (
     <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
       {confirming ? (
-        <motion.span
-          key="confirm"
-          initial={{ opacity: 0, x: 8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ type: "spring", stiffness: 600, damping: 32 }}
-          className="flex items-center gap-0.5"
-        >
-          <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? t("chat.messages.keepOutAsk", { name: displayName(author) }) : t("chat.messages.deleteAsk")}</span>
-          <ToolButton
-            label={confirming === "keep-out" ? t("chat.messages.keepOut") : t("chat.messages.delete")}
-            danger
-            onClick={() =>
-              (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
-                if (confirming === "keep-out") toast(err.message);
-                setConfirming(false);
-              })
-            }
-          >
-            <CheckIcon />
-          </ToolButton>
-          <ToolButton label={t("common.cancel")} onClick={() => setConfirming(false)}>
-            <XIcon />
-          </ToolButton>
-        </motion.span>
+        <ConfirmTools message={message} author={author} confirming={confirming} setConfirming={setConfirming} actions={actions} />
       ) : (
         <>
           <CopyTextButton content={message.content} />
@@ -1142,6 +1119,49 @@ function MessageTools({
         </>
       )}
     </div>
+  );
+}
+
+/** The question over a message when deleting it (or keeping its author out) needs a yes. */
+function ConfirmTools({
+  message,
+  author,
+  confirming,
+  setConfirming,
+  actions,
+}: {
+  message: Message;
+  author: User | undefined;
+  confirming: "delete" | "keep-out";
+  setConfirming: (confirming: "delete" | "keep-out" | false) => void;
+  actions: RowActions;
+}) {
+  const { t } = useI18n();
+  return (
+    <motion.span
+      key="confirm"
+      initial={{ opacity: 0, x: 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ type: "spring", stiffness: 600, damping: 32 }}
+      className="flex items-center gap-0.5"
+    >
+      <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? t("chat.messages.keepOutAsk", { name: displayName(author) }) : t("chat.messages.deleteAsk")}</span>
+      <ToolButton
+        label={confirming === "keep-out" ? t("chat.messages.keepOut") : t("chat.messages.delete")}
+        danger
+        onClick={() =>
+          (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
+            if (confirming === "keep-out") toast(err.message);
+            setConfirming(false);
+          })
+        }
+      >
+        <CheckIcon />
+      </ToolButton>
+      <ToolButton label={t("common.cancel")} onClick={() => setConfirming(false)}>
+        <XIcon />
+      </ToolButton>
+    </motion.span>
   );
 }
 

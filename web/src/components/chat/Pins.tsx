@@ -13,7 +13,7 @@ import {
 } from "@floating-ui/react";
 import { CornerDownRightIcon, LockKeyholeIcon, PinIcon, PinOffIcon, RotateCwIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { memo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { DmPin } from "@/gen/fuwa/v1/dm_pb";
 import type { Message, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
@@ -165,8 +165,8 @@ function Loading() {
   );
 }
 
-/** One pinned message in the list: who wrote it, when it was pinned, what it says, and its buttons. */
-const PinRow = memo(function PinRow({
+/** One pinned message in the list: who wrote it, when it was pinned, what it says, and its buttons. Not memoized: its body is a fresh element on every draw. */
+function PinRow({
   author,
   at,
   body,
@@ -235,7 +235,7 @@ const PinRow = memo(function PinRow({
       </div>
     </motion.li>
   );
-});
+}
 
 /** A channel's (or a thread's) pins, behind the pin in its header. */
 export function ChannelPinsButton({
