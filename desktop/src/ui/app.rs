@@ -264,6 +264,11 @@ pub struct FuwaApp {
     pub polls: crate::ui::polls::PollState,
     /// Voice messages being recorded, sent and played.
     pub voice: crate::ui::voice_notes::VoiceState,
+    /// The timestamp picker, while it's open, and the style picked last.
+    pub time_picker: Option<crate::ui::timestamps::TimePicker>,
+    pub time_style: crate::core::timestamps::Style,
+    /// A redraw is coming for relative timestamps.
+    pub time_ticking: bool,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
     /// Where the @ list was closed with Escape, so it stays closed for that mention.
@@ -446,6 +451,9 @@ impl FuwaApp {
             keeping_out: None,
             polls: Default::default(),
             voice: Default::default(),
+            time_picker: None,
+            time_style: crate::core::timestamps::Style::Relative,
+            time_ticking: false,
             edit_box,
             picker: None,
             picker_dismissed: None,
@@ -692,6 +700,7 @@ impl FuwaApp {
         // A recording belongs to where it was started; what's playing stops with the conversation.
         self.discard_recording(cx);
         self.stop_voice();
+        self.time_picker = None;
         self.maybe_welcome(cx);
         let target = self.target();
         let id = target.as_ref().map(Target::id);

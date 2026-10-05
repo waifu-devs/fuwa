@@ -20,6 +20,9 @@ impl FuwaApp {
         if key.key == "escape" && self.discard_recording(cx) {
             return true;
         }
+        if key.key == "escape" && self.close_time_picker(window, cx) {
+            return true;
+        }
         if self.emoji_open && key.key == "escape" {
             self.close_emoji(window, cx);
             return true;

@@ -41,6 +41,7 @@ mod shared_marks;
 mod sidebar;
 pub mod text;
 pub mod theme;
+mod timestamps;
 mod update;
 mod voice_notes;
 mod widgets;

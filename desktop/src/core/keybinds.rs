@@ -58,7 +58,7 @@ const fn action(
     Action { id, label, group, combo, while_typing, repeats }
 }
 
-pub const ACTIONS: [Action; 13] = [
+pub const ACTIONS: [Action; 14] = [
     action("quickSwitcher", "Find a server or channel", Group::Navigation, Some("Mod+K"), true, false),
     action("previousServer", "Previous server", Group::Navigation, Some("Mod+Alt+ArrowUp"), true, true),
     action("nextServer", "Next server", Group::Navigation, Some("Mod+Alt+ArrowDown"), true, true),
@@ -68,6 +68,7 @@ pub const ACTIONS: [Action; 13] = [
     action("nextUnread", "Next unread channel", Group::Navigation, Some("Alt+Shift+ArrowDown"), true, true),
     action("markServerRead", "Mark the server as read", Group::Messages, Some("Shift+Escape"), true, false),
     action("focusComposer", "Start typing a message", Group::Chat, Some("Tab"), false, false),
+    action("insertTimestamp", "Insert a timestamp", Group::Chat, Some("Alt+Shift+T"), true, false),
     action("toggleMembers", "Show or hide members", Group::Chat, Some("Mod+U"), true, false),
     action("openSettings", "Open settings", Group::App, Some("Mod+Comma"), true, false),
     action("shortcuts", "Show keyboard shortcuts", Group::App, Some("Mod+Slash"), true, false),
