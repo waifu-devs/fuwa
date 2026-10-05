@@ -17,6 +17,7 @@ use gpui_kit::{
     Styled as _, StyledText, Subscription, Window, div, px,
 };
 
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::keybinds::{self, Action, COMPOSER_KEYS, Group};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
@@ -187,8 +188,8 @@ impl FuwaApp {
                 let on = !self.prefs.streamer_mode;
                 self.core.set_prefs(|p| p.streamer_mode = on);
                 self.prefs = self.core.prefs();
-                let title = if on { "Streamer mode on" } else { "Streamer mode off" };
-                self.toast("eye-off", title.into(), String::new(), None, None, cx);
+                let title = if on { t("chattools.shortcuts.streamerOn") } else { t("chattools.shortcuts.streamerOff") };
+                self.toast("eye-off", title, String::new(), None, None, cx);
             }
             _ => {}
         }
@@ -307,7 +308,7 @@ impl FuwaApp {
                 }
             }
         }
-        self.toast("check", "You're all caught up".into(), String::new(), None, None, cx);
+        self.toast("check", t("chattools.shortcuts.caughtUp"), String::new(), None, None, cx);
     }
 
     fn mark_server_read(&mut self, cx: &mut Context<Self>) {
@@ -320,8 +321,12 @@ impl FuwaApp {
             let cleared = ids.iter().filter(|id| i.unread.remove(*id).is_some_and(|n| n > 0)).count();
             (cleared, name)
         });
-        let name = if name.is_empty() { "the server".to_owned() } else { name };
-        let title = if cleared > 0 { format!("Marked {name} as read") } else { format!("Nothing unread in {name}") };
+        let title = match (cleared > 0, name.is_empty()) {
+            (true, true) => t("chattools.shortcuts.markedReadThis"),
+            (false, true) => t("chattools.shortcuts.nothingUnreadThis"),
+            (true, false) => t_with("chattools.shortcuts.markedRead", &[("server", Arg::Str(&name))]),
+            (false, false) => t_with("chattools.shortcuts.nothingUnread", &[("server", Arg::Str(&name))]),
+        };
         self.toast("check", title, String::new(), None, None, cx);
     }
 
@@ -330,7 +335,7 @@ impl FuwaApp {
     pub(crate) fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::core::reports::used("quick_switcher.open");
         self.sheet_open = false;
-        let query = cx.new(|cx| InputState::new(window, cx).placeholder("Where to?"));
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder(t("chattools.switcher.placeholder")));
         let subscription = cx.subscribe_in(&query, window, |this: &mut Self, _, event: &InputEvent, _, cx| {
             if matches!(event, InputEvent::Change)
                 && let Some(s) = &mut this.switcher
@@ -420,7 +425,7 @@ impl FuwaApp {
                 (server_name, node)
             });
             let instance_name =
-                if streamer || instance_name.is_empty() { "an instance".to_owned() } else { instance_name };
+                if streamer || instance_name.is_empty() { t("desktop.switcher.anInstance") } else { instance_name };
             let unread_of = |c: &str| {
                 self.core.shared.read(|s| s.instance(&key).and_then(|i| i.unread.get(c).copied()).unwrap_or(0))
             };
@@ -503,14 +508,17 @@ impl FuwaApp {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(if first_unread { "UNREAD FIRST" } else { "JUMP TO" }),
+                    .child(
+                        if first_unread { t("chattools.switcher.unreadFirst") } else { t("chattools.switcher.jumpTo") }
+                            .to_uppercase(),
+                    ),
             );
         }
         if items.is_empty() {
             let text = if typed.is_empty() {
-                "Join a server and its channels show up here.".to_owned()
+                t("chattools.switcher.empty")
             } else {
-                format!("Nothing called “{typed}”")
+                t_with("chattools.switcher.nothingCalled", &[("query", Arg::Str(&typed))])
             };
             list = list.child(motion::rise(
                 div().py(px(32.0)).text_center().text_sm().text_color(p.muted_foreground).child(text),
@@ -541,23 +549,18 @@ impl FuwaApp {
                     .gap(px(2.0))
                     .child(icon("arrow-up").size(px(12.0)))
                     .child(icon("arrow-down").size(px(12.0)))
-                    .child(" move"),
-            )
-            .child(div().flex().items_center().gap(px(4.0)).child(icon("corner-down-left").size(px(12.0))).child("go"))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(4.0))
-                    .child(div().font_weight(FontWeight::BOLD).text_color(p.foreground).child("#"))
-                    .child("channels only"),
+                    .child(format!(" {}", t("chattools.switcher.move"))),
             )
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(px(4.0))
-                    .child(div().font_weight(FontWeight::BOLD).text_color(p.foreground).child("*"))
-                    .child("servers only"),
-            );
+                    .child(icon("corner-down-left").size(px(12.0)))
+                    .child(t("chattools.switcher.go")),
+            )
+            .child(marked(t_with("chattools.switcher.channelsOnly", &[("mark", Arg::Str("#"))]), "#", &p))
+            .child(marked(t_with("chattools.switcher.serversOnly", &[("mark", Arg::Str("*"))]), "*", &p));
         let panel = div()
             .id("switcher")
             .occlude()
@@ -712,7 +715,9 @@ impl FuwaApp {
                 match &combo {
                     Some(c) => keys = keys.child(keycaps(c, &p)),
                     None if extra.is_empty() => {
-                        keys = keys.child(div().text_xs().text_color(p.muted_foreground).child("Not set"))
+                        keys = keys.child(
+                            div().text_xs().text_color(p.muted_foreground).child(t("chattools.shortcuts.notSet")),
+                        )
                     }
                     None => {}
                 }
@@ -753,8 +758,15 @@ impl FuwaApp {
                     .text_xs()
                     .text_color(p.muted_foreground)
                     .map(|el| match &open_with {
-                        Some(c) => el.child("Open this anytime with").child(keycaps(c, &p)),
-                        None => el.child("Give this sheet a shortcut on the Keyboard page."),
+                        Some(c) => {
+                            // One sentence with the keys drawn where {keys} sits in it.
+                            let line = t_with("chattools.shortcuts.openAnytime", &[("keys", Arg::Str(KEYS_AT))]);
+                            let (before, after) = line.split_once(KEYS_AT).unwrap_or((line.as_str(), ""));
+                            el.when(!before.trim().is_empty(), |el| el.child(before.trim().to_owned()))
+                                .child(keycaps(c, &p))
+                                .when(!after.trim().is_empty(), |el| el.child(after.trim().to_owned()))
+                        }
+                        None => el.child(t("desktop.sheet.noShortcut")),
                     }),
             )
             .child(
@@ -782,7 +794,7 @@ impl FuwaApp {
                         }
                     }))
                     .child(icon("sparkles").size(px(15.0)))
-                    .child("Change shortcuts"),
+                    .child(t("desktop.sheet.change")),
             );
         let header = div()
             .flex()
@@ -808,13 +820,8 @@ impl FuwaApp {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child("Keyboard shortcuts"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child("The same as in the web app. Change any of them in settings."),
-                    ),
+                    .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.shortcuts.title")))
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.sheet.about"))),
             )
             .child(
                 div()
@@ -872,6 +879,17 @@ impl FuwaApp {
                 .into_any_element(),
         )
     }
+}
+
+/// Stands in for the keycaps while a sentence around them is translated.
+const KEYS_AT: &str = "\u{E000}";
+
+/// A line with its mark (`#`, `*`) in bold, wherever the language puts it.
+fn marked(line: String, mark: &str, p: &Palette) -> impl IntoElement {
+    let bold =
+        HighlightStyle { color: Some(p.foreground.into()), font_weight: Some(FontWeight::BOLD), ..Default::default() };
+    let ranges: Vec<_> = line.find(mark).map(|at| (at..at + mark.len(), bold)).into_iter().collect();
+    div().child(StyledText::new(line).with_highlights(ranges))
 }
 
 fn sheet_row(label: &str, keys: impl IntoElement, muted: bool, n: usize, p: &Palette) -> impl IntoElement {

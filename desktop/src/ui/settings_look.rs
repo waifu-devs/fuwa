@@ -12,6 +12,7 @@ use gpui_kit::{
 };
 
 use crate::core::config::Prefs;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::themes::{self, Backdrop, Effect, Fit, Picture, Theme};
 use crate::ui::settings::{SettingsView, radio, section, segmented, theme_preview, toggle_row};
 use crate::ui::theme::{Palette, alpha, corner, mix, system_dark};
@@ -110,7 +111,7 @@ impl SettingsView {
             pr.custom_themes.retain(|t| t.id != id);
             pr.tidy();
         });
-        self.say(false, "Theme deleted.", cx);
+        self.say(false, t("desktop.look.themeDeleted"), cx);
     }
 
     /// Asks for a theme file, reads it, uploads its picture (if it has one) and puts the theme on.
@@ -122,7 +123,7 @@ impl SettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Import a theme".into()),
+            prompt: Some(t("desktop.look.importTheme").into()),
         });
         let (core, key, dark) = (self.core.clone(), instance_in_use(self), system_dark(window.appearance()));
         cx.spawn(async move |this, cx| {
@@ -136,12 +137,11 @@ impl SettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let meta = tokio::fs::metadata(&path).await.map_err(|_| "Couldn't read that file.".to_owned())?;
+                    let meta = tokio::fs::metadata(&path).await.map_err(|_| t("desktop.look.cantRead"))?;
                     if meta.len() > (themes::MAX_FILE_PICTURE_BYTES as u64) * 2 {
-                        return Err("That file is too big to be a theme.".to_owned());
+                        return Err(t("appsettings.themes.tooBig"));
                     }
-                    let text =
-                        tokio::fs::read_to_string(&path).await.map_err(|_| "That isn't a theme file.".to_owned())?;
+                    let text = tokio::fs::read_to_string(&path).await.map_err(|_| t("system.themeFile.notTheme"))?;
                     let mut imported = themes::parse_file(&text)?;
                     if let Some(picture) = imported.picture.take() {
                         match &key {
@@ -151,11 +151,11 @@ impl SettingsView {
                                         b.image = url;
                                     }
                                 }
-                                Err(err) => imported.notes.push(format!("Its picture didn't upload: {}", err.message)),
+                                Err(err) => imported
+                                    .notes
+                                    .push(t_with("desktop.look.pictureFailed", &[("error", Arg::Str(&err.message))])),
                             },
-                            None => imported
-                                .notes
-                                .push("Its picture needs an instance to live on; sign in and import it again.".into()),
+                            None => imported.notes.push(t("desktop.look.pictureNeedsInstance")),
                         }
                     }
                     Ok(imported)
@@ -170,7 +170,7 @@ impl SettingsView {
                         let (id, name, theme_dark) = (theme.id.clone(), theme.name.clone(), theme.dark());
                         let full = this.core.prefs().custom_themes.len() >= themes::MAX_CUSTOM_THEMES;
                         if full {
-                            this.say(true, "There are 50 themes here already; delete one to make room.", cx);
+                            this.say(true, t("desktop.look.full"), cx);
                             return;
                         }
                         this.set(cx, |pr| {
@@ -183,9 +183,13 @@ impl SettingsView {
                                 pr.light_theme = id;
                             }
                         });
-                        let mut note = format!("{name} is on.");
+                        let mut note = t_with("desktop.look.themeOn", &[("theme", Arg::Str(&name))]);
                         if this.core.prefs().follow_system && theme_dark != dark {
-                            note = format!("{name} is your {} theme now.", if theme_dark { "dark" } else { "light" });
+                            note = if theme_dark {
+                                t_with("desktop.look.nowDark", &[("theme", Arg::Str(&name))])
+                            } else {
+                                t_with("desktop.look.nowLight", &[("theme", Arg::Str(&name))])
+                            };
                         }
                         for n in imported.notes {
                             note.push(' ');
@@ -220,13 +224,13 @@ impl SettingsView {
                         None => None,
                     };
                     let file = themes::to_file(&theme, backdrop.as_ref(), picture.as_ref());
-                    tokio::fs::write(&path, file).await.map_err(|_| "Couldn't save the theme.".to_owned())?;
+                    tokio::fs::write(&path, file).await.map_err(|_| t("desktop.look.cantSave"))?;
                     Ok::<_, String>(theme.name)
                 }
             });
             let result = rx.await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(Ok(name)) => this.say(false, format!("Saved {name}. Open it in any fuwa app to use it."), cx),
+                Ok(Ok(name)) => this.say(false, t_with("desktop.look.exported", &[("theme", Arg::Str(&name))]), cx),
                 Ok(Err(message)) => this.say(true, message, cx),
                 Err(_) => {}
             });
@@ -249,8 +253,26 @@ impl SettingsView {
                 .flex()
                 .flex_col()
                 .gap(px(18.0))
-                .child(self.theme_grid("light", "sun", "Light", light, &prefs.light_theme, Slot::Light, p, cx))
-                .child(self.theme_grid("dark", "moon", "Dark", dark, &prefs.dark_theme, Slot::Dark, p, cx))
+                .child(self.theme_grid(
+                    "light",
+                    "sun",
+                    &t("desktop.look.light"),
+                    light,
+                    &prefs.light_theme,
+                    Slot::Light,
+                    p,
+                    cx,
+                ))
+                .child(self.theme_grid(
+                    "dark",
+                    "moon",
+                    &t("desktop.look.dark"),
+                    dark,
+                    &prefs.dark_theme,
+                    Slot::Dark,
+                    p,
+                    cx,
+                ))
                 .into_any_element()
         } else {
             self.theme_grid("all", "palette", "", all, &prefs.theme, Slot::Only, p, cx)
@@ -260,12 +282,16 @@ impl SettingsView {
             .flex_wrap()
             .gap(px(10.0))
             .child(
-                soft_button("theme-import", if self.look.busy { "Importing…" } else { "Import a theme file" }, p)
-                    .child(icon("import").size(px(16.0)))
-                    .on_click(cx.listener(|this, _, window, cx| this.import_theme(window, cx))),
+                soft_button(
+                    "theme-import",
+                    if self.look.busy { t("appsettings.themes.importing") } else { t("desktop.look.importFile") },
+                    p,
+                )
+                .child(icon("import").size(px(16.0)))
+                .on_click(cx.listener(|this, _, window, cx| this.import_theme(window, cx))),
             )
             .child(
-                soft_button("theme-export", format!("Export {}", on_screen.name), p)
+                soft_button("theme-export", t_with("desktop.look.export", &[("theme", Arg::Str(&on_screen.name))]), p)
                     .child(icon("download").size(px(16.0)))
                     .on_click(cx.listener(|this, _, window, cx| this.export_theme(window, cx))),
             );
@@ -279,47 +305,53 @@ impl SettingsView {
                 .child(icon(if error { "circle-alert" } else { "sparkles" }).size(px(16.0)).mt(px(2.0)))
                 .child(div().flex_1().child(text))
         });
-        let sizes = [(0.9, "Small"), (1.0, "Normal"), (1.15, "Large"), (1.3, "Larger")];
+        let sizes = [
+            (0.9, t("desktop.look.small")),
+            (1.0, t("desktop.look.normal")),
+            (1.15, t("desktop.look.large")),
+            (1.3, t("desktop.look.larger")),
+        ];
+        let scales = sizes.iter().map(|(v, _)| *v).collect::<Vec<_>>();
         div()
             .flex()
             .flex_col()
             .gap(px(28.0))
             .child(toggle_row(
                 "follow-system",
-                "Light and dark like my computer",
-                "Switches between a light theme and a dark one when your computer does.",
+                &t("desktop.look.followSystem"),
+                &t("desktop.look.followSystemHint"),
                 prefs.follow_system,
                 p,
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.follow_system = on),
             ))
             .child(section(
-                "Theme",
+                &t("appsettings.appearance.theme"),
                 div().flex().flex_col().gap(px(14.0)).child(pickers).child(tools).children(note),
                 p,
             ))
             .child(section(
-                "Text size",
+                &t("desktop.look.textSize"),
                 segmented(
                     "size",
-                    sizes.iter().map(|(v, l)| (*l, (prefs.text_scale - *v).abs() < 0.01)).collect(),
+                    sizes.into_iter().map(|(v, l)| (l, (prefs.text_scale - v).abs() < 0.01)).collect(),
                     p,
                     window,
                     cx,
                     move |this, n, cx| {
-                        let v = sizes[n].0;
+                        let v = scales[n];
                         this.set(cx, |pr| pr.text_scale = v);
                     },
                 ),
                 p,
             ))
             .child(section(
-                "Message density",
+                &t("desktop.look.density"),
                 segmented(
                     "density",
                     vec![
-                        ("Cozy", prefs.density == crate::core::config::Density::Cozy),
-                        ("Compact", prefs.density == crate::core::config::Density::Compact),
+                        (t("appsettings.appearance.cozy"), prefs.density == crate::core::config::Density::Cozy),
+                        (t("appsettings.appearance.compact"), prefs.density == crate::core::config::Density::Compact),
                     ],
                     p,
                     window,
@@ -445,7 +477,7 @@ impl SettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose a picture".into()),
+            prompt: Some(t("desktop.account.choosePicture").into()),
         });
         let core = self.core.clone();
         cx.spawn(async move |this, cx| {
@@ -453,9 +485,7 @@ impl SettingsView {
             let Some(path) = paths.into_iter().next() else { return };
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.say(true, "That isn't a picture fuwa can use (PNG, JPEG, GIF or WebP).", cx)
-                });
+                let _ = this.update(cx, |this, cx| this.say(true, t("desktop.account.notAPicture"), cx));
                 return;
             };
             let _ = this.update(cx, |this, cx| {
@@ -556,7 +586,7 @@ impl SettingsView {
                 .text_color(p.muted_foreground)
                 .on_click(cx.listener(|this, _, _, cx| this.set(cx, |pr| pr.backdrop.image.clear())))
                 .child(icon("image-off").size(px(20.0)))
-                .child("No picture"),
+                .child(t("appsettings.backdrop.noPicture")),
         );
         let list = match (&key, &self.look.backgrounds) {
             (Some(key), Some((k, list))) if k == key => list.clone(),
@@ -600,13 +630,17 @@ impl SettingsView {
                         .text_color(p.primary)
                         .on_click(cx.listener(move |this, _, _, cx| this.upload_background(key.clone(), cx)))
                         .child(icon(if self.look.busy { "loader" } else { "image-plus" }).size(px(20.0)))
-                        .child(if self.look.busy { "Uploading…" } else { "Upload a picture" }),
+                        .child(if self.look.busy {
+                            t("serversettings.emoji.uploading")
+                        } else {
+                            t("desktop.background.uploadPicture")
+                        }),
                 )
                 .into_any_element(),
             None => div()
                 .text_sm()
                 .text_color(p.muted_foreground)
-                .child("Pictures live on an instance; sign in to one to add them.")
+                .child(t("desktop.background.needInstance"))
                 .into_any_element(),
         };
 
@@ -634,7 +668,7 @@ impl SettingsView {
             );
         }
         let animated = !b.effect.texture() && b.effect != Effect::None;
-        let speed = if b.speed == 0 { "Still".to_owned() } else { format!("{}%", b.speed) };
+        let speed = if b.speed == 0 { t("appsettings.backdrop.still") } else { format!("{}%", b.speed) };
 
         let slider_row = |label: &str, state: &Entity<SliderState>, value: String| {
             div()
@@ -661,22 +695,19 @@ impl SettingsView {
                         .bg(p.secondary)
                         .text_sm()
                         .child(icon("palette").size(px(18.0)).text_color(p.primary))
-                        .child(format!(
-                            "{} brings its own background, so this one shows under your other themes.",
-                            theme.name
-                        )),
+                        .child(t_with("desktop.background.themeHasOwn", &[("theme", Arg::Str(&theme.name))])),
                 )
             })
-            .child(section("Picture", pictures, p))
+            .child(section(&t("appsettings.backdrop.picture"), pictures, p))
             .when(!b.image.is_empty(), |el| {
                 el.child(section(
-                    "Fit",
+                    &t("desktop.background.fit"),
                     segmented(
                         "fit",
                         vec![
-                            ("Fill", b.fit == Fit::Cover),
-                            ("Whole picture", b.fit == Fit::Contain),
-                            ("Repeat", b.fit == Fit::Tile),
+                            (t("appsettings.backdrop.fill"), b.fit == Fit::Cover),
+                            (t("desktop.background.wholePicture"), b.fit == Fit::Contain),
+                            (t("desktop.background.repeat"), b.fit == Fit::Tile),
                         ],
                         p,
                         window,
@@ -688,23 +719,34 @@ impl SettingsView {
                     ),
                     p,
                 ))
-                .child(slider_row("Dim the picture", &self.look.dim, format!("{}%", b.dim)))
-                .child(slider_row("Blur", &self.look.blur, format!("{}px", b.blur)))
+                .child(slider_row(&t("desktop.background.dim"), &self.look.dim, format!("{}%", b.dim)))
+                .child(slider_row(
+                    &t("appsettings.backdrop.blur"),
+                    &self.look.blur,
+                    format!("{}px", b.blur),
+                ))
             })
             .child(section(
-                "Effect",
-                div().flex().flex_col().gap(px(10.0)).child(effects).child(
-                    div().text_sm().text_color(p.muted_foreground).child(
-                        "Moving effects draw at most 30 frames a second, and stop while fuwa is behind other windows.",
-                    ),
-                ),
+                &t("appsettings.backdrop.effect"),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(effects)
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.background.effectNote"))),
                 p,
             ))
             .when(b.effect != Effect::None, |el| {
-                el.child(slider_row("Strength", &self.look.intensity, format!("{}%", b.intensity)))
+                el.child(slider_row(
+                    &t("appsettings.backdrop.strength"),
+                    &self.look.intensity,
+                    format!("{}%", b.intensity),
+                ))
             })
-            .when(animated, |el| el.child(slider_row("Speed", &self.look.speed, speed)))
-            .when(b.any(), |el| el.child(slider_row("Solid panels", &self.look.panels, format!("{}%", b.panels))))
+            .when(animated, |el| el.child(slider_row(&t("appsettings.backdrop.speed"), &self.look.speed, speed)))
+            .when(b.any(), |el| {
+                el.child(slider_row(&t("desktop.background.panels"), &self.look.panels, format!("{}%", b.panels)))
+            })
             .into_any_element()
     }
 }

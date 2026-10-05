@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use crate::core::Core;
 use crate::core::config::{MotionChoice, NotifyFor, Prefs};
-use crate::core::i18n::t;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::store::{Connection, user_name};
 use crate::ui::motion;
 use crate::ui::settings_account::AccountForm;
@@ -49,27 +49,50 @@ pub(crate) enum Page {
     About,
 }
 
-/// Your account's pages, then the app's.
+/// Your account's pages, then the app's, as (page, icon, id).
 const ACCOUNT_PAGES: [(Page, &str, &str); 3] = [
-    (Page::Profile, "user-round-pen", "Profile"),
-    (Page::Security, "key-round", "Password and devices"),
-    (Page::Friends, "heart-handshake", "Friends and privacy"),
+    (Page::Profile, "user-round-pen", "profile"),
+    (Page::Security, "key-round", "security"),
+    (Page::Friends, "heart-handshake", "friends"),
 ];
 
 const PAGES: [(Page, &str, &str); 12] = [
-    (Page::Appearance, "palette", "Appearance"),
-    (Page::Background, "image", "Background"),
-    (Page::Motion, "sparkles", "Motion"),
-    (Page::Notifications, "bell", "Notifications"),
-    (Page::Streamer, "eye-off", "Streamer mode"),
-    (Page::Accounts, "user", "Accounts"),
-    (Page::Keyboard, "keyboard", "Keyboard"),
-    (Page::Language, "languages", "Language"),
-    (Page::Privacy, "shield-check", "Privacy"),
-    (Page::Updates, "refresh-cw", "Updates"),
-    (Page::Advanced, "wrench", "Advanced"),
-    (Page::About, "info", "About"),
+    (Page::Appearance, "palette", "appearance"),
+    (Page::Background, "image", "background"),
+    (Page::Motion, "sparkles", "motion"),
+    (Page::Notifications, "bell", "notifications"),
+    (Page::Streamer, "eye-off", "streamer"),
+    (Page::Accounts, "user", "accounts"),
+    (Page::Keyboard, "keyboard", "keyboard"),
+    (Page::Language, "languages", "language"),
+    (Page::Privacy, "shield-check", "privacy"),
+    (Page::Updates, "refresh-cw", "updates"),
+    (Page::Advanced, "wrench", "advanced"),
+    (Page::About, "info", "about"),
 ];
+
+impl Page {
+    /// Its name in the side menu.
+    fn label(self) -> String {
+        match self {
+            Page::Profile => t("settings.nav.profile"),
+            Page::Security => t("desktop.settings.passwordAndDevices"),
+            Page::Friends => t("settings.nav.friends"),
+            Page::Appearance => t("settings.nav.appearance"),
+            Page::Background => t("settings.nav.backdrop"),
+            Page::Motion => t("appsettings.accessibility.motion"),
+            Page::Notifications => t("settings.nav.notifications"),
+            Page::Streamer => t("appsettings.streamer.title"),
+            Page::Accounts => t("connect.accounts.title"),
+            Page::Keyboard => t("desktop.settings.keyboard"),
+            Page::Language => t("settings.language.title"),
+            Page::Privacy => t("instancesettings.nav.privacy"),
+            Page::Updates => t("desktop.settings.updates"),
+            Page::Advanced => t("settings.nav.advanced"),
+            Page::About => t("desktop.settings.about"),
+        }
+    }
+}
 
 pub struct SettingsView {
     pub(crate) core: Arc<Core>,
@@ -128,25 +151,25 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> (String, String, AnyElement) {
         match self.page {
-            Page::Profile => {
-                ("Your profile".into(), "How people see you on this instance.".into(), self.profile_page(p, window, cx))
-            }
-            Page::Security => {
-                ("Password and devices".into(), "Keep your account yours.".into(), self.security_page(p, window, cx))
-            }
-            Page::Friends => (
-                "Friends and privacy".into(),
-                "Who can reach you, and what your friends see. Kept on the instance, for every device.".into(),
-                self.friends_page(p, window, cx),
+            Page::Profile => (
+                t("desktop.settings.profileTitle"),
+                t("desktop.settings.profileAbout"),
+                self.profile_page(p, window, cx),
             ),
+            Page::Security => {
+                (Page::Security.label(), t("desktop.settings.securityAbout"), self.security_page(p, window, cx))
+            }
+            Page::Friends => {
+                (Page::Friends.label(), t("desktop.settings.friendsAbout"), self.friends_page(p, window, cx))
+            }
             Page::Appearance => (
-                "Appearance".into(),
-                "How fuwa looks on this computer, the same themes as everywhere else.".into(),
+                Page::Appearance.label(),
+                t("desktop.settings.appearanceAbout"),
                 self.appearance_page(prefs, p, window, cx),
             ),
             Page::Background => (
-                "Background".into(),
-                "A picture and an effect behind the app, under any theme without its own.".into(),
+                Page::Background.label(),
+                t("desktop.settings.backgroundAbout"),
                 self.background_page(prefs, p, window, cx),
             ),
             Page::Motion => {
@@ -156,13 +179,13 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(28.0))
                     .child(section(
-                        "Animations",
+                        &t("desktop.settings.animations"),
                         segmented(
                             "motion",
                             vec![
-                                ("Like my computer", prefs.motion == MotionChoice::System),
-                                ("Full", prefs.motion == MotionChoice::Full),
-                                ("Reduced", prefs.motion == MotionChoice::Reduced),
+                                (t("settings.language.matchSystem"), prefs.motion == MotionChoice::System),
+                                (t("desktop.settings.motionFull"), prefs.motion == MotionChoice::Full),
+                                (t("desktop.settings.motionReduced"), prefs.motion == MotionChoice::Reduced),
                             ],
                             p,
                             window,
@@ -184,12 +207,12 @@ impl SettingsView {
                             .bg(p.secondary)
                             .child(bouncer(p, reduced))
                             .child(div().text_sm().text_color(p.muted_foreground).child(if reduced {
-                                "Things appear in place, without moving. Nothing bounces or slides."
+                                t("desktop.settings.motionReducedNote")
                             } else {
-                                "Things spring into place, slide and glide. Reduced keeps them still."
+                                t("desktop.settings.motionFullNote")
                             })),
                     );
-                ("Motion".into(), "How much things move.".into(), body.into_any_element())
+                (Page::Motion.label(), t("desktop.settings.motionAbout"), body.into_any_element())
             }
             Page::Notifications => {
                 let body = div()
@@ -198,15 +221,15 @@ impl SettingsView {
                     .gap(px(28.0))
                     .child(toggle_row(
                         "notify",
-                        "Notifications",
-                        "For messages that arrive while you're looking elsewhere: a card in the corner, or your computer's own notification while fuwa is in the background.",
+                        &Page::Notifications.label(),
+                        &t("desktop.settings.notificationsHint"),
                         prefs.notifications,
                         p,
                         cx,
                         |this, on, cx| this.set(cx, |pr| pr.notifications = on),
                     ))
                     .child(section(
-                        "Notify me about",
+                        &t("appsettings.notifications.notifyFor"),
                         div()
                             .flex()
                             .flex_col()
@@ -214,8 +237,8 @@ impl SettingsView {
                             .child(segmented(
                                 "notify-for",
                                 vec![
-                                    ("Only @mentions", prefs.notify_for == NotifyFor::Mentions),
-                                    ("All messages", prefs.notify_for == NotifyFor::All),
+                                    (t("common.notify.mentions"), prefs.notify_for == NotifyFor::Mentions),
+                                    (t("common.notify.all"), prefs.notify_for == NotifyFor::All),
                                 ],
                                 p,
                                 window,
@@ -225,44 +248,45 @@ impl SettingsView {
                                     this.set(cx, |pr| pr.notify_for = v)
                                 },
                             ))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(
-                                "In servers and channels you haven't set yourself, from their bell. Private messages always notify you.",
-                            )),
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("desktop.settings.notifyForHint")),
+                            ),
                         p,
                     ))
-                    .child(div().child(
-                        soft_button("notify-test", "Send a test notification", p)
-                            .child(icon("bell-ring").size(px(16.0)))
-                            .on_click(|_, _, _| {
-                                crate::ui::notify::show(
-                                    "fuwa".into(),
-                                    "This is how messages will reach you ✨".into(),
-                                    crate::ui::notify::Clicked {
-                                        instance: String::new(),
-                                        server: None,
-                                        channel: String::new(),
-                                        thread: None,
-                                    },
-                                )
-                            }),
-                    ));
-                ("Notifications".into(), "What fuwa tells you about.".into(), body.into_any_element())
+                    .child(
+                        div().child(
+                            soft_button("notify-test", t("desktop.settings.sendTest"), p)
+                                .child(icon("bell-ring").size(px(16.0)))
+                                .on_click(|_, _, _| {
+                                    crate::ui::notify::show(
+                                        "fuwa".into(),
+                                        t("workspace.notify.test"),
+                                        crate::ui::notify::Clicked {
+                                            instance: String::new(),
+                                            server: None,
+                                            channel: String::new(),
+                                            thread: None,
+                                        },
+                                    )
+                                }),
+                        ),
+                    );
+                (Page::Notifications.label(), t("desktop.settings.notificationsAbout"), body.into_any_element())
             }
             Page::Streamer => {
-                let body = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(18.0))
-                    .child(toggle_row(
-                        "streamer",
-                        "Streamer mode",
-                        "Hides instance addresses, your username, invite links and what private messages say in notifications. For streaming or sharing your screen.",
-                        prefs.streamer_mode,
-                        p,
-                        cx,
-                        |this, on, cx| this.set(cx, |pr| pr.streamer_mode = on),
-                    ));
-                ("Streamer mode".into(), "Keep private things off your stream.".into(), body.into_any_element())
+                let body = div().flex().flex_col().gap(px(18.0)).child(toggle_row(
+                    "streamer",
+                    &Page::Streamer.label(),
+                    &t("desktop.settings.streamerHint"),
+                    prefs.streamer_mode,
+                    p,
+                    cx,
+                    |this, on, cx| this.set(cx, |pr| pr.streamer_mode = on),
+                ));
+                (Page::Streamer.label(), t("desktop.settings.streamerAbout"), body.into_any_element())
             }
             Page::Accounts => {
                 let streamer = prefs.streamer_mode;
@@ -313,30 +337,38 @@ impl SettingsView {
                                             .text_color(p.muted_foreground)
                                             .whitespace_nowrap()
                                             .text_ellipsis()
-                                            .child(who.unwrap_or_else(|| "Signed out".into())),
+                                            .child(who.unwrap_or_else(|| t("workspace.connection.signedOut"))),
                                     )
                                     .when(!streamer, |el| {
                                         el.child(div().text_xs().text_color(p.muted_foreground).child(url))
                                     }),
                             )
                             .child(if signed_out {
-                                primary_button(SharedString::from(format!("again-{key}")), "Sign in", p)
-                                    .on_click(cx.listener(move |_, _, _, cx| {
-                                        cx.emit(SettingsEvent::SignIn { key: k1.clone() })
-                                    }))
-                                    .into_any_element()
+                                primary_button(
+                                    SharedString::from(format!("again-{key}")),
+                                    t("connect.account.signIn"),
+                                    p,
+                                )
+                                .on_click(
+                                    cx.listener(move |_, _, _, cx| cx.emit(SettingsEvent::SignIn { key: k1.clone() })),
+                                )
+                                .into_any_element()
                             } else {
-                                soft_button(SharedString::from(format!("out-{key}")), "Sign out", p)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        let core = this.core.clone();
-                                        let key = k2.clone();
-                                        drop(core.spawn({
-                                            let core = core.clone();
-                                            async move { core.sign_out(&key).await }
-                                        }));
-                                        cx.notify();
-                                    }))
-                                    .into_any_element()
+                                soft_button(
+                                    SharedString::from(format!("out-{key}")),
+                                    t("accountsettings.shared.signOut"),
+                                    p,
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let core = this.core.clone();
+                                    let key = k2.clone();
+                                    drop(core.spawn({
+                                        let core = core.clone();
+                                        async move { core.sign_out(&key).await }
+                                    }));
+                                    cx.notify();
+                                }))
+                                .into_any_element()
                             })
                             .child(icon_button(SharedString::from(format!("remove-{key}")), "trash", p).on_click(
                                 cx.listener(move |this, _, _, cx| {
@@ -351,34 +383,23 @@ impl SettingsView {
                 }
                 let body = div().flex().flex_col().gap(px(18.0)).child(list).child(
                     div().child(
-                        soft_button("add-instance", "Add an instance", p)
+                        soft_button("add-instance", t("desktop.settings.addInstance"), p)
                             .child(icon("plus").size(px(16.0)))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::AddInstance))),
                     ),
                 );
-                (
-                    "Accounts".into(),
-                    "Every instance you're signed in to here. Signing out also wipes the private messages this computer kept for it."
-                        .into(),
-                    body.into_any_element(),
-                )
+                (Page::Accounts.label(), t("desktop.settings.accountsAbout"), body.into_any_element())
             }
-            Page::Keyboard => (
-                "Keyboard".into(),
-                "Shortcuts that work everywhere in the app. Click one to change it.".into(),
-                self.keyboard_page(prefs, p, cx),
-            ),
-            Page::Language => (t("settings.language.title"), String::new(), self.language_page(prefs, p, window, cx)),
-            Page::Privacy => (
-                "Privacy".into(),
-                "What this app tells anyone, and only if you let it.".into(),
-                self.privacy_page(prefs, p, window, cx),
-            ),
-            Page::Updates => (
-                "Updates".into(),
-                "New versions of the app, checked before they run.".into(),
-                self.updates_page(prefs, p, window, cx),
-            ),
+            Page::Keyboard => {
+                (Page::Keyboard.label(), t("desktop.settings.keyboardAbout"), self.keyboard_page(prefs, p, cx))
+            }
+            Page::Language => (Page::Language.label(), String::new(), self.language_page(prefs, p, window, cx)),
+            Page::Privacy => {
+                (Page::Privacy.label(), t("desktop.settings.privacyAbout"), self.privacy_page(prefs, p, window, cx))
+            }
+            Page::Updates => {
+                (Page::Updates.label(), t("desktop.settings.updatesAbout"), self.updates_page(prefs, p, window, cx))
+            }
             Page::Advanced => {
                 let on = prefs.developer_mode;
                 let body = div()
@@ -387,8 +408,8 @@ impl SettingsView {
                     .gap(px(12.0))
                     .child(toggle_row(
                         "developer-mode",
-                        "Developer mode",
-                        "Shows Copy ID on servers, channels, people and messages, in their right-click menus. Handy for bots, the API and bug reports.",
+                        &t("appsettings.advanced.developer"),
+                        &t("desktop.settings.developerHint"),
                         on,
                         p,
                         cx,
@@ -405,12 +426,21 @@ impl SettingsView {
                             .bg(alpha(p.foreground, 0.05))
                             .text_sm()
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(div().flex().gap(px(4.0)).child(div().font_weight(FontWeight::BOLD).child("#general")).child(
-                                        div().text_color(p.muted_foreground).child("· right-click a channel"),
-                                    )),
+                                div().flex_1().min_w_0().child(
+                                    div()
+                                        .flex()
+                                        .gap(px(4.0))
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .child(format!("#{}", t("appsettings.preview.general"))),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(p.muted_foreground)
+                                                .child(t("desktop.settings.developerSample")),
+                                        ),
+                                ),
                             )
                             .when(on, |el| {
                                 el.child(crate::ui::motion::slide_in(
@@ -426,13 +456,13 @@ impl SettingsView {
                                         .text_xs()
                                         .font_weight(FontWeight::BOLD)
                                         .child(icon("binary").size(px(14.0)).text_color(p.primary))
-                                        .child("Copy channel ID"),
+                                        .child(t("appsettings.advanced.copyChannelId")),
                                     "dev-preview",
                                     8.0,
                                 ))
                             }),
                     );
-                ("Advanced".into(), "For people building on fuwa.".into(), body.into_any_element())
+                (Page::Advanced.label(), t("desktop.settings.advancedAbout"), body.into_any_element())
             }
             Page::About => {
                 let body = div()
@@ -440,34 +470,37 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(14.0))
                     .child(
+                        div().flex().items_center().gap(px(14.0)).child(crate::ui::widgets::fuwa_mark(56.0, p)).child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .text_xl()
+                                        .font_weight(FontWeight::EXTRA_BOLD)
+                                        .child(t("common.device.desktop")),
+                                )
+                                .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
+                                    "desktop.settings.version",
+                                    &[("version", Arg::Str(env!("CARGO_PKG_VERSION")))],
+                                ))),
+                        ),
+                    )
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.settings.credits")))
+                    .child(
                         div()
                             .flex()
-                            .items_center()
-                            .gap(px(14.0))
-                            .child(crate::ui::widgets::fuwa_mark(56.0, p))
+                            .gap(px(10.0))
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child("fuwa desktop"))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(p.muted_foreground)
-                                            .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
-                                    ),
+                                soft_button("source", t("desktop.settings.sourceCode"), p)
+                                    .on_click(|_, _, cx| cx.open_url("https://github.com/waifu-devs/fuwa")),
+                            )
+                            .child(
+                                soft_button("site", "waifu.dev", p)
+                                    .on_click(|_, _, cx| cx.open_url("https://www.waifu.dev/projects")),
                             ),
-                    )
-                    .child(div().text_sm().text_color(p.muted_foreground).child(
-                        "Made by Waifu Devs. Private messages are end-to-end encrypted with MLS; the font is M PLUS Rounded 1c (SIL Open Font License); icons are Lucide.",
-                    ))
-                    .child(div().flex().gap(px(10.0)).child(
-                        soft_button("source", "Source code", p)
-                            .on_click(|_, _, cx| cx.open_url("https://github.com/waifu-devs/fuwa")),
-                    ).child(
-                        soft_button("site", "waifu.dev", p).on_click(|_, _, cx| cx.open_url("https://www.waifu.dev/projects")),
-                    ));
-                ("About".into(), String::new(), body.into_any_element())
+                    );
+                (Page::About.label(), String::new(), body.into_any_element())
             }
         }
     }
@@ -482,7 +515,9 @@ impl Render for SettingsView {
         let mut menu = div().flex().flex_col().w(px(220.0));
         let mut y = 0.0;
         let mut at_y = 0.0;
-        for (group, pages) in [("YOUR ACCOUNT", &ACCOUNT_PAGES[..]), ("APP SETTINGS", &PAGES[..])] {
+        for (group, pages) in
+            [(t("desktop.settings.yourAccount"), &ACCOUNT_PAGES[..]), (t("settings.nav.app"), &PAGES[..])]
+        {
             menu = menu.child(
                 div()
                     .h(px(30.0))
@@ -491,10 +526,10 @@ impl Render for SettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group),
+                    .child(group.to_uppercase()),
             );
             y += if y > 0.0 { 44.0 } else { 30.0 };
-            for (page, glyph, label) in pages.iter().copied() {
+            for (page, glyph, slug) in pages.iter().copied() {
                 let on = page == self.page;
                 if on {
                     at_y = y;
@@ -502,7 +537,7 @@ impl Render for SettingsView {
                 let hover = alpha(p.primary, 0.08);
                 menu = menu.child(
                     div()
-                        .id(SharedString::from(format!("menu-{label}")))
+                        .id(SharedString::from(format!("menu-{slug}")))
                         .h(px(38.0))
                         .mb(px(2.0))
                         .px(px(10.0))
@@ -519,7 +554,7 @@ impl Render for SettingsView {
                             cx.notify();
                         }))
                         .child(icon(glyph).size(px(17.0)).text_color(if on { p.primary } else { p.muted_foreground }))
-                        .child(label),
+                        .child(page.label()),
                 );
                 y += 40.0;
             }
@@ -688,7 +723,7 @@ pub(crate) fn theme_preview(pv: &Palette) -> impl IntoElement {
 /// Choices side by side; the chosen one sits on a pill that glides between them.
 pub(crate) fn segmented(
     id: &'static str,
-    options: Vec<(&'static str, bool)>,
+    options: Vec<(String, bool)>,
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<SettingsView>,
