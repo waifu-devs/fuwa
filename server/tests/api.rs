@@ -3289,6 +3289,77 @@ async fn roles(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Role> {
         .roles
 }
 
+#[tokio::test]
+async fn only_instance_admins_set_a_servers_caps() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_MEMBERS", "3"), ("FUWA_LIMIT_CHANNELS", "4")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = c
+        .servers
+        .create_server(authed(
+            &owner,
+            pb::CreateServerRequest { name: "Owned".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    let sid = server.id.clone();
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let admins = create_role(&mut c, &owner, &sid, "Admins", &[pb::Permission::Administrator]).await.unwrap();
+    give_role(&mut c, &owner, &sid, &mika_user.id, &admins.id).await.unwrap();
+
+    let usage = |c: &mut Clients, token: String| {
+        let mut servers = c.servers.clone();
+        let sid = sid.clone();
+        async move {
+            servers
+                .get_server_usage(authed(&token, pb::GetServerUsageRequest { server_id: sid }))
+                .await
+                .unwrap()
+                .into_inner()
+        }
+    };
+    let set = |c: &mut Clients, token: String, limits: Option<pb::ServerLimits>| {
+        let mut admin = c.admin.clone();
+        let sid = sid.clone();
+        async move { admin.set_server_limits(authed(&token, pb::SetServerLimitsRequest { server_id: sid, limits })).await }
+    };
+    let higher = pb::ServerLimits { members: Some(1_000), channels: Some(1_000), ..Default::default() };
+    let lower = pb::ServerLimits { members: Some(2), ..Default::default() };
+
+    // The server's owner and its admins can't change its caps, up, down or off.
+    for token in [&owner, &mika] {
+        for limits in [Some(higher), Some(lower), Some(pb::ServerLimits::default()), None] {
+            let denied = set(&mut c, token.clone(), limits).await.unwrap_err();
+            assert_eq!(denied.code(), Code::PermissionDenied);
+        }
+    }
+    let seen = usage(&mut c, owner.clone()).await;
+    assert_eq!(seen.own_limits.unwrap(), pb::ServerLimits::default());
+    let limits = seen.limits.unwrap();
+    assert_eq!((limits.members, limits.channels), (Some(3), Some(4)));
+
+    // An instance admin overrides them for this server alone, member or not.
+    let set_by_admin = set(&mut c, juan.clone(), Some(higher)).await.unwrap().into_inner().limits.unwrap();
+    assert_eq!((set_by_admin.members, set_by_admin.channels), (Some(1_000), Some(1_000)));
+    let seen = usage(&mut c, mika.clone()).await.limits.unwrap();
+    assert_eq!((seen.members, seen.channels), (Some(1_000), Some(1_000)));
+
+    // And the override holds against the server's own people too.
+    let denied = set(&mut c, owner.clone(), Some(pb::ServerLimits::default())).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    assert_eq!(usage(&mut c, owner.clone()).await.own_limits.unwrap().members, Some(1_000));
+    instance.stop().await;
+}
+
 async fn create_role(
     c: &mut Clients,
     token: &str,
