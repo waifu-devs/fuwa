@@ -55,7 +55,7 @@ export function ServerBanner({
             animate={pan && !still ? { opacity: 1, ...PAN.animate } : { opacity: 1, transform: "scale(1.04)" }}
             transition={{ opacity: { duration: 0.6 }, transform: pan && !still ? PAN.transition : { duration: 0 } }}
             style={{ objectPosition: bannerPosition(server) }}
-            className="absolute inset-0 size-full object-cover will-change-transform"
+            className="absolute inset-0 size-full object-cover"
           />
         ) : (
           <Gradient moving={pan && !still} />
@@ -78,7 +78,7 @@ function Parallax({ scrollY, children }: { scrollY?: MotionValue<number>; childr
 function Parallaxed({ scrollY, children }: { scrollY: MotionValue<number>; children: ReactNode }) {
   const y = useTransform(scrollY, [0, 400], [0, 200], { clamp: false });
   return (
-    <motion.div style={{ y }} className="absolute inset-0 will-change-transform">
+    <motion.div style={{ y }} className="absolute inset-0">
       {children}
     </motion.div>
   );

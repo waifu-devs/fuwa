@@ -51,7 +51,8 @@ import { GifSettings } from "./instance/Gifs";
 import { GIF_FIELDS, gifSection } from "./instance/gif-fields";
 import { FederationSettings } from "./instance/Federation";
 import { FEDERATION_FIELDS, federationSection } from "./instance/federation-fields";
-import { MODERATION_FIELDS, moderationSection, ModerationSettings } from "./instance/Moderation";
+import { ModerationSettings } from "./instance/Moderation";
+import { MODERATION_FIELDS, moderationSection } from "./instance/moderation-section";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen, type SettingsGroup } from "./SettingsScreen";
 

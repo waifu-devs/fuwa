@@ -7,7 +7,8 @@ import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions
 import { useAccess, useAction, useInstance, useMyMember } from "@/fuwa/hooks";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeAndTalk, RulesList } from "@/components/join/Rules";
-import { StartHere, suggestedChannels } from "@/components/join/StartHere";
+import { StartHere } from "@/components/join/StartHere";
+import { suggestedChannels } from "@/components/join/suggested";
 import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING } from "@/lib/motion";
 import { Dialog, DialogContent } from "@/components/ui/dialog";

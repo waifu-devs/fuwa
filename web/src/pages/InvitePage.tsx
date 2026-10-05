@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import type { Effect } from "effect";
 import { ChevronLeftIcon, GlobeIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { lookUpInvite, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
@@ -35,19 +35,16 @@ type Found = Effect.Effect.Success<ReturnType<typeof lookUpInvite>>;
  * make one right here, then go straight in.
  */
 export function InvitePage({ instanceKey, code }: { instanceKey: string; code: string }) {
-  const lang = useI18n();
-  const { t } = lang;
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { compact, setNavOpen } = useLayout();
   const [found, setFound] = useState<Found | null>(null);
   const [problem, setProblem] = useState<FuwaError | null>(null);
   // Signing in here can save the instance under a slightly different address; the button follows it.
-  const [key, setKey] = useState(instanceKey);
-  const [justSignedIn, setJustSignedIn] = useState(false);
-  useEffect(() => {
-    setKey(instanceKey);
-    setJustSignedIn(false);
-  }, [instanceKey]);
+  // It belongs to the invite's instance it happened on, so another link starts afresh.
+  const [signedIn, setSignedIn] = useState<{ on: string; key: string } | null>(null);
+  const justSignedIn = signedIn?.on === instanceKey;
+  const key = justSignedIn ? signedIn.key : instanceKey;
   const inst = useInstance(key);
   // From the key alone, so signing in partway (which adds the instance) doesn't look the invite up again.
   const address = instanceKey.replaceAll("~", "/");
@@ -100,111 +97,26 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
           ) : problem ? (
             <Broken key="broken" problem={problem} />
           ) : !found ? (
-            <motion.div key="loading" exit={{ opacity: 0, scale: 0.97 }} className="w-full max-w-md rounded-3xl border bg-card p-8 shadow-xl">
-              <div className="flex flex-col items-center gap-3">
-                <div className="shimmer size-20 rounded-3xl" />
-                <div className="shimmer h-6 w-1/2 rounded-lg" />
-                <div className="shimmer h-4 w-1/3 rounded-lg" />
-                <div className="shimmer mt-4 h-11 w-full rounded-xl" />
-              </div>
-            </motion.div>
+            <LoadingCard key="loading" />
           ) : (
-            <motion.div
+            <InviteCard
               key="invite"
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.5, ease: EASE_OUT }}
-              className="w-full max-w-md overflow-hidden rounded-3xl border bg-card shadow-2xl"
-            >
-              <ServerBanner server={found.server} className="h-32 sm:h-36">
-                {found.inviter && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.15 }}
-                    className="absolute top-3 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/35 px-2.5 py-1 text-xs whitespace-nowrap text-white/85 backdrop-blur-md"
-                  >
-                    <UserAvatar user={found.inviter} className="size-5 text-[0.55rem]" />
-                    <span className="truncate">
-                      <T k="workspace.invitePage.invitedYou" values={{ name: <b className="text-white">{displayName(found.inviter)}</b> }} />
-                    </span>
-                  </motion.p>
-                )}
-              </ServerBanner>
-              <div style={accentVars(found.server)} className="relative -mt-12 flex flex-col items-center gap-2 px-6 pb-6 text-center sm:px-8">
-                <motion.div
-                  initial={{ scale: 0.5, rotate: -14, y: 12 }}
-                  animate={{ scale: 1, rotate: 0, y: 0 }}
-                  transition={{ type: "spring", stiffness: 380, damping: 13, delay: 0.1 }}
-                  className="relative"
-                >
-                  <ServerIcon server={found.server} active className="float size-20 text-2xl ring-4 ring-card shadow-[0_14px_30px_-10px_color-mix(in_srgb,var(--accent-server)_70%,transparent)]" />
-                </motion.div>
-                <h1 className="relative mt-1 text-2xl font-extrabold tracking-tight">{found.server.name}</h1>
-                <p className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <UsersIcon className="size-3.5" />{" "}
-                    <T k="workspace.invitePage.members" values={{ count: <Count value={Number(found.server.memberCount)} /> }} count={Number(found.server.memberCount)} />
-                  </span>
-                  {found.channelName && (
-                    <span className="flex items-center gap-0.5 font-bold text-foreground">
-                      <HashIcon className="size-3.5" />
-                      {found.channelName}
-                    </span>
-                  )}
-                </p>
-                {found.server.description.trim() && (
-                  <p className="relative line-clamp-3 text-sm break-words text-muted-foreground">
-                    <InlineMarkdown>{found.server.description}</InlineMarkdown>
-                  </p>
-                )}
-                <ServerDoor server={found.server} className="relative justify-center" />
-                {!signedOut && (
-                  <p className="relative flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
-                    <span>
-                      <T k="workspace.invitePage.on" values={{ name: <b>{found.node.name}</b>, address: <Private text={instanceKey} /> }} />
-                    </span>
-                    <HostedBadge url={found.url} className="ml-1" />
-                  </p>
-                )}
-              </div>
-              <div className="border-t bg-background/40 p-6 sm:p-8">
-                {signedOut ? (
-                  <div className="flex flex-col gap-3">
-                    <p className="text-center text-sm text-muted-foreground">{t("workspace.invitePage.signIn")}</p>
-                    <Account
-                      url={found.url}
-                      node={found.node}
-                      onDone={(k) => {
-                        setKey(k);
-                        setJustSignedIn(true);
-                      }}
-                      returnTo={window.location.pathname}
-                    />
-                  </div>
-                ) : !inst?.me ? (
-                  <div className="grid h-11 place-items-center">
-                    <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : (
-                  <JoinButton
-                    instanceKey={key}
-                    server={found.server}
-                    inviteCode={code}
-                    auto={justSignedIn}
-                    size="lg"
-                    openLabel={t("workspace.invitePage.alreadyIn")}
-                    onOpen={open}
-                  />
-                )}
-                {(() => {
-                  const until = expiresAt(found.invite);
-                  return until ? (
-                    <p className="mt-3 text-center text-xs text-muted-foreground">{t("workspace.invitePage.expiresIn", { time: timeLeft(lang, until.getTime() - Date.now()) })}</p>
-                  ) : null;
-                })()}
-              </div>
-            </motion.div>
+              found={found}
+              instanceKey={instanceKey}
+              signedOut={signedOut}
+              footer={
+                <InviteFooter
+                  found={found}
+                  instanceKey={key}
+                  code={code}
+                  signedOut={signedOut}
+                  ready={!!inst?.me}
+                  justSignedIn={justSignedIn}
+                  onSignedIn={(k) => setSignedIn({ on: instanceKey, key: k })}
+                  onOpen={open}
+                />
+              }
+            />
           )}
         </AnimatePresence>
       </div>
@@ -212,7 +124,141 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
   );
 }
 
-/** An invite that doesn't lead anywhere anymore, or a server that can't be reached. */
+function LoadingCard() {
+  return (
+    <motion.div exit={{ opacity: 0, scale: 0.97 }} className="w-full max-w-md rounded-3xl border bg-card p-8 shadow-xl">
+      <div className="flex flex-col items-center gap-3">
+        <div className="shimmer size-20 rounded-3xl" />
+        <div className="shimmer h-6 w-1/2 rounded-lg" />
+        <div className="shimmer h-4 w-1/3 rounded-lg" />
+        <div className="shimmer mt-4 h-11 w-full rounded-xl" />
+      </div>
+    </motion.div>
+  );
+}
+
+/** The invite itself: the server's banner, who sent it, the server, and `footer` to get in. */
+function InviteCard({ found, instanceKey, signedOut, footer }: { found: Found; instanceKey: string; signedOut: boolean; footer: ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.5, ease: EASE_OUT }}
+      className="w-full max-w-md overflow-hidden rounded-3xl border bg-card shadow-2xl"
+    >
+      <ServerBanner server={found.server} className="h-32 sm:h-36">
+        {found.inviter && (
+          <motion.p
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="absolute top-3 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/35 px-2.5 py-1 text-xs whitespace-nowrap text-white/85 backdrop-blur-md"
+          >
+            <UserAvatar user={found.inviter} className="size-5 text-[0.55rem]" />
+            <span className="truncate">
+              <T k="workspace.invitePage.invitedYou" values={{ name: <b className="text-white">{displayName(found.inviter)}</b> }} />
+            </span>
+          </motion.p>
+        )}
+      </ServerBanner>
+      <div style={accentVars(found.server)} className="relative -mt-12 flex flex-col items-center gap-2 px-6 pb-6 text-center sm:px-8">
+        <motion.div
+          initial={{ scale: 0.5, rotate: -14, y: 12 }}
+          animate={{ scale: 1, rotate: 0, y: 0 }}
+          transition={{ type: "spring", stiffness: 380, damping: 13, delay: 0.1 }}
+          className="relative"
+        >
+          <ServerIcon server={found.server} active className="float size-20 text-2xl ring-4 ring-card shadow-[0_14px_30px_-10px_color-mix(in_srgb,var(--accent-server)_70%,transparent)]" />
+        </motion.div>
+        <h1 className="relative mt-1 text-2xl font-extrabold tracking-tight">{found.server.name}</h1>
+        <p className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <UsersIcon className="size-3.5" />{" "}
+            <T k="workspace.invitePage.members" values={{ count: <Count value={Number(found.server.memberCount)} /> }} count={Number(found.server.memberCount)} />
+          </span>
+          {found.channelName && (
+            <span className="flex items-center gap-0.5 font-bold text-foreground">
+              <HashIcon className="size-3.5" />
+              {found.channelName}
+            </span>
+          )}
+        </p>
+        {found.server.description.trim() && (
+          <p className="relative line-clamp-3 text-sm break-words text-muted-foreground">
+            <InlineMarkdown>{found.server.description}</InlineMarkdown>
+          </p>
+        )}
+        <ServerDoor server={found.server} className="relative justify-center" />
+        {!signedOut && (
+          <p className="relative flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
+            <span>
+              <T k="workspace.invitePage.on" values={{ name: <b>{found.node.name}</b>, address: <Private text={instanceKey} /> }} />
+            </span>
+            <HostedBadge url={found.url} className="ml-1" />
+          </p>
+        )}
+      </div>
+      {footer}
+    </motion.div>
+  );
+}
+
+/** Signing in, or the button to join once you are. */
+function InviteFooter({
+  found,
+  instanceKey,
+  code,
+  signedOut,
+  ready,
+  justSignedIn,
+  onSignedIn,
+  onOpen,
+}: {
+  found: Found;
+  instanceKey: string;
+  code: string;
+  signedOut: boolean;
+  /** Signed in and known to the instance. */
+  ready: boolean;
+  justSignedIn: boolean;
+  onSignedIn: (key: string) => void;
+  onOpen: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="border-t bg-background/40 p-6 sm:p-8">
+      {signedOut ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-center text-sm text-muted-foreground">{t("workspace.invitePage.signIn")}</p>
+          <Account url={found.url} node={found.node} onDone={onSignedIn} returnTo={window.location.pathname} />
+        </div>
+      ) : !ready ? (
+        <div className="grid h-11 place-items-center">
+          <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <JoinButton
+          instanceKey={instanceKey}
+          server={found.server}
+          inviteCode={code}
+          auto={justSignedIn}
+          size="lg"
+          openLabel={t("workspace.invitePage.alreadyIn")}
+          onOpen={onOpen}
+        />
+      )}
+      <Expires invite={found.invite} />
+    </div>
+  );
+}
+
+function Expires({ invite }: { invite: Found["invite"] }) {
+  const lang = useI18n();
+  const until = expiresAt(invite);
+  if (!until) return null;
+  return <p className="mt-3 text-center text-xs text-muted-foreground">{lang.t("workspace.invitePage.expiresIn", { time: timeLeft(lang, until.getTime() - Date.now()) })}</p>;
+}
+
 /** Whether `address` is this instance or one this browser already added. */
 function knownInstance(address: string): boolean {
   let origin: string;
@@ -276,6 +322,7 @@ function Elsewhere({ address, onContinue }: { address: string; onContinue: () =>
   );
 }
 
+/** An invite that doesn't lead anywhere anymore, or a server that can't be reached. */
 function Broken({ problem }: { problem: FuwaError }) {
   const { t } = useI18n();
   const gone = problem.code === Code.NotFound;

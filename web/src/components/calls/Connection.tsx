@@ -8,7 +8,7 @@ import { SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
 
-export const COLOR: Record<Level, string> = { good: "#3ba55d", okay: "#f0b232", poor: "#ed4245" };
+const COLOR: Record<Level, string> = { good: "#3ba55d", okay: "#f0b232", poor: "#ed4245" };
 const LIT: Record<Level, number> = { good: 3, okay: 2, poor: 1 };
 const LABEL: Record<Level, Key> = { good: "dms-calls.calls.connection.good", okay: "dms-calls.calls.connection.okay", poor: "dms-calls.calls.connection.poor" };
 const ROUTE: Record<Route, Key> = {

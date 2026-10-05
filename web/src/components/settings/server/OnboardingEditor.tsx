@@ -1,4 +1,4 @@
-import { create, equals } from "@bufbuild/protobuf";
+import { create } from "@bufbuild/protobuf";
 import {
   ChevronDownIcon,
   GripVerticalIcon,
@@ -18,19 +18,18 @@ import { useState } from "react";
 import {
   ChannelType,
   OnboardingOptionSchema,
-  OnboardingSchema,
   OnboardingStepKind,
   OnboardingStepSchema,
   Permission,
   type Channel,
   type Emoji,
-  type Onboarding,
   type OnboardingOption,
   type OnboardingStep,
   type Role,
   type Server,
 } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
+import { fresh, type Draft, type OnboardingDraft } from "@/components/settings/server/onboarding-draft";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { SPRING } from "@/lib/motion";
@@ -68,39 +67,7 @@ const POWERS = [
 ].reduce((bits, p) => bits | bit(p), 0);
 
 /** Whether anyone may get the role by picking it. */
-export const harmless = (role: Role) => (fromList(role.permissions) & POWERS) === 0;
-
-/** A step being edited, with a key that survives reordering. */
-type Draft = { key: string; step: OnboardingStep };
-
-/** The onboarding as it's being edited. */
-export type OnboardingDraft = { enabled: boolean; steps: Draft[] };
-
-let made = 0;
-const fresh = () => `new-${++made}`;
-
-export const onboardingDraft = (o: Onboarding): OnboardingDraft => ({
-  enabled: o.enabled,
-  steps: o.steps.map((step) => ({ key: step.id || fresh(), step })),
-});
-
-/** The draft as the server takes it. */
-export const onboardingOf = (d: OnboardingDraft): Onboarding =>
-  create(OnboardingSchema, {
-    enabled: d.enabled,
-    steps: d.steps.map(({ step }) =>
-      create(OnboardingStepSchema, {
-        ...step,
-        title: step.title.trim(),
-        description: step.description.trim(),
-        hello: step.hello.trim(),
-        options: step.options.map((o) => create(OnboardingOptionSchema, { ...o, label: o.label.trim(), description: o.description.trim() })),
-      }),
-    ),
-  });
-
-/** 1 when the onboarding differs from what's saved. */
-export const onboardingChanges = (d: OnboardingDraft, saved: Onboarding) => (equals(OnboardingSchema, onboardingOf(d), saved) ? 0 : 1);
+const harmless = (role: Role) => (fromList(role.permissions) & POWERS) === 0;
 
 /** Each kind of step: its name and what it does (catalog keys), and its icon. */
 const KINDS: Record<Exclude<OnboardingStepKind, OnboardingStepKind.UNSPECIFIED>, { label: Key; hint: Key; icon: LucideIcon }> = {
@@ -380,8 +347,10 @@ function OptionRow({
 }) {
   const { t } = useI18n();
   const flip = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id].slice(0, MAX_PICKS));
-  const given = roles.filter((r) => option.roleIds.includes(r.id));
-  const suggested = channels.filter((c) => option.channelIds.includes(c.id));
+  const roleIds = new Set(option.roleIds);
+  const channelIds = new Set(option.channelIds);
+  const given = roles.filter((r) => roleIds.has(r.id));
+  const suggested = channels.filter((c) => channelIds.has(c.id));
   return (
     <motion.div
       layout
@@ -438,8 +407,8 @@ function OptionRow({
               return (
                 <DropdownMenuCheckboxItem
                   key={r.id}
-                  disabled={!ok && !option.roleIds.includes(r.id)}
-                  checked={option.roleIds.includes(r.id)}
+                  disabled={!ok && !roleIds.has(r.id)}
+                  checked={roleIds.has(r.id)}
                   onSelect={(e) => e.preventDefault()}
                   onCheckedChange={() => onChange({ roleIds: flip(option.roleIds, r.id) })}
                 >
@@ -459,7 +428,7 @@ function OptionRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
             {channels.map((c) => (
-              <DropdownMenuCheckboxItem key={c.id} checked={option.channelIds.includes(c.id)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => onChange({ channelIds: flip(option.channelIds, c.id) })}>
+              <DropdownMenuCheckboxItem key={c.id} checked={channelIds.has(c.id)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => onChange({ channelIds: flip(option.channelIds, c.id) })}>
                 <HashIcon /> {c.name}
               </DropdownMenuCheckboxItem>
             ))}

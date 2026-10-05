@@ -9,7 +9,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
-import { hasPassword } from "@/components/settings/Account";
+import { hasPassword } from "@/lib/accounts";
 import { PasswordInput, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";

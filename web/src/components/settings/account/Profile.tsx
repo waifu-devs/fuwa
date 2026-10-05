@@ -2,10 +2,12 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { CheckIcon, EyeIcon, PencilLineIcon, PipetteIcon, SparklesIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import type { Profile as ProfileInfo, User } from "@/gen/fuwa/v1/types_pb";
 import { loadProfile, run, updateProfile, type ProfilePatch } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
-import { hue, UserAvatar } from "@/components/Icons";
+import { UserAvatar } from "@/components/Icons";
+import { hue } from "@/components/icons-utils";
 import { Markdown } from "@/components/Markdown";
 import { Count } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
@@ -83,16 +85,10 @@ const isUrl = (value: string) => !value.trim() || /^https?:\/\/\S+$/i.test(value
  * effect.
  */
 export function Profile({ instanceKey }: { instanceKey: string }) {
-  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const me = inst?.me;
   const profile = useFuwa((s) => (me ? s.instances[instanceKey]?.profiles[me.id] : undefined));
   const [failed, setFailed] = useState(false);
-  const [edits, setEdits] = useState<Partial<Draft>>({});
-  const [bioTab, setBioTab] = useState<"write" | "preview">("write");
-  const save = useAction(updateProfile);
-  // Instances from before profile effects don't say, and can't keep one.
-  const effectsOn = useFuwa((s) => !!s.instances[instanceKey]?.node?.profileEffects);
 
   const meId = me?.id;
   useEffect(() => {
@@ -101,57 +97,15 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
   }, [instanceKey, meId]);
 
   if (!me) return null;
-  const ready = !!profile || failed;
-  const status = shownStatus(me);
-  const base: Draft = {
-    displayName: me.displayName,
-    pronouns: profile?.pronouns ?? "",
-    status,
-    clear: status && me.statusExpiresAt ? "keep" : "never",
-    bio: profile?.bio ?? "",
-    avatarUrl: me.avatarUrl,
-    bannerUrl: profile?.bannerUrl ?? "",
-    accent: profile?.accentColor ?? -1,
-    effect: profile?.effect ?? "",
-  };
-  const draft: Draft = { ...base, ...edits };
-  const differs = (k: keyof Draft) => edits[k] !== undefined && edits[k] !== base[k];
-  const statusChanged = differs("status") || (draft.status.trim() !== "" && differs("clear"));
-  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect"] as const).filter(differs).length + (statusChanged ? 1 : 0);
-  const set = (patch: Partial<Draft>) => {
-    setEdits((e) => ({ ...e, ...patch }));
-    save.setError(null);
-  };
-  const keptUntil = me.statusExpiresAt ? timestampDate(me.statusExpiresAt) : null;
+  return <ProfileForm instanceKey={instanceKey} me={me} profile={profile} ready={!!profile || failed} />;
+}
 
-  const problem = !draft.displayName.trim()
-    ? t("accountsettings.profile.nameEmpty")
-    : !isUrl(draft.avatarUrl)
-      ? t("accountsettings.profile.avatarLink")
-      : !isUrl(draft.bannerUrl)
-        ? t("accountsettings.profile.bannerLink")
-        : null;
+function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string; me: User; profile: ProfileInfo | undefined; ready: boolean }) {
+  const { t } = useI18n();
+  // Instances from before profile effects don't say, and can't keep one.
+  const effectsOn = useFuwa((s) => !!s.instances[instanceKey]?.node?.profileEffects);
+  const { base, draft, changed, set, keptUntil, submit, discard, save } = useProfileDraft(instanceKey, me, profile);
   const effect = builtinEffect(draft.effect);
-
-  async function submit(e?: FormEvent) {
-    e?.preventDefault();
-    if (problem) return save.setError(problem);
-    const patch: ProfilePatch = {};
-    if (differs("displayName")) patch.displayName = draft.displayName.trim();
-    if (differs("pronouns")) patch.pronouns = draft.pronouns.trim();
-    if (differs("bio")) patch.bio = draft.bio.trim();
-    if (differs("avatarUrl")) patch.avatarUrl = draft.avatarUrl.trim();
-    if (differs("bannerUrl")) patch.bannerUrl = draft.bannerUrl.trim();
-    if (differs("accent")) patch.accentColor = draft.accent;
-    if (differs("effect")) patch.effect = draft.effect;
-    if (statusChanged) {
-      patch.status = draft.status.trim();
-      patch.statusExpiresAt = draft.clear === "keep" ? keptUntil : clearsAt(draft.clear);
-    }
-    if (!(await save.go(instanceKey, patch))) return;
-    if (patch.effect) reportUsage("profile-effect/picked");
-    setEdits({});
-  }
 
   const preview = (
     <ProfileCard
@@ -248,49 +202,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
             </Row>
           )}
           <Row id="status" label={t("settings.nav.status")} htmlFor="profile-status" hint={t("accountsettings.profile.statusHint")}>
-            <div className="relative">
-              <Input
-                id="profile-status"
-                maxLength={STATUS_MAX}
-                value={draft.status}
-                placeholder={t("accountsettings.profile.statusPlaceholder")}
-                onChange={(e) => set({ status: e.target.value })}
-                className="h-11 rounded-xl pr-11"
-              />
-              <AnimatePresence>
-                {draft.status && (
-                  <motion.button
-                    type="button"
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0, opacity: 0 }}
-                    transition={SPRING}
-                    onClick={() => set({ status: "" })}
-                    aria-label={t("accountsettings.profile.clearStatus")}
-                    className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                  >
-                    <XIcon className="size-4" />
-                  </motion.button>
-                )}
-              </AnimatePresence>
-            </div>
-            <AnimatePresence initial={false}>
-              {draft.status.trim() && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
-                  <p className="pt-1 pb-2 text-xs font-bold text-muted-foreground">{t("accountsettings.profile.clearAfter")}</p>
-                  <Chips
-                    value={draft.clear}
-                    onChange={(clear) => set({ clear })}
-                    options={[
-                      ...(keptUntil && base.clear === "keep"
-                        ? [{ value: "keep" as Clear, label: t("accountsettings.profile.clearAt", { time: at(keptUntil) }) }]
-                        : []),
-                      ...clearOptions(t),
-                    ]}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <StatusField draft={draft} canKeep={base.clear === "keep"} keptUntil={keptUntil} set={set} />
           </Row>
           <Row
             id="about-me"
@@ -311,42 +223,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               </span>
             }
           >
-            <Segmented
-              label={t("settings.nav.aboutMe")}
-              value={bioTab}
-              onChange={setBioTab}
-              className="self-start"
-              options={[
-                { value: "write", label: t("accountsettings.profile.write"), icon: <PencilLineIcon className="size-3.5" /> },
-                { value: "preview", label: t("accountsettings.profile.preview"), icon: <EyeIcon className="size-3.5" /> },
-              ]}
-            />
-            <AnimatePresence mode="wait" initial={false}>
-              {bioTab === "write" ? (
-                <motion.div key="write" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.15 }}>
-                  <Textarea
-                    id="profile-bio"
-                    maxLength={BIO_MAX}
-                    value={draft.bio}
-                    disabled={!ready}
-                    placeholder={t("accountsettings.profile.bioPlaceholder")}
-                    onChange={(e) => set({ bio: e.target.value })}
-                    className="min-h-32 rounded-xl"
-                  />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="preview"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  transition={{ duration: 0.15 }}
-                  className="min-h-32 rounded-xl border bg-muted/40 px-3 py-2"
-                >
-                  {draft.bio.trim() ? <Markdown className="text-sm">{draft.bio}</Markdown> : <p className="text-sm text-muted-foreground">{t("accountsettings.profile.nothingToPreview")}</p>}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <BioField bio={draft.bio} disabled={!ready} onChange={(bio) => set({ bio })} />
           </Row>
           <Row id="username" label={t("accountsettings.profile.username")} hint={t("accountsettings.profile.usernameHint")}>
             <p className="text-sm font-bold">
@@ -359,13 +236,187 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
           saving={save.pending}
           error={save.error}
           onSave={() => void submit()}
-          onDiscard={() => {
-            setEdits({});
-            save.setError(null);
-          }}
+          onDiscard={discard}
         />
       </WithPreview>
     </form>
+  );
+}
+
+/** Your profile as it's saved, to edit over. */
+function savedDraft(me: User, profile: ProfileInfo | undefined): Draft {
+  const status = shownStatus(me);
+  return {
+    displayName: me.displayName,
+    pronouns: profile?.pronouns ?? "",
+    status,
+    clear: status && me.statusExpiresAt ? "keep" : "never",
+    bio: profile?.bio ?? "",
+    avatarUrl: me.avatarUrl,
+    bannerUrl: profile?.bannerUrl ?? "",
+    accent: profile?.accentColor ?? -1,
+    effect: profile?.effect ?? "",
+  };
+}
+
+/** What stops a draft from saving, if anything. */
+function draftProblem(t: I18n["t"], draft: Draft): string | null {
+  if (!draft.displayName.trim()) return t("accountsettings.profile.nameEmpty");
+  if (!isUrl(draft.avatarUrl)) return t("accountsettings.profile.avatarLink");
+  if (!isUrl(draft.bannerUrl)) return t("accountsettings.profile.bannerLink");
+  return null;
+}
+
+/**
+ * Only what changed. `status` is given when the status changed: the time
+ * it already clears at, for "keep".
+ */
+function patchFor(draft: Draft, differs: (k: keyof Draft) => boolean, status: Date | null | undefined): ProfilePatch {
+  const patch: ProfilePatch = {};
+  if (differs("displayName")) patch.displayName = draft.displayName.trim();
+  if (differs("pronouns")) patch.pronouns = draft.pronouns.trim();
+  if (differs("bio")) patch.bio = draft.bio.trim();
+  if (differs("avatarUrl")) patch.avatarUrl = draft.avatarUrl.trim();
+  if (differs("bannerUrl")) patch.bannerUrl = draft.bannerUrl.trim();
+  if (differs("accent")) patch.accentColor = draft.accent;
+  if (differs("effect")) patch.effect = draft.effect;
+  if (status !== undefined) {
+    patch.status = draft.status.trim();
+    patch.statusExpiresAt = draft.clear === "keep" ? status : clearsAt(draft.clear);
+  }
+  return patch;
+}
+
+/** Your edits over what's saved, how many there are, and saving them. */
+function useProfileDraft(instanceKey: string, me: User, profile: ProfileInfo | undefined) {
+  const { t } = useI18n();
+  const [edits, setEdits] = useState<Partial<Draft>>({});
+  const save = useAction(updateProfile);
+  const base = savedDraft(me, profile);
+  const draft: Draft = { ...base, ...edits };
+  const differs = (k: keyof Draft) => edits[k] !== undefined && edits[k] !== base[k];
+  const statusChanged = differs("status") || (draft.status.trim() !== "" && differs("clear"));
+  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect"] as const).filter(differs).length + (statusChanged ? 1 : 0);
+  const set = (patch: Partial<Draft>) => {
+    setEdits((e) => ({ ...e, ...patch }));
+    save.setError(null);
+  };
+  const keptUntil = me.statusExpiresAt ? timestampDate(me.statusExpiresAt) : null;
+
+  const problem = draftProblem(t, draft);
+
+  async function submit(e?: FormEvent) {
+    e?.preventDefault();
+    if (problem) return save.setError(problem);
+    const patch = patchFor(draft, differs, statusChanged ? keptUntil : undefined);
+    if (!(await save.go(instanceKey, patch))) return;
+    if (patch.effect) reportUsage("profile-effect/picked");
+    setEdits({});
+  }
+
+  const discard = () => {
+    setEdits({});
+    save.setError(null);
+  };
+
+  return { base, draft, changed, set, keptUntil, submit, discard, save };
+}
+
+/** Your status, a button to clear it, and when it clears by itself. */
+function StatusField({ draft, canKeep, keptUntil, set }: { draft: Draft; canKeep: boolean; keptUntil: Date | null; set: (patch: Partial<Draft>) => void }) {
+  const { t } = useI18n();
+  return (
+    <>
+      <div className="relative">
+        <Input
+          id="profile-status"
+          maxLength={STATUS_MAX}
+          value={draft.status}
+          placeholder={t("accountsettings.profile.statusPlaceholder")}
+          onChange={(e) => set({ status: e.target.value })}
+          className="h-11 rounded-xl pr-11"
+        />
+        <AnimatePresence>
+          {draft.status && (
+            <motion.button
+              type="button"
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={SPRING}
+              onClick={() => set({ status: "" })}
+              aria-label={t("accountsettings.profile.clearStatus")}
+              className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <XIcon className="size-4" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+      <AnimatePresence initial={false}>
+        {draft.status.trim() && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+            <p className="pt-1 pb-2 text-xs font-bold text-muted-foreground">{t("accountsettings.profile.clearAfter")}</p>
+            <Chips
+              value={draft.clear}
+              onChange={(clear) => set({ clear })}
+              options={[
+                ...(keptUntil && canKeep
+                  ? [{ value: "keep" as Clear, label: t("accountsettings.profile.clearAt", { time: at(keptUntil) }) }]
+                  : []),
+                ...clearOptions(t),
+              ]}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+/** About me, written or previewed as it will show. */
+function BioField({ bio, disabled, onChange }: { bio: string; disabled: boolean; onChange: (bio: string) => void }) {
+  const { t } = useI18n();
+  const [bioTab, setBioTab] = useState<"write" | "preview">("write");
+  return (
+    <>
+      <Segmented
+        label={t("settings.nav.aboutMe")}
+        value={bioTab}
+        onChange={setBioTab}
+        className="self-start"
+        options={[
+          { value: "write", label: t("accountsettings.profile.write"), icon: <PencilLineIcon className="size-3.5" /> },
+          { value: "preview", label: t("accountsettings.profile.preview"), icon: <EyeIcon className="size-3.5" /> },
+        ]}
+      />
+      <AnimatePresence mode="wait" initial={false}>
+        {bioTab === "write" ? (
+          <motion.div key="write" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.15 }}>
+            <Textarea
+              id="profile-bio"
+              maxLength={BIO_MAX}
+              value={bio}
+              disabled={disabled}
+              placeholder={t("accountsettings.profile.bioPlaceholder")}
+              onChange={(e) => onChange(e.target.value)}
+              className="min-h-32 rounded-xl"
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="preview"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.15 }}
+            className="min-h-32 rounded-xl border bg-muted/40 px-3 py-2"
+          >
+            {bio.trim() ? <Markdown className="text-sm">{bio}</Markdown> : <p className="text-sm text-muted-foreground">{t("accountsettings.profile.nothingToPreview")}</p>}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 

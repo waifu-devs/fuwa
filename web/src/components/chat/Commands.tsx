@@ -41,6 +41,7 @@ const MAX = 8;
 const FRESH_MS = 30_000;
 const NO_MEMBERS: Member[] = [];
 const NO_CHANNELS: Channel[] = [];
+const NO_VALUES: Record<string, string> = {};
 
 type Listed = { at: number; list: ListCommandsResponse };
 const lists = new Map<string, Listed>();
@@ -90,21 +91,28 @@ export function useCommandPicker(instanceKey: string, serverId: string, channelI
   const query = /^\/([a-z0-9_-]{0,32})$/i.exec(text)?.[1]?.toLowerCase();
   const typing = query !== undefined;
   const { choices, loading } = useServerCommands(instanceKey, serverId, typing);
-  const [active, setActive] = useState(0);
+  // The highlighted line belongs to what was typed; typing more starts at the top.
+  const [highlight, setHighlight] = useState({ query, n: 0 });
+  const active = highlight.query === query ? highlight.n : 0;
+  const setActive = useCallback((next: number | ((n: number) => number)) => {
+    setHighlight((h) => {
+      const from = h.query === query ? h.n : 0;
+      return { query, n: typeof next === "function" ? next(from) : next };
+    });
+  }, [query]);
+  // Escape closes the list until the "/" is gone.
   const [dismissed, setDismissed] = useState(false);
-  const [chosen, setChosen] = useState<CommandChoice | null>(null);
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [running, setRunning] = useState(false);
-
-  useEffect(() => {
+  const [wasTyping, setWasTyping] = useState(typing);
+  if (typing !== wasTyping) {
+    setWasTyping(typing);
     if (!typing) setDismissed(false);
-  }, [typing]);
-  useEffect(() => setActive(0), [query]);
-  // A different channel or server starts over.
-  useEffect(() => {
-    setChosen(null);
-    setValues({});
-  }, [channelId, serverId]);
+  }
+  // The picked command and its options belong to one channel; another starts over.
+  const here = `${serverId}\n${channelId}`;
+  const [form, setForm] = useState<{ here: string; chosen: CommandChoice | null; values: Record<string, string> }>({ here, chosen: null, values: {} });
+  const chosen = form.here === here ? form.chosen : null;
+  const values = form.here === here ? form.values : NO_VALUES;
+  const [running, setRunning] = useState(false);
 
   const options = useMemo(() => {
     if (query === undefined || dismissed) return [];
@@ -117,17 +125,13 @@ export function useCommandPicker(instanceKey: string, serverId: string, channelI
 
   const pick = useCallback(
     (choice: CommandChoice) => {
-      setChosen(choice);
-      setValues({});
+      setForm({ here, chosen: choice, values: {} });
       setText("");
     },
-    [setText],
+    [here, setText],
   );
 
-  const cancel = useCallback(() => {
-    setChosen(null);
-    setValues({});
-  }, []);
+  const cancel = useCallback(() => setForm({ here, chosen: null, values: {} }), [here]);
 
   const missing = chosen?.command.options.filter((o) => o.required && !values[o.name]?.trim()).map((o) => o.name) ?? [];
 
@@ -160,7 +164,8 @@ export function useCommandPicker(instanceKey: string, serverId: string, channelI
     pick,
     chosen,
     values,
-    setValue: (name: string, value: string) => setValues((v) => ({ ...v, [name]: value })),
+    setValue: (name: string, value: string) =>
+      setForm((f) => (f.here === here ? { ...f, values: { ...f.values, [name]: value } } : { here, chosen: null, values: { [name]: value } })),
     missing,
     running,
     cancel,
@@ -217,9 +222,11 @@ export function CommandPicker({ picker }: { picker: CommandPickerState }) {
               {picker.options.map((choice, n) => {
                 const on = n === picker.active;
                 return (
-                  <li key={choice.key} role="option" aria-selected={on}>
+                  <li key={choice.key} role="presentation">
                     <button
                       type="button"
+                      role="option"
+                      aria-selected={on}
                       onMouseDown={(e) => e.preventDefault()}
                       onMouseEnter={() => picker.setActive(n)}
                       onClick={() => picker.pick(choice)}
@@ -284,6 +291,7 @@ export function CommandForm({
     }
   }
 
+  const missing = new Set(picker.missing);
   const field = "h-8 min-w-0 rounded-lg border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:w-full max-sm:max-w-none";
 
   return (
@@ -325,11 +333,11 @@ export function CommandForm({
             let input;
             switch (option.type) {
               case CommandOptionType.INTEGER:
-                input = <input ref={ref} type="number" step={1} inputMode="numeric" value={value} onChange={(e) => set(e.target.value)} className={cn(field, "w-28")} />;
+                input = <input ref={ref} aria-label={label} type="number" step={1} inputMode="numeric" value={value} onChange={(e) => set(e.target.value)} className={cn(field, "w-28")} />;
                 break;
               case CommandOptionType.BOOLEAN:
                 input = (
-                  <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={field}>
+                  <select ref={ref} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={field}>
                     <option value="">{t("chattools.commands.pickOne")}</option>
                     <option value="true">{t("chattools.commands.yes")}</option>
                     <option value="false">{t("chattools.commands.no")}</option>
@@ -338,7 +346,7 @@ export function CommandForm({
                 break;
               case CommandOptionType.USER:
                 input = (
-                  <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
+                  <select ref={ref} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
                     <option value="">{t("chattools.commands.pickSomeone")}</option>
                     {members
                       .filter((m) => m.user)
@@ -352,7 +360,7 @@ export function CommandForm({
                 break;
               case CommandOptionType.CHANNEL:
                 input = (
-                  <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
+                  <select ref={ref} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
                     <option value="">{t("chattools.commands.pickChannel")}</option>
                     {channels
                       .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.VOICE)
@@ -366,7 +374,7 @@ export function CommandForm({
                 break;
               case CommandOptionType.ROLE:
                 input = (
-                  <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
+                  <select ref={ref} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
                     <option value="">{t("chattools.commands.pickRole")}</option>
                     {roles.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -378,7 +386,7 @@ export function CommandForm({
                 break;
               default:
                 input = option.choices.length ? (
-                  <select ref={ref} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
+                  <select ref={ref} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "max-w-48")}>
                     <option value="">{t("chattools.commands.pickOne")}</option>
                     {option.choices.map((c) => (
                       <option key={c} value={c}>
@@ -387,12 +395,12 @@ export function CommandForm({
                     ))}
                   </select>
                 ) : (
-                  <input ref={ref} type="text" maxLength={1000} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "w-48 max-sm:w-full")} />
+                  <input ref={ref} aria-label={label} type="text" maxLength={1000} value={value} onChange={(e) => set(e.target.value)} className={cn(field, "w-48 max-sm:w-full")} />
                 );
             }
             return (
               <label key={option.name} title={option.description} className="flex min-w-0 flex-col gap-0.5 max-sm:w-full">
-                <span className={cn("text-[0.7rem] font-bold text-muted-foreground", picker.missing.includes(option.name) && "text-foreground")}>{label}</span>
+                <span className={cn("text-[0.7rem] font-bold text-muted-foreground", missing.has(option.name) && "text-foreground")}>{label}</span>
                 {input}
               </label>
             );

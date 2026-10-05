@@ -1,15 +1,12 @@
 import { m as motion } from "motion/react";
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { CONNECTION_LABEL, hue } from "@/components/icons-utils";
 import type { Server, User } from "@/gen/fuwa/v1/types_pb";
 import type { Connection } from "@/fuwa/store";
-import { i18n, type Key } from "@/i18n/i18n";
 import { useI18n } from "@/i18n/react";
-import { displayName, hueOf, initials } from "@/lib/format";
+import { displayName, initials } from "@/lib/format";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
-
-/** Sets `--h` to the hue that belongs to an id, for `.server-gradient`. */
-export const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
 
 /**
  * A picture that gives way to `fallback` when it can't load: a link that
@@ -63,14 +60,6 @@ export function UserAvatar({ user, className }: { user: User | undefined; classN
   );
 }
 
-const CONNECTION_LABEL: Record<Connection, Key> = {
-  connecting: "workspace.connection.connecting",
-  live: "workspace.connection.live",
-  reconnecting: "workspace.connection.reconnecting",
-  offline: "workspace.connection.offline",
-  "signed-out": "workspace.connection.signedOut",
-};
-
 /** Pops each time the connection changes, so a drop or a reconnect catches the eye. */
 export function ConnDot({ state, className }: { state: Connection; className?: string }) {
   const { t } = useI18n();
@@ -88,9 +77,6 @@ export function ConnDot({ state, className }: { state: Connection; className?: s
     />
   );
 }
-
-/** In the app's language now; components re-render with useI18n when it changes. */
-export const connectionLabel = (state: Connection) => i18n().t(CONNECTION_LABEL[state]);
 
 /** The fuwa mark: a soft cloud with a speech tail. */
 export function FuwaMark({ className }: { className?: string }) {

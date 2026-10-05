@@ -17,9 +17,13 @@ export function useControlledState<T, Rest extends any[] = []>(
     value !== undefined ? value : (defaultValue as T),
   );
 
-  React.useEffect(() => {
+  // Follow a new controlled value in the same render, while still showing a
+  // change at once before the owner answers it.
+  const [seen, setSeen] = React.useState(value);
+  if (value !== seen) {
+    setSeen(value);
     if (value !== undefined) setInternalState(value);
-  }, [value]);
+  }
 
   const setState = React.useCallback(
     (next: T, ...args: Rest) => {

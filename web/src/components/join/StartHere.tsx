@@ -1,20 +1,10 @@
 import { ArrowRightIcon, HashIcon, MegaphoneIcon } from "lucide-react";
 import { m as motion } from "motion/react";
-import { ChannelType, type Channel, type Emoji, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, type Emoji } from "@/gen/fuwa/v1/types_pb";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
+import type { Suggested } from "@/components/join/suggested";
 import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
-
-/** A suggested channel as a card: its emoji or kind, its name and why to go there. */
-export type Suggested = { channelId: string; description: string; emoji: string; channel: Channel };
-
-/** The welcome screen's channels that exist and the caller can see, with their channel. */
-export function suggestedChannels(screen: Pick<WelcomeScreen, "channels">, channels: Channel[]): Suggested[] {
-  return screen.channels.flatMap((w) => {
-    const channel = channels.find((c) => c.id === w.channelId);
-    return channel ? [{ channelId: w.channelId, description: w.description, emoji: w.emoji, channel }] : [];
-  });
-}
 
 /** "Start here": channel cards that rise in one after another, two to a row where there's room. */
 export function StartHere({

@@ -8,7 +8,7 @@ import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/sta
 import { canShareScreen, canShareSound, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
 import { store, useFuwa } from "@/fuwa/store";
-import { hue } from "@/components/Icons";
+import { hue } from "@/components/icons-utils";
 import { displayName, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setPrefs, usePrefs } from "@/lib/prefs";

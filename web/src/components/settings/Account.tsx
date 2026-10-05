@@ -1,7 +1,6 @@
 import { CheckIcon, ExternalLinkIcon, Flower2Icon, KeyRoundIcon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, UserPenIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useState, type FormEvent } from "react";
-import { AccountKind, type User } from "@/gen/fuwa/v1/types_pb";
 import { changePassword, forget, signOut } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { SwapText } from "@/components/motion";
@@ -11,9 +10,6 @@ import { Button } from "@/components/ui/button";
 import { type Key, useI18n } from "@/i18n/react";
 import { issuerName, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { cn } from "@/lib/utils";
-
-/** Accounts made on the instance sign in with a password; linked ones sign in through waifu.dev, and agents with a token. */
-export const hasPassword = (user: User | undefined) => !!user && user.kind === AccountKind.LOCAL;
 
 // ───────────────────────── Linked sign-in ─────────────────────────
 
@@ -109,7 +105,6 @@ export function Password({ instanceKey }: { instanceKey: string }) {
   const mismatch = confirm.length > 0 && confirm !== next;
   const same = next.length > 0 && next === current;
   const ready = current.length > 0 && next.length >= MIN && next.length <= MAX && confirm === next && !same;
-  const level = strength(next);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -131,28 +126,7 @@ export function Password({ instanceKey }: { instanceKey: string }) {
   return (
     <AnimatePresence mode="wait" initial={false}>
       {done ? (
-        <motion.div
-          key="done"
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={SPRING}
-          className="flex flex-col items-center gap-3 rounded-3xl border bg-card px-6 py-10 text-center"
-        >
-          <motion.span
-            initial={{ scale: 0, rotate: -45 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}
-            className="grid size-14 place-items-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
-          >
-            <CheckIcon className="size-7" strokeWidth={3} />
-          </motion.span>
-          <p className="text-lg font-extrabold">{t("accountsettings.password.changed")}</p>
-          <p className="max-w-sm text-sm text-muted-foreground">{t("accountsettings.password.changedHint", { instance: where })}</p>
-          <Button type="button" variant="outline" className="mt-2 rounded-xl" onClick={() => setDone(false)}>
-            {t("accountsettings.shared.done")}
-          </Button>
-        </motion.div>
+        <PasswordChanged key="done" where={where} onDone={() => setDone(false)} />
       ) : (
         <motion.form key="form" onSubmit={submit} animate={shake} className="flex max-w-md flex-col">
           <Row id="current-password" label={t("accountsettings.password.current")} htmlFor="current-password">
@@ -162,51 +136,15 @@ export function Password({ instanceKey }: { instanceKey: string }) {
             id="new-password"
             label={t("accountsettings.password.new")}
             htmlFor="new-password"
-            hint={
-              same ? (
-                <Warn>{t("accountsettings.password.same")}</Warn>
-              ) : tooShort ? (
-                <Warn>{t("accountsettings.password.min", { count: MIN })}</Warn>
-              ) : (
-                t("accountsettings.password.range", { min: MIN, max: MAX })
-              )
-            }
+            hint={<NewPasswordHint same={same} tooShort={tooShort} />}
           >
             <PasswordInput id="new-password" autoComplete="new-password" value={next} onChange={setNext} show={show} onShow={setShow} />
-            <div className="flex items-center gap-3" aria-live="polite">
-              <div className="grid flex-1 grid-cols-4 gap-1">
-                {[1, 2, 3, 4].map((n) => (
-                  <span key={n} className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <motion.span
-                      className={cn("block h-full rounded-full", STRENGTH[level]!.tone)}
-                      initial={false}
-                      animate={{ x: level >= n ? "0%" : "-100%" }}
-                      transition={{ ...SPRING, delay: (n - 1) * 0.04 }}
-                    />
-                  </span>
-                ))}
-              </div>
-              <span className="w-16 text-right text-xs font-bold text-muted-foreground">
-                <SwapText>{next ? t(STRENGTH[level]!.label) : " "}</SwapText>
-              </span>
-            </div>
+            <Strength password={next} />
           </Row>
           <Row id="confirm-password" label={t("accountsettings.password.again")} htmlFor="confirm-password" hint={mismatch ? <Warn>{t("accountsettings.password.mismatch")}</Warn> : undefined}>
             <div className="relative">
               <PasswordInput id="confirm-password" autoComplete="new-password" value={confirm} onChange={setConfirm} show={show} onShow={setShow} />
-              <AnimatePresence>
-                {confirm && confirm === next && (
-                  <motion.span
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 600, damping: 18 }}
-                    className="pointer-events-none absolute top-1/2 right-12 grid size-5 -translate-y-1/2 place-items-center rounded-full bg-emerald-500 text-white"
-                  >
-                    <CheckIcon className="size-3.5" strokeWidth={3} />
-                  </motion.span>
-                )}
-              </AnimatePresence>
+              <Matches show={!!confirm && confirm === next} />
             </div>
           </Row>
           <AnimatePresence initial={false}>
@@ -225,6 +163,85 @@ export function Password({ instanceKey }: { instanceKey: string }) {
             <KeyRoundIcon /> {change.pending ? t("accountsettings.password.changing") : t("accountsettings.password.change")}
           </Button>
         </motion.form>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** After a change: it worked, and where else you're still signed in. */
+function PasswordChanged({ where, onDone }: { where: string; onDone: () => void }) {
+  const { t } = useI18n();
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={SPRING}
+      className="flex flex-col items-center gap-3 rounded-3xl border bg-card px-6 py-10 text-center"
+    >
+      <motion.span
+        initial={{ scale: 0, rotate: -45 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}
+        className="grid size-14 place-items-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
+      >
+        <CheckIcon className="size-7" strokeWidth={3} />
+      </motion.span>
+      <p className="text-lg font-extrabold">{t("accountsettings.password.changed")}</p>
+      <p className="max-w-sm text-sm text-muted-foreground">{t("accountsettings.password.changedHint", { instance: where })}</p>
+      <Button type="button" variant="outline" className="mt-2 rounded-xl" onClick={onDone}>
+        {t("accountsettings.shared.done")}
+      </Button>
+    </motion.div>
+  );
+}
+
+function NewPasswordHint({ same, tooShort }: { same: boolean; tooShort: boolean }) {
+  const { t } = useI18n();
+  if (same) return <Warn>{t("accountsettings.password.same")}</Warn>;
+  if (tooShort) return <Warn>{t("accountsettings.password.min", { count: MIN })}</Warn>;
+  return t("accountsettings.password.range", { min: MIN, max: MAX });
+}
+
+/** Four bars that fill as the new password gets harder to guess. */
+function Strength({ password }: { password: string }) {
+  const { t } = useI18n();
+  const level = strength(password);
+  return (
+    <div className="flex items-center gap-3" aria-live="polite">
+      <div className="grid flex-1 grid-cols-4 gap-1">
+        {[1, 2, 3, 4].map((n) => (
+          <span key={n} className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <motion.span
+              className={cn("block h-full rounded-full", STRENGTH[level]!.tone)}
+              initial={false}
+              animate={{ x: level >= n ? "0%" : "-100%" }}
+              transition={{ ...SPRING, delay: (n - 1) * 0.04 }}
+            />
+          </span>
+        ))}
+      </div>
+      <span className="w-16 text-right text-xs font-bold text-muted-foreground">
+        <SwapText>{password ? t(STRENGTH[level]!.label) : " "}</SwapText>
+      </span>
+    </div>
+  );
+}
+
+/** A tick in the confirm field once both passwords match. */
+function Matches({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.span
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 600, damping: 18 }}
+          className="pointer-events-none absolute top-1/2 right-12 grid size-5 -translate-y-1/2 place-items-center rounded-full bg-emerald-500 text-white"
+        >
+          <CheckIcon className="size-3.5" strokeWidth={3} />
+        </motion.span>
       )}
     </AnimatePresence>
   );
