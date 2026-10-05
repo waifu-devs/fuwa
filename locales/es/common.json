@@ -3,5 +3,9 @@
   "time.yesterday": "Ayer",
   "time.todayAt": "Hoy, {time}",
   "time.yesterdayAt": "Ayer, {time}",
-  "time.dayTime": "{day}, {time}"
+  "time.dayTime": "{day}, {time}",
+  "back": "Volver",
+  "cancel": "Cancelar",
+  "close": "Cerrar",
+  "continue": "Continuar"
 }
