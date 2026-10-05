@@ -22,6 +22,9 @@ const MOD_ACTIONS: { action: ModAction; label: string; icon: LucideIcon; hover: 
   { action: "ban", label: "Ban", icon: GavelIcon, hover: "group-hover:-rotate-45" },
 ];
 
+/** How long a profile may take before the card shows a placeholder for it. */
+const SLOW_MS = 500;
+
 /**
  * Opens someone's profile card from whatever you click on them: a name or
  * avatar in chat, a row in the member list. The card shows what's already
@@ -46,6 +49,8 @@ export function ProfilePopover({
   const profile = useFuwa((s) => (user ? s.instances[instanceKey]?.profiles[user.id] : undefined));
   const me = useFuwa((s) => s.instances[instanceKey]?.me?.id === user?.id);
   const [failed, setFailed] = useState(false);
+  // The bio's placeholder waits a moment: a quick load would flash it and pull it away again.
+  const [slow, setSlow] = useState(false);
   const allowed = useModeration(instanceKey, member?.serverId ?? "", member);
   const canModerate = allowed.timeout || allowed.kick || allowed.ban;
   const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
@@ -78,8 +83,13 @@ export function ProfilePopover({
   useEffect(() => {
     if (!open || !user) return;
     setFailed(false);
+    setSlow(false);
+    const timer = setTimeout(() => setSlow(true), SLOW_MS);
     // Load it fresh each time it opens; what's kept shows meanwhile.
-    run(loadProfile(instanceKey, user.id)).catch(() => setFailed(true));
+    run(loadProfile(instanceKey, user.id))
+      .catch(() => setFailed(true))
+      .finally(() => clearTimeout(timer));
+    return () => clearTimeout(timer);
   }, [open, instanceKey, user]);
 
   if (!user) return <>{children}</>;
@@ -106,7 +116,7 @@ export function ProfilePopover({
                   roles={member && <MemberRoles instanceKey={instanceKey} member={member} />}
                   me={me}
                   instanceKey={instanceKey}
-                  loading={!profile && !failed}
+                  loading={!profile && !failed && slow}
                   className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
                 />
                 {canMessage && (
