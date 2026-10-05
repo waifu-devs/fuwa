@@ -381,9 +381,14 @@ impl EventService for Api {
                             }
                         };
                         let mut view = View { sdb: sdb.clone(), account_id: account_id.clone(), access, replaying: false };
-                        if let Err(status) = view.reload().await {
-                            send(Err(status)).await;
-                            return;
+                        // Worked out again from after the head, as for a stream that starts live.
+                        match view.load().await {
+                            Ok(Some(access)) => view.access = access,
+                            Ok(None) => continue, // gone again already
+                            Err(err) => {
+                                send(Err(err.into())).await;
+                                return;
+                            }
                         }
                         last_sent.insert(sdb.id.clone(), sequence);
                         live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
