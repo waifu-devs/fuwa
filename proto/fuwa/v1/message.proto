@@ -228,6 +228,10 @@ message VotePollRequest {
   // The answers picked: one, or several in a multiple-choice poll. Empty
   // takes the vote back.
   repeated uint32 answer_ids = 3;
+  // The channel it's in. Needed for a poll in a channel shared from another
+  // server, which this server doesn't hold; anywhere else it must be the
+  // poll's own channel, or empty.
+  string channel_id = 4;
 }
 
 message VotePollResponse {
@@ -238,6 +242,8 @@ message VotePollResponse {
 message EndPollRequest {
   string server_id = 1;
   string message_id = 2;
+  // As in VotePollRequest.
+  string channel_id = 3;
 }
 
 message EndPollResponse {
@@ -252,6 +258,8 @@ message ListPollVotersRequest {
   int32 limit = 4;
   // The page after this voter (a user id), in the order they're listed.
   string after_id = 5;
+  // As in VotePollRequest.
+  string channel_id = 6;
 }
 
 message ListPollVotersResponse {

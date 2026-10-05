@@ -880,8 +880,10 @@ impl MessageService for Api {
                             "buttons and interactions aren't in channels shared between servers yet",
                         ));
                     }
-                    if poll.is_some() {
-                        return Err(Error::invalid("polls can't go in channels shared from another server yet"));
+                    if poll.is_some() && (!req.attachments.is_empty() || !req.embeds.is_empty()) {
+                        return Err(Error::invalid(
+                            "a poll goes without files or link previews in a channel shared from another server",
+                        ));
                     }
                     if !req.attachments.is_empty() {
                         // The sender's uploads for this server, which the
@@ -961,9 +963,6 @@ impl MessageService for Api {
                             Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
                         ) {
                             return Err(Error::invalid("messages can only go in text channels"));
-                        }
-                        if poll.is_some() && polls::shared_out(conn, &channel.id).await? {
-                            return Err(Error::invalid("polls can't go in channels shared with other servers yet"));
                         }
                         let parent = if req.thread_id.is_empty() {
                             None

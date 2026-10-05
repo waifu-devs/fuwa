@@ -8624,6 +8624,313 @@ async fn files_in_shared_channels_stay_with_the_home() {
     instance.stop().await;
 }
 
+/// A vote naming the channel the poll is in, as apps showing a channel from
+/// another server do.
+async fn vote_in(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    answer_ids: &[u32],
+) -> Result<pb::Poll, tonic::Status> {
+    c.messages
+        .vote_poll(authed(
+            token,
+            pb::VotePollRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                answer_ids: answer_ids.to_vec(),
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().poll.unwrap())
+}
+
+async fn voters_in(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    answer_id: u32,
+) -> Result<Vec<String>, tonic::Status> {
+    c.messages
+        .list_poll_voters(authed(
+            token,
+            pb::ListPollVotersRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                answer_id,
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().users.into_iter().map(|u| u.id).collect())
+}
+
+async fn end_in(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> Result<pb::Poll, tonic::Status> {
+    c.messages
+        .end_poll(authed(
+            token,
+            pb::EndPollRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().poll.unwrap())
+}
+
+async fn events_of(c: &mut Clients, token: &str, server_id: &str) -> tonic::Streaming<pb::SubscribeResponse> {
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            token,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server_id.into(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let ready = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+    assert!(ready.ready.is_some());
+    stream
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn polls_in_shared_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &rin, &guest).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let other = new_channel(&mut c, &juan, &home, "other", pb::ChannelType::Text).await;
+
+    // A channel with a poll running can be shared, and its guests vote in it.
+    let lunch = send_poll(&mut c, &juan, &home, &dev.id, new_poll("Lunch?", &["Pizza", "Ramen"], false)).await.unwrap();
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let mut at_home = events_of(&mut c, &juan, &home).await;
+    let mut at_guest = events_of(&mut c, &mika, &guest).await;
+    let listed = messages(&mut c, &rin, &guest, &shown.id).await;
+    assert_eq!(listed.iter().find(|m| m.id == lunch.id).unwrap().poll.as_ref().unwrap().question, "Lunch?");
+    let voted = vote_in(&mut c, &rin, &guest, &shown.id, &lunch.id, &[2]).await.unwrap();
+    assert_eq!((voted.voters, voted.answers[1].votes, voted.my_answer_ids.clone()), (1, 1, vec![2]));
+    let (_, update) = next_poll_update(&mut at_home).await;
+    assert_eq!((update.channel_id.as_str(), update.voter_id.as_str()), (dev.id.as_str(), rin_user.id.as_str()));
+    let (_, update) = next_poll_update(&mut at_guest).await;
+    assert_eq!((update.channel_id.as_str(), update.voter_id.as_str()), (shown.id.as_str(), rin_user.id.as_str()));
+    assert_eq!(update.voter_answer_ids, [2]);
+    // Each side reads back its own picks, and who voted names both sides.
+    vote(&mut c, &juan, &home, &lunch.id, &[2]).await.unwrap();
+    let listed = messages(&mut c, &rin, &guest, &shown.id).await;
+    let seen = listed.iter().find(|m| m.id == lunch.id).unwrap().poll.clone().unwrap();
+    assert_eq!((seen.voters, seen.my_answer_ids.clone()), (2, vec![2]));
+    let mut both = vec![juan_user.id.clone(), rin_user.id.clone()];
+    both.sort();
+    assert_eq!(voters_in(&mut c, &rin, &guest, &shown.id, &lunch.id, 2).await.unwrap(), both);
+    assert_eq!(voters_in(&mut c, &juan, &home, &dev.id, &lunch.id, 2).await.unwrap(), both);
+
+    // A call naming a channel answers only for a poll in it.
+    let elsewhere = send_poll(&mut c, &juan, &home, &other.id, new_poll("Tea?", &["Yes", "No"], false)).await.unwrap();
+    let wrong = vote_in(&mut c, &juan, &home, &dev.id, &elsewhere.id, &[1]).await.unwrap_err();
+    assert_eq!(wrong.code(), Code::NotFound);
+    let wrong = voters_in(&mut c, &juan, &home, &dev.id, &elsewhere.id, 1).await.unwrap_err();
+    assert_eq!(wrong.code(), Code::NotFound);
+    let wrong = end_in(&mut c, &juan, &home, &dev.id, &elsewhere.id).await.unwrap_err();
+    assert_eq!(wrong.code(), Code::NotFound);
+    // And the guest's home answers only for polls in the channel it shows.
+    let wrong = vote_in(&mut c, &rin, &guest, &shown.id, &elsewhere.id, &[1]).await.unwrap_err();
+    assert_eq!(wrong.code(), Code::NotFound);
+
+    // A guest makes a poll there; the home's people vote in it.
+    let theirs =
+        send_poll(&mut c, &rin, &guest, &shown.id, new_poll("Movie?", &["Totoro", "Mononoke"], false)).await.unwrap();
+    assert_eq!(theirs.channel_id, shown.id);
+    let at_home_list = messages(&mut c, &juan, &home, &dev.id).await;
+    let kept = at_home_list.iter().find(|m| m.id == theirs.id).unwrap();
+    assert_eq!(kept.poll.as_ref().unwrap().question, "Movie?");
+    vote(&mut c, &juan, &home, &theirs.id, &[1]).await.unwrap();
+    assert_eq!(
+        voters_in(&mut c, &rin, &guest, &shown.id, &theirs.id, 1).await.unwrap(),
+        std::slice::from_ref(&juan_user.id)
+    );
+
+    // Anonymous polls name no one, on either side.
+    let secret = send_poll(&mut c, &juan, &home, &dev.id, new_poll("Who?", &["Me", "You"], true)).await.unwrap();
+    let mine = vote_in(&mut c, &rin, &guest, &shown.id, &secret.id, &[1]).await.unwrap();
+    assert_eq!(mine.my_answer_ids, [1]);
+    let (actor, update) = loop {
+        let (actor, update) = next_poll_update(&mut at_guest).await;
+        if update.message_id == secret.id {
+            break (actor, update);
+        }
+    };
+    assert!(actor.is_empty() && update.voter_id.is_empty() && update.voter_answer_ids.is_empty());
+    let anonymous = voters_in(&mut c, &rin, &guest, &shown.id, &secret.id, 1).await.unwrap_err();
+    assert_eq!(anonymous.code(), Code::PermissionDenied);
+
+    // A guest's moderators end their own server's people's polls, not the home's.
+    let not_ours = end_in(&mut c, &mika, &guest, &shown.id, &lunch.id).await.unwrap_err();
+    assert_eq!(not_ours.code(), Code::PermissionDenied);
+    let ended = end_in(&mut c, &mika, &guest, &shown.id, &theirs.id).await.unwrap();
+    assert!(ended.ended_at.is_some());
+    assert_eq!(
+        vote_in(&mut c, &rin, &guest, &shown.id, &theirs.id, &[2]).await.unwrap_err().code(),
+        Code::FailedPrecondition
+    );
+
+    // Someone the home keeps out votes no more.
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: true,
+            },
+        ))
+        .await
+        .unwrap();
+    let kept_out = vote_in(&mut c, &rin, &guest, &shown.id, &lunch.id, &[1]).await.unwrap_err();
+    assert_eq!(kept_out.code(), Code::PermissionDenied);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn polls_cross_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let paced = [federated[0], federated[1], ("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE", "4")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &paced).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, juan_user, _) = sign_up(&mut ca, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let lunch =
+        send_poll(&mut ca, &juan, &home, &dev.id, new_poll("Lunch?", &["Pizza", "Ramen"], false)).await.unwrap();
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert!(asked.allowed.contains(&(pb::Permission::CreatePolls as i32)));
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+    let mut at_guest = events_of(&mut cb, &mika, &guest).await;
+    // Each side names its own people as they are, and the other's under
+    // their instance.
+    let juan_there = format!("{}@{origin_a}", juan_user.id);
+    let mika_there = format!("{}@{origin_b}", mika_user.id);
+
+    let voted = vote_in(&mut cb, &mika, &guest, &shown.id, &lunch.id, &[1]).await.unwrap();
+    assert_eq!((voted.voters, voted.my_answer_ids.clone()), (1, vec![1]));
+    vote(&mut ca, &juan, &home, &lunch.id, &[1]).await.unwrap();
+    let update = loop {
+        let (_, update) = next_poll_update(&mut at_guest).await;
+        if update.voter_id != mika_user.id {
+            break update;
+        }
+    };
+    assert_eq!((update.channel_id.as_str(), update.voter_id.as_str()), (shown.id.as_str(), juan_there.as_str()));
+    assert_eq!(update.poll.unwrap().voters, 2);
+    let mut seen_there = vec![juan_there.clone(), mika_user.id.clone()];
+    seen_there.sort();
+    let mut there = voters_in(&mut cb, &mika, &guest, &shown.id, &lunch.id, 1).await.unwrap();
+    there.sort();
+    assert_eq!(there, seen_there);
+    let mut seen_home = vec![juan_user.id.clone(), mika_there.clone()];
+    seen_home.sort();
+    assert_eq!(voters_in(&mut ca, &juan, &home, &dev.id, &lunch.id, 1).await.unwrap(), seen_home);
+    let listed = messages(&mut cb, &mika, &guest, &shown.id).await;
+    assert_eq!(listed.iter().find(|m| m.id == lunch.id).unwrap().poll.as_ref().unwrap().my_answer_ids, [1]);
+
+    // A poll from the other instance, kept and voted on at the home.
+    let theirs =
+        send_poll(&mut cb, &mika, &guest, &shown.id, new_poll("Movie?", &["Totoro", "Mononoke"], false)).await.unwrap();
+    let kept = messages(&mut ca, &juan, &home, &dev.id).await.into_iter().find(|m| m.id == theirs.id).unwrap();
+    assert_eq!((kept.author_id.as_str(), kept.poll.unwrap().question.as_str()), (mika_there.as_str(), "Movie?"));
+    vote(&mut ca, &juan, &home, &theirs.id, &[2]).await.unwrap();
+    assert_eq!(
+        voters_in(&mut cb, &mika, &guest, &shown.id, &theirs.id, 2).await.unwrap(),
+        std::slice::from_ref(&juan_there)
+    );
+
+    // An anonymous poll's events name no one there either.
+    let secret = send_poll(&mut ca, &juan, &home, &dev.id, new_poll("Who?", &["Me", "You"], true)).await.unwrap();
+    vote_in(&mut cb, &mika, &guest, &shown.id, &secret.id, &[2]).await.unwrap();
+    let (actor, update) = loop {
+        let (actor, update) = next_poll_update(&mut at_guest).await;
+        if update.message_id == secret.id {
+            break (actor, update);
+        }
+    };
+    assert!(actor.is_empty() && update.voter_id.is_empty() && update.voter_answer_ids.is_empty(), "{update:?}");
+    let anonymous = voters_in(&mut cb, &mika, &guest, &shown.id, &secret.id, 2).await.unwrap_err();
+    assert_eq!(anonymous.code(), Code::PermissionDenied);
+
+    // Votes count toward the home's pace for a server on another instance.
+    let mut paced = None;
+    for n in 0..10u32 {
+        if let Err(err) = vote_in(&mut cb, &mika, &guest, &shown.id, &lunch.id, &[1 + n % 2]).await {
+            paced = Some(err);
+            break;
+        }
+    }
+    assert_eq!(paced.expect("the pace never held").code(), Code::ResourceExhausted);
+    a.stop().await;
+    b.stop().await;
+}
+
 #[tokio::test]
 async fn attachments_upload_send_serve_and_go_with_their_message() {
     let dir = tempfile::tempdir().unwrap();
@@ -8948,6 +9255,7 @@ async fn vote(
                 server_id: server_id.into(),
                 message_id: message_id.into(),
                 answer_ids: answer_ids.to_vec(),
+                ..Default::default()
             },
         ))
         .await
@@ -9146,13 +9454,19 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
     // someone else's is in the audit log, and then nobody can vote.
     let err = c
         .messages
-        .end_poll(authed(&mika, pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone() }))
+        .end_poll(authed(
+            &mika,
+            pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone(), ..Default::default() },
+        ))
         .await
         .unwrap_err();
     assert_eq!(err.code(), Code::PermissionDenied);
     let ended = c
         .messages
-        .end_poll(authed(&juan, pb::EndPollRequest { server_id: sid.clone(), message_id: message.id.clone() }))
+        .end_poll(authed(
+            &juan,
+            pb::EndPollRequest { server_id: sid.clone(), message_id: message.id.clone(), ..Default::default() },
+        ))
         .await
         .unwrap()
         .into_inner()
@@ -9178,7 +9492,10 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
     // voter's own pick is gone too.
     let ended = c
         .messages
-        .end_poll(authed(&juan, pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone() }))
+        .end_poll(authed(
+            &juan,
+            pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone(), ..Default::default() },
+        ))
         .await
         .unwrap()
         .into_inner()
@@ -9337,7 +9654,12 @@ async fn votes_at_once_are_all_counted_in_order() {
             messages
                 .vote_poll(authed(
                     &token,
-                    pb::VotePollRequest { server_id: sid, message_id: id, answer_ids: vec![1 + n as u32 % 2] },
+                    pb::VotePollRequest {
+                        server_id: sid,
+                        message_id: id,
+                        answer_ids: vec![1 + n as u32 % 2],
+                        ..Default::default()
+                    },
                 ))
                 .await
         }));

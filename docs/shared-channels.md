@@ -56,8 +56,11 @@ audit log notes an instance admin did it.
 
 ## What each side controls
 
-- **The home decides what guests may do**, at most send messages, embed links
-  and attach files (`UpdateConnection`; `SHAREABLE` in `api/shared.rs`).
+- **The home decides what guests may do**, at most send messages, embed links,
+  attach files and create polls (`UpdateConnection`; `SHAREABLE` in
+  `api/shared.rs`). A new connection starts with all of them; one made
+  before polls could cross keeps what it had until the home's admins turn
+  Create polls on.
   Seeing the channel comes with being shown it. Guests get no other
   permission there: they can't ping @everyone, @here or roles, pin, or manage
   anything (`Access::guest`).
@@ -79,7 +82,8 @@ audit log notes an instance admin did it.
   shows up there.
 - **Each side moderates its own people.** A guest's moderators (Manage
   Messages in their channel) can delete their own server's people's messages
-  there; the home's moderators can delete anyone's. The home can keep a guest
+  there, and end their polls; the home's moderators can delete anyone's, and
+  end any poll. The home can keep a guest
   person out of the channel (`BlockFromChannel`, needs Kick Members). Members
   of the home are kicked or banned as usual instead.
 - **Slow mode** is the home's.
@@ -117,6 +121,26 @@ audit log notes an instance admin did it.
   its copy. From then on the file is served, counted and deleted as one of
   the home's. From another instance, the home fetches them with a ticket
   (docs/federation.md).
+- **Polls** in a shared channel are the home's too: the poll, its counts and
+  its votes are kept where the channel lives, and nothing of them on the
+  guest's side. A guest's poll goes as `GuestPoll`, its votes as
+  `GuestVote`, an early end as `GuestEndPoll` and "who voted" as
+  `GuestPollVoters`; `VotePoll`, `EndPoll` and `ListPollVoters` take
+  `channel_id` for a channel shown from another server (anywhere else it
+  must be the poll's own channel, or empty). The home checks the poll is in
+  the connection's channel and not in a thread, and turns away someone it
+  kept out. Everyone in the channel, on both sides, votes and sees the counts
+  live (`PollUpdated` goes to guests like message events), and "who voted"
+  names people from both sides as members of the other already see them.
+  A channel with polls running can be shared; a public poll's earlier
+  voters then show to the guest's people too, as the channel's history
+  does. Anonymous polls stay anonymous to everyone: their events name no
+  one and their voters are never listed. The guest's own instance passes on
+  its person's vote, so its operator could see that pick in passing, as it
+  can see anything its people do there; the home's operator holds the key,
+  as for its own polls. When someone's account is deleted on their own
+  instance, their votes at another server's home stay, as their messages
+  there do.
 - `Channel.shared` tells apps a channel is shared: from here with which
   servers (`home`), or from which server and channel (not `home`).
   `SharedChannelsUpdated` tells managers to re-read `ListConnections`.
