@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /** As on the server. */
@@ -58,6 +59,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
   const nudge = useAnimationControls();
   const scroller = useRef<HTMLFormElement>(null);
   const { scrollY } = useScroll({ container: scroller });
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -107,11 +109,9 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
 
   return (
     <form ref={scroller} onSubmit={submit} className="scroll-thin -m-6 flex max-h-[92svh] flex-col gap-4 overflow-y-auto p-6">
-      <BannerHero server={server} bleed eyebrow="Apply to join" badge={<ClipboardPenIcon className="size-3.5" />} scrollY={scrollY}>
-        <DialogPrimitive.Title className="sr-only">Apply to join {server.name}</DialogPrimitive.Title>
-        <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-          Someone from the server reads this and lets you in. It waits in your server list until then.
-        </DialogPrimitive.Description>
+      <BannerHero server={server} bleed eyebrow={t("join.apply")} badge={<ClipboardPenIcon className="size-3.5" />} scrollY={scrollY}>
+        <DialogPrimitive.Title className="sr-only">{t("join.applyDialog.title", { server: server.name })}</DialogPrimitive.Title>
+        <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">{t("join.applyDialog.description")}</DialogPrimitive.Description>
       </BannerHero>
 
       {problem ? (
@@ -126,13 +126,13 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
         <>
           {form.rules.length > 0 && (
             <section className="flex flex-col gap-2">
-              <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Rules</h3>
+              <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("join.applyDialog.rules")}</h3>
               <RulesList rules={form.rules} className="scroll-thin max-h-56 overflow-y-auto pr-1" />
             </section>
           )}
           {form.questions.length > 0 && (
             <section className="flex flex-col gap-3">
-              <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">A few questions</h3>
+              <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("join.applyDialog.questions")}</h3>
               {form.questions.map((q, n) => {
                 const max = q.paragraph ? PARAGRAPH_MAX : LINE_MAX;
                 const value = answers[n] ?? "";
@@ -157,7 +157,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                         {q.prompt}
                         {q.required && <span className="text-destructive"> *</span>}
                       </span>
-                      {!q.required && <span className="shrink-0 text-xs font-normal text-muted-foreground">Optional</span>}
+                      {!q.required && <span className="shrink-0 text-xs font-normal text-muted-foreground">{t("join.applyDialog.optional")}</span>}
                     </label>
                     {q.paragraph ? (
                       <Textarea rows={3} {...props} className={cn("rounded-xl", bad && "border-destructive")} />
@@ -172,7 +172,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                           exit={{ opacity: 0, height: 0 }}
                           className={cn("text-xs", bad ? "text-destructive" : "text-muted-foreground")}
                         >
-                          {bad ? "This one needs an answer." : `${max - value.length} characters left`}
+                          {bad ? t("join.applyDialog.needsAnswer") : t("join.applyDialog.charactersLeft", { count: max - value.length })}
                         </motion.p>
                       )}
                     </AnimatePresence>
@@ -184,13 +184,13 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
           <motion.div animate={nudge} className="flex flex-col gap-3">
             {form.rules.length > 0 && (
               <AgreeCheck checked={agreed} onChange={setAgreed}>
-                I've read the rules and agree to them
+                {t("join.rules.agree")}
               </AgreeCheck>
             )}
             {apply.error && <p className="text-sm text-destructive first-letter:uppercase">{apply.error}</p>}
             <Button type="submit" size="lg" disabled={apply.pending} className="btn group h-11 rounded-xl font-bold">
               {apply.pending ? <LoaderCircleIcon className="animate-spin" /> : <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />}
-              Send application
+              {t("join.applyDialog.send")}
             </Button>
           </motion.div>
         </>

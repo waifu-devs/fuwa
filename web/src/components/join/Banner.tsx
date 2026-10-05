@@ -3,6 +3,7 @@ import { motion, useTransform, type MotionValue } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { ServerIcon } from "@/components/Icons";
 import { Count } from "@/components/motion";
+import { T } from "@/i18n/react";
 import { accentVars, bannerPosition, type BannerServer } from "@/lib/banner";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
@@ -162,7 +163,7 @@ export function BannerHero({
                 <span className="absolute size-2 animate-ping rounded-full bg-emerald-500/60 motion-reduce:hidden" />
                 <span className="size-1.5 rounded-full bg-emerald-500" />
               </span>
-              <UsersIcon className="ml-0.5 size-3.5" /> <Count value={Number(members)} /> {members === 1n ? "member" : "members"}
+              <UsersIcon className="ml-0.5 size-3.5" /> <T k="join.banner.members" count={Number(members)} values={{ count: <Count value={Number(members)} /> }} />
             </p>
           )}
         </motion.div>

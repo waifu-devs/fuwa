@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AnnouncementTone, type Announcement } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { InlineMarkdown } from "@/components/Markdown";
+import { useI18n } from "@/i18n/react";
 import { formatStamp, formatTime, sameDay, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
@@ -31,9 +32,9 @@ export function isLive(a: Announcement | undefined, now = Date.now()): a is Anno
 }
 
 export const TONES = {
-  [AnnouncementTone.INFO]: { label: "Info", icon: MegaphoneIcon, className: "announcement-info" },
-  [AnnouncementTone.WARNING]: { label: "Heads-up", icon: TriangleAlertIcon, className: "announcement-warning" },
-  [AnnouncementTone.CRITICAL]: { label: "Urgent", icon: SirenIcon, className: "announcement-critical" },
+  [AnnouncementTone.INFO]: { icon: MegaphoneIcon, className: "announcement-info" },
+  [AnnouncementTone.WARNING]: { icon: TriangleAlertIcon, className: "announcement-warning" },
+  [AnnouncementTone.CRITICAL]: { icon: SirenIcon, className: "announcement-critical" },
 } as const;
 
 export const toneOf = (a: Pick<Announcement, "tone">) =>
@@ -81,6 +82,7 @@ export const endsLabel = (d: Date) => (sameDay(d, new Date()) ? formatTime(d) : 
 
 /** The banner itself, also used as the live preview in the Announcement settings. */
 export function BannerBody({ announcement: a, onClose, preview = false }: { announcement: Announcement; onClose?: () => void; preview?: boolean }) {
+  const { t } = useI18n();
   const tone = TONES[toneOf(a)];
   const Icon = tone.icon;
   const critical = toneOf(a) === AnnouncementTone.CRITICAL;
@@ -113,14 +115,14 @@ export function BannerBody({ announcement: a, onClose, preview = false }: { anno
       </AnimatePresence>
       {a.endsAt && (
         <span className="hidden shrink-0 rounded-full bg-black/10 px-2 py-0.5 text-xs font-bold whitespace-nowrap sm:inline dark:bg-white/10" title={formatStamp(toDate(a.endsAt))}>
-          Until {endsLabel(toDate(a.endsAt))}
+          {t("shell.announcement.until", { time: endsLabel(toDate(a.endsAt)) })}
         </span>
       )}
       {onClose && (
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close the announcement"
+          aria-label={t("shell.announcement.close")}
           className="group grid size-7 shrink-0 place-items-center rounded-full transition hover:bg-black/10 active:scale-90 sm:absolute sm:top-1/2 sm:right-2 sm:-translate-y-1/2 dark:hover:bg-white/15"
         >
           <XIcon className="size-4 transition-transform duration-300 group-hover:rotate-90" />

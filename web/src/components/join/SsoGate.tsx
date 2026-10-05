@@ -5,6 +5,7 @@ import { startServerSso } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { ProviderButton } from "@/components/Connect";
 import { useLayout } from "@/components/Shell";
+import { T, useI18n } from "@/i18n/react";
 import { ssoLocked } from "@/lib/sso";
 
 /** Whether you're locked out of a server until you sign in through its provider. */
@@ -24,13 +25,14 @@ export function SsoGate({ instanceKey, server }: { instanceKey: string; server: 
   const start = useAction(startServerSso);
   const reduce = useReducedMotion();
   const { compact, setNavOpen } = useLayout();
-  const name = server.ssoName || "your organization";
+  const { t } = useI18n();
+  const name = server.ssoName || t("connect.provider.yourOrganization");
   const days = server.ssoRecheckDays;
   return (
     <div className="relative grid h-full place-items-center overflow-hidden p-6 text-center" data-testid="sso-gate">
       {compact && (
         <button type="button" onClick={() => setNavOpen(true)} className="absolute top-2 left-2 flex items-center gap-1 rounded-full px-3 py-2 text-sm font-bold text-muted-foreground hover:bg-muted">
-          <ChevronLeftIcon className="size-4" /> Channels
+          <ChevronLeftIcon className="size-4" /> {t("join.sso.channels")}
         </button>
       )}
       <motion.div
@@ -61,10 +63,12 @@ export function SsoGate({ instanceKey, server }: { instanceKey: string; server: 
           </motion.span>
         </div>
         <div className="flex flex-col gap-1.5">
-          <h2 className="text-xl font-extrabold tracking-tight">Sign in with {name}</h2>
+          <h2 className="text-xl font-extrabold tracking-tight">{t("join.sso.title", { name })}</h2>
           <p className="text-sm text-muted-foreground">
-            <b className="text-foreground">{server.name}</b> asks members to sign in through {name}
-            {days > 0 ? ` every ${days === 1 ? "day" : `${days} days`}` : ""}. You're still a member; the channels come back once you do.
+            <T
+              k={days > 0 ? "join.sso.noteEvery" : "join.sso.note"}
+              values={{ server: <b className="text-foreground">{server.name}</b>, name, count: days }}
+            />
           </p>
           {server.ssoHost && (
             <motion.p
@@ -75,7 +79,7 @@ export function SsoGate({ instanceKey, server }: { instanceKey: string; server: 
               data-testid="sso-gate-host"
             >
               <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
-              Signs you in at <b className="text-foreground">{server.ssoHost}</b>, which sees your IP address.
+              <T k="connect.provider.signsYouInAt" values={{ host: <b className="text-foreground">{server.ssoHost}</b> }} />
             </motion.p>
           )}
         </div>

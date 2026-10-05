@@ -2,6 +2,7 @@ import { ArrowRightIcon, HashIcon, MegaphoneIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { ChannelType, type Channel, type Emoji, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /** A suggested channel as a card: its emoji or kind, its name and why to go there. */
@@ -21,7 +22,7 @@ export function StartHere({
   emojis,
   onPick,
   wide = false,
-  label = "Start here",
+  label,
 }: {
   suggested: Suggested[];
   emojis: Emoji[] | undefined;
@@ -30,10 +31,11 @@ export function StartHere({
   wide?: boolean;
   label?: string;
 }) {
+  const { t } = useI18n();
   if (suggested.length === 0) return null;
   return (
     <div className="flex w-full flex-col gap-2 text-left">
-      <p className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{label ?? t("join.startHere")}</p>
       <div className={cn("grid gap-2", wide && "sm:grid-cols-2")}>
         {suggested.map((w, n) => (
           <motion.button

@@ -10,6 +10,7 @@ import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -107,6 +108,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
   const nudge = useAnimationControls();
   // Only while it's open: agreeing elsewhere (another tab) mustn't turn this into the reading view mid-way.
   const [agreeing] = useState(agree);
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +127,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
       return;
     }
     if ((await accept.go(instanceKey, server.id)) === undefined) return;
-    toast(`Welcome to ${server.name}! Say hi`);
+    toast(t("join.rules.welcomeToast", { server: server.name }));
     onDone();
   }
 
@@ -145,8 +147,8 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
         </motion.span>
         <div className="min-w-0 flex-1 pt-1">
           <DialogHeader
-            title={agreeing ? `Before you talk in ${server.name}` : `${server.name}'s rules`}
-            description={agreeing ? "Read the server's rules and agree to them. Until then you can read along, but not send messages." : "What everyone here agreed to."}
+            title={agreeing ? t("join.rules.beforeYouTalkIn", { server: server.name }) : t("join.rules.title", { server: server.name })}
+            description={agreeing ? t("join.rules.agreeNote") : t("join.rules.readNote")}
           />
         </div>
       </div>
@@ -160,7 +162,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
           ))}
         </div>
       ) : rules.length === 0 ? (
-        <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">This server has no rules right now{agreeing ? ", so you can talk straight away." : "."}</p>
+        <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">{agreeing ? t("join.rules.noneTalk") : t("join.rules.none")}</p>
       ) : (
         <RulesList rules={rules} className="scroll-thin max-h-[45svh] overflow-y-auto pr-1" />
       )}
@@ -168,7 +170,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
       {agreeing && rules !== null && rules.length > 0 && (
         <motion.div animate={nudge} className="flex flex-col gap-3">
           <AgreeCheck checked={checked} onChange={setChecked}>
-            I've read the rules and agree to them
+            {t("join.rules.agree")}
           </AgreeCheck>
           {accept.error && <p className="text-sm text-destructive first-letter:uppercase">{accept.error}</p>}
           <Button
@@ -187,7 +189,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
                 className="flex items-center gap-2"
               >
                 {accept.pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
-                Agree and start talking
+                {t("join.rules.agreeAndTalk")}
               </motion.span>
             </AnimatePresence>
           </Button>
@@ -195,7 +197,7 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
       )}
       {(!agreeing || (rules !== null && rules.length === 0)) && (
         <Button variant="outline" onClick={onDone} className="h-10 rounded-xl font-bold">
-          {agreeing ? "Start talking" : "Close"}
+          {agreeing ? t("join.rules.startTalking") : t("common.close")}
         </Button>
       )}
     </div>

@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
+import type { I18n } from "../i18n/i18n.ts";
 import { CLIENT_DATE, FEATURES, instanceHas, missing, shown, tooOld, updateLine } from "./compat.ts";
+
+/** The app's strings in English, as the page has them (i18n/i18n.ts needs Vite, so this reads the catalog itself). */
+const shell = JSON.parse(readFileSync(new URL("../../../locales/en/shell.json", import.meta.url), "utf8")) as Namespace;
+const english = flatten({ shell });
+const t: I18n["t"] = (key, values = {}) =>
+  fill(template("en", english, english, key, typeof values.count === "number" ? values.count : undefined), Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])));
 
 const ours = [
   { id: "a", date: "2026-10-04", title: "A" },
@@ -35,10 +43,12 @@ test("features show only where the instance has them", () => {
 test("the line names the instance and says what needs the update", () => {
   const extra = (id: string) => ({ id, date: "2099-01-01", title: id.toUpperCase() });
   const v = (features: { id: string; date: string; title: string }[], minClientDate = "") => ({ compatibilityDate: "2099-01-01", minClientDate, features });
-  assert.equal(updateLine(v([...FEATURES]), "Waifu Devs"), null);
-  assert.equal(updateLine(v([...FEATURES, extra("x")]), "Waifu Devs"), "Waifu Devs has X. Update fuwa to use it");
-  assert.equal(updateLine(v([...FEATURES, extra("x"), extra("y")]), "Waifu Devs"), "Waifu Devs has X and 1 more. Update fuwa to use them");
-  assert.equal(updateLine(v([...FEATURES], "2099-01-01"), "Waifu Devs"), "Waifu Devs needs a newer fuwa for everything to work");
+  assert.equal(updateLine(v([...FEATURES]), "Waifu Devs", t), null);
+  assert.equal(updateLine(v([...FEATURES, extra("x")]), "Waifu Devs", t), "Waifu Devs has X. Update fuwa to use it");
+  assert.equal(updateLine(v([...FEATURES, extra("x"), extra("y")]), "Waifu Devs", t), "Waifu Devs has X and 1 more. Update fuwa to use them");
+  assert.equal(updateLine(v([...FEATURES, extra("x"), extra("y"), extra("z")]), "Waifu Devs", t), "Waifu Devs has X and 2 more. Update fuwa to use them");
+  assert.equal(updateLine(v([...FEATURES], "2099-01-01"), "Waifu Devs", t), "Waifu Devs needs a newer fuwa for everything to work");
+  assert.equal(updateLine(v([...FEATURES, { id: "q", date: "2099-01-01", title: "://" }]), "", t), "An instance has something new. Update fuwa to use it");
 });
 
 test("what an instance says is shown short and plain", () => {

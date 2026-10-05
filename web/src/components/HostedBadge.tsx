@@ -4,10 +4,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { Private } from "@/components/Private";
 import { SPRING } from "@/components/motion";
+import { T, useI18n } from "@/i18n/react";
 import { hostedByUs } from "@/lib/hosted";
 import { cn } from "@/lib/utils";
-
-const LABEL = "Hosted by Waifu Devs";
 
 /** A five-petal flower, the badge's mark. Its petals open one after another when it appears. */
 export function FlowerMark({ className, bloom = true }: { className?: string; bloom?: boolean }) {
@@ -50,14 +49,16 @@ export function FlowerMark({ className, bloom = true }: { className?: string; bl
  */
 export function HostedBadge({ url, variant = "chip", className }: { url: string | undefined; variant?: "chip" | "mark" | "still"; className?: string }) {
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
   if (!hostedByUs(url)) return null;
+  const label = t("shell.hosted.label");
   const host = new URL(url!).host;
 
   if (variant === "still") {
     return (
       <span className={cn("hosted-chip", className)}>
         <FlowerMark className="size-3.5" />
-        {LABEL}
+        {label}
       </span>
     );
   }
@@ -68,16 +69,16 @@ export function HostedBadge({ url, variant = "chip", className }: { url: string 
         {variant === "mark" ? (
           <button
             type="button"
-            title={LABEL}
+            title={label}
             className={cn("group inline-grid size-5 shrink-0 place-items-center rounded-full text-primary transition hover:bg-primary/15 active:scale-90", className)}
           >
             <FlowerMark className="size-3.5 transition-transform duration-700 ease-out group-hover:rotate-[72deg]" />
-            <span className="sr-only">{LABEL}</span>
+            <span className="sr-only">{label}</span>
           </button>
         ) : (
           <button type="button" className={cn("hosted-chip group cursor-pointer transition active:scale-95", className)}>
             <FlowerMark className="size-3.5 transition-transform duration-700 ease-out group-hover:rotate-[72deg]" />
-            {LABEL}
+            {label}
           </button>
         )}
       </Popover.Trigger>
@@ -99,8 +100,8 @@ export function HostedBadge({ url, variant = "chip", className }: { url: string 
                     <FlowerMark className="size-7" />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-extrabold">{LABEL}</p>
-                    <p className="text-xs text-muted-foreground">The people who make fuwa run this instance.</p>
+                    <p className="font-extrabold">{label}</p>
+                    <p className="text-xs text-muted-foreground">{t("shell.hosted.who")}</p>
                   </div>
                 </div>
                 <motion.p
@@ -111,7 +112,7 @@ export function HostedBadge({ url, variant = "chip", className }: { url: string 
                 >
                   <LockIcon className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span className="min-w-0">
-                    <Private text={host} className="font-mono font-bold" /> · your browser checked its certificate
+                    <T k="shell.hosted.checked" values={{ host: <Private text={host} className="font-mono font-bold" /> }} />
                   </span>
                 </motion.p>
                 <motion.p
@@ -120,8 +121,7 @@ export function HostedBadge({ url, variant = "chip", className }: { url: string 
                   transition={{ ...SPRING, delay: 0.22 }}
                   className="relative mt-3 text-xs text-muted-foreground"
                 >
-                  Only instances at our own addresses get this badge. The app goes by the address alone, since any server could say anything about
-                  itself.
+                  {t("shell.hosted.why")}
                 </motion.p>
                 <motion.a
                   initial={{ opacity: 0 }}
@@ -132,7 +132,7 @@ export function HostedBadge({ url, variant = "chip", className }: { url: string 
                   rel="noreferrer"
                   className="group relative mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
                 >
-                  About fuwa
+                  {t("shell.hosted.about")}
                   <ArrowUpRightIcon className="size-3.5 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </motion.a>
               </motion.div>

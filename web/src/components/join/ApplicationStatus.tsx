@@ -9,6 +9,7 @@ import { BannerHero } from "@/components/join/Banner";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { useI18n } from "@/i18n/react";
 import { accentVars } from "@/lib/banner";
 import { ago } from "@/lib/format";
 import { toast } from "@/lib/ui";
@@ -32,23 +33,24 @@ export function useStanding(instanceKey: string, serverId: string): { standing: 
  * while it waits, and the answer pops in with the reason when there is one.
  */
 export function ApplicationTimeline({ standing, appliedAt, reason }: { standing: Standing; appliedAt: number | null; reason: string }) {
+  const { t } = useI18n();
   const done = standing !== "waiting";
   const stops: { id: string; icon: ReactNode; title: string; note: string; state: "done" | "now" | "later" | "no" }[] = [
-    { id: "sent", icon: <SendIcon className="size-3.5" />, title: "Sent", note: appliedAt ? `You applied ${ago(new Date(appliedAt))}.` : "You applied.", state: "done" },
+    { id: "sent", icon: <SendIcon className="size-3.5" />, title: t("join.timeline.sent"), note: appliedAt ? t("join.timeline.appliedAgo", { when: ago(new Date(appliedAt)) }) : t("join.timeline.applied"), state: "done" },
     {
       id: "read",
       icon: done ? <EyeIcon className="size-3.5" /> : <HourglassIcon className="size-3.5 animate-[flip_3s_ease-in-out_infinite]" />,
-      title: done ? "Read" : "Being read",
-      note: done ? "Someone from the server looked it over." : "Someone who can let people in reads it. This page updates by itself.",
+      title: done ? t("join.timeline.read") : t("join.timeline.beingRead"),
+      note: done ? t("join.timeline.readNote") : t("join.timeline.beingReadNote"),
       state: done ? "done" : "now",
     },
     standing === "declined"
-      ? { id: "answer", icon: <XIcon className="size-3.5" strokeWidth={3} />, title: "Turned down", note: reason ? "" : "They didn't say why. You can apply again.", state: "no" }
+      ? { id: "answer", icon: <XIcon className="size-3.5" strokeWidth={3} />, title: t("join.timeline.turnedDown"), note: reason ? "" : t("join.timeline.noReason"), state: "no" }
       : {
           id: "answer",
           icon: standing === "accepted" ? <PartyPopperIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />,
-          title: standing === "accepted" ? "You're in!" : "Let in",
-          note: standing === "accepted" ? "It's in your server list now." : "When they say yes, the server opens up for you.",
+          title: standing === "accepted" ? t("join.timeline.youreIn") : t("join.timeline.letIn"),
+          note: standing === "accepted" ? t("join.timeline.inYourList") : t("join.timeline.letInNote"),
           state: standing === "accepted" ? "done" : "later",
         },
   ];
@@ -97,7 +99,7 @@ export function ApplicationTimeline({ standing, appliedAt, reason }: { standing:
                 transition={{ ...SPRING, delay: 0.35 }}
                 className="mt-1.5 rounded-xl border-l-4 border-destructive/60 bg-destructive/5 px-3 py-2 text-sm break-words"
               >
-                “{reason}”
+                {t("join.quoted", { text: reason })}
               </motion.blockquote>
             )}
           </div>
@@ -126,51 +128,52 @@ export function ApplicationCard({
 }) {
   const { standing, appliedAt, reason } = useStanding(instanceKey, server.id);
   const withdraw = useAction(withdrawApplication);
+  const { t } = useI18n();
   return (
     <div style={accentVars(server)} className="flex flex-col gap-5">
       <BannerHero
         server={server}
         bleed
-        eyebrow={standing === "accepted" ? "You're in" : standing === "declined" ? "Your application to" : "Waiting to join"}
+        eyebrow={standing === "accepted" ? t("join.card.eyebrowIn") : standing === "declined" ? t("join.card.eyebrowDeclined") : t("join.card.eyebrowWaiting")}
         badge={standing === "waiting" ? <HourglassIcon className="size-3.5 animate-[flip_3s_ease-in-out_infinite]" /> : standing === "accepted" ? <CheckIcon className="size-3.5" strokeWidth={3} /> : <XIcon className="size-3.5" strokeWidth={3} />}
       />
-      <DialogPrimitive.Title className="sr-only">Your application to {server.name}</DialogPrimitive.Title>
-      <DialogPrimitive.Description className="sr-only">Where your application stands.</DialogPrimitive.Description>
+      <DialogPrimitive.Title className="sr-only">{t("join.card.title", { server: server.name })}</DialogPrimitive.Title>
+      <DialogPrimitive.Description className="sr-only">{t("join.card.description")}</DialogPrimitive.Description>
       <ApplicationTimeline standing={standing} appliedAt={appliedAt} reason={reason} />
       {withdraw.error && <p className="text-sm text-destructive first-letter:uppercase">{withdraw.error}</p>}
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.div key={standing} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={SPRING} className="flex flex-col gap-2 sm:flex-row-reverse">
           {standing === "accepted" ? (
             <Button onClick={onOpen ?? onDone} style={{ background: "var(--accent-server)" }} className="h-10 flex-1 rounded-xl font-bold text-white hover:brightness-110" data-burst="">
-              <PartyPopperIcon /> Open {server.name}
+              <PartyPopperIcon /> {t("join.card.open", { server: server.name })}
             </Button>
           ) : standing === "declined" ? (
             <>
               {onApplyAgain && (
                 <Button onClick={onApplyAgain} className="btn h-10 flex-1 rounded-xl font-bold">
-                  <ClipboardPenIcon /> Apply again
+                  <ClipboardPenIcon /> {t("join.applyAgain")}
                 </Button>
               )}
               <Button variant="outline" onClick={onDone} className="h-10 flex-1 rounded-xl font-bold">
-                Close
+                {t("common.close")}
               </Button>
             </>
           ) : (
             <>
               <Button onClick={onDone} className="btn h-10 flex-1 rounded-xl font-bold">
-                Got it
+                {t("join.card.gotIt")}
               </Button>
               <Button
                 variant="ghost"
                 disabled={withdraw.pending}
                 onClick={async () => {
                   if ((await withdraw.go(instanceKey, server.id)) === undefined) return;
-                  toast(`Took back your application to ${server.name}`);
+                  toast(t("join.withdrawn", { server: server.name }));
                   onDone();
                 }}
                 className="h-10 flex-1 rounded-xl font-bold text-muted-foreground hover:text-destructive"
               >
-                <Undo2Icon /> Take it back
+                <Undo2Icon /> {t("join.card.takeBack")}
               </Button>
             </>
           )}

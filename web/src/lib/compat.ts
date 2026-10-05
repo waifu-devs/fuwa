@@ -8,6 +8,7 @@
  * something broken, and everything else keeps working. Nothing is forced.
  */
 import list from "../gen/features.json" with { type: "json" };
+import type { I18n } from "../i18n/i18n.ts";
 
 export type FeatureInfo = { id: string; date: string; title: string };
 /** Just what's read of `Node.versions`, so plain objects work in tests. */
@@ -58,16 +59,16 @@ export function shown(text: string, fallback: string): string {
 
 /**
  * What an app that needs updating tells people, naming the instance it's
- * about, or null when it's fine.
+ * about, or null when it's fine. `t` is the app's language (i18n/).
  */
-export function updateLine(versions: VersionsInfo | undefined, instance: string): string | null {
-  const name = shown(instance, "An instance");
+export function updateLine(versions: VersionsInfo | undefined, instance: string, t: I18n["t"]): string | null {
+  const name = shown(instance, t("shell.update.anInstance"));
   const need = missing(versions);
   if (need.length) {
-    const first = shown(need[0]!.title, "something new");
+    const feature = shown(need[0]!.title, t("shell.update.somethingNew"));
     return need.length === 1
-      ? `${name} has ${first}. Update fuwa to use it`
-      : `${name} has ${first} and ${need.length - 1} more. Update fuwa to use them`;
+      ? t("shell.update.hasFeature", { instance: name, feature })
+      : t("shell.update.hasFeatures", { instance: name, feature, count: need.length - 1 });
   }
-  return tooOld(versions) ? `${name} needs a newer fuwa for everything to work` : null;
+  return tooOld(versions) ? t("shell.update.tooOld", { instance: name }) : null;
 }

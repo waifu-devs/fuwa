@@ -1,4 +1,5 @@
 import type { Node } from "@/gen/fuwa/v1/types_pb";
+import { useI18n } from "@/i18n/react";
 
 /**
  * "fuwa 0.4.2 · a0b78b7": the build an instance says it runs. The instance
@@ -7,12 +8,13 @@ import type { Node } from "@/gen/fuwa/v1/types_pb";
  * serve can show that.
  */
 export function BuildLabel({ node }: { node?: Node | null }) {
+  const { t } = useI18n();
   if (!node) return null;
   const commit = node.build?.commit.slice(0, 7);
   return (
     <span>
       fuwa {node.version}
-      {commit ? <span className="font-mono" title={`Built from commit ${node.build?.commit}`}> · {commit}</span> : null}
+      {commit ? <span className="font-mono" title={t("shell.build.commit", { commit: node.build?.commit ?? "" })}> · {commit}</span> : null}
     </span>
   );
 }

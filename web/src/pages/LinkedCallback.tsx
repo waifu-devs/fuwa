@@ -7,6 +7,8 @@ import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
+import type { Key } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { CALLBACK, issuerName, takePending } from "@/lib/linked";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -14,10 +16,12 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 type Phase =
   /** Trading the code for a session on the instance this tab started with. */
   | { kind: "finishing" }
+  /** `name` is empty when the account has none to show. */
   | { kind: "done"; name: string; created: boolean }
   /** Another fuwa app started this sign-in; it goes back there if the person says so. */
   | { kind: "handoff"; origin: string; code: string; state: string }
-  | { kind: "error"; title: string; message: string }
+  /** `message` is what the server or provider said, if anything; `note` is ours, shown when it said nothing. */
+  | { kind: "error"; title: Key; message?: string; note?: Key }
   | { kind: "cancelled" };
 
 /**
@@ -29,6 +33,7 @@ type Phase =
  */
 export function LinkedCallback() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: "finishing" });
   const [here, setHere] = useState<{ name: string; issuer: string } | null>(null);
   const once = useRef(false);
@@ -48,24 +53,24 @@ export function LinkedCallback() {
     const pending = state ? takePending(state) : null;
     if (pending) {
       if (problem || !code) {
-        setPhase({ kind: "error", title: "Didn't sign in", message: problem || "waifu.dev didn't send a sign-in back." });
+        setPhase({ kind: "error", title: "connect.callback.didntSignIn", message: problem, note: "connect.callback.nothingBackLinked" });
         return;
       }
       run(finishLinkedSignIn(pending, state, code)).then(
         ({ key, user, created }) => {
-          setPhase({ kind: "done", name: user?.displayName || user?.username || "you", created });
+          setPhase({ kind: "done", name: user?.displayName || user?.username || "", created });
           window.setTimeout(() => {
             if (pending.next) navigate({ to: pending.next, replace: true });
             else navigate({ to: "/$instance", params: { instance: key }, replace: true });
           }, 1500);
         },
-        (err: Error) => setPhase({ kind: "error", title: "Couldn't sign in", message: err.message }),
+        (err: Error) => setPhase({ kind: "error", title: "connect.callback.couldntSignIn", message: err.message }),
       );
       return;
     }
 
     if (!state) {
-      setPhase({ kind: "error", title: "Nothing to finish", message: "There's no sign-in waiting here." });
+      setPhase({ kind: "error", title: "connect.callback.nothingToFinish", note: "connect.callback.nothingWaiting" });
       return;
     }
     run(probe(window.location.origin)).then(
@@ -75,14 +80,14 @@ export function LinkedCallback() {
     run(linkedSignInOrigin(window.location.origin, state)).then(
       (origin) => {
         if (origin === window.location.origin) {
-          setPhase({ kind: "error", title: "Started somewhere else", message: "This sign-in began in another tab. Start it again from here." });
+          setPhase({ kind: "error", title: "connect.callback.elsewhere", note: "connect.callback.elsewhereNote" });
         } else if (problem || !code) {
-          setPhase({ kind: "error", title: "Didn't sign in", message: problem || "waifu.dev didn't send a sign-in back." });
+          setPhase({ kind: "error", title: "connect.callback.didntSignIn", message: problem, note: "connect.callback.nothingBackLinked" });
         } else {
           setPhase({ kind: "handoff", origin, code, state });
         }
       },
-      () => setPhase({ kind: "error", title: "This sign-in ran out", message: "Sign-ins last ten minutes. Start again from the app." }),
+      () => setPhase({ kind: "error", title: "connect.callback.ranOut", note: "connect.callback.ranOutNote" }),
     );
   }, [navigate]);
 
@@ -116,39 +121,42 @@ export function LinkedCallback() {
             {phase.kind === "finishing" && (
               <>
                 <Bridge />
-                <Title>Signing you in</Title>
-                <p className="text-sm text-muted-foreground">Checking your sign-in…</p>
+                <Title>{t("connect.callback.signingIn")}</Title>
+                <p className="text-sm text-muted-foreground">{t("connect.callback.checking")}</p>
               </>
             )}
             {phase.kind === "done" && (
               <>
                 <Check />
-                <Title>{phase.created ? `Welcome, ${phase.name}!` : `Welcome back, ${phase.name}!`}</Title>
+                <Title>{t(phase.created ? "connect.callback.welcome" : "connect.callback.welcomeBack", { name: phase.name || t("connect.callback.you") })}</Title>
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <LoaderCircleIcon className="size-4 animate-spin" /> Taking you in
+                  <LoaderCircleIcon className="size-4 animate-spin" /> {t("connect.callback.takingYouIn")}
                 </p>
               </>
             )}
             {phase.kind === "handoff" && (
               <>
                 <Bridge still />
-                <Title>Finish signing in?</Title>
+                <Title>{t("connect.callback.finishTitle")}</Title>
                 <p className="text-sm text-muted-foreground">
-                  You signed in with {here?.issuer ?? "waifu.dev"} to use <b className="text-foreground">{here?.name ?? "this server"}</b> in the fuwa app at
+                  <T
+                    k="connect.callback.linkedHandoff"
+                    values={{ issuer: here?.issuer ?? "waifu.dev", server: <b className="text-foreground">{here?.name ?? t("connect.callback.thisServer")}</b> }}
+                  />
                 </p>
                 <span className="max-w-full truncate rounded-xl border bg-muted/60 px-3 py-1.5 font-mono text-sm font-bold">
                   <Private text={phase.origin} />
                 </span>
                 <p className="flex items-start gap-2 rounded-2xl bg-amber-500/10 p-3 text-left text-xs text-amber-700 dark:text-amber-300">
                   <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
-                  Only continue if you started this there yourself. Whoever runs that app gets signed in as you.
+                  {t("connect.callback.linkedWarning")}
                 </p>
                 <div className="flex w-full flex-col gap-2 sm:flex-row-reverse">
                   <Button size="lg" className="btn h-11 rounded-xl font-bold sm:flex-1" onClick={() => handOff(phase)}>
-                    Continue <ArrowRightIcon className="transition group-hover:translate-x-0.5" />
+                    {t("common.continue")} <ArrowRightIcon className="transition group-hover:translate-x-0.5" />
                   </Button>
                   <Button size="lg" variant="ghost" className="h-11 rounded-xl font-bold sm:flex-1" onClick={() => setPhase({ kind: "cancelled" })}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                 </div>
               </>
@@ -158,8 +166,8 @@ export function LinkedCallback() {
                 <Badge tone="muted">
                   <CheckIcon className="size-7" />
                 </Badge>
-                <Title>Nothing was signed in</Title>
-                <p className="text-sm text-muted-foreground">You can close this tab.</p>
+                <Title>{t("connect.callback.cancelledTitle")}</Title>
+                <p className="text-sm text-muted-foreground">{t("connect.callback.closeTab")}</p>
               </>
             )}
             {phase.kind === "error" && (
@@ -167,10 +175,10 @@ export function LinkedCallback() {
                 <Badge tone="error">
                   <CloudOffIcon className="size-7" />
                 </Badge>
-                <Title>{phase.title}</Title>
-                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message}</p>
+                <Title>{t(phase.title)}</Title>
+                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message || (phase.note && t(phase.note))}</p>
                 <Button size="lg" className="btn h-11 w-full rounded-xl font-bold" onClick={() => navigate({ to: "/", replace: true })}>
-                  Back to fuwa
+                  {t("connect.callback.backToFuwa")}
                 </Button>
               </>
             )}

@@ -1,6 +1,9 @@
 import { type Catalog, flatten, isTag, type Meta, type Namespace } from "./core.ts";
 import englishCommon from "../../../locales/en/common.json";
+import englishConnect from "../../../locales/en/connect.json";
+import englishJoin from "../../../locales/en/join.json";
 import englishSettings from "../../../locales/en/settings.json";
+import englishShell from "../../../locales/en/shell.json";
 
 /**
  * The languages this build ships: every folder under locales/ with a meta.json.
@@ -14,7 +17,7 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
 
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
-export const ENGLISH = { common: englishCommon, settings: englishSettings } as const;
+export const ENGLISH = { common: englishCommon, connect: englishConnect, join: englishJoin, settings: englishSettings, shell: englishShell } as const;
 export type Namespaces = typeof ENGLISH;
 export const english: Catalog = flatten(ENGLISH);
 

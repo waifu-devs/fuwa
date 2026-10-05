@@ -19,6 +19,7 @@ import { has } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { lazyComponent } from "@/components/lazy";
+import { useI18n } from "@/i18n/react";
 
 /** Onboarding opens once per server at most, so its steps come in their own file. */
 const OnboardingDialog = lazyComponent(() => import("@/components/join/Onboarding").then((m) => m.OnboardingDialog));
@@ -53,9 +54,10 @@ export function WelcomeCard({
   scrollY?: Parameters<typeof BannerHero>[0]["scrollY"];
 }) {
   const suggested = suggestedChannels(screen, channels);
+  const { t } = useI18n();
   return (
     <div style={accentVars(server)} className={cn("flex flex-col gap-4", className)}>
-      <BannerHero server={server} eyebrow="Welcome to" bleed={bleed} compact={compact} scrollY={scrollY} badge={<span className="text-sm">👋</span>}>
+      <BannerHero server={server} eyebrow={t("join.welcome.eyebrow")} bleed={bleed} compact={compact} scrollY={scrollY} badge={<span className="text-sm">👋</span>}>
         {screen.description.trim() && (
           <motion.p
             initial={{ opacity: 0, y: 6 }}
@@ -227,16 +229,17 @@ function WelcomeBody({
   const scroller = useRef<HTMLDivElement>(null);
   const { scrollY } = useScroll({ container: scroller });
   const [agreeing] = useState(agree);
+  const { t } = useI18n();
   return (
     <div ref={scroller} className="scroll-thin -m-6 max-h-[92svh] overflow-y-auto p-6 pb-5">
-      <DialogPrimitive.Title className="sr-only">Welcome to {server.name}</DialogPrimitive.Title>
-      <DialogPrimitive.Description className="sr-only">The channels {server.name} suggests starting in.</DialogPrimitive.Description>
+      <DialogPrimitive.Title className="sr-only">{t("join.welcome.title", { server: server.name })}</DialogPrimitive.Title>
+      <DialogPrimitive.Description className="sr-only">{t("join.welcome.description", { server: server.name })}</DialogPrimitive.Description>
       <WelcomeCard server={server} screen={screen} channels={channels} emojis={emojis} onPick={agreeing ? undefined : onPick} bleed wide scrollY={scrollY} />
       {agreeing ? (
         <AgreeRules instanceKey={instanceKey} server={server} onDone={onClose} />
       ) : (
         <button type="button" onClick={onClose} className="mx-auto mt-5 block w-fit text-sm font-bold text-muted-foreground transition hover:text-foreground">
-          I'll look around myself
+          {t("join.welcome.lookAround")}
         </button>
       )}
     </div>
@@ -249,6 +252,7 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
   const [checked, setChecked] = useState(false);
   const accept = useAction(agreeToRules);
   const nudge = useAnimationControls();
+  const { t } = useI18n();
   useEffect(() => {
     let cancelled = false;
     run(getJoinForm(instanceKey, server.id)).then(
@@ -266,14 +270,14 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
       return;
     }
     if ((await accept.go(instanceKey, server.id)) === undefined) return;
-    toast(`Welcome to ${server.name}! Say hi`);
+    toast(t("join.rules.welcomeToast", { server: server.name }));
     onDone();
   }
 
   return (
     <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.3 }} className="mt-5 flex flex-col gap-3">
       <p className="flex items-center gap-1.5 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
-        <ScrollTextIcon className="size-3.5" /> Before you talk
+        <ScrollTextIcon className="size-3.5" /> {t("join.welcome.beforeYouTalk")}
       </p>
       {rules === null ? (
         <div className="flex flex-col gap-2">
@@ -286,7 +290,7 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
       )}
       <motion.div animate={nudge} className="flex flex-col gap-3">
         <AgreeCheck checked={checked} onChange={setChecked}>
-          I've read the rules and agree to them
+          {t("join.rules.agree")}
         </AgreeCheck>
         {accept.error && <p className="text-sm text-destructive first-letter:uppercase">{accept.error}</p>}
         <Button size="lg" onClick={() => void submit()} disabled={accept.pending} className={cn("h-11 rounded-xl font-bold transition-opacity", checked ? "btn" : "opacity-60")}>
@@ -300,7 +304,7 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
               className="flex items-center gap-2"
             >
               {accept.pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
-              Agree and start talking
+              {t("join.rules.agreeAndTalk")}
             </motion.span>
           </AnimatePresence>
         </Button>

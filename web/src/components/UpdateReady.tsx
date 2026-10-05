@@ -5,6 +5,7 @@ import { SPRING } from "@/components/motion";
 import { updateLine } from "@/lib/compat";
 import { FRESH, entryOf, look, type Freshness } from "@/lib/fresh";
 import { useInstances } from "@/fuwa/hooks";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError, reportUsage } from "@/lib/reports";
 
@@ -62,13 +63,14 @@ export function UpdateReady() {
   /** The build "Later" was pressed for; a newer deploy asks again. */
   const [later, setLater] = useState<string | null>(null);
   const fresh = useRef<Freshness>(FRESH);
+  const { t } = useI18n();
   // An instance with features this app doesn't know asks for a newer app too
   // (lib/compat.ts); the rest keeps working.
   // Reload only helps when it's this page's own instance; another instance's
   // features need the app it serves, or a newer fuwa there.
   const need =
     useInstances()
-      .map((i) => ({ line: updateLine(i.node?.versions, i.node?.name || hostOf(i.url)), own: sameOrigin(i.url) }))
+      .map((i) => ({ line: updateLine(i.node?.versions, i.node?.name || hostOf(i.url), t), own: sameOrigin(i.url) }))
       .find((n) => n.line !== null) ?? null;
   const needs = need?.line ?? null;
   const showing = behind && behind !== later ? "updated" : needs && needs !== later ? "needs" : null;
@@ -131,7 +133,7 @@ export function UpdateReady() {
             )}
             <SparklesIcon className="size-4" />
           </span>
-          <span className="min-w-0 truncate font-semibold">{showing === "updated" ? "fuwa was updated" : needs}</span>
+          <span className="min-w-0 truncate font-semibold">{showing === "updated" ? t("shell.update.updated") : needs}</span>
           {canReload && (
             <button
               type="button"
@@ -139,14 +141,14 @@ export function UpdateReady() {
               className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-[0.97]"
             >
               <RefreshCwIcon className="size-3.5" />
-              Reload
+              {t("shell.update.reload")}
             </button>
           )}
           <button
             type="button"
             onClick={() => setLater(showing === "updated" ? behind : needs)}
-            aria-label="Later"
-            title="Later: keep using this version until you reload"
+            aria-label={t("shell.update.later")}
+            title={t("shell.update.laterHint")}
             className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <XIcon className="size-4" />

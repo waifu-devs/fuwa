@@ -13,11 +13,13 @@ export function useI18n(): I18n {
 /**
  * A string with elements in its placeholders, for the few that need bold text
  * or a link inside: <T k="..." values={{ count: <b>{n}</b> }} />. The catalog
- * stays plain text; the elements come from the app.
+ * stays plain text; the elements come from the app. When {count} holds an
+ * element (an animated number, say), `count` gives the number that picks the
+ * plural form.
  */
-export function T({ k, values = {} }: { k: Key; values?: Record<string, ReactNode> }) {
+export function T({ k, values = {}, count: given }: { k: Key; values?: Record<string, ReactNode>; count?: number }) {
   const { locale, catalog, number } = useI18n();
-  const count = typeof values.count === "number" ? values.count : undefined;
+  const count = given ?? (typeof values.count === "number" ? values.count : undefined);
   return (
     <>
       {parts(template(locale, catalog, english, k, count)).map((part, n) => {
