@@ -8,6 +8,7 @@ import { useAccess, useAction } from "@/fuwa/hooks";
 import { ProviderButton } from "@/components/Connect";
 import { CountUp, SPRING } from "@/components/motion";
 import { IdentityCard } from "@/pages/SsoDone";
+import { T, useI18n } from "@/i18n/react";
 import { providerReady } from "@/lib/sso";
 import { Choice, SaveBar, Setting, Toggle } from "../controls";
 import { fullProvider, IdentityProviderForm, providerFingerprint } from "../IdentityProviderForm";
@@ -21,6 +22,7 @@ const RECHECKS = [7, 30, 90, 0] as const;
  * it themselves before requiring it, so nobody locks themselves out.
  */
 export function SingleSignOn({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const { t } = useI18n();
   const access = useAccess(instanceKey, server.id);
   const [saved, setSaved] = useState<ServerSso | null>(null);
   const [mine, setMine] = useState<SsoIdentity | undefined>(undefined);
@@ -62,7 +64,7 @@ export function SingleSignOn({ instanceKey, server }: { instanceKey: string; ser
   const providerDirty = providerFingerprint(provider) !== providerFingerprint(saved.provider);
   const changes = [providerDirty, required !== saved.required, recheck !== saved.recheckDays].filter(Boolean).length;
   const savedReady = providerReady(saved.provider);
-  const name = saved.provider?.name || "the provider";
+  const name = saved.provider?.name || t("serversettings.sso.theProvider");
   const mayRequire = access.owner || !!mine;
 
   const before = saved;
@@ -98,18 +100,24 @@ export function SingleSignOn({ instanceKey, server }: { instanceKey: string; ser
           </motion.span>
           <div className="min-w-0 flex-1">
             <p className="font-extrabold">
-              {!savedReady ? "Not set up" : saved.required ? `Members sign in with ${name}` : `${name} is set up, not required`}
+              {!savedReady ? t("serversettings.sso.notSetUp") : saved.required ? t("serversettings.sso.required", { name }) : t("serversettings.sso.notRequired", { name })}
             </p>
             <p className="text-sm text-muted-foreground">
               {savedReady ? (
-                <>
-                  <b className="text-foreground">
-                    <CountUp value={Number(saved.signedInMembers)} />
-                  </b>{" "}
-                  of <CountUp value={Number(server.memberCount)} /> members signed in
-                </>
+                <T
+                  k="serversettings.sso.signedIn"
+                  values={{
+                    signedIn: (
+                      <b className="text-foreground">
+                        <CountUp value={Number(saved.signedInMembers)} />
+                      </b>
+                    ),
+                    count: <CountUp value={Number(server.memberCount)} />,
+                  }}
+                  count={Number(server.memberCount)}
+                />
               ) : (
-                "Anyone who can join gets in the usual way."
+                t("serversettings.sso.usualWay")
               )}
             </p>
           </div>
@@ -136,21 +144,21 @@ export function SingleSignOn({ instanceKey, server }: { instanceKey: string; ser
           })
         }
         serviceProvider={saved.serviceProvider}
-        offHint="Join the usual way."
+        offHint={t("serversettings.sso.offHint")}
       />
 
       {provider.protocol !== SsoProtocol.UNSPECIFIED && (
         <>
-          <Setting id="sso-yours" title="Your sign-in" hint="Sign in through the provider to see that it works. It's also how you show you can before requiring it." badge={false} delay={0.2}>
+          <Setting id="sso-yours" title={t("serversettings.sso.yours")} hint={t("serversettings.sso.yoursHint")} badge={false} delay={0.2}>
             {mine && !providerDirty ? (
               <IdentityCard identity={mine} />
             ) : (
-              <p className="text-sm text-muted-foreground">{providerDirty ? "Save first; signing in uses the saved provider." : "You haven't signed in through it yet."}</p>
+              <p className="text-sm text-muted-foreground">{providerDirty ? t("serversettings.sso.saveFirst") : t("serversettings.sso.notYet")}</p>
             )}
             {savedReady && !providerDirty && (
               <ProviderButton
                 name={name}
-                label={mine ? `Sign in with ${name} again` : `Sign in with ${name}`}
+                label={mine ? t("serversettings.sso.signInAgain", { name }) : t("join.sso.title", { name })}
                 icon={<UserCheckIcon className="size-5" />}
                 onGo={() => signIn.go(instanceKey, server.id, { next: window.location.pathname })}
                 error={signIn.error}
@@ -158,29 +166,36 @@ export function SingleSignOn({ instanceKey, server }: { instanceKey: string; ser
               />
             )}
           </Setting>
-          <Setting id="sso-required" title="Require it" badge={false} delay={0.24}>
+          <Setting id="sso-required" title={t("serversettings.sso.requireIt")} badge={false} delay={0.24}>
             <Toggle
               checked={required}
               onChange={setRequired}
               disabled={!savedReady || providerDirty || (!saved.required && !mayRequire)}
-              label={`Members sign in with ${name} to join and to stay`}
+              label={t("serversettings.sso.requireLabel", { name })}
               hint={
                 !savedReady || providerDirty
-                  ? "Save the provider first."
+                  ? t("serversettings.sso.saveProviderFirst")
                   : !saved.required && !mayRequire
-                    ? "Sign in through it yourself first, so you don't lock yourself out."
-                    : "Members who haven't still belong, but see no channels until they sign in. The owner and agents never need to."
+                    ? t("serversettings.sso.signInYourselfFirst")
+                    : t("serversettings.sso.requireHint")
               }
             />
           </Setting>
-          <Setting id="sso-recheck" title="Sign in again" hint="How long a sign-in lasts. When it runs out, members sign in again to keep seeing the server." badge={false} delay={0.28}>
+          <Setting id="sso-recheck" title={t("serversettings.nav.ssoRecheck")} hint={t("serversettings.sso.recheckHint")} badge={false} delay={0.28}>
             <Choice
               value={RECHECKS.includes(recheck as (typeof RECHECKS)[number]) ? recheck : 30}
               onChange={setRecheck}
               options={RECHECKS.map((days) => ({
                 value: days,
-                label: days === 0 ? "Never" : days === 7 ? "Every week" : `Every ${days} days`,
-                hint: days === 0 ? "Once is enough." : days === 7 ? "Tightest." : days === 30 ? "A good default." : "Lightest.",
+                label: days === 0 ? t("serversettings.shared.never") : days === 7 ? t("serversettings.sso.everyWeek") : t("serversettings.sso.everyDays", { count: days }),
+                hint:
+                  days === 0
+                    ? t("serversettings.sso.onceEnough")
+                    : days === 7
+                      ? t("serversettings.sso.tightest")
+                      : days === 30
+                        ? t("serversettings.sso.goodDefault")
+                        : t("serversettings.sso.lightest"),
                 icon: days === 0 ? <InfinityIcon className="size-4" /> : days === 7 ? <CalendarClockIcon className="size-4" /> : <CalendarDaysIcon className="size-4" />,
               }))}
             />

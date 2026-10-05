@@ -12,6 +12,8 @@ import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useI18n } from "@/i18n/react";
+import type { Key } from "@/i18n/i18n";
 import { cn } from "@/lib/utils";
 
 /** As on the server. */
@@ -27,7 +29,8 @@ let nextId = 1;
 const rulesOf = (list: string[]): Rule[] => list.map((text) => ({ id: nextId++, text }));
 const questionsOf = (list: QuestionDraft[]): Question[] => list.map((q) => ({ prompt: q.prompt, paragraph: q.paragraph, required: q.required, id: nextId++ }));
 
-const STARTERS = ["Be kind. No harassment, hate or slurs.", "Keep it safe for work.", "No spam or self-promotion without asking."];
+/** Rules to start from, as catalog keys; picked, one becomes the rule's text in the app's language. */
+const STARTERS: readonly Key[] = ["serversettings.joinForm.starterKind", "serversettings.joinForm.starterSafe", "serversettings.joinForm.starterSpam"];
 
 /**
  * The rules new members agree to before they talk, and the questions people
@@ -35,6 +38,7 @@ const STARTERS = ["Be kind. No harassment, hate or slurs.", "Keep it safe for wo
  * few paragraphs, and can be optional.
  */
 export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instanceKey: string; server: Server; onOpenAccess: () => void }) {
+  const { t } = useI18n();
   const [saved, setSaved] = useState<{ rules: string[]; questions: QuestionDraft[] } | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -61,7 +65,9 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
     [rules, questions],
   );
   // Starting points, while the rules are only ever these.
-  const ideas = rules.every((r) => STARTERS.includes(r.text) || !r.text.trim()) ? STARTERS.filter((t) => !rules.some((r) => r.text === t)) : [];
+  const starters = STARTERS.map((key) => t(key));
+  const startersSet = new Set(starters);
+  const ideas = rules.every((r) => startersSet.has(r.text) || !r.text.trim()) ? starters.filter((text) => !rules.some((r) => r.text === text)) : [];
   const changes = saved
     ? Number(JSON.stringify(draft.rules) !== JSON.stringify(saved.rules)) + Number(JSON.stringify(draft.questions) !== JSON.stringify(saved.questions))
     : 0;
@@ -80,10 +86,8 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
         <section data-setting="rules" className="flex flex-col gap-3 border-b border-border/70 pb-6">
           <span className="flex items-end justify-between gap-3">
             <span>
-              <span className="block font-extrabold">Rules</span>
-              <span className="block text-sm text-muted-foreground">
-                New members read these and agree before they can send messages. Markdown works. Drag to reorder.
-              </span>
+              <span className="block font-extrabold">{t("serversettings.nav.rules")}</span>
+              <span className="block text-sm text-muted-foreground">{t("serversettings.joinForm.rulesHint")}</span>
             </span>
             <span className="shrink-0 text-xs font-bold text-muted-foreground tabular-nums">
               <Count value={rules.length} />/{MAX_RULES}
@@ -114,7 +118,7 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
               >
                 <div className="flex flex-col gap-2 rounded-2xl border border-dashed p-4">
                   <p className="text-sm text-muted-foreground">
-                    {rules.length ? "More to start from:" : "No rules: new members talk straight away. Start from one of these, or write your own."}
+                    {rules.length ? t("serversettings.joinForm.moreStarters") : t("serversettings.joinForm.noRules")}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <AnimatePresence initial={false} mode="popLayout">
@@ -151,15 +155,15 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
             }}
             className="group self-start rounded-xl font-bold"
           >
-            <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> Add a rule
+            <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> {t("serversettings.joinForm.addRule")}
           </Button>
         </section>
 
         <section data-setting="questions" className="flex flex-col gap-3 pt-6">
           <span className="flex items-end justify-between gap-3">
             <span>
-              <span className="block font-extrabold">Questions</span>
-              <span className="block text-sm text-muted-foreground">Asked when people apply to join. Whoever reviews applications reads the answers.</span>
+              <span className="block font-extrabold">{t("serversettings.joinForm.questions")}</span>
+              <span className="block text-sm text-muted-foreground">{t("serversettings.joinForm.questionsHint")}</span>
             </span>
             <span className="shrink-0 text-xs font-bold text-muted-foreground tabular-nums">
               <Count value={questions.length} />/{MAX_QUESTIONS}
@@ -173,9 +177,9 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
                 exit={{ opacity: 0, height: 0 }}
                 className="flex flex-wrap items-center gap-3 overflow-hidden rounded-2xl bg-muted/60 p-3 text-sm"
               >
-                <span className="min-w-0 flex-1 text-muted-foreground">People join straight away right now, so nobody is asked these yet.</span>
+                <span className="min-w-0 flex-1 text-muted-foreground">{t("serversettings.joinForm.notAsked")}</span>
                 <Button type="button" size="sm" variant="outline" onClick={onOpenAccess} className="rounded-xl font-bold">
-                  Turn on Apply to join
+                  {t("serversettings.joinForm.turnOnApply")}
                 </Button>
               </motion.div>
             )}
@@ -202,7 +206,7 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
             }}
             className="group self-start rounded-xl font-bold"
           >
-            <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> Add a question
+            <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> {t("serversettings.joinForm.addQuestion")}
           </Button>
         </section>
       </div>
@@ -234,6 +238,7 @@ function RuleRow({
   onChange: (text: string) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const drag = useDragControls();
   return (
     <Reorder.Item
@@ -250,7 +255,7 @@ function RuleRow({
       <div className="group flex items-center gap-2 rounded-2xl border bg-background/50 p-1.5 pl-1 transition-colors focus-within:border-primary/50">
         <button
           type="button"
-          aria-label="Drag to reorder"
+          aria-label={t("serversettings.shared.dragToReorder")}
           onPointerDown={(e) => drag.start(e)}
           className="grid h-8 w-6 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:cursor-grabbing"
         >
@@ -266,17 +271,17 @@ function RuleRow({
           {index + 1}
         </motion.span>
         <Input
-          aria-label={`Rule ${index + 1}`}
+          aria-label={t("serversettings.joinForm.rule", { index: index + 1 })}
           autoFocus={autoFocus}
           value={rule.text}
           maxLength={RULE_MAX}
-          placeholder="Write a rule"
+          placeholder={t("serversettings.joinForm.writeRule")}
           onChange={(e) => onChange(e.target.value)}
           className="h-9 flex-1 rounded-lg border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
         />
         <button
           type="button"
-          aria-label={`Remove rule ${index + 1}`}
+          aria-label={t("serversettings.joinForm.removeRule", { index: index + 1 })}
           onClick={onRemove}
           className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
         >
@@ -300,6 +305,7 @@ function QuestionCard({
   onChange: (patch: Partial<QuestionDraft>) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <motion.div
       layout
@@ -310,10 +316,10 @@ function QuestionCard({
       className="flex flex-col gap-3 rounded-2xl border bg-background/50 p-3 transition-colors focus-within:border-primary/50"
     >
       <div className="flex items-center gap-2">
-        <span className="shrink-0 text-xs font-extrabold text-muted-foreground uppercase">Question {index + 1}</span>
+        <span className="shrink-0 text-xs font-extrabold text-muted-foreground uppercase">{t("serversettings.joinForm.question", { index: index + 1 })}</span>
         <button
           type="button"
-          aria-label={`Remove question ${index + 1}`}
+          aria-label={t("serversettings.joinForm.removeQuestion", { index: index + 1 })}
           onClick={onRemove}
           className="ml-auto grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
         >
@@ -321,26 +327,26 @@ function QuestionCard({
         </button>
       </div>
       <Input
-        aria-label={`Question ${index + 1}`}
+        aria-label={t("serversettings.joinForm.question", { index: index + 1 })}
         autoFocus={autoFocus}
         value={q.prompt}
         maxLength={PROMPT_MAX}
-        placeholder="How did you find us?"
+        placeholder={t("serversettings.joinForm.questionPlaceholder")}
         onChange={(e) => onChange({ prompt: e.target.value })}
         className="h-10 rounded-xl"
       />
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Segmented
-          label="Answer length"
+          label={t("serversettings.joinForm.answerLength")}
           value={q.paragraph ? "paragraph" : "line"}
           onChange={(v) => onChange({ paragraph: v === "paragraph" })}
           options={[
-            { value: "line", label: "A line", icon: <MinusIcon className="size-3.5" /> },
-            { value: "paragraph", label: "Paragraphs", icon: <AlignLeftIcon className="size-3.5" /> },
+            { value: "line", label: t("serversettings.joinForm.line"), icon: <MinusIcon className="size-3.5" /> },
+            { value: "paragraph", label: t("serversettings.joinForm.paragraphs"), icon: <AlignLeftIcon className="size-3.5" /> },
           ]}
         />
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm font-bold">
-          Required <Switch checked={q.required} onCheckedChange={(required) => onChange({ required })} />
+          {t("serversettings.joinForm.required")} <Switch checked={q.required} onCheckedChange={(required) => onChange({ required })} />
         </label>
       </div>
     </motion.div>
@@ -349,16 +355,17 @@ function QuestionCard({
 
 /** The rules and questions as people will see them on their way in. */
 function FormPreview({ rules, questions }: { rules: string[]; questions: QuestionDraft[] }) {
+  const { t } = useI18n();
   const [agreed, setAgreed] = useState(false);
   return (
     <div className="flex flex-col gap-3 rounded-3xl border bg-card p-4 shadow-lg">
       <p className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-        <ScrollTextIcon className="size-3.5" /> {questions.length ? "Applying to join" : "A new member's first look"}
+        <ScrollTextIcon className="size-3.5" /> {questions.length ? t("serversettings.joinForm.previewApplying") : t("serversettings.joinForm.previewFirstLook")}
       </p>
       {rules.length ? (
         <RulesList rules={rules} className="max-h-72 overflow-y-auto [&_li]:p-2 [&_li]:text-xs" />
       ) : (
-        <p className="rounded-2xl bg-muted/50 p-3 text-xs text-muted-foreground">No rules, so nothing to agree to.</p>
+        <p className="rounded-2xl bg-muted/50 p-3 text-xs text-muted-foreground">{t("serversettings.joinForm.previewNoRules")}</p>
       )}
       <AnimatePresence initial={false}>
         {questions.map((q, n) => (
@@ -380,7 +387,7 @@ function FormPreview({ rules, questions }: { rules: string[]; questions: Questio
       </AnimatePresence>
       {rules.length > 0 && (
         <AgreeCheck checked={agreed} onChange={setAgreed}>
-          <span className="text-xs">I've read the rules and agree to them</span>
+          <span className="text-xs">{t("join.rules.agree")}</span>
         </AgreeCheck>
       )}
     </div>

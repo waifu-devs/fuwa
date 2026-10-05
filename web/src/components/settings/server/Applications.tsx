@@ -10,7 +10,7 @@ import { Count, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ago, displayName, roughly, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,7 @@ type Decision = { userId: string; approve: boolean };
  * see) sends it off to the left. New ones slide in as they arrive.
  */
 export function Applications({ instanceKey, serverId, takesApplications }: { instanceKey: string; serverId: string; takesApplications: boolean }) {
+  const { t } = useI18n();
   const list = useFuwa((s) => s.instances[instanceKey]?.applications[serverId]);
   const [error, setError] = useState<string | null>(null);
   const [decided, setDecided] = useState<Decision | null>(null);
@@ -44,10 +45,16 @@ export function Applications({ instanceKey, serverId, takesApplications }: { ins
     <div className="flex flex-col gap-3">
       {list.length > 0 && (
         <p className="text-sm text-muted-foreground">
-          <b className="text-foreground">
-            <Count value={list.length} /> {list.length === 1 ? "person" : "people"}
-          </b>{" "}
-          waiting, oldest first. They see the reason if you turn them down.
+          <T
+            k="serversettings.applications.waiting"
+            values={{
+              people: (
+                <b className="text-foreground">
+                  <T k="serversettings.applications.people" values={{ count: <Count value={list.length} /> }} count={list.length} />
+                </b>
+              ),
+            }}
+          />
         </p>
       )}
       <AnimatePresence mode="popLayout" custom={decided}>
@@ -63,11 +70,9 @@ export function Applications({ instanceKey, serverId, takesApplications }: { ins
             <span className="float grid size-14 place-items-center rounded-full bg-primary/15 text-primary">
               <InboxIcon className="size-7" />
             </span>
-            <p className="font-extrabold">Nobody's waiting</p>
+            <p className="font-extrabold">{t("serversettings.applications.none")}</p>
             <p className="max-w-sm text-sm text-muted-foreground">
-              {takesApplications
-                ? "When people apply to join, they show up here with their answers."
-                : "People join straight away right now. Turn on Apply to join under Access to look people over first."}
+              {takesApplications ? t("serversettings.applications.noneHint") : t("serversettings.applications.noneHintOff")}
             </p>
           </motion.div>
         ) : (
@@ -112,6 +117,7 @@ function Card({
   ref?: Ref<HTMLElement>;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState<"in" | "out" | null>(null);
@@ -126,7 +132,7 @@ function Card({
       onDecided(approve);
       setFlash(approve ? "in" : "out");
       await run(reviewApplication(instanceKey, serverId, a, approve, approve ? "" : reason.trim()));
-      toast(approve ? `Let ${name} in` : `Turned down ${name}`);
+      toast(approve ? t("serversettings.applications.letInDone", { name }) : t("serversettings.applications.turnedDownDone", { name }));
     } catch (err) {
       setFlash(null);
       toast((err as FuwaError).message);
@@ -157,12 +163,16 @@ function Card({
             {name}
             {fresh && (
               <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.65rem] font-bold text-amber-600 dark:text-amber-400">
-                <SparklesIcon className="size-3" /> New account
+                <SparklesIcon className="size-3" /> {t("serversettings.applications.newAccount")}
               </span>
             )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            @{a.user?.username} · account {roughly(lang, Date.now() - made.getTime())} old · applied {ago(lang, toDate(a.createdAt))}
+            {t("serversettings.applications.line", {
+              username: a.user?.username ?? "",
+              age: roughly(lang, Date.now() - made.getTime()),
+              when: ago(lang, toDate(a.createdAt)),
+            })}
           </p>
         </div>
       </header>
@@ -172,7 +182,7 @@ function Card({
           {a.answers.map((answer, n) => (
             <div key={n} className="rounded-2xl bg-muted/50 p-3">
               <dt className="text-xs font-bold text-muted-foreground">{answer.question}</dt>
-              <dd className={cn("mt-1 text-sm break-words whitespace-pre-wrap", !answer.answer && "text-muted-foreground italic")}>{answer.answer || "No answer"}</dd>
+              <dd className={cn("mt-1 text-sm break-words whitespace-pre-wrap", !answer.answer && "text-muted-foreground italic")}>{answer.answer || t("serversettings.applications.noAnswer")}</dd>
             </div>
           ))}
         </dl>
@@ -182,7 +192,7 @@ function Card({
         {declining && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
             <label htmlFor={`reason-${a.user?.id}`} className="mt-4 flex items-center justify-between text-sm font-bold">
-              Why not? <span className="text-xs font-normal text-muted-foreground">Optional. They'll see it.</span>
+              {t("serversettings.applications.whyNot")} <span className="text-xs font-normal text-muted-foreground">{t("serversettings.applications.whyNotHint")}</span>
             </label>
             <Textarea
               id={`reason-${a.user?.id}`}
@@ -201,16 +211,16 @@ function Card({
         {declining ? (
           <>
             <Button variant="ghost" disabled={!!busy} onClick={() => setDeclining(false)} className="rounded-xl">
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" disabled={!!busy} onClick={() => void decide(false)} className="rounded-xl font-bold">
-              {busy === "out" ? <LoaderCircleIcon className="animate-spin" /> : <UserXIcon />} Turn down
+              {busy === "out" ? <LoaderCircleIcon className="animate-spin" /> : <UserXIcon />} {t("serversettings.applications.turnDown")}
             </Button>
           </>
         ) : (
           <>
             <Button variant="outline" disabled={!!busy} onClick={() => setDeclining(true)} className="rounded-xl font-bold hover:border-destructive/50 hover:text-destructive">
-              <UserXIcon /> Turn down
+              <UserXIcon /> {t("serversettings.applications.turnDown")}
             </Button>
             <Button disabled={!!busy} onClick={() => void decide(true)} className="group rounded-xl bg-emerald-500 font-bold text-white hover:bg-emerald-600" data-burst>
               {busy === "in" ? (
@@ -220,7 +230,7 @@ function Card({
               ) : (
                 <UserCheckIcon className="transition-transform group-hover:scale-110" />
               )}
-              Let in
+              {t("serversettings.applications.letIn")}
             </Button>
           </>
         )}

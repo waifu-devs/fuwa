@@ -17,6 +17,7 @@ import { WelcomeFields, welcomeChanges, welcomeDraft, welcomeScreen, type Welcom
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useI18n } from "@/i18n/react";
 import { accentVars, bannerColors, bannerPosition, hex, parseHex, type BannerServer } from "@/lib/banner";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ const DEVICES: Record<Device, { width: number; height: number; label: string; ic
  * saves all three.
  */
 export function WelcomeAndOnboarding({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const { t } = useI18n();
   const [saved, setSaved] = useState<{ welcome: WelcomeScreen; onboarding: Onboarding; form: JoinForm } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [look, setLook] = useState<Look>(() => lookOf(server));
@@ -91,7 +93,7 @@ export function WelcomeAndOnboarding({ instanceKey, server }: { instanceKey: str
       let w = saved.welcome;
       if (welcomeChanges(welcome, saved.welcome)) {
         const draft = welcomeScreen(welcome);
-        if (draft.enabled && !draft.description && draft.channels.length === 0) throw new Error("add a few words or a channel to the welcome screen first");
+        if (draft.enabled && !draft.description && draft.channels.length === 0) throw new Error(t("serversettings.welcome.emptyScreen"));
         w = await run(setWelcomeScreen(instanceKey, server.id, draft));
         setWelcome(welcomeDraft(w));
       }
@@ -102,7 +104,7 @@ export function WelcomeAndOnboarding({ instanceKey, server }: { instanceKey: str
       }
       setSaved({ ...saved, welcome: w, onboarding: o });
     } catch (err) {
-      setError((err as FuwaError).message ?? "that didn't save");
+      setError((err as FuwaError).message ?? t("serversettings.welcome.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -122,15 +124,15 @@ export function WelcomeAndOnboarding({ instanceKey, server }: { instanceKey: str
         form={saved.form}
         focusStep={focusStep}
       />
-      <Section id="banner" title="Banner and color" hint="Across the top of the welcome, applying and onboarding screens, invites and the server's Browse card.">
+      <Section id="banner" title={t("serversettings.welcome.banner")} hint={t("serversettings.welcome.bannerHint")}>
         <BannerFields instanceKey={instanceKey} server={server} look={look} onChange={setLook} />
       </Section>
-      <Section id="welcome" title="Welcome screen" hint="What new members see first: a few words and channels to start in.">
+      <Section id="welcome" title={t("serversettings.welcome.screen")} hint={t("serversettings.welcome.screenHint")}>
         <div onFocusCapture={() => setView("welcome")}>
           <WelcomeFields instanceKey={instanceKey} server={server} draft={welcome} onChange={setWelcome} />
         </div>
       </Section>
-      <Section id="onboarding" title="Onboarding" hint="A few quick steps right after joining: what they're into, the rules, a hello.">
+      <Section id="onboarding" title={t("serversettings.nav.onboarding")} hint={t("serversettings.welcome.onboardingHint")}>
         <div onFocusCapture={() => setView("onboarding")}>
           <OnboardingFields
             instanceKey={instanceKey}
@@ -175,6 +177,7 @@ function Section({ id, title, hint, children }: { id: string; title: string; hin
 // ───────────────────────── Banner ─────────────────────────
 
 function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: string; server: Server; look: Look; onChange: (look: Look) => void }) {
+  const { t } = useI18n();
   const [colors, setColors] = useState<number[]>([]);
   // Only pictures on a trusted instance are ever loaded here: a pasted link
   // to another site shows nothing until it's saved (and refused, see check_picture).
@@ -215,13 +218,13 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
       <div data-setting="accent-color" className="flex flex-col gap-2">
         <span>
           <span className="flex items-center gap-1.5 text-sm font-bold">
-            <PaletteIcon className="size-4 text-muted-foreground" /> Accent color
+            <PaletteIcon className="size-4 text-muted-foreground" /> {t("serversettings.nav.accentColor")}
           </span>
-          <span className="block text-xs text-muted-foreground">Tints buttons, progress and highlights on these screens. Picked from the banner, or your own.</span>
+          <span className="block text-xs text-muted-foreground">{t("serversettings.welcome.accentHint")}</span>
         </span>
         <LayoutGroup>
-          <div role="radiogroup" aria-label="Accent color" className="flex flex-wrap items-center gap-2">
-            <Swatch label="The server's own hue" selected={look.accentColor === undefined} onSelect={() => onChange({ ...look, accentColor: undefined })}>
+          <div role="radiogroup" aria-label={t("serversettings.nav.accentColor")} className="flex flex-wrap items-center gap-2">
+            <Swatch label={t("serversettings.welcome.ownHue")} selected={look.accentColor === undefined} onSelect={() => onChange({ ...look, accentColor: undefined })}>
               <span style={accentVars({ id: server.id, accentColor: undefined })} className="grid size-full place-items-center rounded-full bg-[var(--accent-server)]">
                 <WandSparklesIcon className="size-3.5 text-white" />
               </span>
@@ -229,7 +232,7 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
             <AnimatePresence initial={false}>
               {colors.map((c, n) => (
                 <motion.span key={c} initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={{ ...SPRING, delay: n * 0.04 }}>
-                  <Swatch label={`From the banner: ${hex(c)}`} selected={look.accentColor === c} onSelect={() => onChange({ ...look, accentColor: c })}>
+                  <Swatch label={t("serversettings.welcome.fromBanner", { color: hex(c) })} selected={look.accentColor === c} onSelect={() => onChange({ ...look, accentColor: c })}>
                     <span className="block size-full rounded-full" style={{ background: hex(c) }} />
                   </Swatch>
                 </motion.span>
@@ -238,7 +241,7 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
             <label className={cn("relative flex h-9 items-center gap-1.5 rounded-full border px-2 text-xs font-bold text-muted-foreground transition hover:border-primary/40", custom && "border-foreground ring-1 ring-foreground")}>
               <span className="size-5 rounded-full border" style={{ background: look.accentColor !== undefined ? hex(look.accentColor) : "transparent" }} />
               <Input
-                aria-label="Accent color as hex"
+                aria-label={t("serversettings.welcome.accentHex")}
                 value={look.accentColor !== undefined ? hex(look.accentColor) : ""}
                 placeholder="#ff88aa"
                 onChange={(e) => {
@@ -249,7 +252,7 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
               />
               <input
                 type="color"
-                aria-label="Pick an accent color"
+                aria-label={t("serversettings.welcome.pickAccent")}
                 value={look.accentColor !== undefined ? hex(look.accentColor) : "#ff88aa"}
                 onChange={(e) => onChange({ ...look, accentColor: parseHex(e.target.value) ?? undefined })}
                 className="size-6 cursor-pointer rounded-full border-0 bg-transparent p-0"
@@ -293,6 +296,7 @@ function Swatch({ label, selected, onSelect, children }: { label: string; select
  * the whole banner, and see how a phone header and a Browse card crop it.
  */
 function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x: number, y: number) => void }) {
+  const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const x = server.bannerFocusX;
@@ -306,13 +310,13 @@ function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x:
   return (
     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
       <div>
-        <p className="mb-1.5 text-sm font-bold">Focal point</p>
+        <p className="mb-1.5 text-sm font-bold">{t("serversettings.welcome.focalPoint")}</p>
         <div
           ref={box}
           role="slider"
           tabIndex={0}
-          aria-label="Banner focal point"
-          aria-valuetext={`${x}% across, ${y}% down`}
+          aria-label={t("serversettings.nav.bannerFocus")}
+          aria-valuetext={t("serversettings.welcome.focusAt", { x, y })}
           aria-valuenow={x}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId);
@@ -347,9 +351,9 @@ function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x:
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        <Crop label="Phone header" ratio="aspect-[390/128]" server={server} />
-        <Crop label="Browse card" ratio="aspect-[300/80]" server={server} />
-        <Crop label="Wide dialog" ratio="aspect-[672/160]" server={server} />
+        <Crop label={t("serversettings.welcome.cropPhone")} ratio="aspect-[390/128]" server={server} />
+        <Crop label={t("serversettings.welcome.cropBrowse")} ratio="aspect-[300/80]" server={server} />
+        <Crop label={t("serversettings.welcome.cropDialog")} ratio="aspect-[672/160]" server={server} />
       </div>
     </div>
   );
@@ -396,6 +400,7 @@ function Preview({
   form: JoinForm;
   focusStep: number;
 }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const roles = useRoles(instanceKey, server.id);
   const channels = inst?.channels[server.id] ?? [];
@@ -415,9 +420,9 @@ function Preview({
   const phone = device === "phone";
 
   const views: { id: View; label: string; icon: typeof PartyPopperIcon }[] = [
-    { id: "welcome", label: "Welcome", icon: PartyPopperIcon },
-    { id: "apply", label: "Applying", icon: ClipboardPenIcon },
-    { id: "onboarding", label: "Onboarding", icon: SparklesIcon },
+    { id: "welcome", label: t("serversettings.welcome.viewWelcome"), icon: PartyPopperIcon },
+    { id: "apply", label: t("serversettings.welcome.viewApplying"), icon: ClipboardPenIcon },
+    { id: "onboarding", label: t("serversettings.nav.onboarding"), icon: SparklesIcon },
   ];
 
   return (
@@ -448,7 +453,7 @@ function Preview({
                       welcome.enabled || welcome.description || welcome.channels.length ? (
                         <WelcomeCard server={server} screen={welcome} channels={channels} emojis={emojis} bleed wide={!phone} onPick={() => {}} />
                       ) : (
-                        <Empty server={server} text="Turn on the welcome screen to greet new members here." />
+                        <Empty server={server} text={t("serversettings.welcome.emptyWelcome")} />
                       )
                     ) : view === "apply" ? (
                       <ApplyPreview server={server} form={form} />
@@ -466,7 +471,7 @@ function Preview({
                         compact={false}
                       />
                     ) : (
-                      <Empty server={server} text="Add a step to onboard new members." />
+                      <Empty server={server} text={t("serversettings.welcome.emptyOnboarding")} />
                     )}
                   </motion.div>
                 </AnimatePresence>
@@ -538,9 +543,10 @@ function FakeApp({ server, phone }: { server: Server; phone: boolean }) {
 }
 
 function Empty({ server, text }: { server: Server; text: string }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col gap-4">
-      <BannerHero server={server} bleed eyebrow="Preview" />
+      <BannerHero server={server} bleed eyebrow={t("settings.controls.preview")} />
       <p className="rounded-2xl bg-muted/50 p-4 text-center text-sm text-muted-foreground">{text}</p>
     </div>
   );
@@ -548,20 +554,21 @@ function Empty({ server, text }: { server: Server; text: string }) {
 
 /** Applying, as someone sees it: the banner, the rules and questions, and the button. */
 function ApplyPreview({ server, form }: { server: Server; form: JoinForm }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col gap-4">
-      <BannerHero server={server} bleed eyebrow="Apply to join" badge={<ClipboardPenIcon className="size-3.5" />}>
-        <p className="mt-1 text-sm text-muted-foreground">Someone from the server reads this and lets you in. It waits in your server list until then.</p>
+      <BannerHero server={server} bleed eyebrow={t("join.apply")} badge={<ClipboardPenIcon className="size-3.5" />}>
+        <p className="mt-1 text-sm text-muted-foreground">{t("join.applyDialog.description")}</p>
       </BannerHero>
       {form.rules.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Rules</h3>
+          <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("join.applyDialog.rules")}</h3>
           <RulesList rules={form.rules} className="max-h-56 overflow-hidden" />
         </section>
       )}
       {form.questions.length > 0 ? (
         <section className="flex flex-col gap-3">
-          <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">A few questions</h3>
+          <h3 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("join.applyDialog.questions")}</h3>
           {form.questions.map((q, n) => (
             <motion.div key={`${n}:${q.prompt}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.05 * n }} className="flex flex-col gap-1.5">
               <span className="text-sm font-bold">
@@ -573,10 +580,10 @@ function ApplyPreview({ server, form }: { server: Server; form: JoinForm }) {
           ))}
         </section>
       ) : (
-        <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">No questions yet: add them in Rules & questions.</p>
+        <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">{t("serversettings.welcome.noQuestions")}</p>
       )}
       <Button type="button" tabIndex={-1} style={{ background: "var(--accent-server)", ...accentVars(server) }} className="h-11 rounded-xl font-bold text-white">
-        <SendIcon /> Send application
+        <SendIcon /> {t("join.applyDialog.send")}
       </Button>
     </div>
   );

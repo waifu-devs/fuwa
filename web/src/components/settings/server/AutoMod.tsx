@@ -46,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -55,59 +55,60 @@ const MAX_WORDS = 1000;
 const MAX_ALLOWED = 100;
 
 /** The three kinds of rule, as the page lists them. */
-const KINDS = [
+const KINDS: readonly { trigger: AutoModTrigger; label: Key; blurb: Key; icon: typeof TypeIcon; tint: string; max: number }[] = [
   {
     trigger: AutoModTrigger.KEYWORDS,
-    label: "Blocked words",
-    blurb: "Words and phrases you don't want said. Up to six lists, each with its own actions.",
+    label: "serversettings.automod.kindKeywords",
+    blurb: "serversettings.automod.kindKeywordsHint",
     icon: TypeIcon,
     tint: "from-rose-500/20 text-rose-500",
     max: MAX_KEYWORD_RULES,
   },
   {
     trigger: AutoModTrigger.MENTION_SPAM,
-    label: "Mention spam",
-    blurb: "Messages that ping too many people or roles at once, the usual sign of a raid.",
+    label: "serversettings.automod.kindMentions",
+    blurb: "serversettings.automod.kindMentionsHint",
     icon: AtSignIcon,
     tint: "from-amber-500/20 text-amber-500",
     max: 1,
   },
   {
     trigger: AutoModTrigger.LINKS,
-    label: "Links",
-    blurb: "Links to sites you haven't allowed. Allowing a site allows its subdomains too.",
+    label: "serversettings.automod.kindLinks",
+    blurb: "serversettings.automod.kindLinksHint",
     icon: LinkIcon,
     tint: "from-sky-500/20 text-sky-500",
     max: 1,
   },
   {
     trigger: AutoModTrigger.PROVIDER,
-    label: "Smart filter",
-    blurb: "A moderation service reads each message and says what kind it is: hate, harassment, scams, spam and more. You pick what happens for each.",
+    label: "serversettings.automod.kindSmart",
+    blurb: "serversettings.automod.kindSmartHint",
     icon: SparklesIcon,
     tint: "from-violet-500/20 text-violet-500",
     max: 1,
   },
-] as const;
+];
 
-/** What a smart filter can do about one kind of message, mildest first. */
-const LEVELS = [
-  { level: AutoModLevel.OFF, label: "Nothing", short: "Off" },
-  { level: AutoModLevel.FLAG, label: "Flag", short: "Flag" },
-  { level: AutoModLevel.BLOCK, label: "Block", short: "Block" },
-  { level: AutoModLevel.TIME_OUT, label: "Block + time out", short: "Time out" },
-] as const;
+/** What a smart filter can do about one kind of message, mildest first; labels are catalog keys. */
+const LEVELS: readonly { level: AutoModLevel; label: Key; short: Key }[] = [
+  { level: AutoModLevel.OFF, label: "serversettings.automod.levelNothing", short: "serversettings.shared.off" },
+  { level: AutoModLevel.FLAG, label: "serversettings.automod.levelFlag", short: "serversettings.automod.levelFlag" },
+  { level: AutoModLevel.BLOCK, label: "serversettings.automod.levelBlock", short: "serversettings.automod.levelBlock" },
+  { level: AutoModLevel.TIME_OUT, label: "serversettings.automod.levelTimeOut", short: "serversettings.members.timeOut" },
+];
 
 /** The level a label is at (unset reads as nothing). */
 const levelOf = (level: AutoModLevel) => (level === AutoModLevel.UNSPECIFIED ? AutoModLevel.OFF : level);
 
-const TIME_OUTS = [
-  { value: 60, label: "1 minute" },
-  { value: 300, label: "5 minutes" },
-  { value: 600, label: "10 minutes" },
-  { value: 3600, label: "1 hour" },
-  { value: 86_400, label: "1 day" },
-  { value: 604_800, label: "1 week" },
+/** Time-out lengths to pick from; labels are catalog keys. */
+const TIME_OUTS: readonly { value: number; label: Key }[] = [
+  { value: 60, label: "serversettings.automod.time.minute" },
+  { value: 300, label: "serversettings.automod.time.fiveMinutes" },
+  { value: 600, label: "serversettings.automod.time.tenMinutes" },
+  { value: 3600, label: "serversettings.automod.time.hour" },
+  { value: 86_400, label: "serversettings.automod.time.day" },
+  { value: 604_800, label: "serversettings.automod.time.week" },
 ];
 
 function fresh(trigger: AutoModTrigger, provider?: AutoModProvider, alertChannelId = ""): AutoModRule {
@@ -134,6 +135,7 @@ function fresh(trigger: AutoModTrigger, provider?: AutoModProvider, alertChannel
  * server are never caught.
  */
 export function AutoMod({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const [rules, setRules] = useState<AutoModRule[] | null>(null);
   const [providers, setProviders] = useState<AutoModProvider[]>([]);
   const [drafts, setDrafts] = useState<{ key: string; rule: AutoModRule }[]>([]);
@@ -175,10 +177,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
         >
           <ShieldCheckIcon className="size-4" />
         </motion.span>
-        <p className="text-muted-foreground">
-          AutoMod reads each message as it's sent or edited. Blocked words, mention spam and links are caught before anyone sees them; the Smart filter answers a moment after, and takes blocked messages down then. People who can manage the server are never caught, so test a rule with the
-          box under it rather than in chat.
-        </p>
+        <p className="text-muted-foreground">{t("serversettings.automod.intro")}</p>
       </motion.div>
       {KINDS.map((kind, n) => {
         const mine = rules.filter((r) => r.trigger === kind.trigger);
@@ -198,8 +197,8 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                 <kind.icon className="size-5" />
               </span>
               <div className="min-w-48 flex-1">
-                <h3 className="font-extrabold">{kind.label}</h3>
-                <p className="text-sm text-muted-foreground">{kind.blurb}</p>
+                <h3 className="font-extrabold">{t(kind.label)}</h3>
+                <p className="text-sm text-muted-foreground">{t(kind.blurb)}</p>
               </div>
               {room && (
                 <Button
@@ -212,7 +211,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                   }
                 >
                   <PlusIcon className="transition-transform group-hover:rotate-90" />
-                  {mine.length + pending.length ? "Another list" : "Set up"}
+                  {mine.length + pending.length ? t("serversettings.automod.anotherList") : t("serversettings.automod.setUp")}
                 </Button>
               )}
             </div>
@@ -223,8 +222,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                 transition={SPRING}
                 className="rounded-2xl border border-dashed p-3 text-sm text-muted-foreground"
               >
-                This instance hasn't turned on a moderation service yet. Its admins can, under Instance settings, Moderation: TypeSafe Jev and Cloudflare Clef take
-                a key and one switch.
+                {t("serversettings.automod.noProvider")}
               </motion.p>
             )}
             <AnimatePresence initial={false}>
@@ -282,6 +280,7 @@ function RuleCard({
   onSaved: (rule: AutoModRule) => void;
   onDeleted: () => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(saved);
   const [open, setOpen] = useState(isNew);
   const [confirm, setConfirm] = useState(false);
@@ -317,7 +316,7 @@ function RuleCard({
     const next = await save.go(instanceKey, serverId, draft);
     if (next) {
       onSaved(next);
-      toast(isNew ? `${next.name} is on guard` : `Saved ${next.name}`);
+      toast(isNew ? t("serversettings.automod.onGuard", { name: next.name }) : t("serversettings.automod.saved", { name: next.name }));
     } else
       void shake.start({
         x: [0, -8, 7, -5, 3, 0],
@@ -342,17 +341,17 @@ function RuleCard({
   const doing = smart
     ? []
     : [
-        actionOf(draft, AutoModActionKind.BLOCK) && "blocks",
-        actionOf(draft, AutoModActionKind.ALERT) && "alerts",
-        actionOf(draft, AutoModActionKind.TIME_OUT) && "times out",
+        actionOf(draft, AutoModActionKind.BLOCK) && t("serversettings.automod.doingBlocks"),
+        actionOf(draft, AutoModActionKind.ALERT) && t("serversettings.automod.doingAlerts"),
+        actionOf(draft, AutoModActionKind.TIME_OUT) && t("serversettings.automod.doingTimesOut"),
       ].filter(Boolean);
   const summary = smart
-    ? `${provider?.name ?? "Provider turned off on this instance"} · watching ${watching} ${watching === 1 ? "kind" : "kinds"}${provider?.pictures && draft.pictures ? " · with pictures" : ""}`
+    ? `${provider?.name ?? t("serversettings.automod.providerOff")} · ${t("serversettings.automod.watching", { count: watching })}${provider?.pictures && draft.pictures ? ` · ${t("serversettings.automod.withPictures")}` : ""}`
     : draft.trigger === AutoModTrigger.KEYWORDS
-      ? `${draft.keywords.length} ${draft.keywords.length === 1 ? "word" : "words"}`
+      ? t("serversettings.automod.words", { count: draft.keywords.length })
       : draft.trigger === AutoModTrigger.MENTION_SPAM
-        ? `More than ${draft.mentionLimit} pings`
-        : `${draft.allowed.length} allowed ${draft.allowed.length === 1 ? "site" : "sites"}`;
+        ? t("serversettings.automod.morePings", { count: draft.mentionLimit })
+        : t("serversettings.automod.allowedSitesCount", { count: draft.allowed.length });
 
   return (
     <motion.div
@@ -373,7 +372,7 @@ function RuleCard({
         <div className="flex items-center gap-3 p-3 pl-4">
           <button type="button" onClick={() => setOpen((o) => !o)} className="group flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open}>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-bold">{draft.name || kind.label}</span>
+              <span className="block truncate font-bold">{draft.name || t(kind.label)}</span>
               <span className="block truncate text-xs text-muted-foreground">
                 {summary}
                 {doing.length > 0 && ` · ${doing.join(", ")}`}
@@ -388,13 +387,13 @@ function RuleCard({
                   transition={SPRING}
                   className="rounded-full bg-primary/15 px-2 py-0.5 text-[0.65rem] font-bold text-primary uppercase"
                 >
-                  Unsaved
+                  {t("serversettings.automod.unsaved")}
                 </motion.span>
               )}
             </AnimatePresence>
             <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
           </button>
-          <Switch checked={draft.enabled} onCheckedChange={(on) => void toggle(on)} aria-label={draft.enabled ? "Turn the rule off" : "Turn the rule on"} />
+          <Switch checked={draft.enabled} onCheckedChange={(on) => void toggle(on)} aria-label={draft.enabled ? t("serversettings.automod.turnOff") : t("serversettings.automod.turnOn")} />
         </div>
         <AnimatePresence initial={false}>
           {open && (
@@ -406,11 +405,11 @@ function RuleCard({
               transition={{ ...SPRING, opacity: { duration: 0.15 } }}
             >
               <div className="flex flex-col gap-5 border-t p-4">
-                <Field label="Name">
+                <Field label={t("serversettings.overview.name")}>
                   <Input
                     value={draft.name}
                     maxLength={100}
-                    placeholder={kind.label}
+                    placeholder={t(kind.label)}
                     onChange={(e) => set({ name: e.target.value })}
                     className="h-10 rounded-xl"
                   />
@@ -451,10 +450,10 @@ function RuleCard({
                           onClick={() => void destroy()}
                         >
                           {remove.pending && <LoaderCircleIcon className="animate-spin" />}
-                          Delete {draft.name || kind.label}
+                          {t("serversettings.automod.deleteNamed", { name: draft.name || t(kind.label) })}
                         </Button>
                         <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setConfirm(false)}>
-                          Keep it
+                          {t("serversettings.shared.keepIt")}
                         </Button>
                       </motion.span>
                     ) : (
@@ -466,7 +465,7 @@ function RuleCard({
                           className="rounded-xl text-muted-foreground hover:text-destructive"
                           onClick={() => (isNew ? onDeleted() : setConfirm(true))}
                         >
-                          <Trash2Icon /> {isNew ? "Cancel" : "Delete"}
+                          <Trash2Icon /> {isNew ? t("common.cancel") : t("serversettings.shared.delete")}
                         </Button>
                       </motion.span>
                     )}
@@ -474,12 +473,12 @@ function RuleCard({
                   <span className="min-w-0 flex-1 text-right text-sm text-destructive first-letter:uppercase">{save.error ?? remove.error}</span>
                   {dirty && !isNew && (
                     <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setDraft(saved)} disabled={save.pending}>
-                      Discard
+                      {t("settings.controls.discard")}
                     </Button>
                   )}
                   <Button type="button" size="sm" className="btn rounded-xl px-4 font-bold" disabled={!dirty || save.pending} onClick={() => void submit()}>
                     {save.pending ? <LoaderCircleIcon className="animate-spin" /> : <CheckIcon />}
-                    {isNew ? "Create rule" : "Save"}
+                    {isNew ? t("serversettings.automod.createRule") : t("serversettings.automod.save")}
                   </Button>
                 </div>
               </div>
@@ -505,27 +504,24 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
 
 /** What the rule looks for: words, a ping limit, or which sites are fine. */
 function Trigger({ draft, set }: { draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  const { t } = useI18n();
   if (draft.trigger === AutoModTrigger.KEYWORDS)
     return (
       <>
         <Field
-          label="Words and phrases"
-          hint={
-            <>
-              Matched whole, ignoring case. A <b>*</b> lets a word run on: <code>*cat</code> catches “bobcat”, <code>cat*</code> catches “catapult”.
-            </>
-          }
+          label={t("serversettings.automod.wordsLabel")}
+          hint={<T k="serversettings.automod.wordsHint" values={{ star: <b>*</b>, prefix: <code>*cat</code>, suffix: <code>cat*</code> }} />}
         >
-          <WordList words={draft.keywords} max={MAX_WORDS} placeholder="Type a word, then Enter" onChange={(keywords) => set({ keywords })} wild />
+          <WordList words={draft.keywords} max={MAX_WORDS} placeholder={t("serversettings.automod.typeWord")} onChange={(keywords) => set({ keywords })} wild />
         </Field>
-        <Field label="Allowed anyway" hint="Words the list would catch that are fine, like “class” under *ass*.">
-          <WordList words={draft.allowed} max={MAX_ALLOWED} placeholder="Type a word, then Enter" onChange={(allowed) => set({ allowed })} tone="ok" />
+        <Field label={t("serversettings.automod.allowedAnyway")} hint={t("serversettings.automod.allowedAnywayHint")}>
+          <WordList words={draft.allowed} max={MAX_ALLOWED} placeholder={t("serversettings.automod.typeWord")} onChange={(allowed) => set({ allowed })} tone="ok" />
         </Field>
       </>
     );
   if (draft.trigger === AutoModTrigger.MENTION_SPAM)
     return (
-      <Field label="Ping limit" hint="Each person or role counts once; @everyone and @here count as one together.">
+      <Field label={t("serversettings.automod.pingLimit")} hint={t("serversettings.automod.pingLimitHint")}>
         <div className="flex items-center gap-3">
           <input
             type="range"
@@ -533,7 +529,7 @@ function Trigger({ draft, set }: { draft: AutoModRule; set: (patch: Partial<Auto
             max={50}
             value={draft.mentionLimit}
             onChange={(e) => set({ mentionLimit: Number(e.target.value) })}
-            aria-label="Ping limit"
+            aria-label={t("serversettings.automod.pingLimit")}
             className="h-2 flex-1 cursor-pointer accent-primary"
           />
           <motion.span
@@ -543,14 +539,14 @@ function Trigger({ draft, set }: { draft: AutoModRule; set: (patch: Partial<Auto
             transition={SPRING}
             className="w-28 shrink-0 text-sm font-bold tabular-nums"
           >
-            More than {draft.mentionLimit}
+            {t("serversettings.automod.moreThan", { count: draft.mentionLimit })}
           </motion.span>
         </div>
       </Field>
     );
   return (
-    <Field label="Allowed sites" hint="Every other link is caught. Leave it empty to catch them all.">
-      <WordList words={draft.allowed} max={MAX_ALLOWED} placeholder="example.com, then Enter" onChange={(allowed) => set({ allowed })} tone="ok" />
+    <Field label={t("serversettings.automod.allowedSites")} hint={t("serversettings.automod.allowedSitesHint")}>
+      <WordList words={draft.allowed} max={MAX_ALLOWED} placeholder={t("serversettings.automod.sitePlaceholder")} onChange={(allowed) => set({ allowed })} tone="ok" />
     </Field>
   );
 }
@@ -571,6 +567,7 @@ function WordList({
   wild?: boolean;
   tone?: "block" | "ok";
 }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const add = (raw: string[]) => {
     const fresh = raw.map((w) => w.trim().toLowerCase()).filter((w) => w && !words.includes(w));
@@ -621,7 +618,7 @@ function WordList({
               </span>
               <button
                 type="button"
-                aria-label={`Remove ${w}`}
+                aria-label={t("serversettings.automod.removeWord", { word: w })}
                 onClick={() => onChange(words.filter((x) => x !== w))}
                 className="grid size-4 place-items-center rounded opacity-60 hover:opacity-100"
               >
@@ -655,6 +652,7 @@ function WordList({
 
 /** Try a message against the rule as it stands, saved or not. Matches light up. */
 function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId: string; rule: AutoModRule }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [result, setResult] = useState<{
     matched: boolean;
@@ -682,7 +680,7 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
     if (!text.trim()) return setResult(null);
     let live = true;
     setChecking(true);
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       run(testAutoModRule(instanceKey, serverId, rule, text))
         .then((r) => live && setResult({ matched: r.matched, matches: r.matches, error: r.error, elapsedMs: r.elapsedMs }))
         .catch(() => live && setResult(null))
@@ -691,7 +689,7 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
     }, smart ? 700 : 250);
     return () => {
       live = false;
-      clearTimeout(t);
+      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, instanceKey, serverId]);
@@ -699,12 +697,12 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
   return (
     <div className="flex flex-col gap-2 rounded-2xl bg-muted/50 p-3">
       <span className="flex items-center gap-1.5 text-sm font-extrabold">
-        <FlaskConicalIcon className="size-4 text-primary" /> Try a message
+        <FlaskConicalIcon className="size-4 text-primary" /> {t("serversettings.automod.try")}
       </span>
       <Textarea
         value={text}
         rows={2}
-        placeholder={smart ? "Write something it should flag or block, or let through. It goes to the provider." : "Write something the rule should catch, or let through."}
+        placeholder={smart ? t("serversettings.automod.tryPlaceholderSmart") : t("serversettings.automod.tryPlaceholder")}
         onChange={(e) => setText(e.target.value)}
         className="rounded-xl bg-background"
       />
@@ -720,16 +718,16 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
           >
             {checking || !result ? (
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <LoaderCircleIcon className="size-3.5 animate-spin" /> {smart ? "Asking the provider…" : "Checking…"}
+                <LoaderCircleIcon className="size-3.5 animate-spin" /> {smart ? t("serversettings.automod.asking") : t("serversettings.automod.checking")}
               </span>
             ) : result.error ? (
               <span className="text-xs text-amber-700 first-letter:uppercase dark:text-amber-400">
-                The provider didn't answer: {result.error}. Messages go through this rule unchecked until it does; your other rules still apply.
+                {t("serversettings.automod.noAnswer", { error: result.error })}
               </span>
             ) : result.matched ? (
               <>
                 <span className="flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-bold text-destructive">
-                  <BanIcon className="size-3" /> Caught
+                  <BanIcon className="size-3" /> {t("serversettings.automod.caught")}
                 </span>
                 {result.matches.map((m, n) => (
                   <motion.code
@@ -750,7 +748,7 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
               </>
             ) : (
               <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                <CheckIcon className="size-3" strokeWidth={3} /> Gets through
+                <CheckIcon className="size-3" strokeWidth={3} /> {t("serversettings.automod.getsThrough")}
               </span>
             )}
             {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{result.elapsedMs} ms</span>}
@@ -774,36 +772,38 @@ function Actions({
   setAction: (kind: AutoModActionKind, action: Partial<AutoModAction> | null) => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const inst = useInstance(instanceKey);
   const textChannels = (inst?.channels[serverId] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   const block = actionOf(draft, AutoModActionKind.BLOCK);
   const alert = actionOf(draft, AutoModActionKind.ALERT);
   const timeOut = actionOf(draft, AutoModActionKind.TIME_OUT);
   const alertChannel = textChannels.find((c) => c.id === alert?.channelId);
+  const lengths = TIME_OUTS.map((o) => ({ value: o.value, label: t(o.label) }));
   const durations =
-    timeOut && !TIME_OUTS.some((t) => t.value === timeOut.durationSeconds)
+    timeOut && !TIME_OUTS.some((o) => o.value === timeOut.durationSeconds)
       ? [
-          ...TIME_OUTS,
+          ...lengths,
           {
             value: timeOut.durationSeconds,
             label: formatDuration(lang, timeOut.durationSeconds),
           },
         ].sort((a, b) => a.value - b.value)
-      : TIME_OUTS;
+      : lengths;
   return (
-    <Field label="When it catches one" hint="Pick any. Without blocking, the message is still sent.">
+    <Field label={t("serversettings.automod.whenCaught")} hint={t("serversettings.automod.whenCaughtHint")}>
       <div className="flex flex-col gap-2">
         <ActionCard
           on={!!block}
           icon={<BanIcon className="size-4" />}
-          title="Block the message"
-          hint="It never reaches the channel. Its author sees why."
+          title={t("serversettings.automod.blockTitle")}
+          hint={t("serversettings.automod.blockHint")}
           onToggle={(on) => setAction(AutoModActionKind.BLOCK, on ? {} : null)}
         >
           <Input
             value={block?.message ?? ""}
             maxLength={150}
-            placeholder="What they're told (optional): “Keep it friendly, please.”"
+            placeholder={t("serversettings.automod.blockPlaceholder")}
             onChange={(e) => setAction(AutoModActionKind.BLOCK, { message: e.target.value })}
             className="h-9 rounded-xl"
           />
@@ -811,8 +811,8 @@ function Actions({
         <ActionCard
           on={!!alert}
           icon={<BellRingIcon className="size-4" />}
-          title="Alert a channel"
-          hint="Posts what was caught, who said it and where, for your mods."
+          title={t("serversettings.automod.alertTitle")}
+          hint={t("serversettings.automod.alertHint")}
           onToggle={(on) => setAction(AutoModActionKind.ALERT, on ? { channelId: alert?.channelId || textChannels[0]?.id || "" } : null)}
         >
           <DropdownMenu>
@@ -822,7 +822,7 @@ function Actions({
                 className="group flex h-9 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60"
               >
                 <HashIcon className="size-4 text-muted-foreground" />
-                <span className="flex-1 truncate font-bold">{alertChannel?.name ?? "Pick a channel"}</span>
+                <span className="flex-1 truncate font-bold">{alertChannel?.name ?? t("serversettings.shared.pickChannel")}</span>
                 <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
               </button>
             </DropdownMenuTrigger>
@@ -838,12 +838,12 @@ function Actions({
         <ActionCard
           on={!!timeOut}
           icon={<TimerIcon className="size-4" />}
-          title="Time them out"
-          hint="They can read but not talk for a while."
+          title={t("serversettings.automod.timeOutTitle")}
+          hint={t("serversettings.automod.timeOutHint")}
           onToggle={(on) => setAction(AutoModActionKind.TIME_OUT, on ? { durationSeconds: timeOut?.durationSeconds || 60 } : null)}
         >
           <Chips
-            label="Time-out length"
+            label={t("serversettings.automod.timeOutLength")}
             value={timeOut?.durationSeconds ?? 60}
             options={durations}
             onChange={(durationSeconds) => setAction(AutoModActionKind.TIME_OUT, { durationSeconds })}
@@ -917,6 +917,7 @@ function Exemptions({
   draft: AutoModRule;
   set: (patch: Partial<AutoModRule>) => void;
 }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const roles = useRoles(instanceKey, serverId).filter((r) => r.id !== serverId);
   const channels = (inst?.channels[serverId] ?? []).filter((c) => c.type !== ChannelType.CATEGORY && c.type !== ChannelType.VOICE);
@@ -924,7 +925,7 @@ function Exemptions({
   const chosenRoles = roles.filter((r) => draft.exemptRoleIds.includes(r.id));
   const chosenChannels = channels.filter((c) => draft.exemptChannelIds.includes(c.id));
   return (
-    <Field label="Leave out" hint="Roles and channels this rule never looks at.">
+    <Field label={t("serversettings.automod.leaveOut")} hint={t("serversettings.automod.leaveOutHint")}>
       <div className="flex flex-wrap items-center gap-1.5">
         <AnimatePresence initial={false}>
           {chosenRoles.map((r) => (
@@ -941,7 +942,7 @@ function Exemptions({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg border-dashed text-xs" disabled={!roles.length}>
-              <ShieldIcon /> Roles
+              <ShieldIcon /> {t("serversettings.nav.roles")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
@@ -960,7 +961,7 @@ function Exemptions({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg border-dashed text-xs">
-              <HashIcon /> Channels
+              <HashIcon /> {t("serversettings.nav.channels")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
@@ -991,11 +992,12 @@ function ProviderPicker({
   draft: AutoModRule;
   set: (patch: Partial<AutoModRule>) => void;
 }) {
+  const { t } = useI18n();
   const chosen = providers.find((p) => p.id === draft.provider);
   return (
-    <Field label="Provider" hint="The services this instance's admins turned on.">
+    <Field label={t("serversettings.automod.provider")} hint={t("serversettings.automod.providerHint")}>
       {providers.length > 1 && (
-        <div className="flex flex-wrap gap-1 rounded-2xl bg-muted/60 p-1" role="radiogroup" aria-label="Provider">
+        <div className="flex flex-wrap gap-1 rounded-2xl bg-muted/60 p-1" role="radiogroup" aria-label={t("serversettings.automod.provider")}>
           {providers.map((p) => {
             const on = p.id === draft.provider;
             return (
@@ -1029,13 +1031,14 @@ function ProviderPicker({
           <GlobeLockIcon className={cn("mt-0.5 size-4 shrink-0", chosen ? "text-violet-500" : "text-amber-500")} />
           {chosen ? (
             <span className="min-w-0 text-muted-foreground">
-              <b className="text-foreground">{chosen.name}</b> reads the messages this rule checks, at <b className="break-all text-foreground">{chosen.host}</b>. It
-              gets the text{chosen.pictures && draft.pictures ? " and pictures" : ""} alone: never who wrote it, where, or this server's name, and mentions and
-              custom emoji are swapped for placeholders first. Your instance sends it, never anyone's app.
+              <T
+                k={chosen.pictures && draft.pictures ? "serversettings.automod.providerReadsPictures" : "serversettings.automod.providerReads"}
+                values={{ provider: <b className="text-foreground">{chosen.name}</b>, host: <b className="break-all text-foreground">{chosen.host}</b> }}
+              />
             </span>
           ) : (
             <span className="min-w-0 text-amber-700 dark:text-amber-400">
-              This instance turned that provider off, so the rule lets every message through. Pick another, or ask the instance's admins.
+              {t("serversettings.automod.providerGone")}
             </span>
           )}
         </motion.div>
@@ -1046,6 +1049,7 @@ function ProviderPicker({
 
 /** Whether the provider sees messages' pictures too, for providers that read them. */
 function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence initial={false}>
       {provider?.pictures && (
@@ -1073,13 +1077,10 @@ function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft:
               <ImageIcon className="size-4" />
             </motion.span>
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-bold">Check pictures too</span>
-              <span className="block text-xs text-muted-foreground">
-                Up to 4 per message, attached or in embeds (PNG, JPEG or WebP). Your instance fetches them and sends them along; GIFs and very large photos
-                are skipped.
-              </span>
+              <span className="block text-sm font-bold">{t("serversettings.automod.pictures")}</span>
+              <span className="block text-xs text-muted-foreground">{t("serversettings.automod.picturesHint", { count: 4 })}</span>
             </span>
-            <Switch checked={draft.pictures} onCheckedChange={(on) => set({ pictures: on })} aria-label="Check pictures too" />
+            <Switch checked={draft.pictures} onCheckedChange={(on) => set({ pictures: on })} aria-label={t("serversettings.automod.pictures")} />
           </label>
         </motion.div>
       )}
@@ -1089,6 +1090,7 @@ function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft:
 
 /** Each kind of message the provider tells apart, with what happens to it and how sure it must be. */
 function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  const { t, number } = useI18n();
   const labels = provider?.labels ?? [];
   const ruleFor = (id: string) => draft.labels.find((l) => l.label === id);
   const change = (id: string, patch: { level?: AutoModLevel; threshold?: number }) => {
@@ -1105,14 +1107,18 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
   if (!labels.length) return null;
   return (
     <Field
-      label="What to do about each kind"
+      label={t("serversettings.automod.eachKind")}
       hint={
-        <>
-          Flags post to your alert channel and let the message through. The bar is how sure the provider must be.{" "}
-          <button type="button" onClick={resetAll} className="font-bold text-primary hover:underline">
-            Back to the defaults
-          </button>
-        </>
+        <T
+          k="serversettings.automod.eachKindHint"
+          values={{
+            reset: (
+              <button type="button" onClick={resetAll} className="font-bold text-primary hover:underline">
+                {t("serversettings.automod.backToDefaults")}
+              </button>
+            ),
+          }}
+        />
       }
     >
       <div className="flex flex-col gap-2">
@@ -1134,7 +1140,7 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                   <span className="block text-sm font-bold">{label.name}</span>
                   <span className="block text-xs text-muted-foreground">{label.description}</span>
                 </span>
-                <div className="flex w-full gap-0.5 rounded-xl bg-muted/70 p-0.5 sm:w-auto" role="radiogroup" aria-label={`What to do about ${label.name}`}>
+                <div className="flex w-full gap-0.5 rounded-xl bg-muted/70 p-0.5 sm:w-auto" role="radiogroup" aria-label={t("serversettings.automod.whatToDoAbout", { label: label.name })}>
                   {LEVELS.map((option) => {
                     const on = option.level === level;
                     return (
@@ -1143,7 +1149,7 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                         type="button"
                         role="radio"
                         aria-checked={on}
-                        title={option.label}
+                        title={t(option.label)}
                         onClick={() => change(label.id, { level: option.level })}
                         className={cn(
                           "relative flex-1 rounded-[0.6rem] px-2.5 py-1 text-xs font-bold whitespace-nowrap transition-colors sm:flex-none",
@@ -1160,7 +1166,7 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                             )}
                           />
                         )}
-                        <span className="relative">{option.short}</span>
+                        <span className="relative">{t(option.short)}</span>
                       </button>
                     );
                   })}
@@ -1176,14 +1182,14 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                     className="overflow-hidden"
                   >
                     <div className="flex items-center gap-3 pt-2.5">
-                      <span className="shrink-0 text-xs text-muted-foreground">How sure</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{t("serversettings.automod.howSure")}</span>
                       <input
                         type="range"
                         min={50}
                         max={99}
                         value={threshold}
                         onChange={(e) => change(label.id, { threshold: Number(e.target.value) })}
-                        aria-label={`How sure the provider must be about ${label.name}`}
+                        aria-label={t("serversettings.automod.howSureAbout", { label: label.name })}
                         className="h-1.5 flex-1 cursor-pointer accent-primary"
                       />
                       <motion.span
@@ -1193,7 +1199,7 @@ function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: A
                         transition={SPRING}
                         className="w-10 shrink-0 text-right text-xs font-bold tabular-nums"
                       >
-                        {threshold}%
+                        {number(threshold / 100, { style: "percent" })}
                       </motion.span>
                     </div>
                   </motion.div>
@@ -1219,6 +1225,7 @@ function SmartActions({
   draft: AutoModRule;
   setAction: (kind: AutoModActionKind, action: Partial<AutoModAction> | null) => void;
 }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const textChannels = (inst?.channels[serverId] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   const levels = draft.labels.map((l) => levelOf(l.level));
@@ -1232,8 +1239,8 @@ function SmartActions({
   return (
     <div className="flex flex-col gap-4">
       <Field
-        label="Alert channel"
-        hint={flags ? "Flagged messages are posted here for your mods; blocked ones too." : "Blocked messages are posted here too, if you pick one."}
+        label={t("serversettings.automod.alertChannel")}
+        hint={flags ? t("serversettings.automod.alertFlagsHint") : t("serversettings.automod.alertBlocksHint")}
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1245,14 +1252,14 @@ function SmartActions({
               )}
             >
               <HashIcon className="size-4 text-muted-foreground" />
-              <span className="flex-1 truncate font-bold">{alertChannel?.name ?? (flags ? "Pick a channel for flags" : "No alerts")}</span>
+              <span className="flex-1 truncate font-bold">{alertChannel?.name ?? (flags ? t("serversettings.automod.pickForFlags") : t("serversettings.automod.noAlerts"))}</span>
               <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
             {!flags && (
               <DropdownMenuItem onSelect={() => setAction(AutoModActionKind.ALERT, null)}>
-                <XIcon /> No alerts
+                <XIcon /> {t("serversettings.automod.noAlerts")}
               </DropdownMenuItem>
             )}
             {textChannels.map((c) => (
@@ -1266,11 +1273,11 @@ function SmartActions({
       <AnimatePresence initial={false}>
         {blocks && (
           <motion.div key="block" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
-            <Field label="What blocked people are told">
+            <Field label={t("serversettings.automod.blockedTold")}>
               <Input
                 value={block?.message ?? ""}
                 maxLength={150}
-                placeholder="Optional: “That message breaks our rules.”"
+                placeholder={t("serversettings.automod.blockedPlaceholder")}
                 onChange={(e) => setAction(AutoModActionKind.BLOCK, e.target.value ? { message: e.target.value } : null)}
                 className="h-10 rounded-xl"
               />
@@ -1279,11 +1286,11 @@ function SmartActions({
         )}
         {timesOut && (
           <motion.div key="time-out" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
-            <Field label="Time-out length">
+            <Field label={t("serversettings.automod.timeOutLength")}>
               <Chips
-                label="Time-out length"
+                label={t("serversettings.automod.timeOutLength")}
                 value={timeOut?.durationSeconds ?? 600}
-                options={TIME_OUTS}
+                options={TIME_OUTS.map((o) => ({ value: o.value, label: t(o.label) }))}
                 onChange={(durationSeconds) => setAction(AutoModActionKind.TIME_OUT, { durationSeconds })}
               />
             </Field>
@@ -1295,6 +1302,7 @@ function SmartActions({
 }
 
 function Pill({ children, onRemove }: { children: ReactNode; onRemove: () => void }) {
+  const { t } = useI18n();
   return (
     <motion.span
       layout
@@ -1305,7 +1313,7 @@ function Pill({ children, onRemove }: { children: ReactNode; onRemove: () => voi
       className="flex h-7 items-center gap-1.5 rounded-lg bg-muted pr-1 pl-2 text-xs font-bold"
     >
       {children}
-      <button type="button" aria-label="Remove" onClick={onRemove} className="grid size-4 place-items-center rounded opacity-60 hover:opacity-100">
+      <button type="button" aria-label={t("serversettings.channelPermissions.remove")} onClick={onRemove} className="grid size-4 place-items-center rounded opacity-60 hover:opacity-100">
         <XIcon className="size-3" />
       </button>
     </motion.span>

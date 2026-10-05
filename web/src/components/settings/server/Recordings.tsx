@@ -6,6 +6,7 @@ import { getRecordingVideo, run, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { SPRING } from "@/components/motion";
 import { Choice, SaveBar, WithPreview } from "@/components/settings/controls";
+import { useI18n } from "@/i18n/react";
 
 /**
  * What recordings on the server keep: everyone's sound, or their cameras
@@ -14,6 +15,7 @@ import { Choice, SaveBar, WithPreview } from "@/components/settings/controls";
  * presses Record.
  */
 export function RecordingSettings({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const { t } = useI18n();
   const [video, setVideo] = useState(server.recordVideo);
   const save = useAction(updateServer);
   const changed = video !== server.recordVideo;
@@ -28,38 +30,34 @@ export function RecordingSettings({ instanceKey, server }: { instanceKey: string
       <div className="flex flex-col">
         <div data-setting="record-video" className="flex flex-col gap-3 pb-5">
           <span>
-            <span className="block font-extrabold">What recordings keep</span>
-            <span className="block text-sm text-muted-foreground">
-              For recordings on the server, which people with Record start in a voice channel. Recordings on someone's own device are always sound only.
-            </span>
+            <span className="block font-extrabold">{t("serversettings.recordings.title")}</span>
+            <span className="block text-sm text-muted-foreground">{t("serversettings.recordings.hint")}</span>
           </span>
           <Choice
             value={video ? "video" : "sound"}
             onChange={(v) => setVideo(v === "video")}
             options={[
-              { value: "sound", label: "Sound only", hint: "A track per person, as Ogg Opus.", icon: <AudioLinesIcon className="size-4" /> },
+              { value: "sound", label: t("serversettings.recordings.sound"), hint: t("serversettings.recordings.soundHint"), icon: <AudioLinesIcon className="size-4" /> },
               {
                 value: "video",
-                label: "Sound and video",
-                hint: "Each person's camera and shared screen too, as WebM files next to their sound.",
+                label: t("serversettings.recordings.video"),
+                hint: t("serversettings.recordings.videoHint"),
                 icon: <VideoIcon className="size-4" />,
-                disabled: allowed || server.recordVideo ? undefined : "This instance doesn't let servers record video",
+                disabled: allowed || server.recordVideo ? undefined : t("serversettings.recordings.videoOff"),
               },
             ]}
           />
           <AnimatePresence initial={false}>
             {!allowed && !server.recordVideo && (
               <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-muted-foreground">
-                This instance doesn't let servers keep video in recordings. Whoever runs it can turn it on (Video in recordings, under Calls in its settings).
+                {t("serversettings.recordings.videoOffHint")}
               </motion.p>
             )}
           </AnimatePresence>
           <AnimatePresence initial={false}>
             {changed && (
               <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-amber-600 dark:text-amber-400">
-                {video
-                  ? "Everyone in the call sees “Recording with video”. Pictures take far more room than sound, against the same storage cap. A recording going on ends; the next, when someone presses Record, keeps video."
-                  : "A recording going on ends; the next, when someone presses Record, keeps sound only."}
+                {video ? t("serversettings.recordings.changedVideo") : t("serversettings.recordings.changedSound")}
               </motion.p>
             )}
           </AnimatePresence>
@@ -81,6 +79,7 @@ export function RecordingSettings({ instanceKey, server }: { instanceKey: string
 
 /** One person's files from an hour of recording, as the setting would keep them. */
 function FilesPreview({ video }: { video: boolean }) {
+  const { t } = useI18n();
   const files = [
     { key: "sound", name: "Mika.opus", icon: AudioLinesIcon, size: "4 MB" },
     ...(video
@@ -92,7 +91,7 @@ function FilesPreview({ video }: { video: boolean }) {
   ];
   return (
     <div className="flex flex-col gap-2 rounded-2xl border bg-muted/40 p-3">
-      <p className="text-xs text-muted-foreground">An hour-long recording, for one person:</p>
+      <p className="text-xs text-muted-foreground">{t("serversettings.recordings.preview")}</p>
       <ul className="flex flex-col gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
           {files.map((file, n) => (

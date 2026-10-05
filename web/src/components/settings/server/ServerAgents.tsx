@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ago, displayName, isAgent, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
  */
 export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const lang = useI18n();
+  const { t } = lang;
   const inst = useInstance(instanceKey);
   const here = useMemo(() => (inst?.members[serverId] ?? []).filter((m) => isAgent(m.user)), [inst?.members, serverId]);
   const [mine, setMine] = useState<Agent[]>([]);
@@ -102,8 +103,8 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
           <BotIcon className="size-4" />
         </motion.span>
         <div className="min-w-0 flex-1">
-          <p className="font-extrabold">Agents</p>
-          <p className="text-sm text-muted-foreground">Accounts programs drive. They talk like members, with the roles you give them.</p>
+          <p className="font-extrabold">{t("settings.nav.agents")}</p>
+          <p className="text-sm text-muted-foreground">{t("serversettings.agents.intro")}</p>
         </div>
       </div>
 
@@ -119,14 +120,14 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
             <Input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="An agent's username"
+              placeholder={t("serversettings.agents.username")}
               spellCheck={false}
               maxLength={33}
               className="h-10 rounded-xl pl-9"
             />
           </span>
           <Button type="submit" className="btn h-10 rounded-xl font-bold" disabled={!!busy}>
-            {busy?.startsWith("add:") ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} Add
+            {busy?.startsWith("add:") ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} {t("serversettings.channelPermissions.add")}
           </Button>
         </motion.div>
       </form>
@@ -140,7 +141,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
             transition={SPRING}
             className="flex flex-wrap items-center gap-1.5 overflow-hidden"
           >
-            <span className="text-xs font-bold text-muted-foreground">Yours:</span>
+            <span className="text-xs font-bold text-muted-foreground">{t("serversettings.agents.yours")}</span>
             {suggestions.map((a, n) => (
               <motion.button
                 key={a.user?.id}
@@ -172,11 +173,16 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
             🤖
           </motion.span>
           <span>
-            No agents here yet. Make your own under{" "}
-            <button type="button" className="font-bold text-primary hover:underline" onClick={() => openSettings("agents")}>
-              Settings, Agents
-            </button>
-            .
+            <T
+              k="serversettings.agents.none"
+              values={{
+                settings: (
+                  <button type="button" className="font-bold text-primary hover:underline" onClick={() => openSettings("agents")}>
+                    {t("serversettings.agents.settingsAgents")}
+                  </button>
+                ),
+              }}
+            />
           </span>
         </motion.div>
       ) : (
@@ -214,7 +220,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                       </AnimatePresence>
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      @{m.user?.username} · added {ago(lang, toDate(m.joinedAt))}
+                      {t("serversettings.agents.line", { username: m.user?.username ?? "", when: ago(lang, toDate(m.joinedAt)) })}
                     </span>
                   </span>
                   <AnimatePresence initial={false}>
@@ -230,7 +236,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                         MCP
                         <Switch
                           checked={mcpIds.has(id)}
-                          aria-label={`${displayName(m.user)} can use this server through MCP`}
+                          aria-label={t("serversettings.agents.mcpFor", { name: displayName(m.user) })}
                           onCheckedChange={(on) => {
                             const ids = new Set(mcpIds);
                             if (on) ids.add(id);
@@ -245,9 +251,9 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                     {confirm === id ? (
                       <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
                         <Button type="button" size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs font-bold" onClick={() => void remove(id)}>
-                          Remove
+                          {t("serversettings.channelPermissions.remove")}
                         </Button>
-                        <Button type="button" size="icon" variant="ghost" aria-label="Never mind" className="size-8 rounded-full" onClick={() => setConfirm(null)}>
+                        <Button type="button" size="icon" variant="ghost" aria-label={t("serversettings.shared.neverMind")} className="size-8 rounded-full" onClick={() => setConfirm(null)}>
                           <XIcon />
                         </Button>
                       </motion.span>
@@ -262,7 +268,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                           onClick={() => setConfirm(id)}
                         >
                           {busy === `remove:${id}` ? <LoaderCircleIcon className="animate-spin" /> : <UserMinusIcon />}
-                          <span className="hidden sm:inline">Remove</span>
+                          <span className="hidden sm:inline">{t("serversettings.channelPermissions.remove")}</span>
                         </Button>
                       </motion.span>
                     )}
@@ -277,10 +283,11 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
   );
 }
 
-const MCP_CHOICES = [
-  { mode: McpAccessMode.ALL, label: "Every agent" },
-  { mode: McpAccessMode.CHOSEN, label: "Only chosen" },
-  { mode: McpAccessMode.OFF, label: "None" },
+/** Who may use the server through MCP; labels are catalog keys. */
+const MCP_CHOICES: readonly { mode: McpAccessMode; label: Key }[] = [
+  { mode: McpAccessMode.ALL, label: "serversettings.agents.mcpAll" },
+  { mode: McpAccessMode.CHOSEN, label: "serversettings.agents.mcpChosen" },
+  { mode: McpAccessMode.OFF, label: "serversettings.agents.mcpNone" },
 ];
 
 /**
@@ -288,6 +295,7 @@ const MCP_CHOICES = [
  * apps (Claude and others) reach it there with an agent's token.
  */
 function McpChoice({ mode, onChange }: { mode: McpAccessMode; onChange: (mode: McpAccessMode) => void }) {
+  const { t } = useI18n();
   const current = mode === McpAccessMode.UNSPECIFIED ? McpAccessMode.ALL : mode;
   return (
     <motion.div
@@ -299,12 +307,10 @@ function McpChoice({ mode, onChange }: { mode: McpAccessMode; onChange: (mode: M
     >
       <div className="flex items-center gap-2">
         <PlugZapIcon className="size-4 text-violet-500" />
-        <p className="flex-1 text-sm font-bold">Through MCP</p>
+        <p className="flex-1 text-sm font-bold">{t("serversettings.agents.mcp")}</p>
       </div>
-      <p className="text-xs text-muted-foreground">
-        AI apps such as Claude can use this server through the instance&apos;s MCP endpoint with an agent&apos;s token. This only decides MCP: what an agent can do here is still up to its roles.
-      </p>
-      <div role="radiogroup" aria-label="Agents that can use this server through MCP" className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1">
+      <p className="text-xs text-muted-foreground">{t("serversettings.agents.mcpHint")}</p>
+      <div role="radiogroup" aria-label={t("serversettings.agents.mcpWho")} className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1">
         {MCP_CHOICES.map((choice) => {
           const on = current === choice.mode;
           return (
@@ -317,7 +323,7 @@ function McpChoice({ mode, onChange }: { mode: McpAccessMode; onChange: (mode: M
               className={cn("relative rounded-lg px-2 py-1.5 text-xs font-bold transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
               {on && <motion.span layoutId="mcp-choice" transition={SPRING} className="absolute inset-0 rounded-lg bg-background shadow-sm" />}
-              <span className="relative">{choice.label}</span>
+              <span className="relative">{t(choice.label)}</span>
             </button>
           );
         })}
