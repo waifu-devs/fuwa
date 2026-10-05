@@ -7,6 +7,7 @@ mod auth;
 mod automod;
 mod calls;
 mod channels;
+mod commands;
 mod dms;
 mod emoji;
 mod events;

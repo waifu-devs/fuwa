@@ -183,6 +183,20 @@ fn clip(text: &str) -> String {
     text.chars().take(MAX_DM).collect()
 }
 
+/// What a text shows: its words, and a line saying files came with it (they
+/// open in the web app for now).
+fn text_line(text: &pb::DirectMessageText) -> String {
+    if text.files.is_empty() {
+        return clip(&text.content);
+    }
+    let files = match text.files.len() {
+        1 => "A file".to_string(),
+        n => format!("{n} files"),
+    };
+    let line = format!("{files} came with this message, open it in the web app to see them");
+    clip(&if text.content.is_empty() { line } else { format!("{}\n{line}", text.content) })
+}
+
 fn is_precondition(p: &Problem) -> bool {
     p.code == Code::FailedPrecondition
 }
@@ -756,7 +770,7 @@ impl DmEngine {
             }
             Room::Channel { id, server_id, .. } => {
                 let (server_id, channel_id) = Self::at(server_id, id);
-                let req = pb::PostSecureMessageRequest { server_id, channel_id, message };
+                let req = pb::PostSecureMessageRequest { server_id, channel_id, message, ..Default::default() };
                 rpc!(self.api.secure(), post_secure_message(req)).await?;
             }
         }
@@ -1029,7 +1043,7 @@ impl DmEngine {
         match content.body {
             Some(Body::Text(text)) => {
                 let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
-                item.content = clip(&text.content);
+                item.content = text_line(&text);
                 item.reply_to = text.reply_to_sequence;
                 item.signed = signed;
                 let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
@@ -1167,7 +1181,7 @@ impl DmEngine {
                         continue;
                     }
                     let mut item = Item::new(*seq, ItemKind::Text, at, sender, device);
-                    item.content = clip(&text.content);
+                    item.content = text_line(text);
                     item.reply_to = text.reply_to_sequence;
                     item.signed = Some(o.signed.clone());
                     item.shared_by = by.to_owned();

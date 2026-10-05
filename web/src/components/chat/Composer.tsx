@@ -12,6 +12,7 @@ import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/
 import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { CommandForm, CommandPicker, useCommandPicker } from "@/components/chat/Commands";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { PollEditor } from "@/components/chat/PollEditor";
@@ -141,6 +142,11 @@ export function Composer({
   const cooling = gate.cooldownUntil > 0;
   const timedOut = gate.timedOutUntil > 0;
   const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
+  // Agents' commands run in a channel, not a thread, and stay with the server
+  // a channel lives in, so none in channels shared between servers.
+  const commandsHere = !thread && !channel.shared;
+  const commands = useCommandPicker(instanceKey, serverId, channelId, commandsHere ? text : "", setText);
+  const chosen = commandsHere ? commands.chosen : null;
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
   const access = useAccess(instanceKey, serverId);
@@ -224,6 +230,15 @@ export function Composer({
   const uploaded = staged.length ? staged.reduce((sum, s) => sum + (s.failed ? 0 : s.sent), 0) / staged.length : 0;
 
   function send() {
+    if (chosen) {
+      if (timedOut) return;
+      if (commands.missing.length || commands.running) {
+        void nudge.start({ x: [0, -5, 5, -3, 3, 0], transition: { duration: 0.4 } });
+        return;
+      }
+      void commands.send().then((ran) => ran && box.current?.focus());
+      return;
+    }
     if ((!content && !staged.length) || tooLong || timedOut) return;
     if (cooling || uploading || brokenFile) {
       void nudge.start({ x: [0, -5, 5, -3, 3, 0], transition: { duration: 0.4 } });
@@ -268,6 +283,7 @@ export function Composer({
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
+    if (commandsHere && commands.onKeyDown(e)) return;
     if (picker.onKeyDown(e)) return;
     if (sendsMessage(e, sendWith)) {
       e.preventDefault();
@@ -278,7 +294,9 @@ export function Composer({
     }
   }
 
-  const ready = (!!content || staged.length > 0) && !tooLong && !cooling && !uploading && !brokenFile;
+  const ready = chosen
+    ? !commands.missing.length && !commands.running
+    : (!!content || staged.length > 0) && !tooLong && !cooling && !uploading && !brokenFile;
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
@@ -306,8 +324,12 @@ export function Composer({
       <motion.div animate={nudge} className="composer relative rounded-2xl border bg-card px-3 py-2">
         <AnimatePresence initial={false}>{staged.length > 0 && <StagedTray key="files" where={where} staged={staged} />}</AnimatePresence>
         <div className="flex items-end gap-2">
-        {gate.canAttach && <AttachButton where={where} />}
+        {gate.canAttach && !chosen && <AttachButton where={where} />}
         <MentionPicker picker={picker} />
+        {commandsHere && <CommandPicker picker={commands} />}
+        {chosen ? (
+          <CommandForm instanceKey={instanceKey} serverId={serverId} picker={commands} onDone={() => requestAnimationFrame(() => box.current?.focus())} />
+        ) : (
         <textarea
           ref={box}
           data-composer
@@ -331,6 +353,7 @@ export function Composer({
           aria-label={placeholder}
           className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"
         />
+        )}
         <AnimatePresence>
           {text.length > MAX - 500 && (
             <motion.span
@@ -343,6 +366,8 @@ export function Composer({
             </motion.span>
           )}
         </AnimatePresence>
+        {!chosen && (
+        <>
         <TimestampPicker onPick={insert} />
         <EmojiPicker
           catalog={catalog}
@@ -376,7 +401,9 @@ export function Composer({
             <BarChart3Icon className="size-[18px]" />
           </motion.button>
         )}
-        {voiceHere && gate.canAttach && !text && !staged.length && !cooling ? (
+        </>
+        )}
+        {voiceHere && gate.canAttach && !chosen && !text && !staged.length && !cooling ? (
           <VoiceRecorder
             maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
             onSend={sendVoice}
@@ -388,7 +415,7 @@ export function Composer({
           onClick={send}
           disabled={!ready}
           aria-label={
-            cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
+            chosen ? `Run /${chosen.command.name}` : cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
           }
           whileTap={{ scale: 0.85 }}
           initial={false}
@@ -444,8 +471,17 @@ export function Composer({
           </p>
         ) : (
         <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
-          <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
-          <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
+          {chosen ? (
+            <>
+              <b>{comboLabel("Enter")}</b> to run /{chosen.command.name} · <b>Esc</b> to go back to typing
+            </>
+          ) : (
+            <>
+              <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
+              <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
+              {commandsHere && " · / for commands"}
+            </>
+          )}
         </p>
         )}
         <AnimatePresence initial={false}>

@@ -53,6 +53,8 @@ not_for_server() {
 not_for_desktop() {
   top_md "$1" && return 0
   case $1 in
+    # The desktop builds its standard emoji from this one.
+    web/src/lib/emoji-data.json) return 1 ;;
     docs/* | web/* | sdk/* | e2ee-wasm/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     Cargo.lock | Dockerfile | .dockerignore | buf.yaml | buf.lock | \
     .github/workflows/desktop.yml | .github/workflows/release.yml | .github/workflows/publish.yml | \

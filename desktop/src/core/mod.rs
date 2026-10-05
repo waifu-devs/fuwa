@@ -14,6 +14,7 @@ pub mod calls;
 pub mod compat;
 pub mod config;
 pub mod dms;
+pub mod emoji;
 pub mod history;
 pub mod instance_admin;
 pub mod instance_manage;
@@ -23,6 +24,7 @@ pub mod linked;
 pub mod moderation;
 pub mod notifications;
 pub mod permissions;
+pub mod presence;
 pub mod reports;
 pub mod secrets;
 pub mod server_admin;
@@ -186,6 +188,10 @@ pub struct Core {
     version: watch::Receiver<u64>,
     notices: Mutex<Option<mpsc::UnboundedReceiver<Notice>>>,
     voice: voice::Voice,
+    /// What games report, and which may (`presence`).
+    pub games: Arc<presence::Games>,
+    /// Listening for games, while that's on.
+    games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 /// Messages per page, as the web app reads them.
@@ -215,6 +221,12 @@ impl Core {
         let secrets = secrets::Secrets::open(&paths.config);
         let vault_key = secrets.vault_key();
         reports::start(&paths.config, prefs.share_reports);
+        // A game asking to be allowed shows in the window.
+        let games = presence::Games::new(prefs.game_answers.clone(), {
+            let shared = shared.clone();
+            move || shared.update(|_| {})
+        });
+        let game_activity = prefs.game_activity;
         let core = Arc::new(Self {
             shared,
             paths,
@@ -225,7 +237,10 @@ impl Core {
             version,
             notices: Mutex::new(Some(notices)),
             voice: voice::Voice::default(),
+            games,
+            games_listener: Mutex::new(None),
         });
+        core.listen_for_games(game_activity);
         for saved in config::load_instances(&core.paths, &core.secrets) {
             core.add_instance(&saved.url, saved.token);
         }
@@ -284,8 +299,41 @@ impl Core {
             prefs.clone()
         };
         reports::set_enabled(prefs.share_reports);
+        self.listen_for_games(prefs.game_activity);
+        self.games.set_answers(prefs.game_answers.clone());
         config::store_prefs(&self.paths, &prefs);
         self.shared.update(|_| {});
+    }
+
+    // ───────────────────────── Games ─────────────────────────
+
+    /// Starts or stops listening where games report to Discord.
+    fn listen_for_games(&self, on: bool) {
+        let mut listener = self.games_listener.lock();
+        match (on, listener.is_some()) {
+            (true, false) => {
+                let task = presence::listen(self.games.clone(), self.paths.config.clone());
+                *listener = Some(self.runtime.spawn(task));
+            }
+            (false, true) => {
+                if let Some(task) = listener.take() {
+                    task.abort();
+                }
+                self.games.clear();
+            }
+            _ => {}
+        }
+    }
+
+    /// The person's answer to a game asking to show what they're doing;
+    /// None asks again the next time the app starts.
+    pub fn answer_game(&self, key: &str, allow: Option<bool>) {
+        self.games.answer(key, allow);
+        if let Some(allow) = allow {
+            self.set_prefs(|p| {
+                p.game_answers.insert(key.to_owned(), allow);
+            });
+        }
     }
 
     // ───────────────────────── Anonymous reports ─────────────────────────
@@ -645,7 +693,15 @@ impl Core {
         let Some(api) = self.api(key) else { return Ok(()) };
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let pending = PendingMessage { nonce, content: content.into(), created_at_ms: dms::now_ms(), failed: None };
+        let emojis = self.shared.read(|s| s.instance(key).map(|i| emoji::outside(i, server_id, content)));
+        let emojis = emojis.unwrap_or_default();
+        let pending = PendingMessage {
+            nonce,
+            content: content.into(),
+            emojis: emojis.clone(),
+            created_at_ms: dms::now_ms(),
+            failed: None,
+        };
         self.shared.instance(key, |i| i.pending.entry(channel_id.to_owned()).or_default().push(pending));
         let res = rpc!(
             api.messages(),
@@ -653,6 +709,7 @@ impl Core {
                 server_id: server_id.into(),
                 channel_id: channel_id.into(),
                 content: content.into(),
+                emojis,
                 ..Default::default()
             })
         )
@@ -695,6 +752,7 @@ impl Core {
         content: &str,
     ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
+        let emojis = self.shared.read(|s| s.instance(key).map(|i| emoji::outside(i, server_id, content)));
         let res = rpc!(
             api.messages(),
             update_message(pb::UpdateMessageRequest {
@@ -703,7 +761,7 @@ impl Core {
                 content: content.into(),
                 // A channel shown from another server isn't held here, so the instance needs it named.
                 channel_id: channel_id.into(),
-                ..Default::default()
+                emojis: emojis.unwrap_or_default(),
             })
         )
         .await?;

@@ -1026,7 +1026,7 @@ async fn review_guest(
     server: &pb::SharedServer,
     access: &Access,
     channel: &pb::Channel,
-    content: &str,
+    text: automod::Text<'_>,
     asked: Option<&automod::Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Option<String>> {
@@ -1036,12 +1036,12 @@ async fn review_guest(
         timed_out_until: Some(timestamp(253_402_300_799_000)),
         ..Default::default()
     };
-    let verdict = automod::review(conn, server_id, &member, access, channel, content, asked, events).await?;
+    let verdict = automod::review(conn, server_id, &member, access, channel, text, asked, events).await?;
     let times_out = store::load_automod(conn).await?.iter().any(|rule| {
         rule.enabled
             && !rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
             && rule.actions.iter().any(|a| a.kind == pb::AutoModActionKind::TimeOut as i32)
-            && crate::automod::check(rule, content).is_some()
+            && crate::automod::check_text(rule, text).is_some()
     });
     if times_out {
         keep_out(conn, channel, &user.id, &server.id, &user.id, "AutoMod", events).await?;
@@ -1155,11 +1155,14 @@ async fn shown_one(
 
 /// @everyone, @here and role pings belong to the server they were said in:
 /// the home's roles mean nothing here, and its @everyone isn't this
-/// server's people.
+/// server's people. Nor are an agent's buttons and interactions relayed
+/// between servers yet.
 fn no_pings(message: &mut pb::Message) {
     message.mentions_everyone = false;
     message.mention_role_ids.clear();
     message.mention_user_ids.clear();
+    message.components.clear();
+    message.interaction = None;
 }
 
 /// Runs this server's own AutoMod over what one of its people writes in a
@@ -1170,18 +1173,18 @@ async fn review_here(
     member: &pb::Member,
     access: &Access,
     channel_id: &str,
-    content: &str,
+    text: automod::Text<'_>,
     pictures: &[String],
 ) -> Result<()> {
     if access.has(Permission::ManageServer) || store::load_automod(&*sdb.read()?).await?.is_empty() {
         return Ok(());
     }
-    let asked = automod::ask(app, sdb, member, access, channel_id, content, pictures).await;
+    let asked = automod::ask(app, sdb, member, access, channel_id, text, pictures).await;
     let author_id = member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let blocked = sdb
         .write(&author_id, async |conn, events| {
             let channel = load_channel(conn, &sdb.id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
-            Ok(automod::review(conn, &sdb.id, member, access, &channel, content, asked.as_ref(), events).await?.blocked)
+            Ok(automod::review(conn, &sdb.id, member, access, &channel, text, asked.as_ref(), events).await?.blocked)
         })
         .await?;
     match blocked {
@@ -1250,7 +1253,15 @@ pub(super) async fn guest_send(
     let channel_id = link.channel_id.clone().unwrap_or_default();
     let guest = guest_of(app, &*sdb.read()?, &sdb.id, account, access, link).await?;
     let pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
-    review_here(app, sdb, member, access, &channel_id, &req.content, &pictures).await?;
+    let reviewed = messages::reviewed_text(&pb::Message {
+        content: req.content.clone(),
+        embeds: req.embeds.clone(),
+        attachments: req.attachments.clone(),
+        ..Default::default()
+    })
+    .into_owned();
+    let text = automod::Text { all: &reviewed, content: &req.content };
+    review_here(app, sdb, member, access, &channel_id, text, &pictures).await?;
     let files: Vec<String> = req.attachments.iter().map(|file| file.id.clone()).collect();
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
@@ -1322,7 +1333,7 @@ pub(super) async fn guest_edit(
     req: &pb::UpdateMessageRequest,
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
-    review_here(app, sdb, member, access, &channel_id, &req.content, &[]).await?;
+    review_here(app, sdb, member, access, &channel_id, automod::Text::plain(&req.content), &[]).await?;
     let call = Call::Edit(cpb::GuestEdit {
         guest: Some(guest),
         message_id: req.message_id.clone(),
@@ -1570,7 +1581,16 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     let mut send = send;
     let files = take_files(app, sdb, &guest, &mut send.attachments).await?;
     let file_bytes: i64 = send.attachments.iter().map(|file| file.size).sum();
-    let asked = ask_home(app, sdb, &guest, &send.content, &send.attachments, &send.embeds).await;
+    // AutoMod reads the embeds' words and the files' names with the text.
+    let reviewed = messages::reviewed_text(&pb::Message {
+        content: send.content.clone(),
+        embeds: send.embeds.clone(),
+        attachments: send.attachments.clone(),
+        ..Default::default()
+    })
+    .into_owned();
+    let text = automod::Text { all: &reviewed, content: &send.content };
+    let asked = ask_home(app, sdb, &guest, text, &send.attachments, &send.embeds).await;
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -1610,8 +1630,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             }
             remember(conn, &user, &server).await?;
             let verdict =
-                review_guest(conn, &sdb.id, &user, &server, &access, &channel, &send.content, asked.as_ref(), events)
-                    .await?;
+                review_guest(conn, &sdb.id, &user, &server, &access, &channel, text, asked.as_ref(), events).await?;
             if let Some(why) = verdict {
                 return Ok(Err(why));
             }
@@ -1767,7 +1786,7 @@ async fn ask_home(
     app: &Arc<App>,
     sdb: &ServerDb,
     guest: &cpb::Guest,
-    content: &str,
+    text: automod::Text<'_>,
     attachments: &[pb::Attachment],
     embeds: &[pb::Embed],
 ) -> Option<automod::Asked> {
@@ -1790,7 +1809,14 @@ async fn ask_home(
     }
     let pictures = automod::picture_links(attachments, embeds, &[]);
     let member = pb::Member { user: Some(user), ..Default::default() };
-    automod::ask(app, sdb, &member, &access, &channel_id, content, &pictures).await
+    automod::ask(app, sdb, &member, &access, &channel_id, text, &pictures).await
+}
+
+/// What AutoMod reads of `message` with its text changed to `content`: the
+/// embeds and file names an edit leaves as they are come too.
+fn edited_text(message: &pb::Message, content: &str) -> String {
+    let edited = pb::Message { content: content.to_string(), ..message.clone() };
+    messages::reviewed_text(&edited).into_owned()
 }
 
 async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
@@ -1800,7 +1826,8 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     let before = load_message(&*sdb.read()?, &sdb.id, &edit.message_id).await?;
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
-            ask_home(app, sdb, &guest, &edit.content, &[], &[]).await
+            let all = edited_text(&m, &edit.content);
+            ask_home(app, sdb, &guest, automod::Text { all: &all, content: &edit.content }, &[], &[]).await
         }
         _ => None,
     };
@@ -1835,7 +1862,7 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
                     &server,
                     &access,
                     &channel,
-                    &edit.content,
+                    automod::Text { all: &edited_text(&message, &edit.content), content: &edit.content },
                     asked.as_ref(),
                     events,
                 )

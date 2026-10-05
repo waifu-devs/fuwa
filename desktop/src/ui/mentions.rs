@@ -18,7 +18,8 @@ pub struct Look {
     pub people: HashMap<String, String>,
     /// Role ids to names.
     pub roles: HashMap<String, String>,
-    /// The server's emoji: ids to pictures.
+    /// Emoji ids to pictures: the server's own, and the other servers' on
+    /// the instance (a message may write those too).
     pub emojis: HashMap<String, String>,
     /// Changes whenever any of the above does, so what was worked out with
     /// one look can be kept until the next.
@@ -51,17 +52,27 @@ impl Look {
                 (r.id.clone(), r.name.clone())
             })
             .collect();
-        let emojis = i
-            .emojis
-            .get(server_id)
-            .into_iter()
-            .flatten()
-            .map(|e| {
-                (&e.id, &e.url).hash(&mut h);
-                (e.id.clone(), e.url.clone())
-            })
-            .collect();
+        // The server's own last, so they win should two ever share an id.
+        let mut emojis = HashMap::new();
+        let others = i.emojis.iter().filter(|(id, _)| *id != server_id).flat_map(|(_, list)| list);
+        for e in others.chain(i.emojis.get(server_id).into_iter().flatten()) {
+            (&e.id, &e.url).hash(&mut h);
+            emojis.insert(e.id.clone(), e.url.clone());
+        }
         Self { people, roles, emojis, digest: h.finish() }
+    }
+
+    /// With the emoji a message brought along from other servers, for the
+    /// ones not here already.
+    pub fn with(&self, brought: &[pb::Emoji]) -> std::borrow::Cow<'_, Self> {
+        if brought.iter().all(|e| self.emojis.contains_key(&e.id)) {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut look = self.clone();
+        for e in brought {
+            look.emojis.entry(e.id.clone()).or_insert_with(|| e.url.clone());
+        }
+        std::borrow::Cow::Owned(look)
     }
 }
 
@@ -116,18 +127,11 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                 prev = Some('>');
                 continue;
             }
-            // A server's own emoji, `<:name:id>` (or `<a:name:id>` when it
-            // moves): its picture, or its :name: once it's gone.
-            if plain
-                && (rest.starts_with("<:") || rest.starts_with("<a:"))
-                && let Some(end) = rest.find('>')
-                && let Some((name, id)) = rest[rest.find(':').unwrap_or(0) + 1..end].split_once(':')
-                && (2..=32).contains(&name.len())
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                && id.len() == 26
-                && id.chars().all(|c| c.is_ascii_alphanumeric())
-            {
-                match look.emojis.get(&id.to_uppercase()).filter(|url| url.starts_with("http")) {
+            // A server emoji, `<:name:id>` (or `<a:name:id>` when it moves):
+            // its picture, or its :name: when it's gone or never came along.
+            if plain && let Some((name, id, len)) = crate::ui::emoji::token_at(rest) {
+                let url = look.emojis.get(id).or_else(|| look.emojis.get(&id.to_uppercase()));
+                match url.filter(|url| url.starts_with("http")) {
                     Some(url) => out.push_str(&format!(
                         "![:{}:]({}{})",
                         escape(name),
@@ -136,7 +140,7 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                     )),
                     None => out.push_str(&format!(":{}:", escape(name))),
                 }
-                i += end + 1;
+                i += len;
                 prev = Some('>');
                 continue;
             }
@@ -251,7 +255,7 @@ impl Pick {
             Pick::Member { user, .. } => format!("u-{}", user.id),
             Pick::Role { id, .. } => format!("r-{id}"),
             Pick::Everyone(name) => (*name).to_owned(),
-            Pick::Emoji(choice) => format!("e-{}", choice.name),
+            Pick::Emoji(choice) => format!("e-{}", choice.key),
         }
     }
 }

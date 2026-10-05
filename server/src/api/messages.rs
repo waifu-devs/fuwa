@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, polls, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, commands, polls, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -47,6 +47,10 @@ struct Extras {
     gif: Option<pb::MessageGif>,
     #[prost(string, repeated, tag = "10")]
     mention_user_ids: Vec<String>,
+    #[prost(message, repeated, tag = "11")]
+    components: Vec<pb::ComponentRow>,
+    #[prost(message, optional, tag = "12")]
+    interaction: Option<pb::MessageInteraction>,
 }
 
 impl Extras {
@@ -62,6 +66,8 @@ impl Extras {
             emojis: message.emojis.clone(),
             gif: message.gif.clone(),
             mention_user_ids: message.mention_user_ids.clone(),
+            components: message.components.clone(),
+            interaction: message.interaction.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -272,6 +278,8 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 poll: None,
                 gif: None,
                 mention_user_ids: vec![],
+                components: vec![],
+                interaction: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -298,6 +306,8 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.emojis = extras.emojis;
         message.gif = extras.gif;
         message.mention_user_ids = extras.mention_user_ids;
+        message.components = extras.components;
+        message.interaction = extras.interaction;
     }
     Ok(message)
 }
@@ -307,13 +317,30 @@ pub(super) fn stored_size(message: &pb::Message) -> i64 {
     message.content.len() as i64 + message.poll.as_ref().map_or(0, polls::bytes)
 }
 
-/// What AutoMod reads of a message: its text, and its poll's question and answers.
+/// What AutoMod reads of a message: its text, its poll's question and
+/// answers, the words of the embeds its sender made (title, description,
+/// fields) and its files' names, each on its own line. Names are read as
+/// they're shown, words and all, nothing taken from their shape.
 pub(super) fn reviewed_text(message: &pb::Message) -> std::borrow::Cow<'_, str> {
-    match &message.poll {
-        Some(poll) if message.content.is_empty() => polls::words(poll).into(),
-        Some(poll) => format!("{}\n{}", message.content, polls::words(poll)).into(),
-        None => message.content.as_str().into(),
+    let mut extras = Vec::new();
+    if let Some(poll) = &message.poll {
+        extras.push(polls::words(poll));
     }
+    for embed in &message.embeds {
+        extras.extend([embed.title.clone(), embed.description.clone()]);
+        for field in &embed.fields {
+            extras.extend([field.name.clone(), field.value.clone()]);
+        }
+    }
+    extras.extend(message.attachments.iter().map(|file| file.filename.clone()));
+    extras.retain(|words| !words.trim().is_empty());
+    if extras.is_empty() {
+        return message.content.as_str().into();
+    }
+    if !message.content.is_empty() {
+        extras.insert(0, message.content.clone());
+    }
+    extras.join("\n").into()
 }
 
 pub(super) async fn load_message(
@@ -835,7 +862,21 @@ impl MessageService for Api {
                 if req.also_send_to_channel && req.thread_id.is_empty() {
                     return Err(Error::invalid("only thread replies are also sent to the channel"));
                 }
+                // Buttons and answers to interactions are agents' (commands.rs).
+                let answering = !req.interaction_id.is_empty();
+                if (answering || !req.components.is_empty()) && account.kind != pb::AccountKind::Agent {
+                    return Err(Error::denied("only agents send buttons and answer interactions"));
+                }
+                if answering && !req.thread_id.is_empty() {
+                    return Err(Error::invalid("answer an interaction in the channel it came from"));
+                }
+                let components = commands::check_components(&req.components)?;
                 if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
+                    if answering || !components.is_empty() {
+                        return Err(Error::invalid(
+                            "buttons and interactions aren't in channels shared between servers yet",
+                        ));
+                    }
                     if poll.is_some() {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
@@ -870,9 +911,6 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
-                // AutoMod reads a poll's question and answers along with the text.
-                let draft = pb::Message { content: req.content.clone(), poll: poll.clone(), ..Default::default() };
-                let reviewed = reviewed_text(&draft).into_owned();
                 let file_bytes = self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
                 if file_bytes > 0
                     && let Some(limit) = limits.attachment_bytes
@@ -883,6 +921,16 @@ impl MessageService for Api {
                         media::size_label(limit)
                     )));
                 }
+                // AutoMod reads the poll, embeds and file names along with the
+                // text, as the message will be stored (names as cleaned above).
+                let draft = pb::Message {
+                    content: req.content.clone(),
+                    poll: poll.clone(),
+                    embeds: req.embeds.clone(),
+                    attachments: req.attachments.clone(),
+                    ..Default::default()
+                };
+                let reviewed = reviewed_text(&draft).into_owned();
                 let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
                 // The GIF too: providers read its first frame. Then emoji
                 // from other servers, the smallest.
@@ -892,7 +940,16 @@ impl MessageService for Api {
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
                     None,
-                    automod::ask_after(&self.app, &sdb, &member, &access, &req.channel_id, &reviewed, &pictures).await,
+                    automod::ask_after(
+                        &self.app,
+                        &sdb,
+                        &member,
+                        &access,
+                        &req.channel_id,
+                        automod::Text { all: &reviewed, content: &req.content },
+                        &pictures,
+                    )
+                    .await,
                 );
                 let message = sdb
                     .write(&account.id, async |conn, events| {
@@ -924,7 +981,7 @@ impl MessageService for Api {
                             &member,
                             &access,
                             &channel,
-                            &reviewed,
+                            automod::Text { all: &reviewed, content: &req.content },
                             asked.as_ref(),
                             events,
                         )
@@ -941,6 +998,16 @@ impl MessageService for Api {
                         let (mentions_everyone, mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
                         let mention_user_ids = mentioned_users(conn, &req.content).await?;
+                        let interaction = if answering {
+                            Some(commands::answer(conn, &account.id, &req.interaction_id, &channel.id, now).await?)
+                        } else {
+                            None
+                        };
+                        if (answering || !components.is_empty()) && polls::shared_out(conn, &channel.id).await? {
+                            return Err(Error::invalid(
+                                "buttons and interactions aren't in channels shared between servers yet",
+                            ));
+                        }
                         let message = pb::Message {
                             id: new_id(),
                             server_id: sdb.id.clone(),
@@ -965,6 +1032,8 @@ impl MessageService for Api {
                             poll: poll.clone(),
                             gif: gif.clone(),
                             mention_user_ids,
+                            components: components.clone(),
+                            interaction,
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0
@@ -1111,11 +1180,13 @@ impl MessageService for Api {
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
                 let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
-                // With a poll's question and answers, which an edit leaves as they are.
+                // With the poll, embeds and file names, which an edit leaves as they are.
                 let reviewed = before.as_ref().map(|m| {
                     reviewed_text(&pb::Message {
                         content: req.content.clone(),
                         poll: m.poll.clone(),
+                        embeds: m.embeds.clone(),
+                        attachments: m.attachments.clone(),
                         ..Default::default()
                     })
                     .into_owned()
@@ -1138,8 +1209,16 @@ impl MessageService for Api {
                         let pictures = automod::picture_links(&[], &[], &added);
                         (
                             None,
-                            automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &pictures)
-                                .await,
+                            automod::ask_after(
+                                &self.app,
+                                &sdb,
+                                &member,
+                                &access,
+                                &m.channel_id,
+                                automod::Text { all: &reviewed, content: &req.content },
+                                &pictures,
+                            )
+                            .await,
                         )
                     }
                     _ => (None, None),
@@ -1173,7 +1252,7 @@ impl MessageService for Api {
                                 &member,
                                 &access,
                                 &channel,
-                                &reviewed,
+                                automod::Text { all: &reviewed, content: &req.content },
                                 asked.as_ref(),
                                 events,
                             )
@@ -1379,5 +1458,35 @@ mod tests {
         assert!(!says_everyone("@@here"));
         assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
         assert_eq!(user_tokens("<@AB> <@!AB> <@!CD> <@&EF> <@> <@G-H> <@IJ"), ["AB", "CD"]);
+    }
+
+    /// AutoMod reads what a sender wrote anywhere in the message, once,
+    /// in one text: embeds' words and file names along with the text.
+    #[test]
+    fn reviewed_text_reads_embeds_and_file_names() {
+        let plain = pb::Message { content: "hi".into(), ..Default::default() };
+        assert!(matches!(reviewed_text(&plain), std::borrow::Cow::Borrowed("hi")));
+        let message = pb::Message {
+            content: "look".into(),
+            embeds: vec![pb::Embed {
+                title: "Free nitro".into(),
+                description: "log in at discord-gift.example".into(),
+                fields: vec![pb::EmbedField { name: "Code".into(), value: " ".into(), ..Default::default() }],
+                url: "https://example.com/never-read".into(),
+                ..Default::default()
+            }],
+            attachments: vec![pb::Attachment {
+                filename: "steam gift card.png".into(),
+                url: "https://fuwa.test/media/a".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            reviewed_text(&message),
+            "look\nFree nitro\nlog in at discord-gift.example\nCode\nsteam gift card.png"
+        );
+        let only_file = pb::Message { attachments: message.attachments.clone(), ..Default::default() };
+        assert_eq!(reviewed_text(&only_file), "steam gift card.png");
     }
 }

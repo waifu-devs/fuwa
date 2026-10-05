@@ -10,8 +10,11 @@
     { "id": "polls", "date": "2026-10-04", "title": "Polls" },
     { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" },
     { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" },
-    { "id": "agent-streams", "date": "2026-10-04", "title": "Agents that follow new servers and see mentions" },
+    { "id": "agent-streams", "date": "2026-10-04", "title": "Agents following new servers" },
     { "id": "secure-threads", "date": "2026-10-04", "title": "Threads in secure channels" },
-    { "id": "voice-messages-in-channels", "date": "2026-10-04", "title": "Voice messages in server channels" }
+    { "id": "voice-messages-in-channels", "date": "2026-10-04", "title": "Voice messages in server channels" },
+    { "id": "video-recordings", "date": "2026-10-04", "title": "Video in server recordings" },
+    { "id": "secure-files", "date": "2026-10-04", "title": "Files in encrypted chats" },
+    { "id": "agent-commands", "date": "2026-10-04", "title": "Slash commands and buttons from agents" }
   ]
 }

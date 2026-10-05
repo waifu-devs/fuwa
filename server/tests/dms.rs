@@ -572,7 +572,20 @@ async fn voice_messages_carry_sealed_files() {
     // A sealed file is any bytes: the instance can't tell what's in it.
     let sealed: Vec<u8> = (0..4096u32).map(|n| (n.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
     let reserve = |token: &str, size: usize| {
-        authed(token, pb::CreateSealedUploadRequest { conversation_id: cid.clone(), size: size as i64 })
+        authed(
+            token,
+            pb::CreateSealedUploadRequest { conversation_id: cid.clone(), size: size as i64, ..Default::default() },
+        )
+    };
+    let file = |token: &str, size: usize| {
+        authed(
+            token,
+            pb::CreateSealedUploadRequest {
+                conversation_id: cid.clone(),
+                size: size as i64,
+                kind: pb::SealedKind::File as i32,
+            },
+        )
     };
     let reserved = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap().into_inner();
     let put = http.put(on(&instance, &reserved.upload_url)).body(sealed.clone()).send().await.unwrap();
@@ -645,6 +658,36 @@ async fn voice_messages_carry_sealed_files() {
     dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap();
     let daily = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap_err();
     assert_eq!(daily.code(), Code::ResourceExhausted);
+
+    // Files aren't voice messages, so the voice cap leaves them alone...
+    dms.create_sealed_upload(file(&juan.token, sealed.len())).await.unwrap();
+    // ...but every sealed upload counts toward the daily cap on files, since
+    // the instance can't tell what's inside (four so far today).
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.voice_message_bytes_per_day = None;
+    settings.limits.attachment_upload_bytes_per_day = Some(5 * sealed.len() as i64);
+    instance.app.replace_settings(settings);
+    dms.create_sealed_upload(file(&juan.token, sealed.len())).await.unwrap();
+    let daily = dms.create_sealed_upload(file(&juan.token, sealed.len())).await.unwrap_err();
+    assert_eq!(daily.code(), Code::ResourceExhausted);
+    let daily = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap_err();
+    assert_eq!(daily.code(), Code::ResourceExhausted);
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.attachment_upload_bytes_per_day = None;
+    instance.app.replace_settings(settings);
+
+    // The cap on one file holds for both kinds; voice also has its own.
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.attachment_upload_bytes = Some(1000);
+    instance.app.replace_settings(settings);
+    for request in [file(&juan.token, sealed.len()), reserve(&juan.token, sealed.len())] {
+        let big = dms.create_sealed_upload(request).await.unwrap_err();
+        assert_eq!(big.code(), Code::ResourceExhausted);
+        assert!(big.message().contains("files"), "{}", big.message());
+    }
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.attachment_upload_bytes = None;
+    instance.app.replace_settings(settings);
 
     // A cap admins set is checked on the sealed size.
     let mut settings = (*instance.app.settings()).clone();

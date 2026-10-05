@@ -122,6 +122,7 @@ async fn follow_instance(
 
     // Notification settings follow the account; an older instance without them just has none.
     core.refresh_notifications(key).await;
+    core.refresh_presence(key).await;
 
     let servers = retrying(core, key, || rpc!(api.servers(), list_servers(pb::ListServersRequest {}))).await?.servers;
     let ids: Vec<String> = servers.iter().map(|s| s.id.clone()).collect();
@@ -146,11 +147,15 @@ async fn follow_instance(
                 }
                 // Notification settings changed on another device don't send an event either.
                 core.refresh_notifications(&key).await;
+                core.refresh_presence(&key).await;
             }
         })
     };
+    // What games report goes out with this app's presence.
+    let presence = tokio::spawn(crate::core::presence::keep(api.clone(), core.games.clone()));
     let result = follow_events(core, key, api, followed).await;
     refresh.abort();
+    presence.abort();
     result
 }
 

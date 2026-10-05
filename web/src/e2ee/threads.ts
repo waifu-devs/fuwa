@@ -11,10 +11,10 @@
 import type { Item, Note } from "./vault";
 
 /**
- * A line once it's deleted: no text, and no signed copies either, since those
+ * A line once it's deleted: no text or files, and no signed copies either, since those
  * hold the plaintext too.
  */
-export const emptied = (i: Item): Item => ({ ...i, deleted: true, content: "", signed: undefined, editSigned: undefined });
+export const emptied = (i: Item): Item => ({ ...i, deleted: true, content: "", signed: undefined, editSigned: undefined, files: undefined });
 
 /** What a thread is, as this device can tell from the lines it has. */
 export type SecureThread = {

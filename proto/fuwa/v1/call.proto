@@ -83,8 +83,9 @@ service CallService {
   // A voice channel's recordings on the server, newest first, the one going
   // on now included. Needs RECORD there.
   rpc ListRecordings(ListRecordingsRequest) returns (ListRecordingsResponse);
-  // One person's track of a finished recording, as an Ogg Opus file sent in
-  // pieces. Needs RECORD in the recording's channel.
+  // One person's track of a finished recording, as a file sent in pieces:
+  // their sound as Ogg Opus, or (in recordings with video) their camera or
+  // shared screen as WebM. Needs RECORD in the recording's channel.
   rpc DownloadRecording(DownloadRecordingRequest) returns (stream DownloadRecordingResponse);
   // Deletes a finished recording. Needs RECORD in its channel, and to have
   // started it or MANAGE_CHANNELS there.
@@ -123,6 +124,9 @@ message GetCallSettingsResponse {
   // the screen) while the screen is shared. Off from instances that predate
   // it, whose media part takes one audio track only.
   bool screen_sound = 4;
+  // Servers may have their recordings keep video too
+  // (InstanceSettings.call_recording_video, Server.record_video).
+  bool recording_video = 5;
 }
 
 message JoinVoiceRequest {
@@ -187,6 +191,10 @@ message KeepVoiceResponse {
   // As in JoinVoiceResponse: recording on the server stopped, or didn't
   // start, because the server's recordings are full.
   bool recordings_full = 2;
+  // Recording on the server stopped because someone changed what the
+  // server's recordings keep (Server.record_video). It doesn't start again
+  // by itself: press Record to start a new one, as it now says.
+  bool recording_ended = 3;
 }
 
 message ListVoiceStatesRequest {
@@ -335,14 +343,34 @@ message Recording {
   repeated RecordingTrack tracks = 6;
   // All its tracks' files together.
   int64 size_bytes = 7;
+  // It keeps cameras and shared screens too (Server.record_video was on
+  // when it started).
+  bool video = 8;
 }
 
 // One person's sound in a recording, from when the recording started (it's
-// silent until they first spoke) to when it ended.
+// silent until they first spoke) to when it ended, and in recordings with
+// video their camera and shared screen, each from the first picture to the
+// last (on the same clock: a picture at 1:00 goes with the sound at 1:00).
 message RecordingTrack {
   string user_id = 1;
+  // The sound's file.
   int64 size_bytes = 2;
   int64 duration_ms = 3;
+  // Their camera's file; zero when it was never on.
+  int64 camera_bytes = 4;
+  // Their shared screen's file; zero when they never shared it.
+  int64 screen_bytes = 5;
+}
+
+// Which of a person's files in a recording.
+enum RecordingPart {
+  // Their sound, as Ogg Opus.
+  RECORDING_PART_UNSPECIFIED = 0;
+  // Their camera, as WebM (VP8, no sound).
+  RECORDING_PART_CAMERA = 1;
+  // Their shared screen, as WebM (VP8, no sound).
+  RECORDING_PART_SCREEN = 2;
 }
 
 message ListRecordingsRequest {
@@ -365,6 +393,8 @@ message DownloadRecordingRequest {
   string recording_id = 2;
   // Whose track.
   string user_id = 3;
+  // Unset for their sound.
+  RecordingPart part = 4;
 }
 
 message DownloadRecordingResponse {

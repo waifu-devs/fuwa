@@ -92,12 +92,19 @@ can't do in the apps' API, it can't do here.
 | `add_member_role`, `remove_member_role` | `RoleService.AddMemberRole`, `RemoveMemberRole` |
 | `upload_picture` | `MediaService.CreateUpload` and the upload itself |
 | `create_emoji` | `EmojiService.CreateEmoji` |
+| `set_commands`, `list_commands` | `CommandService.SetCommands`, `ListCommands` ([docs/commands.md](commands.md)) |
 
 Tools say whether they only read, and which ones can't be undone (deleting,
 kicking, banning), so apps can ask before running them. A call the API
 refuses comes back as a tool error with the API's reason ("not allowed:
 …"), so the model reads why. Polls and threads get their tools when they
 land.
+
+`send_message` also takes `interaction_id`, to answer someone who ran one of
+the agent's slash commands or pressed one of its buttons, and `buttons`, rows
+of buttons to put under the message. Those runs and presses show up in
+`list_events` as `interaction_created`, to this agent only
+([docs/commands.md](commands.md)).
 
 ### Resources
 

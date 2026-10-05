@@ -148,13 +148,30 @@ pub enum Dialog {
         user_id: String,
         action: crate::core::moderation::Action,
     },
+    /// A game or app reporting to Discord's local RPC asks, once, to show
+    /// what you're doing (`core::presence`).
+    AllowGame {
+        key: String,
+        name: String,
+    },
 }
 
-/// A small menu hanging under a bell.
+/// A small menu hanging under a bell, or over your name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Menu {
-    Channel { key: String, server: String, channel: String },
-    Server { key: String, server: String },
+    Channel {
+        key: String,
+        server: String,
+        channel: String,
+    },
+    Server {
+        key: String,
+        server: String,
+    },
+    /// Your status on an instance, from your name at the bottom of the sidebar.
+    Status {
+        key: String,
+    },
 }
 
 /// The @ list while someone types a mention.
@@ -240,6 +257,9 @@ pub struct FuwaApp {
     /// The emoji picker over the composer, and its search box.
     pub emoji_open: bool,
     pub emoji_query: Entity<InputState>,
+    pub emoji: crate::ui::emoji_picker::EmojiPicker,
+    /// When the picker opened, so its emoji ripple in only then.
+    pub emoji_born: Option<std::time::Instant>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The rules the rules dialog shows, once they arrive.
@@ -295,8 +315,11 @@ impl FuwaApp {
                     this.save_edit(window, cx);
                 }
             }),
-            cx.subscribe_in(&emoji_query, window, |_: &mut Self, _, event: &InputEvent, _, cx| {
+            cx.subscribe_in(&emoji_query, window, |this: &mut Self, _, event: &InputEvent, _, cx| {
                 if let InputEvent::Change = event {
+                    // A new search starts at the top, on its best match.
+                    this.emoji.active = None;
+                    this.emoji.scroll.scroll_to_item(0, gpui_kit::ScrollStrategy::Top);
                     cx.notify();
                 }
             }),
@@ -423,6 +446,8 @@ impl FuwaApp {
             covers: 0,
             emoji_open: false,
             emoji_query,
+            emoji: Default::default(),
+            emoji_born: None,
             profile: None,
             rules: None,
             _subscriptions: subscriptions,
@@ -455,6 +480,13 @@ impl FuwaApp {
             self.navigate(Nav::Home { dm: None }, window, cx);
         }
         self.maybe_welcome(cx);
+        // A game asking to show what you're doing, once nothing else is open.
+        if self.dialog.is_none()
+            && let Some(program) = self.core.games.asking()
+        {
+            self.dialog_error = None;
+            self.dialog = Some(Dialog::AllowGame { key: program.key, name: program.name });
+        }
         // A server's channels arrived after it was opened: open the first.
         if self.target().map(|t| t.id()) != self.draft_for {
             self.after_move(window, cx);
@@ -467,7 +499,11 @@ impl FuwaApp {
     fn on_notice(&mut self, notice: Notice, window: &mut Window, cx: &mut Context<Self>) {
         match notice {
             Notice::Message { instance, server_id, channel_id, title, body, mention } => {
-                if !self.prefs.notifications {
+                // Do not disturb is quiet everywhere, on every app.
+                let busy = self.core.shared.read(|s| {
+                    s.instance(&instance).is_some_and(|i| i.status() == crate::pb::PresenceStatus::DoNotDisturb)
+                });
+                if !self.prefs.notifications || busy {
                     return;
                 }
                 let streamer = self.prefs.streamer_mode;
@@ -1168,7 +1204,18 @@ impl FuwaApp {
     }
 
     pub fn close_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialog = None;
+        // A game's question closed unanswered waits for the next start.
+        if let Some(Dialog::AllowGame { key, .. }) = self.dialog.take() {
+            self.core.answer_game(&key, None);
+        }
+        cx.notify();
+    }
+
+    /// "Don't allow" on a game's question: remembered, like "Allow".
+    pub fn refuse_game(&mut self, cx: &mut Context<Self>) {
+        if let Some(Dialog::AllowGame { key, .. }) = self.dialog.take() {
+            self.core.answer_game(&key, Some(false));
+        }
         cx.notify();
     }
 
@@ -1260,6 +1307,11 @@ impl FuwaApp {
                     }
                 });
                 self.after_dialog(rx, key, window, cx);
+            }
+            Dialog::AllowGame { key, .. } => {
+                self.dialog = None;
+                core.answer_game(&key, Some(true));
+                cx.notify();
             }
             Dialog::LeaveServer { key, server } => {
                 self.dialog_busy = true;
@@ -1602,6 +1654,7 @@ impl FuwaApp {
         .when_some(
             match self.menu.clone() {
                 Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
+                Some(Menu::Status { key }) => Some(self.status_menu(&key, cx)),
                 _ => None,
             },
             |el, menu| el.child(menu),

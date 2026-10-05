@@ -157,11 +157,15 @@ message BridgeRequest {
   string session_id = 3;
   bool may_speak = 4;
   bool may_hear = 5;
+  // It gets cameras and shared screens too (recordings with video).
+  bool watch = 6;
 }
 
 message BridgeResponse {
   oneof event {
     HeardFrame frame = 1;
+    // Watched only.
+    WatchedFrame picture = 3;
     // "replaced", "restarting" or "closed". A stream that ends without it
     // was cut off: open it again.
     string ended = 2;
@@ -172,6 +176,18 @@ message HeardFrame {
   string participant = 1;
   bytes frame = 2;
   uint32 timestamp = 3;
+}
+
+message WatchedFrame {
+  string participant = 1;
+  // A whole VP8 frame.
+  bytes frame = 2;
+  bool keyframe = 3;
+  // The shared screen, not the camera.
+  bool screen = 4;
+  // When it was filmed, in 90 kHz ticks of the camera's own clock (carried
+  // on across its sizes): only the gaps between frames count.
+  uint64 time = 5;
 }
 
 message SpeakRequest {

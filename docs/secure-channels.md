@@ -109,6 +109,15 @@ big it was (padded), whether it's a commit or a message, and when one is
 deleted. The channel's name and topic are ordinary channel settings, not
 encrypted.
 
+Files work as in direct messages ([e2ee.md](e2ee.md#files)): sealed on the
+sender's device, uploaded as ordinary attachment uploads for the server
+(needing Attach files), and named in `PostSecureMessage.media_ids`, which ties
+them to the record. The server sees that a message carries files, how many,
+and each one's padded size; never names, types or contents. They count toward
+the server's storage for files, and deleting the message, the channel or the
+server deletes them. Like every upload, a file can be fetched by anyone with
+its link, and what they get is ciphertext.
+
 ## What doesn't work in a secure channel
 
 The server can't read the messages, so nothing that needs to can work. The
@@ -118,14 +127,14 @@ channel says so once, at its top:
 - **Search** can't find these messages (it could only ever happen on the
   device).
 - **Bots, agents and webhooks** can't post or read: they have no device.
-- **Link previews and inline pictures**: links stay links. The reader's app
+- **Link previews and pictures from links**: links stay links. The reader's app
   never fetches anything from other sites, and the server can't fetch what it
   can't read.
 - **Mentions**: the server can't see who a message mentions, so it notifies
   nobody in particular; each device works out whether a message mentions you
   when it opens it, and chimes and notifies by the channel's notification
   settings.
-- **Voice and server recordings**: secure channels are text.
+- **Voice and server recordings**: secure channels are text and files.
 - **Threads** work, worked out on each device rather than by the server; see
   [Threads](#threads) for what that changes.
 

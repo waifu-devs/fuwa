@@ -3,11 +3,11 @@ import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Channel, Member, User } from "@/gen/fuwa/v1/types_pb";
 import { archived, following, search, unreadIn, type Organized, type SecureThread } from "@/e2ee/threads";
-import type { Item } from "@/e2ee/vault";
+import { lineText, type Item } from "@/e2ee/vault";
 import { dmProblem, followSecureThread, lockSecureThread, markSecureThreadRead } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage, type ThreadNote } from "@/fuwa/store";
 import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/components/dm/DmView";
-import { Faces, PanelButton } from "@/components/chat/Threads";
+import { Faces, PanelButton, SWAP } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
@@ -75,11 +75,13 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
         )}
       </AnimatePresence>
       {thread.locked && <LockIcon aria-label="Locked" className="size-3 shrink-0 text-muted-foreground" />}
-      <span className="min-w-0 truncate text-muted-foreground">
-        <span className="group-hover/replies:hidden">
+      <span className="grid min-w-0 text-muted-foreground">
+        <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
           {archived(thread, hours) ? "Archived" : thread.lastAt ? `Last reply ${ago(new Date(thread.lastAt))}` : "No replies"}
         </span>
-        <span className="hidden group-hover/replies:inline">View thread</span>
+        <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
+          View thread
+        </span>
       </span>
     </motion.button>
   );
@@ -120,7 +122,7 @@ function SecureThreadStart({
       {parent ? (
         <div className="message-row first flex gap-3 px-4">
           <MessageLine display={display} first author={author} member={member} date={new Date(parent.at)} instanceKey={instanceKey}>
-            <MessageBody content={parent.content} display={display} />
+            <MessageBody content={lineText(parent)} display={display} />
           </MessageLine>
         </div>
       ) : (
@@ -160,6 +162,7 @@ export function SecureThreadPanel({
   memberOf,
   describe,
   canSend,
+  canAttach,
   canModerate,
   onClose,
 }: {
@@ -173,6 +176,7 @@ export function SecureThreadPanel({
   memberOf: (id: string) => Member | undefined;
   describe: (item: Item) => string;
   canSend: boolean;
+  canAttach: boolean;
   canModerate: boolean;
   onClose: () => void;
 }) {
@@ -271,6 +275,7 @@ export function SecureThreadPanel({
         id={id}
         placeholder="Reply in thread"
         promise="Only people in this channel can read this"
+        files={canAttach}
         locked={
           !canSend
             ? "You don't have permission to send messages in this channel."
@@ -419,7 +424,7 @@ export function SecureThreadList({
                     <b className="truncate text-sm">{m ? displayName(author) : "Earlier message"}</b>
                     {m && <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(new Date(m.at))}</span>}
                   </span>
-                  <span className="line-clamp-2 text-sm break-words text-muted-foreground">{m ? plain(m.content) || "…" : "Not on this device"}</span>
+                  <span className="line-clamp-2 text-sm break-words text-muted-foreground">{m ? plain(lineText(m)) || "…" : "Not on this device"}</span>
                   <span className="mt-1 flex items-center gap-2 text-xs">
                     <Faces instanceKey={instanceKey} ids={t.participants} size="size-4" />
                     <b className="text-primary">

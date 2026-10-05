@@ -118,11 +118,91 @@ const TOOLS: &[Tool] = &[
                 "server_id": server_id(),
                 "channel_id": channel_id(),
                 "content": { "type": "string", "description": "The text, up to 4000 characters." },
-                "reply_to_id": { "type": "string", "description": "A message in the same channel this one answers." }
+                "reply_to_id": { "type": "string", "description": "A message in the same channel this one answers." },
+                "interaction_id": {
+                    "type": "string",
+                    "description": "Answers an interaction_created event (someone ran this agent's command or \
+                                    pressed its button): send in that interaction's channel, within 15 minutes, \
+                                    at most 5 times. The message shows who used what."
+                },
+                "buttons": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "description": "Rows of buttons under the message (up to 5 rows of 5). Pressing one sends this \
+                                    agent an interaction_created event with its custom_id.",
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": { "type": "string", "description": "1 to 80 characters." },
+                                "custom_id": { "type": "string", "description": "What comes back when pressed; unique on the message." },
+                                "style": { "type": "string", "enum": ["primary", "secondary", "success", "danger", "link"] },
+                                "url": { "type": "string", "description": "link buttons only: an https link they open." },
+                                "disabled": { "type": "boolean" }
+                            },
+                            "required": ["label"]
+                        }
+                    }
+                }
             })
         },
         required: &["server_id", "channel_id", "content"],
         read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "set_commands",
+        title: "Set slash commands",
+        description: "Replaces this agent's slash commands in a server. People see them when they type \"/\" and \
+                      run them; each run arrives as an interaction_created event in list_events, and this agent \
+                      answers with send_message and its interaction_id. An empty list removes them all.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "commands": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "1 to 32 of a-z, 0-9, _ and -." },
+                            "description": { "type": "string", "description": "1 to 100 characters." },
+                            "options": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "description": "What people fill in; required ones first.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": { "type": "string" },
+                                        "description": { "type": "string" },
+                                        "type": { "type": "string", "enum": ["string", "integer", "boolean", "user", "channel", "role"] },
+                                        "required": { "type": "boolean" },
+                                        "choices": { "type": "array", "items": { "type": "string" }, "maxItems": 25 }
+                                    },
+                                    "required": ["name", "description"]
+                                }
+                            }
+                        },
+                        "required": ["name", "description"]
+                    }
+                }
+            })
+        },
+        required: &["server_id", "commands"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "list_commands",
+        title: "List slash commands",
+        description: "The slash commands of every agent in a server, this one's included.",
+        properties: || json!({ "server_id": server_id() }),
+        required: &["server_id"],
+        read_only: true,
         destructive: false,
     },
     Tool {
@@ -160,9 +240,10 @@ const TOOLS: &[Tool] = &[
         name: "list_events",
         title: "Follow what happens",
         description: "What happened in a server since a cursor: messages sent, edited and deleted, members \
-                      joining and leaving, channels and roles changing. Call it once without after_sequence \
-                      to get the current cursor, then again with the cursor each answer returns. Only events \
-                      about channels this agent can see.",
+                      joining and leaving, channels and roles changing, and interaction_created when someone \
+                      runs this agent's slash command or presses its button. Call it once without \
+                      after_sequence to get the current cursor, then again with the cursor each answer \
+                      returns. Only events about channels this agent can see.",
         properties: || {
             json!({
                 "server_id": server_id(),
@@ -375,6 +456,83 @@ impl Args<'_> {
     }
 }
 
+/// What set_commands was given, as commands; the API checks the rest.
+fn commands(value: Option<&Value>) -> Result<Vec<pb::Command>, RpcError> {
+    let Some(Value::Array(list)) = value else { return Err(RpcError::invalid("commands is needed, as a list")) };
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    list.iter()
+        .map(|c| {
+            let options = match c.get("options") {
+                None | Some(Value::Null) => vec![],
+                Some(Value::Array(options)) => options
+                    .iter()
+                    .map(|o| {
+                        let kind = match o.get("type").and_then(Value::as_str).unwrap_or("string") {
+                            "string" => pb::CommandOptionType::String,
+                            "integer" => pb::CommandOptionType::Integer,
+                            "boolean" => pb::CommandOptionType::Boolean,
+                            "user" => pb::CommandOptionType::User,
+                            "channel" => pb::CommandOptionType::Channel,
+                            "role" => pb::CommandOptionType::Role,
+                            other => return Err(RpcError::invalid(format!("an option's type can't be {other:?}"))),
+                        };
+                        let choices = match o.get("choices") {
+                            None | Some(Value::Null) => vec![],
+                            Some(Value::Array(c)) => c.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                            Some(_) => return Err(RpcError::invalid("an option's choices are a list of strings")),
+                        };
+                        Ok(pb::CommandOption {
+                            name: text(o, "name"),
+                            description: text(o, "description"),
+                            r#type: kind as i32,
+                            required: o.get("required").and_then(Value::as_bool).unwrap_or(false),
+                            choices,
+                        })
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(_) => return Err(RpcError::invalid("a command's options are a list")),
+            };
+            Ok(pb::Command { name: text(c, "name"), description: text(c, "description"), options })
+        })
+        .collect()
+}
+
+/// What send_message's buttons were, as rows; the API checks the rest.
+fn buttons(value: Option<&Value>) -> Result<Vec<pb::ComponentRow>, RpcError> {
+    let rows = match value {
+        None | Some(Value::Null) => return Ok(vec![]),
+        Some(Value::Array(rows)) => rows,
+        Some(_) => return Err(RpcError::invalid("buttons are a list of rows")),
+    };
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    rows.iter()
+        .map(|row| {
+            let Value::Array(list) = row else { return Err(RpcError::invalid("each row of buttons is a list")) };
+            let buttons = list
+                .iter()
+                .map(|b| {
+                    let style = match b.get("style").and_then(Value::as_str).unwrap_or("secondary") {
+                        "primary" => pb::ButtonStyle::Primary,
+                        "secondary" => pb::ButtonStyle::Secondary,
+                        "success" => pb::ButtonStyle::Success,
+                        "danger" => pb::ButtonStyle::Danger,
+                        "link" => pb::ButtonStyle::Link,
+                        other => return Err(RpcError::invalid(format!("a button's style can't be {other:?}"))),
+                    };
+                    Ok(pb::Button {
+                        custom_id: text(b, "custom_id"),
+                        label: text(b, "label"),
+                        style: style as i32,
+                        url: text(b, "url"),
+                        disabled: b.get("disabled").and_then(Value::as_bool).unwrap_or(false),
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(pb::ComponentRow { buttons })
+        })
+        .collect()
+}
+
 /// `tools/call`: runs a tool. A call the API refused is a tool result with
 /// `isError`, so the model reads why; bad arguments are a protocol error.
 pub async fn call(cx: &Cx, params: &Value) -> Result<Value, RpcError> {
@@ -496,10 +654,32 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 channel_id: args.text("channel_id")?,
                 content: args.text("content")?,
                 reply_to_id: args.optional("reply_to_id")?,
+                interaction_id: args.optional("interaction_id")?,
+                components: buttons(args.0.get("buttons"))?,
                 ..Default::default()
             };
             call!(cx, message_service_client::MessageServiceClient.send_message(req))
                 .map(|r| json!({ "message": view::messages(r.message.as_slice(), std::slice::from_ref(&cx.me)).pop() }))
+        }
+        "set_commands" => {
+            let req = pb::SetCommandsRequest { server_id: sid()?, commands: commands(args.0.get("commands"))? };
+            call!(cx, command_service_client::CommandServiceClient.set_commands(req))
+                .map(|r| json!({ "commands": r.commands.iter().map(view::command).collect::<Vec<_>>() }))
+        }
+        "list_commands" => {
+            let req = pb::ListCommandsRequest { server_id: sid()? };
+            call!(cx, command_service_client::CommandServiceClient.list_commands(req)).map(|r| {
+                let commands: Vec<Value> = r
+                    .commands
+                    .iter()
+                    .map(|c| {
+                        let mut shown = c.command.as_ref().map(view::command).unwrap_or_default();
+                        shown["agent_id"] = Value::from(c.agent_id.clone());
+                        shown
+                    })
+                    .collect();
+                json!({ "commands": commands, "agents": r.agents.iter().map(view::user).collect::<Vec<_>>() })
+            })
         }
         "update_message" => {
             let req = pb::UpdateMessageRequest {

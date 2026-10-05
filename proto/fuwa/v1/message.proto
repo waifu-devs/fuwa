@@ -70,6 +70,11 @@ message SendMessageRequest {
   // A GIF, as GifService.PrepareGif or ListSavedGifs gave it (sealed).
   // Needs ATTACH_FILES. Not in channels shared from another server yet.
   MessageGif gif = 11;
+  // Agents only: answers this interaction (an InteractionCreated it got),
+  // within 15 minutes and at most 5 times. The message shows who used what.
+  string interaction_id = 12;
+  // Agents only: buttons under the message, up to 5 rows of 5.
+  repeated ComponentRow components = 13;
 }
 
 // A poll as its creator writes it.

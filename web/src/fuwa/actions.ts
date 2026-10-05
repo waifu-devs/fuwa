@@ -6,6 +6,7 @@ import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSetti
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
+import type { CommandArgument } from "@/gen/fuwa/v1/types_pb";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -880,6 +881,13 @@ export const listApplications = (key: string, serverId: string) =>
     return applications;
   });
 
+/** Whether the instance lets servers keep video in their recordings. */
+export const getRecordingVideo = (key: string) =>
+  Effect.gen(function* () {
+    const settings = yield* call((signal) => api(key).calls.getCallSettings({}, { signal }));
+    return settings.recordingVideo;
+  });
+
 export const reviewApplication = (key: string, serverId: string, application: Application, approve: boolean, reason = "") =>
   Effect.gen(function* () {
     const userId = application.user!.id;
@@ -953,6 +961,8 @@ export const updateServer = (
     bannerFocusY?: number;
     /** 0xRRGGBB, or -1 for none. */
     accentColor?: number;
+    /** Recordings on the server keep cameras and shared screens too. */
+    recordVideo?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -1367,6 +1377,25 @@ export const endPoll = (key: string, serverId: string, channelId: string, messag
 /** Who voted for one answer of a public poll, a page at a time. */
 export const listPollVoters = (key: string, serverId: string, messageId: string, answerId: number, afterId = "") =>
   call((signal) => api(key).messages.listPollVoters({ serverId, messageId, answerId, afterId, limit: 50 }, { signal }));
+
+// ───────────────────────── Agents' commands and buttons ─────────────────────────
+
+/** The commands of the agents in a server, for the composer's "/" list. */
+export const listCommands = (key: string, serverId: string) => call((signal) => api(key).commands.listCommands({ serverId }, { signal }));
+
+/** Runs an agent's command here; the agent answers with a message of its own. */
+export const runCommand = (key: string, serverId: string, channelId: string, agentId: string, command: string, args: CommandArgument[]) =>
+  Effect.gen(function* () {
+    reportUsage("command.run");
+    return yield* call((signal) => api(key).commands.runCommand({ serverId, channelId, agentId, command, arguments: args }, { signal }));
+  });
+
+/** Presses a button on an agent's message; the agent is told who pressed it. */
+export const pressButton = (key: string, serverId: string, messageId: string, customId: string) =>
+  Effect.gen(function* () {
+    reportUsage("command.button");
+    return yield* call((signal) => api(key).commands.pressButton({ serverId, messageId, customId }, { signal }));
+  });
 
 export const dismissPending = (key: string, at: string, pendingNonce: string) =>
   updateInstance(key, (i) => ({

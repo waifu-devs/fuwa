@@ -18,6 +18,13 @@ impl FuwaApp {
             self.close_emoji(window, cx);
             return true;
         }
+        if self.emoji_open
+            && bare
+            && self.emoji_query.read(cx).focus_handle(cx).is_focused(window)
+            && self.emoji_key(&key.key, window, cx)
+        {
+            return true;
+        }
         if self.edit_box.read(cx).focus_handle(cx).is_focused(window) {
             if key.key == "escape" {
                 self.cancel_edit(window, cx);
@@ -80,6 +87,7 @@ impl FuwaApp {
             self.picker = None;
             return;
         }
+        let tone = self.core.prefs().skin_tone;
         let options = self.core.shared.read(|s| match &target {
             Target::Channel { key, server, channel } => s
                 .instance(key)
@@ -89,14 +97,15 @@ impl FuwaApp {
                         mentions::options(i, server, &query, everyone)
                     }
                     _ => {
-                        let own = i.emojis.get(server).map(Vec::as_slice).unwrap_or_default();
-                        emoji::search(&query, own, 8).into_iter().map(mentions::Pick::Emoji).collect()
+                        let catalog = emoji::Catalog::of(&i.servers, &i.emojis, server);
+                        emoji::search(&query, &catalog, tone, 8).into_iter().map(mentions::Pick::Emoji).collect()
                     }
                 })
                 .unwrap_or_default(),
-            Target::Dm { .. } | Target::Secure { .. } => {
-                emoji::search(&query, &[], 8).into_iter().map(mentions::Pick::Emoji).collect()
-            }
+            Target::Dm { .. } | Target::Secure { .. } => emoji::search(&query, &emoji::Catalog::default(), tone, 8)
+                .into_iter()
+                .map(mentions::Pick::Emoji)
+                .collect(),
         });
         if options.is_empty() {
             self.picker = None;
@@ -133,23 +142,14 @@ impl FuwaApp {
         self.encode_emoji(&out)
     }
 
-    /// `:name:` of the open server's emoji as their tokens.
+    /// `:name:` of the emoji you can use in the open server (its own and
+    /// your other servers') as their tokens.
     pub(crate) fn encode_emoji(&self, text: &str) -> String {
         let Some(Target::Channel { key, server, .. }) = self.target() else { return text.to_owned() };
-        self.core.shared.read(|s| {
-            let own = s.instance(&key).and_then(|i| i.emojis.get(&server)).map(Vec::as_slice).unwrap_or_default();
-            emoji::encode(text, own)
+        self.core.shared.read(|s| match s.instance(&key) {
+            Some(i) => emoji::Catalog::of(&i.servers, &i.emojis, &server).encode(text),
+            None => text.to_owned(),
         })
-    }
-
-    /// Puts text in the composer where the caret is, from the emoji picker.
-    pub(crate) fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let text = text.to_owned();
-        self.composer.update(cx, |state, cx| {
-            state.replace(text, window, cx);
-            state.focus(window, cx);
-        });
-        cx.notify();
     }
 
     // ───────────────────────── Editing ─────────────────────────

@@ -138,7 +138,7 @@ impl Store {
         if let Err(err) = std::fs::remove_file(self.path(id))
             && err.kind() != std::io::ErrorKind::NotFound
         {
-            tracing::warn!(media = %id, error = %err, "couldn't delete an uploaded file");
+            tracing::warn!("couldn't delete an uploaded file");
         }
     }
 
@@ -343,8 +343,8 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
     let row = match node.media(&id).await {
         Ok(Some(row)) if row.stored => row,
         Ok(_) => return plain(StatusCode::NOT_FOUND, "not found"),
-        Err(err) => {
-            tracing::error!(media = %id, error = %err, "couldn't look up an uploaded file");
+        Err(_) => {
+            tracing::error!("couldn't look up an uploaded file");
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
         }
     };
@@ -395,7 +395,7 @@ async fn serve_attachment(app: &App, row: &MediaRow, media: &Store, headers: &He
         Ok(Some(file)) => serve_file(&media.path(&row.id), &file, headers).await,
         Ok(None) => plain(StatusCode::NOT_FOUND, "not found"),
         Err(_) => {
-            tracing::warn!(media = %row.id, "couldn't look up an attachment");
+            tracing::warn!("couldn't look up an attachment");
             plain(StatusCode::SERVICE_UNAVAILABLE, "that file can't be reached right now; try again soon")
         }
     }
@@ -556,8 +556,8 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
         Ok(None) => {
             return plain(StatusCode::NOT_FOUND, "this upload link has been used or ran out; start the upload again");
         }
-        Err(err) => {
-            tracing::error!(error = %err, "couldn't start an upload");
+        Err(_) => {
+            tracing::error!("couldn't start an upload");
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
         }
     };
@@ -570,8 +570,8 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
         Err(_) => (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()),
     };
     let _ = tokio::fs::remove_file(&temp).await;
-    if let Err(err) = node.delete_media(std::slice::from_ref(&row.id)).await {
-        tracing::warn!(media = %row.id, error = %err, "couldn't drop a failed upload");
+    if node.delete_media(std::slice::from_ref(&row.id)).await.is_err() {
+        tracing::warn!("couldn't drop a failed upload");
     }
     plain(failure.0, &failure.1)
 }
@@ -579,15 +579,15 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
 /// Writes the body to a file beside the store, checks it, then moves it in.
 async fn receive(app: &App, row: &MediaRow, temp: &Path, body: Body) -> std::result::Result<(), (StatusCode, String)> {
     let (content_type, size) = if row.purpose == pb::MediaPurpose::Sealed {
-        (crate::sealed::CONTENT_TYPE, crate::sealed::receive_file(&row.id, row.size, temp, body).await?)
+        (crate::sealed::CONTENT_TYPE, crate::sealed::receive_file(row.size, temp, body).await?)
     } else {
-        receive_file(&row.id, row.purpose, row.size, temp, body).await?
+        receive_file(row.purpose, row.size, temp, body).await?
     };
     let (node, media) = kept(app);
-    tokio::fs::rename(temp, media.path(&row.id)).await.map_err(|err| broken(&row.id, err))?;
-    node.finish_upload(&row.id, content_type, size, now_ms()).await.map_err(|err| {
+    tokio::fs::rename(temp, media.path(&row.id)).await.map_err(|_| broken())?;
+    node.finish_upload(&row.id, content_type, size, now_ms()).await.map_err(|_| {
         media.remove(&row.id);
-        tracing::error!(media = %row.id, error = %err, "couldn't record an upload");
+        tracing::error!("couldn't record an upload");
         (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
     })
 }
@@ -599,13 +599,12 @@ async fn receive(app: &App, row: &MediaRow, temp: &Path, body: Body) -> std::res
 /// upload goes through here, where accounts are kept or (a server's
 /// pictures on a split instance) on its shard.
 pub async fn receive_file(
-    id: &str,
     purpose: pb::MediaPurpose,
     size: i64,
     temp: &Path,
     body: Body,
 ) -> std::result::Result<(&'static str, i64), (StatusCode, String)> {
-    let mut file = tokio::fs::File::create(temp).await.map_err(|err| broken(id, err))?;
+    let mut file = tokio::fs::File::create(temp).await.map_err(|_| broken())?;
     let mut stream = body.into_data_stream();
     let mut received: i64 = 0;
     let mut head = Vec::with_capacity(HEAD);
@@ -621,7 +620,7 @@ pub async fn receive_file(
         if head.len() < HEAD {
             head.extend_from_slice(&chunk[..chunk.len().min(HEAD - head.len())]);
         }
-        file.write_all(&chunk).await.map_err(|err| broken(id, err))?;
+        file.write_all(&chunk).await.map_err(|_| broken())?;
     }
     if received != size {
         return Err((StatusCode::BAD_REQUEST, format!("got {received} bytes of a {size}-byte file")));
@@ -632,17 +631,17 @@ pub async fn receive_file(
             (StatusCode::UNSUPPORTED_MEDIA_TYPE, "that isn't a PNG, JPEG, GIF, WebP or AVIF picture".to_string())
         })?,
     };
-    file.sync_all().await.map_err(|err| broken(id, err))?;
+    file.sync_all().await.map_err(|_| broken())?;
     drop(file);
-    let kept = without_metadata(temp, content_type).await.map_err(|err| {
-        tracing::info!(media = %id, error = %err, "refused an upload whose metadata couldn't be taken out");
+    let kept = without_metadata(temp, content_type).await.map_err(|_| {
+        tracing::info!("refused an upload whose metadata couldn't be taken out");
         (StatusCode::UNPROCESSABLE_ENTITY, "that picture looks broken; save it again and upload that".to_string())
     })?;
     Ok((content_type, kept.unwrap_or(received)))
 }
 
-fn broken(id: &str, err: std::io::Error) -> (StatusCode, String) {
-    tracing::error!(media = %id, error = %err, "couldn't store an upload");
+fn broken() -> (StatusCode, String) {
+    tracing::error!("couldn't store an upload");
     (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
 }
 

@@ -18,6 +18,13 @@ use fuwa_desktop::pb;
 use fuwa_server::app::App;
 use fuwa_server::config::Config;
 
+/// A 1×1 PNG, for an emoji's picture.
+const TINY_PNG: [u8; 70] = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+    137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 223, 224, 240, 31, 0, 7, 0, 2, 191, 43, 215, 199, 226, 0, 0,
+    0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 struct Instance {
     url: String,
     runtime: tokio::runtime::Runtime,
@@ -183,6 +190,58 @@ fn two_people_talk_in_a_server_and_in_private() {
             && s.instance(&key).unwrap().unread.get(&general).copied() == Some(3)
     });
     assert!(notices.try_recv().is_err(), "a muted channel notified");
+
+    // A status picked here is the account's: read back from the instance, it's still there.
+    use fuwa_desktop::pb::PresenceStatus;
+    assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().status()), PresenceStatus::Online);
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.set_status(&key, PresenceStatus::Invisible).await }).unwrap();
+    }
+    bob.shared.instance(&key, |i| i.presence = None);
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.refresh_presence(&key).await });
+    }
+    assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().status()), PresenceStatus::Invisible);
+    // Another app of Bob's shares his activity, this one reads that, then the
+    // other turns sharing off: picking a status here must keep it off.
+    let other_app = |settings: pb::PresenceSettings| {
+        let api = bob.api(&key).unwrap();
+        wait(&bob, async move {
+            let req = pb::UpdatePresenceSettingsRequest { settings: Some(settings) };
+            fuwa_desktop::rpc!(api.presence(), update_presence_settings(req)).await.unwrap();
+        });
+    };
+    let shared = pb::PresenceSettings {
+        status: PresenceStatus::Invisible as i32,
+        show_activity: true,
+        hidden_server_ids: vec![server.id.clone()],
+    };
+    other_app(shared.clone());
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.refresh_presence(&key).await });
+    }
+    assert!(bob.shared.read(|s| s.instance(&key).unwrap().presence.as_ref().unwrap().show_activity));
+    other_app(pb::PresenceSettings { show_activity: false, ..shared });
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.set_status(&key, PresenceStatus::Idle).await }).unwrap();
+    }
+    let saved = {
+        let api = bob.api(&key).unwrap();
+        wait(&bob, async move {
+            fuwa_desktop::rpc!(api.presence(), get_presence_settings(pb::GetPresenceSettingsRequest {}))
+                .await
+                .unwrap()
+                .settings
+                .unwrap()
+        })
+    };
+    assert_eq!(saved.status(), PresenceStatus::Idle);
+    assert!(!saved.show_activity, "a status picked here turned sharing back on");
+    assert_eq!(saved.hidden_server_ids, vec![server.id.clone()]);
     // It's kept on the instance, so it follows Bob to his other devices.
     bob.shared.instance(&key, |i| i.notifications.clear());
     {
@@ -200,6 +259,30 @@ fn two_people_talk_in_a_server_and_in_private() {
     )));
     bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone() }));
     assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&general).copied()), None);
+
+    // Alice writes with an emoji from her other server, which Bob isn't in:
+    // it goes along with the message, so Bob can draw it.
+    let owls = {
+        let (core, key) = (alice.clone(), key.clone());
+        wait(&alice, async move { core.create_server(&key, "Owl post").await }).unwrap()
+    };
+    let owl = {
+        let (core, key, sid) = (alice.clone(), key.clone(), owls.id.clone());
+        wait(&alice, async move { core.add_emoji(&key, &sid, "owl", "image/png", TINY_PNG.to_vec()).await }).unwrap()
+    };
+    until(&alice, "the owl emoji", |s| s.instance(&key).unwrap().emojis.get(&owls.id).is_some_and(|l| l.len() == 1));
+    let hoot = format!("hoot {}", fuwa_desktop::core::emoji::token(&owl));
+    {
+        let (core, key, sid, cid, text) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), hoot.clone());
+        wait(&alice, async move { core.send_message(&key, &sid, &cid, &text).await }).unwrap();
+    }
+    until(&bob, "the owl message", |s| {
+        s.instance(&key).unwrap().messages[&general]
+            .items
+            .iter()
+            .any(|m| m.content == hoot && m.emojis.iter().any(|e| e.id == owl.id && !e.url.is_empty()))
+    });
 
     // Alice opens a conversation with Bob and writes; only their devices can read it.
     let bob_id = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);

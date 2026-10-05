@@ -922,6 +922,24 @@ fn read_answers(body: &Value) -> std::result::Result<Scores, Failure> {
         .collect()
 }
 
+/// The text a provider gets for a message: its own text first, then what
+/// else its sender wrote (a poll, embeds' words, file names), together within
+/// [`MAX_TEXT`]. The own text keeps at least half the room (all of it when
+/// shorter), so neither part can crowd the other out.
+pub fn fitted(text: super::Text) -> String {
+    let Some(rest) = text.all.strip_prefix(text.content) else { return text.all.to_string() };
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    if rest.is_empty() || text.content.is_empty() {
+        return text.all.to_string();
+    }
+    let (own, extra) = (text.content.chars().count(), rest.chars().count());
+    let kept = own.min(MAX_TEXT.saturating_sub(extra + 1).max(MAX_TEXT / 2));
+    let room = MAX_TEXT.saturating_sub(kept + 1);
+    let own: String = text.content.chars().take(kept).collect();
+    let rest: String = rest.chars().take(room).collect();
+    format!("{own}\n{rest}")
+}
+
 /// A message's text as it goes to a provider: people, roles, channels and
 /// custom emoji written by id or name become placeholders, so no ids or names
 /// leave the instance, and only the first [`MAX_TEXT`] characters go.
@@ -989,6 +1007,22 @@ mod tests {
         assert_eq!(outgoing("@everyone mail me at a@b.com. @mika."), "@everyone mail me at a@b.com. @someone.");
         assert_eq!(outgoing("1 < 2 > 0 <not a tag>"), "1 < 2 > 0 <not a tag>");
         assert_eq!(outgoing(&"é".repeat(5000)).chars().count(), MAX_TEXT);
+        // The message's own text is clipped first, so the rest fits.
+        let content = "a".repeat(MAX_TEXT);
+        let all = format!("{content}\nFree nitro\nsteam gift card.png");
+        let sent = fitted(super::super::Text { all: &all, content: &content });
+        assert_eq!(sent.chars().count(), MAX_TEXT);
+        assert!(sent.ends_with("\nFree nitro\nsteam gift card.png"));
+        // Extras long enough to fill it alone leave the text half the room.
+        let filler = "b".repeat(MAX_TEXT);
+        let all = format!("free nitro {content}\n{filler}");
+        let own = format!("free nitro {content}");
+        let sent = fitted(super::super::Text { all: &all, content: &own });
+        assert_eq!(sent.chars().count(), MAX_TEXT);
+        assert!(sent.starts_with("free nitro "));
+        assert_eq!(sent.chars().filter(|&c| c == 'b').count(), MAX_TEXT - MAX_TEXT / 2 - 1);
+        assert_eq!(fitted(super::super::Text::plain("hi")), "hi");
+        assert_eq!(fitted(super::super::Text { all: "a.png", content: "" }), "a.png");
     }
 
     #[test]
