@@ -19,6 +19,7 @@ use gpui_kit::{
 };
 
 use crate::core::config::Density;
+use crate::core::i18n::t;
 use crate::core::shared;
 use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
@@ -73,6 +74,8 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         gif: None,
         thread: ThreadBits::default(),
         agent: None,
+        pinned: false,
+        can_pin: false,
         sig: 0,
     }
 }
@@ -283,6 +286,10 @@ pub struct Msg {
     pub thread: ThreadBits,
     /// An agent's buttons, and over its answer who used what.
     pub agent: Option<Rc<crate::ui::commands::AgentBits>>,
+    /// Pinned in its channel or thread.
+    pub pinned: bool,
+    /// You may pin it or unpin it.
+    pub can_pin: bool,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -413,6 +420,8 @@ impl FuwaApp {
                 .clone()
         };
         let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+        // Pins are the home's in a shared channel, and need the instance to keep them.
+        let pins_here = i.has("pins") && manage && !guest_side;
         let can_vote = !guest_side && !i.access(&server).pending;
         let now = crate::core::dms::now_ms();
         let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
@@ -525,6 +534,8 @@ impl FuwaApp {
                 can_thread: m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
             };
             let agent = crate::ui::commands::AgentBits::of(i, &server, m, can_vote, &self.commands).map(Rc::new);
+            let pinned = m.pinned_at.is_some();
+            let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
             let mut h = DefaultHasher::new();
             bits.digest(&mut h);
             if let Some(agent) = &agent {
@@ -542,6 +553,7 @@ impl FuwaApp {
             (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
+            (pinned, can_pin).hash(&mut h);
             // Never 0, which means "not kept".
             let sig = h.finish() | 1;
             let (key, was) = match built.remove_entry(&m.id) {
@@ -584,6 +596,8 @@ impl FuwaApp {
                     gif: m.gif.clone(),
                     thread: bits.clone(),
                     agent: agent.clone(),
+                    pinned,
+                    can_pin,
                     sig,
                 }),
             };
@@ -623,6 +637,8 @@ impl FuwaApp {
                 gif: None,
                 thread: ThreadBits::default(),
                 agent: None,
+                pinned: false,
+                can_pin: false,
                 sig: 0,
             })));
         }
@@ -805,6 +821,8 @@ impl FuwaApp {
         let mut view = div().size_full().relative().flex().child(column);
         if let Some(panel) = self.search_panel(window, cx) {
             view = view.child(panel);
+        } else if let Some(panel) = self.pins_panel(cx) {
+            view = view.child(panel);
         } else if let Some(panel) = self.thread_panel(window, cx) {
             view = view.child(panel);
         } else if let Some(panel) = self.threads_list_panel(window, cx) {
@@ -854,7 +872,7 @@ impl FuwaApp {
         let channel_id = channel.id.as_str();
         // Threads aren't in shared channels yet, nor in secure ones (theirs are their own).
         let threads = channel.shared.is_none() && channel.r#type != pb::ChannelType::Secure as i32;
-        let side = self.threads.open.is_some() || self.threads.listing.is_some();
+        let side = self.threads.open.is_some() || self.threads.listing.is_some() || self.pins.is_some();
         div()
             .flex()
             .items_center()
@@ -874,6 +892,17 @@ impl FuwaApp {
                         cx.notify();
                     }))
             })
+            .when(self.pins_here(key, channel), |el| {
+                let open = self.pins.is_some();
+                el.child(
+                    icon_button("pins-toggle", "pin", &p)
+                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_pins(window, cx))),
+                )
+            })
             .when(threads, |el| {
                 let open = self.threads.listing.is_some();
                 el.child(
@@ -890,6 +919,7 @@ impl FuwaApp {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.close_thread(cx);
                         this.threads.listing = None;
+                        this.pins = None;
                         if this.search.panel.is_some() {
                             this.close_search(window, cx);
                         }
@@ -1804,7 +1834,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             .child(div().flex_1().min_w_0().when(m.pending && m.failed.is_none(), |el| el.opacity(0.55)).child(content))
             .when(m.edited && !m.editing, |el| {
                 el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))
-            }),
+            })
+            .when(m.pinned, |el| el.child(crate::ui::pins::pin_mark(&m.id, p))),
     );
     if !m.embeds.is_empty() {
         body = body.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p));
@@ -2413,6 +2444,8 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         gif: None,
         thread: ThreadBits::default(),
         agent: None,
+        pinned: false,
+        can_pin: false,
         sig: 0,
     }
 }

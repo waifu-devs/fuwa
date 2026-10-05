@@ -33,6 +33,7 @@ mod notify;
 mod onboarding;
 pub(crate) mod overlay;
 pub mod perf;
+mod pins;
 mod png;
 mod polls;
 mod presence;
