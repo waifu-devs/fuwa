@@ -112,7 +112,7 @@ service ShardService {
   // Sends a file a server here uploaded and no message has yet, to the shard
   // holding the shared channel's home it's being sent to, checked by SHA-256
   // like SendPicture.
-  rpc SendSharedFile(SendSharedFileRequest) returns (stream SendPictureResponse);
+  rpc SendSharedFile(SendSharedFileRequest) returns (stream SendSharedFileResponse);
 
   // Moving a server to another shard (and so maybe another region), run by
   // the directory: it asks the new shard to AdoptServer, which takes the
@@ -439,6 +439,14 @@ message SendSharedFileRequest {
   // uploaded it: the file is sent only when its row says both.
   string home_id = 3;
   string account_id = 4;
+}
+
+// A piece of the file, in order, as SendPictureResponse.
+message SendSharedFileResponse {
+  bytes data = 1;
+  // Set on the last piece (which may have no data): the SHA-256 of the
+  // whole file.
+  bytes sha256 = 2;
 }
 
 message SendPictureRequest {

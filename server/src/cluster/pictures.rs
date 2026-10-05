@@ -96,7 +96,7 @@ pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
 /// Writes a picture's pieces to `partial`, checked against the SHA-256 the
 /// last one carries and stopped past `most` bytes. Whatever went wrong,
 /// nothing is left at `partial`.
-async fn receive(stream: &mut tonic::Streaming<cpb::SendPictureResponse>, partial: &Path, most: u64) -> Result<()> {
+async fn receive<T: Piece>(stream: &mut tonic::Streaming<T>, partial: &Path, most: u64) -> Result<()> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
@@ -105,17 +105,18 @@ async fn receive(stream: &mut tonic::Streaming<cpb::SendPictureResponse>, partia
         let mut hash = Sha256::new();
         let mut got = 0u64;
         while let Some(piece) = stream.message().await.map_err(Error::retried)? {
-            got += piece.data.len() as u64;
+            let (data, sha256) = piece.parts();
+            got += data.len() as u64;
             if got > most {
                 return Err(Error::internal("a picture was bigger than it should be"));
             }
-            out.write_all(&piece.data).await?;
-            hash.update(&piece.data);
-            if piece.sha256.is_empty() {
+            out.write_all(data).await?;
+            hash.update(data);
+            if sha256.is_empty() {
                 continue;
             }
             out.sync_all().await?;
-            if hash.finalize().as_slice() != piece.sha256.as_slice() {
+            if hash.finalize().as_slice() != sha256 {
                 return Err(Error::internal("a picture didn't arrive intact"));
             }
             return Ok(());
@@ -127,6 +128,24 @@ async fn receive(stream: &mut tonic::Streaming<cpb::SendPictureResponse>, partia
         let _ = std::fs::remove_file(partial);
     }
     received
+}
+
+/// A piece of a file sent between parts of the instance: its bytes, and
+/// on the last one the whole file's SHA-256.
+trait Piece: prost::Message + Default + 'static {
+    fn parts(&self) -> (&[u8], &[u8]);
+}
+
+impl Piece for cpb::SendPictureResponse {
+    fn parts(&self) -> (&[u8], &[u8]) {
+        (&self.data, &self.sha256)
+    }
+}
+
+impl Piece for cpb::SendSharedFileResponse {
+    fn parts(&self) -> (&[u8], &[u8]) {
+        (&self.data, &self.sha256)
+    }
 }
 
 /// Takes in the background, after a server here started using a picture.
@@ -658,10 +677,7 @@ fn stream_file(mut file: tokio::fs::File) -> mpsc::Receiver<Result<cpb::SendPict
 /// Sends a file a server here uploaded and no message has yet to the shard
 /// holding the shared channel's home that took it ([`take_shared`]): only
 /// one still loose here whose row says that home took it from `account_id`.
-pub async fn send_shared(
-    app: &App,
-    req: &cpb::SendSharedFileRequest,
-) -> Result<mpsc::Receiver<Result<cpb::SendPictureResponse, Status>>> {
+pub async fn send_shared(app: &App, req: &cpb::SendSharedFileRequest) -> Result<SharedFileStream> {
     let (server_id, media_id) = (parse_id("server_id", &req.server_id)?, canonical(&req.media_id)?);
     let home_id = parse_id("server_id", &req.home_id)?;
     if !app.servers.holds(&server_id) {
@@ -676,11 +692,19 @@ pub async fn send_shared(
         _ => return Err(Error::NotFound(GONE_UPLOAD)),
     }
     match tokio::fs::File::open(app.config.data_path.join(name(&server_id, &media_id))).await {
-        Ok(file) => Ok(stream_file(file)),
+        Ok(file) => {
+            use tokio_stream::StreamExt;
+            let pieces = tokio_stream::wrappers::ReceiverStream::new(stream_file(file));
+            let pieces =
+                pieces.map(|piece| piece.map(|p| cpb::SendSharedFileResponse { data: p.data, sha256: p.sha256 }));
+            Ok(Box::pin(pieces))
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(Error::NotFound(GONE_UPLOAD)),
         Err(err) => Err(err.into()),
     }
 }
+
+pub type SharedFileStream = Pin<Box<dyn Stream<Item = Result<cpb::SendSharedFileResponse, Status>> + Send>>;
 
 /// What's said of an upload that's no longer there to send.
 pub const GONE_UPLOAD: &str = "uploaded file; upload it again";

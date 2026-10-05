@@ -675,14 +675,13 @@ impl ShardService for Internal {
         respond(crate::api::shared_call(&self.app, call).await.map(|reply| cpb::SharedResponse { reply: Some(reply) }))
     }
 
-    type SendSharedFileStream = super::pictures::PictureStream;
+    type SendSharedFileStream = super::pictures::SharedFileStream;
 
     async fn send_shared_file(
         &self,
         request: Request<cpb::SendSharedFileRequest>,
     ) -> Result<Response<Self::SendSharedFileStream>, Status> {
         let req = request.into_inner();
-        let pieces = super::pictures::send_shared(&self.app, &req).await?;
-        Ok(Response::new(Box::pin(ReceiverStream::new(pieces))))
+        Ok(Response::new(super::pictures::send_shared(&self.app, &req).await?))
     }
 }
