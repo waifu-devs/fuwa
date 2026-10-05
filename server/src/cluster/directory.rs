@@ -480,9 +480,7 @@ impl DirectoryService for Internal {
                 if tx.send(Ok(response)).await.is_err() {
                     return;
                 }
-                // Then what happens to accounts, between changes to settings. One
-                // missed (the watcher fell behind) waits for the stream's own
-                // heartbeat check, or its next subscribe.
+                // Then what happens to accounts, between changes to settings.
                 loop {
                     use tokio::sync::broadcast::error::RecvError;
                     let response = tokio::select! {
@@ -494,6 +492,10 @@ impl DirectoryService for Internal {
                                 sessions_ended: vec![account_id.to_string()],
                                 ..Default::default()
                             },
+                            // Fell behind, so some ends were missed: ending a shard's
+                            // watch has it follow again and check every session it holds.
+                            // Gateways don't check sessions, so theirs carries on.
+                            Err(RecvError::Lagged(_)) if is_shard => return,
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => return,
                         },

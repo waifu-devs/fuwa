@@ -867,6 +867,8 @@ impl DirectMessageService for Api {
 
     async fn watch(&self, request: Request<pb::WatchRequest>) -> Result<Response<WatchStream>, Status> {
         let caller = self.caller(request.metadata()).await?;
+        // Listening before anything else, so an end said meanwhile isn't missed.
+        let mut ended = self.app.ended_sessions();
         let ticket = self.app.streams.open(
             crate::streams::Kind::Dms,
             &caller.account.id,
@@ -881,8 +883,8 @@ impl DirectMessageService for Api {
             if !send(Ok(pb::WatchResponse { ready: true, event: None })).await {
                 return;
             }
-            let mut heartbeat = tokio::time::interval(HEARTBEAT);
-            heartbeat.tick().await;
+            let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
+            let mut session = crate::streams::SessionCheck::new(&app, &caller.token_hash);
             loop {
                 tokio::select! {
                     _ = app.shutdown.cancelled() => {
@@ -891,10 +893,23 @@ impl DirectMessageService for Api {
                         return;
                     }
                     _ = tx.closed() => return,
+                    // Some session of the caller's just ended: if it's this one, the
+                    // stream ends now rather than at a later check.
+                    ended = ended.recv() => match ended {
+                        Ok(id) if *id == *caller.account.id => {
+                            if matches!(app.session_live(&caller.token_hash).await, Ok(false)) {
+                                let _ = tx.send(Err(Error::Unauthenticated.into())).await;
+                                return;
+                            }
+                        }
+                        Ok(_) => {}
+                        // Fell behind: ask at this stream's next heartbeat.
+                        Err(broadcast::error::RecvError::Lagged(_)) => session.due(),
+                        Err(broadcast::error::RecvError::Closed) => return,
+                    },
                     _ = heartbeat.tick() => {
                         // A session signed out elsewhere stops getting events.
-                        let live = async { app.node()?.session_live(&caller.token_hash).await }.await;
-                        if matches!(live, Ok(false)) {
+                        if !session.still_live(&app).await {
                             let _ = tx.send(Err(Error::Unauthenticated.into())).await;
                             return;
                         }

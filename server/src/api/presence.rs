@@ -91,6 +91,8 @@ impl PresenceService for Api {
         request: Request<pb::WatchPresenceRequest>,
     ) -> Result<Response<WatchStream>, Status> {
         let caller = self.caller(request.metadata()).await?;
+        // Listening before anything else, so an end said meanwhile isn't missed.
+        let mut ended = self.app.ended_sessions();
         // Agents report their own presence but don't watch anyone's.
         if caller.account.kind == pb::AccountKind::Agent {
             return Err(Error::PermissionDenied("agents can't watch presence".into()).into());
@@ -114,8 +116,8 @@ impl PresenceService for Api {
                 if !send(Ok(pb::WatchPresenceResponse { presence: None, ready: true })).await {
                     return;
                 }
-                let mut heartbeat = tokio::time::interval(HEARTBEAT);
-                heartbeat.tick().await;
+                let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
+                let mut session = crate::streams::SessionCheck::new(&app, &caller.token_hash);
                 loop {
                     tokio::select! {
                         _ = app.shutdown.cancelled() => {
@@ -123,10 +125,23 @@ impl PresenceService for Api {
                             return;
                         }
                         _ = tx.closed() => return,
+                        // Some session of the caller's just ended: if it's this one, the
+                        // stream ends now rather than at a later check.
+                        ended = ended.recv() => match ended {
+                            Ok(id) if *id == *caller.account.id => {
+                                if matches!(app.session_live(&caller.token_hash).await, Ok(false)) {
+                                    let _ = tx.send(Err(Error::Unauthenticated.into())).await;
+                                    return;
+                                }
+                            }
+                            Ok(_) => {}
+                            // Fell behind: ask at this stream's next heartbeat.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => session.due(),
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        },
                         _ = heartbeat.tick() => {
                             // A session signed out elsewhere stops hearing.
-                            let live = async { app.node()?.session_live(&caller.token_hash).await }.await;
-                            if matches!(live, Ok(false)) {
+                            if !session.still_live(&app).await {
                                 let _ = tx.send(Err(Error::Unauthenticated.into())).await;
                                 return;
                             }

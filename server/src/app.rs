@@ -83,6 +83,10 @@ pub struct App {
     /// reset, an account disabled or deleted), so their live streams check
     /// at once rather than at their next heartbeat. See [`App::sessions_ended`].
     ended: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Moves on whenever ends may have been missed (a shard lost the
+    /// directory for a while), so live streams ask about their sessions at
+    /// their next heartbeat. See [`crate::streams::SessionCheck`].
+    session_epoch: std::sync::atomic::AtomicU64,
     /// Accounts joining servers, as (account, server), for streams that
     /// follow new servers. See [`App::joined_server`].
     joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
@@ -236,6 +240,7 @@ impl App {
             picture_key,
             federation,
             ended: tokio::sync::broadcast::Sender::new(256),
+            session_epoch: std::sync::atomic::AtomicU64::new(0),
             joined: tokio::sync::broadcast::Sender::new(256),
             releases: crate::releases::Releases::new(update_check, release_cache),
         });
@@ -265,6 +270,17 @@ impl App {
     /// The accounts whose sessions end from now on, for a live stream to follow.
     pub fn ended_sessions(&self) -> tokio::sync::broadcast::Receiver<Arc<str>> {
         self.ended.subscribe()
+    }
+
+    /// Says sessions may have ended without word reaching here, so every live
+    /// stream asks about its own at its next heartbeat.
+    pub fn recheck_sessions(&self) {
+        self.session_epoch.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+
+    /// Changes each time [`App::recheck_sessions`] is called.
+    pub fn session_epoch(&self) -> u64 {
+        self.session_epoch.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Says an account just joined a server, where the index of who's in what
