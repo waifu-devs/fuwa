@@ -232,6 +232,13 @@ message InstanceSettings {
   // their turn. A protective default, 8 unless
   // FUWA_SHARED_FILE_FETCHES_IN_FLIGHT says otherwise.
   optional int64 shared_file_fetches_in_flight = 52;
+  // Most pinned messages in one channel, and in one thread
+  // (MessageService.PinMessage); unset for no cap. FUWA_LIMIT_PINS_PER_CHANNEL.
+  optional int64 pins_per_channel = 53;
+  // Most pinned messages in one direct-message conversation
+  // (DirectMessageService.PinRecord); unset for no cap.
+  // FUWA_LIMIT_PINS_PER_CONVERSATION.
+  optional int64 pins_per_conversation = 54;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made

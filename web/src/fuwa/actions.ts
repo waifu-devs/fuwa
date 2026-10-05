@@ -46,6 +46,7 @@ import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { forgetPins } from "./pins";
 import { outsideEmojis } from "@/lib/emoji-catalog";
 import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
@@ -293,6 +294,7 @@ export const signOut = (key: string) =>
     forgetRecentSearches(key);
     // The session's device is gone; what it kept here goes too.
     yield* Effect.promise(() => wipeDms(key));
+    forgetPins(key);
   });
 
 export const forget = (key: string) =>
@@ -301,6 +303,7 @@ export const forget = (key: string) =>
     removeInstance(key);
     forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
+    forgetPins(key);
   });
 
 export type ProfilePatch = Partial<
@@ -549,6 +552,7 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
     removeInstance(key);
     forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
+    forgetPins(key);
     return true;
   });
 

@@ -44,6 +44,7 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(r) }) => Some(&r.channel_id),
         Payload::SecureRecordDeleted(d) => Some(&d.channel_id),
         Payload::ThreadUpdated(t) => Some(&t.channel_id),
+        Payload::MessagePinned(p) => Some(&p.channel_id),
         Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) }) => Some(&i.channel_id),
         _ => None,
     }

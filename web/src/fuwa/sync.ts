@@ -4,6 +4,7 @@ import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import { ChannelType, type Event } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine, startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
+import { onPinEvent } from "./pins";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
@@ -425,6 +426,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           });
           onLiveEvent(key, event);
           dmEngine(key)?.onServerEvent(event);
+          onPinEvent(key, event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));

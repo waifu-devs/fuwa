@@ -5,6 +5,7 @@ import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
 import { store, updateDms, updateInstance, type DmMember } from "@/fuwa/store";
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
+import { onDmPinEvent } from "@/fuwa/pins";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -469,10 +470,14 @@ export class DmEngine {
         break;
       }
       case "recordDeleted":
+        onDmPinEvent(this.key, event);
         void this.forgetDeleted(p.value.conversationId, Number(p.value.sequence)).catch(() => {});
         break;
       case "callUpdated":
         this.setCall(p.value);
+        break;
+      case "pinUpdated":
+        onDmPinEvent(this.key, event);
         break;
     }
   }

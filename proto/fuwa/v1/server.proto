@@ -329,6 +329,9 @@ enum AuditAction {
   AUDIT_ACTION_POLL_END = 52;
   // Someone changed the server's onboarding steps.
   AUDIT_ACTION_ONBOARDING_UPDATE = 53;
+  // A moderator pinned or unpinned a message. The target is its author.
+  AUDIT_ACTION_MESSAGE_PIN = 54;
+  AUDIT_ACTION_MESSAGE_UNPIN = 55;
 }
 
 // One thing someone did with a moderator's or manager's permission.

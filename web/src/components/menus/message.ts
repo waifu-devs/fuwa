@@ -1,4 +1,4 @@
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, MessageSquareReplyIcon, PencilIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, MessageSquareReplyIcon, PencilIcon, PinIcon, PinOffIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
 import type { MenuTrigger } from "@/components/ContextMenu";
 import { copyIdItem } from "@/components/menus/common";
 import { i18n } from "@/i18n/i18n";
@@ -80,6 +80,8 @@ export type MessageMenuActions = {
   edit?: () => void;
   copyText?: () => void;
   keepOut?: { name: string; ask: () => void };
+  /** Pin it to its channel or thread, or unpin it. */
+  pin?: { pinned: boolean; toggle: () => void };
   delete?: () => void;
 };
 
@@ -103,7 +105,15 @@ export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, 
       },
       {
         id: "manage",
-        items: items(actions.keepOut && { id: "keep-out", label: `Keep ${actions.keepOut.name} out`, icon: UserXIcon, danger: true, onSelect: actions.keepOut.ask }),
+        items: items(
+          actions.pin && {
+            id: "pin",
+            label: i18n().t(actions.pin.pinned ? "chattools.pins.unpinMessage" : "chattools.pins.pin"),
+            icon: actions.pin.pinned ? PinOffIcon : PinIcon,
+            onSelect: actions.pin.toggle,
+          },
+          actions.keepOut && { id: "keep-out", label: `Keep ${actions.keepOut.name} out`, icon: UserXIcon, danger: true, onSelect: actions.keepOut.ask },
+        ),
       },
       { id: "developer", items: items(copyIdItem(ctx.message.id, "message")) },
       { id: "danger", items: items(actions.delete && { id: "delete", label: "Delete message", icon: Trash2Icon, danger: true, onSelect: actions.delete }) },

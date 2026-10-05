@@ -11,6 +11,8 @@ import {
   RotateCcwKeyIcon,
   LockKeyholeIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   RotateCwIcon,
   SendHorizontalIcon,
   ShieldAlertIcon,
@@ -42,6 +44,10 @@ import {
   type ThreadTarget,
 } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
+import type { FuwaError } from "@/fuwa/errors";
+import { doneDmJump, loadDmPins, pinDm, requestDmJump, useDmJump, useDmPins } from "@/fuwa/pins";
+import { DmPinsButton, PinMark } from "@/components/chat/Pins";
+import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/Composer";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { insertAtCaret } from "@/lib/caret";
@@ -55,6 +61,7 @@ import { displayName, formatFull, sameDay } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { setTitle } from "@/lib/notify";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
+import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
@@ -79,6 +86,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
   const [sheet, setSheet] = useState(false);
   const { t } = useI18n();
   const partner = conversation?.users.find((u) => u.id !== me?.id) ?? conversation?.users[0];
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
 
   useEffect(() => {
     focusChannel(instanceKey, conversationId);
@@ -129,6 +137,14 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
           </motion.span>
         </AnimatePresence>
         <span className="flex-1" />
+        {conversation && status === "ready" && pinsHere && (
+          <DmPinsButton
+            instanceKey={instanceKey}
+            conversationId={conversationId}
+            users={conversation.users}
+            onJump={(seq) => requestDmJump(conversationId, seq)}
+          />
+        )}
         {conversation && status === "ready" && <CallButton instanceKey={instanceKey} conversationId={conversationId} />}
         {conversation && <TrustPill instanceKey={instanceKey} conversationId={conversationId} onOpen={() => setSheet(true)} />}
       </header>
@@ -256,10 +272,30 @@ function DmMessages({
   });
   const { t } = useI18n();
   const describe = useCallback((item: Item) => deviceLine(t, item, users, me, earlier), [t, users, me, earlier]);
+  // Which messages are pinned, for their marks: the instance names them by their place, never what they say.
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
+  useEffect(() => {
+    if (pinsHere) void loadDmPins(instanceKey, conversation.id);
+  }, [pinsHere, instanceKey, conversation.id]);
+  const pinList = useDmPins(instanceKey, conversation.id)?.pins;
+  const pins = useMemo<PinHooks | undefined>(() => {
+    if (!pinsHere) return undefined;
+    const pinned = new Set((pinList ?? []).map((p) => Number(p.sequence)));
+    return {
+      pinned: (seq) => pinned.has(seq),
+      toggle: (seq) => {
+        const was = pinned.has(seq);
+        pinDm(instanceKey, conversation.id, seq, !was)
+          .then(() => toast(was ? t("chattools.pins.unpinnedToast") : t("chattools.pins.pinnedToast", { place: t("chattools.pins.thisConversation") })))
+          .catch((err: FuwaError) => toast(err.message));
+      },
+    };
+  }, [pinsHere, pinList, instanceKey, conversation.id, t]);
   return (
     <EncryptedMessages
       instanceKey={instanceKey}
       id={conversation.id}
+      pins={pins}
       me={me}
       userOf={userOf}
       describe={describe}
@@ -289,6 +325,7 @@ export function EncryptedMessages({
   lines,
   pendingIn,
   threads,
+  pins,
 }: {
   instanceKey: string;
   id: string;
@@ -308,6 +345,8 @@ export function EncryptedMessages({
   pendingIn?: (p: PendingMessage) => boolean;
   /** A secure channel's threads: what shows under a line, and starting a thread on one. */
   threads?: ThreadHooks;
+  /** A conversation's pins: which lines are pinned, and pinning one. */
+  pins?: PinHooks;
 }) {
   const stored = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
   const items = stored && (lines ?? stored);
@@ -374,6 +413,27 @@ export function EncryptedMessages({
   const atBottom = useRef(true);
   const fromBottom = useRef(0);
   const [missed, setMissed] = useState(0);
+
+  // A pin opened from the header: draw the rows down to it, then bring it into view and let it glow.
+  const jump = useDmJump(id);
+  useEffect(() => {
+    if (!jump) return;
+    doneDmJump(jump);
+    const index = rows.findIndex((r) => r.key === `s${jump.seq}`);
+    if (index === -1) return;
+    if (index < skipped) setHidden(Math.max(0, index - 10));
+    atBottom.current = false;
+    const light = (tries: number) =>
+      requestAnimationFrame(() => {
+        const el = scroller.current?.querySelector<HTMLElement>(`[data-dm-seq="${jump.seq}"]`);
+        if (!el) return tries > 0 && light(tries - 1);
+        el.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        el.classList.remove("jumped");
+        void el.offsetWidth;
+        el.classList.add("jumped");
+      });
+    light(5);
+  }, [jump, rows, skipped]);
   const count = useRef(0);
   const shownBefore = useRef(skipped);
   useLayoutEffect(() => {
@@ -443,6 +503,8 @@ export function EncryptedMessages({
                   editing={editing === item.seq}
                   actions={actions}
                   threads={threads}
+                  pinned={!!pins?.pinned(item.seq)}
+                  onPin={pins && !item.deleted ? pins.toggle : undefined}
                 />
               );
             })}
@@ -531,6 +593,12 @@ const dateOf = (item: Item) => {
   return d;
 };
 
+/** What a conversation's list knows of its pins: whether a line is pinned, and pinning or unpinning one. */
+export type PinHooks = {
+  pinned: (seq: number) => boolean;
+  toggle: (seq: number) => void;
+};
+
 /** What a row can do to its message, the same object for the whole conversation. */
 type DmActions = {
   edit: (seq: number) => void;
@@ -569,6 +637,8 @@ const DmRow = memo(function DmRow({
   editing,
   actions,
   threads,
+  pinned,
+  onPin,
 }: {
   item: Item;
   first: boolean;
@@ -584,6 +654,8 @@ const DmRow = memo(function DmRow({
   editing: boolean;
   actions: DmActions;
   threads?: ThreadHooks;
+  pinned: boolean;
+  onPin?: (seq: number) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -593,6 +665,7 @@ const DmRow = memo(function DmRow({
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      data-dm-seq={item.seq}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
@@ -623,6 +696,7 @@ const DmRow = memo(function DmRow({
             {item.files && <SealedFiles instanceKey={instanceKey} files={item.files} animate={animate} />}
           </>
         )}
+        {pinned && !item.deleted && !editing && <PinMark />}
         {!editing && threads?.under(item)}
       </MessageLine>
       {!editing && !item.deleted && (
@@ -670,6 +744,11 @@ const DmRow = memo(function DmRow({
               {threads?.canStart(item) && (
                 <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
                   <MessageSquareReplyIcon />
+                </ToolButton>
+              )}
+              {onPin && (
+                <ToolButton label={pinned ? t("chattools.pins.unpinMessage") : t("chattools.pins.pin")} onClick={() => onPin(item.seq)}>
+                  {pinned ? <PinOffIcon /> : <PinIcon />}
                 </ToolButton>
               )}
               {mine && item.kind === "text" && (

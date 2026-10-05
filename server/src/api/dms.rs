@@ -108,6 +108,9 @@ async fn shown_to(app: &App, viewer: &str, record: &mut pb::ConversationRecord) 
     Ok(true)
 }
 
+/// Most pins one page of ListPins holds.
+const MAX_PINS_PAGE: i32 = 100;
+
 fn malformed(err: wire::Malformed) -> Error {
     Error::invalid(err.to_string())
 }
@@ -745,6 +748,51 @@ impl DirectMessageService for Api {
                     tracing::warn!("couldn't delete a deleted message's sealed files");
                 }
                 Ok(pb::DeleteRecordResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn pin_record(
+        &self,
+        request: Request<pb::PinRecordRequest>,
+    ) -> Result<Response<pb::PinRecordResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.get_ref();
+                let dms = self.app.dms()?;
+                let conversation = dms.conversation_of(&account.id, &req.conversation_id).await?;
+                // As for writing in it. Someone who blocked the caller never
+                // hears of the caller's pins (`DmDb::pin`).
+                let mut blocker = None;
+                for other in conversation.participants.iter().filter(|id| **id != account.id) {
+                    if self.may_message(&account.id, other, true).await? == Reach::Hidden {
+                        blocker = Some(other.as_str());
+                    }
+                }
+                let cap = self.app.settings().limits.pins_per_conversation;
+                let pin = dms.pin(&account.id, blocker, &conversation.id, req.sequence, req.pinned, cap).await?;
+                Ok(pb::PinRecordResponse { pin })
+            }
+            .await,
+        )
+    }
+
+    async fn list_pins(
+        &self,
+        request: Request<pb::ListDmPinsRequest>,
+    ) -> Result<Response<pb::ListDmPinsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let dms = self.app.dms()?;
+                let req = request.get_ref();
+                let conversation = dms.conversation_of(&account.id, &req.conversation_id).await?;
+                let limit = if req.limit <= 0 { 50 } else { req.limit.min(MAX_PINS_PAGE) };
+                let (pins, has_more) =
+                    dms.pins(&account.id, &conversation.id, i64::from(limit), req.after_sequence).await?;
+                Ok(pb::ListDmPinsResponse { pins, has_more })
             }
             .await,
         )

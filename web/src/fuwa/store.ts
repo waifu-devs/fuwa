@@ -580,6 +580,17 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
     }
     case "threadUpdated":
       return withThreadSummary(i, p.value.channelId, p.value.threadId, p.value.thread);
+    case "messagePinned": {
+      // Marks the message where it's loaded: in its channel, and in its thread for a reply.
+      const { channelId, messageId, threadId, pinnedAt } = p.value;
+      let messages = i.messages;
+      for (const at of [channelId, threadId && threadKey(threadId)]) {
+        const loaded = at ? messages[at] : undefined;
+        const found = loaded?.items.find((m) => m.id === messageId);
+        if (found) messages = { ...messages, [at!]: { ...loaded!, items: upsertMessage(loaded!.items, { ...found, pinnedAt }) } };
+      }
+      return messages === i.messages ? i : { ...i, messages };
+    }
     case "userUpdated": {
       const user = p.value.user;
       return user ? withUpdatedUser(i, user) : i;
