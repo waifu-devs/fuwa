@@ -563,6 +563,18 @@ impl LiveTileService for Api {
                 tiles.retain(|t| access.can_see(&t.channel_id));
                 let channels = store::load_channels(&conn, &sdb.id).await?;
                 tiles.retain(|t| channels.iter().any(|c| c.id == t.channel_id && tile_channel(c).is_ok()));
+                // An agent that may no longer send in a channel no longer shows tiles there.
+                let mut agents = HashMap::new();
+                for tile in &tiles {
+                    if tile.source_kind == LiveTileSource::Agent as i32 && !agents.contains_key(&tile.source_id) {
+                        let source = sdb.member_access(&tile.source_id).await?.map(|(_, access)| access);
+                        agents.insert(tile.source_id.clone(), source);
+                    }
+                }
+                tiles.retain(|t| match agents.get(&t.source_id) {
+                    Some(source) => source.as_ref().is_some_and(|a| a.has_in(&t.channel_id, Permission::SendMessages)),
+                    None => true,
+                });
                 Ok(pb::ListLiveTilesResponse { tiles: named(&conn, tiles).await? })
             }
             .await,

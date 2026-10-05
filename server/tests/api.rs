@@ -10649,15 +10649,13 @@ async fn apps_keep_live_tiles_that_reach_only_who_can_see_them() {
     assert_eq!(log.entries.len(), 1);
     assert_eq!(log.entries[0].target_id, bot_id);
 
-    // Kicked, the agent's tiles go with it.
-    c.servers
-        .kick_member(authed(
-            &juan,
-            pb::KickMemberRequest { server_id: sid.clone(), user_id: bot_id.clone(), reason: String::new() },
-        ))
+    // An agent that may no longer send in a channel no longer shows tiles there.
+    assert_eq!(tiles(&mut c, &rin, &sid).await, [(general.clone(), "final".to_string())]);
+    set_permissions(&mut c, &juan, &sid, &general, vec![overwrite(&bot_id, T::Member, &[], &[P::SendMessages])])
         .await
         .unwrap();
-    assert!(tiles(&mut c, &juan, &sid).await.is_empty());
+    assert!(tiles(&mut c, &rin, &sid).await.is_empty());
+    assert_eq!(tiles(&mut c, &juan, &sid).await, [(staff.clone(), "secret".to_string())]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

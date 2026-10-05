@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Channel, LiveTile, Message, VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { collectTiles, fitApp, kindNumbers, pickTiles, serverKinds, type AppTile, type Sources, type Tile } from "./live-tiles.ts";
+import { collectTiles, fitApp, kindNumbers, pickTiles, serverKinds, shownKinds, type AppTile, type Sources, type Tile } from "./live-tiles.ts";
 
 const NOW = 1_800_000_000_000;
 const ts = (ms: number) => ({ seconds: BigInt(Math.floor(ms / 1000)), nanos: (ms % 1000) * 1e6 }) as Message["createdAt"];
@@ -118,6 +118,14 @@ test("a server's kinds come from its setting, and only those show", () => {
     { kind: "thread", id: "thread", channelId: "c", threadId: "t", title: "", replies: 1, unread: 1, userIds: [] },
   ];
   assert.deepEqual(pickTiles(tiles, new Set(), NOW, serverKinds([2, 3, 4, 5])).map((t) => t.id), ["thread"]);
+});
+
+test("a server that never chose drops voice rooms once it grows past the big-server line, without a new setting", () => {
+  const unchosen = { customized: false, kinds: [1, 2, 3, 4, 5] };
+  assert.ok(shownKinds(unchosen, 499n).has("voice"));
+  assert.deepEqual([...shownKinds(unchosen, 500n)], ["poll", "thread", "shared", "app"]);
+  assert.ok(shownKinds({ customized: true, kinds: [1] }, 5000n).has("voice"), "a chosen setting stays as chosen");
+  assert.equal(shownKinds(undefined, 3n).size, 0, "an instance without tiles shows none");
 });
 
 test("an app's tile is cut to the template before anyone sees it", () => {

@@ -32,8 +32,9 @@ audit entry "live_tiles"); `customized: false` goes back to the default.
 
 The default shows every kind except voice rooms in servers of 500 members or
 more (`servers::BIG_SERVER`), so a crowd isn't pointed at a few people
-talking. The server resolves it: apps read `Server.live_tiles.kinds` and
-show those.
+talking. The server resolves it in `Server.live_tiles.kinds`; since a
+server's size changes without a `ServerUpdated`, apps work the default out
+the same way from `member_count` while `customized` is false.
 
 ## Tiles from apps
 
@@ -63,7 +64,8 @@ and ends it with `DELETE` to the same address and `?id=final`. Both answer
   ones, nor channels shared with other servers. Only while the server shows
   tiles from apps.
 - Agents need Send Messages in the channel; people can't set tiles. A
-  webhook's tiles go in its channel.
+  webhook's tiles go in its channel. An agent that loses Send Messages there
+  stops showing its tiles in `ListLiveTiles`.
 - The server's AutoMod word, link and ping rules read the tile's text and
   can refuse it (an error starting "AutoMod: "). A tile can change every
   second, so it posts no alerts, times nobody out, and the Smart filter's

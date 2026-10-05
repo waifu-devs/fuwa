@@ -16,7 +16,7 @@ import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
 import { useI18n } from "@/i18n/react";
 import { instanceHas } from "@/lib/compat";
 import { formatTime } from "@/lib/format";
-import { BIG_SERVER, collectTiles, kindNumbers, pickTiles, POLL_SOON_MS, serverKinds, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
+import { BIG_SERVER, collectTiles, kindNumbers, pickTiles, POLL_SOON_MS, shownKinds, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
 import { hideTile, setServerQuiet, setTilesOn, useLiveTilesLocal } from "@/lib/live-tiles-store";
 import { toast } from "@/lib/ui";
 import { isMuted, useNow } from "@/lib/notifications";
@@ -47,7 +47,8 @@ const useTilesHere = (instanceKey: string) => useFuwa((s) => instanceHas(s.insta
 /** The kinds a server shows, as its setting says. */
 function useServerKinds(instanceKey: string, serverId: string) {
   const setting = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.liveTiles);
-  return useMemo(() => ({ customized: !!setting?.customized, kinds: serverKinds(setting?.kinds) }), [setting]);
+  const members = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.memberCount ?? 0n);
+  return useMemo(() => ({ customized: !!setting?.customized, kinds: shownKinds(setting, members) }), [setting, members]);
 }
 
 export function LiveTiles({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {

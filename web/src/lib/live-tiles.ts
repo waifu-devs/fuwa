@@ -253,6 +253,17 @@ export function serverKinds(kinds: readonly number[] | undefined): Set<TileKind>
   return new Set((kinds ?? []).flatMap((k) => (KIND_NUMBERS[k] ? [KIND_NUMBERS[k]] : [])));
 }
 
+/**
+ * The kinds a server shows now. A server that never chose follows its size,
+ * which changes without a ServerUpdated, so the app works the default out
+ * the same way the server does (`servers::live_tile_kinds`).
+ */
+export function shownKinds(setting: { customized: boolean; kinds: readonly number[] } | undefined, members: bigint | number): Set<TileKind> {
+  if (!setting) return new Set();
+  if (setting.customized) return serverKinds(setting.kinds);
+  return new Set(TILE_KINDS.filter((k) => k !== "voice" || Number(members) < BIG_SERVER));
+}
+
 /** A server's kinds as its setting takes them back: one number each. */
 export function kindNumbers(kinds: ReadonlySet<TileKind>): number[] {
   return Object.entries(KIND_NUMBERS)
