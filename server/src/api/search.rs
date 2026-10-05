@@ -810,9 +810,13 @@ async fn find_by_filters(conn: &turso::Connection, find: &Find) -> Result<Found>
 /// message back to its oldest.
 async fn indexed_percent(conn: &turso::Connection, backfill: &str) -> Result<i32> {
     let ms = |id: &str| ulid::Ulid::from_string(id).ok().map(|u| u.timestamp_ms() as i64);
-    let Some((oldest, newest)) = query_one(conn, "SELECT min(id), max(id) FROM messages", (), |r| {
-        Ok((r.get::<Option<String>>(0)?, r.get::<Option<String>>(1)?))
-    })
+    // Not min(id) and max(id): Turso reads every message for those.
+    let Some((oldest, newest)) = query_one(
+        conn,
+        "SELECT (SELECT id FROM messages ORDER BY id LIMIT 1), (SELECT id FROM messages ORDER BY id DESC LIMIT 1)",
+        (),
+        |r| Ok((r.get::<Option<String>>(0)?, r.get::<Option<String>>(1)?)),
+    )
     .await?
     else {
         return Ok(0);

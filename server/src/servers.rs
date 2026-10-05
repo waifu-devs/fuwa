@@ -387,7 +387,9 @@ impl ServerDb {
     /// The last committed sequence, read from the file.
     async fn stored_head(&self) -> Result<i64> {
         let conn = self.read()?;
-        Ok(query_one(&conn, "SELECT coalesce(max(sequence), 0) FROM events", (), |r| r.get::<i64>(0))
+        // Not max(sequence): Turso reads every event for that, and this runs
+        // whenever a stream starts following the server.
+        Ok(query_one(&conn, "SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1", (), |r| r.get::<i64>(0))
             .await?
             .unwrap_or(0))
     }
@@ -536,7 +538,7 @@ impl ServerDb {
             &conn,
             "SELECT u.members, u.channels, u.messages + c.messages, u.messages_sent + c.messages_sent,
                     u.message_bytes + c.message_bytes, u.attachments + c.attachments,
-                    u.attachment_bytes + c.attachment_bytes, (SELECT coalesce(max(sequence), 0) FROM events),
+                    u.attachment_bytes + c.attachment_bytes, coalesce((SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1), 0),
                     max(u.updated_at, c.at), u.emojis
              FROM usage u,
                   (SELECT coalesce(sum(messages), 0) messages, coalesce(sum(messages_sent), 0) messages_sent,
