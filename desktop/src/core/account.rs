@@ -10,7 +10,7 @@ use http_body_util::{BodyExt as _, Full};
 use tonic::Code;
 
 use crate::core::api::Problem;
-use crate::core::{Core, notifications, store};
+use crate::core::{Core, notifications, reports, store};
 use crate::pb;
 use crate::rpc;
 
@@ -60,6 +60,15 @@ pub async fn read_picture(path: &std::path::Path) -> Result<Vec<u8>, Problem> {
     tokio::fs::read(path).await.map_err(|_| unreadable())
 }
 
+/// Shares what you're doing in a server again, or hides it there: the
+/// settings keep the servers it's hidden from, each once.
+pub fn share_in(settings: &mut pb::PresenceSettings, server_id: &str, on: bool) {
+    settings.hidden_server_ids.retain(|id| id != server_id);
+    if !on {
+        settings.hidden_server_ids.push(server_id.to_owned());
+    }
+}
+
 fn missing() -> Problem {
     Problem::new(Code::NotFound, "That instance isn't here.")
 }
@@ -87,15 +96,32 @@ impl Core {
 
     /// Picks your status on an instance, for every app you're signed in with there.
     pub async fn set_status(&self, key: &str, status: pb::PresenceStatus) -> Result<(), Problem> {
+        self.change_presence(key, |s| s.status = status as i32).await
+    }
+
+    /// Turns "Show what I'm doing" on or off on an instance.
+    pub async fn share_activity(&self, key: &str, on: bool) -> Result<(), Problem> {
+        self.change_presence(key, |s| s.show_activity = on).await?;
+        reports::used(if on { "presence.share_on" } else { "presence.share_off" });
+        Ok(())
+    }
+
+    /// Shares what you're doing in one server, or hides it there.
+    pub async fn share_activity_in(&self, key: &str, server_id: &str, on: bool) -> Result<(), Problem> {
+        let server_id = server_id.to_owned();
+        self.change_presence(key, move |s| share_in(s, &server_id, on)).await
+    }
+
+    /// Changes your presence settings. The update replaces every setting, so
+    /// the rest are read fresh, never from what this app last saw: sharing
+    /// turned off in another app since then must stay off.
+    async fn change_presence(&self, key: &str, change: impl FnOnce(&mut pb::PresenceSettings)) -> Result<(), Problem> {
         let api = self.api(key).ok_or_else(missing)?;
-        // The update replaces every setting, so the rest are read fresh, never
-        // from what this app last saw: sharing turned off in another app since
-        // then must stay off.
         let mut settings = rpc!(api.presence(), get_presence_settings(pb::GetPresenceSettingsRequest {}))
             .await?
             .settings
             .unwrap_or_default();
-        settings.status = status as i32;
+        change(&mut settings);
         let res = rpc!(
             api.presence(),
             update_presence_settings(pb::UpdatePresenceSettingsRequest { settings: Some(settings) })
@@ -422,6 +448,19 @@ pub(crate) async fn send(method: http::Method, url: &str, content_type: &str, by
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hiding_activity_keeps_each_server_once() {
+        let mut s = pb::PresenceSettings { hidden_server_ids: vec!["a".into()], ..Default::default() };
+        share_in(&mut s, "b", false);
+        share_in(&mut s, "b", false);
+        assert_eq!(s.hidden_server_ids, ["a", "b"]);
+        share_in(&mut s, "a", true);
+        assert_eq!(s.hidden_server_ids, ["b"]);
+        // Sharing where it was never hidden changes nothing.
+        share_in(&mut s, "c", true);
+        assert_eq!(s.hidden_server_ids, ["b"]);
+    }
 
     #[test]
     fn pictures_name_their_type() {
