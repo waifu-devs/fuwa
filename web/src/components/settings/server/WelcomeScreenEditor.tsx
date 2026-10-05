@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const MAX_CHANNELS = 5;
@@ -77,6 +78,7 @@ export function WelcomeFields({
   draft: WelcomeDraft;
   onChange: (draft: WelcomeDraft) => void;
 }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const channels = (inst?.channels[server.id] ?? []).filter((c) => c.type !== ChannelType.CATEGORY);
   const emojis = inst?.emojis[server.id];
@@ -91,25 +93,30 @@ export function WelcomeFields({
         <Toggle
           checked={enabled}
           onChange={(on) => onChange({ ...draft, enabled: on })}
-          label="Show a welcome screen"
-          hint="New members see it once, with the rules to agree to when there are. With onboarding on, it's the last step. Anyone can open it again from the server menu."
+          label={t("serversettings.nav.welcomeEnabled")}
+          hint={t("serversettings.welcomeScreen.enabledHint")}
         />
       </div>
       <div data-setting="welcome-description" className="flex flex-col gap-2 border-b border-border/70 py-5">
         <Label htmlFor="welcome-description" className="font-extrabold">
-          A few words
+          {t("serversettings.welcomeScreen.words")}
         </Label>
         <Textarea
           id="welcome-description"
           rows={3}
           maxLength={DESCRIPTION_MAX}
           value={description}
-          placeholder="What this place is about, and where to begin."
+          placeholder={t("serversettings.welcomeScreen.wordsPlaceholder")}
           onChange={(e) => onChange({ ...draft, description: e.target.value })}
           className="rounded-xl"
         />
         <p className="flex justify-between gap-3 text-sm text-muted-foreground">
-          <span>Markdown works on one line: **bold**, *italics*, links.</span>
+          <span>
+            {t("serversettings.welcomeScreen.markdown", {
+              bold: `**${t("serversettings.welcomeScreen.bold")}**`,
+              italics: `*${t("serversettings.welcomeScreen.italics")}*`,
+            })}
+          </span>
           <span className={cn("tabular-nums", description.length > DESCRIPTION_MAX - 30 && "text-amber-600 dark:text-amber-400")}>
             {description.length}/{DESCRIPTION_MAX}
           </span>
@@ -117,8 +124,8 @@ export function WelcomeFields({
       </div>
       <div data-setting="welcome-channels" className="flex flex-col gap-3 py-5">
         <span>
-          <span className="block font-extrabold">Channels to start in</span>
-          <span className="block text-sm text-muted-foreground">Up to {MAX_CHANNELS}. Drag to reorder. People only see the ones they're allowed into.</span>
+          <span className="block font-extrabold">{t("serversettings.welcomeScreen.channels")}</span>
+          <span className="block text-sm text-muted-foreground">{t("serversettings.welcomeScreen.channelsHint", { max: MAX_CHANNELS })}</span>
         </span>
         <Reorder.Group axis="y" values={list} onReorder={setList} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
@@ -144,7 +151,7 @@ export function WelcomeFields({
               className="group rounded-xl border-dashed"
               onClick={() => setList((l) => [...l, { key: `new-${Date.now()}`, channelId: unused[0]!.id, description: "", emoji: "" }])}
             >
-              <PlusIcon className="transition-transform group-hover:rotate-90" /> Add a channel
+              <PlusIcon className="transition-transform group-hover:rotate-90" /> {t("serversettings.welcomeScreen.addChannel")}
             </Button>
           </motion.div>
         )}
@@ -170,6 +177,7 @@ function ChannelRow({
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const drag = useDragControls();
   const channel = channels.find((c) => c.id === row.channelId);
   return (
@@ -186,7 +194,7 @@ function ChannelRow({
     >
       <button
         type="button"
-        aria-label="Drag to reorder"
+        aria-label={t("serversettings.shared.dragToReorder")}
         onPointerDown={(e) => drag.start(e)}
         className="grid h-9 w-5 shrink-0 cursor-grab touch-none place-items-center text-muted-foreground active:cursor-grabbing"
       >
@@ -198,7 +206,7 @@ function ChannelRow({
             type="button"
             whileHover={{ scale: 1.08, rotate: -6 }}
             whileTap={{ scale: 0.9 }}
-            aria-label={row.emoji ? "Change the emoji" : "Pick an emoji"}
+            aria-label={row.emoji ? t("serversettings.shared.changeEmoji") : t("serversettings.shared.pickEmoji")}
             className={cn(
               "grid size-9 shrink-0 place-items-center rounded-xl border text-xl transition-colors",
               open ? "border-primary/60 bg-primary/10" : "hover:border-primary/40",
@@ -215,7 +223,7 @@ function ChannelRow({
             className="group flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-xl border px-2.5 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60 sm:w-40 sm:flex-none"
           >
             <HashIcon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1 truncate font-bold">{channel?.name ?? "Pick a channel"}</span>
+            <span className="flex-1 truncate font-bold">{channel?.name ?? t("serversettings.shared.pickChannel")}</span>
             <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
           </button>
         </DropdownMenuTrigger>
@@ -230,12 +238,12 @@ function ChannelRow({
       <Input
         value={row.description}
         maxLength={NOTE_MAX}
-        placeholder="Why go there (optional)"
-        aria-label={`Why go to #${channel?.name ?? "this channel"}`}
+        placeholder={t("serversettings.welcomeScreen.notePlaceholder")}
+        aria-label={channel ? t("serversettings.welcomeScreen.noteFor", { channel: channel.name }) : t("serversettings.welcomeScreen.noteForThis")}
         onChange={(e) => onChange({ description: e.target.value })}
         className="h-9 min-w-0 basis-full rounded-xl sm:basis-auto sm:flex-1"
       />
-      <Button type="button" variant="ghost" size="icon" aria-label="Remove" onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
+      <Button type="button" variant="ghost" size="icon" aria-label={t("serversettings.channelPermissions.remove")} onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
         <XIcon />
       </Button>
     </Reorder.Item>

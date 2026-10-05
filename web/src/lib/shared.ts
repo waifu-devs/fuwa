@@ -1,4 +1,5 @@
 import type { Channel, Message, SharedServer } from "@/gen/fuwa/v1/types_pb";
+import type { Lang } from "./durations.ts";
 
 /*
  * Shared channels (like Slack Connect): one server, the channel's home, keeps
@@ -53,13 +54,17 @@ export function foreignServer(message: Pick<Message, "shared">, serverId: string
   return server && server.id && server.id !== serverId ? server : null;
 }
 
-/** How long a share code has left, in words: "6 days", "3 hours", "a few minutes". */
-export function codeLeft(ms: number): string {
-  if (ms <= 0) return "expired";
+/** A number of days, hours or minutes, in the language's own words. */
+const units = (locale: string, n: number, unit: "day" | "hour" | "minute") =>
+  new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay: "long" }).format(n);
+
+/** How long a share code has left, in words and in the app's language: "6 days", "3 hours", "a few minutes". */
+export function codeLeft({ t, locale }: Lang, ms: number): string {
+  if (ms <= 0) return t("serversettings.sharedChannels.expired");
   const hours = ms / 3_600_000;
   // A code made a moment ago "works for 7 days", not 6 and a bit.
-  if (hours >= 36) return `${Math.round(hours / 24)} days`;
-  if (hours >= 2) return `${Math.floor(hours)} hours`;
+  if (hours >= 36) return units(locale, Math.round(hours / 24), "day");
+  if (hours >= 2) return units(locale, Math.floor(hours), "hour");
   const minutes = Math.floor(ms / 60_000);
-  return minutes >= 5 ? `${minutes} minutes` : "a few minutes";
+  return minutes >= 5 ? units(locale, minutes, "minute") : t("serversettings.sharedChannels.fewMinutes");
 }

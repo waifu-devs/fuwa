@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
+import type { I18n } from "../i18n/i18n.ts";
+import type { Lang } from "./durations.ts";
 import { codeLeft, findShareCode, foreignServer, listNames, shareCodeInstance, sharedLabel } from "./shared.ts";
+
+/** The server settings strings in a language, as the page has them (i18n/i18n.ts needs Vite, so this reads the catalogs itself). */
+const serversettings = (code: string) =>
+  JSON.parse(readFileSync(new URL(`../../../locales/${code}/serversettings.json`, import.meta.url), "utf8")) as Namespace;
+const english = flatten({ serversettings: serversettings("en") });
+function lang(locale: string): Lang {
+  const catalog = locale === "en" ? english : flatten({ serversettings: serversettings(locale) });
+  const t: I18n["t"] = (key, values = {}) =>
+    fill(
+      template(locale, catalog, english, key, typeof values.count === "number" ? values.count : undefined),
+      Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])),
+    );
+  return { t, locale };
+}
+const en = lang("en");
+const es = lang("es");
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
 
@@ -50,10 +70,17 @@ test("only authors from another server get a tag", () => {
 });
 
 test("time left on a code reads plainly", () => {
-  assert.equal(codeLeft(7 * 24 * 3_600_000), "7 days");
-  assert.equal(codeLeft(7 * 24 * 3_600_000 - 60_000), "7 days");
-  assert.equal(codeLeft(5 * 3_600_000), "5 hours");
-  assert.equal(codeLeft(30 * 60_000), "30 minutes");
-  assert.equal(codeLeft(60_000), "a few minutes");
-  assert.equal(codeLeft(0), "expired");
+  assert.equal(codeLeft(en, 7 * 24 * 3_600_000), "7 days");
+  assert.equal(codeLeft(en, 7 * 24 * 3_600_000 - 60_000), "7 days");
+  assert.equal(codeLeft(en, 30 * 3_600_000), "30 hours");
+  assert.equal(codeLeft(en, 5 * 3_600_000), "5 hours");
+  assert.equal(codeLeft(en, 30 * 60_000), "30 minutes");
+  assert.equal(codeLeft(en, 60_000), "a few minutes");
+  assert.equal(codeLeft(en, 0), "expired");
+});
+
+test("time left on a code reads in the app's language", () => {
+  assert.equal(codeLeft(es, 7 * 24 * 3_600_000), "7 días");
+  assert.equal(codeLeft(es, 5 * 3_600_000), "5 horas");
+  assert.equal(codeLeft(es, 30 * 60_000), "30 minutos");
 });

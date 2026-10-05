@@ -38,6 +38,7 @@ import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { type I18n, type Key, useI18n } from "@/i18n/react";
 import { above, bit, cssColor, fromList } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
@@ -101,21 +102,29 @@ export const onboardingOf = (d: OnboardingDraft): Onboarding =>
 /** 1 when the onboarding differs from what's saved. */
 export const onboardingChanges = (d: OnboardingDraft, saved: Onboarding) => (equals(OnboardingSchema, onboardingOf(d), saved) ? 0 : 1);
 
-const KINDS: Record<Exclude<OnboardingStepKind, OnboardingStepKind.UNSPECIFIED>, { label: string; hint: string; icon: LucideIcon }> = {
-  [OnboardingStepKind.PICK]: { label: "Pick what they're into", hint: "Choices that hand out roles and suggest channels.", icon: ListChecksIcon },
-  [OnboardingStepKind.RULES]: { label: "Agree to the rules", hint: "Your rules, for people who haven't agreed yet. Never skippable.", icon: ScrollTextIcon },
-  [OnboardingStepKind.HELLO]: { label: "Say hello", hint: "A message box ready to send in a channel you pick.", icon: MessageCircleHeartIcon },
+/** Each kind of step: its name and what it does (catalog keys), and its icon. */
+const KINDS: Record<Exclude<OnboardingStepKind, OnboardingStepKind.UNSPECIFIED>, { label: Key; hint: Key; icon: LucideIcon }> = {
+  [OnboardingStepKind.PICK]: { label: "serversettings.onboarding.kindPick", hint: "serversettings.onboarding.kindPickHint", icon: ListChecksIcon },
+  [OnboardingStepKind.RULES]: { label: "serversettings.onboarding.kindRules", hint: "serversettings.onboarding.kindRulesHint", icon: ScrollTextIcon },
+  [OnboardingStepKind.HELLO]: { label: "serversettings.onboarding.kindHello", hint: "serversettings.onboarding.kindHelloHint", icon: MessageCircleHeartIcon },
 };
 
-function newStep(kind: OnboardingStepKind, channels: Channel[]): OnboardingStep {
+/** A new step of a kind, its title and hello in the app's language. */
+function newStep(t: I18n["t"], kind: OnboardingStepKind, channels: Channel[]): OnboardingStep {
   const text = channels.find((c) => c.type === ChannelType.TEXT);
   return create(OnboardingStepSchema, {
     kind,
-    title: kind === OnboardingStepKind.PICK ? "What are you into?" : kind === OnboardingStepKind.RULES ? "Our rules" : "Say hello",
+    title: t(
+      kind === OnboardingStepKind.PICK
+        ? "serversettings.onboarding.titlePick"
+        : kind === OnboardingStepKind.RULES
+          ? "serversettings.onboarding.titleRules"
+          : "serversettings.onboarding.kindHello",
+    ),
     skippable: kind === OnboardingStepKind.HELLO,
     multiple: true,
     channelId: kind === OnboardingStepKind.HELLO ? (text?.id ?? "") : "",
-    hello: kind === OnboardingStepKind.HELLO ? "Hi everyone! 👋" : "",
+    hello: kind === OnboardingStepKind.HELLO ? t("join.onboarding.hello") : "",
     options: kind === OnboardingStepKind.PICK ? [create(OnboardingOptionSchema, { label: "", emoji: "✨" })] : [],
   });
 }
@@ -139,6 +148,7 @@ export function OnboardingFields({
   /** The step being edited, for the preview to show. */
   onFocusStep?: (index: number) => void;
 }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const channels = (inst?.channels[server.id] ?? []).filter((c) => c.type !== ChannelType.CATEGORY);
   const emojis = inst?.emojis[server.id];
@@ -151,7 +161,7 @@ export function OnboardingFields({
 
   function add(kind: OnboardingStepKind) {
     const key = fresh();
-    setSteps([...draft.steps, { key, step: newStep(kind, channels) }]);
+    setSteps([...draft.steps, { key, step: newStep(t, kind, channels) }]);
     setOpen(key);
     onFocusStep?.(draft.steps.length);
   }
@@ -162,14 +172,14 @@ export function OnboardingFields({
         <Toggle
           checked={draft.enabled}
           onChange={(on) => onChange({ ...draft, enabled: on })}
-          label="Onboard new members"
-          hint="Right after joining, people go through these steps, then land on the welcome screen. They can redo it from the server menu."
+          label={t("serversettings.onboarding.enabled")}
+          hint={t("serversettings.onboarding.enabledHint")}
         />
       </div>
       <div data-setting="onboarding-steps" className="flex flex-col gap-3 py-5">
         <span>
-          <span className="block font-extrabold">Steps</span>
-          <span className="block text-sm text-muted-foreground">Up to {MAX_STEPS}, in order. Drag to reorder. Server rules show up for anyone who still has to agree, even without a rules step.</span>
+          <span className="block font-extrabold">{t("serversettings.onboarding.steps")}</span>
+          <span className="block text-sm text-muted-foreground">{t("serversettings.onboarding.stepsHint", { max: MAX_STEPS })}</span>
         </span>
         <Reorder.Group axis="y" values={draft.steps} onReorder={setSteps} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
@@ -203,7 +213,7 @@ export function OnboardingFields({
                 return (
                   <Button key={k} type="button" variant="outline" className="group rounded-xl border-dashed" onClick={() => add(k)}>
                     <PlusIcon className="transition-transform group-hover:rotate-90" />
-                    <Icon className="text-muted-foreground" /> {label}
+                    <Icon className="text-muted-foreground" /> {t(label)}
                   </Button>
                 );
               })}
@@ -239,6 +249,7 @@ function StepCard({
   server: Server;
   canHandOut: (role: Role) => boolean;
 }) {
+  const { t } = useI18n();
   const drag = useDragControls();
   const { step } = draft;
   const kind = KINDS[step.kind as keyof typeof KINDS] ?? KINDS[OnboardingStepKind.PICK];
@@ -259,7 +270,7 @@ function StepCard({
       <div className="flex items-center gap-2 p-2">
         <button
           type="button"
-          aria-label="Drag to reorder"
+          aria-label={t("serversettings.shared.dragToReorder")}
           onPointerDown={(e) => drag.start(e)}
           className="grid h-9 w-5 shrink-0 cursor-grab touch-none place-items-center text-muted-foreground active:cursor-grabbing"
         >
@@ -271,16 +282,16 @@ function StepCard({
         <button type="button" onClick={onToggle} aria-expanded={open} className="group flex min-w-0 flex-1 items-center gap-2 text-left">
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-bold">
-              {index + 1}. {step.title || kind.label}
+              {index + 1}. {step.title || t(kind.label)}
             </span>
             <span className="block truncate text-xs text-muted-foreground">
-              {step.kind === OnboardingStepKind.PICK ? `${step.options.length} ${step.options.length === 1 ? "choice" : "choices"}` : kind.label}
-              {step.skippable && step.kind !== OnboardingStepKind.RULES ? " · skippable" : ""}
+              {step.kind === OnboardingStepKind.PICK ? t("serversettings.onboarding.choices", { count: step.options.length }) : t(kind.label)}
+              {step.skippable && step.kind !== OnboardingStepKind.RULES ? ` · ${t("serversettings.onboarding.skippableTag")}` : ""}
             </span>
           </span>
           <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
         </button>
-        <Button type="button" variant="ghost" size="icon" aria-label="Remove the step" onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
+        <Button type="button" variant="ghost" size="icon" aria-label={t("serversettings.onboarding.removeStep")} onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
           <Trash2Icon className="size-4" />
         </Button>
       </div>
@@ -288,22 +299,22 @@ function StepCard({
         {open && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={SPRING}>
             <div className="flex flex-col gap-3 border-t p-3">
-              <p className="text-xs text-muted-foreground">{kind.hint}</p>
-              <Input value={step.title} maxLength={80} placeholder="Title" aria-label="The step's title" onChange={(e) => onChange({ title: e.target.value })} className="h-10 rounded-xl font-bold" />
+              <p className="text-xs text-muted-foreground">{t(kind.hint)}</p>
+              <Input value={step.title} maxLength={80} placeholder={t("serversettings.onboarding.title")} aria-label={t("serversettings.onboarding.titleLabel")} onChange={(e) => onChange({ title: e.target.value })} className="h-10 rounded-xl font-bold" />
               <Input
                 value={step.description}
                 maxLength={200}
-                placeholder="A line under it (optional, Markdown)"
-                aria-label="The step's words"
+                placeholder={t("serversettings.onboarding.description")}
+                aria-label={t("serversettings.onboarding.descriptionLabel")}
                 onChange={(e) => onChange({ description: e.target.value })}
                 className="h-10 rounded-xl"
               />
               {step.kind !== OnboardingStepKind.RULES && (
-                <Toggle checked={step.skippable} onChange={(on) => onChange({ skippable: on })} label="Skippable" hint="People can go on without doing it." />
+                <Toggle checked={step.skippable} onChange={(on) => onChange({ skippable: on })} label={t("serversettings.onboarding.skippable")} hint={t("serversettings.onboarding.skippableHint")} />
               )}
               {step.kind === OnboardingStepKind.PICK && (
                 <>
-                  <Toggle checked={step.multiple} onChange={(on) => onChange({ multiple: on })} label="More than one" hint="People can pick several choices." />
+                  <Toggle checked={step.multiple} onChange={(on) => onChange({ multiple: on })} label={t("serversettings.onboarding.multiple")} hint={t("serversettings.onboarding.multipleHint")} />
                   <div className="flex flex-col gap-2">
                     <AnimatePresence initial={false}>
                       {step.options.map((o, n) => (
@@ -329,7 +340,7 @@ function StepCard({
                       className="group w-fit rounded-xl border-dashed"
                       onClick={() => onChange({ options: [...step.options, create(OnboardingOptionSchema, { label: "", emoji: "" })] })}
                     >
-                      <PlusIcon className="transition-transform group-hover:rotate-90" /> Add a choice
+                      <PlusIcon className="transition-transform group-hover:rotate-90" /> {t("serversettings.onboarding.addChoice")}
                     </Button>
                   )}
                 </>
@@ -337,7 +348,7 @@ function StepCard({
               {step.kind === OnboardingStepKind.HELLO && (
                 <>
                   <ChannelPick channels={channels.filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT)} value={step.channelId} onChange={(channelId) => onChange({ channelId })} />
-                  <Input value={step.hello} maxLength={200} placeholder="Hi everyone! 👋" aria-label="What the message box starts with" onChange={(e) => onChange({ hello: e.target.value })} className="h-10 rounded-xl" />
+                  <Input value={step.hello} maxLength={200} placeholder={t("join.onboarding.hello")} aria-label={t("serversettings.onboarding.helloLabel")} onChange={(e) => onChange({ hello: e.target.value })} className="h-10 rounded-xl" />
                 </>
               )}
             </div>
@@ -367,6 +378,7 @@ function OptionRow({
   onChange: (p: Partial<OnboardingOption>) => void;
   onRemove?: () => void;
 }) {
+  const { t } = useI18n();
   const flip = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id].slice(0, MAX_PICKS));
   const given = roles.filter((r) => option.roleIds.includes(r.id));
   const suggested = channels.filter((c) => option.channelIds.includes(c.id));
@@ -386,21 +398,21 @@ function OptionRow({
               type="button"
               whileHover={{ scale: 1.08, rotate: -6 }}
               whileTap={{ scale: 0.9 }}
-              aria-label={option.emoji ? "Change the emoji" : "Pick an emoji"}
+              aria-label={option.emoji ? t("serversettings.shared.changeEmoji") : t("serversettings.shared.pickEmoji")}
               className={cn("grid size-9 shrink-0 place-items-center rounded-xl border text-xl transition-colors", open ? "border-primary/60 bg-primary/10" : "hover:border-primary/40")}
             >
               {option.emoji ? <EmojiGlyph value={option.emoji} emojis={emojis} className="size-6" /> : <SmilePlusIcon className="size-4 text-muted-foreground" />}
             </motion.button>
           )}
         </EmojiPicker>
-        <Input value={option.label} maxLength={50} placeholder="Choice, like Art" aria-label="The choice" onChange={(e) => onChange({ label: e.target.value })} className="h-9 min-w-0 flex-1 rounded-xl font-bold" />
+        <Input value={option.label} maxLength={50} placeholder={t("serversettings.onboarding.choicePlaceholder")} aria-label={t("serversettings.onboarding.choiceLabel")} onChange={(e) => onChange({ label: e.target.value })} className="h-9 min-w-0 flex-1 rounded-xl font-bold" />
         {onRemove && (
-          <Button type="button" variant="ghost" size="icon" aria-label="Remove the choice" onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
+          <Button type="button" variant="ghost" size="icon" aria-label={t("serversettings.onboarding.removeChoice")} onClick={onRemove} className="size-9 shrink-0 rounded-full text-muted-foreground hover:text-destructive">
             <XIcon />
           </Button>
         )}
       </div>
-      <Input value={option.description} maxLength={100} placeholder="A few words (optional)" aria-label="About the choice" onChange={(e) => onChange({ description: e.target.value })} className="h-9 rounded-xl" />
+      <Input value={option.description} maxLength={100} placeholder={t("serversettings.onboarding.choiceAbout")} aria-label={t("serversettings.onboarding.choiceAboutLabel")} onChange={(e) => onChange({ description: e.target.value })} className="h-9 rounded-xl" />
       <div className="flex flex-wrap items-center gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
           {given.map((r) => (
@@ -417,7 +429,7 @@ function OptionRow({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg border-dashed text-xs" disabled={!roles.length}>
-              <ShieldIcon /> Roles
+              <ShieldIcon /> {t("serversettings.nav.roles")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
@@ -433,7 +445,7 @@ function OptionRow({
                 >
                   <span className="size-2 rounded-full" style={{ background: r.color ? cssColor(r.color) : "var(--muted-foreground)" }} />
                   <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                  {!ok && <span className="text-[0.65rem] text-muted-foreground">{harmless(r) ? "above you" : "moderates"}</span>}
+                  {!ok && <span className="text-[0.65rem] text-muted-foreground">{harmless(r) ? t("serversettings.onboarding.aboveYou") : t("serversettings.onboarding.moderates")}</span>}
                 </DropdownMenuCheckboxItem>
               );
             })}
@@ -442,7 +454,7 @@ function OptionRow({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg border-dashed text-xs">
-              <HashIcon /> Channels
+              <HashIcon /> {t("serversettings.nav.channels")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
@@ -459,10 +471,11 @@ function OptionRow({
 }
 
 function Chip({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
+  const { t } = useI18n();
   return (
     <motion.span layout initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={SPRING} className="flex h-7 items-center gap-1 rounded-lg bg-muted pr-0.5 pl-2 text-xs font-bold">
       {children}
-      <button type="button" aria-label="Remove" onClick={onRemove} className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-background hover:text-foreground">
+      <button type="button" aria-label={t("serversettings.channelPermissions.remove")} onClick={onRemove} className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-background hover:text-foreground">
         <XIcon className="size-3" />
       </button>
     </motion.span>
@@ -470,13 +483,14 @@ function Chip({ children, onRemove }: { children: React.ReactNode; onRemove: () 
 }
 
 function ChannelPick({ channels, value, onChange }: { channels: Channel[]; value: string; onChange: (id: string) => void }) {
+  const { t } = useI18n();
   const channel = channels.find((c) => c.id === value);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" className="group flex h-10 items-center gap-1.5 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60">
           <HashIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate font-bold">{channel?.name ?? "Pick a channel"}</span>
+          <span className="flex-1 truncate font-bold">{channel?.name ?? t("serversettings.shared.pickChannel")}</span>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
         </button>
       </DropdownMenuTrigger>

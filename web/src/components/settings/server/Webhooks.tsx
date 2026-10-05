@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ago, displayName, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +43,7 @@ const asUser = (w: Pick<Webhook, "id" | "name" | "avatarUrl">) => ({ id: w.id, d
  * made for Discord webhooks) post messages to, each into one channel.
  */
 export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const channels = useMemo(
     () => (inst?.channels[serverId] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT),
@@ -71,7 +72,7 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
 
   async function add() {
     const channel = channels[0];
-    if (!channel) return toast("Make a text channel first: webhooks post into one.");
+    if (!channel) return toast(t("serversettings.webhooks.needChannel"));
     setCreating(true);
     const name = NAMES[(webhooks?.length ?? 0) % NAMES.length]!;
     try {
@@ -101,13 +102,11 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
             <WebhookIcon className="size-6" />
           </motion.span>
           <div className="min-w-0 flex-1 basis-60">
-            <p className="font-extrabold">Let other apps post here</p>
-            <p className="text-sm text-muted-foreground">
-              Each webhook is an address that posts into one channel: build results, feeds, alerts. Anything that posts to Discord webhooks works too.
-            </p>
+            <p className="font-extrabold">{t("serversettings.webhooks.title")}</p>
+            <p className="text-sm text-muted-foreground">{t("serversettings.webhooks.intro")}</p>
           </div>
           <Button type="button" className="btn rounded-xl font-bold" disabled={creating || !webhooks} onClick={() => void add()}>
-            {creating ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} New webhook
+            {creating ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} {t("serversettings.webhooks.new")}
           </Button>
         </div>
       </div>
@@ -123,8 +122,8 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
           <motion.span animate={{ y: [0, -6, 0], rotate: [0, 6, -6, 0] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8 }} className="text-4xl">
             🪝
           </motion.span>
-          <p className="font-bold">No webhooks yet</p>
-          <p className="text-sm text-muted-foreground">Make one, copy its address, and paste it into the app that should post.</p>
+          <p className="font-bold">{t("serversettings.webhooks.none")}</p>
+          <p className="text-sm text-muted-foreground">{t("serversettings.webhooks.noneHint")}</p>
         </motion.div>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -150,7 +149,7 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
       <div className="rounded-2xl border">
         <button type="button" onClick={() => setHowTo((h) => !h)} className="flex w-full items-center gap-2 p-3 text-left text-sm font-bold">
           <TerminalIcon className="size-4 text-primary" />
-          <span className="flex-1">How apps post</span>
+          <span className="flex-1">{t("serversettings.webhooks.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
         <AnimatePresence initial={false}>
@@ -164,13 +163,22 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
             >
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
-                  Send a JSON <b>POST</b> to the address. <code>content</code> is Markdown; <code>username</code> and <code>avatar_url</code> change who it says
-                  it's from for that message; <code>embeds</code> work as on Discord. Add <code>?wait=true</code> to get the message back.
+                  <T
+                    k="serversettings.webhooks.howToPost"
+                    values={{
+                      post: <b>POST</b>,
+                      content: <code>content</code>,
+                      username: <code>username</code>,
+                      avatarUrl: <code>avatar_url</code>,
+                      embeds: <code>embeds</code>,
+                      wait: <code>?wait=true</code>,
+                    }}
+                  />
                 </p>
                 <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs leading-relaxed text-foreground">
                   {`curl -X POST '${exampleUrl}' \\\n  -H 'content-type: application/json' \\\n  -d '{"content": "Build **passed** ✨"}'`}
                 </pre>
-                <p>Each webhook posts at most 30 messages a minute, and never pings @everyone, @here or roles.</p>
+                <p>{t("serversettings.webhooks.limits", { count: 30 })}</p>
               </div>
             </motion.div>
           )}
@@ -224,6 +232,7 @@ function WebhookCard({
   onDelete: () => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const [name, setName] = useState(w.name);
   const [busy, setBusy] = useState<null | "save" | "test" | "reset">(null);
   const [confirm, setConfirm] = useState<null | "reset" | "delete">(null);
@@ -263,14 +272,14 @@ function WebhookCard({
         setCopied(true);
         setTimeout(() => setCopied(false), 1400);
       },
-      () => toast("Couldn't copy the address"),
+      () => toast(t("serversettings.webhooks.copyFailed")),
     );
   }
 
   async function test() {
     setBusy("test");
     try {
-      await run(testWebhook(url, `👋 Hello from **${w.name}**! This webhook works.`));
+      await run(testWebhook(url, `👋 ${t("serversettings.webhooks.testMessage", { name: `**${w.name}**` })}`));
       setSent(true);
       setTimeout(() => setSent(false), 1600);
     } catch (err) {
@@ -284,7 +293,7 @@ function WebhookCard({
     setBusy("reset");
     try {
       onChange(await run(resetWebhookToken(instanceKey, w.serverId, w.id)));
-      toast("New address made. The old one stopped working.");
+      toast(t("serversettings.webhooks.reset"));
     } catch (err) {
       toast((err as FuwaError).message);
     }
@@ -324,8 +333,15 @@ function WebhookCard({
           <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
             {channel?.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon className="size-3" /> : <HashIcon className="size-3" />}
             <span className="truncate">
-              {channel?.name ?? "a deleted channel"} · <Count value={messages} /> {messages === 1 ? "message" : "messages"}
-              {w.lastUsedAt && ` · last ${ago(lang, toDate(w.lastUsedAt))}`}
+              <T
+                k={w.lastUsedAt ? "serversettings.webhooks.lineUsed" : "serversettings.webhooks.line"}
+                values={{
+                  channel: channel?.name ?? t("serversettings.invites.deletedChannel"),
+                  count: <Count value={messages} />,
+                  when: w.lastUsedAt ? ago(lang, toDate(w.lastUsedAt)) : "",
+                }}
+                count={messages}
+              />
             </span>
           </span>
         </span>
@@ -349,7 +365,7 @@ function WebhookCard({
                 />
                 <div className="flex min-w-0 flex-1 basis-56 flex-col gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-xs font-bold text-muted-foreground uppercase">Name</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.overview.name")}</span>
                     <motion.span animate={shake}>
                       <Input
                         value={name}
@@ -365,7 +381,7 @@ function WebhookCard({
                     </motion.span>
                   </label>
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs font-bold text-muted-foreground uppercase">Posts in</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.webhooks.postsIn")}</span>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -377,7 +393,7 @@ function WebhookCard({
                           ) : (
                             <HashIcon className="size-4 text-muted-foreground" />
                           )}
-                          <span className="flex-1 truncate font-bold">{channel?.name ?? "Pick a channel"}</span>
+                          <span className="flex-1 truncate font-bold">{channel?.name ?? t("serversettings.shared.pickChannel")}</span>
                           <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
                         </button>
                       </DropdownMenuTrigger>
@@ -395,7 +411,7 @@ function WebhookCard({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-xs font-bold text-muted-foreground uppercase">Address</span>
+                <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.webhooks.address")}</span>
                 <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 pl-3">
                   <AnimatePresence mode="wait" initial={false}>
                     <motion.code
@@ -409,7 +425,7 @@ function WebhookCard({
                       {shown ? url : masked}
                     </motion.code>
                   </AnimatePresence>
-                  <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg" aria-label={shown ? "Hide the address" : "Show the address"} onClick={() => setShown((s) => !s)}>
+                  <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg" aria-label={shown ? t("serversettings.webhooks.hide") : t("serversettings.webhooks.show")} onClick={() => setShown((s) => !s)}>
                     {shown ? <EyeOffIcon /> : <EyeIcon />}
                   </Button>
                   <Button type="button" size="sm" className="btn h-8 shrink-0 rounded-lg px-3 font-bold" onClick={copyUrl}>
@@ -422,12 +438,12 @@ function WebhookCard({
                         transition={SPRING}
                         className="flex items-center gap-1.5"
                       >
-                        {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? "Copied" : "Copy"}
+                        {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("serversettings.webhooks.copied") : t("serversettings.webhooks.copy")}
                       </motion.span>
                     </AnimatePresence>
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">Anyone with this address can post here, so share it only with the app that needs it.</p>
+                <p className="text-xs text-muted-foreground">{t("serversettings.webhooks.secret")}</p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -442,14 +458,14 @@ function WebhookCard({
                       className="flex items-center gap-1.5"
                     >
                       {sent ? <CheckIcon className="text-emerald-500" strokeWidth={3} /> : busy === "test" ? <LoaderCircleIcon className="animate-spin" /> : <SendIcon />}
-                      {sent ? "Posted" : "Send a test"}
+                      {sent ? t("serversettings.webhooks.posted") : t("serversettings.webhooks.test")}
                     </motion.span>
                   </AnimatePresence>
                 </Button>
                 <AnimatePresence mode="popLayout" initial={false}>
                   {confirm ? (
                     <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
-                      <span className="px-1 text-xs font-bold">{confirm === "reset" ? "The old address stops working." : "Its messages stay."}</span>
+                      <span className="px-1 text-xs font-bold">{confirm === "reset" ? t("serversettings.webhooks.resetAsk") : t("serversettings.webhooks.deleteAsk")}</span>
                       <Button
                         type="button"
                         size="sm"
@@ -457,26 +473,28 @@ function WebhookCard({
                         className="h-8 rounded-full px-3 text-xs font-bold"
                         onClick={() => void (confirm === "reset" ? reset() : remove())}
                       >
-                        {confirm === "reset" ? "New address" : "Delete"}
+                        {confirm === "reset" ? t("serversettings.webhooks.newAddress") : t("serversettings.shared.delete")}
                       </Button>
-                      <Button type="button" size="icon" variant="ghost" aria-label="Never mind" className="size-8 rounded-full" onClick={() => setConfirm(null)}>
+                      <Button type="button" size="icon" variant="ghost" aria-label={t("serversettings.shared.neverMind")} className="size-8 rounded-full" onClick={() => setConfirm(null)}>
                         <XIcon />
                       </Button>
                     </motion.span>
                   ) : (
                     <motion.span key="actions" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={SPRING} className="flex gap-2">
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => setConfirm("reset")}>
-                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> New address
+                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("serversettings.webhooks.newAddress")}
                       </Button>
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}>
-                        <Trash2Icon /> Delete
+                        <Trash2Icon /> {t("serversettings.shared.delete")}
                       </Button>
                     </motion.span>
                   )}
                 </AnimatePresence>
                 <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
                   <UserAvatar user={creator} className="size-4" />
-                  Made by {creator ? displayName(creator) : "someone"} {ago(lang, toDate(w.createdAt))}
+                  {creator
+                    ? t("serversettings.webhooks.madeBy", { name: displayName(creator), when: ago(lang, toDate(w.createdAt)) })
+                    : t("serversettings.webhooks.madeBySomeone", { when: ago(lang, toDate(w.createdAt)) })}
                 </span>
               </div>
             </div>

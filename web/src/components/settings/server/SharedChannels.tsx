@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { displayName, formatDay, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { has } from "@/lib/permissions";
@@ -75,13 +76,13 @@ import { cn } from "@/lib/utils";
  * people kept out. `ChannelShare` is the same for one channel, in its settings.
  */
 
-/** What the home can let a guest server's people do; seeing the channel comes with being shown it. */
-const SHAREABLE = [
-  { permission: Permission.SEND_MESSAGES, label: "Send messages", icon: MessageSquareIcon },
-  { permission: Permission.EMBED_LINKS, label: "Embed links", icon: LinkIcon },
-  { permission: Permission.ATTACH_FILES, label: "Attach files", icon: ImageIcon },
-  { permission: Permission.CREATE_POLLS, label: "Create polls", icon: BarChart3Icon },
-] as const;
+/** What the home can let a guest server's people do; seeing the channel comes with being shown it. Labels are the permissions' catalog keys. */
+const SHAREABLE: readonly { permission: Permission; label: Key; icon: typeof EyeIcon }[] = [
+  { permission: Permission.SEND_MESSAGES, label: "serversettings.permission.sendMessages", icon: MessageSquareIcon },
+  { permission: Permission.EMBED_LINKS, label: "serversettings.permission.embedLinks", icon: LinkIcon },
+  { permission: Permission.ATTACH_FILES, label: "serversettings.permission.attachFiles", icon: ImageIcon },
+  { permission: Permission.CREATE_POLLS, label: "serversettings.permission.createPolls", icon: BarChart3Icon },
+];
 
 const waiting = (c: SharedConnection) => c.state === SharedConnectionState.WAITING;
 const NO_CHANNELS: Channel[] = [];
@@ -106,6 +107,7 @@ const useFederationOn = (instanceKey: string) => useFuwa((s) => !!s.instances[in
 
 /** The server settings page. */
 export function SharedChannels({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const { t } = useI18n();
   const { list, error } = useSharedList(instanceKey, serverId);
   const on = useSharingOn(instanceKey);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? NO_CHANNELS);
@@ -123,10 +125,7 @@ export function SharedChannels({ instanceKey, serverId }: { instanceKey: string;
       {on ? (
         <AddChannel instanceKey={instanceKey} serverId={serverId} channels={channels} />
       ) : (
-        <p className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
-          Sharing channels is turned off on this instance, so nothing new can be shared. Channels already shared keep working until
-          either server ends them.
-        </p>
+        <p className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">{t("serversettings.sharedChannels.off")}</p>
       )}
       {error ? (
         <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>
@@ -138,17 +137,17 @@ export function SharedChannels({ instanceKey, serverId }: { instanceKey: string;
         </div>
       ) : (
         <LayoutGroup id={`shared-${serverId}`}>
-          <Section title="Waiting" count={requests.length} hidden={!requests.length}>
+          <Section title={t("serversettings.sharedChannels.waiting")} count={requests.length} hidden={!requests.length}>
             {requests.map((c, n) => (
               <ConnectionRow key={c.id} index={n} instanceKey={instanceKey} serverId={serverId} connection={c} here={nameOf(c.channelId)} />
             ))}
           </Section>
           <Section
-            title="Shared channels"
+            title={t("serversettings.nav.shared")}
             count={active.length}
             empty={
-              <Empty icon={<SharedGlyph className="size-6" />} title="Nothing shared yet">
-                Share one of your channels from its settings (Share tab), or add another server's channel with the code its admins give you.
+              <Empty icon={<SharedGlyph className="size-6" />} title={t("serversettings.sharedChannels.nothingYet")}>
+                {t("serversettings.sharedChannels.nothingYetHint")}
               </Empty>
             }
           >
@@ -156,12 +155,12 @@ export function SharedChannels({ instanceKey, serverId }: { instanceKey: string;
               <ConnectionRow key={c.id} index={n} instanceKey={instanceKey} serverId={serverId} connection={c} here={nameOf(c.channelId)} />
             ))}
           </Section>
-          <Section title="Share codes" count={codes.length} hidden={!codes.length}>
+          <Section title={t("serversettings.sharedChannels.codes")} count={codes.length} hidden={!codes.length}>
             {codes.map((code, n) => (
               <CodeRow key={code.code} index={n} instanceKey={instanceKey} serverId={serverId} code={code} now={now} />
             ))}
           </Section>
-          <Section title="People kept out" count={list.blocks.length} hidden={!list.blocks.length}>
+          <Section title={t("serversettings.sharedChannels.keptOut")} count={list.blocks.length} hidden={!list.blocks.length}>
             {list.blocks.map((b, n) => (
               <BlockRow key={`${b.channelId}/${b.user?.id}`} index={n} instanceKey={instanceKey} serverId={serverId} block={b} channelName={nameOf(b.channelId)} canKick={canKick} />
             ))}
@@ -228,6 +227,7 @@ const slug = (name: string) => name.toLowerCase().replace(/\s+/g, "-").replace(/
 
 /** Paste a code, see where it leads, pick a name and a place, and ask. */
 function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; serverId: string; channels: Channel[] }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const code = findShareCode(text);
   const [preview, setPreview] = useState<PreviewShareResponse | null>(null);
@@ -240,7 +240,7 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
 
   async function lookUp() {
     if (!code) {
-      look.setError("that doesn't look like a share code");
+      look.setError(t("serversettings.sharedChannels.notCode"));
       nudge();
       return;
     }
@@ -255,13 +255,13 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
     const chosen = slug(name);
     const done = await ask.go(instanceKey, serverId, code, chosen === preview.channelName ? "" : chosen, parentId);
     if (!done) return nudge();
-    toast(`Asked ${preview.homeServer?.name ?? "the other server"}. #${chosen || preview.channelName} shows up here once they approve.`);
+    toast(t("serversettings.sharedChannels.asked", { server: preview.homeServer?.name ?? t("serversettings.sharedChannels.theOtherServer"), channel: chosen || preview.channelName }));
     setText("");
     setPreview(null);
     setParentId("");
   }
 
-  const parentName = categories.find((c) => c.id === parentId)?.name ?? "No category";
+  const parentName = categories.find((c) => c.id === parentId)?.name ?? t("serversettings.channels.noCategory");
   return (
     <motion.section layout="position" transition={SPRING} className="flex flex-col gap-3 rounded-3xl border bg-background/40 p-4 sm:p-5">
       <div className="flex items-start gap-3">
@@ -269,8 +269,8 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
           <SharedGlyph className="size-5" />
         </span>
         <div className="min-w-0">
-          <h3 className="font-extrabold">Add a channel from another server</h3>
-          <p className="text-sm text-muted-foreground">Paste the share code its admins gave you. You'll see where it leads before anything changes.</p>
+          <h3 className="font-extrabold">{t("serversettings.sharedChannels.add")}</h3>
+          <p className="text-sm text-muted-foreground">{t("serversettings.sharedChannels.addHint")}</p>
         </div>
       </div>
       <motion.form
@@ -284,8 +284,8 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
         <div className="relative min-w-0 flex-1">
           <KeyRoundIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="Share code"
-            placeholder="Paste a share code"
+            aria-label={t("serversettings.sharedChannels.code")}
+            placeholder={t("serversettings.sharedChannels.paste")}
             value={text}
             spellCheck={false}
             autoComplete="off"
@@ -300,7 +300,7 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
           />
         </div>
         <Button type="submit" disabled={look.pending || !text.trim()} className="btn h-11 rounded-xl font-bold">
-          {look.pending ? <LoaderCircleIcon className="animate-spin" /> : <ScanEyeIcon />} Preview
+          {look.pending ? <LoaderCircleIcon className="animate-spin" /> : <ScanEyeIcon />} {t("settings.controls.preview")}
         </Button>
       </motion.form>
       <AnimatePresence initial={false}>
@@ -330,14 +330,14 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
             <PreviewCard preview={preview} instanceKey={instanceKey} />
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-extrabold">Name here</span>
+                <span className="text-sm font-extrabold">{t("serversettings.sharedChannels.nameHere")}</span>
                 <span className="relative">
                   <HashIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input value={slug(name)} maxLength={100} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl pl-9" />
                 </span>
               </label>
               <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-extrabold">Category</span>
+                <span className="text-sm font-extrabold">{t("serversettings.channels.category")}</span>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -350,7 +350,7 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64">
                     <DropdownMenuRadioGroup value={parentId} onValueChange={setParentId}>
-                      <DropdownMenuRadioItem value="">No category</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="">{t("serversettings.channels.noCategory")}</DropdownMenuRadioItem>
                       {categories.map((c) => (
                         <DropdownMenuRadioItem key={c.id} value={c.id}>
                           {c.name}
@@ -363,13 +363,13 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
             </div>
             {ask.error && <p className="text-sm text-destructive first-letter:uppercase">{ask.error}</p>}
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <p className="mr-auto text-xs text-muted-foreground">Their admins approve it before it shows up here.</p>
+              <p className="mr-auto text-xs text-muted-foreground">{t("serversettings.sharedChannels.approveNote")}</p>
               <Button type="button" variant="ghost" onClick={() => setPreview(null)} className="rounded-xl">
-                Not now
+                {t("serversettings.sharedChannels.notNow")}
               </Button>
               <Button type="button" disabled={ask.pending || !slug(name)} onClick={() => void connect()} className="btn group rounded-xl font-bold">
                 {ask.pending ? <LoaderCircleIcon className="animate-spin" /> : <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />}
-                Ask to connect
+                {t("serversettings.sharedChannels.askToConnect")}
               </Button>
             </div>
           </motion.div>
@@ -383,6 +383,8 @@ const stagger = (n: number) => ({ initial: { opacity: 0, y: 8 }, animate: { opac
 
 /** Where a code leads: whose channel it is, where what's said is kept, and what your people may do there. */
 function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; instanceKey: string }) {
+  const lang = useI18n();
+  const { t } = lang;
   const home = preview.homeServer;
   const regions = useInstance(instanceKey)?.node?.regions;
   const now = useNow(60_000);
@@ -394,7 +396,7 @@ function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; 
           {home && <ServerIcon server={home} className="size-12 rounded-2xl" />}
         </motion.span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold text-muted-foreground">From {home?.name ?? "another server"}</p>
+          <p className="text-xs font-bold text-muted-foreground">{t("serversettings.sharedChannels.from", { server: home?.name ?? t("serversettings.sharedChannels.anotherServer") })}</p>
           <p className="flex items-center gap-1 truncate text-lg font-extrabold">
             <HashIcon className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{preview.channelName}</span>
@@ -402,7 +404,7 @@ function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; 
         </div>
         {left > 0 && (
           <span className="hidden shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:flex">
-            <TimerIcon className="size-3" /> Code works for {codeLeft(left)}
+            <TimerIcon className="size-3" /> {t("serversettings.sharedChannels.codeWorksFor", { time: codeLeft(lang, left) })}
           </span>
         )}
       </div>
@@ -414,44 +416,44 @@ function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; 
         )}
         {preview.instance && (
           <motion.div {...stagger(0.5)}>
-            <InstanceLine instance={preview.instance} fingerprint={preview.fingerprint} note="Before asking, check its key fingerprint with their admins somewhere you trust:" />
+            <InstanceLine instance={preview.instance} fingerprint={preview.fingerprint} note={t("serversettings.sharedChannels.checkBeforeAsking")} />
           </motion.div>
         )}
         <motion.p {...stagger(1)} className="flex items-start gap-2">
           <DatabaseIcon className="mt-0.5 size-4 shrink-0 text-primary" />
           <span>
-            Messages are stored only on <b>{home?.name ?? "the other server"}</b>
-            {hasRegions(regions) && !preview.instance && (
-              <>
-                , in <b>{regionName(regions, preview.region)}</b>
-              </>
-            )}
-            . Your people's messages there are kept by them too, even if you disconnect later.
+            <T
+              k={hasRegions(regions) && !preview.instance ? "serversettings.sharedChannels.storedOnIn" : "serversettings.sharedChannels.storedOn"}
+              values={{
+                server: <b>{home?.name ?? t("serversettings.sharedChannels.theOtherServer")}</b>,
+                region: <b>{hasRegions(regions) ? regionName(regions, preview.region) : ""}</b>,
+              }}
+            />
           </span>
         </motion.p>
         {preview.checkedBy.length > 0 && (
           <motion.p {...stagger(2)} className="flex items-start gap-2">
             <EyeIcon className="mt-0.5 size-4 shrink-0 text-primary" />
             <span>
-              Their AutoMod also sends what's written there to <b>{preview.checkedBy.join(", ")}</b>.
+              <T k="serversettings.sharedChannels.theirAutoModAlso" values={{ providers: <b>{preview.checkedBy.join(", ")}</b> }} />
             </span>
           </motion.p>
         )}
         {preview.guestCount > 0 && (
           <motion.p {...stagger(3)} className="flex items-start gap-2 text-muted-foreground">
             <SharedGlyph className="mt-0.5 size-4 shrink-0" />
-            Already shown in {preview.guestCount} other {preview.guestCount === 1 ? "server" : "servers"}.
+            {t("serversettings.sharedChannels.alreadyShown", { count: preview.guestCount })}
           </motion.p>
         )}
         <motion.div {...stagger(4)} className="flex flex-col gap-1.5">
-          <p className="font-bold">What your people can do there</p>
+          <p className="font-bold">{t("serversettings.sharedChannels.whatTheyCanDo")}</p>
           <ul className="flex flex-wrap gap-1.5">
-            <Capability on label="Read" icon={EyeIcon} index={0} />
+            <Capability on label={t("serversettings.sharedChannels.read")} icon={EyeIcon} index={0} />
             {SHAREABLE.map((s, n) => (
-              <Capability key={s.permission} on={preview.allowed.includes(s.permission)} label={s.label} icon={s.icon} index={n + 1} />
+              <Capability key={s.permission} on={preview.allowed.includes(s.permission)} label={t(s.label)} icon={s.icon} index={n + 1} />
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">You decide which of your people see it with roles here. Pings to @everyone or roles never reach the other server.</p>
+          <p className="text-xs text-muted-foreground">{t("serversettings.sharedChannels.rolesNote")}</p>
         </motion.div>
       </div>
     </div>
@@ -464,7 +466,7 @@ function InstanceLine({ instance, fingerprint, note }: { instance: string; finge
     <p className="flex items-start gap-2 text-sm">
       <GlobeIcon className="mt-0.5 size-4 shrink-0 text-primary" />
       <span className="min-w-0">
-        On another instance, <b className="text-foreground">{instance}</b>. <span className="text-muted-foreground">{note}</span>
+        <T k="serversettings.sharedChannels.otherInstance" values={{ instance: <b className="text-foreground">{instance}</b> }} /> <span className="text-muted-foreground">{note}</span>
         <code className="mt-1 block font-mono text-xs tracking-wider break-all text-foreground">{fingerprint}</code>
       </span>
     </p>
@@ -497,6 +499,7 @@ const rowMotion = (index: number) => ({
 
 /** Waiting or connected: a chip that swaps when the other side answers. */
 export function StateChip({ connection }: { connection: SharedConnection }) {
+  const { t } = useI18n();
   const isWaiting = waiting(connection);
   return (
     <motion.span
@@ -519,7 +522,7 @@ export function StateChip({ connection }: { connection: SharedConnection }) {
           </motion.span>
         )}
       </AnimatePresence>
-      <SwapText>{isWaiting ? "Waiting" : "Connected"}</SwapText>
+      <SwapText>{isWaiting ? t("serversettings.sharedChannels.waiting") : t("serversettings.sharedChannels.connected")}</SwapText>
     </motion.span>
   );
 }
@@ -528,40 +531,42 @@ type Ask = "disconnect" | "turn-down" | "cancel";
 
 /** What a connection is, in a line, from this server's side. */
 function ConnectionLine({ connection: c, homeName, here }: { connection: SharedConnection; homeName: string; here: string | undefined }) {
-  if (c.home) return waiting(c) ? <>wants to show <b>#{homeName}</b> in their server</> : <>sees <b>#{homeName}</b></>;
-  if (waiting(c)) return <>Waiting for them to approve <b>#{homeName}</b></>;
-  return (
-    <>
-      <b>#{homeName}</b>, here as <b>#{here ?? homeName}</b>
-    </>
-  );
+  const channel = <b>#{homeName}</b>;
+  if (c.home) return <T k={waiting(c) ? "serversettings.sharedChannels.wantsToShow" : "serversettings.sharedChannels.sees"} values={{ channel }} />;
+  if (waiting(c)) return <T k="serversettings.sharedChannels.waitingForApproval" values={{ channel }} />;
+  return <T k="serversettings.sharedChannels.hereAs" values={{ channel, here: <b>#{here ?? homeName}</b> }} />;
 }
 
 /** What the confirm dialog says before ending a connection or a request. */
-function askCopy(ask: Ask, c: SharedConnection, otherName: string, homeName: string, here: string | undefined) {
+function askCopy(t: I18n["t"], ask: Ask, c: SharedConnection, otherName: string, homeName: string, here: string | undefined) {
   if (ask === "turn-down")
-    return { title: `Turn down ${otherName}?`, body: `#${homeName} won't show up in their server. They can ask again with a new code.`, action: "Turn down", done: `Turned down ${otherName}` };
+    return {
+      title: t("serversettings.sharedChannels.turnDownAsk", { server: otherName }),
+      body: t("serversettings.sharedChannels.turnDownHint", { channel: homeName }),
+      action: t("serversettings.applications.turnDown"),
+      done: t("serversettings.applications.turnedDownDone", { name: otherName }),
+    };
   if (ask === "cancel")
-    return { title: "Cancel this request?", body: `${otherName} won't see the request anymore. You can ask again with a new code.`, action: "Cancel request", done: "Request canceled" };
+    return { title: t("serversettings.sharedChannels.cancelAsk"), body: t("serversettings.sharedChannels.cancelHint", { server: otherName }), action: t("serversettings.sharedChannels.cancelRequest"), done: t("serversettings.sharedChannels.canceled") };
   return c.home
     ? {
-        title: `Stop sharing #${homeName} with ${otherName}?`,
-        body: `It goes away from ${otherName}. Everything said stays here, their people's messages included.`,
-        action: "Disconnect",
-        done: `Disconnected from ${otherName}`,
+        title: t("serversettings.sharedChannels.stopAsk", { channel: homeName, server: otherName }),
+        body: t("serversettings.sharedChannels.stopHint", { server: otherName }),
+        action: t("serversettings.sharedChannels.disconnect"),
+        done: t("serversettings.sharedChannels.disconnected", { server: otherName }),
       }
     : {
-        title: `Remove #${here ?? homeName} from this server?`,
-        body: `The channel goes away here. Everything said stays on ${otherName}, your people's messages included.`,
-        action: "Disconnect",
-        done: `Disconnected from ${otherName}`,
+        title: t("serversettings.sharedChannels.removeAsk", { channel: here ?? homeName }),
+        body: t("serversettings.sharedChannels.removeHint", { server: otherName }),
+        action: t("serversettings.sharedChannels.disconnect"),
+        done: t("serversettings.sharedChannels.disconnected", { server: otherName }),
       };
 }
 
 /** What a connection with a server on another instance says beside that instance's key. */
-function instanceNote(c: SharedConnection) {
-  if (c.home && waiting(c)) return "Before approving, check their key fingerprint with their admins somewhere you trust:";
-  return "Their key fingerprint:";
+function instanceNote(t: I18n["t"], c: SharedConnection) {
+  if (c.home && waiting(c)) return t("serversettings.sharedChannels.checkBeforeApproving");
+  return t("serversettings.sharedChannels.theirFingerprint");
 }
 
 /** One connection, from this server's side, with what you can do about it. */
@@ -579,10 +584,11 @@ export function ConnectionRow({
   here: string | undefined;
   index: number;
 }) {
-  const otherName = c.server?.name ?? "another server";
+  const { t } = useI18n();
+  const otherName = c.server?.name ?? t("serversettings.sharedChannels.anotherServer");
   const [confirm, setConfirm] = useState<Ask | null>(null);
-  const homeName = c.homeChannelName || here || "a channel";
-  const ask = confirm ? askCopy(confirm, c, otherName, homeName, here) : null;
+  const homeName = c.homeChannelName || here || t("serversettings.sharedChannels.aChannel");
+  const ask = confirm ? askCopy(t, confirm, c, otherName, homeName, here) : null;
 
   return (
     <motion.li
@@ -598,15 +604,15 @@ export function ConnectionRow({
           </span>
         </span>
         <div className="min-w-0 flex-1 basis-48">
-          <p className="truncate font-bold">{c.home ? otherName : `From ${otherName}`}</p>
+          <p className="truncate font-bold">{c.home ? otherName : t("serversettings.sharedChannels.from", { server: otherName })}</p>
           <p className="truncate text-sm text-muted-foreground">
             <ConnectionLine connection={c} homeName={homeName} here={here} />
           </p>
         </div>
         <StateChip connection={c} />
-        <ConnectionActions instanceKey={instanceKey} serverId={serverId} connection={c} onAsk={setConfirm} approved={`#${homeName} is now shared with ${otherName}`} />
+        <ConnectionActions instanceKey={instanceKey} serverId={serverId} connection={c} onAsk={setConfirm} approved={t("serversettings.sharedChannels.approved", { channel: homeName, server: otherName })} />
       </div>
-      {c.instance && <InstanceLine instance={c.instance} fingerprint={c.fingerprint} note={instanceNote(c)} />}
+      {c.instance && <InstanceLine instance={c.instance} fingerprint={c.fingerprint} note={instanceNote(t, c)} />}
       {c.checkedBy.length > 0 && (
         <motion.p
           initial={{ opacity: 0, y: 4 }}
@@ -616,8 +622,7 @@ export function ConnectionRow({
         >
           <EyeIcon className="mt-0.5 size-4 shrink-0 text-primary" />
           <span>
-            {c.home ? "Your" : "Their"} AutoMod sends what's written there to <b className="text-foreground">{c.checkedBy.join(", ")}</b>
-            {c.home ? ", their people's messages included." : ", your people's messages included."}
+            <T k={c.home ? "serversettings.sharedChannels.yourAutoMod" : "serversettings.sharedChannels.theirAutoMod"} values={{ providers: <b className="text-foreground">{c.checkedBy.join(", ")}</b> }} />
           </span>
         </motion.p>
       )}
@@ -652,18 +657,19 @@ function ConnectionActions({
   onAsk: (ask: Ask) => void;
   approved: string;
 }) {
+  const { t } = useI18n();
   const [approving, setApproving] = useState(false);
   if (c.home && waiting(c))
     return (
       <span className="flex shrink-0 items-center gap-1.5">
         <Button type="button" size="sm" variant="ghost" onClick={() => onAsk("turn-down")} className="rounded-xl">
-          Turn down
+          {t("serversettings.applications.turnDown")}
         </Button>
         <Button
           type="button"
           size="sm"
           disabled={approving}
-          title="Their people will be able to read the channel, past messages included"
+          title={t("serversettings.sharedChannels.approveTitle")}
           onClick={async () => {
             setApproving(true);
             try {
@@ -677,7 +683,7 @@ function ConnectionActions({
           }}
           className="btn rounded-xl font-bold"
         >
-          {approving ? <LoaderCircleIcon className="animate-spin" /> : <CheckIcon />} Approve
+          {approving ? <LoaderCircleIcon className="animate-spin" /> : <CheckIcon />} {t("serversettings.sharedChannels.approve")}
         </Button>
       </span>
     );
@@ -691,7 +697,7 @@ function ConnectionActions({
       className="group shrink-0 rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
     >
       {pending ? <XIcon className="transition-transform group-hover:rotate-90" /> : <UnplugIcon className="transition-transform group-hover:-rotate-12" />}
-      {pending ? "Cancel" : "Disconnect"}
+      {pending ? t("common.cancel") : t("serversettings.sharedChannels.disconnect")}
     </Button>
   );
 }
@@ -701,6 +707,7 @@ function ConnectionActions({
  * each on or off; the guest sees what they were given.
  */
 function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string; serverId: string; connection: SharedConnection }) {
+  const { t } = useI18n();
   const [saving, setSaving] = useState<Permission | null>(null);
   // Polls go to other servers once this instance takes their votes.
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
@@ -709,7 +716,7 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
     return (
       <ul className="flex flex-wrap gap-1.5 pl-[3.25rem]">
         {SHAREABLE.map((s, n) => (
-          <Capability key={s.permission} on={c.allowed.includes(s.permission)} label={s.label} icon={s.icon} index={n} />
+          <Capability key={s.permission} on={c.allowed.includes(s.permission)} label={t(s.label)} icon={s.icon} index={n} />
         ))}
       </ul>
     );
@@ -733,11 +740,11 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
             <motion.span animate={{ scale: on ? 1 : 0.9, opacity: on ? 1 : 0.5 }} transition={SPRING} className={cn("grid size-6 place-items-center rounded-md", on ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
               <s.icon className="size-3.5" />
             </motion.span>
-            <span className="min-w-0 flex-1 truncate font-bold">{s.label}</span>
+            <span className="min-w-0 flex-1 truncate font-bold">{t(s.label)}</span>
             {saving === s.permission ? (
               <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
             ) : (
-              <Switch checked={on} disabled={saving !== null} onCheckedChange={(v) => void toggle(s.permission, v)} aria-label={`${s.label} (their people)`} />
+              <Switch checked={on} disabled={saving !== null} onCheckedChange={(v) => void toggle(s.permission, v)} aria-label={t("serversettings.sharedChannels.forTheirPeople", { permission: t(s.label) })} />
             )}
           </label>
         );
@@ -747,6 +754,8 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
 }
 
 function CodeRow({ instanceKey, serverId, code, now, index }: { instanceKey: string; serverId: string; code: ShareCode; now: number; index: number }) {
+  const lang = useI18n();
+  const { t } = lang;
   const left = toDate(code.expiresAt).getTime() - now;
   const [deleting, setDeleting] = useState(false);
   return (
@@ -760,15 +769,15 @@ function CodeRow({ instanceKey, serverId, code, now, index }: { instanceKey: str
           <Private text={code.code} kind="secret" />
         </span>
       </span>
-      <span className={cn("flex items-center gap-1 text-sm tabular-nums", left < 86_400_000 ? "text-destructive" : "text-muted-foreground")} title={`Works until ${formatDay(toDate(code.expiresAt))}`}>
-        <TimerIcon className="size-3.5" /> {codeLeft(left)}
+      <span className={cn("flex items-center gap-1 text-sm tabular-nums", left < 86_400_000 ? "text-destructive" : "text-muted-foreground")} title={t("serversettings.sharedChannels.worksUntil", { date: formatDay(toDate(code.expiresAt)) })}>
+        <TimerIcon className="size-3.5" /> {codeLeft(lang, left)}
       </span>
       <span className="ml-auto flex items-center gap-1">
-        <CopyButton text={code.code} label="Copy code" />
+        <CopyButton text={code.code} label={t("serversettings.sharedChannels.copyCode")} />
         <button
           type="button"
-          aria-label="Delete code"
-          title="Delete code"
+          aria-label={t("serversettings.sharedChannels.deleteCode")}
+          title={t("serversettings.sharedChannels.deleteCode")}
           disabled={deleting}
           onClick={async () => {
             setDeleting(true);
@@ -801,6 +810,7 @@ function BlockRow({
   canKick: boolean;
   index: number;
 }) {
+  const { t } = useI18n();
   const [lifting, setLifting] = useState(false);
   const name = displayName(block.user);
   return (
@@ -812,7 +822,7 @@ function BlockRow({
           {block.server && <ServerTag server={block.server} />}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          Kept out of #{channelName ?? "a channel"} · {formatDay(toDate(block.createdAt))}
+          {t("serversettings.sharedChannels.keptOutOf", { channel: channelName ?? t("serversettings.sharedChannels.aChannel"), date: formatDay(toDate(block.createdAt)) })}
         </p>
       </div>
       {canKick && (
@@ -825,7 +835,7 @@ function BlockRow({
             setLifting(true);
             try {
               await run(blockFromChannel(instanceKey, serverId, block.channelId, block.user?.id ?? "", false));
-              toast(`${name} can see #${channelName ?? "the channel"} again`);
+              toast(t("serversettings.sharedChannels.letBackInDone", { name, channel: channelName ?? t("serversettings.sharedChannels.theChannel") }));
             } catch (err) {
               toast((err as FuwaError).message);
               setLifting(false);
@@ -834,7 +844,7 @@ function BlockRow({
           className="group/back shrink-0 rounded-xl"
         >
           {lifting ? <LoaderCircleIcon className="animate-spin" /> : <UndoIcon className="transition-transform duration-300 group-hover/back:-rotate-45" />}
-          Let back in
+          {t("serversettings.sharedChannels.letBackIn")}
         </Button>
       )}
     </motion.li>
@@ -842,6 +852,7 @@ function BlockRow({
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -854,7 +865,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 1400);
         } catch {
-          toast("Couldn't copy it");
+          toast(t("serversettings.sharedChannels.copyFailed"));
         }
       }}
       className={cn("grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90", copied && "text-primary hover:text-primary")}
@@ -884,6 +895,7 @@ export function ConfirmDialog({
   action: string;
   onConfirm: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -899,7 +911,7 @@ export function ConfirmDialog({
         {error && <p className="mb-3 text-sm text-destructive first-letter:uppercase">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} className="rounded-xl">
-            Keep it
+            {t("serversettings.shared.keepIt")}
           </Button>
           <Button
             type="button"
@@ -948,12 +960,12 @@ type ShareProps = { instanceKey: string; serverId: string; channel: Channel; gue
 
 /** A channel shown here from another server: where it comes from, and the way to let it go. */
 function ShownChannelShare({ instanceKey, serverId, channel, guests }: ShareProps) {
+  const { t } = useI18n();
   const home = channel.shared?.homeServer;
   return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          This channel comes from <b className="text-foreground">{home?.name ?? "another server"}</b>, where its messages are kept. You decide which of your
-          people see it with this channel's permissions; they decide what your people may do there.
+          <T k="serversettings.sharedChannels.comesFrom" values={{ server: <b className="text-foreground">{home?.name ?? t("serversettings.sharedChannels.anotherServer")}</b> }} />
         </p>
         <ul className="flex flex-col gap-2">
           <AnimatePresence initial={false} mode="popLayout">
@@ -968,6 +980,8 @@ function ShownChannelShare({ instanceKey, serverId, channel, guests }: ShareProp
 
 /** A code just made, to copy. */
 function FreshCode({ code, now }: { code: ShareCode; now: number }) {
+  const lang = useI18n();
+  const { t } = lang;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.96 }}
@@ -980,11 +994,11 @@ function FreshCode({ code, now }: { code: ShareCode; now: number }) {
         <code className="min-w-0 flex-1 font-mono text-sm font-bold break-all">
           <Private text={code.code} kind="secret" className="text-clip whitespace-normal" />
         </code>
-        <CopyButton text={code.code} label="Copy code" />
+        <CopyButton text={code.code} label={t("serversettings.sharedChannels.copyCode")} />
       </div>
       <p className="flex items-center gap-1 text-xs text-muted-foreground">
-        <TimerIcon className="size-3" /> Works for {codeLeft(toDate(code.expiresAt).getTime() - now)}, for one server
-        {shareCodeInstance(code.code) ? ", here or on another instance." : " on this instance."}
+        <TimerIcon className="size-3" />{" "}
+        {t(shareCodeInstance(code.code) ? "serversettings.sharedChannels.worksForAnywhere" : "serversettings.sharedChannels.worksForHere", { time: codeLeft(lang, toDate(code.expiresAt).getTime() - now) })}
       </p>
     </motion.div>
   );
@@ -992,18 +1006,19 @@ function FreshCode({ code, now }: { code: ShareCode; now: number }) {
 
 /** The button that makes a code, and, when this instance shares with others, whether it's for a server on another one. */
 function MakeCode({ pending, federation, onMake }: { pending: boolean; federation: boolean; onMake: (elsewhere: boolean) => void }) {
+  const { t } = useI18n();
   const [elsewhere, setElsewhere] = useState(false);
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-wrap items-center gap-x-4 gap-y-3">
       <Button type="button" disabled={pending} onClick={() => onMake(federation && elsewhere)} className="btn rounded-xl font-bold">
-        {pending ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} Create share code
+        {pending ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} {t("serversettings.sharedChannels.createCode")}
       </Button>
       {federation && (
         <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <Switch checked={elsewhere} onCheckedChange={setElsewhere} aria-label="For a server on another instance" />
+          <Switch checked={elsewhere} onCheckedChange={setElsewhere} aria-label={t("serversettings.sharedChannels.elsewhere")} />
           <span>
-            <span className="font-bold">For a server on another instance</span>
-            <span className="block text-xs text-muted-foreground">The code names this instance, so theirs can find it.</span>
+            <span className="font-bold">{t("serversettings.sharedChannels.elsewhere")}</span>
+            <span className="block text-xs text-muted-foreground">{t("serversettings.sharedChannels.elsewhereHint")}</span>
           </span>
         </label>
       )}
@@ -1013,6 +1028,7 @@ function MakeCode({ pending, federation, onMake }: { pending: boolean; federatio
 
 /** One of this server's channels: a code to share it, codes still out, and who it's shared with. */
 function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, codes: all }: ShareProps & { loaded: boolean; codes: ShareCode[] }) {
+  const { t } = useI18n();
   const on = useSharingOn(instanceKey);
   const federation = useFederationOn(instanceKey);
   const make = useAction(createShareCode);
@@ -1029,12 +1045,8 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
             <SharedGlyph className="size-5" />
           </span>
           <div className="min-w-0 text-sm">
-            <p className="font-extrabold">Share #{channel.name} with another server</p>
-            <p className="text-muted-foreground">
-              Give a share code to the other server's admins. They'll see this server's name, #{channel.name} and its topic, and what their people
-              may do, then ask to connect. Nothing is shared until you approve. Once you do, their people can read
-              everything said here, past messages included. Messages stay here.
-            </p>
+            <p className="font-extrabold">{t("serversettings.sharedChannels.shareTitle", { channel: channel.name })}</p>
+            <p className="text-muted-foreground">{t("serversettings.sharedChannels.shareHint", { channel: channel.name })}</p>
           </div>
         </div>
         <AnimatePresence mode="popLayout" initial={false}>
@@ -1052,7 +1064,7 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
             />
           ) : (
             <motion.p key="why" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-xs text-muted-foreground">
-              {!on ? "Sharing is turned off on this instance." : "A channel can be shared with one other server for now."}
+              {!on ? t("serversettings.sharedChannels.offShort") : t("serversettings.sharedChannels.onlyOne")}
             </motion.p>
           )}
         </AnimatePresence>
@@ -1060,7 +1072,7 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
       </div>
       {codes.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h4 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Codes still out</h4>
+          <h4 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("serversettings.sharedChannels.codesOut")}</h4>
           <ul className="flex flex-col gap-2">
             <AnimatePresence initial={false} mode="popLayout">
               {codes.map((code, n) => (
@@ -1071,12 +1083,12 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
         </div>
       )}
       <div className="flex flex-col gap-2">
-        <h4 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Shared with</h4>
+        <h4 className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("serversettings.sharedChannels.sharedWith")}</h4>
         {!loaded ? (
           <div className="shimmer h-16 rounded-2xl" />
         ) : guests.length === 0 ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ClipboardPasteIcon className="size-4" /> No other server yet. <ArrowRightIcon className="size-3.5" /> Send a code to start.
+            <ClipboardPasteIcon className="size-4" /> {t("serversettings.sharedChannels.noGuest")} <ArrowRightIcon className="size-3.5" /> {t("serversettings.sharedChannels.sendCode")}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
