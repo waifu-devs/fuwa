@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { Permission, type Channel, type Emoji, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance, useMyMember } from "@/fuwa/hooks";
+import { accountKey } from "@/fuwa/saved";
+import { WELCOMED } from "@/lib/account-keys";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
 import { StartHere, suggestedChannels } from "@/components/join/StartHere";
@@ -76,21 +78,22 @@ export function WelcomeCard({
   );
 }
 
-const SEEN = (instanceKey: string, serverId: string) => `fuwa.welcomed.${instanceKey}.${serverId}`;
+/** `account` is "<instance>|<user id>": each account is greeted on its own. */
+const SEEN = (account: string, serverId: string) => `${WELCOMED}${account}.${serverId}`;
 /** New members are people who joined in the last week. */
 const NEW_FOR = 7 * 86_400_000;
 
-function seen(instanceKey: string, serverId: string) {
+function seen(account: string, serverId: string) {
   try {
-    return localStorage.getItem(SEEN(instanceKey, serverId)) !== null;
+    return localStorage.getItem(SEEN(account, serverId)) !== null;
   } catch {
     return true;
   }
 }
 
-function markSeen(instanceKey: string, serverId: string) {
+function markSeen(account: string, serverId: string) {
   try {
-    localStorage.setItem(SEEN(instanceKey, serverId), "1");
+    localStorage.setItem(SEEN(account, serverId), "1");
   } catch {
     // Without storage it shows again next time, which is harmless.
   }
@@ -124,6 +127,7 @@ export function WelcomeGate({
   // Closed partway: it comes back next time, not straight away.
   const [dismissed, setDismissed] = useState(false);
   const channels = inst?.channels[server.id] ?? [];
+  const account = accountKey(instanceKey, inst?.me?.id ?? "");
 
   const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
   const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
@@ -133,7 +137,7 @@ export function WelcomeGate({
   if (due && !started) setStarted(true);
   const onboarding = due || started;
   // Onboarding ends with the welcome screen's channels, so it isn't shown again after.
-  const newcomer = fresh && !seen(instanceKey, server.id) && !(server.hasOnboarding && me?.onboardedAt);
+  const newcomer = fresh && !seen(account, server.id) && !(server.hasOnboarding && me?.onboardedAt);
   const wanted = !onboarding && (asked || (server.hasWelcomeScreen && newcomer));
 
   useEffect(() => {
@@ -144,7 +148,7 @@ export function WelcomeGate({
         if (cancelled) return;
         setScreen(s);
         if (!asked) {
-          markSeen(instanceKey, server.id);
+          markSeen(account, server.id);
           if (s.enabled) setGreeting(true);
         }
       },
@@ -153,7 +157,7 @@ export function WelcomeGate({
     return () => {
       cancelled = true;
     };
-  }, [wanted, asked, instanceKey, server.id]);
+  }, [wanted, asked, instanceKey, account, server.id]);
 
   function go(channel: string) {
     void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: server.id, channel } });
@@ -169,7 +173,7 @@ export function WelcomeGate({
           if (!o) {
             setStarted(false);
             setDismissed(true);
-            markSeen(instanceKey, server.id);
+            markSeen(account, server.id);
             onOpenChange(false);
           }
         }}

@@ -11,6 +11,8 @@ import { useAccess } from "@/fuwa/hooks";
 import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/chat/ComposerFiles";
 import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
+import { accountKey } from "@/fuwa/saved";
+import { draftKey as toDraftKey, getDraft, setDraft } from "@/lib/drafts";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
 import { CommandForm, CommandPicker, useCommandPicker } from "@/components/chat/Commands";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -33,7 +35,6 @@ import { onCommand } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const MAX = 4000;
-const drafts = new Map<string, string>();
 
 /** Whether a key press sends, by the Chat setting: Enter, or Ctrl+Enter (Cmd+Return on a Mac). */
 export function sendsMessage(e: KeyboardEvent<HTMLTextAreaElement>, sendWith: SendWith) {
@@ -132,9 +133,10 @@ export function Composer({
   const lang = useI18n();
   const { t } = lang;
   const channelId = channel.id;
-  // Drafts are kept per channel, and per thread apart from their channel.
-  const draftKey = thread ? `thread:${thread.id}` : channelId;
-  const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
+  // Drafts are kept per account and channel, and per thread apart from their channel.
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id ?? "");
+  const draftKey = toDraftKey(accountKey(instanceKey, meId), thread ? `thread:${thread.id}` : channelId);
+  const [text, setText] = useState(() => getDraft(draftKey));
   const [alsoToChannel, setAlsoToChannel] = useState(false);
   const [voiceProblem, setVoiceProblem] = useState<string | null>(null);
   // Only where the instance takes voice messages in channels.
@@ -214,12 +216,12 @@ export function Composer({
   useEffect(() => (typing ? onCommand(COMPOSER_INSERT, (piece) => piece && inserts.current(piece)) : undefined), [typing]);
 
   useEffect(() => {
-    setText(drafts.get(draftKey) ?? "");
+    setText(getDraft(draftKey));
     setVoiceProblem(null);
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
   }, [draftKey]);
   useEffect(() => {
-    drafts.set(draftKey, text);
+    setDraft(draftKey, text);
   }, [draftKey, text]);
 
   // Grow with the text, up to a point.
@@ -253,7 +255,7 @@ export function Composer({
     }
     const files = takeFiles(channelId);
     setText("");
-    drafts.delete(draftKey);
+    setDraft(draftKey, "");
     void plane.start({
       x: [0, 28, -18, 0],
       y: [0, -14, 8, 0],

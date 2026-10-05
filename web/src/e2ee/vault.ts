@@ -338,7 +338,19 @@ export async function loadItemsAt(keys: [string, string, number][]): Promise<(It
   return Promise.all(keys.map((key) => result(tx.objectStore("items").get(key)) as Promise<Item | undefined>));
 }
 
-/** Forgets everything kept for vaults whose key starts with `prefix`: one account, or every account on an instance. */
+/** Forgets everything kept for exactly one vault: one account on one instance, and no other account whose id starts the same. */
+export async function wipeVault(vaultKey: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["devices", "notes", "items", "sent", "backup", "unbacked"], "readwrite");
+  tx.objectStore("devices").delete(vaultKey);
+  tx.objectStore("backup").delete(vaultKey);
+  for (const store of ["notes", "items", "sent", "unbacked"] as const) {
+    tx.objectStore(store).delete(IDBKeyRange.bound([vaultKey], [vaultKey, []]));
+  }
+  await done(tx);
+}
+
+/** Forgets everything kept for vaults whose key starts with `prefix`: every account on an instance. */
 export async function wipe(prefix: string): Promise<void> {
   const db = await open();
   const tx = db.transaction(["devices", "notes", "items", "sent", "backup", "unbacked"], "readwrite");

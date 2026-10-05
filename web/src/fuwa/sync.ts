@@ -1,17 +1,37 @@
 import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
-import { ChannelType, type Event } from "@/gen/fuwa/v1/types_pb";
-import { dmEngine, startDms, stopDms, wipeDms } from "@/e2ee/engine";
-import { onLiveEvent, onRemoved } from "@/lib/notify";
-import { onPinEvent } from "./pins";
+import { ChannelType, type Event, type User } from "@/gen/fuwa/v1/types_pb";
+import { dmEngine, startDms, stopDms } from "@/e2ee/engine";
+import { loadApplied } from "@/lib/applied";
+import { adoptInstanceKeys, forgetAccount } from "./accounts";
+import { closeNotifications, onLiveEvent, onRemoved } from "@/lib/notify";
+import { clearToasts } from "@/lib/ui";
+import { forgetPins, onPinEvent } from "./pins";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
 import { followFriends } from "./friends";
 import { startPresence } from "./presence";
 import { FuwaError, call, toFuwaError } from "./errors";
-import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
+import {
+  accountKey,
+  activeAccount,
+  instanceKey,
+  isSavedKey,
+  loadSaved,
+  savedInstance,
+  updateSaved,
+  withAccount,
+  withActive,
+  withCard,
+  withInstance,
+  withoutAccount,
+  withoutInstance,
+  replacedTokens,
+  type Card,
+  type SavedAccount,
+} from "./saved";
 import { i18n } from "@/i18n/i18n";
 import {
   addServer,
@@ -60,6 +80,8 @@ type Engine = {
   url: string;
   api: Api;
   token: string | null;
+  /** The account the token is for; empty while signed out or before the instance says. */
+  userId: string;
   /** The servers the stream follows. Changing it resubscribes. */
   followed: SubscriptionRef.SubscriptionRef<readonly string[]>;
   fiber: Fiber.RuntimeFiber<void, never> | null;
@@ -73,12 +95,18 @@ export function engine(key: string): Engine {
   return e;
 }
 
-function persist() {
-  const list: SavedInstance[] = store.get().order.flatMap((key) => {
-    const e = engines.get(key);
-    return e ? [{ url: e.url, token: e.token }] : [];
-  });
-  storeSaved(list);
+/** Called before an instance's account goes away (switched, signed out or forgotten), so what it was doing stops. */
+const leaving = new Set<(key: string) => void>();
+export function onLeaveAccount(fn: (key: string) => void) {
+  leaving.add(fn);
+  return () => void leaving.delete(fn);
+}
+
+function leave(key: string) {
+  closeNotifications(key);
+  forgetPins(key);
+  clearToasts();
+  for (const fn of leaving) fn(key);
 }
 
 /** Where anonymous reports go: the first instance you're signed in to whose telemetry is on. */
@@ -91,45 +119,145 @@ export function reportTarget(): ReportTarget | null {
   return null;
 }
 
-/** Loads the saved instances and starts following them. Call once at startup. */
+/** Loads the saved instances and starts following them, and follows other tabs switching accounts. Call once at startup. */
 export function restore() {
-  for (const saved of loadSaved()) addInstance(saved.url, saved.token);
+  for (const saved of loadSaved()) start(saved.url, activeAccount(saved) ?? null);
+  window.addEventListener("storage", (e) => {
+    if (isSavedKey(e.key)) followOtherTabs();
+  });
 }
 
-/** Adds an instance (or updates its token) and (re)starts syncing it. Returns its key. */
-export function addInstance(url: string, token: string | null): string {
+/** Another tab changed the kept accounts: run the same account it did on every instance. */
+function followOtherTabs() {
+  const list = loadSaved();
+  for (const saved of list) {
+    const key = instanceKey(saved.url);
+    const account = activeAccount(saved) ?? null;
+    const e = engines.get(key);
+    if (!e || e.token !== (account?.token ?? null)) start(saved.url, account);
+  }
+  for (const key of store.get().order) {
+    if (!list.some((i) => instanceKey(i.url) === key)) stop(key);
+  }
+}
+
+/**
+ * (Re)starts an instance as `account`, or signed out: whatever the last
+ * account had loaded is dropped, so nothing of it stays on screen or in
+ * memory. Returns its key.
+ */
+function start(url: string, account: SavedAccount | null): string {
   const key = instanceKey(url);
   const existing = engines.get(key);
-  if (existing?.fiber) Effect.runFork(Fiber.interrupt(existing.fiber));
+  if (existing?.fiber) {
+    if (existing.userId !== (account?.userId ?? "")) leave(key);
+    Effect.runFork(Fiber.interrupt(existing.fiber));
+  }
   const e: Engine = existing ?? {
     url,
     api: makeApi(url, () => engines.get(key)?.token ?? null),
-    token,
+    token: null,
+    userId: "",
     followed: Effect.runSync(SubscriptionRef.make<readonly string[]>([])),
     fiber: null,
   };
-  e.token = token;
+  e.token = account?.token ?? null;
+  e.userId = account?.userId ?? "";
   engines.set(key, e);
   store.update((s) => ({
     ...s,
-    instances: { ...s.instances, [key]: emptyInstance(key, url) },
+    instances: { ...s.instances, [key]: emptyInstance(key, url, e.userId) },
     order: s.order.includes(key) ? s.order : [...s.order, key],
+    focus: s.focus?.instance === key ? null : s.focus,
   }));
-  persist();
   e.fiber = Effect.runFork(run(key, e));
   return key;
 }
 
-/** Forgets an instance: stops syncing and drops its token from this browser. */
-export function removeInstance(key: string) {
+function stop(key: string) {
   const e = engines.get(key);
-  if (e?.fiber) Effect.runFork(Fiber.interrupt(e.fiber));
+  if (e?.fiber) {
+    leave(key);
+    Effect.runFork(Fiber.interrupt(e.fiber));
+  }
   engines.delete(key);
   store.update((s) => {
     const { [key]: _, ...instances } = s.instances;
     return { ...s, instances, order: s.order.filter((k) => k !== key), focus: s.focus?.instance === key ? null : s.focus };
   });
-  persist();
+}
+
+const cardOf = (user: User): Card => ({
+  userId: user.id,
+  username: user.username,
+  displayName: user.displayName,
+  avatarUrl: user.avatarUrl,
+});
+
+/** Signed in as `user`: keeps the account beside any others on the instance, makes it the active one, and starts it. Returns the key. */
+export function addAccount(url: string, token: string, user: User | undefined): string {
+  if (!user) return addInstance(url);
+  let replaced: string[] = [];
+  const list = updateSaved((l) => {
+    const next = withAccount(l, url, token, cardOf(user));
+    replaced = replacedTokens(l, next, url);
+    return next;
+  });
+  endSessions(url, replaced);
+  return start(url, activeAccount(savedInstance(list, url)) ?? null);
+}
+
+/** Ends sessions this browser let go of for someone still signed in here, so they don't stay live on the instance. */
+function endSessions(url: string, tokens: string[]) {
+  for (const token of tokens) {
+    void makeApi(url, () => token)
+      .auth.signOut({})
+      .catch(() => {});
+  }
+}
+
+/** Lists an instance with nobody signed in (or leaves it as it is when it's already listed). Returns its key. */
+export function addInstance(url: string): string {
+  const key = instanceKey(url);
+  updateSaved((l) => withInstance(l, url));
+  return engines.has(key) ? key : start(url, null);
+}
+
+/** Connects as another account already kept on the instance. */
+export function switchAccount(key: string, userId: string) {
+  const e = engine(key);
+  if (e.userId === userId && e.token) return;
+  const list = updateSaved((l) => withActive(l, e.url, userId));
+  const account = savedInstance(list, e.url)?.accounts.find((a) => a.userId === userId);
+  if (account) start(e.url, account);
+}
+
+/** Forgets the instance's active account here and leaves the instance signed out. Returns who it was. */
+export function dropAccount(key: string): string {
+  const e = engine(key);
+  const userId = e.userId;
+  const token = e.token;
+  updateSaved((l) => {
+    const inst = savedInstance(l, e.url);
+    // A session kept from before accounts were told apart has no user id yet: go by its token.
+    const id = userId || inst?.accounts.find((a) => a.token === token)?.userId;
+    return id === undefined ? l : withoutAccount(l, e.url, id);
+  });
+  start(e.url, null);
+  return userId;
+}
+
+/** Forgets an instance: stops syncing and drops every account's token from this browser. */
+export function removeInstance(key: string) {
+  const e = engines.get(key);
+  if (e) updateSaved((l) => withoutInstance(l, e.url));
+  stop(key);
+}
+
+/** The accounts kept on an instance, as cards, for the switcher. */
+export function keptAccounts(key: string): SavedAccount[] {
+  const e = engines.get(key);
+  return e ? (savedInstance(loadSaved(), e.url)?.accounts ?? []) : [];
 }
 
 /** Starts or stops following a server after joining, creating or leaving it. */
@@ -158,6 +286,23 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
     patchInstance(key, { me: me.user ?? null, admin: me.admin });
+    if (me.user) {
+      const user = me.user;
+      const token = e.token;
+      e.userId = user.id;
+      let fromBefore = false;
+      let replaced: string[] = [];
+      updateSaved((l) => {
+        const { list, wasUnknown } = withCard(l, e.url, token, cardOf(user));
+        fromBefore = wasUnknown;
+        replaced = replacedTokens(l, list, e.url);
+        return list;
+      });
+      endSessions(e.url, replaced);
+      // What this browser kept for the instance before accounts were told apart was this account's.
+      if (fromBefore) adoptInstanceKeys(key, user.id);
+      patchInstance(key, { account: user.id, applied: loadApplied(accountKey(key, user.id)) });
+    }
     // Encrypted direct messages run alongside, for as long as this does.
     const token = e.token;
     if (me.user) {
@@ -211,9 +356,17 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.sync(() => {
         if (err.signedOut) {
           // The session expired or was revoked elsewhere, and its device with it.
+          const userId = e.userId;
+          const token = e.token;
           e.token = null;
-          persist();
-          void wipeDms(key);
+          e.userId = "";
+          updateSaved((l) => {
+            const id = userId || savedInstance(l, e.url)?.accounts.find((a) => a.token === token)?.userId;
+            return id === undefined ? l : withoutAccount(l, e.url, id);
+          });
+          closeNotifications(key);
+          forgetPins(key);
+          if (userId) void forgetAccount(key, userId);
           patchInstance(key, { connection: "signed-out", problem: i18n().t("workspace.session.ended") });
         } else {
           patchInstance(key, { connection: "offline", problem: err.message });

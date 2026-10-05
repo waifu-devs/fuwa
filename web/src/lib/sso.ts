@@ -24,6 +24,8 @@ export type PendingSso = {
   serverId?: string;
   /** For a server: join it once signed in. */
   join?: boolean;
+  /** For a server: the account that started it (the instance only lets that account finish). */
+  userId?: string;
   /** For a server out of Browse: the invite joining takes. */
   inviteCode?: string;
   /** An admin checking the instance's provider: nobody gets signed in. */
@@ -132,18 +134,18 @@ export function ssoLocked(
 
 const SIGNED_IN = "fuwa.sso.signed-in.";
 
-/** Remembers, for this tab, that you signed in for a server you haven't joined, so it offers to apply next. */
-export function rememberServerSignIn(instanceKey: string, serverId: string) {
+/** Remembers, for this tab and account ("<instance>|<user id>"), that you signed in for a server you haven't joined, so it offers to apply next. */
+export function rememberServerSignIn(account: string, serverId: string) {
   try {
-    sessionStorage.setItem(`${SIGNED_IN}${instanceKey}/${serverId}`, String(Date.now()));
+    sessionStorage.setItem(`${SIGNED_IN}${account}/${serverId}`, String(Date.now()));
   } catch {
     // The instance still knows; the button just asks to sign in again.
   }
 }
 
-export function signedInForServer(instanceKey: string, serverId: string) {
+export function signedInForServer(account: string, serverId: string) {
   try {
-    const at = Number(sessionStorage.getItem(`${SIGNED_IN}${instanceKey}/${serverId}`) ?? 0);
+    const at = Number(sessionStorage.getItem(`${SIGNED_IN}${account}/${serverId}`) ?? 0);
     return Date.now() - at < DAY;
   } catch {
     return false;

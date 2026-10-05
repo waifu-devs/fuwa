@@ -1,7 +1,7 @@
 import { Code } from "@connectrpc/connect";
 import { Effect } from "effect";
 import { dmEngine, DmError, SECURE_BROKEN, type Content } from "@/e2ee/engine";
-import { engine } from "./sync";
+import { engine, onLeaveAccount } from "./sync";
 import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
 import { cleanName, MAX_FILE_BYTES, MAX_FILES, openFile, sealFile } from "@/files/sealed";
@@ -369,6 +369,12 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
 
 /** Files this device sent or opened lately, by media id, so showing them again doesn't fetch them again. */
 const openedFiles = new Map<string, Blob>();
+
+// What an account opened stays with it: switching or signing out lets go of every opened file and voice message.
+onLeaveAccount(() => {
+  opened.clear();
+  openedFiles.clear();
+});
 const OPENED_BYTES = 64 * 1024 * 1024;
 function keepOpenedFile(mediaId: string, blob: Blob) {
   openedFiles.delete(mediaId);
