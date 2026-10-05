@@ -251,6 +251,18 @@ On "Other instances" in Instance settings (`GetFederation`,
     shard takes the bytes from it (`DirectoryService.FetchSharedFile`), and
     it takes them from the shard holding a server
     (`ShardService.SendSharedFile`, `SendSharedAttachment`).
+- **Polls** cross as on one instance (docs/shared-channels.md): the home
+  keeps them, guests make them, vote and end their own with `GuestPoll`,
+  `GuestVote` and `GuestEndPoll`, calls of their own so a home too old for
+  polls refuses them instead of dropping one. Votes from a server on another
+  instance count toward the home's `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE`
+  for that server, as its messages do, besides the voter's own instance's
+  pace. A poll from the other instance is clipped to what one here can hold,
+  and the people `PollUpdated` and "who voted" name are read like authors:
+  that instance's under its address, this one's as they are here. That
+  instance vouches for its own people, so it could vote under as many of
+  its own accounts as it has; only the pace and keeping people out bound
+  that, as for its messages.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
@@ -264,4 +276,4 @@ who talks to whom.
 
 ## Next
 
-Threads, polls and custom emoji from the other instance in shared channels.
+Threads in shared channels.

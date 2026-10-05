@@ -47,6 +47,7 @@ import {
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
@@ -220,16 +221,18 @@ export const MessageList = forwardRef<
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
+  // Polls in a channel shown from another server are voted on at its home, once this instance takes votes there.
+  const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
   const pollPlace = useMemo<PollPlaceValue>(
     () => ({
       instanceKey,
       serverId,
       channelId: channel.id,
-      canVote: !guestSide && !access.pending,
+      canVote: (!guestSide || pollsShared) && !access.pending,
       moderator: manager && !guestSide,
       emojis,
     }),
-    [instanceKey, serverId, channel.id, guestSide, access.pending, manager, emojis],
+    [instanceKey, serverId, channel.id, guestSide, pollsShared, access.pending, manager, emojis],
   );
   const look = useMemo<ServerLook>(
     () => ({

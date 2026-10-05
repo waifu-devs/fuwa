@@ -22,7 +22,7 @@ use prost::Message as _;
 use sha2::Sha256;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, respond, text, users};
+use super::{Api, Seat, respond, shared, text, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -101,6 +101,29 @@ fn emoji(value: &str) -> Result<String> {
     if token || glyph { Ok(value.to_string()) } else { Err(Error::invalid("an answer's emoji must be one emoji")) }
 }
 
+/// A poll as another instance sent it, clipped to what a poll here can
+/// hold: its question and answers no longer than this instance's own, each
+/// answer's emoji one this instance would take (else none), no negative
+/// counts, picks only of its answers, and who ended it read by `ended_by`.
+pub(super) fn arrived(mut poll: pb::Poll, ended_by: impl Fn(&str) -> Result<String>) -> Result<pb::Poll> {
+    poll.question = poll.question.chars().take(MAX_QUESTION).collect();
+    poll.answers.truncate(MAX_ANSWERS);
+    for answer in &mut poll.answers {
+        answer.text = answer.text.chars().take(MAX_ANSWER).collect();
+        answer.emoji = emoji(&answer.emoji).unwrap_or_default();
+        answer.votes = answer.votes.max(0);
+    }
+    poll.voters = poll.voters.max(0);
+    let answers = &poll.answers;
+    poll.my_answer_ids.retain(|id| answers.iter().any(|a| a.id == *id));
+    poll.my_answer_ids.sort_unstable();
+    poll.my_answer_ids.dedup();
+    if !poll.ended_by_id.is_empty() {
+        poll.ended_by_id = ended_by(&poll.ended_by_id)?;
+    }
+    Ok(poll)
+}
+
 /// The bytes a poll adds to its message, counted in the server's storage.
 pub(super) fn bytes(poll: &pb::Poll) -> i64 {
     (poll.question.len() + poll.answers.iter().map(|a| a.text.len() + a.emoji.len()).sum::<usize>()) as i64
@@ -176,10 +199,10 @@ pub(super) async fn insert(conn: &turso::Connection, message: &pb::Message) -> R
 
 /// A stored poll, its message's channel and author, the counts it has, and
 /// its voter key while it runs anonymously.
-struct Row {
-    poll: pb::Poll,
-    channel_id: String,
-    author_id: String,
+pub(super) struct Row {
+    pub(super) poll: pb::Poll,
+    pub(super) channel_id: String,
+    pub(super) author_id: String,
     tally: Tally,
     voter_key: Option<Vec<u8>>,
 }
@@ -235,7 +258,7 @@ fn assemble(Stored { channel_id, author_id, mut poll, answers, tally, voter_key,
     Ok(Row { poll, channel_id, author_id, tally, voter_key })
 }
 
-async fn load(conn: &turso::Connection, message_id: &str) -> Result<Option<Row>> {
+pub(super) async fn load(conn: &turso::Connection, message_id: &str) -> Result<Option<Row>> {
     query_one(
         conn,
         &format!("SELECT {POLL_COLUMNS} FROM polls p JOIN messages m ON m.id = p.message_id WHERE p.message_id = ?1"),
@@ -340,25 +363,12 @@ pub(super) async fn forget_thread(conn: &turso::Connection, thread_id: &str) -> 
     Ok(())
 }
 
-/// Whether polls can go in a channel: not one shared with other servers,
-/// whose people couldn't vote on them.
+/// Whether a channel is shared with other servers (it has guests), where
+/// agents' buttons and answers don't go yet.
 pub(super) async fn shared_out(conn: &turso::Connection, channel_id: &str) -> Result<bool> {
     Ok(query_one(conn, "SELECT 1 FROM channel_guests WHERE channel_id = ?1 LIMIT 1", [channel_id], |_| Ok(()))
         .await?
         .is_some())
-}
-
-/// Whether a channel has polls still running, which keeps it from being
-/// shared: the guests' people couldn't vote on them.
-pub(super) async fn running_in(conn: &turso::Connection, channel_id: &str) -> Result<bool> {
-    Ok(query_one(
-        conn,
-        "SELECT 1 FROM polls WHERE channel_id = ?1 AND ended_at IS NULL AND (ends_at IS NULL OR ends_at > ?2) LIMIT 1",
-        (channel_id, now_ms()),
-        |_| Ok(()),
-    )
-    .await?
-    .is_some())
 }
 
 /// Votes per account per minute (the instance's `poll_votes_per_minute`,
@@ -517,6 +527,141 @@ pub(crate) async fn forget_voter(conn: &turso::Connection, account_id: &str, eve
     Ok(())
 }
 
+/// Counts `voter_id`'s vote in a poll they may vote in, inside the write
+/// that keeps it: their picks replace whatever they picked before (none
+/// takes it back). The poll as they see it, with their picks.
+pub(super) async fn cast(
+    conn: &turso::Connection,
+    row: Row,
+    message_id: &str,
+    voter_id: &str,
+    answer_ids: &[u32],
+    events: &mut Vec<Payload>,
+) -> Result<pb::Poll> {
+    let now = now_ms();
+    if closed(&row.poll, now) {
+        return Err(Error::FailedPrecondition("this poll has ended".into()));
+    }
+    let voter = row.voter(voter_id);
+    let Row { mut poll, channel_id, mut tally, .. } = row;
+    let picked = picked(&poll, answer_ids)?;
+    let before = mine(conn, message_id, &voter).await?;
+    if before == picked {
+        let mut poll = shown(poll, now);
+        poll.my_answer_ids = picked;
+        return Ok(poll);
+    }
+    conn.execute("DELETE FROM poll_votes WHERE message_id = ?1 AND voter = ?2", (message_id, voter.as_str())).await?;
+    for answer_id in &picked {
+        conn.execute(
+            "INSERT INTO poll_votes (message_id, voter, answer_id) VALUES (?1, ?2, ?3)",
+            (message_id, voter.as_str(), i64::from(*answer_id)),
+        )
+        .await?;
+    }
+    take_off(&poll, &mut tally, &before);
+    for id in &picked {
+        if let Some(n) = poll.answers.iter().position(|a| a.id == *id) {
+            tally.votes[n] += 1;
+        }
+    }
+    tally.voters += i64::from(!picked.is_empty());
+    // The one row every vote changes: votes at once clash here
+    // and run again, so the counts in events follow each other.
+    conn.execute("UPDATE polls SET tally = ?2 WHERE message_id = ?1", (message_id, tally.encode_to_vec())).await?;
+    count(&mut poll, &tally);
+    let (event_voter, voter_answer_ids) =
+        if poll.anonymous { (String::new(), vec![]) } else { (voter_id.to_string(), picked.clone()) };
+    events.push(Payload::PollUpdated(pb::PollUpdated {
+        channel_id,
+        message_id: message_id.to_string(),
+        poll: Some(shared_view(poll.clone(), now)),
+        voter_id: event_voter,
+        voter_answer_ids,
+    }));
+    let mut poll = shown(poll, now);
+    poll.my_answer_ids = picked;
+    Ok(poll)
+}
+
+/// Ends a poll early for `by_id`, who the caller checked may, inside the
+/// write that ends it. The poll as they see it, with their own picks.
+pub(super) async fn close(
+    conn: &turso::Connection,
+    server_id: &str,
+    row: Row,
+    message_id: &str,
+    by_id: &str,
+    events: &mut Vec<Payload>,
+) -> Result<pb::Poll> {
+    let now = now_ms();
+    if closed(&row.poll, now) {
+        return Err(Error::FailedPrecondition("this poll has already ended".into()));
+    }
+    // Read before an anonymous poll's votes are sealed away, so
+    // the one ending it still sees their own pick this time.
+    let my_answer_ids = mine(conn, message_id, &row.voter(by_id)).await?;
+    let Row { mut poll, channel_id, author_id, voter_key, .. } = row;
+    conn.execute("UPDATE polls SET ended_at = ?2, ended_by_id = ?3 WHERE message_id = ?1", (message_id, now, by_id))
+        .await?;
+    if voter_key.is_some() {
+        seal(conn, message_id).await?;
+    }
+    poll.ended_at = Some(timestamp(now));
+    poll.ended_by_id = by_id.to_string();
+    if author_id != by_id {
+        let channel = load_channel(conn, server_id, &channel_id).await?.map(|c| c.name).unwrap_or_default();
+        store::audit(conn, by_id, Audit::new(pb::AuditAction::PollEnd, &author_id).channel(channel)).await?;
+    }
+    events.push(Payload::PollUpdated(pb::PollUpdated {
+        channel_id,
+        message_id: message_id.to_string(),
+        poll: Some(shared_view(poll.clone(), now)),
+        ..Default::default()
+    }));
+    poll.my_answer_ids = my_answer_ids;
+    Ok(poll)
+}
+
+/// One page of who picked `answer_id` in a public poll: refused for an
+/// anonymous one before anything is read. The ids, in order, and whether
+/// there are more.
+pub(super) async fn voters(
+    conn: &turso::Connection,
+    row: &Row,
+    message_id: &str,
+    answer_id: u32,
+    limit: i32,
+    after_id: &str,
+) -> Result<(Vec<String>, bool)> {
+    if row.poll.anonymous {
+        return Err(Error::denied("this poll's votes are anonymous"));
+    }
+    if !row.poll.answers.iter().any(|a| a.id == answer_id) {
+        return Err(Error::NotFound("answer"));
+    }
+    let limit = if limit <= 0 { 50 } else { limit.min(100) } as i64;
+    let mut ids = query_all(
+        conn,
+        "SELECT voter FROM poll_votes WHERE message_id = ?1 AND answer_id = ?2 AND voter > ?3
+         ORDER BY voter LIMIT ?4",
+        (message_id, i64::from(answer_id), after_id, limit + 1),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    let has_more = ids.len() as i64 > limit;
+    ids.truncate(limit as usize);
+    Ok((ids, has_more))
+}
+
+/// The poll a call names, in a channel the caller can see: when the call
+/// names a channel too, it has to be the poll's own (a channel shared from
+/// another server is answered by its home, never here).
+fn named<'a>(row: Option<Row>, channel_id: &str, can_see: impl Fn(&str) -> bool + 'a) -> Result<Row> {
+    row.filter(|row| (channel_id.is_empty() || channel_id == row.channel_id) && can_see(&row.channel_id))
+        .ok_or(Error::NotFound("poll"))
+}
+
 impl Api {
     pub(super) async fn vote(&self, request: Request<pb::VotePollRequest>) -> Result<pb::VotePollResponse> {
         let account = self.account(request.metadata()).await?;
@@ -526,14 +671,19 @@ impl Api {
         if access.pending {
             return Err(Error::FailedPrecondition("agree to the server's rules first".into()));
         }
+        if let Some((link, guest)) =
+            self.shown_from_elsewhere(&sdb, &account, &access, &req.channel_id, &req.message_id).await?
+        {
+            picked_count(&req.answer_ids)?;
+            pace(&account.id, now_ms(), self.app.settings().limits.poll_votes_per_minute)?;
+            let poll = shared::guest_vote(&self.app, &sdb.id, &link, guest, &req.message_id, &req.answer_ids).await?;
+            return Ok(pb::VotePollResponse { poll: Some(poll) });
+        }
         // Who's named on the event is decided before the write: anonymous
         // polls never say, and a poll's anonymity never changes. A poll's
         // answers don't change either, so the vote is checked here too,
         // before it counts against the voter's pace.
-        let before_write = load(&*sdb.read()?, &req.message_id)
-            .await?
-            .filter(|row| access.can_see(&row.channel_id))
-            .ok_or(Error::NotFound("poll"))?;
+        let before_write = named(load(&*sdb.read()?, &req.message_id).await?, &req.channel_id, |c| access.can_see(c))?;
         if closed(&before_write.poll, now_ms()) {
             return Err(Error::FailedPrecondition("this poll has ended".into()));
         }
@@ -542,65 +692,8 @@ impl Api {
         let actor = if before_write.poll.anonymous { "" } else { account.id.as_str() };
         let poll = sdb
             .write(actor, async |conn, events| {
-                let row = load(conn, &req.message_id)
-                    .await?
-                    .filter(|row| access.can_see(&row.channel_id))
-                    .ok_or(Error::NotFound("poll"))?;
-                let now = now_ms();
-                if closed(&row.poll, now) {
-                    return Err(Error::FailedPrecondition("this poll has ended".into()));
-                }
-                if shared_out(conn, &row.channel_id).await? {
-                    return Err(Error::invalid("polls can't be voted on in channels shared with other servers"));
-                }
-                let voter = row.voter(&account.id);
-                let Row { mut poll, channel_id, mut tally, .. } = row;
-                let picked = picked(&poll, &req.answer_ids)?;
-                let before = mine(conn, &req.message_id, &voter).await?;
-                if before == picked {
-                    let mut poll = shown(poll, now);
-                    poll.my_answer_ids = picked;
-                    return Ok(poll);
-                }
-                conn.execute(
-                    "DELETE FROM poll_votes WHERE message_id = ?1 AND voter = ?2",
-                    (req.message_id.as_str(), voter.as_str()),
-                )
-                .await?;
-                for answer_id in &picked {
-                    conn.execute(
-                        "INSERT INTO poll_votes (message_id, voter, answer_id) VALUES (?1, ?2, ?3)",
-                        (req.message_id.as_str(), voter.as_str(), i64::from(*answer_id)),
-                    )
-                    .await?;
-                }
-                take_off(&poll, &mut tally, &before);
-                for id in &picked {
-                    if let Some(n) = poll.answers.iter().position(|a| a.id == *id) {
-                        tally.votes[n] += 1;
-                    }
-                }
-                tally.voters += i64::from(!picked.is_empty());
-                // The one row every vote changes: votes at once clash here
-                // and run again, so the counts in events follow each other.
-                conn.execute(
-                    "UPDATE polls SET tally = ?2 WHERE message_id = ?1",
-                    (req.message_id.as_str(), tally.encode_to_vec()),
-                )
-                .await?;
-                count(&mut poll, &tally);
-                let (voter_id, voter_answer_ids) =
-                    if poll.anonymous { (String::new(), vec![]) } else { (account.id.clone(), picked.clone()) };
-                events.push(Payload::PollUpdated(pb::PollUpdated {
-                    channel_id,
-                    message_id: req.message_id.clone(),
-                    poll: Some(shared_view(poll.clone(), now)),
-                    voter_id,
-                    voter_answer_ids,
-                }));
-                let mut poll = shown(poll, now);
-                poll.my_answer_ids = picked;
-                Ok(poll)
+                let row = named(load(conn, &req.message_id).await?, &req.channel_id, |c| access.can_see(c))?;
+                cast(conn, row, &req.message_id, &account.id, &req.answer_ids, events).await
             })
             .await?;
         Ok(pb::VotePollResponse { poll: Some(poll) })
@@ -611,46 +704,19 @@ impl Api {
         let req = request.into_inner();
         let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
         access.require_not_timed_out()?;
+        if let Some((link, guest)) =
+            self.shown_from_elsewhere(&sdb, &account, &access, &req.channel_id, &req.message_id).await?
+        {
+            let poll = shared::guest_end_poll(&self.app, &sdb.id, &link, guest, &req.message_id).await?;
+            return Ok(pb::EndPollResponse { poll: Some(poll) });
+        }
         let poll = sdb
             .write(&account.id, async |conn, events| {
-                let row = load(conn, &req.message_id)
-                    .await?
-                    .filter(|row| access.can_see(&row.channel_id))
-                    .ok_or(Error::NotFound("poll"))?;
+                let row = named(load(conn, &req.message_id).await?, &req.channel_id, |c| access.can_see(c))?;
                 if row.author_id != account.id && !access.has_in(&row.channel_id, Permission::ManageMessages) {
                     return Err(Error::denied("only its creator or a moderator can end a poll"));
                 }
-                let now = now_ms();
-                if closed(&row.poll, now) {
-                    return Err(Error::FailedPrecondition("this poll has already ended".into()));
-                }
-                // Read before an anonymous poll's votes are sealed away, so
-                // the one ending it still sees their own pick this time.
-                let my_answer_ids = mine(conn, &req.message_id, &row.voter(&account.id)).await?;
-                let Row { mut poll, channel_id, author_id, voter_key, .. } = row;
-                conn.execute(
-                    "UPDATE polls SET ended_at = ?2, ended_by_id = ?3 WHERE message_id = ?1",
-                    (req.message_id.as_str(), now, account.id.as_str()),
-                )
-                .await?;
-                if voter_key.is_some() {
-                    seal(conn, &req.message_id).await?;
-                }
-                poll.ended_at = Some(timestamp(now));
-                poll.ended_by_id = account.id.clone();
-                if author_id != account.id {
-                    let channel = load_channel(conn, &sdb.id, &channel_id).await?.map(|c| c.name).unwrap_or_default();
-                    store::audit(conn, &account.id, Audit::new(pb::AuditAction::PollEnd, &author_id).channel(channel))
-                        .await?;
-                }
-                events.push(Payload::PollUpdated(pb::PollUpdated {
-                    channel_id,
-                    message_id: req.message_id.clone(),
-                    poll: Some(shared_view(poll.clone(), now)),
-                    ..Default::default()
-                }));
-                poll.my_answer_ids = my_answer_ids;
-                Ok(poll)
+                close(conn, &sdb.id, row, &req.message_id, &account.id, events).await
             })
             .await?;
         Ok(pb::EndPollResponse { poll: Some(poll) })
@@ -663,32 +729,41 @@ impl Api {
         let account = self.account(request.metadata()).await?;
         let req = request.into_inner();
         let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+        if let Some((link, guest)) =
+            self.shown_from_elsewhere(&sdb, &account, &access, &req.channel_id, &req.message_id).await?
+        {
+            return shared::guest_poll_voters(&self.app, &sdb.id, &link, guest, &req).await;
+        }
         let conn = sdb.read()?;
-        let row = load(&conn, &req.message_id)
-            .await?
-            .filter(|row| access.can_see(&row.channel_id))
-            .ok_or(Error::NotFound("poll"))?;
-        if row.poll.anonymous {
-            return Err(Error::denied("this poll's votes are anonymous"));
-        }
-        if !row.poll.answers.iter().any(|a| a.id == req.answer_id) {
-            return Err(Error::NotFound("answer"));
-        }
-        let limit = if req.limit <= 0 { 50 } else { req.limit.min(100) } as i64;
-        let ids = query_all(
-            &conn,
-            "SELECT voter FROM poll_votes WHERE message_id = ?1 AND answer_id = ?2 AND voter > ?3
-             ORDER BY voter LIMIT ?4",
-            (req.message_id.as_str(), i64::from(req.answer_id), req.after_id.as_str(), limit + 1),
-            |r| r.get::<String>(0),
-        )
-        .await?;
-        let has_more = ids.len() as i64 > limit;
-        let ids: Vec<&str> = ids.iter().take(limit as usize).map(String::as_str).collect();
+        let row = named(load(&conn, &req.message_id).await?, &req.channel_id, |c| access.can_see(c))?;
+        let (ids, has_more) = voters(&conn, &row, &req.message_id, req.answer_id, req.limit, &req.after_id).await?;
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
         let mut found = users(&conn, &ids).await?;
         found.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(pb::ListPollVotersResponse { users: found, has_more })
     }
+
+    /// Whether a poll call is about a channel this server shows from
+    /// another, whose home answers it: the channel and who's asking there.
+    async fn shown_from_elsewhere(
+        &self,
+        sdb: &ServerDb,
+        account: &crate::node::Account,
+        access: &crate::permissions::Access,
+        channel_id: &str,
+        message_id: &str,
+    ) -> Result<Option<(shared::LinkRow, crate::cpb::Guest)>> {
+        shared::locate(&self.app, &*sdb.read()?, &sdb.id, account, access, channel_id, message_id).await
+    }
+}
+
+/// How many answers a vote names, checked before it goes to another
+/// server: the home checks them against the poll.
+fn picked_count(answer_ids: &[u32]) -> Result<()> {
+    if answer_ids.len() > MAX_ANSWERS {
+        return Err(Error::invalid("pick answers from the poll, each once"));
+    }
+    Ok(())
 }
 
 /// The gRPC entry points, called from `MessageService`'s implementation.

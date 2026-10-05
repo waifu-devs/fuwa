@@ -173,7 +173,12 @@ impl Core {
         reports::used(if answer_ids.is_empty() { "poll.unvote" } else { "poll.vote" });
         let res = rpc!(
             api.messages(),
-            vote_poll(pb::VotePollRequest { server_id: server_id.into(), message_id: message_id.into(), answer_ids })
+            vote_poll(pb::VotePollRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                answer_ids,
+            })
         )
         .await?;
         if let Some(poll) = res.poll {
@@ -194,7 +199,11 @@ impl Core {
         reports::used("poll.end");
         let res = rpc!(
             api.messages(),
-            end_poll(pb::EndPollRequest { server_id: server_id.into(), message_id: message_id.into() })
+            end_poll(pb::EndPollRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+            })
         )
         .await?;
         if let Some(poll) = res.poll {
@@ -222,6 +231,7 @@ impl Core {
                 answer_id,
                 limit: VOTERS_PAGE,
                 after_id: after_id.into(),
+                ..Default::default()
             })
         )
         .await?;

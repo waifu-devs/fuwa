@@ -152,8 +152,9 @@ export function Composer({
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
   const access = useAccess(instanceKey, serverId);
-  // Polls are counted where a channel lives, so none in channels shared between servers.
-  const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && !channel.shared;
+  // Polls are counted where a channel lives: in a shared one, once this instance takes them there.
+  const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
+  const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && (!channel.shared || pollsShared);
   const [polling, setPolling] = useState(false);
   const catalog = useCatalog(instanceKey, serverId);
   const staged = useStaged(channelId);

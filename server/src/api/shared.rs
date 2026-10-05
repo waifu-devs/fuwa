@@ -32,7 +32,10 @@ use crate::servers::{self as store, Audit, Payload, ServerDb, load_channel};
 
 /// What a guest server's people may be let do in a shared channel, at most;
 /// the home picks which. Seeing it comes with being shown it.
-pub const SHAREABLE: Bits = bit(Permission::SendMessages) | bit(Permission::EmbedLinks) | bit(Permission::AttachFiles);
+pub const SHAREABLE: Bits = bit(Permission::SendMessages)
+    | bit(Permission::EmbedLinks)
+    | bit(Permission::AttachFiles)
+    | bit(Permission::CreatePolls);
 /// The same for a server on another instance: as much, now that files
 /// cross instances too ([`crate::shared_files`]).
 const SHAREABLE_ELSEWHERE: Bits = SHAREABLE;
@@ -385,6 +388,7 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
         .filter_map(|e| their_emoji(e, pictures))
         .collect();
     message.gif = message.gif.as_ref().and_then(|gif| their_gif(gif, pictures));
+    message.poll = message.poll.take().map(|poll| their_poll(poll, at, own)).transpose()?;
     if let Some(webhook) = &mut message.webhook {
         webhook.webhook_id.clear();
         webhook.name = one_line(&webhook.name, 80);
@@ -405,6 +409,12 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     }
     no_pings(message);
     Ok(())
+}
+
+/// A poll in what another instance (at `at`) sends: as [`super::polls::arrived`]
+/// clips it, with who ended it read by [`from_there`].
+fn their_poll(poll: pb::Poll, at: &str, own: &str) -> Result<pb::Poll> {
+    super::polls::arrived(poll, |id| from_there(id, at, own))
 }
 
 /// One of this server's own people, as a home on another instance named
@@ -642,6 +652,32 @@ pub fn arrived(
             their_guest(delete.guest.as_mut(), at, &pictures)?;
             parse_id("message", &delete.message_id)?;
         }
+        Some(Call::Poll(poll)) => {
+            their_guest(poll.guest.as_mut(), at, &pictures)?;
+            messages::check_content(&poll.content, true)?;
+            poll.poll.as_ref().ok_or_else(|| Error::invalid("poll is required"))?;
+            message_id(&poll.reply_to_id)?;
+        }
+        Some(Call::Vote(vote)) => {
+            their_guest(vote.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &vote.message_id)?;
+            if vote.answer_ids.len() > super::polls::MAX_ANSWERS {
+                return Err(Error::invalid("pick answers from the poll, each once"));
+            }
+        }
+        Some(Call::EndPoll(end)) => {
+            their_guest(end.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &end.message_id)?;
+        }
+        Some(Call::Voters(voters)) => {
+            their_guest(voters.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &voters.message_id)?;
+            // The page after someone as that instance names them: its own
+            // people under its address, this one's as they are here.
+            if !voters.after_id.is_empty() {
+                voters.after_id = from_there(&voters.after_id, at, own)?;
+            }
+        }
         // To a guest: what just happened in the channel.
         Some(Call::Events(home)) => {
             let mut shown = Vec::new();
@@ -653,6 +689,16 @@ pub fn arrived(
                     ) => their_message(m, at, own, &pictures)?,
                     Some(Payload::MessageDeleted(deleted)) => {
                         parse_id("message", &deleted.message_id)?;
+                    }
+                    Some(Payload::PollUpdated(updated)) => {
+                        parse_id("message", &updated.message_id)?;
+                        let poll = updated.poll.take().ok_or_else(|| Error::invalid("poll is required"))?;
+                        updated.poll = Some(their_poll(poll, at, own)?);
+                        // Anonymous polls and ends name no one: kept empty.
+                        if !updated.voter_id.is_empty() {
+                            updated.voter_id = from_there(&updated.voter_id, at, own)?;
+                        }
+                        updated.voter_answer_ids.truncate(super::polls::MAX_ANSWERS);
                     }
                     _ => continue,
                 }
@@ -699,7 +745,7 @@ pub fn returned(
     let own = federation::address(own);
     let mut out = cpb::SharedReply::default();
     match &call.call {
-        Some(Call::Send(_) | Call::Get(_) | Call::Edit(_)) => {
+        Some(Call::Send(_) | Call::Get(_) | Call::Edit(_) | Call::Poll(_)) => {
             if let Some(mut message) = reply.message {
                 their_message(&mut message, at, own, &pictures)?;
                 out.message = Some(message);
@@ -721,6 +767,19 @@ pub fn returned(
                 their_user(author, at, own, &pictures)?;
             }
             out.page = Some(page);
+            return Ok(out);
+        }
+        Some(Call::Vote(_) | Call::EndPoll(_)) => {
+            out.poll = reply.poll.map(|poll| their_poll(poll, at, own)).transpose()?;
+            return Ok(out);
+        }
+        Some(Call::Voters(_)) => {
+            let mut voters = reply.voters.unwrap_or_default();
+            voters.users.truncate(100);
+            for user in &mut voters.users {
+                their_user(user, at, own, &pictures)?;
+            }
+            out.voters = Some(voters);
             return Ok(out);
         }
         _ => {}
@@ -1309,20 +1368,31 @@ pub(super) async fn guest_send(
         content: req.content.clone(),
         embeds: req.embeds.clone(),
         attachments: req.attachments.clone(),
+        poll: req.poll.as_ref().map(|new| super::polls::check(new, now_ms())).transpose()?,
         ..Default::default()
     })
     .into_owned();
     let text = automod::Text { all: &reviewed, content: &req.content };
     review_here(app, sdb, member, access, &channel_id, text, &pictures).await?;
     let files: Vec<String> = req.attachments.iter().map(|file| file.id.clone()).collect();
-    let call = Call::Send(cpb::GuestSend {
-        guest: Some(guest),
-        content: req.content,
-        attachments: req.attachments,
-        embeds: req.embeds,
-        reply_to_id: req.reply_to_id,
-        ..Default::default()
-    });
+    // A poll goes as a call of its own, which a home too old for polls here
+    // refuses instead of keeping the message without it.
+    let call = match req.poll {
+        Some(poll) => Call::Poll(cpb::GuestPoll {
+            guest: Some(guest),
+            content: req.content,
+            poll: Some(poll),
+            reply_to_id: req.reply_to_id,
+        }),
+        None => Call::Send(cpb::GuestSend {
+            guest: Some(guest),
+            content: req.content,
+            attachments: req.attachments,
+            embeds: req.embeds,
+            reply_to_id: req.reply_to_id,
+            ..Default::default()
+        }),
+    };
     let reply = to_home(app, &sdb.id, link, call).await?;
     // The home has its own copies now; on a split instance this server's
     // shard lets go of its own, and so does one process for a home on
@@ -1410,6 +1480,66 @@ pub(super) async fn guest_delete(
     to_home(app, server_id, link, call).await.map(|_| ())
 }
 
+/// Votes in a poll in a channel this server shows from another. The caller
+/// has checked the voter may, here.
+pub(super) async fn guest_vote(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    message_id: &str,
+    answer_ids: &[u32],
+) -> Result<pb::Poll> {
+    let call = Call::Vote(cpb::GuestVote {
+        guest: Some(guest),
+        message_id: message_id.to_string(),
+        answer_ids: answer_ids.to_vec(),
+    });
+    to_home(app, server_id, link, call)
+        .await?
+        .poll
+        .ok_or_else(|| Error::internal("the home server didn't say how the poll stands"))
+}
+
+pub(super) async fn guest_end_poll(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    message_id: &str,
+) -> Result<pb::Poll> {
+    let call = Call::EndPoll(cpb::GuestEndPoll { guest: Some(guest), message_id: message_id.to_string() });
+    to_home(app, server_id, link, call)
+        .await?
+        .poll
+        .ok_or_else(|| Error::internal("the home server didn't say how the poll stands"))
+}
+
+/// Who voted for an answer of a poll in a channel this server shows from
+/// another: this server's own people as this instance has them, when the
+/// home is on another instance.
+pub(super) async fn guest_poll_voters(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    req: &pb::ListPollVotersRequest,
+) -> Result<pb::ListPollVotersResponse> {
+    let call = Call::Voters(cpb::GuestPollVoters {
+        guest: Some(guest),
+        message_id: req.message_id.clone(),
+        answer_id: req.answer_id,
+        limit: req.limit,
+        after_id: req.after_id.clone(),
+    });
+    let mut voters = to_home(app, server_id, link, call).await?.voters.unwrap_or_default();
+    if link.instance.origin.is_some() {
+        let conn = app.servers.get(server_id).await?.read()?;
+        voters.users = own_authors(&conn, std::mem::take(&mut voters.users)).await?;
+    }
+    Ok(voters)
+}
+
 /// Answers a call from the other end of one of this process's servers'
 /// shared channels.
 pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
@@ -1421,11 +1551,15 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
     match call.call.ok_or_else(|| Error::invalid("call is required"))? {
         Call::Lookup(lookup) => home_lookup(app, &sdb, lookup, &from).await,
         Call::Ask(ask) => home_ask(&sdb, ask, &from).await,
-        Call::Send(send) => home_send(app, &sdb, send).await,
+        Call::Send(send) => home_send(app, &sdb, send, None).await,
         Call::List(list) => home_list(app, &sdb, list).await,
         Call::Get(get) => home_get(app, &sdb, get).await,
         Call::Edit(edit) => home_edit(app, &sdb, edit).await,
         Call::Delete(delete) => home_delete(app, &sdb, delete).await,
+        Call::Poll(poll) => home_poll(app, &sdb, poll).await,
+        Call::Vote(vote) => home_vote(app, &sdb, vote).await,
+        Call::EndPoll(end) => home_end_poll(&sdb, end).await,
+        Call::Voters(voters) => home_voters(app, &sdb, voters).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
@@ -1548,9 +1682,6 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk, from: &Instance) -> Result
             if !shareable(&channel) || link_of(conn, &channel.id).await?.is_some() {
                 return Err(Error::FailedPrecondition("that channel can't be shared".into()));
             }
-            if super::polls::running_in(conn, &channel.id).await? {
-                return Err(Error::FailedPrecondition("that channel has polls running; try again once they end".into()));
-            }
             let guests = guests_of(conn, &channel.id).await?;
             if guests.iter().any(|g| g.server.id == guest.id) {
                 return Err(Error::AlreadyExists("this server already shows that channel, or has asked to".into()));
@@ -1616,7 +1747,26 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk, from: &Instance) -> Result
     Ok(cpb::SharedReply { connection: Some(connection), ..Default::default() })
 }
 
-async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Result<cpb::SharedReply> {
+/// A guest's new message with a poll: as [`home_send`] takes any, once the
+/// poll is checked as the home's own people's are.
+async fn home_poll(app: &Arc<App>, sdb: &ServerDb, poll: cpb::GuestPoll) -> Result<cpb::SharedReply> {
+    let new = poll.poll.as_ref().ok_or_else(|| Error::invalid("poll is required"))?;
+    let checked = super::polls::check(new, now_ms())?;
+    let send = cpb::GuestSend {
+        guest: poll.guest,
+        content: poll.content,
+        reply_to_id: poll.reply_to_id,
+        ..Default::default()
+    };
+    home_send(app, sdb, send, Some(checked)).await
+}
+
+async fn home_send(
+    app: &Arc<App>,
+    sdb: &ServerDb,
+    send: cpb::GuestSend,
+    poll: Option<pb::Poll>,
+) -> Result<cpb::SharedReply> {
     let guest = send.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let limits = sdb.limits(&app.settings().limits).await?;
@@ -1637,16 +1787,17 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     let mut send = send;
     let files = take_files(app, sdb, &guest, &mut send.attachments, &send.files).await?;
     let file_bytes: i64 = send.attachments.iter().map(|file| file.size).sum();
-    // AutoMod reads the embeds' words and the files' names with the text.
+    // AutoMod reads the poll, the embeds' words and the files' names with the text.
     let reviewed = messages::reviewed_text(&pb::Message {
         content: send.content.clone(),
         embeds: send.embeds.clone(),
         attachments: send.attachments.clone(),
+        poll: poll.clone(),
         ..Default::default()
     })
     .into_owned();
     let text = automod::Text { all: &reviewed, content: &send.content };
-    let asked = ask_home(app, sdb, &guest, text, &send.attachments, &send.embeds).await;
+    let asked = ask_home(app, sdb, &guest, text, &send.attachments, &send.embeds, poll.is_some()).await;
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -1678,6 +1829,9 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             if !send.embeds.is_empty() {
                 access.require_in(&channel.id, Permission::EmbedLinks)?;
             }
+            if poll.is_some() {
+                access.require_in(&channel.id, Permission::CreatePolls)?;
+            }
             if !send.reply_to_id.is_empty() {
                 let replied = load_message(conn, &sdb.id, &send.reply_to_id).await?;
                 if replied.is_none_or(|m| m.channel_id != channel.id || !in_channel(&m)) {
@@ -1704,6 +1858,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
                 created_at: Some(timestamp(now)),
                 kind: pb::MessageKind::Unspecified as i32,
                 shared: Some(pb::SharedAuthor { user: Some(user), server: Some(server) }),
+                poll: poll.clone(),
                 ..Default::default()
             };
             messages::insert_message(conn, &message, now).await?;
@@ -1917,6 +2072,7 @@ async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cp
     let (mut messages, has_more) =
         messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
     messages.iter_mut().for_each(no_threads);
+    super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     let mut authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
@@ -1943,6 +2099,7 @@ async fn home_get(app: &App, sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::
         .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m))
         .ok_or(Error::NotFound("message"))?;
     no_threads(&mut message);
+    super::polls::mark_mine(&conn, &user.id, std::slice::from_mut(&mut message)).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
     let mut author = store::user(&conn, &message.author_id).await?;
@@ -1965,6 +2122,7 @@ async fn ask_home(
     text: automod::Text<'_>,
     attachments: &[pb::Attachment],
     embeds: &[pb::Embed],
+    poll: bool,
 ) -> Option<automod::Asked> {
     let conn = sdb.read().ok()?;
     let (row, user, _) = connection(&conn, guest).await.ok()?;
@@ -1980,6 +2138,7 @@ async fn ask_home(
     if !access.has_in(&channel_id, Permission::SendMessages)
         || (!attachments.is_empty() && !access.has_in(&channel_id, Permission::AttachFiles))
         || (!embeds.is_empty() && !access.has_in(&channel_id, Permission::EmbedLinks))
+        || (poll && !access.has_in(&channel_id, Permission::CreatePolls))
     {
         return None;
     }
@@ -2003,7 +2162,7 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
             let all = edited_text(&m, &edit.content);
-            ask_home(app, sdb, &guest, automod::Text { all: &all, content: &edit.content }, &[], &[]).await
+            ask_home(app, sdb, &guest, automod::Text { all: &all, content: &edit.content }, &[], &[], false).await
         }
         _ => None,
     };
@@ -2101,6 +2260,105 @@ async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -
         .await?;
     crate::attachments::drop_soon(app, &sdb.id, files);
     Ok(cpb::SharedReply::default())
+}
+
+/// A poll in the channel a guest's connection shows: one in a message
+/// people wrote there, not in a thread (threads stay with the home).
+async fn poll_in(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> Result<super::polls::Row> {
+    let shown = load_message(conn, server_id, message_id)
+        .await?
+        .is_some_and(|m| m.channel_id == channel_id && m.kind == pb::MessageKind::Unspecified as i32 && in_channel(&m));
+    if !shown {
+        return Err(Error::NotFound("poll"));
+    }
+    super::polls::load(conn, message_id).await?.ok_or(Error::NotFound("poll"))
+}
+
+async fn home_vote(app: &Arc<App>, sdb: &ServerDb, vote: cpb::GuestVote) -> Result<cpb::SharedReply> {
+    let guest = vote.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    // Anonymous polls never say who voted, so the write names no one then.
+    let anonymous = {
+        let conn = sdb.read()?;
+        let (row, user, _) = connection(&conn, &guest).await?;
+        if blocked(&conn, &row.channel_id, &user.id).await? {
+            return Err(Error::denied(KEPT_OUT));
+        }
+        poll_in(&conn, &sdb.id, &row.channel_id, &vote.message_id).await?.poll.anonymous
+    };
+    // A server on another instance counts as one sender here, votes and all.
+    let elsewhere = guest.server.as_ref().map(|s| s.id.clone()).filter(|id| id.contains('@'));
+    if let Some(server_id) = &elsewhere
+        && !app.federation.take_send(server_id, app.settings().limits.shared_remote_sends_per_minute)
+    {
+        return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
+    }
+    let actor = if anonymous { String::new() } else { guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default() };
+    let poll = sdb
+        .write(&actor, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            if blocked(conn, &row.channel_id, &user.id).await? {
+                return Ok(Err(KEPT_OUT.to_string()));
+            }
+            let poll = poll_in(conn, &sdb.id, &row.channel_id, &vote.message_id).await?;
+            remember(conn, &user, &server).await?;
+            super::polls::cast(conn, poll, &vote.message_id, &user.id, &vote.answer_ids, events).await.map(Ok)
+        })
+        .await?
+        .map_err(Error::denied)?;
+    Ok(cpb::SharedReply { poll: Some(poll), ..Default::default() })
+}
+
+async fn home_end_poll(sdb: &ServerDb, end: cpb::GuestEndPoll) -> Result<cpb::SharedReply> {
+    let guest = end.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    let poll = sdb
+        .write(&actor_id, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            if blocked(conn, &row.channel_id, &user.id).await? {
+                return Ok(Err(KEPT_OUT.to_string()));
+            }
+            let poll = poll_in(conn, &sdb.id, &row.channel_id, &end.message_id).await?;
+            if poll.author_id != user.id {
+                // A guest's moderators end their own server's people's polls,
+                // as they delete their messages.
+                let theirs = guest.moderator
+                    && guests_among(conn, &[poll.author_id.as_str()]).await?.get(&poll.author_id) == Some(&server.id);
+                if !theirs {
+                    return Err(Error::denied("you can only end your own polls here, or your server's people's"));
+                }
+            }
+            remember(conn, &user, &server).await?;
+            super::polls::close(conn, &sdb.id, poll, &end.message_id, &user.id, events).await.map(Ok)
+        })
+        .await?
+        .map_err(Error::denied)?;
+    Ok(cpb::SharedReply { poll: Some(poll), ..Default::default() })
+}
+
+async fn home_voters(app: &App, sdb: &ServerDb, voters: cpb::GuestPollVoters) -> Result<cpb::SharedReply> {
+    let guest = voters.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    let poll = poll_in(&conn, &sdb.id, &row.channel_id, &voters.message_id).await?;
+    let (ids, has_more) =
+        super::polls::voters(&conn, &poll, &voters.message_id, voters.answer_id, voters.limit, &voters.after_id)
+            .await?;
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut found = users(&conn, &ids).await?;
+    found.sort_by(|a, b| a.id.cmp(&b.id));
+    if user.id.contains('@') {
+        let public_url = &app.settings().public_url;
+        found = found.iter().map(|u| plain_user(u, public_url)).collect();
+    }
+    Ok(cpb::SharedReply { voters: Some(pb::ListPollVotersResponse { users: found, has_more }), ..Default::default() })
 }
 
 /// Ends a connection at the home, inside a write: its row, and the people
@@ -2274,6 +2532,7 @@ async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> 
                     files_here(app, &link, m);
                 }
                 Payload::MessageDeleted(d) => d.channel_id = channel_id.clone(),
+                Payload::PollUpdated(p) => p.channel_id = channel_id.clone(),
                 _ => return None,
             }
             // Not in this server's log: it's shown, not kept.
@@ -2502,6 +2761,8 @@ fn message_channel(payload: &Payload) -> Option<&str> {
             Some(&m.channel_id)
         }
         Payload::MessageDeleted(d) => Some(&d.channel_id),
+        // Checked by [`for_guests`]: only polls in messages shown in the channel.
+        Payload::PollUpdated(p) => Some(&p.channel_id),
         _ => None,
     }
 }
@@ -2509,6 +2770,23 @@ fn message_channel(payload: &Payload) -> Option<&str> {
 /// An event as guests get it: each message says who wrote it, since its
 /// author needn't be in the guest server.
 async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
+    if let Some(Payload::PollUpdated(updated)) = &event.payload {
+        // A poll in a thread stays with the home, as threads do.
+        let shown = async {
+            let sdb = app.servers.get(&event.server_id).await?;
+            let message = load_message(&*sdb.read()?, &sdb.id, &updated.message_id).await?;
+            Ok::<_, Error>(message.is_some_and(|m| m.kind == pb::MessageKind::Unspecified as i32 && in_channel(&m)))
+        }
+        .await;
+        return match shown {
+            Ok(true) => Some(event.clone()),
+            Ok(false) => None,
+            Err(_) => {
+                tracing::warn!("couldn't read a shared poll's message");
+                None
+            }
+        };
+    }
     let mut event = event.clone();
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
@@ -2840,11 +3118,6 @@ impl SharedChannelService for Api {
                         if !shareable(&channel) || link_of(conn, &channel.id).await?.is_some() {
                             return Err(Error::invalid(
                                 "only text and announcement channels of this server's own can be shared",
-                            ));
-                        }
-                        if super::polls::running_in(conn, &channel.id).await? {
-                            return Err(Error::FailedPrecondition(
-                                "end this channel's polls before sharing it: other servers can't vote".into(),
                             ));
                         }
                         if guests_of(conn, &channel.id).await?.len() >= MAX_GUESTS {
@@ -3347,6 +3620,59 @@ mod tests {
     /// A picture from another instance, as this one's proxy would link it.
     fn proxied(url: &str) -> String {
         format!("{OWN}/media/outside/sig?url={url}")
+    }
+
+    #[test]
+    fn polls_from_other_instances_are_clipped_and_name_only_theirs() {
+        let origin = "https://night-owls.example";
+        let (there, here) = (new_id(), new_id());
+        let update = |voter_id: String, poll: pb::Poll| cpb::SharedCall {
+            server_id: new_id(),
+            call: Some(Call::Events(cpb::HomeEvents {
+                connection_id: new_id(),
+                events: vec![pb::Event {
+                    payload: Some(Payload::PollUpdated(pb::PollUpdated {
+                        channel_id: new_id(),
+                        message_id: new_id(),
+                        poll: Some(poll),
+                        voter_id,
+                        voter_answer_ids: (1..=20).collect(),
+                    })),
+                    ..Default::default()
+                }],
+            })),
+            ..Default::default()
+        };
+        let read = |call| {
+            let Some(Call::Events(home)) = arrived(call, origin, OWN, "abcd", &proxied).unwrap().call else { panic!() };
+            let Some(Payload::PollUpdated(updated)) = home.events.into_iter().next().unwrap().payload else { panic!() };
+            updated
+        };
+        let poll = pb::Poll {
+            question: "q".repeat(1000),
+            answers: (1..=12)
+                .map(|id| pb::PollAnswer { id, text: "a".repeat(100), emoji: "not an emoji".into(), votes: -3 })
+                .collect(),
+            voters: -1,
+            my_answer_ids: vec![2, 2, 40],
+            ended_by_id: there.clone(),
+            ..Default::default()
+        };
+        let updated = read(update(there.clone(), poll.clone()));
+        assert_eq!(updated.voter_id, format!("{there}@night-owls.example"));
+        assert_eq!(updated.voter_answer_ids.len(), 10);
+        let clipped = updated.poll.unwrap();
+        assert_eq!((clipped.question.chars().count(), clipped.answers.len(), clipped.voters), (300, 10, 0));
+        assert!(clipped.answers.iter().all(|a| a.text.chars().count() == 55 && a.emoji.is_empty() && a.votes == 0));
+        assert_eq!(clipped.my_answer_ids, [2]);
+        assert_eq!(clipped.ended_by_id, format!("{there}@night-owls.example"));
+        // Anonymous polls name no one: an empty voter stays empty.
+        let updated = read(update(String::new(), pb::Poll::default()));
+        assert!(updated.voter_id.is_empty());
+        // This instance's own people read back as its own; a third's are refused.
+        assert_eq!(read(update(format!("{here}@fuwa.example"), pb::Poll::default())).voter_id, here);
+        let third = update(format!("{there}@third.example"), pb::Poll::default());
+        assert!(arrived(third, origin, OWN, "abcd", &proxied).is_err());
     }
 
     #[test]

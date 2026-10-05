@@ -514,7 +514,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
 
   useEffect(() => {
     let live = true;
-    run(listPollVoters(place.instanceKey, place.serverId, messageId, answerId))
+    run(listPollVoters(place.instanceKey, place.serverId, place.channelId, messageId, answerId))
       .then((res) => {
         if (!live) return;
         setUsers(res.users);
@@ -530,7 +530,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
     const last = users?.at(-1);
     if (!last) return;
     try {
-      const res = await run(listPollVoters(place.instanceKey, place.serverId, messageId, answerId, last.id));
+      const res = await run(listPollVoters(place.instanceKey, place.serverId, place.channelId, messageId, answerId, last.id));
       setUsers((list) => [...(list ?? []), ...res.users]);
       setMore(res.hasMore);
     } catch (err) {

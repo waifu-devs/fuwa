@@ -783,6 +783,12 @@ message SharedCall {
     // ending one.
     AdminShares admin_list = 15;
     AdminEnd admin_end = 16;
+    // To the home: polls in the channel. New calls rather than fields on
+    // the old ones, so a home that predates them refuses them out loud.
+    GuestPoll poll = 19;
+    GuestVote vote = 20;
+    GuestEndPoll end_poll = 21;
+    GuestPollVoters voters = 22;
   }
   // Set only by the instance that received the call from another instance
   // (whatever the other instance sent there): that instance's origin and
@@ -801,6 +807,11 @@ message SharedReply {
   repeated string checked_by = 6;
   // For AdminShares.
   repeated fuwa.v1.SharedConnection connections = 7;
+  // For GuestPollVoters.
+  fuwa.v1.ListPollVotersResponse voters = 8;
+  // For GuestVote and GuestEndPoll: the poll as the guest sees it, with
+  // their own picks.
+  fuwa.v1.Poll poll = 9;
 }
 
 message AdminShares {}
@@ -858,6 +869,34 @@ message GuestSend {
 // (GET /federation/files/<ticket>), once, within ten minutes.
 message SharedFile {
   string ticket = 1;
+}
+
+// A guest's new message with a poll in it.
+message GuestPoll {
+  Guest guest = 1;
+  string content = 2;
+  fuwa.v1.NewPoll poll = 3;
+  string reply_to_id = 4;
+}
+
+message GuestVote {
+  Guest guest = 1;
+  string message_id = 2;
+  // Empty takes the vote back.
+  repeated uint32 answer_ids = 3;
+}
+
+message GuestEndPoll {
+  Guest guest = 1;
+  string message_id = 2;
+}
+
+message GuestPollVoters {
+  Guest guest = 1;
+  string message_id = 2;
+  uint32 answer_id = 3;
+  int32 limit = 4;
+  string after_id = 5;
 }
 
 message GuestList {

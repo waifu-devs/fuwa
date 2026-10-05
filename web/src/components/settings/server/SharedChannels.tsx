@@ -21,6 +21,7 @@ import {
   UndoIcon,
   UnplugIcon,
   XIcon,
+  BarChart3Icon,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -42,6 +43,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { hasRegions, regionName } from "@/lib/regions";
 import { useFuwa } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SPRING, SwapText } from "@/components/motion";
@@ -78,6 +80,7 @@ const SHAREABLE = [
   { permission: Permission.SEND_MESSAGES, label: "Send messages", icon: MessageSquareIcon },
   { permission: Permission.EMBED_LINKS, label: "Embed links", icon: LinkIcon },
   { permission: Permission.ATTACH_FILES, label: "Attach files", icon: ImageIcon },
+  { permission: Permission.CREATE_POLLS, label: "Create polls", icon: BarChart3Icon },
 ] as const;
 
 const waiting = (c: SharedConnection) => c.state === SharedConnectionState.WAITING;
@@ -699,6 +702,9 @@ function ConnectionActions({
  */
 function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string; serverId: string; connection: SharedConnection }) {
   const [saving, setSaving] = useState<Permission | null>(null);
+  // Polls go to other servers once this instance takes their votes.
+  const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
+  const toggles = SHAREABLE.filter((s) => s.permission !== Permission.CREATE_POLLS || pollsShared);
   if (!c.home)
     return (
       <ul className="flex flex-wrap gap-1.5 pl-[3.25rem]">
@@ -719,8 +725,8 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
     }
   }
   return (
-    <div className="grid gap-1.5 rounded-xl bg-muted/40 p-2 sm:grid-cols-3">
-      {SHAREABLE.map((s) => {
+    <div className="grid gap-1.5 rounded-xl bg-muted/40 p-2 sm:grid-cols-2">
+      {toggles.map((s) => {
         const on = c.allowed.includes(s.permission);
         return (
           <label key={s.permission} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-background/60">
