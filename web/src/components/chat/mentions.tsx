@@ -58,63 +58,6 @@ export function useRoleColor(member: Member | undefined): number | undefined {
   return useMemo(() => colorOf(roles, member), [roles, member]);
 }
 
-// ───────────────────────── Finding them in the text ─────────────────────────
-
-const ROLE = String.raw`<@&([0-9A-Za-z]{26})>`;
-const EVERYONE = String.raw`(?<![\w@<])@(everyone|here)\b`;
-const USER = String.raw`(?<![\w@<.])@([a-z0-9][a-z0-9_.]{0,30}[a-z0-9_]|[a-z0-9])(?![\w])`;
-const EMOJI = String.raw`<(a?):([A-Za-z0-9_]{2,32}):([0-9A-Za-z]{10,32})>`;
-const PATTERN = new RegExp(`${ROLE}|${EVERYONE}|${USER}|${EMOJI}`, "gi");
-
-type MdNode = { type: string; value?: string; children?: MdNode[]; data?: Record<string, unknown> };
-
-const mention = (kind: string, target: string, text: string): MdNode => ({
-  type: "mention",
-  data: { hName: "fuwa-mention", hProperties: { dataKind: kind, dataTarget: target } },
-  children: [{ type: "text", value: text }],
-});
-
-function split(value: string): MdNode[] | null {
-  const out: MdNode[] = [];
-  let last = 0;
-  for (const m of value.matchAll(PATTERN)) {
-    const at = m.index ?? 0;
-    if (at > last) out.push({ type: "text", value: value.slice(last, at) });
-    if (m[6]) out.push(mention("emoji", m[6].toUpperCase(), `:${m[5]}:`));
-    else if (m[1]) out.push(mention("role", m[1].toUpperCase(), m[0]));
-    else if (m[2]) out.push(mention("everyone", m[2].toLowerCase(), m[0]));
-    else out.push(mention("user", m[3]!.toLowerCase(), m[0]));
-    last = at + m[0].length;
-  }
-  if (!out.length) return null;
-  if (last < value.length) out.push({ type: "text", value: value.slice(last) });
-  return out;
-}
-
-/** Leaves code and links alone. */
-const SKIP = new Set(["code", "inlineCode", "link", "linkReference", "html"]);
-
-function walk(node: MdNode) {
-  if (!node.children) return;
-  const next: MdNode[] = [];
-  for (const child of node.children) {
-    if (child.type === "text" && child.value) {
-      const parts = split(child.value);
-      if (parts) {
-        next.push(...parts);
-        continue;
-      }
-    } else if (!SKIP.has(child.type)) walk(child);
-    next.push(child);
-  }
-  node.children = next;
-}
-
-/** The remark plugin that turns mentions into `fuwa-mention` elements. */
-export function remarkMentions() {
-  return (tree: MdNode) => walk(tree);
-}
-
 // ───────────────────────── Drawing them ─────────────────────────
 
 type MentionProps = { children?: ReactNode; "data-kind"?: string; "data-target"?: string };
@@ -127,36 +70,43 @@ export function Mention(props: MentionProps) {
   const kind = props["data-kind"];
   const target = props["data-target"] ?? "";
   const look = useServerLook();
-  const mode = usePrefs((p) => p.roleColors);
-  const carried = use(MessageEmojiContext);
-  const { t } = useI18n();
-  if (kind === "emoji") {
-    const emoji =
-      look.emojis?.find((e) => e.id === target) ?? carried.find((e) => e.id === target) ?? look.otherEmojis?.get(target);
-    if (!emoji) return <span className="text-muted-foreground">{props.children}</span>;
-    return <EmojiImage emoji={emoji} className="emoji" />;
-  }
-  if (kind === "role") {
-    const role = look.roles.find((r) => r.id === target);
-    if (!role) return <span className={cn(chip, "bg-muted text-muted-foreground")}>{t("chat.mentions.deletedRole")}</span>;
-    const mine = !!look.me?.roleIds.includes(role.id);
-    const color = role.color !== undefined && mode !== "off" ? cssColor(role.color) : null;
-    return (
-      <motion.span
-        whileHover={{ y: -1 }}
-        className={cn(chip, !color && "bg-primary/15 text-primary", mine && "ring-1 ring-current/40")}
-        style={color ? { color, backgroundColor: `color-mix(in srgb, ${color} ${mine ? 24 : 15}%, transparent)` } : undefined}
-        title={t("chat.mentions.role", { name: role.name })}
-      >
-        @{role.name}
-      </motion.span>
-    );
-  }
+  if (kind === "emoji") return <EmojiMention target={target}>{props.children}</EmojiMention>;
+  if (kind === "role") return <RoleMention target={target} />;
   if (kind === "everyone")
     return <span className={cn(chip, "bg-primary/15 text-primary")}>@{target}</span>;
   const member = look.members.find((m) => m.user?.username === target);
   if (!member?.user) return <>{props.children}</>;
   return <UserMention member={member} user={member.user} me={look.me?.id === member.user.id} instanceKey={look.instanceKey} />;
+}
+
+/** A server emoji, as its picture; one nobody here has stays as its text. */
+function EmojiMention({ target, children }: { target: string; children?: ReactNode }) {
+  const look = useServerLook();
+  const carried = use(MessageEmojiContext);
+  const emoji =
+    look.emojis?.find((e) => e.id === target) ?? carried.find((e) => e.id === target) ?? look.otherEmojis?.get(target);
+  if (!emoji) return <span className="text-muted-foreground">{children}</span>;
+  return <EmojiImage emoji={emoji} className="emoji" />;
+}
+
+function RoleMention({ target }: { target: string }) {
+  const look = useServerLook();
+  const mode = usePrefs((p) => p.roleColors);
+  const { t } = useI18n();
+  const role = look.roles.find((r) => r.id === target);
+  if (!role) return <span className={cn(chip, "bg-muted text-muted-foreground")}>{t("chat.mentions.deletedRole")}</span>;
+  const mine = !!look.me?.roleIds.includes(role.id);
+  const color = role.color !== undefined && mode !== "off" ? cssColor(role.color) : null;
+  return (
+    <motion.span
+      whileHover={{ y: -1 }}
+      className={cn(chip, !color && "bg-primary/15 text-primary", mine && "ring-1 ring-current/40")}
+      style={color ? { color, backgroundColor: `color-mix(in srgb, ${color} ${mine ? 24 : 15}%, transparent)` } : undefined}
+      title={t("chat.mentions.role", { name: role.name })}
+    >
+      @{role.name}
+    </motion.span>
+  );
 }
 
 function UserMention({ member, user, me, instanceKey }: { member: Member; user: User; me: boolean; instanceKey?: string }) {

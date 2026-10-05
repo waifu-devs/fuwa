@@ -4,7 +4,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { UserSchema } from "@/gen/fuwa/v1/types_pb";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice, Toggle, WithPreview } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
 import { useInstance } from "@/fuwa/hooks";

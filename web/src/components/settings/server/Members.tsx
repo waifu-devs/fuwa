@@ -19,7 +19,8 @@ import { RoleDot } from "@/components/chat/mentions";
 import { UserAvatar } from "@/components/Icons";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { RoleName } from "@/components/RoleName";
 import { Segmented } from "@/components/settings/account/common";
 import {

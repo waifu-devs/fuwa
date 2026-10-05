@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { deleteBackground, keepBackground, listBackgrounds, run, uploadPicture } from "@/fuwa/actions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
 import { ShaderEditor } from "@/components/settings/app/ShaderEditor";

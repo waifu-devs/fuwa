@@ -7,7 +7,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { InviteDialog, publicBase } from "@/components/dialogs/InviteDialog";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { displayName, formatLeft, formatStamp } from "@/lib/format";
@@ -145,21 +145,7 @@ function Row({
   index: number;
   onRevoke: () => void;
 }) {
-  const lang = useI18n();
-  const { t } = lang;
-  const [copied, setCopied] = useState(false);
-  const until = expiresAt(invite);
-  const left = until ? until.getTime() - now : null;
-  const share = invite.maxUses ? invite.uses / invite.maxUses : 0;
-  function copyLink() {
-    void navigator.clipboard?.writeText(link).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1400);
-      },
-      () => toast(t("serversettings.invites.copyFailed")),
-    );
-  }
+  const { t } = useI18n();
   return (
     <motion.li
       layout
@@ -182,49 +168,10 @@ function Row({
         {invite.channelId ? <HashIcon className="size-3.5 shrink-0" /> : <ServerGlyph className="size-3.5 shrink-0" />}
         <span className="truncate">{invite.channelId ? (channelName ?? t("serversettings.invites.deletedChannel")) : t("serversettings.invites.server")}</span>
       </span>
-      <span className="flex basis-24 flex-col gap-1" title={
-          invite.maxUses
-            ? t("serversettings.invites.usesOf", { uses: invite.uses, count: invite.maxUses })
-            : t("serversettings.invites.usesNoLimit", { count: invite.uses })
-        }>
-        <span className="flex items-center gap-1 text-sm tabular-nums">
-          <b>{invite.uses}</b>
-          <span className="text-muted-foreground">/</span>
-          {invite.maxUses ? <span className="text-muted-foreground">{invite.maxUses}</span> : <InfinityIcon className="size-3.5 text-muted-foreground" />}
-        </span>
-        <span className="h-1 overflow-hidden rounded-full bg-muted">
-          <motion.span
-            className="block h-full rounded-full bg-primary"
-            initial={{ x: "-100%" }}
-            animate={{ x: invite.maxUses ? `${share * 100 - 100}%` : "0%", opacity: invite.maxUses ? 1 : 0.25 }}
-            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-          />
-        </span>
-      </span>
-      <span
-        className={cn("flex basis-24 items-center gap-1 text-sm tabular-nums", left !== null && left < 3_600_000 ? "text-amber-500" : "text-muted-foreground")}
-        title={until ? t("serversettings.invites.expires", { time: formatStamp(until) }) : t("serversettings.invites.neverExpires")}
-      >
-        {left !== null ? <TimerIcon className="size-3.5" /> : <InfinityIcon className="size-3.5" />}
-        {left !== null ? formatLeft(lang, left) : t("serversettings.shared.never")}
-      </span>
+      <InviteUses invite={invite} />
+      <InviteExpiry invite={invite} now={now} />
       <span className="ml-auto flex items-center gap-1">
-        <button
-          type="button"
-          onClick={copyLink}
-          aria-label={t("serversettings.invites.copy")}
-          title={t("serversettings.invites.copy")}
-          className={cn(
-            "grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90",
-            copied && "text-emerald-500 hover:text-emerald-500",
-          )}
-        >
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.span key={String(copied)} initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0 }} transition={SPRING}>
-              {copied ? <CheckIcon className="size-4" strokeWidth={3} /> : <CopyIcon className="size-4" />}
-            </motion.span>
-          </AnimatePresence>
-        </button>
+        <CopyLinkButton link={link} />
         <button
           type="button"
           onClick={onRevoke}
@@ -236,5 +183,82 @@ function Row({
         </button>
       </span>
     </motion.li>
+  );
+}
+
+/** How many times it was used, out of how many, with a bar. */
+function InviteUses({ invite }: { invite: Invite }) {
+  const { t } = useI18n();
+  const share = invite.maxUses ? invite.uses / invite.maxUses : 0;
+  return (
+    <span className="flex basis-24 flex-col gap-1" title={
+        invite.maxUses
+          ? t("serversettings.invites.usesOf", { uses: invite.uses, count: invite.maxUses })
+          : t("serversettings.invites.usesNoLimit", { count: invite.uses })
+      }>
+      <span className="flex items-center gap-1 text-sm tabular-nums">
+        <b>{invite.uses}</b>
+        <span className="text-muted-foreground">/</span>
+        {invite.maxUses ? <span className="text-muted-foreground">{invite.maxUses}</span> : <InfinityIcon className="size-3.5 text-muted-foreground" />}
+      </span>
+      <span className="h-1 overflow-hidden rounded-full bg-muted">
+        <motion.span
+          className="block h-full rounded-full bg-primary"
+          initial={{ x: "-100%" }}
+          animate={{ x: invite.maxUses ? `${share * 100 - 100}%` : "0%", opacity: invite.maxUses ? 1 : 0.25 }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        />
+      </span>
+    </span>
+  );
+}
+
+/** How long until it expires, amber in its last hour. */
+function InviteExpiry({ invite, now }: { invite: Invite; now: number }) {
+  const lang = useI18n();
+  const { t } = lang;
+  const until = expiresAt(invite);
+  const left = until ? until.getTime() - now : null;
+  return (
+    <span
+      className={cn("flex basis-24 items-center gap-1 text-sm tabular-nums", left !== null && left < 3_600_000 ? "text-amber-500" : "text-muted-foreground")}
+      title={until ? t("serversettings.invites.expires", { time: formatStamp(until) }) : t("serversettings.invites.neverExpires")}
+    >
+      {left !== null ? <TimerIcon className="size-3.5" /> : <InfinityIcon className="size-3.5" />}
+      {left !== null ? formatLeft(lang, left) : t("serversettings.shared.never")}
+    </span>
+  );
+}
+
+/** Copies the invite's link, ticking for a moment once it's copied. */
+function CopyLinkButton({ link }: { link: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  function copyLink() {
+    void navigator.clipboard?.writeText(link).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      },
+      () => toast(t("serversettings.invites.copyFailed")),
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={copyLink}
+      aria-label={t("serversettings.invites.copy")}
+      title={t("serversettings.invites.copy")}
+      className={cn(
+        "grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90",
+        copied && "text-emerald-500 hover:text-emerald-500",
+      )}
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span key={String(copied)} initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0 }} transition={SPRING}>
+          {copied ? <CheckIcon className="size-4" strokeWidth={3} /> : <CopyIcon className="size-4" />}
+        </motion.span>
+      </AnimatePresence>
+    </button>
   );
 }

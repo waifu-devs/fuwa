@@ -6,7 +6,7 @@ import { giveRole, run, takeRole } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -20,7 +20,7 @@ import { useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { PollPlace } from "@/components/chat/pollPlace";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { T, useI18n } from "@/i18n/react";
 import { displayName, memberName } from "@/lib/format";
 import { hidesPersonal } from "@/lib/streamer";

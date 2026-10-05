@@ -8,7 +8,7 @@ import { ProviderButton } from "@/components/Connect";
 import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { signedInForServer } from "@/lib/sso";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";

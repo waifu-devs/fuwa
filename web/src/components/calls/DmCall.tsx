@@ -5,7 +5,7 @@ import type { User } from "@/gen/fuwa/v1/types_pb";
 import { hangUp, joinCall } from "@/calls/engine";
 import { useCalls, useInDmCall } from "@/calls/state";
 import { useFuwa } from "@/fuwa/store";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";

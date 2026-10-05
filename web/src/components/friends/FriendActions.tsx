@@ -8,7 +8,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { acceptFriend, blockUser, getRelationship, removeFriend, sendFriendRequest, unblockUser } from "@/fuwa/friends";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { displayName } from "@/lib/format";
 import { BLOCKED, FRIEND, INCOMING, OUTGOING, stateWith } from "@/lib/friends";
 import { toast } from "@/lib/ui";

@@ -1,8 +1,9 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeftIcon, ChevronRightIcon, CornerDownRightIcon, SearchIcon, SearchXIcon, XIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { Count, EASE_OUT, SPRING } from "@/components/motion";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Count } from "@/components/motion";
+import { EASE_OUT, SPRING } from "@/lib/motion";
 import { useI18n } from "@/i18n/react";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
@@ -82,22 +83,26 @@ export function SettingsScreen({
   /** Shown under every section, such as a save bar for edits across sections. */
   footer?: ReactNode;
 }) {
-  const { t } = useI18n();
   const wide = useMediaQuery("(min-width: 768px)");
   const [menu, setMenu] = useState(true);
   const [query, setQuery] = useState("");
   const [glow, setGlow] = useState<{ id: string; n: number } | null>(null);
   const mainRef = useRef<HTMLElement>(null);
-  const [dirty, setDirtyState] = useState<Record<string, GuardScope>>({});
+  // Only read when someone tries to leave, so changes don't redraw anything.
+  const dirty = useRef<Record<string, GuardScope>>({});
   const [nudge, setNudge] = useState(0);
 
-  useEffect(() => {
+  // Each time it opens: the menu (or, with `openToSection`, the section), no search, no nudges yet.
+  const opening = open ? `open:${openToSection}` : null;
+  const [opened, setOpened] = useState<string | null>(null);
+  if (opening !== opened) {
+    setOpened(opening);
     if (open) {
       setMenu(!openToSection);
       setNudge(0);
       setQuery("");
     }
-  }, [open, openToSection]);
+  }
 
   // A setting picked from search: once its section is on screen, scroll to it and let it glow.
   useEffect(() => {
@@ -129,26 +134,20 @@ export function SettingsScreen({
   }, [open]);
 
   const setDirty = useCallback((id: string, scope: GuardScope | null) => {
-    setDirtyState((current) => {
-      if ((current[id] ?? null) === scope) return current;
-      const next = { ...current };
-      if (scope) next[id] = scope;
-      else delete next[id];
-      return next;
-    });
+    if (scope) dirty.current[id] = scope;
+    else delete dirty.current[id];
   }, []);
   const guard = useMemo(() => ({ setDirty, nudge }), [setDirty, nudge]);
-  const scopes = Object.values(dirty);
-  const holdsScreen = scopes.length > 0;
-  const holdsSection = scopes.includes("section");
+  const holdsScreen = () => Object.keys(dirty.current).length > 0;
+  const holdsSection = () => Object.values(dirty.current).includes("section");
 
   const hold = () => setNudge((n) => n + 1);
   function attemptClose() {
-    if (holdsScreen) hold();
+    if (holdsScreen()) hold();
     else onOpenChange(false);
   }
   function choose(id: string, setting?: string) {
-    if (id !== section && holdsSection) return hold();
+    if (id !== section && holdsSection()) return hold();
     onSectionChange(id);
     setMenu(false);
     if (setting) setGlow({ id: setting, n: Date.now() });
@@ -198,52 +197,16 @@ export function SettingsScreen({
                     />
                   )}
                   {showSection && current && (
-                    <main ref={mainRef} className="scroll-thin relative flex min-w-0 flex-[1_1_52rem] flex-col overflow-y-auto">
-                      {!wide && (
-                        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur">
-                          <button
-                            type="button"
-                            onClick={() => (holdsSection ? hold() : setMenu(true))}
-                            aria-label={t("settings.screen.allSettings")}
-                            className="grid size-10 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
-                          >
-                            <ArrowLeftIcon className="size-5" />
-                          </button>
-                          <p className="min-w-0 flex-1 truncate font-extrabold">{current.label}</p>
-                          <CloseButton onClose={attemptClose} compact />
-                        </header>
-                      )}
-                      <div className="flex w-full max-w-[60rem] flex-1">
-                        <div className="flex min-w-0 flex-1 flex-col px-4 pt-6 pb-4 sm:px-10 md:pt-16">
-                          <AnimatePresence mode="wait" initial={false}>
-                            <motion.div
-                              key={current.id}
-                              initial={{ opacity: 0, y: 14 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -8, transition: { duration: 0.12 } }}
-                              transition={SPRING}
-                              className="flex flex-col"
-                            >
-                              {wide && (
-                                <div className="mb-6">
-                                  <h2 className={cn("text-2xl font-extrabold tracking-tight", current.danger && "text-destructive")}>{current.label}</h2>
-                                  {current.description && <p className="mt-1 text-sm text-muted-foreground">{current.description}</p>}
-                                </div>
-                              )}
-                              {!wide && current.description && <p className="mb-4 text-sm text-muted-foreground">{current.description}</p>}
-                              {children}
-                            </motion.div>
-                          </AnimatePresence>
-                          <span className="flex-1" />
-                          {footer}
-                        </div>
-                        {wide && (
-                          <div className="sticky top-0 shrink-0 self-start pt-16 pr-6">
-                            <CloseButton onClose={attemptClose} />
-                          </div>
-                        )}
-                      </div>
-                    </main>
+                    <SectionPane
+                      mainRef={mainRef}
+                      current={current}
+                      wide={wide}
+                      onBack={() => (holdsSection() ? hold() : setMenu(true))}
+                      onClose={attemptClose}
+                      footer={footer}
+                    >
+                      {children}
+                    </SectionPane>
                   )}
                 </GuardContext.Provider>
               </motion.div>
@@ -252,6 +215,75 @@ export function SettingsScreen({
         )}
       </AnimatePresence>
     </DialogPrimitive.Root>
+  );
+}
+
+/** The chosen section, with its heading (or, on phones, a bar back to the menu). */
+function SectionPane({
+  mainRef,
+  current,
+  wide,
+  onBack,
+  onClose,
+  footer,
+  children,
+}: {
+  mainRef: RefObject<HTMLElement | null>;
+  current: SettingsSection;
+  wide: boolean;
+  onBack: () => void;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <main ref={mainRef} className="scroll-thin relative flex min-w-0 flex-[1_1_52rem] flex-col overflow-y-auto">
+      {!wide && (
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={t("settings.screen.allSettings")}
+            className="grid size-10 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
+          >
+            <ArrowLeftIcon className="size-5" />
+          </button>
+          <p className="min-w-0 flex-1 truncate font-extrabold">{current.label}</p>
+          <CloseButton onClose={onClose} compact />
+        </header>
+      )}
+      <div className="flex w-full max-w-[60rem] flex-1">
+        <div className="flex min-w-0 flex-1 flex-col px-4 pt-6 pb-4 sm:px-10 md:pt-16">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={current.id}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8, transition: { duration: 0.12 } }}
+              transition={SPRING}
+              className="flex flex-col"
+            >
+              {wide && (
+                <div className="mb-6">
+                  <h2 className={cn("text-2xl font-extrabold tracking-tight", current.danger && "text-destructive")}>{current.label}</h2>
+                  {current.description && <p className="mt-1 text-sm text-muted-foreground">{current.description}</p>}
+                </div>
+              )}
+              {!wide && current.description && <p className="mb-4 text-sm text-muted-foreground">{current.description}</p>}
+              {children}
+            </motion.div>
+          </AnimatePresence>
+          <span className="flex-1" />
+          {footer}
+        </div>
+        {wide && (
+          <div className="sticky top-0 shrink-0 self-start pt-16 pr-6">
+            <CloseButton onClose={onClose} />
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
 

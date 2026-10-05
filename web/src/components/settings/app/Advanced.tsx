@@ -1,6 +1,7 @@
 import { BugIcon, CheckIcon, FingerprintIcon, GaugeIcon, MousePointerClickIcon, ServerIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
 import { useFuwa } from "@/fuwa/store";
 import { type Key, T, useI18n } from "@/i18n/react";

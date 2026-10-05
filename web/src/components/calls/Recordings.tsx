@@ -7,7 +7,7 @@ import { useAccess } from "@/fuwa/hooks";
 import { toFuwaError } from "@/fuwa/errors";
 import { useFuwa, type FuwaState } from "@/fuwa/store";
 import { engine } from "@/fuwa/sync";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { UserAvatar } from "@/components/Icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";

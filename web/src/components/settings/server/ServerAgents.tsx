@@ -8,7 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";

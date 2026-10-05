@@ -9,7 +9,7 @@ import { CHANNEL_ICON } from "@/components/ChannelSidebar";
 import { useArrange } from "@/hooks/use-arrange";
 import { layoutOf, placements, step, type Layout } from "@/lib/arrange";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Row, Segmented } from "@/components/settings/account/common";
 import { ChannelPermissions } from "@/components/settings/server/ChannelPermissions";
 import { ChannelShare, useSharingOn } from "@/components/settings/server/SharedChannels";

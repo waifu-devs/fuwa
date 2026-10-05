@@ -20,7 +20,7 @@ import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
 import { StartHere, suggestedChannels, type Suggested } from "@/components/join/StartHere";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";

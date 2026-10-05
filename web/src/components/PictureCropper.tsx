@@ -1,7 +1,7 @@
 import { CheckIcon, MoveIcon, RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
-import { EASE_OUT, SPRING } from "@/components/motion";
+import { EASE_OUT, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";

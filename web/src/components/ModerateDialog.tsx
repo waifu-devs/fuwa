@@ -6,7 +6,7 @@ import { banMember, kickMember, setNickname, timeOutMember } from "@/fuwa/action
 import { useAccess, useAction, useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";

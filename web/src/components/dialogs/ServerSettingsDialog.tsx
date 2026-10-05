@@ -76,7 +76,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InlineMarkdown } from "@/components/Markdown";
-import { Count, CountUp, SPRING, SwapText } from "@/components/motion";
+import { Count, CountUp, SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

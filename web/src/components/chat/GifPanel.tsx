@@ -7,7 +7,7 @@ import type { MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run, uploadPicture } from "@/fuwa/actions";
 import { gifCategories, isSaved, prepareGif, saveGif, searchGifs, unsaveGif, useRecentGifs, useSavedGifs } from "@/fuwa/gifs";
 import { GifImage } from "@/components/chat/GifImage";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";

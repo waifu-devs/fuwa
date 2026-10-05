@@ -6,7 +6,8 @@ import { getJoinForm, run, setJoinForm, type QuestionDraft } from "@/fuwa/action
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
@@ -133,7 +134,10 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
                           whileHover={{ y: -2 }}
                           whileTap={{ scale: 0.95 }}
                           transition={SPRING}
-                          onClick={() => setRules((list) => [...list, { id: nextId++, text }])}
+                          onClick={() => {
+                            const id = nextId++;
+                            setRules((list) => [...list, { id, text }]);
+                          }}
                           className="flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition-colors hover:border-primary/50 hover:text-primary"
                         >
                           <PlusIcon className="size-3" /> {text}
@@ -151,7 +155,8 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
             disabled={rules.length >= MAX_RULES}
             onClick={() => {
               focusLast.current = "rule";
-              setRules((list) => [...list, { id: nextId++, text: "" }]);
+              const id = nextId++;
+              setRules((list) => [...list, { id, text: "" }]);
             }}
             className="group self-start rounded-xl font-bold"
           >
@@ -202,7 +207,8 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
             disabled={questions.length >= MAX_QUESTIONS}
             onClick={() => {
               focusLast.current = "question";
-              setQuestions((list) => [...list, { id: nextId++, prompt: "", paragraph: false, required: true }]);
+              const id = nextId++;
+              setQuestions((list) => [...list, { id, prompt: "", paragraph: false, required: true }]);
             }}
             className="group self-start rounded-xl font-bold"
           >

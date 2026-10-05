@@ -14,7 +14,7 @@ import {
 import { CalendarClockIcon, CheckIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useId, useMemo, useState } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { type Key, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { actionById, bindingOf, comboLabel } from "@/lib/keybinds";

@@ -52,7 +52,7 @@ import { listAuditLog, run, type AuditFilter } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

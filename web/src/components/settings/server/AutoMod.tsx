@@ -38,7 +38,7 @@ import { deleteAutoModRule, listAutoModRules, run, saveAutoModRule, testAutoModR
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";

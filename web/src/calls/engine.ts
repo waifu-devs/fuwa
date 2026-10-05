@@ -695,8 +695,9 @@ function preferOpus(transceiver: RTCRtpTransceiver) {
   if (!codecs || !transceiver.setCodecPreferences) return;
   const opus = codecs.filter((c) => c.mimeType.toLowerCase() === "audio/opus");
   if (!opus.length) return;
+  const first = new Set(opus);
   try {
-    transceiver.setCodecPreferences([...opus, ...codecs.filter((c) => !opus.includes(c))]);
+    transceiver.setCodecPreferences([...opus, ...codecs.filter((c) => !first.has(c))]);
   } catch {
     // The browser's own order is fine.
   }

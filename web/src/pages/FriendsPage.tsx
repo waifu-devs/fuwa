@@ -24,7 +24,8 @@ import { acceptFriend, blockUser, removeFriend, sendFriendRequest, unblockUser }
 import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { useLayout } from "@/components/Shell";
 import {

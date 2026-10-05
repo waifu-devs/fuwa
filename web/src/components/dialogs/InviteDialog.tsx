@@ -6,7 +6,7 @@ import { createInvite, listInvites, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { getInstance, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { usePrivateField } from "@/components/Private";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";

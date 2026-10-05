@@ -17,7 +17,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { keepBackground, run, uploadPicture } from "@/fuwa/actions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { BackdropForm, Labeled } from "@/components/settings/app/BackdropForm";
 import { ThemePreview } from "@/components/settings/app/ThemePreview";
 import { Toggle, WithPreview } from "@/components/settings/controls";

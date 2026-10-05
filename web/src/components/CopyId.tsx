@@ -1,7 +1,7 @@
 import { CheckIcon, FingerprintIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { type Key, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { copy } from "@/lib/ui";

@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion, useAnimationControls } from "motion/react
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { run, uploadPicture } from "@/fuwa/actions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { PictureCropper } from "@/components/PictureCropper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

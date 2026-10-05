@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import { addFiles, removeFile, retryFile, type Staged } from "@/components/chat/staged";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
 import { useI18n } from "@/i18n/react";

@@ -6,9 +6,10 @@ import { UpdateReady } from "@/components/UpdateReady";
 import { AppliedWatcher } from "@/components/join/Applied";
 import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
-import { EASE_OUT } from "@/components/motion";
+import { EASE_OUT } from "@/lib/motion";
 import { Rail } from "@/components/Rail";
 import { useFuwa } from "@/fuwa/store";
+import { rememberPath } from "@/lib/last-path";
 import { onCommand } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -33,16 +34,6 @@ export function useLayout(): Layout {
   const layout = useContext(LayoutContext);
   if (!layout) throw new Error("useLayout outside Shell");
   return layout;
-}
-
-const LAST_PATH = "fuwa:last-path";
-
-export function rememberedPath(): string | null {
-  try {
-    return localStorage.getItem(LAST_PATH);
-  } catch {
-    return null;
-  }
 }
 
 export function Shell() {
@@ -76,12 +67,7 @@ export function Shell() {
   // An invite isn't a place to come back to, so it isn't remembered.
   const invite = !!params.code;
   useEffect(() => {
-    if (invite) return;
-    try {
-      localStorage.setItem(LAST_PATH, pathname);
-    } catch {
-      // Not remembered; the app still opens on the first server next time.
-    }
+    if (!invite) rememberPath(pathname);
   }, [pathname, invite]);
 
   const layout = useMemo(

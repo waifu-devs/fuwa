@@ -3,7 +3,7 @@ import { ArrowUpRightIcon, LockIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { Private } from "@/components/Private";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { T, useI18n } from "@/i18n/react";
 import { hostedByUs } from "@/lib/hosted";
 import { cn } from "@/lib/utils";

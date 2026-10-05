@@ -7,7 +7,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n/react";
@@ -74,6 +74,68 @@ export function AgreeCheck({ checked, onChange, children }: { checked: boolean; 
 }
 
 /**
+ * "I agree" and the button that agrees and lets you talk. `nudge` shakes it
+ * when the button is pressed before the box is ticked.
+ */
+export function AgreeAndTalk({
+  nudge,
+  checked,
+  onChange,
+  error,
+  pending,
+  onAgree,
+}: {
+  nudge: ReturnType<typeof useAnimationControls>;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  error: string | null | undefined;
+  pending: boolean;
+  onAgree: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <motion.div animate={nudge} className="flex flex-col gap-3">
+      <AgreeCheck checked={checked} onChange={onChange}>
+        {t("join.rules.agree")}
+      </AgreeCheck>
+      {error && <p className="text-sm text-destructive first-letter:uppercase">{error}</p>}
+      <Button size="lg" onClick={onAgree} disabled={pending} className={cn("h-11 rounded-xl font-bold transition-opacity", checked ? "btn" : "opacity-60")}>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={pending ? "busy" : "agree"}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={SPRING}
+            className="flex items-center gap-2"
+          >
+            {pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
+            {t("join.rules.agreeAndTalk")}
+          </motion.span>
+        </AnimatePresence>
+      </Button>
+    </motion.div>
+  );
+}
+
+/** The rules once they're in: shimmering while they load, or what went wrong. */
+function RulesContent({ rules, problem, agreeing }: { rules: string[] | null; problem: string | null; agreeing: boolean }) {
+  const { t } = useI18n();
+  if (problem) return <p className="text-sm text-muted-foreground first-letter:uppercase">{problem}</p>;
+  if (rules === null)
+    return (
+      <div className="flex flex-col gap-2">
+        {[80, 60, 70].map((w, n) => (
+          <div key={n} className="shimmer h-12 rounded-2xl" style={{ width: `${w + 20}%` }} />
+        ))}
+      </div>
+    );
+  if (rules.length === 0)
+    return <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">{agreeing ? t("join.rules.noneTalk") : t("join.rules.none")}</p>;
+  return <RulesList rules={rules} className="scroll-thin max-h-[45svh] overflow-y-auto pr-1" />;
+}
+
+/**
  * A server's rules. Members who haven't agreed to them yet agree here and can
  * talk straight away; everyone else just reads them.
  */
@@ -94,20 +156,21 @@ export function RulesDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <RulesBody instanceKey={instanceKey} server={server} agree={agree} onDone={() => onOpenChange(false)} />
+        <RulesBody instanceKey={instanceKey} server={server} initialAgree={agree} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string; server: Server; agree: boolean; onDone: () => void }) {
+/** `initialAgree` is read once, when it opens. */
+function RulesBody({ instanceKey, server, initialAgree, onDone }: { instanceKey: string; server: Server; initialAgree: boolean; onDone: () => void }) {
   const [rules, setRules] = useState<string[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
   const accept = useAction(agreeToRules);
   const nudge = useAnimationControls();
   // Only while it's open: agreeing elsewhere (another tab) mustn't turn this into the reading view mid-way.
-  const [agreeing] = useState(agree);
+  const [agreeing] = useState(initialAgree);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -153,47 +216,10 @@ function RulesBody({ instanceKey, server, agree, onDone }: { instanceKey: string
         </div>
       </div>
 
-      {problem ? (
-        <p className="text-sm text-muted-foreground first-letter:uppercase">{problem}</p>
-      ) : rules === null ? (
-        <div className="flex flex-col gap-2">
-          {[80, 60, 70].map((w, n) => (
-            <div key={n} className="shimmer h-12 rounded-2xl" style={{ width: `${w + 20}%` }} />
-          ))}
-        </div>
-      ) : rules.length === 0 ? (
-        <p className="rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">{agreeing ? t("join.rules.noneTalk") : t("join.rules.none")}</p>
-      ) : (
-        <RulesList rules={rules} className="scroll-thin max-h-[45svh] overflow-y-auto pr-1" />
-      )}
+      <RulesContent rules={rules} problem={problem} agreeing={agreeing} />
 
       {agreeing && rules !== null && rules.length > 0 && (
-        <motion.div animate={nudge} className="flex flex-col gap-3">
-          <AgreeCheck checked={checked} onChange={setChecked}>
-            {t("join.rules.agree")}
-          </AgreeCheck>
-          {accept.error && <p className="text-sm text-destructive first-letter:uppercase">{accept.error}</p>}
-          <Button
-            size="lg"
-            onClick={() => void submit()}
-            disabled={accept.pending}
-            className={cn("h-11 rounded-xl font-bold transition-opacity", checked ? "btn" : "opacity-60")}
-          >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={accept.pending ? "busy" : "agree"}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={SPRING}
-                className="flex items-center gap-2"
-              >
-                {accept.pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
-                {t("join.rules.agreeAndTalk")}
-              </motion.span>
-            </AnimatePresence>
-          </Button>
-        </motion.div>
+        <AgreeAndTalk nudge={nudge} checked={checked} onChange={setChecked} error={accept.error} pending={accept.pending} onAgree={() => void submit()} />
       )}
       {(!agreeing || (rules !== null && rules.length === 0)) && (
         <Button variant="outline" onClick={onDone} className="h-10 rounded-xl font-bold">

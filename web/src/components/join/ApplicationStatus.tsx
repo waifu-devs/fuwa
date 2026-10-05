@@ -6,7 +6,7 @@ import { ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
 import { withdrawApplication } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { BannerHero } from "@/components/join/Banner";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { type I18n, useI18n } from "@/i18n/react";

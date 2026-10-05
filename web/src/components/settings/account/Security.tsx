@@ -17,7 +17,8 @@ import { disableTwoFactor, enableTwoFactor, getTwoFactor, regenerateBackupCodes,
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { CodeInput } from "@/components/CodeInput";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { PasswordInput, Row, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

@@ -8,7 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { notificationKey, useFuwa } from "@/fuwa/store";
 import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";

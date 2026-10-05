@@ -7,7 +7,8 @@ import { createEmoji, deleteEmoji, renameEmoji, run, serverUsage, uploadPicture 
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EMOJI_NAME, emojiPicture, nameFromFile } from "@/lib/emoji";

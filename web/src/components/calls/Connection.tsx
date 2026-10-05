@@ -3,7 +3,8 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import type { ActiveCall } from "@/calls/state";
 import { formatPing, useQualityEffect, useQualityLevel, useQualityText, type Level, type Quality, type Route } from "@/calls/quality";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
 

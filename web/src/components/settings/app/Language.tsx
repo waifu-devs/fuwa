@@ -1,7 +1,7 @@
 import { LanguagesIcon, MonitorIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice } from "@/components/settings/controls";
 import { coverage, LANGUAGES, languageOf, loadCatalog } from "@/i18n/catalogs";
 import { browserLanguage, switchLanguage } from "@/i18n/i18n";

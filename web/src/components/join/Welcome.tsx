@@ -1,16 +1,15 @@
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, PartyPopperIcon, ScrollTextIcon } from "lucide-react";
-import { AnimatePresence, m as motion, useAnimationControls, useScroll } from "motion/react";
+import { ScrollTextIcon } from "lucide-react";
+import { m as motion, useAnimationControls, useScroll } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Permission, type Channel, type Emoji, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance, useMyMember } from "@/fuwa/hooks";
 import { BannerHero } from "@/components/join/Banner";
-import { AgreeCheck, RulesList } from "@/components/join/Rules";
+import { AgreeAndTalk, RulesList } from "@/components/join/Rules";
 import { StartHere, suggestedChannels } from "@/components/join/StartHere";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING } from "@/components/motion";
-import { Button } from "@/components/ui/button";
+import { SPRING } from "@/lib/motion";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { accentVars, type BannerServer } from "@/lib/banner";
@@ -288,27 +287,7 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
       ) : (
         <RulesList rules={rules} className="scroll-thin max-h-56 overflow-y-auto pr-1" />
       )}
-      <motion.div animate={nudge} className="flex flex-col gap-3">
-        <AgreeCheck checked={checked} onChange={setChecked}>
-          {t("join.rules.agree")}
-        </AgreeCheck>
-        {accept.error && <p className="text-sm text-destructive first-letter:uppercase">{accept.error}</p>}
-        <Button size="lg" onClick={() => void submit()} disabled={accept.pending} className={cn("h-11 rounded-xl font-bold transition-opacity", checked ? "btn" : "opacity-60")}>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.span
-              key={accept.pending ? "busy" : "agree"}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={SPRING}
-              className="flex items-center gap-2"
-            >
-              {accept.pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
-              {t("join.rules.agreeAndTalk")}
-            </motion.span>
-          </AnimatePresence>
-        </Button>
-      </motion.div>
+      <AgreeAndTalk nudge={nudge} checked={checked} onChange={setChecked} error={accept.error} pending={accept.pending} onAgree={() => void submit()} />
     </motion.section>
   );
 }

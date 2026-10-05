@@ -7,7 +7,7 @@ import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { EmojiImage } from "@/components/EmojiImage";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { choiceName, encodeEmoji, rememberEmoji, searchCatalog, toned, useCatalog, useSkinTone, useStandard, type Choice } from "@/lib/emoji-catalog";
 import { useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";

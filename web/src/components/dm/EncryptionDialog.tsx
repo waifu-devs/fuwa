@@ -6,7 +6,7 @@ import { verifyDm } from "@/fuwa/dms";
 import { engine } from "@/fuwa/sync";
 import { useFuwa, type DmMember } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Padlock } from "@/components/dm/Padlock";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";

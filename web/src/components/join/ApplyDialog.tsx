@@ -9,7 +9,7 @@ import { useAction } from "@/fuwa/hooks";
 import { ApplicationCard } from "@/components/join/ApplicationStatus";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";

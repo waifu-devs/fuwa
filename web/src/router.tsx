@@ -9,7 +9,8 @@ import {
 import { useState } from "react";
 import { useInstanceOrder } from "@/fuwa/hooks";
 import { aliasToKey, keyToAlias } from "@/lib/streamer";
-import { rememberedPath, Shell } from "@/components/Shell";
+import { Shell } from "@/components/Shell";
+import { rememberedPath } from "@/lib/last-path";
 import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { instanceKey } from "@/fuwa/saved";
 import { DmView } from "@/components/dm/DmView";

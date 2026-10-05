@@ -3,10 +3,11 @@ import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, Trash2Ic
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { deleteAccount, exportData, getTwoFactor, run } from "@/fuwa/actions";
+import type { User } from "@/gen/fuwa/v1/types_pb";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { hasPassword } from "@/components/settings/Account";
 import { PasswordInput, useShake } from "@/components/settings/account/common";
@@ -190,25 +191,66 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
   const me = inst?.me;
   const standalone = hasPassword(me ?? undefined);
   const [twoStep, setTwoStep] = useState(false);
-  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
-  const [code, setCode] = useState("");
-  const [username, setUsername] = useState("");
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [shake, doShake] = useShake();
-  const navigate = useNavigate();
 
   useEffect(() => {
-    if (!open) return;
-    setPassword("");
-    setCode("");
-    setUsername("");
-    setError(null);
-    if (standalone) run(getTwoFactor(instanceKey)).then((s) => setTwoStep(s.enabled), () => setTwoStep(false));
+    if (open && standalone) run(getTwoFactor(instanceKey)).then((s) => setTwoStep(s.enabled), () => setTwoStep(false));
   }, [open, instanceKey, standalone]);
 
   if (!me) return null;
+  return (
+    <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
+      <DialogContent>
+        <DialogHeader title={t("accountsettings.privacy.dialogTitle")} description={t("accountsettings.privacy.dialogHint", { instance: where })} />
+        <DeleteForm
+          instanceKey={instanceKey}
+          where={where}
+          me={me}
+          standalone={standalone}
+          twoStep={twoStep}
+          show={show}
+          onShow={setShow}
+          pending={pending}
+          setPending={setPending}
+          onClose={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** What deleting asks for: your password (and code), or your username. Starts empty each time the dialog opens. */
+function DeleteForm({
+  instanceKey,
+  where,
+  me,
+  standalone,
+  twoStep,
+  show,
+  onShow,
+  pending,
+  setPending,
+  onClose,
+}: {
+  instanceKey: string;
+  where: string;
+  me: User;
+  standalone: boolean;
+  twoStep: boolean;
+  show: boolean;
+  onShow: (show: boolean) => void;
+  pending: boolean;
+  setPending: (pending: boolean) => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [username, setUsername] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [shake, doShake] = useShake();
+  const navigate = useNavigate();
   const ready = standalone ? password.length > 0 && (!twoStep || code.trim().length >= 6) : username.trim().toLowerCase() === me.username;
 
   async function submit(e: FormEvent) {
@@ -218,7 +260,7 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
     setError(null);
     try {
       await run(deleteAccount(instanceKey, standalone ? { password, code: code.trim() } : { username: username.trim() }));
-      onOpenChange(false);
+      onClose();
       closeSettings();
       toast(t("accountsettings.privacy.gone", { instance: where }));
       void navigate({ to: "/" });
@@ -231,61 +273,54 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
-      <DialogContent>
-        <DialogHeader title={t("accountsettings.privacy.dialogTitle")} description={t("accountsettings.privacy.dialogHint", { instance: where })} />
-        <form onSubmit={submit} className="flex flex-col gap-4">
-          <ul className="flex flex-col gap-2 rounded-2xl bg-muted/60 p-3 text-sm">
-            {[t("accountsettings.privacy.lineProfile"), t("accountsettings.privacy.lineMessages"), t("accountsettings.privacy.lineServers")].map((line, n) => (
-              <motion.li key={line} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ ...SPRING, delay: 0.1 + n * 0.05 }} className="flex gap-2">
-                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-                {line}
-              </motion.li>
-            ))}
-          </ul>
-          <motion.div animate={shake} className="flex flex-col gap-3">
-            {standalone ? (
-              <>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.yourPassword")}</span>
-                  <PasswordInput id="delete-password" autoComplete="current-password" value={password} onChange={setPassword} show={show} onShow={setShow} />
-                </label>
-                <AnimatePresence initial={false}>
-                  {twoStep && (
-                    <motion.label initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-1.5 overflow-hidden">
-                      <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.codeOrBackup")}</span>
-                      <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" maxLength={16} spellCheck={false} placeholder="123456" className="h-11 rounded-xl font-mono tracking-wider" />
-                    </motion.label>
-                  )}
-                </AnimatePresence>
-              </>
-            ) : (
-              <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-bold text-muted-foreground">
-                  <T k="accountsettings.privacy.typeUsername" values={{ username: <Private text={me.username} kind="name" className="font-mono text-foreground" /> }} />
-                </span>
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" spellCheck={false} className="h-11 rounded-xl" />
-              </label>
-            )}
-          </motion.div>
-          <AnimatePresence initial={false}>
-            {error && (
-              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
-                {error}
-              </motion.p>
-            )}
-          </AnimatePresence>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)} disabled={pending}>
-              {t("accountsettings.privacy.keep")}
-            </Button>
-            <Button type="submit" variant="destructive" className={cn("rounded-xl font-bold transition-opacity", !ready && "opacity-60")} disabled={pending}>
-              {pending ? t("accountsettings.privacy.deleting") : t("accountsettings.privacy.deleteForever")}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <ul className="flex flex-col gap-2 rounded-2xl bg-muted/60 p-3 text-sm">
+        {[t("accountsettings.privacy.lineProfile"), t("accountsettings.privacy.lineMessages"), t("accountsettings.privacy.lineServers")].map((line, n) => (
+          <motion.li key={line} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ ...SPRING, delay: 0.1 + n * 0.05 }} className="flex gap-2">
+            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+            {line}
+          </motion.li>
+        ))}
+      </ul>
+      <motion.div animate={shake} className="flex flex-col gap-3">
+        {standalone ? (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.yourPassword")}</span>
+            <PasswordInput id="delete-password" autoComplete="current-password" value={password} onChange={setPassword} show={show} onShow={onShow} />
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-bold text-muted-foreground">
+              <T k="accountsettings.privacy.typeUsername" values={{ username: <Private text={me.username} kind="name" className="font-mono text-foreground" /> }} />
+            </span>
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" spellCheck={false} className="h-11 rounded-xl" />
+          </label>
+        )}
+        <AnimatePresence initial={false}>
+          {standalone && twoStep && (
+            <motion.label initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-1.5 overflow-hidden">
+              <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.codeOrBackup")}</span>
+              <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" maxLength={16} spellCheck={false} placeholder="123456" className="h-11 rounded-xl font-mono tracking-wider" />
+            </motion.label>
+          )}
+        </AnimatePresence>
+      </motion.div>
+      <AnimatePresence initial={false}>
+        {error && (
+          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+            {error}
+          </motion.p>
+        )}
+      </AnimatePresence>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" className="rounded-xl" onClick={onClose} disabled={pending}>
+          {t("accountsettings.privacy.keep")}
+        </Button>
+        <Button type="submit" variant="destructive" className={cn("rounded-xl font-bold transition-opacity", !ready && "opacity-60")} disabled={pending}>
+          {pending ? t("accountsettings.privacy.deleting") : t("accountsettings.privacy.deleteForever")}
+        </Button>
+      </div>
+    </form>
   );
 }
 

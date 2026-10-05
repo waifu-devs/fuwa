@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import type { Channel, SharedServer } from "@/gen/fuwa/v1/types_pb";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/react";
 import { sharedLabel } from "@/lib/shared";

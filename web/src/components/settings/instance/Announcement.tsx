@@ -7,7 +7,7 @@ import { AnnouncementSchema, AnnouncementTone } from "@/gen/fuwa/v1/types_pb";
 import { setAnnouncement } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { BannerBody, endsLabel, isLive, toneOf } from "@/components/AnnouncementBanner";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";

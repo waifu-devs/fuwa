@@ -58,11 +58,12 @@ export function accept(entries: Candidate[], ctx: Context): number[] {
     }
   }
   if (!on) return [];
+  const allowed = new Set(ctx.allowed);
   const taken = new Set<number>();
   const kept: number[] = [];
   entries.forEach((e, i) => {
     if (e.seq <= since || e.seq >= ctx.joined) return;
-    if (!ctx.allowed.includes(e.senderId) || !ctx.devices.has(`${e.senderId}/${e.deviceId}`)) return;
+    if (!allowed.has(e.senderId) || !ctx.devices.has(`${e.senderId}/${e.deviceId}`)) return;
     const r = ctx.log.get(e.seq);
     if (!r || r.kind !== "message" || r.deleted || r.senderId !== e.senderId) return;
     if (e.kind === "text") {

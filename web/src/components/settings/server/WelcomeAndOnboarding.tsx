@@ -9,7 +9,7 @@ import { BannerHero, ServerBanner } from "@/components/join/Banner";
 import { OnboardingFlow, stepsFor } from "@/components/join/Onboarding";
 import { RulesList } from "@/components/join/Rules";
 import { WelcomeCard } from "@/components/join/Welcome";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { PictureField } from "@/components/PictureField";
 import { SaveBar } from "@/components/settings/controls";
 import { OnboardingFields, onboardingChanges, onboardingDraft, onboardingOf, type OnboardingDraft } from "@/components/settings/server/OnboardingEditor";

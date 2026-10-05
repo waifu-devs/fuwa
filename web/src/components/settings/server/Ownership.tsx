@@ -5,7 +5,7 @@ import type { Member, Server } from "@/gen/fuwa/v1/types_pb";
 import { transferOwnership } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

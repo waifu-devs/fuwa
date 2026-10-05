@@ -42,14 +42,15 @@ import {
   type ThreadTarget,
 } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
-import { sendsMessage } from "@/components/chat/Composer";
+import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { insertAtCaret } from "@/lib/caret";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
 import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
 import { displayName, formatFull, sameDay } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";

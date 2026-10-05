@@ -1,7 +1,7 @@
 import { CheckIcon, CopyIcon, DownloadIcon, HistoryIcon, KeyRoundIcon, LockKeyholeIcon, RotateCcwIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { dmEngine } from "@/e2ee/engine";

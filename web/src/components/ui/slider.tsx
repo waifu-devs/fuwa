@@ -1,7 +1,7 @@
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /**

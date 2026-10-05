@@ -1,7 +1,7 @@
 import { ArrowUpRightIcon, GiftIcon } from "lucide-react";
 import { m as motion } from "motion/react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { type I18n, useI18n } from "@/i18n/react";
 import { formatStamp, toDate } from "@/lib/format";
 import { reduceMotion } from "@/lib/prefs";

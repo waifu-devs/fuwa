@@ -2,7 +2,7 @@ import { PaperclipIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useRef } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { cleanName } from "@/files/sealed";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";

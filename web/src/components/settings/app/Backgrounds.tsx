@@ -1,6 +1,6 @@
 import { PaletteIcon } from "lucide-react";
 import { m as motion } from "motion/react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { BackdropForm } from "@/components/settings/app/BackdropForm";
 import { ThemePreview } from "@/components/settings/app/ThemePreview";
 import { WithPreview } from "@/components/settings/controls";

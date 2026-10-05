@@ -10,7 +10,8 @@ import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/compon
 import { Faces, PanelButton, SWAP, ThreadListHeader } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { ago, displayName } from "@/lib/format";
 import { T, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";

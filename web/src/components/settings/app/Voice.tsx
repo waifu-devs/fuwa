@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
 import { VideoView } from "@/components/calls/Video";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";

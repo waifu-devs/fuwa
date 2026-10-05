@@ -33,7 +33,7 @@ import {
 import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";

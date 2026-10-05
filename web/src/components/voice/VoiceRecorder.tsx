@@ -2,7 +2,7 @@ import { MicIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { micProblem } from "@/calls/audio";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError } from "@/lib/reports";
 import { cn } from "@/lib/utils";

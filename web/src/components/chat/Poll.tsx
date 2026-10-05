@@ -5,7 +5,8 @@ import type { Emoji, Message, Poll, PollAnswer, User } from "@/gen/fuwa/v1/types
 import { endPoll, listPollVoters, run, votePoll } from "@/fuwa/actions";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { UserAvatar } from "@/components/Icons";
-import { CountUp, SPRING } from "@/components/motion";
+import { CountUp } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { displayName, formatFull, toDate } from "@/lib/format";

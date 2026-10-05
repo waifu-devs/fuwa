@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { getRecordingVideo, run, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice, SaveBar, WithPreview } from "@/components/settings/controls";
 import { useI18n } from "@/i18n/react";
 

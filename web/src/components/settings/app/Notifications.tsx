@@ -2,7 +2,8 @@ import { AtSignIcon, BellRingIcon, MessagesSquareIcon, PlayIcon, TvMinimalPlayIc
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { FuwaMark } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
