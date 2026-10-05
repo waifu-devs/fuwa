@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
+import { isTag } from "@/i18n/core";
 import { applyTheme, BUILTIN_THEMES, isDark, type Theme } from "@/lib/themes";
 
 /**
@@ -49,6 +50,8 @@ export type Prefs = {
   saturation: number;
   underlineLinks: boolean;
   roleColors: RoleColors;
+  /** The app's language: "auto" follows the browser's, or a language tag from locales/. */
+  language: string;
   clock: Clock;
   sendWith: SendWith;
   desktopNotifications: boolean;
@@ -115,6 +118,7 @@ export const DEFAULT_PREFS: Prefs = {
   saturation: 100,
   underlineLinks: false,
   roleColors: "names",
+  language: "auto",
   clock: "auto",
   sendWith: "enter",
   desktopNotifications: false,
@@ -200,6 +204,8 @@ function sanitize(p: Prefs): Prefs {
     reduceMotion: oneOf(p.reduceMotion, ["system", "always", "never"], d.reduceMotion),
     saturation: clamp(p.saturation, 0, 100, d.saturation),
     roleColors: oneOf(p.roleColors, ["names", "beside", "off"], d.roleColors),
+    // A language this build doesn't ship stays picked (a newer build may have it) and shows as English.
+    language: typeof p.language === "string" && (p.language === "auto" || isTag(p.language)) ? p.language : d.language,
     clock: oneOf(p.clock, ["auto", "12h", "24h"], d.clock),
     sendWith: oneOf(p.sendWith, ["enter", "mod-enter"], d.sendWith),
     notifyFor: oneOf(p.notifyFor, ["mentions", "all"], d.notifyFor),
