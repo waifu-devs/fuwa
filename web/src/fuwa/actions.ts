@@ -226,6 +226,79 @@ export const ssoSignInInfo = (url: string, state: string, serverId?: string) =>
     return { origin: r.returnOrigin, provider: r.providerName, server: "", test: r.test };
   });
 
+// ───────────────────── Google, X and Twitch ─────────────────────
+
+/**
+ * Signs in with Google, X or Twitch (`provider` is its id). Comes back to
+ * /auth/provider/done, which finishes with `finishProviderSignIn`.
+ */
+export const startProviderSignIn = (url: string, provider: string, next: string | null) =>
+  Effect.gen(function* () {
+    const { secret, secretHash } = yield* ssoSecret;
+    const res = yield* call((signal) =>
+      makeApi(url, () => null).auth.startProviderSignIn({ provider, returnOrigin: window.location.origin, secretHash }, { signal }),
+    );
+    return yield* leaveFor(res.authorizeUrl, res.state, { url, secret, next, provider, startedAt: Date.now() });
+  });
+
+/**
+ * Finishes a provider sign-in this tab started. Someone new is asked first
+ * (`newAccount`), then comes back with `create`: a username, and whether to
+ * bring their name and picture along. Two-step accounts get a `ticket`.
+ */
+export const finishProviderSignIn = (
+  pending: PendingSso,
+  state: string,
+  code: string,
+  create?: { username: string; useProfile: boolean },
+) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      makeApi(pending.url, () => null).auth.finishProviderSignIn(
+        { state, code, secret: pending.secret, create: !!create, username: create?.username ?? "", useProfile: !!create?.useProfile },
+        { signal },
+      ),
+    );
+    if (res.newAccount) return { newAccount: res.newAccount } as const;
+    if (res.twoFactorTicket) return { ticket: res.twoFactorTicket } as const;
+    return { key: addAccount(pending.url, res.token, res.user), user: res.user, created: res.created } as const;
+  });
+
+/** Which app a provider sign-in that came back to this instance belongs to. */
+export const providerSignInInfo = (url: string, provider: string, state: string) =>
+  Effect.gen(function* () {
+    const r = yield* call((signal) => makeApi(url, () => null).auth.getProviderSignIn({ provider, state }, { signal }));
+    return { origin: r.returnOrigin, provider: r.providerName };
+  });
+
+/** How your account signs in, and what it could link. */
+export const listSignInMethods = (key: string) =>
+  call((signal) => api(key).account.listSignInMethods({}, { signal }));
+
+/**
+ * Links Google, X or Twitch to your account, proving it's you with the
+ * password and two-step code where the account has them. Comes back to
+ * /auth/provider/done, which finishes with `finishProviderLink`.
+ */
+export const startProviderLink = (key: string, provider: string, proof: { password: string; code: string }, next: string) =>
+  Effect.gen(function* () {
+    const { secret, secretHash } = yield* ssoSecret;
+    const res = yield* call((signal) =>
+      api(key).account.startProviderLink({ provider, returnOrigin: window.location.origin, secretHash, ...proof }, { signal }),
+    );
+    return yield* leaveFor(res.authorizeUrl, res.state, { url: engine(key).url, secret, next, provider, link: true, startedAt: Date.now() });
+  });
+
+export const finishProviderLink = (pending: PendingSso, state: string, code: string) =>
+  Effect.gen(function* () {
+    const key = instanceKey(pending.url);
+    const res = yield* call((signal) => api(key).account.finishProviderLink({ state, code, secret: pending.secret }, { signal }));
+    return { key, method: res.method };
+  });
+
+export const unlinkProvider = (key: string, provider: string, proof: { password: string; code: string }) =>
+  call((signal) => api(key).account.unlinkProvider({ provider, ...proof }, { signal }));
+
 /** A server's provider and who has signed in through it. Managers only. */
 export const getServerSso = (key: string, serverId: string) =>
   call((signal) => api(key).sso.getServerSso({ serverId }, { signal }));

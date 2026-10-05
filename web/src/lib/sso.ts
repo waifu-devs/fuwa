@@ -37,6 +37,10 @@ export type PendingSso = {
   inviteCode?: string;
   /** An admin checking the instance's provider: nobody gets signed in. */
   test?: boolean;
+  /** Google, X or Twitch, by id, for a provider sign-in or link. */
+  provider?: string;
+  /** Linking `provider` to the signed-in account rather than signing in. */
+  link?: boolean;
   startedAt: number;
 };
 

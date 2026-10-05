@@ -19,6 +19,7 @@ import { FriendsPage } from "@/pages/FriendsPage";
 import { InvitePage } from "@/pages/InvitePage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
 import { SsoDone } from "@/pages/SsoDone";
+import { ProviderDone } from "@/pages/ProviderDone";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 import { lazyComponent } from "@/components/lazy";
@@ -101,6 +102,9 @@ const linkedCallback = createRoute({ getParentRoute: () => root, path: "auth/wai
 /** Where an instance sends people back to after single sign-on (its own, or a server's). */
 const ssoDone = createRoute({ getParentRoute: () => root, path: "auth/sso/done", component: SsoDone });
 
+/** Where an instance sends people back to after signing in with Google, X or Twitch, or linking one. */
+const providerDone = createRoute({ getParentRoute: () => root, path: "auth/provider/done", component: ProviderDone });
+
 const instance = createRoute({ getParentRoute: () => root, path: "$instance", component: Shell });
 
 const instanceIndex = createRoute({
@@ -167,6 +171,7 @@ const routeTree = root.addChildren([
   inviteHere,
   linkedCallback,
   ssoDone,
+  providerDone,
   instance.addChildren([instanceIndex, invite, dm, friends, server.addChildren([serverIndex, channel])]),
 ]);
 

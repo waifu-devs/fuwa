@@ -95,5 +95,8 @@
   "nav.activity": "Mostrar lo que estoy haciendo",
   "nav.export": "Descargar tus datos",
   "nav.deleteAccount": "Eliminar tu cuenta",
-  "nav.signOut": "Cerrar sesión"
+  "nav.signOut": "Cerrar sesión",
+  "nav.signInMethods": "Formas de iniciar sesión",
+  "nav.signInMethodsAbout": "Cómo entras a {instance}: tu contraseña, Google, X o Twitch.",
+  "nav.linkProvider": "Vincular Google, X o Twitch"
 }

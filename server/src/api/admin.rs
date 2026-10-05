@@ -164,6 +164,9 @@ impl AdminService for Api {
                         )
                     })?;
                 }
+                if touches("sign_in_providers") {
+                    crate::sso::providers::check_ready(&after_reset.sign_in_providers)?;
+                }
                 // There's always a way in: standalone accounts, or waifu.dev or
                 // single sign-on that works.
                 if (touches("local_accounts")

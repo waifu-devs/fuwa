@@ -84,5 +84,12 @@
   "accounts.addTitle": "Add an account",
   "accounts.addAbout": "Sign in to another account on {instance}. You can switch between them from the menu under your name.",
   "accounts.continueAs": "Continue as",
-  "accounts.orAnother": "Or sign in to another account"
+  "accounts.orAnother": "Or sign in to another account",
+  "providerDone.linked": "{name} is linked",
+  "providerDone.couldntLink": "Couldn't link it",
+  "providerDone.newTitle": "Make your account",
+  "providerDone.newNote": "You'll sign in here with {provider}. Pick the name people see you by; you can change it later.",
+  "providerDone.useProfile": "Use my {provider} name and picture",
+  "providerDone.pictureOnly": "Your picture, copied to this instance",
+  "providerDone.create": "Make my account"
 }

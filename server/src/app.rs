@@ -582,6 +582,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             sso_name: if settings.sso_sign_in() { settings.sso_provider.name.clone() } else { String::new() },
             sso_host: if settings.sso_sign_in() { settings.sso_provider.host() } else { String::new() },
             linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
+            providers: settings.sign_in_provider_options(),
         }),
         server_creation: settings.server_creation as i32,
         agent_creation: settings.agent_creation as i32,
@@ -800,7 +801,7 @@ fn spawn_poll_closings(app: Arc<App>) {
 }
 
 /// Hourly: drops expired sessions, the direct-message devices they had,
-/// uploads nothing uses, and friend requests that ran out.
+/// uploads nothing uses, and friend requests and sign-ins that ran out.
 fn spawn_housekeeping(app: Arc<App>) {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(Duration::from_secs(60 * 60));
@@ -819,6 +820,9 @@ fn spawn_housekeeping(app: Arc<App>) {
                     }
                     if async { app.friends()?.sweep(crate::id::now_ms()).await }.await.is_err() {
                         tracing::warn!("couldn't sweep friend requests that ran out");
+                    }
+                    if async { app.node()?.sweep_sso_sign_ins(crate::id::now_ms()).await }.await.is_err() {
+                        tracing::warn!("couldn't sweep sign-ins that ran out");
                     }
                 }
             }

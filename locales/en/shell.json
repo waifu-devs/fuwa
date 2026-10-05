@@ -18,5 +18,7 @@
   "hosted.who": "The people who make fuwa run this instance.",
   "hosted.checked": "{host} · your browser checked its certificate",
   "hosted.why": "Only instances at our own addresses get this badge. The app goes by the address alone, since any server could say anything about itself.",
-  "hosted.about": "About fuwa"
+  "hosted.about": "About fuwa",
+  "signInNotice.added": "{name} was added as a way to sign in to your account on {date}. Not you?",
+  "signInNotice.review": "Review"
 }

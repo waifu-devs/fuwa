@@ -34,7 +34,7 @@ const MAX_BODY: usize = 1024 * 1024;
 const FAILURE_TTL_MS: i64 = 60 * 1000;
 
 /// Reads a response body, refusing one bigger than [`MAX_BODY`].
-async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>> {
+pub(super) async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>> {
     let too_big = || Error::FailedPrecondition("the identity provider sent far more than an answer needs".into());
     if response.content_length().is_some_and(|n| n > MAX_BODY as u64) {
         return Err(too_big());
@@ -133,7 +133,7 @@ fn fetchable(url: &str, public_only: bool) -> Result<reqwest::Url> {
     Ok(parsed)
 }
 
-fn unreachable(_: reqwest::Error) -> Error {
+pub(super) fn unreachable(_: reqwest::Error) -> Error {
     tracing::info!("couldn't reach an identity provider");
     Error::Unavailable("the identity provider can't be reached right now; try again soon".into())
 }

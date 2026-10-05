@@ -84,5 +84,12 @@
   "accounts.addTitle": "Añadir una cuenta",
   "accounts.addAbout": "Inicia sesión con otra cuenta en {instance}. Puedes cambiar entre ellas desde el menú bajo tu nombre.",
   "accounts.continueAs": "Continuar como",
-  "accounts.orAnother": "O inicia sesión con otra cuenta"
+  "accounts.orAnother": "O inicia sesión con otra cuenta",
+  "providerDone.linked": "{name} quedó vinculado",
+  "providerDone.couldntLink": "No se pudo vincular",
+  "providerDone.newTitle": "Crea tu cuenta",
+  "providerDone.newNote": "Iniciarás sesión aquí con {provider}. Elige el nombre con el que te verán; puedes cambiarlo después.",
+  "providerDone.useProfile": "Usar mi nombre y foto de {provider}",
+  "providerDone.pictureOnly": "Tu foto, copiada a esta instancia",
+  "providerDone.create": "Crear mi cuenta"
 }

@@ -15,6 +15,7 @@
 
 pub mod http;
 pub mod oidc;
+pub mod providers;
 pub mod saml;
 pub mod ticket;
 pub mod xml;
@@ -617,6 +618,7 @@ pub async fn load(conn: &Connection, state: &str) -> Result<Option<SignIn>> {
 /// Records the provider's answer, once: false if it was already answered.
 pub async fn answered(conn: &Connection, state: &str, code_hash: &str, identity: &Identity) -> Result<bool> {
     let json = serde_json::to_string(identity).map_err(|err| Error::internal(err.to_string()))?;
+    conn.execute("DELETE FROM sso_sign_ins WHERE expires_at < ?1", [now_ms()]).await?;
     Ok(conn
         .execute(
             "UPDATE sso_sign_ins SET code_hash = ?2, identity = ?3, verifier = '', nonce = ''

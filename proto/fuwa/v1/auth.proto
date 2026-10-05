@@ -47,6 +47,16 @@ service AuthService {
   rpc StartSsoSignIn(StartSsoSignInRequest) returns (StartSsoSignInResponse);
   rpc GetSsoSignIn(GetSsoSignInRequest) returns (GetSsoSignInResponse);
   rpc FinishSsoSignIn(FinishSsoSignInRequest) returns (FinishSsoSignInResponse);
+
+  // Signing in with Google, X or Twitch (NodeInfo.auth.providers), in three
+  // calls again. The provider sends the browser back to this instance
+  // (/sso/instance/providers/<id>), which reads who signed in and sends it on to
+  //   <public URL>/auth/provider/done#provider=<id>&state=<state>&code=<code>
+  // and FinishProviderSignIn trades the code for a session. Accounts are
+  // only ever found by the provider's id for the person, never by email.
+  rpc StartProviderSignIn(StartProviderSignInRequest) returns (StartProviderSignInResponse);
+  rpc GetProviderSignIn(GetProviderSignInRequest) returns (GetProviderSignInResponse);
+  rpc FinishProviderSignIn(FinishProviderSignInRequest) returns (FinishProviderSignInResponse);
 }
 
 message SignUpRequest {
@@ -98,6 +108,9 @@ message GetMeResponse {
   User user = 1;
   // Instance admins can moderate every server here and read its usage.
   bool admin = 2;
+  // Ways to sign in added to the account in the last week, newest first, so
+  // every device can say so (and the person can undo one that wasn't them).
+  repeated SignInMethod recent_sign_in_methods = 3;
 }
 
 message UpdateProfileRequest {
@@ -219,4 +232,65 @@ message FinishSsoSignInResponse {
   bool created = 4;
   // Who the provider signed in.
   SsoIdentity identity = 5;
+}
+
+message StartProviderSignInRequest {
+  // "google", "x" or "twitch".
+  string provider = 1;
+  // The origin of the app signing in. The sign-in ends at
+  // <return_origin>/auth/provider/done.
+  string return_origin = 2;
+  // The SHA-256 (hex) of a random secret the app keeps until FinishProviderSignIn.
+  string secret_hash = 3;
+}
+
+message StartProviderSignInResponse {
+  string authorize_url = 1;
+  string state = 2;
+}
+
+message GetProviderSignInRequest {
+  string provider = 1;
+  string state = 2;
+}
+
+message GetProviderSignInResponse {
+  string return_origin = 1;
+  string provider_name = 2;
+}
+
+message FinishProviderSignInRequest {
+  string state = 1;
+  string code = 2;
+  string secret = 3;
+  // For someone new (the answer had new_account): make the account, with
+  // this username.
+  bool create = 4;
+  string username = 5;
+  // Copy the name and picture from the provider into the new account's
+  // profile. Off, it starts with just the username.
+  bool use_profile = 6;
+}
+
+message FinishProviderSignInResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+  bool created = 4;
+  // Set, with nothing else, when the account needs a two-step code too:
+  // send it to VerifyTwoFactor.
+  string two_factor_ticket = 5;
+  // Set, with nothing else, for someone new while sign-ups are open: ask
+  // for a username (and whether to use the provider's name and picture),
+  // then call again with create. The sign-in stays usable until it runs out.
+  NewProviderAccount new_account = 6;
+}
+
+message NewProviderAccount {
+  string provider_name = 1;
+  // Free right now, from the handle there; the person may change it.
+  string suggested_username = 2;
+  // What use_profile would copy.
+  string display_name = 3;
+  bool has_picture = 4;
 }
