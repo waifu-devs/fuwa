@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/react";
 import { copy } from "@/lib/ui";
+import { SLIDE_IN } from "@/lib/motion";
 import { cleanDomain, readSamlMetadata } from "@/lib/sso";
 import { cn } from "@/lib/utils";
 import { Choice, Setting, SPRING } from "./controls";
@@ -190,7 +191,7 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
       <Setting id="sso-metadata" title={t("instancesettings.provider.metadata")} hint={t("instancesettings.provider.metadataHint")} badge={false} delay={0.06}>
         <AnimatePresence initial={false} mode="popLayout">
           {pasting ? (
-            <motion.div key="paste" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-2 overflow-hidden">
+            <motion.div key="paste" {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-2">
               <Textarea autoFocus rows={5} value={xml} onChange={(e) => setXml(e.target.value)} placeholder="<EntityDescriptor …>" className="rounded-xl font-mono text-xs" />
               <div className="flex gap-2">
                 <Button type="button" onClick={fill} disabled={!xml.trim()} className="btn rounded-xl font-bold">
@@ -216,7 +217,11 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
             </motion.div>
           )}
         </AnimatePresence>
-        {problem && <p className="text-xs text-amber-600 dark:text-amber-400">{problem}</p>}
+        {problem && (
+          <motion.p layout="position" transition={SPRING} className="text-xs text-amber-600 dark:text-amber-400">
+            {problem}
+          </motion.p>
+        )}
       </Setting>
       <Setting id="sso-entity" title={t("instancesettings.provider.entity")} hint={t("instancesettings.provider.entityHint")} badge={false} delay={0.09}>
         <Glow key={`e${filled}`} on={filled > 0}>

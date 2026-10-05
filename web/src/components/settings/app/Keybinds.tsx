@@ -1,7 +1,7 @@
 import { ChevronDownIcon, InfoIcon, PlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -369,15 +369,13 @@ function Recorder({
 
 function Problem({ text }: { text: string | null }) {
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="popLayout">
       {text && (
         <motion.p
           key={text}
-          initial={{ opacity: 0, height: 0, y: -4 }}
-          animate={{ opacity: 1, height: "auto", y: 0 }}
-          exit={{ opacity: 0, height: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
-          className="overflow-hidden pt-1.5 text-xs font-bold text-destructive"
+          className="pt-1.5 text-xs font-bold text-destructive"
         >
           {text}
         </motion.p>

@@ -8,7 +8,7 @@ import { setAnnouncement } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { BannerBody } from "@/components/AnnouncementBanner";
 import { endsLabel, isLive, toneOf } from "@/lib/announcement";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -178,14 +178,12 @@ function EndsSetting({ live, ends, onChange, endsAt }: { live: AnnouncementMessa
   return (
     <Setting id="announcement-ends" title={t("instancesettings.announcement.comesDown")} hint={t("instancesettings.announcement.comesDownHint")} badge={false} delay={0.12}>
       <Chips label={t("instancesettings.announcement.comesDown")} value={ends} onChange={onChange} options={lengths} />
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {endsAt && ends !== "keep" && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
             transition={SPRING}
-            className="overflow-hidden text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground"
           >
             <T k="instancesettings.announcement.comesDownAt" values={{ time: <b>{formatStamp(endsAt)}</b> }} />
           </motion.p>

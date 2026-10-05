@@ -9,7 +9,7 @@ import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { signedInForServer } from "@/lib/sso";
 import { accountKey } from "@/fuwa/saved";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
@@ -301,13 +301,13 @@ function ApplyButton({ size, tall, again, onApply }: { size: "default" | "lg"; t
 /** The line under the button: what went wrong (with a shake), or a note about the way in. */
 function JoinLine({ kind, note, error }: { kind: Kind; note: ReactNode; error: string | null }) {
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="popLayout">
       {(note || error) && (
         <motion.p
           key={error ? "error" : kind}
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto", x: error ? [0, -6, 6, -3, 3, 0] : 0 }}
-          exit={{ opacity: 0, height: 0 }}
+          {...SLIDE_IN}
+          animate={{ ...SLIDE_IN.animate, x: error ? [0, -6, 6, -3, 3, 0] : 0 }}
+          transition={{ ...SPRING, x: { duration: 0.8 } }}
           className={cn("text-center text-xs break-words", error ? "text-destructive first-letter:uppercase" : "text-muted-foreground")}
         >
           {error ?? note}

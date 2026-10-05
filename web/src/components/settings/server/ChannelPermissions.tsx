@@ -6,7 +6,7 @@ import { setChannelPermissions } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { SaveBar } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import {
@@ -273,9 +273,9 @@ function PrivateSection({
         </span>
         <Switch checked={isPrivate} disabled={!canChange} onCheckedChange={onPrivate} aria-label={t("serversettings.channels.private")} />
       </label>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {isPrivate && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}>
             <div className="mt-4 flex flex-col gap-2 border-t pt-4">
               <p className="text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("serversettings.channelPermissions.whoCanSee")}</p>
               <ul className="flex flex-wrap gap-1.5">

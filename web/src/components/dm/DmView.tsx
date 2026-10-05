@@ -682,7 +682,7 @@ const DmRow = memo(function DmRow({
   return (
     <motion.div
       {...(animate ? enter : {})}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       data-dm-seq={item.seq}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}

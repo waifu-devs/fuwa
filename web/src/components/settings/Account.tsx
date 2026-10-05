@@ -4,8 +4,9 @@ import { useState, type FormEvent } from "react";
 import { changePassword, forget, signOut } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PASSWORD_MAX, PasswordInput, Row, Warn } from "@/components/settings/account/common";
+import { MotionButton } from "@/components/motion-button";
 import { Button } from "@/components/ui/button";
 import { type Key, useI18n } from "@/i18n/react";
 import { issuerName, WAIFU_DEV_ISSUER } from "@/lib/linked";
@@ -147,21 +148,20 @@ export function Password({ instanceKey }: { instanceKey: string }) {
               <Matches show={!!confirm && confirm === next} />
             </div>
           </Row>
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} mode="popLayout">
             {change.error && (
               <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden pb-3 text-sm font-bold text-destructive first-letter:uppercase"
+                {...SLIDE_IN}
+                transition={SPRING}
+                className="pb-3 text-sm font-bold text-destructive first-letter:uppercase"
               >
                 {change.error}
               </motion.p>
             )}
           </AnimatePresence>
-          <Button type="submit" className="btn self-start rounded-xl px-5 font-bold" disabled={change.pending || !ready}>
+          <MotionButton layout="position" transition={SPRING} type="submit" className="btn self-start rounded-xl px-5 font-bold" disabled={change.pending || !ready}>
             <KeyRoundIcon /> {change.pending ? t("accountsettings.password.changing") : t("accountsettings.password.change")}
-          </Button>
+          </MotionButton>
         </motion.form>
       )}
     </AnimatePresence>

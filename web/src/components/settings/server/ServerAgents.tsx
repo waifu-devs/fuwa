@@ -8,7 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -132,15 +132,9 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
         </motion.div>
       </form>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {suggestions.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={SPRING}
-            className="flex flex-wrap items-center gap-1.5 overflow-hidden"
-          >
+          <motion.div {...SLIDE_IN} transition={SPRING} className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs font-bold text-muted-foreground">{t("serversettings.agents.yours")}</span>
             {suggestions.map((a, n) => (
               <motion.button
@@ -165,10 +159,14 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
         )}
       </AnimatePresence>
 
-      {mcpOn && mcp && <McpChoice mode={mcp.mode} onChange={(mode) => void saveMcp(mode, mode === McpAccessMode.CHOSEN ? [...mcpIds] : [])} />}
+      {mcpOn && mcp && (
+        <motion.div layout="position" transition={SPRING}>
+          <McpChoice mode={mcp.mode} onChange={(mode) => void saveMcp(mode, mode === McpAccessMode.CHOSEN ? [...mcpIds] : [])} />
+        </motion.div>
+      )}
 
       {here.length === 0 ? (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
+        <motion.div layout="position" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ layout: SPRING }} className="flex items-center gap-3 rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
           <motion.span animate={{ y: [0, -4, 0] }} transition={{ duration: 2, repeat: Infinity, repeatDelay: 1 }} className="text-2xl">
             🤖
           </motion.span>
@@ -186,7 +184,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
           </span>
         </motion.div>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {here.map((m) => {
               const id = m.user?.id ?? "";
@@ -277,7 +275,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
               );
             })}
           </AnimatePresence>
-        </ul>
+        </motion.ul>
       )}
     </section>
   );

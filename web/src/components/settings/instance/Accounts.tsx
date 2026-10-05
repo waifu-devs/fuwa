@@ -25,7 +25,7 @@ import { useAction, useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
 import { Private } from "@/components/Private";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
@@ -280,14 +280,12 @@ function AccountRow({
           <AccountMenu account={a} me={me} busy={busy} developer={developer} onAdmin={onAdmin} onTurnOn={onTurnOn} onTurnOff={onTurnOff} onReset={onReset} />
         )}
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {a.disabled && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
             transition={SPRING}
-            className="overflow-hidden pl-[3.25rem] text-xs text-destructive/90"
+            className="pl-[3.25rem] text-xs text-destructive/90"
           >
             <OffReason reason={a.disabledReason} day={offDay} />
           </motion.p>

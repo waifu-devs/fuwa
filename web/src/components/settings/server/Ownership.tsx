@@ -5,7 +5,7 @@ import type { Member, Server } from "@/gen/fuwa/v1/types_pb";
 import { transferOwnership } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -93,15 +93,9 @@ export function Ownership({ instanceKey, server, onDone }: { instanceKey: string
         </ul>
       </div>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {picked && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
               <Label htmlFor="confirm-transfer" className="text-sm">
                 <T

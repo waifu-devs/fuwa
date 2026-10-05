@@ -9,7 +9,7 @@ import { useAction } from "@/fuwa/hooks";
 import { ApplicationCard } from "@/components/join/ApplicationStatus";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -147,9 +147,10 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                 return (
                   <motion.div
                     key={`${n}:${q.prompt}`}
+                    layout="position"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...SPRING, delay: 0.05 * n }}
+                    transition={{ ...SPRING, delay: 0.05 * n, layout: SPRING }}
                     className="flex flex-col gap-1.5"
                   >
                     <label htmlFor={`apply-${n}`} className="flex items-baseline justify-between gap-2 text-sm font-bold">
@@ -164,12 +165,11 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                     ) : (
                       <Input {...props} className={cn("h-11 rounded-xl", bad && "border-destructive")} />
                     )}
-                    <AnimatePresence initial={false}>
+                    <AnimatePresence initial={false} mode="popLayout">
                       {(bad || value.length > max - 100) && (
                         <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
+                          {...SLIDE_IN}
+                          transition={SPRING}
                           className={cn("text-xs", bad ? "text-destructive" : "text-muted-foreground")}
                         >
                           {bad ? t("join.applyDialog.needsAnswer") : t("join.applyDialog.charactersLeft", { count: max - value.length })}
@@ -181,7 +181,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
               })}
             </section>
           )}
-          <motion.div animate={nudge} className="flex flex-col gap-3">
+          <motion.div layout="position" transition={SPRING} animate={nudge} className="flex flex-col gap-3">
             {form.rules.length > 0 && (
               <AgreeCheck checked={agreed} onChange={setAgreed}>
                 {t("join.rules.agree")}

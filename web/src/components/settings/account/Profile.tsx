@@ -10,7 +10,7 @@ import { UserAvatar } from "@/components/Icons";
 import { hue } from "@/components/icons-utils";
 import { Markdown } from "@/components/Markdown";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
@@ -353,9 +353,9 @@ function StatusField({ draft, canKeep, keptUntil, set }: { draft: Draft; canKeep
           )}
         </AnimatePresence>
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {draft.status.trim() && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <p className="pt-1 pb-2 text-xs font-bold text-muted-foreground">{t("accountsettings.profile.clearAfter")}</p>
             <Chips
               value={draft.clear}
