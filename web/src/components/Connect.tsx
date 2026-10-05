@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
 import { HostedBadge } from "@/components/HostedBadge";
+import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -87,6 +88,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
   const lookup = useAction(probe);
   const home = useHomeInstance();
   const privateField = usePrivateField();
+  const { t } = useI18n();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -100,7 +102,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="address" className="font-bold">
-          Server address
+          {t("connect.where.address")}
         </Label>
         <div key={shake} className={cn("relative", shake > 0 && "shake")}>
           <ServerGlyph className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -126,7 +128,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
               exit={{ opacity: 0, height: 0 }}
               className="text-sm text-destructive"
             >
-              Couldn't find a fuwa server there: {lookup.error}.
+              {t("connect.where.notFound", { problem: lookup.error })}
             </motion.p>
           )}
         </AnimatePresence>
@@ -150,7 +152,9 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
                 <span className="truncate font-bold">{home.node.name}</span>
                 <HostedBadge url={home.url} variant="still" />
               </span>
-              <span className="block truncate text-xs text-muted-foreground"><Private text={instanceKey(home.url)} /> · this server</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                <T k="connect.where.thisServer" values={{ address: <Private text={instanceKey(home.url)} /> }} />
+              </span>
             </span>
             <ArrowRightIcon className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
           </motion.button>
@@ -159,10 +163,19 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
 
       <Button type="submit" size="lg" disabled={lookup.pending || !address.trim()} className="btn h-11 rounded-xl font-bold">
         {lookup.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
-        {lookup.pending ? "Looking…" : "Continue"}
+        {lookup.pending ? t("connect.where.looking") : t("common.continue")}
       </Button>
       <p className="text-center text-xs text-muted-foreground">
-        Any fuwa server works: ours, a friend's, or <a className="font-bold text-primary hover:underline" href="https://github.com/waifu-devs/fuwa/blob/master/docs/self-hosting.md" target="_blank" rel="noreferrer">one you run</a>.
+        <T
+          k="connect.where.anyServer"
+          values={{
+            link: (
+              <a className="font-bold text-primary hover:underline" href="https://github.com/waifu-devs/fuwa/blob/master/docs/self-hosting.md" target="_blank" rel="noreferrer">
+                {t("connect.where.anyServerLink")}
+              </a>
+            ),
+          }}
+        />
       </p>
     </form>
   );
@@ -188,6 +201,7 @@ export function Account({
   returnTo?: string;
 }) {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const methods = node.auth;
   const canSignUp = !!methods?.localSignUp;
   const canSignIn = !!methods?.localSignIn;
@@ -249,7 +263,7 @@ export function Account({
           </>
         ) : (
           <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
-            This server isn't taking sign-ins right now. Ask its admin about it.
+            {t("connect.account.noSignIns")}
           </p>
         )}
       </div>
@@ -264,17 +278,17 @@ export function Account({
           {sso && <SsoButton url={url} node={node} returnTo={returnTo} />}
           {linked && <LinkedButton url={url} node={node} returnTo={returnTo} />}
           <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
-            <span className="h-px flex-1 bg-border" /> or with a password here <span className="h-px flex-1 bg-border" />
+            <span className="h-px flex-1 bg-border" /> {t("connect.account.orPassword")} <span className="h-px flex-1 bg-border" />
           </div>
         </>
       )}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full">
           <TabsTrigger value="sign-in" disabled={!canSignIn}>
-            Sign in
+            {t("connect.account.signIn")}
           </TabsTrigger>
           <TabsTrigger value="sign-up" disabled={!canSignUp}>
-            Create account
+            {t("connect.account.signUp")}
           </TabsTrigger>
         </TabsList>
         <TabsContents>
@@ -286,18 +300,18 @@ export function Account({
                 transition={{ duration: 0.35, ease: EASE }}
                 className="pt-2 text-xs text-muted-foreground"
               >
-                This server isn't taking new accounts right now. Ask its admin for one.
+                {t("connect.account.noSignUps")}
               </motion.p>
             )}
           </TabsContent>
           <TabsContent value="sign-up">
             <div className="flex flex-col gap-2 pt-2">
               <Label htmlFor="display-name" className="font-bold">
-                Display name
+                {t("connect.account.displayName")}
               </Label>
               <Input
                 id="display-name"
-                placeholder="What people see"
+                placeholder={t("connect.account.displayNameHint")}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 maxLength={64}
@@ -309,7 +323,7 @@ export function Account({
       </Tabs>
       <div key={`u${shake}`} className={cn("flex flex-col gap-2", shake > 0 && "shake")}>
         <Label htmlFor="username" className="font-bold">
-          Username
+          {t("connect.account.username")}
         </Label>
         <Input
           id="username"
@@ -317,20 +331,20 @@ export function Account({
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
-          placeholder="lowercase letters, numbers, . and _"
+          placeholder={t("connect.account.usernameHint")}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           className="h-11 rounded-xl"
           required
         />
         <Label htmlFor="password" className="mt-2 font-bold">
-          Password
+          {t("connect.account.password")}
         </Label>
         <Input
           id="password"
           type="password"
           autoComplete={tab === "sign-in" ? "current-password" : "new-password"}
-          placeholder={tab === "sign-in" ? "" : "at least 8 characters"}
+          placeholder={tab === "sign-in" ? "" : t("connect.account.passwordHint")}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="h-11 rounded-xl"
@@ -351,7 +365,7 @@ export function Account({
       </AnimatePresence>
       <Button type="submit" size="lg" disabled={action.pending} className="btn h-11 rounded-xl font-bold">
         {action.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
-        {tab === "sign-in" ? "Sign in" : "Create account"}
+        {tab === "sign-in" ? t("connect.account.signIn") : t("connect.account.signUp")}
       </Button>
     </form>
   );
@@ -376,6 +390,7 @@ function TwoFactorStep({
   const [code, setCode] = useState("");
   const [shake, setShake] = useState(0);
   const verify = useAction(verifyTwoFactor);
+  const { t } = useI18n();
 
   async function send(value: string) {
     const key = await verify.go(url, ticket, value);
@@ -404,7 +419,7 @@ function TwoFactorStep({
           type="button"
           onClick={() => onBack()}
           className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
-          aria-label="Back to the password"
+          aria-label={t("connect.twoStep.back")}
         >
           <ArrowLeftIcon className="size-4" />
         </button>
@@ -417,10 +432,8 @@ function TwoFactorStep({
           <ShieldCheckIcon className="size-5" />
         </motion.span>
         <div className="min-w-0">
-          <p className="font-extrabold">Two-step sign-in</p>
-          <p className="text-xs text-muted-foreground">
-            {backup ? "Type one of the backup codes you saved." : "Open your authenticator app and type the code it shows."}
-          </p>
+          <p className="font-extrabold">{t("connect.twoStep.title")}</p>
+          <p className="text-xs text-muted-foreground">{backup ? t("connect.twoStep.backupHint") : t("connect.twoStep.appHint")}</p>
         </div>
       </div>
       <AnimatePresence mode="wait" initial={false}>
@@ -428,7 +441,7 @@ function TwoFactorStep({
           <motion.div key="backup" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2, ease: EASE }}>
             <div key={shake} className={cn("flex flex-col gap-2", shake > 0 && "shake")}>
               <Label htmlFor="backup-code" className="font-bold">
-                Backup code
+                {t("connect.twoStep.backupCode")}
               </Label>
               <Input
                 id="backup-code"
@@ -452,7 +465,7 @@ function TwoFactorStep({
             transition={{ duration: 0.2, ease: EASE }}
             className="flex justify-center"
           >
-            <CodeInput id="sign-in-code" onComplete={(value) => void send(value)} disabled={verify.pending} shake={shake} />
+            <CodeInput id="sign-in-code" label={t("connect.twoStep.code")} onComplete={(value) => void send(value)} disabled={verify.pending} shake={shake} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -471,7 +484,7 @@ function TwoFactorStep({
       {backup && (
         <Button type="submit" size="lg" disabled={verify.pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
           {verify.pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon />}
-          Sign in
+          {t("connect.account.signIn")}
         </Button>
       )}
       <button
@@ -483,7 +496,7 @@ function TwoFactorStep({
         }}
         className="self-center text-sm font-bold text-primary hover:underline"
       >
-        {backup ? "Use the authenticator app instead" : "Lost your phone? Use a backup code"}
+        {backup ? t("connect.twoStep.useApp") : t("connect.twoStep.useBackup")}
       </button>
     </motion.form>
   );
@@ -515,11 +528,12 @@ function LinkedButton({ url, node, returnTo }: { url: string; node: Node; return
  */
 function SsoButton({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
   const start = useAction(startSsoSignIn);
+  const { t } = useI18n();
   const host = node.auth?.ssoHost;
   return (
     <div className="flex flex-col gap-1.5">
       <ProviderButton
-        name={node.auth?.ssoName || "your organization"}
+        name={node.auth?.ssoName || t("connect.provider.yourOrganization")}
         icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
         onGo={() => start.go(url, returnTo ?? null)}
         error={start.error}
@@ -535,7 +549,7 @@ function SsoButton({ url, node, returnTo }: { url: string; node: Node; returnTo?
           data-testid="sso-sign-in-host"
         >
           <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
-          Signs you in at <b className="text-foreground">{host}</b>, which sees your IP address.
+          <T k="connect.provider.signsYouInAt" values={{ host: <b className="text-foreground">{host}</b> }} />
         </motion.p>
       )}
     </div>
@@ -561,6 +575,7 @@ export function ProviderButton({
   label?: string;
 }) {
   const [leaving, setLeaving] = useState(false);
+  const { t } = useI18n();
 
   async function go() {
     setLeaving(true);
@@ -600,7 +615,7 @@ export function ProviderButton({
             transition={{ duration: 0.18 }}
             className="min-w-0 truncate"
           >
-            {leaving ? `Off to ${name}…` : (label ?? `Continue with ${name}`)}
+            {leaving ? t("connect.provider.leaving", { name }) : (label ?? t("connect.provider.continueWith", { name }))}
           </motion.span>
         </AnimatePresence>
         <ArrowRightIcon className={cn("size-4 transition group-hover:translate-x-1", leaving && "translate-x-2 opacity-0")} />
@@ -617,7 +632,7 @@ export function ProviderButton({
           </motion.p>
         ) : closed ? (
           <p className="text-center text-xs text-muted-foreground">
-            For people who already have a {name} account here. New ones aren't being made right now.
+            {t("connect.provider.closed", { name })}
           </p>
         ) : null}
       </AnimatePresence>
@@ -626,6 +641,7 @@ export function ProviderButton({
 }
 
 function Header({ url, node, onBack }: { url: string; node: Node; onBack?: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-3">
       {onBack && (
@@ -633,7 +649,7 @@ function Header({ url, node, onBack }: { url: string; node: Node; onBack?: () =>
           type="button"
           onClick={onBack}
           className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
-          aria-label="Pick another server"
+          aria-label={t("connect.account.back")}
         >
           <ArrowLeftIcon className="size-4" />
         </button>

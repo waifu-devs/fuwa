@@ -1,0 +1,22 @@
+{
+  "build.commit": "Built from commit {commit}",
+  "update.updated": "fuwa was updated",
+  "update.reload": "Reload",
+  "update.later": "Later",
+  "update.laterHint": "Later: keep using this version until you reload",
+  "update.hasFeature": "{instance} has {feature}. Update fuwa to use it",
+  "update.hasFeatures": {
+    "one": "{instance} has {feature} and {count} more. Update fuwa to use them",
+    "other": "{instance} has {feature} and {count} more. Update fuwa to use them"
+  },
+  "update.tooOld": "{instance} needs a newer fuwa for everything to work",
+  "update.anInstance": "An instance",
+  "update.somethingNew": "something new",
+  "announcement.until": "Until {time}",
+  "announcement.close": "Close the announcement",
+  "hosted.label": "Hosted by Waifu Devs",
+  "hosted.who": "The people who make fuwa run this instance.",
+  "hosted.checked": "{host} · your browser checked its certificate",
+  "hosted.why": "Only instances at our own addresses get this badge. The app goes by the address alone, since any server could say anything about itself.",
+  "hosted.about": "About fuwa"
+}

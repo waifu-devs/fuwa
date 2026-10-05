@@ -1,38 +1,44 @@
 import { DatabaseIcon, LayersIcon, ServerCogIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
+import { useMemo } from "react";
 import { BubbleBackground } from "@/components/animate-ui/components/backgrounds/bubble";
 import { RotatingText, RotatingTextContainer } from "@/components/animate-ui/primitives/texts/rotating";
 import { Connect } from "@/components/Connect";
 import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
+import { useI18n } from "@/i18n/react";
+import type { Key } from "@/i18n/i18n";
 import { activeTheme, usePrefs } from "@/lib/prefs";
 import { mix } from "@/lib/themes";
 
-const PHRASES = ["on our servers.", "on your own box.", "with your friends.", "across instances."];
+const PHRASES: Key[] = ["connect.welcome.phrase.ourServers", "connect.welcome.phrase.ownBox", "connect.welcome.phrase.friends", "connect.welcome.phrase.instances"];
 const EASE = [0.22, 1, 0.36, 1] as const;
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",");
 
-const FEATURES = [
-  { icon: LayersIcon, text: "One app, every server" },
-  { icon: ServerCogIcon, text: "Self-host with one command" },
-  { icon: DatabaseIcon, text: "A database per community" },
+const FEATURES: { icon: typeof LayersIcon; text: Key }[] = [
+  { icon: LayersIcon, text: "connect.welcome.feature.oneApp" },
+  { icon: ServerCogIcon, text: "connect.welcome.feature.selfHost" },
+  { icon: DatabaseIcon, text: "connect.welcome.feature.database" },
 ];
 
 /** First visit: what fuwa is, and where to connect. */
 export function Welcome({ initialUrl }: { initialUrl?: string }) {
   const reduce = useReducedMotion();
-  const t = usePrefs(activeTheme).variant.tokens;
+  const tokens = usePrefs(activeTheme).variant.tokens;
+  const { t } = useI18n();
+  // The same list while the language stays, so the rotation's timer isn't restarted on every render.
+  const phrases = useMemo(() => PHRASES.map((key) => t(key)), [t]);
   return (
     <div className="relative isolate min-h-full overflow-x-clip overflow-y-auto">
       <BubbleBackground
         interactive
         colors={{
-          first: rgb(t.primary),
-          second: rgb(mix(t.primary, "#a78bfa", 0.5)),
-          third: rgb(mix(t.primary, "#7dd3fc", 0.45)),
-          fourth: rgb(t.ring),
-          fifth: rgb(mix(t.primary, "#f9a8d4", 0.5)),
-          sixth: rgb(t.accent),
+          first: rgb(tokens.primary),
+          second: rgb(mix(tokens.primary, "#a78bfa", 0.5)),
+          third: rgb(mix(tokens.primary, "#7dd3fc", 0.45)),
+          fourth: rgb(tokens.ring),
+          fifth: rgb(mix(tokens.primary, "#f9a8d4", 0.5)),
+          sixth: rgb(tokens.accent),
         }}
         className="fixed inset-0 -z-20 bg-none opacity-30"
       />
@@ -55,7 +61,7 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, ease: EASE, delay: 0.1 }}
             >
-              Chat anywhere,
+              {t("connect.welcome.headline")}
             </motion.span>
             <motion.span
               className="mt-1 block text-[0.72em]"
@@ -63,7 +69,7 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, ease: EASE, delay: 0.25 }}
             >
-              <RotatingTextContainer text={reduce ? PHRASES[0]! : PHRASES} duration={2400} delay={1200} className="min-h-[1.2em] leading-[1.2]">
+              <RotatingTextContainer text={reduce ? phrases[0]! : phrases} duration={2400} delay={1200} className="min-h-[1.2em] leading-[1.2]">
                 <RotatingText className="gradient-text whitespace-nowrap" />
               </RotatingTextContainer>
             </motion.span>
@@ -74,13 +80,12 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
             transition={{ duration: 0.7, ease: EASE, delay: 0.4 }}
             className="max-w-lg text-lg text-muted-foreground"
           >
-            fuwa is a chat app for communities, made by Waifu Devs. Join servers hosted by us or by anyone else, all from
-            one place. Or run your own.
+            {t("connect.welcome.pitch")}
           </motion.p>
           <ul className="stagger flex flex-wrap gap-2">
             {FEATURES.map((f) => (
               <li key={f.text} className="flex items-center gap-2 rounded-full border bg-card/70 px-3 py-1.5 text-sm font-bold backdrop-blur">
-                <f.icon className="size-4 text-primary" /> {f.text}
+                <f.icon className="size-4 text-primary" /> {t(f.text)}
               </li>
             ))}
           </ul>
@@ -92,8 +97,8 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
           transition={{ duration: 0.8, ease: EASE, delay: 0.3 }}
           className="w-full rounded-3xl border bg-card/85 p-6 shadow-[0_30px_80px_-40px_var(--primary)] backdrop-blur-xl sm:p-8"
         >
-          <h2 className="mb-1 text-xl font-extrabold">Connect to a fuwa server</h2>
-          <p className="mb-5 text-sm text-muted-foreground">Enter its address to sign in or make an account.</p>
+          <h2 className="mb-1 text-xl font-extrabold">{t("connect.welcome.connectTitle")}</h2>
+          <p className="mb-5 text-sm text-muted-foreground">{t("connect.welcome.connectHint")}</p>
           <Connect initialUrl={initialUrl} />
         </motion.div>
       </div>

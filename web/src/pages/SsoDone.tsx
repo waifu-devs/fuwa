@@ -9,6 +9,8 @@ import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
+import type { Key } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { DONE, takePendingSso } from "@/lib/sso";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -16,12 +18,14 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 type Phase =
   | { kind: "finishing" }
   /** Signed in to the instance, or through a server's provider. */
-  | { kind: "done"; title: string; line: string }
+  /** `name` fills the title's {name}, when it has one. */
+  | { kind: "done"; title: Key; line: Key; name?: string }
   /** An admin's test: who the provider signed in, and nothing else happened. */
   | { kind: "tested"; identity: SsoIdentity | undefined; next: string | null; key: string }
   /** Another fuwa app started this sign-in; it goes back there if the person says so. */
   | { kind: "handoff"; origin: string; provider: string; place: string; fragment: string }
-  | { kind: "error"; title: string; message: string }
+  /** `message` is what the server or provider said, if anything; `note` is ours, shown when it said nothing. */
+  | { kind: "error"; title: Key; message?: string; note?: Key }
   | { kind: "cancelled" };
 
 /**
@@ -34,6 +38,7 @@ type Phase =
  */
 export function SsoDone() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: "finishing" });
   const once = useRef(false);
 
@@ -51,7 +56,7 @@ export function SsoDone() {
     const pending = state ? takePendingSso(state) : null;
     if (pending && (pending.serverId ?? "") === (serverId ?? "")) {
       if (problem || !code) {
-        setPhase({ kind: "error", title: "Didn't sign in", message: problem || "The provider didn't send a sign-in back." });
+        setPhase({ kind: "error", title: "connect.callback.didntSignIn", message: problem, note: "connect.callback.nothingBackSso" });
         return;
       }
       if (pending.serverId) {
@@ -59,15 +64,15 @@ export function SsoDone() {
           ({ key, serverId, joined }) => {
             setPhase({
               kind: "done",
-              title: joined ? "You're in!" : "Signed in",
-              line: joined ? "Taking you to the server" : "Taking you back",
+              title: joined ? "connect.callback.youreIn" : "connect.callback.signedIn",
+              line: joined ? "connect.callback.toServer" : "connect.callback.takingYouBack",
             });
             window.setTimeout(() => {
               if (pending.next) navigate({ to: pending.next, replace: true });
               else navigate({ to: "/$instance/$server", params: { instance: key, server: serverId }, replace: true });
             }, 1400);
           },
-          (err: Error) => setPhase({ kind: "error", title: "Couldn't sign in", message: err.message }),
+          (err: Error) => setPhase({ kind: "error", title: "connect.callback.couldntSignIn", message: err.message }),
         );
         return;
       }
@@ -77,35 +82,39 @@ export function SsoDone() {
             setPhase({ kind: "tested", identity, next: pending.next, key });
             return;
           }
-          const name = user?.displayName || user?.username || "you";
-          setPhase({ kind: "done", title: created ? `Welcome, ${name}!` : `Welcome back, ${name}!`, line: "Taking you in" });
+          setPhase({
+            kind: "done",
+            title: created ? "connect.callback.welcome" : "connect.callback.welcomeBack",
+            line: "connect.callback.takingYouIn",
+            name: user?.displayName || user?.username || "",
+          });
           window.setTimeout(() => {
             if (pending.next) navigate({ to: pending.next, replace: true });
             else navigate({ to: "/$instance", params: { instance: key }, replace: true });
           }, 1500);
         },
-        (err: Error) => setPhase({ kind: "error", title: "Couldn't sign in", message: err.message }),
+        (err: Error) => setPhase({ kind: "error", title: "connect.callback.couldntSignIn", message: err.message }),
       );
       return;
     }
 
     if (!state) {
-      setPhase({ kind: "error", title: "Nothing to finish", message: "There's no sign-in waiting here." });
+      setPhase({ kind: "error", title: "connect.callback.nothingToFinish", note: "connect.callback.nothingWaiting" });
       return;
     }
     const here = normalizeUrl(window.location.origin);
     run(ssoSignInInfo(here, state, serverId)).then(
       (info) => {
         if (info.origin === window.location.origin) {
-          setPhase({ kind: "error", title: "Started somewhere else", message: "This sign-in began in another tab. Start it again from here." });
+          setPhase({ kind: "error", title: "connect.callback.elsewhere", note: "connect.callback.elsewhereNote" });
         } else if (problem || !code) {
-          setPhase({ kind: "error", title: "Didn't sign in", message: problem || "The provider didn't send a sign-in back." });
+          setPhase({ kind: "error", title: "connect.callback.didntSignIn", message: problem, note: "connect.callback.nothingBackSso" });
         } else {
           const fragment = new URLSearchParams({ ...(serverId ? { server: serverId } : {}), state, code });
           setPhase({ kind: "handoff", origin: info.origin, provider: info.provider, place: info.server, fragment: fragment.toString() });
         }
       },
-      () => setPhase({ kind: "error", title: "This sign-in ran out", message: "Sign-ins last ten minutes. Start again from the app." }),
+      () => setPhase({ kind: "error", title: "connect.callback.ranOut", note: "connect.callback.ranOutNote" }),
     );
   }, [navigate]);
 
@@ -134,24 +143,24 @@ export function SsoDone() {
             {phase.kind === "finishing" && (
               <>
                 <Bridge />
-                <Title>Signing you in</Title>
-                <p className="text-sm text-muted-foreground">Checking your sign-in…</p>
+                <Title>{t("connect.callback.signingIn")}</Title>
+                <p className="text-sm text-muted-foreground">{t("connect.callback.checking")}</p>
               </>
             )}
             {phase.kind === "done" && (
               <>
                 <Check />
-                <Title>{phase.title}</Title>
+                <Title>{t(phase.title, { name: phase.name || t("connect.callback.you") })}</Title>
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <LoaderCircleIcon className="size-4 animate-spin" /> {phase.line}
+                  <LoaderCircleIcon className="size-4 animate-spin" /> {t(phase.line)}
                 </p>
               </>
             )}
             {phase.kind === "tested" && (
               <>
                 <Check />
-                <Title>Single sign-on works</Title>
-                <p className="text-sm text-muted-foreground">The provider signed in this person. Nothing changed on the instance.</p>
+                <Title>{t("connect.callback.ssoWorks")}</Title>
+                <p className="text-sm text-muted-foreground">{t("connect.callback.ssoWorksNote")}</p>
                 <IdentityCard identity={phase.identity} />
                 <Button
                   size="lg"
@@ -162,30 +171,26 @@ export function SsoDone() {
                       : navigate({ to: "/$instance", params: { instance: phase.key }, replace: true })
                   }
                 >
-                  Back to the app
+                  {t("connect.callback.backToApp")}
                 </Button>
               </>
             )}
             {phase.kind === "handoff" && (
               <>
                 <Bridge still />
-                <Title>Finish signing in?</Title>
+                <Title>{t("connect.callback.finishTitle")}</Title>
                 <p className="text-sm text-muted-foreground">
-                  You signed in with {phase.provider || "your organization"}
-                  {phase.place ? (
-                    <>
-                      {" "}
-                      for <b className="text-foreground">{phase.place}</b>
-                    </>
-                  ) : null}{" "}
-                  in the fuwa app at
+                  <T
+                    k={phase.place ? "connect.callback.ssoHandoffFor" : "connect.callback.ssoHandoff"}
+                    values={{ provider: phase.provider || t("connect.provider.yourOrganization"), place: <b className="text-foreground">{phase.place}</b> }}
+                  />
                 </p>
                 <span className="max-w-full truncate rounded-xl border bg-muted/60 px-3 py-1.5 font-mono text-sm font-bold">
                   <Private text={phase.origin} />
                 </span>
                 <p className="flex items-start gap-2 rounded-2xl bg-amber-500/10 p-3 text-left text-xs text-amber-700 dark:text-amber-300">
                   <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
-                  Only continue if you started this there yourself. Whoever runs that app gets this sign-in.
+                  {t("connect.callback.ssoWarning")}
                 </p>
                 <div className="flex w-full flex-col gap-2 sm:flex-row-reverse">
                   <Button
@@ -193,10 +198,10 @@ export function SsoDone() {
                     className="btn h-11 rounded-xl font-bold sm:flex-1"
                     onClick={() => window.location.replace(`${phase.origin}${DONE}#${phase.fragment}`)}
                   >
-                    Continue <ArrowRightIcon className="transition group-hover:translate-x-0.5" />
+                    {t("common.continue")} <ArrowRightIcon className="transition group-hover:translate-x-0.5" />
                   </Button>
                   <Button size="lg" variant="ghost" className="h-11 rounded-xl font-bold sm:flex-1" onClick={() => setPhase({ kind: "cancelled" })}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                 </div>
               </>
@@ -206,8 +211,8 @@ export function SsoDone() {
                 <Badge tone="muted">
                   <CheckIcon className="size-7" />
                 </Badge>
-                <Title>Nothing was signed in</Title>
-                <p className="text-sm text-muted-foreground">You can close this tab.</p>
+                <Title>{t("connect.callback.cancelledTitle")}</Title>
+                <p className="text-sm text-muted-foreground">{t("connect.callback.closeTab")}</p>
               </>
             )}
             {phase.kind === "error" && (
@@ -215,10 +220,10 @@ export function SsoDone() {
                 <Badge tone="error">
                   <CloudOffIcon className="size-7" />
                 </Badge>
-                <Title>{phase.title}</Title>
-                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message}</p>
+                <Title>{t(phase.title)}</Title>
+                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message || (phase.note && t(phase.note))}</p>
                 <Button size="lg" className="btn h-11 w-full rounded-xl font-bold" onClick={() => navigate({ to: "/", replace: true })}>
-                  Back to fuwa
+                  {t("connect.callback.backToFuwa")}
                 </Button>
               </>
             )}
@@ -231,10 +236,11 @@ export function SsoDone() {
 
 /** Who the provider signed in, line by line as they arrive. */
 export function IdentityCard({ identity }: { identity: SsoIdentity | undefined }) {
+  const { t } = useI18n();
   const rows = [
-    ["Name", identity?.name],
-    ["Email", identity?.email],
-    ["Provider's id", identity?.subject],
+    [t("connect.callback.identity.name"), identity?.name],
+    [t("connect.callback.identity.email"), identity?.email],
+    [t("connect.callback.identity.subject"), identity?.subject],
   ].filter((r): r is [string, string] => !!r[1]);
   return (
     <dl className="grid w-full gap-1.5 rounded-2xl border bg-muted/40 p-3 text-left text-sm" data-testid="sso-identity">

@@ -11,6 +11,8 @@ import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { i18n } from "@/i18n/i18n";
+import { useI18n } from "@/i18n/react";
 import type { Applied } from "@/lib/applied";
 import { ago } from "@/lib/format";
 import { toast } from "@/lib/ui";
@@ -37,8 +39,10 @@ export function AppliedWatcher() {
       for (const key of keys)
         run(checkApplied(key)).then(
           ({ letIn, turnedDown }) => {
-            for (const s of letIn) toast(`You're in ${s.name}! Say hi`);
-            for (const s of turnedDown) toast(`${s.name} turned down your application`);
+            // Read when the answer comes, so the toast is in the language the app is in then.
+            const { t } = i18n();
+            for (const s of letIn) toast(t("join.applied.letIn", { server: s.name }));
+            for (const s of turnedDown) toast(t("join.applied.turnedDown", { server: s.name }));
           },
           () => {
             // Asked again on the next round.
@@ -67,11 +71,12 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
   const waiting = applied.status === ApplicationStatus.PENDING;
   const [applying, setApplying] = useState(false);
   const [looking, setLooking] = useState(false);
-  const label = waiting ? `${server.name} · waiting to be let in` : `${server.name} · turned down`;
+  const { t } = useI18n();
+  const label = t(waiting ? "join.applied.waitingLabel" : "join.applied.turnedDownLabel", { server: server.name });
 
   function withdraw() {
     run(withdrawApplication(inst.key, server.id)).then(
-      () => toast(`Took back your application to ${server.name}`),
+      () => toast(t("join.withdrawn", { server: server.name })),
       (e: FuwaError) => toast(e.message),
     );
   }
@@ -114,27 +119,27 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
             <span className="truncate font-extrabold">{server.name}</span>
             <span className="text-xs text-muted-foreground">
               {waiting
-                ? `You applied ${ago(new Date(applied.appliedAt))}. Someone from the server will look it over.`
+                ? t("join.applied.waitingNote", { when: ago(new Date(applied.appliedAt)) })
                 : applied.reason
-                  ? `Turned down: “${applied.reason}”`
-                  : "Your application was turned down."}
+                  ? t("join.applied.turnedDownBecause", { reason: applied.reason })
+                  : t("join.applied.turnedDownNote")}
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setLooking(true)}>
-            <EyeIcon /> See where it stands
+            <EyeIcon /> {t("join.seeWhereItStands")}
           </DropdownMenuItem>
           {waiting ? (
             <DropdownMenuItem variant="destructive" onSelect={withdraw}>
-              <Undo2Icon /> Take back your application
+              <Undo2Icon /> {t("join.applied.takeBack")}
             </DropdownMenuItem>
           ) : (
             <>
               <DropdownMenuItem onSelect={() => setApplying(true)}>
-                <ClipboardPenIcon /> Apply again
+                <ClipboardPenIcon /> {t("join.applyAgain")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => dismissApplied(inst.key, server.id)}>
-                <XIcon /> Remove from the list
+                <XIcon /> {t("join.applied.remove")}
               </DropdownMenuItem>
             </>
           )}

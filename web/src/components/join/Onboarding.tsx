@@ -24,6 +24,8 @@ import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { i18n } from "@/i18n/i18n";
+import { T, useI18n } from "@/i18n/react";
 import { accentVars, type BannerServer } from "@/lib/banner";
 import { canSee, cssColor } from "@/lib/permissions";
 import { reportTiming } from "@/lib/reports";
@@ -31,8 +33,6 @@ import { cn } from "@/lib/utils";
 
 /** What the flow shows: the admin's steps the person can do, then "all set". */
 type Shown = OnboardingStep | { kind: "done"; id: "done" };
-
-const HELLO = "Hi everyone! 👋";
 
 /** Steps slide in from the side they're going to, and the old one slides out the other way. */
 const SLIDE = {
@@ -54,7 +54,7 @@ export function stepsFor(onboarding: Pick<Onboarding, "steps">, opts: { mustAgre
   });
   if (opts.mustAgree && !steps.some((s) => s.kind === OnboardingStepKind.RULES)) {
     const hello = steps.findIndex((s) => s.kind === OnboardingStepKind.HELLO);
-    const rules = { kind: OnboardingStepKind.RULES, id: "rules", title: "The rules", description: "", skippable: false } as OnboardingStep;
+    const rules = { kind: OnboardingStepKind.RULES, id: "rules", title: i18n().t("join.onboarding.rulesTitle"), description: "", skippable: false } as OnboardingStep;
     steps.splice(hello === -1 ? steps.length : hello, 0, rules);
   }
   return steps;
@@ -107,6 +107,9 @@ export function OnboardingFlow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nudge = useAnimationControls();
+  const { t } = useI18n();
+  /** What the hello says until they change it, when the admin didn't write one. */
+  const greeting = (s: OnboardingStep) => s.hello || t("join.onboarding.hello");
   const [started] = useState(() => performance.now());
   const index = Math.min(at, shown.length - 1);
   const step = shown[index]!;
@@ -149,19 +152,19 @@ export function OnboardingFlow({
   async function next(skip = false) {
     if (step.kind === "done") return onClose?.();
     if (busy) return;
-    if (!skip && step.kind === OnboardingStepKind.PICK && !step.skippable && pickedIn(step).length === 0) return refuse("Pick at least one to go on.");
-    if (step.kind === OnboardingStepKind.RULES && !agreed) return refuse("Agree to the rules to go on.");
+    if (!skip && step.kind === OnboardingStepKind.PICK && !step.skippable && pickedIn(step).length === 0) return refuse(t("join.onboarding.pickOne"));
+    if (step.kind === OnboardingStepKind.RULES && !agreed) return refuse(t("join.onboarding.agreeFirst"));
     setBusy(true);
     try {
       if (step.kind === OnboardingStepKind.RULES && !preview && onAgree && !(await onAgree())) return;
       if (step.kind === OnboardingStepKind.HELLO && !skip && !preview && onHello) {
-        const text = (hello[step.id] ?? (step.hello || HELLO)).trim();
+        const text = (hello[step.id] ?? greeting(step)).trim();
         if (text && !(await onHello(step.channelId, text))) return;
       }
       if (last && !(await finish())) return;
       move(index + 1);
     } catch (err) {
-      setError((err as FuwaError).message ?? "that didn't go through");
+      setError((err as FuwaError).message ?? t("join.onboarding.failed"));
     } finally {
       setBusy(false);
     }
@@ -171,11 +174,11 @@ export function OnboardingFlow({
     const fromPicks = steps
       .flatMap((s) => s.options)
       .filter((o) => picked.includes(o.id))
-      .flatMap((o) => o.channelIds.map((channelId) => ({ channelId, description: `Because you picked ${o.label}`, emoji: o.emoji })));
+      .flatMap((o) => o.channelIds.map((channelId) => ({ channelId, description: t("join.onboarding.becausePicked", { option: o.label }), emoji: o.emoji })));
     const all = [...fromPicks, ...(welcome?.enabled ? welcome.channels : [])];
     const once = all.filter((w, n) => all.findIndex((x) => x.channelId === w.channelId) === n).slice(0, 6);
     return suggestedChannels({ channels: once as WelcomeScreen["channels"] }, channels);
-  }, [steps, picked, welcome, channels]);
+  }, [steps, picked, welcome, channels, t]);
 
   const skippable = step.kind !== "done" && step.kind !== OnboardingStepKind.RULES && step.skippable;
   const empty = step.kind === OnboardingStepKind.PICK && pickedIn(step).length === 0;
@@ -185,7 +188,7 @@ export function OnboardingFlow({
         server={server}
         compact={compact}
         bleed={!compact}
-        eyebrow={step.kind === "done" ? "You're all set in" : `Step ${index + 1} of ${shown.length - 1}`}
+        eyebrow={step.kind === "done" ? t("join.onboarding.allSet") : t("join.onboarding.stepOf", { step: index + 1, total: shown.length - 1 })}
         badge={<SparklesIcon className="size-3.5" />}
       />
       <Dots count={shown.length - 1} at={index} onJump={preview ? (n) => move(n) : undefined} className={compact ? "px-4" : ""} />
@@ -211,14 +214,14 @@ export function OnboardingFlow({
                   <>
                     <RulesList rules={rules} className="scroll-thin max-h-60 overflow-y-auto pr-1" />
                     <AgreeCheck checked={agreed} onChange={setAgreed}>
-                      I've read the rules and agree to them
+                      {t("join.rules.agree")}
                     </AgreeCheck>
                   </>
                 )}
                 {step.kind === OnboardingStepKind.HELLO && (
                   <Hello
                     channel={channels.find((c) => c.id === step.channelId)}
-                    value={hello[step.id] ?? (step.hello || HELLO)}
+                    value={hello[step.id] ?? greeting(step)}
                     onChange={(text) => setHello((h) => ({ ...h, [step.id]: text }))}
                   />
                 )}
@@ -244,7 +247,7 @@ export function OnboardingFlow({
         <AnimatePresence initial={false} mode="popLayout">
           {index > 0 && step.kind !== "done" && (
             <motion.span key="back" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={SPRING}>
-              <Button type="button" variant="ghost" size="icon" aria-label="Back" onClick={() => move(index - 1)} className="group size-10 rounded-xl">
+              <Button type="button" variant="ghost" size="icon" aria-label={t("common.back")} onClick={() => move(index - 1)} className="group size-10 rounded-xl">
                 <ArrowLeftIcon className="transition-transform group-hover:-translate-x-0.5" />
               </Button>
             </motion.span>
@@ -253,7 +256,7 @@ export function OnboardingFlow({
         <span className="flex-1" />
         {skippable && (
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void next(true)} className="h-10 rounded-xl font-bold text-muted-foreground">
-            Skip
+            {t("join.onboarding.skip")}
           </Button>
         )}
         <Button
@@ -276,19 +279,19 @@ export function OnboardingFlow({
               {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
               {step.kind === "done" ? (
                 <>
-                  Start exploring <PartyPopperIcon />
+                  {t("join.onboarding.startExploring")} <PartyPopperIcon />
                 </>
               ) : step.kind === OnboardingStepKind.HELLO ? (
                 <>
-                  Send <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  {t("join.onboarding.send")} <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </>
               ) : step.kind === OnboardingStepKind.RULES ? (
                 <>
-                  Agree <CheckIcon />
+                  {t("join.onboarding.agree")} <CheckIcon />
                 </>
               ) : (
                 <>
-                  {last ? "Finish" : "Next"} <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
+                  {last ? t("join.onboarding.finish") : t("join.onboarding.next")} <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
                 </>
               )}
             </motion.span>
@@ -301,16 +304,17 @@ export function OnboardingFlow({
 
 /** Where you are: a dot per step, the current one stretched into a pill that glides along. */
 function Dots({ count, at, onJump, className }: { count: number; at: number; onJump?: (n: number) => void; className?: string }) {
+  const { t } = useI18n();
   if (count <= 1) return null;
   return (
     <LayoutGroup>
-      <div role="group" aria-label={`Step ${Math.min(at + 1, count)} of ${count}`} className={cn("mt-3 flex items-center gap-1.5", className)}>
+      <div role="group" aria-label={t("join.onboarding.stepOf", { step: Math.min(at + 1, count), total: count })} className={cn("mt-3 flex items-center gap-1.5", className)}>
         {Array.from({ length: count }, (_, n) => (
           <button
             key={n}
             type="button"
             tabIndex={onJump ? 0 : -1}
-            aria-label={`Step ${n + 1}`}
+            aria-label={t("join.onboarding.step", { step: n + 1 })}
             aria-current={n === at ? "step" : undefined}
             disabled={!onJump}
             onClick={() => onJump?.(n)}
@@ -398,13 +402,15 @@ function Picks({
 
 /** Saying hello: the channel it goes to and the message, ready to send. */
 function Hello({ channel, value, onChange }: { channel: Channel | undefined; value: string; onChange: (text: string) => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col gap-2">
       <p className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-        <MessageCircleHeartIcon className="size-4 text-[var(--accent-server)]" /> Goes to #{channel?.name ?? "a channel"}
+        <MessageCircleHeartIcon className="size-4 text-[var(--accent-server)]" />{" "}
+        {t("join.onboarding.goesTo", { channel: channel ? `#${channel.name}` : t("join.onboarding.aChannel") })}
       </p>
       <div className="relative">
-        <Textarea value={value} maxLength={2000} rows={3} onChange={(e) => onChange(e.target.value)} aria-label="Your hello" className="rounded-2xl pr-4 text-base" />
+        <Textarea value={value} maxLength={2000} rows={3} onChange={(e) => onChange(e.target.value)} aria-label={t("join.onboarding.yourHello")} className="rounded-2xl pr-4 text-base" />
         <motion.span
           aria-hidden
           animate={{ rotate: [0, 18, -8, 14, 0] }}
@@ -420,6 +426,7 @@ function Hello({ channel, value, onChange }: { channel: Channel | undefined; val
 
 /** All set: a little celebration, and the channels to go to now. */
 function Done({ server, suggested, emojis, onPick }: { server: BannerServer; suggested: Suggested[]; emojis: Emoji[] | undefined; onPick?: (channelId: string) => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -433,10 +440,10 @@ function Done({ server, suggested, emojis, onPick }: { server: BannerServer; sug
           <PartyPopperIcon className="size-6" />
         </motion.span>
         <p className="text-sm text-muted-foreground">
-          That's everything. Have fun in <b className="text-foreground">{server.name}</b>!
+          <T k="join.onboarding.haveFun" values={{ server: <b className="text-foreground">{server.name}</b> }} />
         </p>
       </div>
-      <StartHere suggested={suggested} emojis={emojis} onPick={onPick} label="Go here first" />
+      <StartHere suggested={suggested} emojis={emojis} onPick={onPick} label={t("join.onboarding.goHereFirst")} />
     </div>
   );
 }
@@ -467,6 +474,7 @@ export function OnboardingDialog({
   const [problem, setProblem] = useState<string | null>(null);
   // As it was when it opened, so agreeing partway doesn't take the rules step away under them.
   const [mustAgree] = useState(!!me?.pending && server.hasRules);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!open) return;
@@ -492,8 +500,8 @@ export function OnboardingDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent wide className="overflow-x-hidden pb-5">
-        <DialogPrimitive.Title className="sr-only">Get started in {server.name}</DialogPrimitive.Title>
-        <DialogPrimitive.Description className="sr-only">A few steps to set {server.name} up for you.</DialogPrimitive.Description>
+        <DialogPrimitive.Title className="sr-only">{t("join.onboarding.title", { server: server.name })}</DialogPrimitive.Title>
+        <DialogPrimitive.Description className="sr-only">{t("join.onboarding.description", { server: server.name })}</DialogPrimitive.Description>
         {problem ? (
           <p className="text-sm text-muted-foreground first-letter:uppercase">{problem}</p>
         ) : !loaded ? (

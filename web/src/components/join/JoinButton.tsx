@@ -10,6 +10,7 @@ import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { signedInForServer } from "@/lib/sso";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
+import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ export function JoinButton({
   inviteCode = "",
   auto = false,
   onOpen,
-  openLabel = "Open",
+  openLabel,
   size = "default",
 }: {
   instanceKey: string;
@@ -41,6 +42,7 @@ export function JoinButton({
   size?: "default" | "lg";
 }) {
   const inst = useInstance(instanceKey);
+  const { t } = useI18n();
   const member = !!inst?.servers.some((s) => s.id === server.id);
   const applied = inst?.applied[server.id];
   const local = inst?.me && inst.me.kind !== AccountKind.LINKED;
@@ -87,25 +89,25 @@ export function JoinButton({
   if (kind === "open") {
     button = (
       <Button size={size} variant="outline" onClick={() => onOpen(server)} className={cn("group w-full rounded-xl font-bold", tall)}>
-        {openLabel} <ArrowRightIcon className="transition-transform group-hover:translate-x-1" />
+        {openLabel ?? t("join.button.open")} <ArrowRightIcon className="transition-transform group-hover:translate-x-1" />
       </Button>
     );
   } else if (kind === "linked-only") {
     button = (
       <Button size={size} variant="outline" disabled className={cn("w-full rounded-xl font-bold", tall)}>
-        <LockIcon /> waifu.dev accounts only
+        <LockIcon /> {t("join.button.linkedOnly")}
       </Button>
     );
     note =
       inst?.me?.kind === AccountKind.SSO
-        ? "Only people who sign in with waifu.dev can join. You signed in with single sign-on."
-        : "Only people who sign in with waifu.dev can join. You signed in with an account made here.";
+        ? t("join.button.linkedOnlySso")
+        : t("join.button.linkedOnlyLocal");
   } else if (kind === "sso") {
-    const name = server.ssoName || "your organization";
+    const name = server.ssoName || t("connect.provider.yourOrganization");
     button = (
       <ProviderButton
         name={name}
-        label={server.applications ? `Sign in to apply` : `Join with ${name}`}
+        label={server.applications ? t("join.button.signInToApply") : t("join.button.joinWith", { name })}
         icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
         onGo={() =>
           sso.go(instanceKey, server.id, {
@@ -118,54 +120,52 @@ export function JoinButton({
         testId="sso-join"
       />
     );
-    note = (
-      <>
-        {server.name} lets in people who sign in with {name}
-        {server.ssoHost ? (
-          <>
-            {" "}
-            at <b className="text-foreground">{server.ssoHost}</b>
-          </>
-        ) : null}
-        . That sign-in page sees your IP address, like any site you visit.
-      </>
+    note = server.ssoHost ? (
+      <T k="join.button.ssoNoteAt" values={{ server: server.name, name, host: <b className="text-foreground">{server.ssoHost}</b> }} />
+    ) : (
+      t("join.button.ssoNote", { server: server.name, name })
     );
   } else if (kind === "waiting") {
     button = (
       <span className={cn("flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 px-4 text-sm font-bold text-amber-600 dark:text-amber-400", tall)}>
-        <HourglassIcon className="size-4 animate-[flip_3s_ease-in-out_infinite]" /> Waiting to be let in
+        <HourglassIcon className="size-4 animate-[flip_3s_ease-in-out_infinite]" /> {t("join.button.waiting")}
       </span>
     );
     note = (
-      <>
-        You applied. Someone from the server will look it over.{" "}
-        <button type="button" onClick={() => setLooking(true)} className="font-bold text-foreground underline-offset-2 hover:underline">
-          See where it stands
-        </button>{" "}
-        or{" "}
-        <button
-          type="button"
-          disabled={withdraw.pending}
-          onClick={async () => {
-            if ((await withdraw.go(instanceKey, server.id)) !== undefined) toast(`Took back your application to ${server.name}`);
-          }}
-          className="font-bold text-foreground underline-offset-2 hover:underline"
-        >
-          take it back
-        </button>
-      </>
+      <T
+        k="join.button.waitingNote"
+        values={{
+          look: (
+            <button type="button" onClick={() => setLooking(true)} className="font-bold text-foreground underline-offset-2 hover:underline">
+              {t("join.seeWhereItStands")}
+            </button>
+          ),
+          withdraw: (
+            <button
+              type="button"
+              disabled={withdraw.pending}
+              onClick={async () => {
+                if ((await withdraw.go(instanceKey, server.id)) !== undefined) toast(t("join.withdrawn", { server: server.name }));
+              }}
+              className="font-bold text-foreground underline-offset-2 hover:underline"
+            >
+              {t("join.button.takeItBack")}
+            </button>
+          ),
+        }}
+      />
     );
   } else if (kind === "apply") {
     const again = applied?.status === ApplicationStatus.REJECTED;
     button = (
       <Button size={size} onClick={() => setApplying(true)} className={cn("btn w-full rounded-xl font-bold", tall)}>
-        <ClipboardPenIcon /> {again ? "Apply again" : "Apply to join"}
+        <ClipboardPenIcon /> {again ? t("join.applyAgain") : t("join.apply")}
       </Button>
     );
     note = again
       ? applied!.reason
-        ? `Your last application was turned down: “${applied!.reason}”`
-        : "Your last application was turned down."
+        ? t("join.button.lastTurnedDownBecause", { reason: applied!.reason })
+        : t("join.button.lastTurnedDown")
       : null;
   } else {
     button = (
@@ -185,7 +185,7 @@ export function JoinButton({
             className="flex items-center gap-2"
           >
             {joined ? <CheckIcon strokeWidth={3} /> : join.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
-            {joined ? "Joined" : size === "lg" ? `Join ${server.name}` : "Join"}
+            {joined ? t("join.button.joined") : size === "lg" ? t("join.button.joinServer", { server: server.name }) : t("join.button.join")}
           </motion.span>
         </AnimatePresence>
       </Button>
