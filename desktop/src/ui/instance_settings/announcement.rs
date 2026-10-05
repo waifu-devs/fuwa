@@ -15,11 +15,12 @@ use gpui_kit::{
 use super::controls::Opt;
 use super::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::core::dms::now_ms;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_manage::{self as manage, LENGTHS, TEXT_MAX};
 use crate::pb::{self, AnnouncementTone as Tone};
 use crate::ui::announcement::banner;
 use crate::ui::motion;
-use crate::ui::server_settings::{amber, chip, spinner};
+use crate::ui::server_settings::{amber, chip, marked, spinner, strong};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{error_line, icon, primary_button};
 
@@ -47,9 +48,7 @@ pub(super) struct Announce {
 impl Announce {
     pub fn new(window: &mut Window, cx: &mut Context<InstanceSettingsView>) -> (Self, gpui_kit::Subscription) {
         let text = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .auto_grow(2, 5)
-                .placeholder("We're moving to a bigger server tonight at 10 PM. Expect a few minutes offline.")
+            TextareaState::new(window, cx).auto_grow(2, 5).placeholder(t("instancesettings.announcement.placeholder"))
         });
         let sub =
             cx.subscribe_in(&text, window, |this: &mut InstanceSettingsView, state, e: &InputEvent, window, cx| {
@@ -65,6 +64,17 @@ impl Announce {
                 cx.notify();
             });
         (Self { text, tone: Tone::Info, ends: Ends::Never, busy: false, error: None, filled: None, shouts: 0 }, sub)
+    }
+}
+
+/// How long one of the lengths keeps it up, in words.
+fn length_label(ms: Option<i64>) -> String {
+    match ms {
+        None => t("instancesettings.announcement.untilDown"),
+        Some(ms) if ms <= 3_600_000 => t("instancesettings.announcement.hour"),
+        Some(ms) if ms <= 4 * 3_600_000 => t("instancesettings.announcement.fourHours"),
+        Some(ms) if ms <= 24 * 3_600_000 => t("instancesettings.announcement.day"),
+        Some(_) => t("instancesettings.announcement.week"),
     }
 }
 
@@ -117,14 +127,14 @@ impl InstanceSettingsView {
                 match result {
                     Ok(now_up) => {
                         let title = match (take_down, was_up) {
-                            (true, _) => "Announcement taken down",
-                            (false, true) => "Announcement updated",
-                            (false, false) => "Announcement is up",
+                            (true, _) => t("instancesettings.announcement.down"),
+                            (false, true) => t("instancesettings.announcement.updated"),
+                            (false, false) => t("instancesettings.announcement.up"),
                         };
                         // What came back is what the boxes now show.
                         this.announce.filled = None;
                         this.fill_announcement(now_up.as_ref(), window, cx);
-                        cx.emit(InstanceSettingsEvent::Toast { icon: "megaphone", title: title.to_owned() });
+                        cx.emit(InstanceSettingsEvent::Toast { icon: "megaphone", title });
                     }
                     Err(problem) => this.announce.error = Some(problem.message),
                 }
@@ -158,7 +168,7 @@ impl InstanceSettingsView {
         });
         let draft = pb::Announcement {
             id: live.as_ref().filter(|l| l.text == trimmed).map_or_else(|| "draft".to_owned(), |l| l.id.clone()),
-            text: if trimmed.is_empty() { "Your announcement shows here.".to_owned() } else { trimmed.clone() },
+            text: if trimmed.is_empty() { t("instancesettings.announcement.previewText") } else { trimmed.clone() },
             tone: tone as i32,
             ends_at: ends_at.map(|ms| prost_types::Timestamp { seconds: ms / 1000, nanos: 0 }),
             ..Default::default()
@@ -194,11 +204,15 @@ impl InstanceSettingsView {
         let status = match &live {
             Some(l) => {
                 let since = manage::created_ms(l).map(|at| manage::stamp_label(at, now)).unwrap_or_default();
-                let until =
-                    manage::ends_ms(l).map(|at| format!(", until {}", manage::ends_label(at, now))).unwrap_or_default();
-                format!("Up since {since}{until}")
+                match manage::ends_ms(l) {
+                    Some(at) => t_with(
+                        "instancesettings.announcement.upSinceUntil",
+                        &[("time", Arg::Str(&since)), ("end", Arg::Str(&manage::ends_label(at, now)))],
+                    ),
+                    None => t_with("instancesettings.announcement.upSince", &[("time", Arg::Str(&since))]),
+                }
             }
-            None => "Nothing is up right now.".to_owned(),
+            None => t("instancesettings.announcement.nothingUp"),
         };
         let green = p.success;
         let dot = div()
@@ -285,9 +299,24 @@ impl InstanceSettingsView {
             "announcement-tone",
             tone as i32,
             vec![
-                Opt::new(Tone::Info as i32, "Info", "News and small notes. People can close it.", "megaphone"),
-                Opt::new(Tone::Warning as i32, "Heads-up", "Maintenance or a change coming soon.", "triangle-alert"),
-                Opt::new(Tone::Critical as i32, "Urgent", "Something is wrong now. Nobody can close it.", "siren"),
+                Opt::new(
+                    Tone::Info as i32,
+                    t("instancesettings.announcement.info"),
+                    t("instancesettings.announcement.infoHint"),
+                    "megaphone",
+                ),
+                Opt::new(
+                    Tone::Warning as i32,
+                    t("instancesettings.announcement.warning"),
+                    t("instancesettings.announcement.warningHint"),
+                    "triangle-alert",
+                ),
+                Opt::new(
+                    Tone::Critical as i32,
+                    t("instancesettings.announcement.critical"),
+                    t("instancesettings.announcement.criticalHint"),
+                    "siren",
+                ),
             ],
             p,
             window,
@@ -300,9 +329,12 @@ impl InstanceSettingsView {
 
         let mut lengths: Vec<(String, Ends)> = Vec::new();
         if let Some(at) = live.as_ref().and_then(manage::ends_ms) {
-            lengths.push((format!("Until {}", manage::ends_label(at, now)), Ends::Keep));
+            lengths.push((
+                t_with("instancesettings.announcement.until", &[("time", Arg::Str(&manage::ends_label(at, now)))]),
+                Ends::Keep,
+            ));
         }
-        lengths.extend(LENGTHS.iter().map(|(label, ms)| (label.to_string(), ms.map_or(Ends::Never, Ends::For))));
+        lengths.extend(LENGTHS.iter().map(|ms| (length_label(*ms), ms.map_or(Ends::Never, Ends::For))));
         let mut chips = div().flex().flex_wrap().gap(px(8.0));
         for (n, (label, value)) in lengths.into_iter().enumerate() {
             chips = chips.child(
@@ -318,14 +350,13 @@ impl InstanceSettingsView {
             ends_at.filter(|_| ends != Ends::Keep),
             |el, at| {
                 el.child(motion::rise(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .flex()
-                        .gap(px(4.0))
-                        .child("Comes down")
-                        .child(div().font_weight(FontWeight::BOLD).child(manage::stamp_label(at, now)))
-                        .child("counted from when you put it up."),
+                    div().text_xs().text_color(p.muted_foreground).child(marked(
+                        &t_with(
+                            "desktop.instance.comesDownAt",
+                            &[("time", Arg::Str(&strong(&manage::stamp_label(at, now))))],
+                        ),
+                        p,
+                    )),
                     SharedString::from(format!("announcement-ends-at-{ends:?}")),
                     Duration::ZERO,
                     4.0,
@@ -351,7 +382,11 @@ impl InstanceSettingsView {
         // The icon goes before the words, so the button's own label stays empty.
         let send = primary_button("announcement-send", "", p)
             .child(if self.announce.busy { spinner("announcement-busy", 16.0, window) } else { megaphone })
-            .child(if live.is_some() { "Update" } else { "Put it up" })
+            .child(if live.is_some() {
+                t("instancesettings.announcement.update")
+            } else {
+                t("instancesettings.announcement.putUp")
+            })
             .when(!can_send, |el| el.opacity(0.5).cursor_default())
             .when(can_send, |el| el.on_click(cx.listener(|this, _, window, cx| this.put_up(false, window, cx))));
         let destructive = p.destructive;
@@ -377,7 +412,7 @@ impl InstanceSettingsView {
                         .active(|s| s.top(px(1.0)))
                         .on_click(cx.listener(|this, _, window, cx| this.put_up(true, window, cx)))
                         .child(icon("megaphone-off").size(px(16.0)))
-                        .child("Take it down"),
+                        .child(t("instancesettings.announcement.takeDown")),
                     "announcement-down-in",
                     10.0,
                 ))
@@ -390,8 +425,8 @@ impl InstanceSettingsView {
             .flex_col()
             .child(self.setting(
                 "announcement-preview",
-                "Preview",
-                Some("What everyone on this instance sees at the top of the app."),
+                &t("settings.controls.preview"),
+                Some(&t("instancesettings.announcement.previewHint")),
                 &[],
                 "",
                 0,
@@ -401,8 +436,8 @@ impl InstanceSettingsView {
             ))
             .child(self.setting(
                 "announcement-text",
-                "Message",
-                Some("Bold, italics, code and links work. Keep it to a line or two."),
+                &t("instancesettings.announcement.message"),
+                Some(&t("instancesettings.announcement.messageHint")),
                 &[],
                 "",
                 1,
@@ -410,11 +445,21 @@ impl InstanceSettingsView {
                 p,
                 cx,
             ))
-            .child(self.setting("announcement-tone", "Tone", None, &[], "", 2, tones, p, cx))
+            .child(self.setting(
+                "announcement-tone",
+                &t("instancesettings.announcement.tone"),
+                None,
+                &[],
+                "",
+                2,
+                tones,
+                p,
+                cx,
+            ))
             .child(self.setting(
                 "announcement-ends",
-                "Comes down",
-                Some("It disappears from every client by itself at the end."),
+                &t("instancesettings.announcement.comesDown"),
+                Some(&t("instancesettings.announcement.comesDownHint")),
                 &[],
                 "",
                 3,
@@ -425,5 +470,19 @@ impl InstanceSettingsView {
             .when_some(error_line(self.announce.error.as_deref(), p), |el, e| el.child(div().pt(px(12.0)).child(e)))
             .child(actions)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_length_has_its_own_words() {
+        let labels: Vec<String> = super::LENGTHS.iter().map(|ms| super::length_label(*ms)).collect();
+        let mut unique = labels.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), super::LENGTHS.len(), "{labels:?}");
+        assert_eq!(labels[0], crate::core::i18n::t("instancesettings.announcement.untilDown"));
+        assert_eq!(labels[4], crate::core::i18n::t("instancesettings.announcement.week"));
     }
 }

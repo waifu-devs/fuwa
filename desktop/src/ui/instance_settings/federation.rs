@@ -13,9 +13,12 @@ use gpui_kit::{
     px,
 };
 
+use super::controls::{ago_text, count_text, per_minute_text, size_text};
 use super::general::hidden;
-use super::{HIDDEN_ADDRESS, InstanceSettingsView};
+use super::signups::on_off;
+use super::{InstanceSettingsView, hidden_address};
 use crate::core::dms::now_ms;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_manage::active_ago;
 use crate::pb;
 use crate::ui::motion;
@@ -178,13 +181,13 @@ impl InstanceSettingsView {
                             |el, t| el.rotate(gpui_kit::radians((t * std::f32::consts::TAU).sin() * (1.0 - t) * 0.14)),
                         )),
                 )
-                .child(div().flex_1().min_w_0().text_color(p.muted_foreground).child(
-                    "With this on, this instance talks to other fuwa instances so servers can share channels across \
-                     them. Only the instances talk: apps here never connect to another instance, and no one's address \
-                     is passed on. Every call is signed with this instance's key and checked against the key pinned \
-                     for the other one. Servers can share channels with servers on other instances by share code, \
-                     and you can check below that two instances reach each other.",
-                )),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(p.muted_foreground)
+                        .child(t("desktop.instance.federationIntro")),
+                ),
             "federation-intro",
             Duration::ZERO,
             8.0,
@@ -192,18 +195,17 @@ impl InstanceSettingsView {
 
         let mut page = div().flex().flex_col().child(intro).child(self.setting(
             "federation",
-            "Talk to other instances",
+            &t("instancesettings.nav.federationOn"),
             None,
             &["federation"],
-            if defaults.federation { "on" } else { "off" },
+            &on_off(defaults.federation),
             0,
             self.toggle(
                 "federation",
                 draft.federation,
                 false,
-                "Share channels with other instances",
-                "Off, this instance answers other instances with nothing but \u{201c}off\u{201d}. Turning it off later \
-                 stops every call between instances.",
+                &t("instancesettings.federation.label"),
+                &t("instancesettings.federation.hint"),
                 p,
                 cx,
                 |d, on| d.federation = on,
@@ -213,7 +215,7 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "federation-identity",
-            "This instance's key",
+            &t("instancesettings.nav.federationIdentity"),
             None,
             &[],
             "",
@@ -225,11 +227,8 @@ impl InstanceSettingsView {
         let check = self.check_card(saved_on, hide, p, window, cx);
         page = page.child(self.setting(
             "federation-check",
-            "Check an instance",
-            Some(
-                "Fetches its key and pins it here, then sends it a signed greeting there and back. The other instance \
-                 only checks the greeting: it pins this one's key when its own admins check this instance.",
-            ),
+            &t("instancesettings.nav.federationCheck"),
+            Some(&t("instancesettings.federation.checkHint")),
             &[],
             "",
             2,
@@ -239,7 +238,7 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "federation-peers",
-            "Instances this one knows",
+            &t("instancesettings.nav.federationPeers"),
             None,
             &[],
             "",
@@ -263,10 +262,10 @@ impl InstanceSettingsView {
         };
         page = page.child(self.setting(
             "federation-blocked",
-            "Blocked instances",
-            Some("Host names, one a line. This instance never calls them and turns their calls away."),
+            &t("instancesettings.nav.federationBlocked"),
+            Some(&t("instancesettings.federation.blockedHint")),
             &["federation_blocked_hosts"],
-            "none",
+            &t("instancesettings.shared.none"),
             4,
             list,
             p,
@@ -274,29 +273,23 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "federation-sends",
-            "Messages per server a minute",
-            Some(
-                "How many messages all the people of one server on another instance may send together to channels \
-                 shared from here. That instance says who its people are, so a server there counts as one sender.",
-            ),
+            &t("instancesettings.nav.federationSends"),
+            Some(&t("instancesettings.federation.sendsHint")),
             &["shared_remote_sends_per_minute"],
-            &crate::core::instance_admin::per_minute_label(defaults.shared_remote_sends_per_minute),
+            &per_minute_text(defaults.shared_remote_sends_per_minute),
             5,
-            self.cap("shared_remote_sends_per_minute", "Up to", false, p, window, cx),
+            self.cap("shared_remote_sends_per_minute", &t("instancesettings.shared.upTo"), false, p, window, cx),
             p,
             cx,
         ));
         page = page.child(self.setting(
             "federation-people",
-            "People per server",
-            Some(
-                "How many people one server on another instance may bring to a server's shared channels. Past it, \
-                 no one new from that server can join in; those already there still can.",
-            ),
+            &t("instancesettings.nav.federationPeople"),
+            Some(&t("instancesettings.federation.peopleHint")),
             &["shared_remote_people"],
-            &crate::core::instance_admin::count_label(defaults.shared_remote_people),
+            &count_text(defaults.shared_remote_people),
             6,
-            self.cap("shared_remote_people", "Up to", false, p, window, cx),
+            self.cap("shared_remote_people", &t("instancesettings.shared.upTo"), false, p, window, cx),
             p,
             cx,
         ));
@@ -304,30 +297,23 @@ impl InstanceSettingsView {
         if self.instance_has("shared-files-elsewhere") {
             page = page.child(self.setting(
                 "federation-files",
-                "Files per server a day",
-                Some(
-                    "How much one server on another instance may send in files to channels shared from here in a day \
-                     (UTC). The files are kept here, under the home server's room for files.",
-                ),
+                &t("instancesettings.nav.federationFiles"),
+                Some(&t("instancesettings.federation.filesHint")),
                 &["shared_remote_file_bytes_per_day"],
-                &crate::core::instance_admin::size_label(defaults.shared_remote_file_bytes_per_day),
+                &size_text(defaults.shared_remote_file_bytes_per_day),
                 7,
-                self.cap("shared_remote_file_bytes_per_day", "Up to", true, p, window, cx),
+                self.cap("shared_remote_file_bytes_per_day", &t("instancesettings.shared.upTo"), true, p, window, cx),
                 p,
                 cx,
             ));
             page = page.child(self.setting(
                 "federation-fetches",
-                "Files fetched at once",
-                Some(
-                    "How many files this instance fetches from other instances at the same time, for shared \
-                     channels; each instance gets at most half, and the rest wait their turn. Leave it off for no \
-                     limit.",
-                ),
+                &t("instancesettings.nav.federationFetches"),
+                Some(&t("desktop.instance.fetchesHint")),
                 &["shared_file_fetches_in_flight"],
-                &crate::core::instance_admin::count_label(defaults.shared_file_fetches_in_flight),
+                &count_text(defaults.shared_file_fetches_in_flight),
                 8,
-                self.cap("shared_file_fetches_in_flight", "Up to", false, p, window, cx),
+                self.cap("shared_file_fetches_in_flight", &t("instancesettings.shared.upTo"), false, p, window, cx),
                 p,
                 cx,
             ));
@@ -359,17 +345,21 @@ impl InstanceSettingsView {
                 .child(div().flex_1().min_w_0().child(capitalized(&info.origin_problem)))
                 .into_any_element()
         } else {
+            // The address sits in the sentence in its own type, wherever the language puts it.
+            let line = t_with("desktop.instance.knownAs", &[("origin", Arg::Str("\u{E000}"))]);
+            let (before, after) = line.split_once('\u{E000}').unwrap_or((line.as_str(), ""));
             div()
                 .flex()
                 .flex_wrap()
                 .gap(px(4.0))
                 .text_sm()
-                .child("Other instances know this one as")
+                .when(!before.trim().is_empty(), |el| el.child(before.trim().to_owned()))
                 .child(div().font_family("monospace").text_xs().font_weight(FontWeight::BOLD).child(if hide {
-                    HIDDEN_ADDRESS.to_owned()
+                    hidden_address()
                 } else {
                     shown(&info.origin)
                 }))
+                .when(!after.trim().is_empty(), |el| el.child(after.trim().to_owned()))
                 .into_any_element()
         };
         let mut groups = div().flex().flex_wrap().gap_x(px(12.0)).gap_y(px(4.0)).font_family("monospace").text_xs();
@@ -397,10 +387,7 @@ impl InstanceSettingsView {
                     .child(icon("fingerprint-pattern").size(px(20.0)).text_color(p.primary))
                     .child(div().flex_1().min_w_0().child(groups)),
             )
-            .child(div().text_xs().text_color(p.muted_foreground).child(
-                "Before sharing with another instance, compare fingerprints with its admins somewhere you trust: \
-                 theirs shows here once the two have met.",
-            ))
+            .child(div().text_xs().text_color(p.muted_foreground).child(t("instancesettings.federation.compare")))
             .into_any_element()
     }
 
@@ -422,7 +409,7 @@ impl InstanceSettingsView {
             } else {
                 icon("radar").size(px(16.0)).into_any_element()
             })
-            .child("Check")
+            .child(t("instancesettings.federation.check"))
             .on_click(cx.listener(|this, _, window, cx| this.check_instance(window, cx)));
         let mut card = div()
             .flex()
@@ -437,32 +424,30 @@ impl InstanceSettingsView {
                     .child(button),
             )
             .when(!on, |el| {
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .child("Turn on \u{201c}Share channels with other instances\u{201d} and save first."),
-                )
+                el.child(div().text_xs().text_color(p.muted_foreground).child(t_with(
+                    "instancesettings.federation.turnOnFirst",
+                    &[("setting", Arg::Str(&t("instancesettings.federation.label")))],
+                )))
             });
         if let Some(result) = &f.result {
             let (tint, glyph, text, key) = match result {
                 Ok(r) => {
                     let peer = r.peer.clone().unwrap_or_default();
-                    let host = if hide { HIDDEN_ADDRESS.to_owned() } else { shown(&peer.origin) };
+                    let host = if hide { hidden_address() } else { shown(&peer.origin) };
+                    let reached = t_with(
+                        "instancesettings.federation.reached",
+                        &[
+                            ("origin", Arg::Str(&host)),
+                            ("ms", Arg::Str(&r.round_trip_ms.to_string())),
+                            ("fingerprint", Arg::Str(&peer.fingerprint)),
+                        ],
+                    );
                     let both = if r.known_there {
-                        "It knows this instance too, so signed calls go both ways."
+                        t("instancesettings.federation.knownThere")
                     } else {
-                        "It doesn't know this instance yet: its admins check this one from their side to pin its key."
+                        t("instancesettings.federation.notKnownThere")
                     };
-                    (
-                        green(),
-                        "check",
-                        format!(
-                            "Reached {host} and back in {} ms. Its key: {}. {both}",
-                            r.round_trip_ms, peer.fingerprint
-                        ),
-                        format!("ok-{}", peer.origin),
-                    )
+                    (green(), "check", format!("{reached} {both}"), format!("ok-{}", peer.origin))
                 }
                 Err(message) => (p.destructive.into(), "triangle-alert", message.clone(), format!("error-{message}")),
             };
@@ -494,18 +479,18 @@ impl InstanceSettingsView {
             return div()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("None yet. An instance shows here once an admin here checks it.")
+                .child(t("instancesettings.federation.noPeers"))
                 .into_any_element();
         }
         let now = now_ms();
         let mut list = div().flex().flex_col().gap(px(8.0));
         for (n, peer) in peers.iter().take(f.shown).enumerate() {
             let heard = match &peer.last_heard {
-                Some(t) => match active_ago(t.seconds * 1000, now).trim_start_matches("Active ") {
-                    "now" => "just now".to_owned(),
-                    ago => ago.to_owned(),
-                },
-                None => "never".to_owned(),
+                Some(at) => {
+                    let when = ago_text(active_ago(at.seconds * 1000, now)).unwrap_or_else(|| t("common.time.justNow"));
+                    t_with("instancesettings.federation.heard", &[("when", Arg::Str(&when))])
+                }
+                None => t("instancesettings.federation.heardNever"),
             };
             let edge: Hsla = if peer.blocked { alpha(p.destructive, 0.4) } else { p.border.into() };
             list = list.child(motion::rise(
@@ -529,8 +514,13 @@ impl InstanceSettingsView {
                                     .gap(px(8.0))
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
-                                    .child(if hide { HIDDEN_ADDRESS.to_owned() } else { shown(&peer.origin) })
-                                    .when(peer.blocked, |el| el.child(pill("BLOCKED", p.destructive.into()))),
+                                    .child(if hide { hidden_address() } else { shown(&peer.origin) })
+                                    .when(peer.blocked, |el| {
+                                        el.child(pill(
+                                            &t("instancesettings.federation.blocked").to_uppercase(),
+                                            p.destructive.into(),
+                                        ))
+                                    }),
                             )
                             .child(
                                 div()
@@ -542,9 +532,7 @@ impl InstanceSettingsView {
                                     .child(peer.fingerprint.clone()),
                             ),
                     )
-                    .child(
-                        div().flex_none().text_xs().text_color(p.muted_foreground).child(format!("Heard from {heard}")),
-                    ),
+                    .child(div().flex_none().text_xs().text_color(p.muted_foreground).child(heard)),
                 SharedString::from(format!("federation-peer-{}", peer.origin)),
                 Duration::from_millis(30 * n.min(10) as u64),
                 6.0,
@@ -552,12 +540,19 @@ impl InstanceSettingsView {
         }
         if peers.len() > f.shown {
             let more = (peers.len() - f.shown).min(PAGE);
-            list = list.child(div().child(soft_button("federation-more", format!("Show {more} more"), p).on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.federation.shown += PAGE;
-                    cx.notify();
-                }),
-            )));
+            list = list.child(
+                div().child(
+                    soft_button(
+                        "federation-more",
+                        t_with("instancesettings.federation.showMore", &[("count", Arg::Num(more as i64))]),
+                        p,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.federation.shown += PAGE;
+                        cx.notify();
+                    })),
+                ),
+            );
         }
         list.into_any_element()
     }

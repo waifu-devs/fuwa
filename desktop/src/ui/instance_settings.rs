@@ -30,13 +30,16 @@ use gpui_kit::{
 
 use crate::core::Core;
 use crate::core::api::Problem;
-use crate::core::instance_admin::{self as admin, MAX_CUSTOM};
+use crate::core::i18n::{Arg, t, t_with};
+use crate::core::instance_admin::{self as admin, MAX_CUSTOM, Missing};
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::server_settings::{amber, chip, pill, save_bar, shimmer_rows, spinner, switch};
+use crate::ui::server_settings::{amber, chip, marked, pill, save_bar, shimmer_rows, spinner, strong, switch};
 
 /// What stands in for an address in streamer mode, as on the web.
-const HIDDEN_ADDRESS: &str = "address hidden";
+pub(super) fn hidden_address() -> String {
+    t("desktop.instance.addressHidden")
+}
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{error_line, icon, pal, soft_button};
 
@@ -67,19 +70,19 @@ enum Page {
 }
 
 impl Page {
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Page::General => "General",
-            Page::SignUps => "Sign-ups",
-            Page::Sso => "Single sign-on",
-            Page::Limits => "Limits",
-            Page::Privacy => "Privacy",
-            Page::Calls => "Calls",
-            Page::Moderation => "Moderation",
-            Page::Federation => "Other instances",
-            Page::Accounts => "Accounts",
-            Page::Servers => "Servers",
-            Page::Announcement => "Announcement",
+            Page::General => t("instancesettings.nav.general"),
+            Page::SignUps => t("instancesettings.nav.signUps"),
+            Page::Sso => t("serversettings.nav.sso"),
+            Page::Limits => t("serversettings.nav.limits"),
+            Page::Privacy => t("instancesettings.nav.privacy"),
+            Page::Calls => t("instancesettings.nav.calls"),
+            Page::Moderation => t("instancesettings.nav.moderation"),
+            Page::Federation => t("instancesettings.nav.federation"),
+            Page::Accounts => t("instancesettings.nav.accounts"),
+            Page::Servers => t("instancesettings.nav.servers"),
+            Page::Announcement => t("instancesettings.nav.announcement"),
         }
     }
 
@@ -99,19 +102,19 @@ impl Page {
         }
     }
 
-    fn about(self) -> &'static str {
+    fn about(self) -> String {
         match self {
-            Page::General => "What everyone here gets. Changes apply right away.",
-            Page::SignUps => "Who can join this instance and what they can make.",
-            Page::Sso => "Let people sign in here through your organization's identity provider.",
-            Page::Limits => "Caps every server starts with.",
-            Page::Privacy => "What this instance tells Waifu Devs.",
-            Page::Calls => "Voice channels and calls in direct messages.",
-            Page::Moderation => "Services servers' AutoMod can ask about messages.",
-            Page::Federation => "Let servers here share channels with servers on other fuwa instances.",
-            Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
-            Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
-            Page::Announcement => "A banner at the top of the app for everyone on this instance.",
+            Page::General => t("desktop.instance.generalAbout"),
+            Page::SignUps => t("instancesettings.nav.signUpsAbout"),
+            Page::Sso => t("instancesettings.nav.ssoAbout"),
+            Page::Limits => t("instancesettings.nav.limitsAbout"),
+            Page::Privacy => t("instancesettings.nav.privacyAbout"),
+            Page::Calls => t("instancesettings.nav.callsAbout"),
+            Page::Moderation => t("instancesettings.nav.moderationAbout"),
+            Page::Federation => t("instancesettings.nav.federationAbout"),
+            Page::Accounts => t("instancesettings.nav.accountsAbout"),
+            Page::Servers => t("desktop.instance.serversAbout"),
+            Page::Announcement => t("instancesettings.nav.announcementAbout"),
         }
     }
 
@@ -121,10 +124,10 @@ impl Page {
     }
 }
 
-/// The menu's groups and their pages, in the web's order.
-const GROUPS: [(&str, &[Page]); 2] = [
+/// The menu's groups (instance, manage) and their pages, in the web's order.
+const GROUPS: [(bool, &[Page]); 2] = [
     (
-        "INSTANCE",
+        false,
         &[
             Page::General,
             Page::SignUps,
@@ -136,18 +139,19 @@ const GROUPS: [(&str, &[Page]); 2] = [
             Page::Federation,
         ],
     ),
-    ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
+    (true, &[Page::Accounts, Page::Servers, Page::Announcement]),
 ];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
 type SetText = fn(&mut pb::InstanceSettings, String);
 
-/// Settings typed in one line: (path, placeholder, read, write).
+/// Settings typed in one line: (path, placeholder, read, write). The TURN secret's placeholder
+/// says whether one is saved, so it's set as the draft comes in.
 const TEXTS: [(&str, &str, GetText, SetText); 4] = [
     ("name", "", |s| s.name.clone(), |s, v| s.name = v.chars().take(64).collect()),
     ("public_url", "https://chat.example.com", |s| s.public_url.clone(), |s, v| s.public_url = v),
     ("linked_issuer", signups::WAIFU_DEV_ISSUER, |s| s.linked_issuer.clone(), |s, v| s.linked_issuer = v),
-    ("turn_secret", "No TURN secret", |s| s.turn_secret.clone(), |s, v| s.turn_secret = v),
+    ("turn_secret", "", |s| s.turn_secret.clone(), |s, v| s.turn_secret = v),
 ];
 
 /// Lists typed one per line: (path, placeholder, read, write).
@@ -178,13 +182,61 @@ fn kept(text: &str) -> Vec<&str> {
 }
 
 /// What the usage signal counts, as on the web.
-const SIGNAL: [&str; 5] = [
-    "How many accounts, servers, channels and messages",
-    "Storage used, in bytes",
-    "Which account and server options are on",
-    "fuwa version, OS and a random install id",
-    "Kinds of errors and where, and how long requests took (server and apps)",
-];
+fn signal() -> [String; 5] {
+    [
+        t("instancesettings.privacy.counts"),
+        t("instancesettings.privacy.storage"),
+        t("instancesettings.privacy.options"),
+        t("instancesettings.privacy.version"),
+        t("instancesettings.privacy.errors"),
+    ]
+}
+
+/// What a known provider is, in a line.
+fn blurb(id: &str) -> String {
+    match id {
+        "typesafe-jev" => t("instancesettings.moderation.jevBlurb"),
+        "cloudflare-clef" => t("instancesettings.moderation.clefBlurb"),
+        _ => String::new(),
+    }
+}
+
+/// Where a known provider's key comes from.
+fn key_help(id: &str) -> String {
+    match id {
+        "typesafe-jev" => t("instancesettings.moderation.jevKeyHelp"),
+        "cloudflare-clef" => t("instancesettings.moderation.clefKeyHelp"),
+        _ => String::new(),
+    }
+}
+
+/// What a known provider's model is good for.
+fn model_hint(id: &str) -> String {
+    match id {
+        "jev-latest" => t("instancesettings.moderation.jevLatest"),
+        "jev-preview" => t("instancesettings.moderation.jevPreview"),
+        "@cf/cloudflare/clef" => t("instancesettings.moderation.clefModel"),
+        "@cf/cloudflare/clef-flash" => t("instancesettings.moderation.clefFlash"),
+        _ => String::new(),
+    }
+}
+
+/// What a provider's card still needs, as a sentence.
+fn missing_text(missing: Missing) -> String {
+    match missing {
+        Missing::Key | Missing::Custom { name: false, address: false, key: true } => {
+            t("instancesettings.moderation.addKey")
+        }
+        Missing::TokenAndAccount => t("instancesettings.moderation.addTokenAccount"),
+        Missing::Custom { name: true, address: false, key: false } => t("instancesettings.moderation.addName"),
+        Missing::Custom { name: false, address: true, key: false } => t("instancesettings.moderation.addAddress"),
+        Missing::Custom { name: true, address: true, key: false } => t("instancesettings.moderation.addNameAddress"),
+        Missing::Custom { name: true, address: false, key: true } => t("instancesettings.moderation.addNameKey"),
+        Missing::Custom { name: false, address: true, key: true } => t("instancesettings.moderation.addAddressKey"),
+        Missing::Custom { name: true, address: true, key: true } => t("instancesettings.moderation.addAll"),
+        Missing::Custom { name: false, address: false, key: false } => String::new(),
+    }
+}
 
 /// The text boxes of one provider's card, kept by a slot that doesn't move
 /// when a card above it is removed.
@@ -428,12 +480,13 @@ impl InstanceSettingsView {
         let hide = self.core.prefs().streamer_mode;
         let fields = Fields {
             slot,
-            key: input(&p.api_key, "Paste it here", true, window, cx),
-            account: input(&p.account_id, "32 letters and digits", hide, window, cx),
-            name: input(&p.name, "What servers see, like Our classifier", false, window, cx),
+            key: input(&p.api_key, &t("instancesettings.moderation.paste"), true, window, cx),
+            account: input(&p.account_id, &t("instancesettings.moderation.accountIdPlaceholder"), hide, window, cx),
+            name: input(&p.name, &t("instancesettings.moderation.namePlaceholder"), false, window, cx),
             url: input(&p.url, "https://moderation.example.com/v1/check", hide, window, cx),
+            // The header's name, as it goes over the wire.
             header: input(&p.header, "Authorization (Bearer)", false, window, cx),
-            model: input(&p.model, "Optional, sent as model", false, window, cx),
+            model: input(&p.model, &t("instancesettings.moderation.modelOptional"), false, window, cx),
         };
         type Set = fn(&mut pb::AutoModProviderSettings, String);
         let wires: [(&Entity<InputState>, Set); 6] = [
@@ -475,6 +528,8 @@ impl InstanceSettingsView {
         let hide = self.core.prefs().streamer_mode;
         for (path, placeholder, get, set) in TEXTS {
             let masked = path == "turn_secret" || (hide && path == "public_url");
+            let placeholder =
+                if path == "turn_secret" { t("instancesettings.calls.noSecret") } else { placeholder.to_owned() };
             let state = cx.new(|cx| {
                 let s = InputState::new(window, cx).placeholder(placeholder);
                 if masked { s.masked(true) } else { s }
@@ -537,9 +592,9 @@ impl InstanceSettingsView {
         // The saved TURN secret never comes back; an empty box keeps it.
         if let Some(state) = self.texts.get("turn_secret") {
             let saved = match (draft.turn_secret_set, draft.turn_secret_hint.as_str()) {
-                (false, _) => "No TURN secret".to_owned(),
-                (true, "") => "Saved. Type to replace it".to_owned(),
-                (true, end) => format!("Saved, ending in {end}. Type to replace it"),
+                (false, _) => t("instancesettings.calls.noSecret"),
+                (true, "") => t("instancesettings.shared.saved"),
+                (true, end) => t_with("instancesettings.shared.savedEnding", &[("hint", Arg::Str(end))]),
             };
             state.update(cx, |s, cx| s.set_placeholder(saved, window, cx));
         }
@@ -676,9 +731,9 @@ impl InstanceSettingsView {
             return div().into_any_element();
         };
         let on = draft.telemetry;
-        let default = if defaults.telemetry { "on" } else { "off" };
+        let default = signups::on_off(defaults.telemetry);
         let mut list = div().flex().flex_col().gap(px(6.0));
-        for (n, line) in SIGNAL.iter().enumerate() {
+        for (n, line) in signal().into_iter().enumerate() {
             list = list.child(motion::rise(
                 div()
                     .flex()
@@ -687,7 +742,7 @@ impl InstanceSettingsView {
                     .text_xs()
                     .text_color(p.muted_foreground)
                     .child(icon("shield-check").size(px(14.0)).text_color(p.primary))
-                    .child(*line),
+                    .child(line),
                 SharedString::from(format!("signal-line-{n}")),
                 Duration::from_millis(100 + 50 * n as u64),
                 0.0,
@@ -703,9 +758,9 @@ impl InstanceSettingsView {
                     .items_start()
                     .gap(px(12.0))
                     .child(
-                        div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Anonymous usage signal and reports"),
+                        div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child(t("instancesettings.nav.telemetry")),
                     )
-                    .child(self.reset_badge(&["telemetry"], default, p, cx)),
+                    .child(self.reset_badge(&["telemetry"], &default, p, cx)),
             )
             .child(
                 div()
@@ -733,24 +788,21 @@ impl InstanceSettingsView {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
-                                    .child("Send the usage signal daily and error reports hourly"),
+                                    .child(t("instancesettings.privacy.label")),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(
-                                "Helps Waifu Devs see how fuwa is used and fix what breaks. Counts only: no names, \
-                                 messages, ids or addresses. Off, apps on this instance send no reports either.",
-                            )),
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("instancesettings.privacy.hint")),
+                            ),
                     )
                     .child(switch("instance-telemetry-switch".into(), on, false, cx, |this, on, cx| {
                         this.patch(cx, |d| d.telemetry = on)
                     })),
             )
             .child(list)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(p.muted_foreground)
-                    .child("Every field it sends is listed in fuwa's README, under \"The anonymous usage signal\"."),
-            )
+            .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.instance.signalFields")))
             .into_any_element()
     }
 
@@ -788,12 +840,14 @@ impl InstanceSettingsView {
                         el.relative().top(px(-2.0 * bump.abs()))
                     },
                 ))
-                .child(div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                    "Turn a service on here and every server on this instance can pick it for AutoMod's smart filter, \
-                     with one switch. Only this instance talks to it, and only about messages in servers that turned \
-                     the filter on: their text, never who wrote them, where, or the server's name. If it's slow or \
-                     down, messages go through and the servers' own rules still apply.",
-                )),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .text_color(p.muted_foreground)
+                        .child(t("instancesettings.moderation.intro")),
+                ),
             "instance-moderation-intro",
             Duration::ZERO,
             8.0,
@@ -811,7 +865,15 @@ impl InstanceSettingsView {
                     .collect()
             })
             .unwrap_or_default();
-        let providers_default = if on.is_empty() { "all off".to_owned() } else { format!("{} on", on.join(" and ")) };
+        let providers_default = match on.split_first() {
+            None => t("desktop.instance.providersAllOff"),
+            Some((first, rest)) => {
+                let names = rest.iter().fold(first.clone(), |names, next| {
+                    t_with("desktop.instance.listAnd", &[("first", Arg::Str(&names)), ("second", Arg::Str(next))])
+                });
+                t_with("desktop.instance.providersOn", &[("names", Arg::Str(&names))])
+            }
+        };
         let customs = draft.automod_providers.iter().filter(|x| admin::is_custom(x)).count();
         let mut cards = div().flex().flex_col().gap(px(14.0));
         for (n, provider) in draft.automod_providers.iter().enumerate() {
@@ -857,15 +919,15 @@ impl InstanceSettingsView {
                     .child(icon("plus").size(px(20.0))),
             )
             .child(
-                div().flex_1().min_w_0().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Add your own")).child(
-                    div().text_xs().text_color(p.muted_foreground).child(if full {
-                        format!("That's {MAX_CUSTOM}, the most an instance keeps.")
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("instancesettings.moderation.addOwn")))
+                    .child(div().text_xs().text_color(p.muted_foreground).child(if full {
+                        t_with("instancesettings.moderation.max", &[("count", Arg::Num(MAX_CUSTOM as i64))])
                     } else {
-                        "A classifier you run, or any https address that answers the same questions as Jev and Clef. \
-                         What it gets and answers is in docs/automod.md."
-                            .to_owned()
-                    }),
-                ),
+                        t("instancesettings.moderation.addOwnHint")
+                    })),
             );
         div()
             .flex()
@@ -877,7 +939,7 @@ impl InstanceSettingsView {
                 div()
                     .flex()
                     .items_center()
-                    .child(div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Providers"))
+                    .child(div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child(t("desktop.instance.providers")))
                     .child(self.reset_badge(&["automod_providers"], &providers_default, p, cx)),
             )
             .child(cards)
@@ -887,26 +949,16 @@ impl InstanceSettingsView {
 
     /// How many times a day each server's smart filter may ask, as on the web.
     fn daily_checks(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let default = self
-            .config
-            .as_ref()
-            .and_then(|c| c.defaults.as_ref())
-            .and_then(|d| d.automod_checks_per_day)
-            .map_or_else(|| "no limit".to_owned(), |n| format!("{} a day", admin::count_label(Some(n))));
-        let hint = emphasized(
-            &[
-                (
-                    "How many messages each server's smart filter may send to its provider in a day (UTC), so one \
-                     busy server can't run up your bill. Once a server uses them, its messages ",
-                    false,
-                ),
-                ("go through the smart filter unchecked", true),
-                (
-                    " until midnight UTC, like when the provider is down: blocking every message instead would stop \
-                     a busy server talking. Its own rules still apply.",
-                    false,
-                ),
-            ],
+        let default =
+            self.config.as_ref().and_then(|c| c.defaults.as_ref()).and_then(|d| d.automod_checks_per_day).map_or_else(
+                || t("instancesettings.shared.noLimit"),
+                |n| t_with("instancesettings.shared.perDay", &[("count", Arg::Num(n))]),
+            );
+        let hint = marked(
+            &t_with(
+                "desktop.instance.checksHint",
+                &[("unchecked", Arg::Str(&strong(&t("desktop.instance.checksUnchecked"))))],
+            ),
             p,
         );
         let body = div()
@@ -914,10 +966,10 @@ impl InstanceSettingsView {
             .flex_col()
             .gap(px(10.0))
             .child(div().text_sm().text_color(p.muted_foreground).child(hint))
-            .child(self.cap("automod_checks_per_day", "Up to", false, p, window, cx));
+            .child(self.cap("automod_checks_per_day", &t("instancesettings.shared.upTo"), false, p, window, cx));
         self.setting(
             "automod-checks-per-day",
-            "Checks per server per day",
+            &t("instancesettings.nav.automodChecks"),
             None,
             &["automod_checks_per_day"],
             &default,
@@ -944,16 +996,12 @@ impl InstanceSettingsView {
         let host = if custom { admin::host_of(&provider.url) } else { known.map(|k| k.host.to_owned()) };
         let name = match (custom, known) {
             (true, _) if !provider.name.trim().is_empty() => provider.name.trim().to_owned(),
-            (true, _) => "Your provider".to_owned(),
+            (true, _) => t("instancesettings.moderation.yourProvider"),
             (false, Some(k)) => k.name.to_owned(),
             (false, None) => provider.id.clone(),
         };
-        let shown_host = host.clone().unwrap_or_else(|| "an address you pick".to_owned());
-        let blurb = match known {
-            _ if custom => "Yours, at an https address you pick. It gets the same questions as Jev and Clef.",
-            Some(k) => k.blurb,
-            None => "",
-        };
+        let shown_host = host.clone().unwrap_or_else(|| t("instancesettings.moderation.anAddress"));
+        let blurb = if custom { t("instancesettings.moderation.customBlurb") } else { blurb(&provider.id) };
         let hue = known.map_or(0.8, |k| k.hue);
         let tint = hsla(hue, 0.75, if p.dark { 0.68 } else { 0.48 }, 1.0);
         let missing = admin::missing_for(provider, saved);
@@ -1024,7 +1072,7 @@ impl InstanceSettingsView {
                             )
                             .when(live, |el| {
                                 el.child(motion::rise(
-                                    pill("SERVERS CAN USE IT", green),
+                                    pill(&t("instancesettings.moderation.live").to_uppercase(), green),
                                     SharedString::from(format!("instance-live-{slot}")),
                                     Duration::ZERO,
                                     4.0,
@@ -1059,12 +1107,8 @@ impl InstanceSettingsView {
                 .text_xs()
                 .text_color(p.muted_foreground)
                 .child(icon("globe-lock").size(px(16.0)).text_color(p.primary))
-                .child(div().flex_1().min_w_0().child(emphasized(
-                    &[
-                        ("Turned on, messages that servers choose to check go from this instance to ", false),
-                        (&shown_host, true),
-                        (", which sees their text. Nothing else goes: no names, ids, servers or addresses.", false),
-                    ],
+                .child(div().flex_1().min_w_0().child(marked(
+                    &t_with("instancesettings.moderation.goesTo", &[("host", Arg::Str(&strong(&shown_host)))]),
                     p,
                 ))),
         );
@@ -1075,15 +1119,17 @@ impl InstanceSettingsView {
                     div()
                         .flex()
                         .gap(px(12.0))
-                        .child(div().flex_1().child(field("Name", Input::new(&name_box))))
-                        .child(div().flex_none().w(px(380.0)).child(field("Address", Input::new(&url_box)))),
+                        .child(div().flex_1().child(field(&t("instancesettings.nav.name"), Input::new(&name_box))))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(380.0))
+                                .child(field(&t("instancesettings.moderation.address"), Input::new(&url_box))),
+                        ),
                 )
                 .when(bad_url, |el| {
                     el.child(motion::rise(
-                        div()
-                            .text_xs()
-                            .text_color(amber(p))
-                            .child("fuwa only talks to https addresses, like https://moderation.example.com/v1/check."),
+                        div().text_xs().text_color(amber(p)).child(t("instancesettings.moderation.httpsOnly")),
                         SharedString::from(format!("instance-bad-url-{slot}")),
                         Duration::ZERO,
                         -4.0,
@@ -1093,21 +1139,27 @@ impl InstanceSettingsView {
                     div()
                         .flex()
                         .gap(px(12.0))
-                        .child(div().flex_1().child(field("Key header", Input::new(&header_box))))
-                        .child(div().flex_1().child(field("Model", Input::new(&model_box)))),
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(field(&t("instancesettings.moderation.keyHeader"), Input::new(&header_box))),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(field(&t("instancesettings.moderation.model"), Input::new(&model_box))),
+                        ),
                 );
         }
         let key_note = if moved && provider.api_key_set {
-            "New address: type the key again.".to_owned()
+            t("desktop.instance.retypeKey")
         } else if provider.api_key_set && provider.api_key.is_empty() {
-            format!(
-                "Saved, ends in {}. Type to replace it.",
-                if provider.api_key_hint.is_empty() { "••••" } else { provider.api_key_hint.as_str() }
-            )
+            let hint = if provider.api_key_hint.is_empty() { "••••" } else { provider.api_key_hint.as_str() };
+            t_with("instancesettings.moderation.savedEnds", &[("hint", Arg::Str(hint))])
         } else if custom {
-            "If it needs one. It goes as Authorization: Bearer, or in the header you name.".to_owned()
+            t("instancesettings.moderation.customKeyHelp")
         } else {
-            known.map_or("", |k| k.key_help).to_owned()
+            key_help(&provider.id)
         };
         body = body.child(
             div()
@@ -1115,42 +1167,50 @@ impl InstanceSettingsView {
                 .flex_col()
                 .gap(px(6.0))
                 .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(if clef {
-                    "API token"
+                    t("instancesettings.moderation.apiToken")
                 } else {
-                    "API key"
+                    t("instancesettings.moderation.apiKey")
                 }))
                 .child(div().text_xs().text_color(p.muted_foreground).child(key_note))
                 .child(Input::new(&key).prefix(icon("key-round").size(px(15.0)).text_color(p.muted_foreground)))
-                .child(div().text_size(px(11.0)).text_color(p.muted_foreground).child(
-                    "Kept on the instance, sealed with its files when it encrypts them, and never shown again.",
-                )),
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("instancesettings.moderation.kept")),
+                ),
         );
         if clef {
-            body = body.child(field("Account id", Input::new(&account)));
+            body = body.child(field(&t("instancesettings.moderation.accountId"), Input::new(&account)));
         }
         if let Some(k) = known.filter(|k| !custom && k.models.len() > 1) {
             let picked = if provider.model.is_empty() { k.models[0].0 } else { provider.model.as_str() };
             let mut models = div().flex().gap(px(6.0));
-            for (i, (id, label, hint)) in k.models.iter().enumerate() {
+            for (i, (id, label)) in k.models.iter().enumerate() {
                 let on = *id == picked;
                 let value = if i == 0 { String::new() } else { (*id).to_owned() };
                 models = models.child(
-                    chip(SharedString::from(format!("instance-model-{slot}-{i}")), &format!("{label} · {hint}"), on, p)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let Some(n) = this.fields.iter().position(|f| f.slot == slot) else { return };
-                            let value = value.clone();
-                            this.patch(cx, |d| {
-                                if let Some(p) = d.automod_providers.get_mut(n) {
-                                    p.model = value
-                                }
-                            });
-                            this.tried.remove(&slot);
-                        })),
+                    chip(
+                        SharedString::from(format!("instance-model-{slot}-{i}")),
+                        &format!("{label} · {}", model_hint(id)),
+                        on,
+                        p,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let Some(n) = this.fields.iter().position(|f| f.slot == slot) else { return };
+                        let value = value.clone();
+                        this.patch(cx, |d| {
+                            if let Some(p) = d.automod_providers.get_mut(n) {
+                                p.model = value
+                            }
+                        });
+                        this.tried.remove(&slot);
+                    })),
                 );
             }
-            body = body.child(field("Model", models));
+            body = body.child(field(&t("instancesettings.moderation.model"), models));
         }
-        body = body.child(self.tester(slot, missing.as_deref(), p, window, cx));
+        body = body.child(self.tester(slot, missing.map(missing_text), p, window, cx));
         if custom {
             body = body.child(
                 div()
@@ -1171,10 +1231,11 @@ impl InstanceSettingsView {
                     })
                     .on_click(cx.listener(move |this, _, _, cx| this.remove(slot, cx)))
                     .child(icon("trash").size(px(15.0)))
-                    .child(format!(
-                        "Remove {}",
-                        if provider.name.trim().is_empty() { "this provider" } else { provider.name.trim() }
-                    )),
+                    .child(if provider.name.trim().is_empty() {
+                        t("instancesettings.moderation.removeThis")
+                    } else {
+                        t_with("instancesettings.moderation.remove", &[("name", Arg::Str(provider.name.trim()))])
+                    }),
             );
         }
         div()
@@ -1199,7 +1260,7 @@ impl InstanceSettingsView {
     fn tester(
         &self,
         slot: u64,
-        missing: Option<&str>,
+        missing: Option<String>,
         p: &Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1208,7 +1269,7 @@ impl InstanceSettingsView {
         let ready = missing.is_none();
         let mut button = soft_button(
             SharedString::from(format!("instance-try-{slot}")),
-            if asking { "Asking…" } else { "Try a sample scam" },
+            if asking { t("instancesettings.moderation.asking") } else { t("instancesettings.moderation.trySample") },
             p,
         );
         if ready && !asking {
@@ -1223,7 +1284,13 @@ impl InstanceSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .child(icon("flask-conical").size(px(15.0)).text_color(p.primary))
-                    .child(div().flex_1().text_sm().font_weight(FontWeight::EXTRA_BOLD).child("Test connection"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("instancesettings.moderation.test")),
+                    )
                     .when(asking, |el| el.child(spinner(format!("instance-try-spin-{slot}"), 14.0, window)))
                     .child(button),
             );
@@ -1239,7 +1306,10 @@ impl InstanceSettingsView {
                         .font_weight(FontWeight::BOLD)
                         .text_color(green)
                         .child(icon("check").size(px(13.0)))
-                        .child(format!("It answered in {} ms", answer.elapsed_ms)),
+                        .child(t_with(
+                            "instancesettings.moderation.answered",
+                            &[("ms", Arg::Str(&answer.elapsed_ms.to_string()))],
+                        )),
                 );
                 for (n, score) in answer.scores.iter().take(4).enumerate() {
                     let probability = score.probability.clamp(0.0, 1.0);
@@ -1292,7 +1362,7 @@ impl InstanceSettingsView {
             _ => {}
         }
         if let Some(missing) = missing {
-            out = out.child(div().text_xs().text_color(p.muted_foreground).child(missing.to_owned()));
+            out = out.child(div().text_xs().text_color(p.muted_foreground).child(missing));
         }
         out.into_any_element()
     }
@@ -1374,11 +1444,12 @@ impl Render for InstanceSettingsView {
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .child(name.clone()),
                 )
-                .child(div().text_xs().text_color(p.muted_foreground).child("Instance settings")),
+                .child(div().text_xs().text_color(p.muted_foreground).child(t("instancesettings.nav.subtitle"))),
         );
         let mut at_y = 0.0;
         let mut y = 62.0;
-        for (group, pages) in GROUPS {
+        for (manage, pages) in GROUPS {
+            let group = if manage { t("instancesettings.nav.manage") } else { t("instancesettings.nav.instance") };
             menu = menu.child(
                 div()
                     .h(px(30.0))
@@ -1389,7 +1460,7 @@ impl Render for InstanceSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group),
+                    .child(group.to_uppercase()),
             );
             y += 30.0;
             for &pg in pages {
@@ -1401,7 +1472,7 @@ impl Render for InstanceSettingsView {
                 let hover = alpha(p.primary, 0.08);
                 menu = menu.child(
                     div()
-                        .id(SharedString::from(format!("imenu-{}", pg.label())))
+                        .id(SharedString::from(format!("imenu-{pg:?}")))
                         .h(px(38.0))
                         .mb(px(2.0))
                         .px(px(10.0))
@@ -1526,7 +1597,7 @@ impl Render for InstanceSettingsView {
                         .pb(px(40.0))
                         .child(motion::rise(
                             content,
-                            SharedString::from(format!("ipage-{}", page.label())),
+                            SharedString::from(format!("ipage-{page:?}")),
                             Duration::ZERO,
                             14.0,
                         )),

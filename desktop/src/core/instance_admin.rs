@@ -21,13 +21,12 @@ pub const SAMPLE: &str = "Free nitro for everyone who logs in at discord-gift.ex
 pub const MAX_CUSTOM: usize = 8;
 
 /// What fuwa knows about a provider it ships with, beyond what the instance sends.
+/// Its words (blurb, key help, what each model is) come from the translations, by id.
 pub struct Known {
     pub name: &'static str,
     pub host: &'static str,
-    pub blurb: &'static str,
-    /// (id, label, hint); the first is the default.
-    pub models: &'static [(&'static str, &'static str, &'static str)],
-    pub key_help: &'static str,
+    /// (id, label); the first is the default.
+    pub models: &'static [(&'static str, &'static str)],
     /// The hue its badge is drawn in.
     pub hue: f32,
 }
@@ -43,25 +42,14 @@ pub fn known(id: &str) -> Option<&'static Known> {
 static JEV: Known = Known {
     name: "TypeSafe Jev",
     host: "api.typesafe.ai",
-    blurb: "A decision model that answers yes-or-no questions about a text with a calibrated probability. Text only, \
-            run in the US.",
-    models: &[("jev-latest", "Jev", "The current release"), ("jev-preview", "Jev preview", "The next release, early")],
-    key_help: "An API key from your TypeSafe account. Billed per word read, by TypeSafe.",
+    models: &[("jev-latest", "Jev"), ("jev-preview", "Jev preview")],
     hue: 0.6,
 };
 
 static CLEF: Known = Known {
     name: "Cloudflare Clef",
     host: "api.cloudflare.com",
-    blurb: "Cloudflare's open decision models on Workers AI, answering the same questions as Jev. Runs on \
-            Cloudflare's network.",
-    models: &[
-        ("@cf/cloudflare/clef", "Clef", "Most accurate"),
-        ("@cf/cloudflare/clef-flash", "Clef flash", "Fastest, cheapest"),
-    ],
-    key_help: "An API token with Workers AI Read, either an account token (Manage Account, Account API Tokens) \
-               or a user token (My Profile, API Tokens), and your account id from the dashboard's sidebar. Billed \
-               by Cloudflare.",
+    models: &[("@cf/cloudflare/clef", "Clef"), ("@cf/cloudflare/clef-flash", "Clef flash")],
     hue: 0.07,
 };
 
@@ -87,28 +75,33 @@ pub fn host_of(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
-/// What a provider's card needs before it can be tried or turned on, as words, or `None` when it's ready.
+/// What a provider's card still needs before it can be tried or turned on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Missing {
+    /// One of the admins' own: which of a name, an https address and the key it lacks.
+    Custom { name: bool, address: bool, key: bool },
+    /// A known provider's key.
+    Key,
+    /// Cloudflare's token and account id.
+    TokenAndAccount,
+}
+
+/// What a provider's card needs before it can be tried or turned on, or `None` when it's ready.
 /// A saved key stays with its address: a custom one moved somewhere new needs it typed again.
-pub fn missing_for(p: &pb::AutoModProviderSettings, saved: Option<&pb::AutoModProviderSettings>) -> Option<String> {
+pub fn missing_for(p: &pb::AutoModProviderSettings, saved: Option<&pb::AutoModProviderSettings>) -> Option<Missing> {
     let moved = is_custom(p) && saved.is_some_and(|s| s.url.trim() != p.url.trim());
     let has_key = (p.api_key_set && !moved) || !p.api_key.trim().is_empty();
     if is_custom(p) {
-        let mut need = Vec::new();
-        if p.name.trim().is_empty() {
-            need.push("a name");
-        }
-        if host_of(&p.url).is_none() {
-            need.push("an https address");
-        }
-        if !p.header.trim().is_empty() && !has_key {
-            need.push("the key");
-        }
-        return (!need.is_empty()).then(|| format!("Add {} to test it and turn it on.", need.join(" and ")));
+        let need = Missing::Custom {
+            name: p.name.trim().is_empty(),
+            address: host_of(&p.url).is_none(),
+            key: !p.header.trim().is_empty() && !has_key,
+        };
+        return (need != Missing::Custom { name: false, address: false, key: false }).then_some(need);
     }
     let clef = p.id == "cloudflare-clef";
     let ready = has_key && (!clef || p.account_id.trim().len() == 32);
-    (!ready)
-        .then(|| format!("Add the {} to test it and turn it on.", if clef { "token and account id" } else { "key" }))
+    (!ready).then_some(if clef { Missing::TokenAndAccount } else { Missing::Key })
 }
 
 /// Whether a custom provider's saved key no longer goes with its address.
@@ -430,16 +423,6 @@ pub fn format_bytes(bytes: i64) -> String {
     if value >= 10.0 { format!("{value:.0} {}", units[unit]) } else { format!("{value:.1} {}", units[unit]) }
 }
 
-/// A count cap in words: "no limit" when it's off.
-pub fn count_label(n: Option<i64>) -> String {
-    n.map_or_else(|| "no limit".to_owned(), group_digits)
-}
-
-/// A cap counted per minute in words: "no limit" when it's off.
-pub fn per_minute_label(n: Option<i64>) -> String {
-    n.map_or_else(|| "no limit".to_owned(), |n| format!("{} a minute", group_digits(n)))
-}
-
 /// Where a count cap starts when it's switched on: the web's placeholder.
 pub fn starting_cap(path: &str) -> i64 {
     match path {
@@ -451,23 +434,6 @@ pub fn starting_cap(path: &str) -> i64 {
         "voice_message_seconds" => 300,
         _ => 100,
     }
-}
-
-/// A size cap in words: "no limit" when it's off.
-pub fn size_label(n: Option<i64>) -> String {
-    n.map_or_else(|| "no limit".to_owned(), format_bytes)
-}
-
-fn group_digits(n: i64) -> String {
-    let digits = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
 }
 
 /// A label's id as words: "self_harm" reads "Self harm".
@@ -580,31 +546,28 @@ mod tests {
     #[test]
     fn cards_say_what_they_still_need() {
         let jev = pb::AutoModProviderSettings { id: "typesafe-jev".into(), ..Default::default() };
-        assert_eq!(missing_for(&jev, None).as_deref(), Some("Add the key to test it and turn it on."));
+        assert_eq!(missing_for(&jev, None), Some(Missing::Key));
         let typed = pb::AutoModProviderSettings { api_key: "k".into(), ..jev.clone() };
         assert_eq!(missing_for(&typed, None), None);
         let clef =
             pb::AutoModProviderSettings { id: "cloudflare-clef".into(), api_key_set: true, ..Default::default() };
-        assert_eq!(
-            missing_for(&clef, None).as_deref(),
-            Some("Add the token and account id to test it and turn it on.")
-        );
+        assert_eq!(missing_for(&clef, None), Some(Missing::TokenAndAccount));
         let clef = pb::AutoModProviderSettings { account_id: "0123456789abcdef0123456789abcdef".into(), ..clef };
         assert_eq!(missing_for(&clef, None), None);
 
         assert_eq!(missing_for(&custom("https://a.example/"), None), None);
         let nameless = pb::AutoModProviderSettings { name: " ".into(), ..custom("ftp://a") };
-        assert_eq!(
-            missing_for(&nameless, None).as_deref(),
-            Some("Add a name and an https address to test it and turn it on.")
-        );
+        assert_eq!(missing_for(&nameless, None), Some(Missing::Custom { name: true, address: true, key: false }));
         // A saved key stays with the address it was saved for.
         let saved =
             pb::AutoModProviderSettings { api_key_set: true, header: "X-Key".into(), ..custom("https://a.example/") };
         assert_eq!(missing_for(&saved, Some(&saved)), None);
         let moved_away = pb::AutoModProviderSettings { url: "https://b.example/".into(), ..saved.clone() };
         assert!(moved(&moved_away, Some(&saved)));
-        assert_eq!(missing_for(&moved_away, Some(&saved)).as_deref(), Some("Add the key to test it and turn it on."));
+        assert_eq!(
+            missing_for(&moved_away, Some(&saved)),
+            Some(Missing::Custom { name: false, address: false, key: true })
+        );
     }
 
     #[test]
@@ -678,9 +641,8 @@ mod tests {
         for bad in ["", "-1", "ten", "NaN"] {
             assert_eq!(parse_cap(bad, None), None, "{bad}");
         }
-        assert_eq!(count_label(Some(1_234_567)), "1,234,567");
-        assert_eq!(size_label(Some(5 << 30)), "5.0 GB");
-        assert_eq!(size_label(Some(25 << 30)), "25 GB");
-        assert_eq!(size_label(None), "no limit");
+        assert_eq!(format_bytes(5 << 30), "5.0 GB");
+        assert_eq!(format_bytes(25 << 30), "25 GB");
+        assert_eq!(format_bytes(512), "512 B");
     }
 }

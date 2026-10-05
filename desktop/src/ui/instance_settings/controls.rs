@@ -16,7 +16,9 @@ use gpui_kit::{
 };
 
 use super::InstanceSettingsView;
+use crate::core::i18n::{self, Arg, t, t_with};
 use crate::core::instance_admin::{self as admin, UNITS};
+use crate::core::instance_manage::Ago;
 use crate::ui::motion;
 use crate::ui::server_settings::{amber, pill};
 use crate::ui::theme::{Palette, alpha, corner};
@@ -27,23 +29,57 @@ type View = InstanceSettingsView;
 /// One card in a [`InstanceSettingsView::choice`].
 pub(super) struct Opt {
     pub value: i32,
-    pub label: &'static str,
-    pub hint: &'static str,
+    pub label: String,
+    pub hint: String,
     pub glyph: &'static str,
     /// Why it can't be picked now, in place of the hint.
-    pub disabled: Option<&'static str>,
+    pub disabled: Option<String>,
 }
 
 impl Opt {
-    pub fn new(value: i32, label: &'static str, hint: &'static str, glyph: &'static str) -> Self {
+    pub fn new(value: i32, label: String, hint: String, glyph: &'static str) -> Self {
         Self { value, label, hint, glyph, disabled: None }
     }
 
-    pub fn unless(mut self, blocked: bool, why: &'static str) -> Self {
+    pub fn unless(mut self, blocked: bool, why: impl FnOnce() -> String) -> Self {
         if blocked {
-            self.disabled = Some(why);
+            self.disabled = Some(why());
         }
         self
+    }
+}
+
+/// A whole number in the language's digits: "1,234" in English.
+pub(super) fn number(n: i64) -> String {
+    i18n::format_number(n, &i18n::current().1)
+}
+
+/// A count cap in words: "no limit" when it's off.
+pub(super) fn count_text(n: Option<i64>) -> String {
+    n.map_or_else(|| t("instancesettings.shared.noLimit"), number)
+}
+
+/// A size cap in words: "no limit" when it's off.
+pub(super) fn size_text(n: Option<i64>) -> String {
+    n.map_or_else(|| t("instancesettings.shared.noLimit"), admin::format_bytes)
+}
+
+/// A cap counted per minute in words: "30 a minute", or "no limit" when it's off.
+pub(super) fn per_minute_text(n: Option<i64>) -> String {
+    n.map_or_else(
+        || t("instancesettings.shared.noLimit"),
+        |n| t_with("instancesettings.shared.perMinute", &[("count", Arg::Num(n))]),
+    )
+}
+
+/// How long ago, in words ("5 minutes ago"); `None` for just now, which each place says its own way.
+pub(super) fn ago_text(ago: Ago) -> Option<String> {
+    match ago {
+        Ago::Now => None,
+        Ago::Minutes(n) => Some(t_with("desktop.instance.minutesAgo", &[("count", Arg::Num(n))])),
+        Ago::Hours(n) => Some(t_with("desktop.instance.hoursAgo", &[("count", Arg::Num(n))])),
+        Ago::Days(n) => Some(t_with("desktop.instance.daysAgo", &[("count", Arg::Num(n))])),
+        Ago::Months(n) => Some(t_with("desktop.instance.monthsAgo", &[("count", Arg::Num(n))])),
     }
 }
 
@@ -116,11 +152,10 @@ impl InstanceSettingsView {
                                 })
                                 .when(self.overridden_any(paths) && !short(default), |el| {
                                     el.child(
-                                        div()
-                                            .mt(px(2.0))
-                                            .text_xs()
-                                            .text_color(p.muted_foreground)
-                                            .child(format!("The default is {default}.")),
+                                        div().mt(px(2.0)).text_xs().text_color(p.muted_foreground).child(t_with(
+                                            "desktop.instance.defaultIs",
+                                            &[("value", Arg::Str(default))],
+                                        )),
                                     )
                                 }),
                         )
@@ -286,7 +321,7 @@ impl InstanceSettingsView {
         let Some(state) = self.caps.get(path) else { return row.into_any_element() };
         if !on {
             row = row.child(motion::slide_in(
-                div().text_sm().text_color(p.muted_foreground).child("No limit"),
+                div().text_sm().text_color(p.muted_foreground).child(t("settings.controls.noLimit")),
                 SharedString::from(format!("icap-{path}-off")),
                 12.0,
             ));
@@ -399,7 +434,7 @@ impl InstanceSettingsView {
         let key = paths.first().copied().unwrap_or_default();
         if !self.overridden_any(paths) {
             return motion::rise(
-                pill("DEFAULT", p.muted_foreground.into()),
+                pill(&t("settings.controls.default").to_uppercase(), p.muted_foreground.into()),
                 SharedString::from(format!("instance-default-{key}")),
                 Duration::ZERO,
                 -4.0,
@@ -408,38 +443,62 @@ impl InstanceSettingsView {
         }
         let saving = self.saving;
         motion::rise(
-            div().flex_none().flex().items_center().gap(px(6.0)).child(pill("CHANGED", p.primary.into())).child(
-                div()
-                    .id(SharedString::from(format!("instance-reset-{key}")))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .px(px(8.0))
-                    .h(px(26.0))
-                    .rounded_full()
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.muted_foreground)
-                    .cursor_pointer()
-                    .hover({
-                        let (bg, fg) = (alpha(p.primary, 0.1), p.foreground);
-                        move |s| s.bg(bg).text_color(fg)
-                    })
-                    .when(saving, |el| el.opacity(0.5))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commit(Vec::new(), paths.iter().map(|p| (*p).to_owned()).collect(), window, cx)
-                    }))
-                    .child(icon("rotate-ccw").size(px(13.0)))
-                    .child(if short(default) {
-                        format!("Back to the default: {default}")
-                    } else {
-                        "Back to the default".to_owned()
-                    }),
-            ),
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(pill(&t("settings.controls.changed").to_uppercase(), p.primary.into()))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("instance-reset-{key}")))
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .px(px(8.0))
+                        .h(px(26.0))
+                        .rounded_full()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .cursor_pointer()
+                        .hover({
+                            let (bg, fg) = (alpha(p.primary, 0.1), p.foreground);
+                            move |s| s.bg(bg).text_color(fg)
+                        })
+                        .when(saving, |el| el.opacity(0.5))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.commit(Vec::new(), paths.iter().map(|p| (*p).to_owned()).collect(), window, cx)
+                        }))
+                        .child(icon("rotate-ccw").size(px(13.0)))
+                        .child(if short(default) {
+                            t_with("settings.controls.backToDefaultIs", &[("value", Arg::Str(default))])
+                        } else {
+                            t("settings.controls.backToDefault")
+                        }),
+                ),
             SharedString::from(format!("instance-changed-{key}")),
             Duration::ZERO,
             -4.0,
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caps_that_are_off_say_so_and_numbers_are_grouped() {
+        let off = t("instancesettings.shared.noLimit");
+        assert_eq!(count_text(None), off);
+        assert_eq!(size_text(None), off);
+        assert_eq!(per_minute_text(None), off);
+        assert_eq!(count_text(Some(0)), "0");
+        assert_ne!(count_text(Some(0)), off, "a cap of 0 isn't the same as none");
+        assert_eq!(count_text(Some(1_234_567)), "1,234,567");
+        assert_eq!(size_text(Some(5 << 30)), "5.0 GB");
+        assert!(per_minute_text(Some(30)).contains("30"));
     }
 }

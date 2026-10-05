@@ -13,8 +13,10 @@ use gpui_kit::{
     div, hsla, px, uniform_list,
 };
 
+use super::controls::ago_text;
 use super::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::core::dms::now_ms;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_manage::{self as manage, REASON_MAX};
 use crate::core::store::user_name;
 use crate::pb::{self, AccountFilter as Filter};
@@ -67,7 +69,7 @@ pub(super) struct Accounts {
 
 impl Accounts {
     pub fn new(window: &mut Window, cx: &mut Context<InstanceSettingsView>) -> (Self, Vec<Subscription>) {
-        let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search by name or username"));
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder(t("instancesettings.accounts.search")));
         let reason = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 4));
         let search =
             cx.subscribe_in(&query, window, |this: &mut InstanceSettingsView, _, e: &InputEvent, window, cx| {
@@ -137,15 +139,11 @@ fn id_of(a: &pb::AccountSummary) -> String {
 }
 
 fn name_of(a: &pb::AccountSummary) -> String {
-    a.user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into())
+    a.user.as_ref().map(user_name).unwrap_or_else(|| t("common.someone"))
 }
 
 fn kind(a: &pb::AccountSummary) -> pb::AccountKind {
     a.user.as_ref().map_or(pb::AccountKind::Unspecified, |u| u.kind())
-}
-
-fn plural(n: i32, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 impl InstanceSettingsView {
@@ -323,7 +321,11 @@ impl InstanceSettingsView {
                             Ok(next) => {
                                 this.replace_account(next);
                                 this.accounts.pending = None;
-                                this.toast("power-off", format!("{name} is turned off"), cx);
+                                this.toast(
+                                    "power-off",
+                                    t_with("instancesettings.accounts.turnedOff", &[("name", Arg::Str(&name))]),
+                                    cx,
+                                );
                             }
                             Err(problem) => this.accounts.dialog_error = Some(problem.message),
                         }
@@ -360,12 +362,29 @@ impl InstanceSettingsView {
         let me = self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())));
         let streamer = self.core.prefs().streamer_mode;
         let a = &self.accounts;
-        let count = |n: Option<i64>| n.map(|n| format!(" · {n}")).unwrap_or_default();
         let totals = a.totals;
         let tabs = [
-            (Filter::Unspecified, format!("All{}", count(totals.as_ref().map(|t| t.all)))),
-            (Filter::Admins, format!("Admins{}", count(totals.as_ref().map(|t| t.admins)))),
-            (Filter::Disabled, format!("Turned off{}", count(totals.as_ref().map(|t| t.disabled)))),
+            (
+                Filter::Unspecified,
+                match totals.as_ref() {
+                    Some(n) => t_with("instancesettings.accounts.allCount", &[("count", Arg::Num(n.all))]),
+                    None => t("instancesettings.accounts.all"),
+                },
+            ),
+            (
+                Filter::Admins,
+                match totals.as_ref() {
+                    Some(n) => t_with("instancesettings.accounts.adminsCount", &[("count", Arg::Num(n.admins))]),
+                    None => t("instancesettings.accounts.admins"),
+                },
+            ),
+            (
+                Filter::Disabled,
+                match totals.as_ref() {
+                    Some(n) => t_with("instancesettings.accounts.offCount", &[("count", Arg::Num(n.disabled))]),
+                    None => t("instancesettings.accounts.off"),
+                },
+            ),
         ];
         let filter = a.filter;
         let segmented = segmented(&tabs, filter, p, window, cx);
@@ -394,22 +413,25 @@ impl InstanceSettingsView {
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .text_color(p.muted_foreground)
                 .child(icon("users").size(px(14.0)))
-                .child(format!(
-                    "{shown}{} {}",
-                    if more { "+" } else { "" },
-                    if shown == 1 { "ACCOUNT" } else { "ACCOUNTS" }
-                ));
+                .child(
+                    if more {
+                        t_with("instancesettings.accounts.countMore", &[("count", Arg::Num(shown as i64))])
+                    } else {
+                        t_with("instancesettings.accounts.count", &[("count", Arg::Num(shown as i64))])
+                    }
+                    .to_uppercase(),
+                );
             let column = div().flex_1().min_h_0().flex().flex_col().gap(px(10.0)).child(header);
             if shown == 0 {
                 column
                     .child(motion::rise(
                         div().py(px(32.0)).flex().justify_center().text_sm().text_color(p.muted_foreground).child(
                             if !a.search.is_empty() {
-                                "Nobody matches that."
+                                t("serversettings.shared.nobodyMatches")
                             } else if filter == Filter::Disabled {
-                                "No account is turned off."
+                                t("instancesettings.accounts.noneOff")
                             } else {
-                                "No accounts here."
+                                t("instancesettings.accounts.none")
                             },
                         ),
                         SharedString::from(format!("accounts-none-{filter:?}")),
@@ -443,7 +465,11 @@ impl InstanceSettingsView {
                                             .child(
                                                 soft_button(
                                                     "accounts-more",
-                                                    if loading { "Loading…" } else { "Show more" },
+                                                    if loading {
+                                                        t("desktop.server.loading")
+                                                    } else {
+                                                        t("instancesettings.accounts.showMore")
+                                                    },
                                                     &p,
                                                 )
                                                 .on_click(
@@ -493,18 +519,21 @@ impl InstanceSettingsView {
             .map(|t| manage::day_label(t.seconds * 1000, now))
             .map(|d| if d == "Today" || d == "Yesterday" { d.to_lowercase() } else { d })
             .unwrap_or_default();
-        let active = a
-            .last_seen_at
-            .as_ref()
-            .map(|t| manage::active_ago(t.seconds * 1000, now).replacen("Active", "active", 1))
-            .unwrap_or_default();
+        let seen = a.last_seen_at.as_ref().map(|t| ago_text(manage::active_ago(t.seconds * 1000, now)));
+        let joined = match seen {
+            Some(Some(when)) => {
+                t_with("instancesettings.accounts.joinedSeen", &[("day", Arg::Str(&joined)), ("when", Arg::Str(&when))])
+            }
+            Some(None) => t_with("instancesettings.accounts.joinedNow", &[("day", Arg::Str(&joined))]),
+            None => t_with("desktop.instance.joined", &[("day", Arg::Str(&joined))]),
+        };
         let username = user.as_ref().map(|u| u.username.clone()).unwrap_or_default();
-        let handle = if me && streamer { "@you".to_owned() } else { format!("@{username}") };
-        let mut facts = vec![plural(a.servers, "server", "servers")];
+        let handle = if me && streamer { t("desktop.instance.atYou") } else { format!("@{username}") };
+        let mut facts = vec![t_with("instancesettings.accounts.servers", &[("count", Arg::Num(i64::from(a.servers)))])];
         if a.servers_owned > 0 {
-            facts.push(format!("owns {}", a.servers_owned));
+            facts.push(t_with("instancesettings.accounts.owns", &[("count", Arg::Num(i64::from(a.servers_owned)))]));
         }
-        facts.push(format!("{} signed in", plural(a.sessions, "device", "devices")));
+        facts.push(t_with("instancesettings.accounts.devices", &[("count", Arg::Num(i64::from(a.sessions)))]));
         let destructive = p.destructive;
         let green = hsla(0.42, 0.65, 0.45, 1.0);
 
@@ -520,7 +549,7 @@ impl InstanceSettingsView {
                     .when(a.disabled, |el| el.line_through().opacity(0.8))
                     .child(name.clone()),
             )
-            .when(me, |el| el.child(pill("YOU", p.muted_foreground.into())))
+            .when(me, |el| el.child(pill(&t("serversettings.shared.you").to_uppercase(), p.muted_foreground.into())))
             .when(a.admin, |el| {
                 el.child(motion::once(
                     div()
@@ -535,7 +564,7 @@ impl InstanceSettingsView {
                         .text_size(px(10.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .child(icon("shield").size(px(11.0)))
-                        .child("ADMIN"),
+                        .child(t("instancesettings.accounts.admin").to_uppercase()),
                     SharedString::from(format!("account-admin-{id}")),
                     Duration::from_millis(360),
                     |el, t| el.opacity(t),
@@ -555,7 +584,7 @@ impl InstanceSettingsView {
                         .text_size(px(10.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .child(icon("power-off").size(px(11.0)))
-                        .child("OFF"),
+                        .child(t("serversettings.shared.off").to_uppercase()),
                 )
             })
             .when(a.two_factor, |el| el.child(icon("shield-check").size(px(14.0)).text_color(green)))
@@ -576,58 +605,77 @@ impl InstanceSettingsView {
                 window,
             )));
         } else if !me {
-            let button = |glyph: &str, tip: &'static str, color: Option<gpui_kit::Rgba>| {
+            let button = |glyph: &str, tip: String, color: Option<gpui_kit::Rgba>| {
+                let tip = SharedString::from(tip);
                 let el = match color {
                     Some(c) => icon_button_in(SharedString::from(format!("account-{glyph}-{id}")), glyph, p, c),
                     None => icon_button(SharedString::from(format!("account-{glyph}-{id}")), glyph, p),
                 };
-                el.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx))
+                el.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
             };
             if !a.admin && !a.disabled && !agent {
                 let (acc, n) = (a.clone(), name.clone());
-                actions = actions.child(button("shield", "Make instance admin", Some(p.primary)).on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.change_account(&acc, Some(true), None, format!("{n} is an instance admin now"), window, cx)
-                    }),
-                ));
+                actions = actions.child(
+                    button("shield", t("instancesettings.accounts.makeAdmin"), Some(p.primary)).on_click(cx.listener(
+                        move |this, _, window, cx| {
+                            let done = t_with("instancesettings.accounts.madeAdmin", &[("name", Arg::Str(&n))]);
+                            this.change_account(&acc, Some(true), None, done, window, cx)
+                        },
+                    )),
+                );
             }
             if a.admin {
                 let (acc, n) = (a.clone(), name.clone());
-                actions = actions.child(button("shield-off", "Remove admin", None).on_click(cx.listener(
-                    move |this, _, window, cx| {
-                        this.change_account(&acc, Some(false), None, format!("{n} isn't an admin anymore"), window, cx)
-                    },
-                )));
+                actions =
+                    actions.child(button("shield-off", t("instancesettings.accounts.removeAdmin"), None).on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            let done = t_with("instancesettings.accounts.unmadeAdmin", &[("name", Arg::Str(&n))]);
+                            this.change_account(&acc, Some(false), None, done, window, cx)
+                        }),
+                    ));
             }
             if local {
                 let acc = a.clone();
-                actions = actions.child(button("key-round", "Reset password", Some(p.primary)).on_click(
-                    cx.listener(move |this, _, window, cx| this.ask(Pending::Reset(acc.clone()), window, cx)),
-                ));
+                actions = actions.child(
+                    button("key-round", t("instancesettings.accounts.resetPassword"), Some(p.primary)).on_click(
+                        cx.listener(move |this, _, window, cx| this.ask(Pending::Reset(acc.clone()), window, cx)),
+                    ),
+                );
             }
             if a.disabled {
                 let (acc, n) = (a.clone(), name.clone());
-                actions = actions.child(button("power", "Turn back on", Some(green.to_rgb())).on_click(cx.listener(
-                    move |this, _, window, cx| {
-                        this.change_account(&acc, None, Some(false), format!("{n} can sign in again"), window, cx)
-                    },
-                )));
+                actions = actions.child(
+                    button("power", t("instancesettings.accounts.turnBackOn"), Some(green.to_rgb())).on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            let done = t_with("instancesettings.accounts.turnedOn", &[("name", Arg::Str(&n))]);
+                            this.change_account(&acc, None, Some(false), done, window, cx)
+                        }),
+                    ),
+                );
             } else {
                 let acc = a.clone();
-                actions = actions.child(button("power-off", "Turn off", Some(p.destructive)).on_click(
-                    cx.listener(move |this, _, window, cx| this.ask(Pending::TurnOff(acc.clone()), window, cx)),
-                ));
+                actions = actions.child(
+                    button("power-off", t("accountsettings.shared.turnOff"), Some(p.destructive)).on_click(
+                        cx.listener(move |this, _, window, cx| this.ask(Pending::TurnOff(acc.clone()), window, cx)),
+                    ),
+                );
             }
         }
 
         let off_line = a.disabled.then(|| {
-            let when = a.disabled_at.as_ref().map(|t| manage::day_label(t.seconds * 1000, now).to_lowercase());
-            let why = if a.disabled_reason.is_empty() {
-                ", no reason given.".to_owned()
+            let when = a
+                .disabled_at
+                .as_ref()
+                .map(|t| manage::day_label(t.seconds * 1000, now).to_lowercase())
+                .unwrap_or_default();
+            if a.disabled_reason.is_empty() {
+                t_with("instancesettings.accounts.offNoReason", &[("date", Arg::Str(&when))])
             } else {
-                format!(": {}", a.disabled_reason)
-            };
-            format!("Turned off {}{why}", when.unwrap_or_default())
+                t_with(
+                    "instancesettings.accounts.offReason",
+                    &[("date", Arg::Str(&when)), ("reason", Arg::Str(&a.disabled_reason))],
+                )
+            }
         });
         let tint: Hsla = if a.disabled { alpha(destructive, 0.05) } else { p.card.into() };
         let edge: Hsla = if a.disabled { alpha(destructive, 0.3) } else { p.border.into() };
@@ -668,7 +716,7 @@ impl InstanceSettingsView {
                                     .text_color(p.muted_foreground)
                                     .text_ellipsis()
                                     .whitespace_nowrap()
-                                    .child(format!("{handle} · joined {joined} · {active}")),
+                                    .child(format!("{handle} · {joined}")),
                             )
                             .child(
                                 div()
@@ -729,13 +777,12 @@ impl InstanceSettingsView {
                             .child(format!("@{}", account.user.as_ref().map(|u| u.username.as_str()).unwrap_or(""))),
                     ),
             );
-        let (glyph, title, body, content, action): (&str, String, &str, AnyElement, Option<&str>) =
+        let (glyph, title, body, content, action): (&str, String, String, AnyElement, Option<String>) =
             match (&pending, &a.password) {
                 (Pending::Reset(_), Some(password)) => (
                     "key-round",
-                    format!("{name}'s new password"),
-                    "Send it to them privately. It's shown only this once; they can change it in their account \
-                     settings after signing in.",
+                    t_with("instancesettings.accounts.newPasswordTitle", &[("name", Arg::Str(&name))]),
+                    t("instancesettings.accounts.newPasswordHint"),
                     self.new_password(password, p, window, cx),
                     None,
                 ),
@@ -781,21 +828,27 @@ impl InstanceSettingsView {
                                             div()
                                                 .text_sm()
                                                 .font_weight(FontWeight::BOLD)
-                                                .child("Also turn off two-step sign-in"),
+                                                .child(t("instancesettings.accounts.alsoTwoStep")),
                                         )
-                                        .child(div().text_xs().text_color(p.muted_foreground).child(
-                                            "For someone who lost their authenticator app and their backup codes.",
-                                        )),
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(p.muted_foreground)
+                                                .child(t("instancesettings.accounts.alsoTwoStepHint")),
+                                        ),
                                 ),
                         );
                     }
                     (
                         "key-round",
-                        format!("Reset {name}'s password"),
-                        "They get a new random password and are signed out everywhere. Their old password stops \
-                         working.",
+                        t_with("instancesettings.accounts.resetTitle", &[("name", Arg::Str(&name))]),
+                        t("instancesettings.accounts.resetHint"),
                         content.into_any_element(),
-                        Some(if busy { "Resetting…" } else { "Reset password" }),
+                        Some(if busy {
+                            t("desktop.instance.resetting")
+                        } else {
+                            t("instancesettings.accounts.resetPassword")
+                        }),
                     )
                 }
                 (Pending::TurnOff(_), _) => {
@@ -813,7 +866,7 @@ impl InstanceSettingsView {
                                     .bg(amber(p).opacity(0.1))
                                     .text_sm()
                                     .text_color(amber(p))
-                                    .child("They stop being an instance admin too."),
+                                    .child(t("instancesettings.accounts.turnOffAdmin")),
                             )
                         })
                         .child(
@@ -825,23 +878,27 @@ impl InstanceSettingsView {
                                     div()
                                         .flex()
                                         .justify_between()
-                                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Reason"))
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .font_weight(FontWeight::BOLD)
+                                                .child(t("instancesettings.accounts.reason")),
+                                        )
                                         .child(
                                             div()
                                                 .text_xs()
                                                 .text_color(p.muted_foreground)
-                                                .child("Optional, only admins see it"),
+                                                .child(t("instancesettings.accounts.reasonHint")),
                                         ),
                                 )
                                 .child(Textarea::new(&a.reason)),
                         );
                     (
                         "power-off",
-                        format!("Turn off {name}"),
-                        "They're signed out on every device and can't sign in until an admin turns the account back \
-                         on. Their messages and servers stay.",
+                        t_with("instancesettings.accounts.turnOffTitle", &[("name", Arg::Str(&name))]),
+                        t("instancesettings.accounts.turnOffHint"),
                         content.into_any_element(),
-                        Some(if busy { "Turning off…" } else { "Turn off" }),
+                        Some(if busy { t("desktop.instance.turningOff") } else { t("accountsettings.shared.turnOff") }),
                     )
                 }
             };
@@ -883,22 +940,19 @@ impl InstanceSettingsView {
             .child(content)
             .when(shown && a.two_factor, |el| {
                 el.child(
-                    div()
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .child("Two-step sign-in is off for them now. They can set it up again after signing in."),
+                    div().text_sm().text_color(p.muted_foreground).child(t("instancesettings.accounts.twoStepOff")),
                 )
             })
             .when_some(error_line(a.dialog_error.as_deref(), p), |el, e| el.child(e))
             .child(div().flex().justify_end().gap(px(10.0)).map(|el| {
                 if shown {
-                    el.child(primary_button("account-dialog-done", "Done", p).on_click(cx.listener(
-                        |this, _, _, cx| {
+                    el.child(primary_button("account-dialog-done", t("accountsettings.shared.done"), p).on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.close_account_dialog(cx);
-                        },
-                    )))
+                        }),
+                    ))
                 } else {
-                    el.child(soft_button("account-dialog-cancel", "Cancel", p).on_click(cx.listener(
+                    el.child(soft_button("account-dialog-cancel", t("common.cancel"), p).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.close_account_dialog(cx);
                         },
@@ -998,7 +1052,7 @@ impl InstanceSettingsView {
                             cx.notify();
                         }))
                         .child(icon("eye").size(px(16.0)))
-                        .child("Hidden by streamer mode. Show it anyway"),
+                        .child(t("instancesettings.accounts.hiddenShow")),
                 )
             });
         let text = password.to_owned();

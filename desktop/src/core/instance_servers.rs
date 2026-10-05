@@ -72,12 +72,13 @@ pub fn region_of<'a>(regions: &'a [pb::Region], region: &str) -> Option<&'a pb::
         .or_else(|| if region.is_empty() { regions.first() } else { None })
 }
 
-/// A region's name for people: its own, or the label when the instance doesn't list it.
-pub fn region_name(regions: &[pb::Region], region: &str) -> String {
+/// A region's name for people: its own, or the label when the instance doesn't list it;
+/// `None` for the home region when it has no name, which the page calls home.
+pub fn region_name(regions: &[pb::Region], region: &str) -> Option<String> {
     match region_of(regions, region) {
-        Some(r) if !r.name.is_empty() => r.name.clone(),
-        _ if !region.is_empty() => region.to_owned(),
-        _ => "Home".to_owned(),
+        Some(r) if !r.name.is_empty() => Some(r.name.clone()),
+        _ if !region.is_empty() => Some(region.to_owned()),
+        _ => None,
     }
 }
 
@@ -100,16 +101,16 @@ pub fn region_mark(name: &str) -> String {
     first.chars().take(2).collect::<String>().to_uppercase()
 }
 
-/// The six caps the page changes, by name: (label, bytes?, read, write).
+/// The six caps the page changes: (id, bytes?, read, write). The page names them by id.
 type Read = fn(&pb::ServerLimits) -> Option<i64>;
 type Write = fn(&mut pb::ServerLimits, Option<i64>);
 pub const CAPS: [(&str, bool, Read, Write); 6] = [
-    ("Members", false, |l| l.members, |l, v| l.members = v),
-    ("Channels", false, |l| l.channels, |l, v| l.channels = v),
-    ("Storage", true, |l| l.storage_bytes, |l, v| l.storage_bytes = v),
-    ("Files", true, |l| l.attachment_bytes, |l, v| l.attachment_bytes = v),
-    ("Emoji", false, |l| l.emojis, |l, v| l.emojis = v),
-    ("Recordings", true, |l| l.recording_bytes, |l, v| l.recording_bytes = v),
+    ("members", false, |l| l.members, |l, v| l.members = v),
+    ("channels", false, |l| l.channels, |l, v| l.channels = v),
+    ("storage", true, |l| l.storage_bytes, |l, v| l.storage_bytes = v),
+    ("files", true, |l| l.attachment_bytes, |l, v| l.attachment_bytes = v),
+    ("emoji", false, |l| l.emojis, |l, v| l.emojis = v),
+    ("recordings", true, |l| l.recording_bytes, |l, v| l.recording_bytes = v),
 ];
 
 /// What a server's file is saved as: its name as a slug and the day, like
@@ -298,9 +299,10 @@ mod tests {
             pb::Region { id: "eu".into(), name: "Europe".into(), home: false },
         ];
         assert!(has_regions(&regions));
-        assert_eq!(region_name(&regions, ""), "United States");
-        assert_eq!(region_name(&regions, "eu"), "Europe");
-        assert_eq!(region_name(&regions, "ap"), "ap");
+        assert_eq!(region_name(&regions, "").as_deref(), Some("United States"));
+        assert_eq!(region_name(&regions, "eu").as_deref(), Some("Europe"));
+        assert_eq!(region_name(&regions, "ap").as_deref(), Some("ap"));
+        assert_eq!(region_name(&[], ""), None, "an unnamed home region is the page's to name");
         assert!(same_region(&regions, "", ""));
         assert!(!same_region(&regions, "eu", ""));
         assert_eq!(region_mark("United States"), "US");

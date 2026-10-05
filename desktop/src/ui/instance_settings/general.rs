@@ -6,7 +6,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{AnyElement, Context, FontWeight, IntoElement, ParentElement as _, Styled as _, Window, div, px};
 
 use super::controls::Opt;
-use super::{HIDDEN_ADDRESS, InstanceSettingsView};
+use super::signups::on_off;
+use super::{InstanceSettingsView, hidden_address};
+use crate::core::i18n::t;
 use crate::ui::motion;
 use crate::ui::theme::{Palette, corner};
 use crate::ui::widgets::icon;
@@ -28,8 +30,8 @@ impl InstanceSettingsView {
         if let Some(name) = self.texts.get("name") {
             page = page.child(self.setting(
                 "name",
-                "Name",
-                Some("Shown in the app and when people add this instance."),
+                &t("instancesettings.nav.name"),
+                Some(&t("instancesettings.general.nameHint")),
                 &["name"],
                 &defaults.name,
                 0,
@@ -39,14 +41,11 @@ impl InstanceSettingsView {
             ));
         }
         if let Some(url) = self.texts.get("public_url") {
-            let default = if hide { HIDDEN_ADDRESS.to_owned() } else { defaults.public_url.clone() };
+            let default = if hide { hidden_address() } else { defaults.public_url.clone() };
             page = page.child(self.setting(
                 "public-url",
-                "Public address",
-                Some(
-                    "The URL people use to reach this instance. Uploaded pictures are linked through it, so set it \
-                     before people upload.",
-                ),
+                &t("instancesettings.nav.publicUrl"),
+                Some(&t("instancesettings.general.publicUrlHint")),
                 &["public_url"],
                 &default,
                 1,
@@ -58,20 +57,20 @@ impl InstanceSettingsView {
         let built_in = startup.web_built_in;
         page = page.child(self.setting(
             "web",
-            "Web app",
+            &t("instancesettings.nav.web"),
             None,
             &["web"],
-            if defaults.web { "on" } else { "off" },
+            &on_off(defaults.web),
             2,
             self.toggle(
                 "web",
                 draft.web,
                 !built_in,
-                "Open the app at this address",
-                if built_in {
-                    "Turned off, people can still use this instance from the app on another fuwa instance."
+                &t("instancesettings.general.webLabel"),
+                &if built_in {
+                    t("instancesettings.general.webHint")
                 } else {
-                    "This build of fuwa doesn't include the web app."
+                    t("instancesettings.general.webNotBuilt")
                 },
                 p,
                 cx,
@@ -83,16 +82,16 @@ impl InstanceSettingsView {
 
         let any = draft.allowed_origins.iter().any(|o| o == "*");
         let default = match defaults.allowed_origins.join(", ") {
-            _ if hide => HIDDEN_ADDRESS.to_owned(),
-            all if all == "*" => "any site".to_owned(),
+            _ if hide => hidden_address(),
+            all if all == "*" => t("instancesettings.origins.anySiteDefault"),
             all => all,
         };
         let choice = self.choice(
             "origins",
             if any { ANY } else { LIST },
             vec![
-                Opt::new(ANY, "Any site", "Every fuwa app can connect.", "globe"),
-                Opt::new(LIST, "Only these", "Other apps are blocked.", "lock"),
+                Opt::new(ANY, t("instancesettings.origins.any"), t("instancesettings.origins.anyHint"), "globe"),
+                Opt::new(LIST, t("instancesettings.origins.list"), t("instancesettings.origins.listHint"), "lock"),
             ],
             p,
             window,
@@ -111,10 +110,7 @@ impl InstanceSettingsView {
                         (Some(list), false) => el.child(Textarea::new(list)),
                         (None, false) => el,
                     })
-                    .child(div().text_xs().text_color(p.muted_foreground).child(
-                        "One per line, like https://chat.example.com. The instance's own address and this desktop \
-                         app always work.",
-                    )),
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.instance.originsNote"))),
                 "iorigins-list",
                 std::time::Duration::ZERO,
                 -6.0,
@@ -122,11 +118,8 @@ impl InstanceSettingsView {
         });
         page = page.child(self.setting(
             "origins",
-            "Sites that can connect",
-            Some(
-                "Web pages on other sites, such as the fuwa app on another instance, that may use this one from a \
-                 browser. Signing in with waifu.dev from another site only works for sites listed here by name.",
-            ),
+            &t("instancesettings.nav.origins"),
+            Some(&t("instancesettings.origins.hint")),
             &["allowed_origins"],
             &default,
             3,
@@ -136,15 +129,30 @@ impl InstanceSettingsView {
         ));
 
         let facts = [
-            ("Version", startup.version.clone(), false),
-            ("Port", startup.port.to_string(), false),
-            ("Encryption at rest", if startup.encryption { "on" } else { "off" }.to_owned(), startup.encryption),
-            ("Admin token", if startup.admin_token { "set" } else { "not set" }.to_owned(), false),
-            ("Hosting", if startup.hosted { "Waifu Devs" } else { "self-hosted" }.to_owned(), false),
+            ("version", t("instancesettings.startup.version"), startup.version.clone(), false),
+            ("port", t("instancesettings.startup.port"), startup.port.to_string(), false),
+            ("encryption", t("instancesettings.startup.encryption"), on_off(startup.encryption), startup.encryption),
+            (
+                "token",
+                t("instancesettings.startup.adminToken"),
+                if startup.admin_token {
+                    t("instancesettings.shared.set")
+                } else {
+                    t("instancesettings.startup.notSet")
+                },
+                false,
+            ),
+            (
+                "hosting",
+                t("instancesettings.startup.hosting"),
+                // The company's name stays as it is.
+                if startup.hosted { "Waifu Devs".to_owned() } else { t("instancesettings.startup.selfHosted") },
+                false,
+            ),
         ];
         let mut pills = div().flex().flex_wrap().gap(px(8.0)).mt(px(12.0));
-        for (n, (label, value, good)) in facts.into_iter().enumerate() {
-            pills = pills.child(Self::fact(format!("ifact-{label}"), label, &value, good, n, p));
+        for (n, (id, label, value, good)) in facts.into_iter().enumerate() {
+            pills = pills.child(Self::fact(format!("ifact-{id}"), &label, &value, good, n, p));
         }
         page = page.child(motion::rise(
             div()
@@ -154,13 +162,13 @@ impl InstanceSettingsView {
                 .border_1()
                 .border_dashed()
                 .border_color(p.border)
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child("Set when the instance starts"))
+                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(t("instancesettings.startup.title")))
                 .child(
                     div()
                         .mt(px(2.0))
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child("Changed only by whoever runs it, through FUWA_* environment variables."),
+                        .child(t("instancesettings.startup.hint")),
                 )
                 .child(pills),
             "istartup",
@@ -199,5 +207,5 @@ pub(super) fn hidden(p: &Palette) -> impl IntoElement {
         .text_sm()
         .text_color(p.muted_foreground)
         .child(icon("eye-off").size(px(15.0)))
-        .child("Hidden while streamer mode is on")
+        .child(t("desktop.instance.hiddenStreamer"))
 }

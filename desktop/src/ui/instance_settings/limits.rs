@@ -4,18 +4,31 @@
 use gpui_kit::{AnyElement, Context, IntoElement as _, ParentElement as _, Styled as _, Window, div, px};
 
 use super::InstanceSettingsView;
-use crate::core::instance_admin::{count_label, per_minute_label, size_label};
+use super::controls::{count_text, per_minute_text, size_text};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::theme::Palette;
 
-/// The default caps, saved and reset together: (path, label, a size).
-const DEFAULT_CAPS: [(&str, &str, bool); 6] = [
-    ("default_limits.members", "Members", false),
-    ("default_limits.channels", "Channels", false),
-    ("default_limits.storage_bytes", "Storage", true),
-    ("default_limits.attachment_bytes", "Files", true),
-    ("default_limits.emojis", "Emoji", false),
-    ("default_limits.recording_bytes", "Recordings", true),
+/// The default caps, saved and reset together: (path, a size).
+const DEFAULT_CAPS: [(&str, bool); 6] = [
+    ("default_limits.members", false),
+    ("default_limits.channels", false),
+    ("default_limits.storage_bytes", true),
+    ("default_limits.attachment_bytes", true),
+    ("default_limits.emojis", false),
+    ("default_limits.recording_bytes", true),
 ];
+
+/// A default cap's name, as the web's Limits tab says it.
+fn cap_label(path: &str) -> String {
+    match path {
+        "default_limits.members" => t("serversettings.nav.members"),
+        "default_limits.channels" => t("serversettings.nav.channels"),
+        "default_limits.storage_bytes" => t("serversettings.usage.storage"),
+        "default_limits.attachment_bytes" => t("serversettings.limits.files"),
+        "default_limits.emojis" => t("serversettings.nav.emoji"),
+        _ => t("serversettings.nav.recordings"),
+    }
+}
 
 const DEFAULT_PATHS: [&str; 6] = [
     "default_limits.members",
@@ -27,7 +40,7 @@ const DEFAULT_PATHS: [&str; 6] = [
 ];
 
 /// A cap's setting: id, title, hint, its path, whether it's a size, and the default in words.
-type Row = (&'static str, &'static str, &'static str, &'static [&'static str], bool, String);
+type Row = (&'static str, String, String, &'static [&'static str], bool, String);
 
 impl InstanceSettingsView {
     pub(super) fn limits_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -39,26 +52,29 @@ impl InstanceSettingsView {
             .iter()
             .all(Option::is_none);
         let default = if none {
-            "no limits".to_owned()
+            t("desktop.instance.noLimits")
         } else {
-            [
-                format!("{} members", count_label(l.members)),
-                format!("{} channels", count_label(l.channels)),
-                format!("{} storage", size_label(l.storage_bytes)),
-                format!("{} files", size_label(l.attachment_bytes)),
-                format!("{} emoji", count_label(l.emojis)),
-                format!("{} recordings", size_label(l.recording_bytes)),
-            ]
-            .join(", ")
+            t_with(
+                "instancesettings.limits.defaults",
+                &[
+                    ("members", Arg::Str(&count_text(l.members))),
+                    ("channels", Arg::Str(&count_text(l.channels))),
+                    ("storage", Arg::Str(&size_text(l.storage_bytes))),
+                    ("files", Arg::Str(&size_text(l.attachment_bytes))),
+                    ("emoji", Arg::Str(&count_text(l.emojis))),
+                    ("recordings", Arg::Str(&size_text(l.recording_bytes))),
+                ],
+            )
         };
         let mut caps = div().flex().flex_col().gap(px(12.0));
-        for (path, label, bytes) in DEFAULT_CAPS {
-            caps = caps.child(self.cap(path, label, bytes, p, window, cx));
+        for (path, bytes) in DEFAULT_CAPS {
+            caps = caps.child(self.cap(path, &cap_label(path), bytes, p, window, cx));
         }
+        let up_to = t("instancesettings.shared.upTo");
         let mut page = div().flex().flex_col().child(self.setting(
             "default-limits",
-            "Default caps for every server",
-            Some("A server can get its own caps from its settings. With a cap off, it's unlimited."),
+            &t("instancesettings.nav.defaultLimits"),
+            Some(&t("instancesettings.limits.defaultHint")),
             &DEFAULT_PATHS,
             &default,
             0,
@@ -68,94 +84,92 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "picture-uploads",
-            "Largest picture upload",
-            Some(
-                "Avatars, banners and server icons. The app crops pictures and saves them small, so only GIFs, which \
-                 go up as they are, get near a few megabytes.",
-            ),
+            &t("instancesettings.nav.pictureUploads"),
+            Some(&t("instancesettings.limits.pictureHint")),
             &["picture_upload_bytes"],
-            &size_label(defaults.picture_upload_bytes),
+            &size_text(defaults.picture_upload_bytes),
             1,
-            self.cap("picture_upload_bytes", "Up to", true, p, window, cx),
+            self.cap("picture_upload_bytes", &up_to, true, p, window, cx),
             p,
             cx,
         ));
         page = page.child(self.setting(
             "picture-uploads-per-day",
-            "Pictures per day",
-            Some("How much one account may upload in a day (UTC), so nobody can fill this instance's disk."),
+            &t("instancesettings.limits.picturesPerDay"),
+            Some(&t("instancesettings.limits.picturesPerDayHint")),
             &["picture_upload_bytes_per_day"],
-            &size_label(defaults.picture_upload_bytes_per_day),
+            &size_text(defaults.picture_upload_bytes_per_day),
             2,
-            self.cap("picture_upload_bytes_per_day", "Up to", true, p, window, cx),
+            self.cap("picture_upload_bytes_per_day", &up_to, true, p, window, cx),
             p,
             cx,
         ));
         // The rest as the web has them.
-        let seconds = defaults.voice_message_seconds.map(|s| format!("{} seconds", count_label(Some(s))));
+        let seconds = defaults
+            .voice_message_seconds
+            .map(|s| t_with("instancesettings.limits.seconds", &[("count", Arg::Num(s))]));
         let rest: [Row; 6] = [
             (
                 "attachment-uploads",
-                "Largest file",
-                "The biggest file one attachment may be, apart from pictures.",
+                t("desktop.instance.largestFile"),
+                t("desktop.instance.largestFileHint"),
                 &["attachment_upload_bytes"],
                 true,
-                size_label(defaults.attachment_upload_bytes),
+                size_text(defaults.attachment_upload_bytes),
             ),
             (
                 "attachment-uploads-per-day",
-                "Files per day",
-                "How much one account may send in files in a day (UTC), apart from pictures.",
+                t("instancesettings.limits.attachmentPerDay"),
+                t("instancesettings.limits.attachmentPerDayHint"),
                 &["attachment_upload_bytes_per_day"],
                 true,
-                size_label(defaults.attachment_upload_bytes_per_day),
+                size_text(defaults.attachment_upload_bytes_per_day),
             ),
             (
                 "voice-message-seconds",
-                "Longest voice message",
-                "In direct messages. Apps stop recording here; voice messages are end-to-end encrypted, so this \
-                 instance can't check their length itself.",
+                t("instancesettings.limits.voiceSeconds"),
+                t("instancesettings.limits.voiceSecondsHint"),
                 &["voice_message_seconds"],
                 false,
-                seconds.unwrap_or_else(|| "no limit".to_owned()),
+                seconds.unwrap_or_else(|| t("instancesettings.shared.noLimit")),
             ),
             (
                 "voice-message-bytes",
-                "Biggest voice message",
-                "Its encrypted file, which this instance does see. A minute of voice is about 240 KB.",
+                t("instancesettings.limits.voiceBytes"),
+                t("instancesettings.limits.voiceBytesHint"),
                 &["voice_message_bytes"],
                 true,
-                size_label(defaults.voice_message_bytes),
+                size_text(defaults.voice_message_bytes),
             ),
             (
                 "voice-message-bytes-per-day",
-                "Voice messages a day",
-                "What one account may send in a day (UTC), counted apart from pictures and files.",
+                t("instancesettings.limits.voicePerDay"),
+                t("instancesettings.limits.voicePerDayHint"),
                 &["voice_message_bytes_per_day"],
                 true,
-                size_label(defaults.voice_message_bytes_per_day),
+                size_text(defaults.voice_message_bytes_per_day),
             ),
             (
                 "poll-votes-per-minute",
-                "Poll votes per minute",
-                "How many times one account may vote, change or take back a vote in polls in a minute. Every vote \
-                 is a live update to everyone in the channel.",
+                t("instancesettings.limits.pollVotes"),
+                t("instancesettings.limits.pollVotesHint"),
                 &["poll_votes_per_minute"],
                 false,
-                per_minute_label(defaults.poll_votes_per_minute),
+                per_minute_text(defaults.poll_votes_per_minute),
             ),
         ];
         for (n, (id, title, hint, paths, bytes, default)) in rest.into_iter().enumerate() {
             let path = paths[0];
-            let label = if path == "voice_message_seconds" { "Seconds" } else { "Up to" };
+            let label =
+                if path == "voice_message_seconds" { t("instancesettings.limits.secondsLabel") } else { up_to.clone() };
             page = page.child(self.setting(
                 id,
-                title,
-                Some(hint),
+                &title,
+                Some(&hint),
                 paths,
                 &default,
                 3 + n,
-                self.cap(path, label, bytes, p, window, cx),
+                self.cap(path, &label, bytes, p, window, cx),
                 p,
                 cx,
             ));
@@ -164,15 +178,12 @@ impl InstanceSettingsView {
         if self.instance_has("agent-commands") {
             page = page.child(self.setting(
                 "commands-per-minute",
-                "Agent commands per minute",
-                Some(
-                    "How many times one account may run agents' slash commands or press their buttons in a minute. \
-                     Each one wakes an agent up.",
-                ),
+                &t("instancesettings.limits.commands"),
+                Some(&t("instancesettings.limits.commandsHint")),
                 &["commands_per_minute"],
-                &per_minute_label(defaults.commands_per_minute),
+                &per_minute_text(defaults.commands_per_minute),
                 9,
-                self.cap("commands_per_minute", "Up to", false, p, window, cx),
+                self.cap("commands_per_minute", &up_to, false, p, window, cx),
                 p,
                 cx,
             ));

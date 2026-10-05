@@ -256,5 +256,60 @@
   "server.shared.approveHint": "Their people will read everything said in #{channel}, earlier messages included, and write there.",
   "server.shared.notAcross": "Messages don't cross instances yet. Their key fingerprint:",
   "server.shared.notCode": "That doesn't look like a share code.",
-  "server.shared.notYet": "Not yet"
+  "server.shared.notYet": "Not yet",
+  "instance.originsNote": "One per line, like https://chat.example.com. The instance's own address and this desktop app always work.",
+  "instance.hiddenStreamer": "Hidden while streamer mode is on",
+  "instance.addressHidden": "address hidden",
+  "instance.defaultIs": "The default is {value}.",
+  "instance.noLimits": "no limits",
+  "instance.largestFile": "Largest file",
+  "instance.largestFileHint": "The biggest file one attachment may be, apart from pictures.",
+  "instance.generalAbout": "What everyone here gets. Changes apply right away.",
+  "instance.serversAbout": "Every community server here. Change one's caps, move it, save its file, or delete it.",
+  "instance.signalFields": "Every field it sends is listed in fuwa's README, under \"The anonymous usage signal\".",
+  "instance.providers": "Providers",
+  "instance.providersAllOff": "all off",
+  "instance.providersOn": "{names} on",
+  "instance.listAnd": "{first} and {second}",
+  "instance.checksHint": "How many messages each server's smart filter may send to its provider in a day (UTC), so one busy server can't run up your bill. Once a server uses them, its messages {unchecked} until midnight UTC, like when the provider is down: blocking every message instead would stop a busy server talking. Its own rules still apply.",
+  "instance.checksUnchecked": "go through the smart filter unchecked",
+  "instance.retypeKey": "New address: type the key again.",
+  "instance.comesDownAt": "Comes down {time} counted from when you put it up.",
+  "instance.minutesAgo": {
+    "one": "{count} minute ago",
+    "other": "{count} minutes ago"
+  },
+  "instance.hoursAgo": {
+    "one": "{count} hour ago",
+    "other": "{count} hours ago"
+  },
+  "instance.daysAgo": {
+    "one": "{count} day ago",
+    "other": "{count} days ago"
+  },
+  "instance.monthsAgo": {
+    "one": "{count} month ago",
+    "other": "{count} months ago"
+  },
+  "instance.atYou": "@you",
+  "instance.resetting": "Resetting…",
+  "instance.turningOff": "Turning off…",
+  "instance.joined": "joined {day}",
+  "instance.federationIntro": "With this on, this instance talks to other fuwa instances so servers can share channels across them. Only the instances talk: apps here never connect to another instance, and no one's address is passed on. Every call is signed with this instance's key and checked against the key pinned for the other one. Servers can share channels with servers on other instances by share code, and you can check below that two instances reach each other.",
+  "instance.fetchesHint": "How many files this instance fetches from other instances at the same time, for shared channels; each instance gets at most half, and the rest wait their turn. Leave it off for no limit.",
+  "instance.knownAs": "Other instances know this one as {origin}",
+  "instance.allServers": "All servers",
+  "instance.inBrowse": "In Browse",
+  "instance.hiddenFromBrowse": "Hidden",
+  "instance.byOwner": "by {name} (@{username})",
+  "instance.byNobody": "by nobody",
+  "instance.fileNotEncrypted": "Its file isn't encrypted: it holds everything said in the server. Keep it somewhere safe.",
+  "instance.ending": "Ending…",
+  "instance.homeRegion": "Home",
+  "instance.metadataTooBig": "That's too big to be metadata. Paste the provider's metadata file.",
+  "instance.waitingBrowser": "Waiting for the browser…",
+  "instance.ssoTestHint": "Signs in through the provider as yourself in the browser and shows who it said you are.",
+  "instance.ssoSubject": "Subject",
+  "instance.ssoHidden": "hidden",
+  "instance.ssoWorks": "It works. Nothing changed and nobody was signed in."
 }

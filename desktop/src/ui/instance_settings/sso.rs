@@ -16,7 +16,8 @@ use gpui_kit::{
 
 use super::controls::Opt;
 use super::signups::accounts_label;
-use super::{HIDDEN_ADDRESS, InstanceSettingsView};
+use super::{InstanceSettingsView, hidden_address};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_admin::{self as admin};
 use crate::core::sso::{self, MAX_DOMAINS};
 use crate::pb;
@@ -28,7 +29,8 @@ use crate::ui::widgets::{icon, primary_button, soft_button};
 type Get = fn(&pb::IdentityProvider) -> String;
 type Set = fn(&mut pb::IdentityProvider, String);
 
-/// The provider's one-line boxes: (key, placeholder, masked, read, write).
+/// The provider's one-line boxes: (key, placeholder, masked, read, write). Placeholders in
+/// words come from `placeholder`.
 const LINES: [(&str, &str, bool, Get, Set); 6] = [
     ("name", "Acme", false, |p| p.name.clone(), |p, v| p.name = v.chars().take(40).collect()),
     (
@@ -40,21 +42,21 @@ const LINES: [(&str, &str, bool, Get, Set); 6] = [
     ),
     (
         "client_id",
-        "Client ID",
+        "",
         false,
         |p| p.oidc.as_ref().map(|o| o.client_id.clone()).unwrap_or_default(),
         |p, v| p.oidc.get_or_insert_with(Default::default).client_id = v,
     ),
     (
         "client_secret",
-        "Client secret",
+        "",
         true,
         |p| p.oidc.as_ref().map(|o| o.client_secret.clone()).unwrap_or_default(),
         |p, v| p.oidc.get_or_insert_with(Default::default).client_secret = v,
     ),
     (
         "scopes",
-        "More scopes, if your provider needs them (openid email profile are always asked for)",
+        "",
         false,
         |p| p.oidc.as_ref().map(|o| o.extra_scopes.clone()).unwrap_or_default(),
         |p, v| p.oidc.get_or_insert_with(Default::default).extra_scopes = v,
@@ -76,6 +78,16 @@ const SSO_URL: (&str, &str, Get, Set) = (
     |p, v| p.saml.get_or_insert_with(Default::default).sso_url = v,
 );
 
+/// A box's placeholder: words for the ones that have them, else the example in `LINES`.
+fn placeholder(key: &str, example: &str) -> String {
+    match key {
+        "client_id" => t("system.sso.clientId"),
+        "client_secret" => t("system.sso.clientSecret"),
+        "scopes" => t("instancesettings.provider.scopes"),
+        _ => example.to_owned(),
+    }
+}
+
 /// How a test sign-in went.
 pub(super) enum Tested {
     Waiting,
@@ -96,16 +108,17 @@ pub(super) struct Sso {
     filled: u32,
     problem: Option<String>,
     tested: Option<Tested>,
-    copied: Option<&'static str>,
+    /// Which "Tell your provider" row was just copied.
+    copied: Option<usize>,
 }
 
 impl Sso {
     pub(super) fn new(window: &mut Window, cx: &mut Context<InstanceSettingsView>) -> (Self, Vec<Subscription>) {
         let mut subs = Vec::new();
         let mut lines = Vec::new();
-        for (key, placeholder, masked, get, set) in LINES {
+        for (key, example, masked, get, set) in LINES {
             let state = cx.new(|cx| {
-                let s = InputState::new(window, cx).placeholder(placeholder);
+                let s = InputState::new(window, cx).placeholder(placeholder(key, example));
                 if masked { s.masked(true) } else { s }
             });
             subs.push(Self::follow(&state, get, set, cx));
@@ -230,7 +243,8 @@ impl InstanceSettingsView {
         // The saved secret never comes back; an empty box keeps it.
         let kept = p.oidc.as_ref().is_some_and(|o| o.client_secret_set);
         if let Some(secret) = self.sso.line("client_secret").cloned() {
-            let placeholder = if kept { "Secret kept (type to replace)" } else { "Client secret" };
+            let placeholder =
+                if kept { t("instancesettings.provider.secretKept") } else { t("system.sso.clientSecret") };
             secret.update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
         }
     }
@@ -239,13 +253,13 @@ impl InstanceSettingsView {
     fn fill_metadata(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let xml = self.sso.metadata.read(cx).value().to_string();
         if xml.len() > sso::MAX_METADATA {
-            self.sso.problem = Some("That's too big to be metadata. Paste the provider's metadata file.".into());
+            self.sso.problem = Some(t("desktop.instance.metadataTooBig"));
             cx.notify();
             return;
         }
         let Some(found) = sso::read_saml_metadata(&xml).filter(|f| !f.entity_id.is_empty() || !f.sso_url.is_empty())
         else {
-            self.sso.problem = Some("That doesn't look like identity provider metadata.".into());
+            self.sso.problem = Some(t("instancesettings.provider.notMetadata"));
             cx.notify();
             return;
         };
@@ -261,8 +275,7 @@ impl InstanceSettingsView {
                 s.certificates = found.certificates.clone();
             }
         });
-        self.sso.problem =
-            found.sso_url.is_empty().then(|| "Filled in what it had; it lists no HTTP-Redirect sign-in URL.".into());
+        self.sso.problem = found.sso_url.is_empty().then(|| t("instancesettings.provider.noRedirect"));
         self.sso.pasting = false;
         self.sso.filled += 1;
         self.sso.metadata.update(cx, |s, cx| s.set_value("", window, cx));
@@ -305,18 +318,28 @@ impl InstanceSettingsView {
             if draft.sso_accounts == pb::SsoAccounts::Unspecified as i32 { sso_off } else { draft.sso_accounts };
         let mut page = div().flex().flex_col();
 
-        let not_ready = "Set up the identity provider first.";
+        let not_ready = || t("instancesettings.sso.setUpFirst");
         let choice = self.choice(
             "sso",
             accounts,
             vec![
-                Opt::new(pb::SsoAccounts::Open as i32, "Open", "Anyone the provider lets in.", "building")
-                    .unless(!ready, not_ready),
-                Opt::new(pb::SsoAccounts::Closed as i32, "Closed", "Accounts made before only.", "door-closed")
-                    .unless(!ready, not_ready),
-                Opt::new(sso_off, "Off", "No single sign-on.", "lock").unless(
+                Opt::new(
+                    pb::SsoAccounts::Open as i32,
+                    t("instancesettings.signUps.open"),
+                    t("instancesettings.sso.openHint"),
+                    "building",
+                )
+                .unless(!ready, not_ready),
+                Opt::new(
+                    pb::SsoAccounts::Closed as i32,
+                    t("instancesettings.signUps.closed"),
+                    t("instancesettings.sso.closedHint"),
+                    "door-closed",
+                )
+                .unless(!ready, not_ready),
+                Opt::new(sso_off, t("serversettings.shared.off"), t("instancesettings.sso.offHint"), "lock").unless(
                     !(accounts == sso_off || draft.local_accounts != local_off || admin::linked_works(&draft)),
-                    "Needs another way in first.",
+                    || t("instancesettings.sso.offNeeds"),
                 ),
             ],
             p,
@@ -325,33 +348,49 @@ impl InstanceSettingsView {
             |this, v, _, cx| this.patch(cx, |d| d.sso_accounts = v),
         );
         let no_https = accounts != sso_off && !admin::can_return_to(&draft.public_url);
-        page = page.child(self.setting(
-            "sso-accounts",
-            "Single sign-on accounts",
-            Some("People sign in through the identity provider below, and get an account here the first time."),
-            &["sso_accounts"],
-            accounts_label(defaults.sso_accounts),
-            0,
-            div().flex().flex_col().gap(px(12.0)).child(choice).when(no_https, |el| {
-                el.child(self.notice(
-                    "sso-https",
-                    "Identity providers send people back to this instance's public address, which has to be \
-                     https. Set it under General.",
-                    p,
-                ))
-            }),
-            p,
-            cx,
-        ));
+        page = page.child(
+            self.setting(
+                "sso-accounts",
+                &t("instancesettings.nav.ssoAccounts"),
+                Some(&t("instancesettings.sso.accountsHint")),
+                &["sso_accounts"],
+                &accounts_label(defaults.sso_accounts),
+                0,
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(choice)
+                    .when(no_https, |el| el.child(self.notice("sso-https", &t("instancesettings.sso.notice"), p))),
+                p,
+                cx,
+            ),
+        );
 
         let protocol = provider.protocol;
         let picker = self.choice(
             "sso-protocol",
             protocol,
             vec![
-                Opt::new(pb::SsoProtocol::Unspecified as i32, "Off", "No provider set up.", "power-off"),
-                Opt::new(pb::SsoProtocol::Oidc as i32, "OpenID Connect", "A client ID and secret.", "key-round"),
-                Opt::new(pb::SsoProtocol::Saml as i32, "SAML 2.0", "Metadata and a certificate.", "file-badge"),
+                Opt::new(
+                    pb::SsoProtocol::Unspecified as i32,
+                    t("serversettings.shared.off"),
+                    t("instancesettings.sso.noProvider"),
+                    "power-off",
+                ),
+                // The protocols' own names.
+                Opt::new(
+                    pb::SsoProtocol::Oidc as i32,
+                    "OpenID Connect".into(),
+                    t("instancesettings.provider.oidcHint"),
+                    "key-round",
+                ),
+                Opt::new(
+                    pb::SsoProtocol::Saml as i32,
+                    "SAML 2.0".into(),
+                    t("instancesettings.provider.samlHint"),
+                    "file-badge",
+                ),
             ],
             p,
             window,
@@ -360,10 +399,10 @@ impl InstanceSettingsView {
         );
         page = page.child(self.setting(
             "sso-protocol",
-            "Identity provider",
-            Some("Okta, Microsoft Entra ID, Google Workspace, Keycloak, Authentik and most others speak one of these."),
+            &t("serversettings.nav.ssoProtocol"),
+            Some(&t("instancesettings.provider.protocolHint")),
             &["sso_provider"],
-            "none",
+            &t("instancesettings.shared.none"),
             1,
             picker,
             p,
@@ -379,8 +418,8 @@ impl InstanceSettingsView {
             let shown = provider.name.trim().to_owned();
             form = form.child(self.setting(
                 "sso-name",
-                "Name",
-                Some("What sign-in buttons call it."),
+                &t("instancesettings.nav.name"),
+                Some(&t("instancesettings.provider.nameHint")),
                 &[],
                 "",
                 2,
@@ -396,11 +435,8 @@ impl InstanceSettingsView {
         };
         form = form.child(self.setting(
             "sso-domains",
-            "Email domains",
-            Some(
-                "Only people whose verified email is on one of these get in. Leave it empty to let in anyone the \
-                 provider signs in.",
-            ),
+            &t("serversettings.nav.ssoDomains"),
+            Some(&t("instancesettings.provider.domainsHint")),
             &[],
             "",
             6,
@@ -410,9 +446,9 @@ impl InstanceSettingsView {
         ));
         form = form.child(self.tell_provider(protocol, config.sso_service_provider.as_ref(), p, cx));
         let blocked = if admin::changed(&draft, &saved).iter().any(|c| c == "sso_provider") {
-            Some("Save first; the test uses the saved provider.")
+            Some(t("instancesettings.sso.saveFirst"))
         } else if !admin::provider_ready(saved.sso_provider.as_ref()) {
-            Some("Fill it in and save first.")
+            Some(t("instancesettings.sso.fillFirst"))
         } else {
             None
         };
@@ -426,8 +462,8 @@ impl InstanceSettingsView {
         if let Some(issuer) = self.sso.line("issuer") {
             form = form.child(self.setting(
                 "sso-issuer",
-                "Issuer",
-                Some("Its /.well-known/openid-configuration says where everything else is."),
+                &t("system.sso.issuer"),
+                Some(&t("instancesettings.provider.issuerHint")),
                 &[],
                 "",
                 3,
@@ -442,8 +478,8 @@ impl InstanceSettingsView {
             form = form.child(
                 self.setting(
                     "sso-client",
-                    "Client",
-                    Some("From the app you register for fuwa at the provider, as a confidential web app."),
+                    &t("system.sso.client"),
+                    Some(&t("instancesettings.provider.clientHint")),
                     &[],
                     "",
                     4,
@@ -477,16 +513,18 @@ impl InstanceSettingsView {
                         .flex()
                         .gap(px(8.0))
                         .child(
-                            primary_button("sso-fill", "Fill in", p)
+                            primary_button("sso-fill", t("instancesettings.provider.fillIn"), p)
                                 .when(empty, |el| el.opacity(0.5))
                                 .when(!empty, |el| {
                                     el.on_click(cx.listener(|this, _, window, cx| this.fill_metadata(window, cx)))
                                 }),
                         )
-                        .child(soft_button("sso-fill-cancel", "Cancel", p).on_click(cx.listener(|this, _, _, cx| {
-                            this.sso.pasting = false;
-                            cx.notify();
-                        }))),
+                        .child(soft_button("sso-fill-cancel", t("common.cancel"), p).on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.sso.pasting = false;
+                                cx.notify();
+                            },
+                        ))),
                 ),
                 "sso-paste",
                 Duration::ZERO,
@@ -500,7 +538,7 @@ impl InstanceSettingsView {
                 .items_center()
                 .gap(px(12.0))
                 .child(
-                    soft_button("sso-paste-open", "Paste metadata", p)
+                    soft_button("sso-paste-open", t("instancesettings.provider.pasteMetadata"), p)
                         .child(icon("clipboard-paste").size(px(15.0)))
                         .flex_row_reverse()
                         .gap(px(6.0))
@@ -521,7 +559,7 @@ impl InstanceSettingsView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(green())
                             .child(icon("check").size(px(14.0)))
-                            .child("Filled in"),
+                            .child(t("instancesettings.provider.filledIn")),
                         SharedString::from(format!("sso-filled-{}", s.filled)),
                         Duration::from_millis(360),
                         |el, t| {
@@ -535,8 +573,8 @@ impl InstanceSettingsView {
         let problem = s.problem.clone();
         let mut form = form.child(self.setting(
             "sso-metadata",
-            "Provider metadata",
-            Some("Paste the XML your provider offers to fill in the rest."),
+            &t("instancesettings.provider.metadata"),
+            Some(&t("instancesettings.provider.metadataHint")),
             &[],
             "",
             3,
@@ -550,11 +588,8 @@ impl InstanceSettingsView {
             form = form.child(
                 self.setting(
                     "sso-entity",
-                    "Entity ID and sign-in URL",
-                    Some(
-                        "The provider's entity ID (the Issuer its responses carry) and where people sign in \
-                     (HTTP-Redirect).",
-                    ),
+                    &t("instancesettings.provider.entity"),
+                    Some(&t("instancesettings.provider.entityHint")),
                     &[],
                     "",
                     4,
@@ -571,11 +606,8 @@ impl InstanceSettingsView {
         }
         form.child(self.setting(
             "sso-certificates",
-            "Signing certificates",
-            Some(
-                "Responses must be signed by one of these, with RSA or ECDSA over SHA-256 or stronger. Up to four, \
-                 PEM.",
-            ),
+            &t("instancesettings.provider.certificates"),
+            Some(&t("instancesettings.provider.certificatesHint")),
             &[],
             "",
             5,
@@ -646,19 +678,20 @@ impl InstanceSettingsView {
     ) -> AnyElement {
         let Some(sp) = sp else { return div().into_any_element() };
         let oidc = protocol == pb::SsoProtocol::Oidc as i32;
-        let rows: Vec<(&'static str, String)> = if oidc {
-            vec![("Redirect URI", sp.oidc_redirect_uri.clone())]
+        // The protocols' own names for these, as the web shows them, but for the entity ID's.
+        let rows: Vec<(String, String)> = if oidc {
+            vec![("Redirect URI".to_owned(), sp.oidc_redirect_uri.clone())]
         } else {
             vec![
-                ("Entity ID (and metadata URL)", sp.saml_entity_id.clone()),
-                ("Assertion Consumer Service (HTTP-POST)", sp.saml_acs_url.clone()),
+                (t("instancesettings.provider.entityAndMetadata"), sp.saml_entity_id.clone()),
+                ("Assertion Consumer Service (HTTP-POST)".to_owned(), sp.saml_acs_url.clone()),
             ]
         };
         let hide = self.core.prefs().streamer_mode;
         let mut list = div().mt(px(12.0)).flex().flex_col().gap(px(8.0));
         for (n, (label, value)) in rows.into_iter().enumerate() {
-            let copied = self.sso.copied == Some(label);
-            let shown = if hide { HIDDEN_ADDRESS.to_owned() } else { value.clone() };
+            let copied = self.sso.copied == Some(n);
+            let shown = if hide { hidden_address() } else { value.clone() };
             let row = div()
                 .flex()
                 .flex_col()
@@ -707,12 +740,12 @@ impl InstanceSettingsView {
                                 .active(|s| s.top(px(1.0)))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
-                                    this.sso.copied = Some(label);
+                                    this.sso.copied = Some(n);
                                     cx.notify();
                                     cx.spawn_in(window, async move |this, cx| {
                                         cx.background_executor().timer(Duration::from_millis(1400)).await;
                                         let _ = this.update(cx, |this, cx| {
-                                            if this.sso.copied == Some(label) {
+                                            if this.sso.copied == Some(n) {
                                                 this.sso.copied = None;
                                                 cx.notify();
                                             }
@@ -741,11 +774,11 @@ impl InstanceSettingsView {
                 .border_1()
                 .border_dashed()
                 .border_color(p.border)
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child("Tell your provider"))
+                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(t("instancesettings.provider.tell")))
                 .child(div().mt(px(2.0)).text_xs().text_color(p.muted_foreground).child(if oidc {
-                    "Allow this redirect URI on the app you registered."
+                    t("instancesettings.provider.tellOidc")
                 } else {
-                    "Add fuwa as a service provider with these. Sign the response or the assertion; don't encrypt it."
+                    t("instancesettings.provider.tellSaml")
                 }))
                 .child(list),
             SharedString::from(format!("sso-tell-{protocol}")),
@@ -758,24 +791,28 @@ impl InstanceSettingsView {
     /// Signs in through the saved provider, and says who it signed in.
     fn test_row(
         &self,
-        blocked: Option<&'static str>,
+        blocked: Option<String>,
         p: &Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let waiting = matches!(self.sso.tested, Some(Tested::Waiting));
-        let button = soft_button("sso-test", if waiting { "Waiting for the browser…" } else { "Test sign-in" }, p)
-            .flex_row_reverse()
-            .gap(px(6.0))
-            .child(if waiting {
-                spinner("sso-test-spin", 15.0, window).into_any_element()
-            } else {
-                icon("flask-conical").size(px(15.0)).into_any_element()
-            })
-            .when(blocked.is_some() || waiting, |el| el.opacity(0.6))
-            .when(blocked.is_none() && !waiting, |el| {
-                el.on_click(cx.listener(|this, _, window, cx| this.test_sign_in(window, cx)))
-            });
+        let button = soft_button(
+            "sso-test",
+            if waiting { t("desktop.instance.waitingBrowser") } else { t("instancesettings.nav.ssoTest") },
+            p,
+        )
+        .flex_row_reverse()
+        .gap(px(6.0))
+        .child(if waiting {
+            spinner("sso-test-spin", 15.0, window).into_any_element()
+        } else {
+            icon("flask-conical").size(px(15.0)).into_any_element()
+        })
+        .when(blocked.is_some() || waiting, |el| el.opacity(0.6))
+        .when(blocked.is_none() && !waiting, |el| {
+            el.on_click(cx.listener(|this, _, window, cx| this.test_sign_in(window, cx)))
+        });
         let result: Option<AnyElement> = match &self.sso.tested {
             Some(Tested::Failed(message)) => {
                 Some(div().text_sm().text_color(p.destructive).child(message.clone()).into_any_element())
@@ -785,8 +822,8 @@ impl InstanceSettingsView {
         };
         self.setting(
             "sso-test",
-            "Test sign-in",
-            Some("Signs in through the provider as yourself in the browser and shows who it said you are."),
+            &t("instancesettings.nav.ssoTest"),
+            Some(&t("desktop.instance.ssoTestHint")),
             &[],
             "",
             7,
@@ -810,9 +847,12 @@ impl InstanceSettingsView {
         let hide = self.core.prefs().streamer_mode;
         let id = identity.cloned().unwrap_or_default();
         let rows = [
-            ("Name", id.name.clone()),
-            ("Email", if hide && !id.email.is_empty() { "hidden".into() } else { id.email.clone() }),
-            ("Subject", id.subject.clone()),
+            (t("connect.callback.identity.name"), id.name.clone()),
+            (
+                t("connect.callback.identity.email"),
+                if hide && !id.email.is_empty() { t("desktop.instance.ssoHidden") } else { id.email.clone() },
+            ),
+            (t("desktop.instance.ssoSubject"), id.subject.clone()),
         ];
         let mut list = div().flex().flex_col().gap(px(4.0));
         for (label, value) in rows {
@@ -848,7 +888,7 @@ impl InstanceSettingsView {
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(green())
                         .child(icon("circle-check").size(px(16.0)))
-                        .child("It works. Nothing changed and nobody was signed in."),
+                        .child(t("desktop.instance.ssoWorks")),
                 )
                 .child(list),
             SharedString::from(format!("sso-identity-{}", id.subject)),
@@ -871,7 +911,7 @@ fn button_preview(name: &str, p: &Palette) -> AnyElement {
         .gap(px(12.0))
         .text_xs()
         .text_color(p.muted_foreground)
-        .child("Shows as")
+        .child(t("instancesettings.provider.showsAs"))
         .child(
             div()
                 .h(px(36.0))
@@ -887,10 +927,10 @@ fn button_preview(name: &str, p: &Palette) -> AnyElement {
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .child(icon("building").size(px(16.0)).text_color(p.primary))
                 .child(motion::rise(
-                    div()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        .child(format!("Continue with {}", if name.is_empty() { "…" } else { name })),
+                    div().text_ellipsis().whitespace_nowrap().child(t_with(
+                        "connect.provider.continueWith",
+                        &[("name", Arg::Str(if name.is_empty() { "…" } else { name }))],
+                    )),
                     SharedString::from(format!("sso-preview-{name}")),
                     Duration::ZERO,
                     6.0,

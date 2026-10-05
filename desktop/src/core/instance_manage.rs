@@ -22,14 +22,8 @@ pub const REASON_MAX: usize = 512;
 pub const TEXT_MAX: usize = 300;
 
 const HOUR: i64 = 3_600_000;
-/// How long an announcement stays up: (label, milliseconds; None until taken down).
-pub const LENGTHS: [(&str, Option<i64>); 5] = [
-    ("Until taken down", None),
-    ("1 hour", Some(HOUR)),
-    ("4 hours", Some(4 * HOUR)),
-    ("1 day", Some(24 * HOUR)),
-    ("1 week", Some(7 * 24 * HOUR)),
-];
+/// How long an announcement stays up, in milliseconds (None until taken down).
+pub const LENGTHS: [Option<i64>; 5] = [None, Some(HOUR), Some(4 * HOUR), Some(24 * HOUR), Some(7 * 24 * HOUR)];
 
 fn ms(t: &prost_types::Timestamp) -> i64 {
     t.seconds * 1000 + i64::from(t.nanos) / 1_000_000
@@ -96,23 +90,32 @@ pub fn ends_label(at_ms: i64, now_ms: i64) -> String {
     }
 }
 
+/// How long ago something was last active, rounded the way the web's device lists say it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ago {
+    Now,
+    Minutes(i64),
+    Hours(i64),
+    Days(i64),
+    Months(i64),
+}
+
 /// "Active now", "Active 5 minutes ago" and so on, as on the web's device lists.
-pub fn active_ago(at_ms: i64, now_ms: i64) -> String {
+pub fn active_ago(at_ms: i64, now_ms: i64) -> Ago {
     let minutes = ((now_ms - at_ms).max(0) as f64 / 60_000.0).round() as i64;
-    let ago = |n: i64, unit: &str| format!("Active {n} {unit}{} ago", if n == 1 { "" } else { "s" });
     // Sessions note their use every few minutes.
     if minutes < 6 {
-        return "Active now".into();
+        return Ago::Now;
     }
     if minutes < 60 {
-        return ago(minutes, "minute");
+        return Ago::Minutes(minutes);
     }
     let hours = (minutes as f64 / 60.0).round() as i64;
     if hours < 24 {
-        return ago(hours, "hour");
+        return Ago::Hours(hours);
     }
     let days = (hours as f64 / 24.0).round() as i64;
-    if days < 30 { ago(days, "day") } else { ago((days as f64 / 30.0).round() as i64, "month") }
+    if days < 30 { Ago::Days(days) } else { Ago::Months((days as f64 / 30.0).round() as i64) }
 }
 
 /// The counts after `next` replaces `prev` in the list.
@@ -242,12 +245,12 @@ mod tests {
     #[test]
     fn activity_reads_like_the_web() {
         let now = 100 * 86_400_000;
-        assert_eq!(active_ago(now - 5 * 60_000, now), "Active now");
-        assert_eq!(active_ago(now + 60_000, now), "Active now");
-        assert_eq!(active_ago(now - 7 * 60_000, now), "Active 7 minutes ago");
-        assert_eq!(active_ago(now - 60 * 60_000, now), "Active 1 hour ago");
-        assert_eq!(active_ago(now - 3 * 86_400_000, now), "Active 3 days ago");
-        assert_eq!(active_ago(now - 65 * 86_400_000, now), "Active 2 months ago");
+        assert_eq!(active_ago(now - 5 * 60_000, now), Ago::Now);
+        assert_eq!(active_ago(now + 60_000, now), Ago::Now);
+        assert_eq!(active_ago(now - 7 * 60_000, now), Ago::Minutes(7));
+        assert_eq!(active_ago(now - 60 * 60_000, now), Ago::Hours(1));
+        assert_eq!(active_ago(now - 3 * 86_400_000, now), Ago::Days(3));
+        assert_eq!(active_ago(now - 65 * 86_400_000, now), Ago::Months(2));
     }
 
     #[test]
