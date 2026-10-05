@@ -35,6 +35,9 @@ const OVERSCAN: f32 = 480.0;
 const LOAD_AHEAD: f32 = 600.0;
 /// How long typing rests before it's searched.
 const PAUSE: Duration = Duration::from_millis(300);
+/// The biggest GIF of your own that's read to upload: the most this app draws a
+/// picture from (`ui/http.rs`). The instance's own cap, if it has one, still decides.
+const MAX_UPLOAD: u64 = 10 * 1024 * 1024;
 /// How long whether GIFs are on is believed.
 const SETTINGS_FOR: Duration = Duration::from_secs(5 * 60);
 
@@ -476,6 +479,16 @@ impl FuwaApp {
         self.run(
             cx,
             async move {
+                let unreadable = |_: std::io::Error| {
+                    crate::core::api::Problem::new(tonic::Code::NotFound, "Couldn't read that file.")
+                };
+                // Too big is said before reading it all.
+                if tokio::fs::metadata(&path).await.map_err(unreadable)?.len() > MAX_UPLOAD {
+                    return Err(crate::core::api::Problem::new(
+                        tonic::Code::InvalidArgument,
+                        "That GIF is over 10 MB.",
+                    ));
+                }
                 let bytes = tokio::fs::read(&path)
                     .await
                     .map_err(|_| crate::core::api::Problem::new(tonic::Code::NotFound, "Couldn't read that file."))?;
