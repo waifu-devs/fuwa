@@ -974,7 +974,7 @@ const MessageRow = memo(function MessageRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       data-message-id={message.id}
       className={cn(
@@ -1241,7 +1241,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row group relative flex gap-3 px-4 py-1.5"
     >
@@ -1383,7 +1383,7 @@ const JoinRow = memo(function JoinRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row join-row group relative flex items-center gap-3 px-4 py-1.5"
     >

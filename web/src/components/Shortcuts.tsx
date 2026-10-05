@@ -14,7 +14,7 @@ import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ContextMenuHost } from "@/components/ContextMenu";
 import { ServerIcon } from "@/components/Icons";
 import { Count } from "@/components/motion";
-import { EASE_OUT, SPRING } from "@/lib/motion";
+import { EASE_OUT, SLIDE_IN, SPRING } from "@/lib/motion";
 import { Keycaps } from "@/components/settings/app/common";
 import { i18n } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
@@ -622,14 +622,12 @@ export function StreamerBanner() {
   const show = on && !hiddenBanner;
   const { t } = useI18n();
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: "auto" }}
-          exit={{ height: 0 }}
+          {...SLIDE_IN}
           transition={{ type: "spring", stiffness: 420, damping: 40 }}
-          className="shrink-0 overflow-hidden"
+          className="shrink-0"
         >
           <div className="streamer-banner flex items-center justify-center gap-3 px-3 py-1.5 text-sm font-bold text-primary-foreground">
             <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}>

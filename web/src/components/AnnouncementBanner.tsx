@@ -7,6 +7,7 @@ import { InlineMarkdown } from "@/components/Markdown";
 import { useI18n } from "@/i18n/react";
 import { endsLabel, isLive, TONES, toneOf } from "@/lib/announcement";
 import { formatStamp, toDate } from "@/lib/format";
+import { SLIDE_IN } from "@/lib/motion";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
@@ -47,15 +48,13 @@ export function AnnouncementBanner({ instanceKey }: { instanceKey: string | unde
   }
 
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.div
           key={key}
-          initial={{ height: 0 }}
-          animate={{ height: "auto" }}
-          exit={{ height: 0 }}
+          {...SLIDE_IN}
           transition={{ type: "spring", stiffness: 420, damping: 40 }}
-          className="shrink-0 overflow-hidden"
+          className="shrink-0"
         >
           <BannerBody announcement={a} onClose={toneOf(a) === AnnouncementTone.CRITICAL ? undefined : close} />
         </motion.div>

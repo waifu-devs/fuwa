@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { getRecordingVideo, run, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Choice, SaveBar, WithPreview } from "@/components/settings/controls";
 import { useI18n } from "@/i18n/react";
 
@@ -47,16 +47,16 @@ export function RecordingSettings({ instanceKey, server }: { instanceKey: string
               },
             ]}
           />
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {!allowed && !server.recordVideo && (
-              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-muted-foreground">
+              <motion.p {...SLIDE_IN} transition={SPRING} className="text-xs text-muted-foreground">
                 {t("serversettings.recordings.videoOffHint")}
               </motion.p>
             )}
           </AnimatePresence>
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {changed && (
-              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-amber-600 dark:text-amber-400">
+              <motion.p layout="position" {...SLIDE_IN} transition={SPRING} className="text-xs text-amber-600 dark:text-amber-400">
                 {video ? t("serversettings.recordings.changedVideo") : t("serversettings.recordings.changedSound")}
               </motion.p>
             )}

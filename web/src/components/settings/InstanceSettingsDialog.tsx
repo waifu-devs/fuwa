@@ -38,6 +38,7 @@ import { Private, usePrivateField } from "@/components/Private";
 import { formatBytes, type Lang } from "@/lib/format";
 import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { canReturnTo, WAIFU_DEV_ISSUER } from "@/lib/linked";
+import { SLIDE_IN } from "@/lib/motion";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
@@ -1010,14 +1011,12 @@ const ssoWorks = (s: InstanceSettings) =>
 /** A heads-up under a setting, sliding in while it applies. */
 function Notice({ show, children }: { show: boolean; children: ReactNode }) {
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.p
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
-          className="overflow-hidden rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+          className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
         >
           {children}
         </motion.p>
@@ -1186,21 +1185,25 @@ function Origins({
           { value: "list", label: t("instancesettings.origins.list"), hint: t("instancesettings.origins.listHint"), icon: <LockIcon className="size-4" /> },
         ]}
       />
-      <motion.div initial={false} animate={{ height: any ? 0 : "auto", opacity: any ? 0 : 1 }} transition={SPRING} className="overflow-hidden">
-        <Textarea
-          rows={3}
-          value={list}
-          placeholder={"https://fuwa.waifu.dev\nhttps://chat.example.com"}
-          onChange={(e) => {
-            setList(e.target.value);
-            patch((d) => (d.allowedOrigins = e.target.value.split("\n").map((o) => o.trim()).filter(Boolean)));
-          }}
-          className={cn("rounded-xl font-mono text-xs", privateField)}
-        />
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          <T k="instancesettings.origins.note" values={{ page: <Private text={window.location.origin} /> }} />
-        </p>
-      </motion.div>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {!any && (
+          <motion.div {...SLIDE_IN} transition={SPRING}>
+            <Textarea
+              rows={3}
+              value={list}
+              placeholder={"https://fuwa.waifu.dev\nhttps://chat.example.com"}
+              onChange={(e) => {
+                setList(e.target.value);
+                patch((d) => (d.allowedOrigins = e.target.value.split("\n").map((o) => o.trim()).filter(Boolean)));
+              }}
+              className={cn("rounded-xl font-mono text-xs", privateField)}
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              <T k="instancesettings.origins.note" values={{ page: <Private text={window.location.origin} /> }} />
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Setting>
   );
 }

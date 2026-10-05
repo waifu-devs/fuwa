@@ -4,6 +4,7 @@ import type { VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { AppBadge } from "@/components/AppBadge";
 import { displayName, isAgent, memberName } from "@/lib/format";
+import { SLIDE_IN } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ParticipantMenu, useSpeaking, VoiceAvatar, VoiceFlags } from "./parts";
 
@@ -22,15 +23,13 @@ export function useVoiceIn(instanceKey: string, serverId: string, channelId: str
 export function VoiceUsers({ instanceKey, serverId, channelId }: { instanceKey: string; serverId: string; channelId: string }) {
   const states = useVoiceIn(instanceKey, serverId, channelId);
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {states.length > 0 && (
         <motion.ul
           key="list"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
+          {...SLIDE_IN}
           transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          className="ml-6 flex flex-col overflow-hidden"
+          className="ml-6 flex flex-col"
         >
           <AnimatePresence initial={false}>
             {states.map((state) => (

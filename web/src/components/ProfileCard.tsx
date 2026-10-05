@@ -6,7 +6,7 @@ import { UserAvatar } from "@/components/Icons";
 import { hue } from "@/components/icons-utils";
 import { Markdown } from "@/components/Markdown";
 import { SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { AppBadge } from "@/components/AppBadge";
 import { ActivityCards, PresenceDot } from "@/components/Presence";
@@ -104,15 +104,12 @@ export function ProfileCard({
         <NameLines user={user} name={name} member={member} owner={owner} me={me} pronouns={profile?.pronouns} Text={Text} />
         {roles}
         {instanceKey && <ActivityCards instanceKey={instanceKey} userId={user.id} />}
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {(profile?.bio || loading) && (
             <motion.div
               key="bio"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              {...SLIDE_IN}
               transition={stagger(1)}
-              className="overflow-hidden"
             >
               <AboutMe bio={profile?.bio} />
             </motion.div>
@@ -219,9 +216,10 @@ function Dates({ since, joined }: { since: Date | null; joined: Date | null }) {
   const day = (d: Date) => date(d, { year: "numeric", month: "short", day: "numeric" });
   return (
     <motion.div
+      layout="position"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={stagger(2)}
+      transition={{ ...stagger(2), layout: stagger(1) }}
       className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"
     >
       {since && (

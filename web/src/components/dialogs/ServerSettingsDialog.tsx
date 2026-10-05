@@ -77,7 +77,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, CountUp, SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -603,15 +603,15 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
               },
             ]}
           />
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {server.applications && !applications && (
-              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-amber-600 dark:text-amber-400">
+              <motion.p {...SLIDE_IN} transition={SPRING} className="text-xs text-amber-600 dark:text-amber-400">
                 {lang.t("serversettings.access.dropped")}
               </motion.p>
             )}
           </AnimatePresence>
         </div>
-        <div data-setting="linked-only" className="flex flex-col gap-2 border-b border-border/70 py-5">
+        <motion.div layout="position" transition={SPRING} data-setting="linked-only" className="flex flex-col gap-2 border-b border-border/70 py-5">
           <Toggle
             checked={linkedOnly}
             onChange={setLinkedOnly}
@@ -619,14 +619,14 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
             label={lang.t("serversettings.nav.linkedOnly")}
             hint={linkedOffered || linkedOnly ? lang.t("serversettings.access.linkedOnlyHint") : lang.t("serversettings.access.linkedUnavailable")}
           />
-        </div>
-        <div data-setting="account-age" className="flex flex-col gap-3 py-5">
+        </motion.div>
+        <motion.div layout="position" transition={SPRING} data-setting="account-age" className="flex flex-col gap-3 py-5">
           <span>
             <span className="block font-extrabold">{lang.t("serversettings.nav.accountAge")}</span>
             <span className="block text-sm text-muted-foreground">{lang.t("serversettings.access.accountAgeHint")}</span>
           </span>
           <Chips label={lang.t("serversettings.nav.accountAge")} value={minAge} options={ages} onChange={setMinAge} />
-        </div>
+        </motion.div>
       </div>
       <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
     </WithPreview>

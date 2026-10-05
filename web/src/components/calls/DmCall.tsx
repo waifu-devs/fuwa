@@ -5,7 +5,7 @@ import type { User } from "@/gen/fuwa/v1/types_pb";
 import { hangUp, joinCall } from "@/calls/engine";
 import { useCalls, useInDmCall } from "@/calls/state";
 import { useFuwa } from "@/fuwa/store";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -53,13 +53,11 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   const line = useStripLine(instanceKey, conversation, me, here);
 
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.div
           key="strip"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
           className="shrink-0 overflow-hidden border-b bg-[linear-gradient(180deg,color-mix(in_srgb,#3ba55d_14%,var(--background)),var(--background))]"
         >

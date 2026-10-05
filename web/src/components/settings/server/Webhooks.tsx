@@ -24,7 +24,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -153,14 +153,11 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
           <span className="flex-1">{t("serversettings.webhooks.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {howTo && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              {...SLIDE_IN}
               transition={SPRING}
-              className="overflow-hidden"
             >
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
@@ -311,7 +308,7 @@ function WebhookCard({
 
   return (
     <motion.li
-      layout
+      layout="position"
       initial={{ opacity: 0, y: 10, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
@@ -320,9 +317,9 @@ function WebhookCard({
     >
       <WebhookSummary webhook={w} channel={channel} open={open} saving={busy === "save"} onToggle={onToggle} />
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-4 border-t p-4">
               <div className="flex flex-wrap items-start gap-4">
                 <PictureField
