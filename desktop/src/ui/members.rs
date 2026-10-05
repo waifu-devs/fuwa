@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 
 use crate::core::Core;
+use crate::core::i18n::t;
 use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::motion;
@@ -57,6 +58,10 @@ struct Row {
     agent: bool,
     timed_out: bool,
     mine: bool,
+    /// Their dot; None on an instance without presence.
+    status: Option<pb::PresenceStatus>,
+    /// What they're doing, for under their name.
+    activity: Option<String>,
 }
 
 pub struct MembersView {
@@ -89,61 +94,17 @@ impl MembersView {
     /// Reads the people again, and draws again only if something shown changed.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let now = crate::core::dms::now_ms();
-        let mut ends: Option<i64> = None;
-        let rows: Vec<Item> = self.core.shared.read(|s| {
-            let Some(i) = s.instance(&self.key) else { return Vec::new() };
-            let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
-            let roles = i.roles.get(&self.server);
-            let Some(members) = i.members.get(&self.server) else { return Vec::new() };
-            // Everyone under their highest role that's shown apart, then everyone else.
-            let empty = Vec::new();
-            let ranked = roles.unwrap_or(&empty);
-            let mut groups: Vec<(&pb::Role, Vec<Row>)> =
-                ranked.iter().filter(|r| r.hoist && r.id != self.server).map(|r| (r, Vec::new())).collect();
-            let mut rest: Vec<Row> = Vec::new();
-            let rows = members.iter().filter(|m| !m.pending).filter_map(|m| {
-                let user = m.user.clone()?;
-                // The first of their roles (by rank) that has a colour.
-                let color = roles.and_then(|roles| {
-                    roles.iter().filter(|r| m.role_ids.contains(&r.id)).find_map(|r| r.color).map(|c| c as u32)
-                });
-                let until = crate::core::moderation::timed_out_until(m, now);
-                if let Some(until) = until {
-                    ends = Some(ends.map_or(until, |e| e.min(until)));
-                }
-                Some(Row {
-                    name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
-                    color,
-                    agent: is_agent(Some(&user)),
-                    timed_out: until.is_some(),
-                    mine: user.id == me,
-                    user,
-                })
-                .map(|row| (m, row))
-            });
-            for (m, row) in rows {
-                match groups.iter_mut().find(|(r, _)| m.role_ids.contains(&r.id)) {
-                    Some((_, list)) => list.push(row),
-                    None => rest.push(row),
-                }
-            }
-            let mut out = Vec::new();
-            for (role, list) in groups.into_iter().filter(|(_, l)| !l.is_empty()) {
-                out.push(Item::Heading(role.name.clone(), role.color.map(|c| c as u32), list.len()));
-                out.extend(list.into_iter().map(Item::Member));
-            }
-            if !rest.is_empty() {
-                out.push(Item::Heading("Members".into(), None, rest.len()));
-                out.extend(rest.into_iter().map(Item::Member));
-            }
-            out
+        let (rows, ends) = self.core.shared.read(|s| match s.instance(&self.key) {
+            Some(i) => lines(i, &self.server, now),
+            None => (Vec::new(), None),
         });
         let mut h = DefaultHasher::new();
         for item in &rows {
             match item {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
                 Item::Member(r) => {
-                    (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h)
+                    (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
+                    (r.status.map(|s| s as i32), &r.activity).hash(&mut h);
                 }
             }
         }
@@ -163,6 +124,72 @@ impl MembersView {
             cx.notify();
         }
     }
+}
+
+/// The list's lines, from what's known of a server's people: everyone online
+/// under their highest role that's shown apart, then everyone else online,
+/// then everyone offline (where the instance says who is). Also when the
+/// soonest time-out ends.
+fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<Item>, Option<i64>) {
+    let mut ends: Option<i64> = None;
+    let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
+    let roles = i.roles.get(server);
+    let Some(members) = i.members.get(server) else { return (Vec::new(), None) };
+    let people = i.people.as_ref();
+    let empty = Vec::new();
+    let ranked = roles.unwrap_or(&empty);
+    let mut groups: Vec<(&pb::Role, Vec<Row>)> =
+        ranked.iter().filter(|r| r.hoist && r.id != server).map(|r| (r, Vec::new())).collect();
+    let mut rest: Vec<Row> = Vec::new();
+    let mut offline: Vec<Row> = Vec::new();
+    let rows = members.iter().filter(|m| !m.pending).filter_map(|m| {
+        let user = m.user.clone()?;
+        // The first of their roles (by rank) that has a colour.
+        let color = roles.and_then(|roles| {
+            roles.iter().filter(|r| m.role_ids.contains(&r.id)).find_map(|r| r.color).map(|c| c as u32)
+        });
+        let until = crate::core::moderation::timed_out_until(m, now);
+        if let Some(until) = until {
+            ends = Some(ends.map_or(until, |e| e.min(until)));
+        }
+        let presence = people.and_then(|people| people.get(&user.id));
+        Some(Row {
+            name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
+            status: people.map(|_| crate::ui::presence::shown(presence)),
+            activity: presence.and_then(|p| p.activities.first()).map(crate::ui::presence::line),
+            color,
+            agent: is_agent(Some(&user)),
+            timed_out: until.is_some(),
+            mine: user.id == me,
+            user,
+        })
+        .map(|row| (m, row))
+    });
+    for (m, row) in rows {
+        if row.status == Some(pb::PresenceStatus::Offline) {
+            offline.push(row);
+            continue;
+        }
+        match groups.iter_mut().find(|(r, _)| m.role_ids.contains(&r.id)) {
+            Some((_, list)) => list.push(row),
+            None => rest.push(row),
+        }
+    }
+    let mut out = Vec::new();
+    for (role, list) in groups.into_iter().filter(|(_, l)| !l.is_empty()) {
+        out.push(Item::Heading(role.name.clone(), role.color.map(|c| c as u32), list.len()));
+        out.extend(list.into_iter().map(Item::Member));
+    }
+    if !rest.is_empty() {
+        let label = if people.is_some() { "chat.members.online" } else { "chat.members.members" };
+        out.push(Item::Heading(t(label), None, rest.len()));
+        out.extend(rest.into_iter().map(Item::Member));
+    }
+    if !offline.is_empty() {
+        out.push(Item::Heading(t("chat.members.offline"), None, offline.len()));
+        out.extend(offline.into_iter().map(Item::Member));
+    }
+    (out, ends)
 }
 
 impl Render for MembersView {
@@ -253,25 +280,54 @@ fn member_row(
             let uid = user.id.clone();
             cx.listener(move |_, on: &bool, _, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }))
         })
-        .child(avatar(Some(user), 32.0, p))
+        // Someone offline is faded, until pointed at.
+        .when(row.status == Some(pb::PresenceStatus::Offline), |el| {
+            el.opacity(0.45).hover(move |s| s.bg(hover).opacity(1.0))
+        })
+        .child(
+            div()
+                .relative()
+                .flex_none()
+                .child(avatar(Some(user), 32.0, p))
+                .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
+                    el.child(crate::ui::presence::avatar_dot(status, 14.0, opaque(p.side_surface), p))
+                }),
+        )
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
-                .items_center()
-                .gap(px(6.0))
+                .flex_col()
                 .child(
                     div()
                         .min_w_0()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(color)
-                        .child(row.name.clone()),
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(color)
+                                .child(row.name.clone()),
+                        )
+                        .when(row.agent, |el| {
+                            el.child(app_badge(SharedString::from(format!("member-badge|{}", user.id)), "AGENT", p))
+                        }),
                 )
-                .when(row.agent, |el| {
-                    el.child(app_badge(SharedString::from(format!("member-badge|{}", user.id)), "AGENT", p))
+                .when_some(row.activity.clone(), |el, line| {
+                    el.child(
+                        div()
+                            .min_w_0()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(line),
+                    )
                 }),
         )
         .when(row.timed_out, |el| el.child(icon("hourglass").size(px(14.0)).text_color(amber)))
@@ -294,5 +350,59 @@ fn member_row(
         .into_any_element()
     } else {
         el.into_any_element()
+    }
+}
+
+/// The list's color without see-through, for the ring that cuts a dot out of a picture.
+fn opaque(color: Hsla) -> gpui_kit::Rgba {
+    gpui_kit::Rgba { a: 1.0, ..color.into() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn member(id: &str, roles: &[&str]) -> pb::Member {
+        pb::Member {
+            user: Some(pb::User { id: id.into(), username: id.into(), ..Default::default() }),
+            role_ids: roles.iter().map(|r| r.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn here(id: &str, status: pb::PresenceStatus) -> (String, pb::Presence) {
+        (id.into(), pb::Presence { user_id: id.into(), status: status as i32, ..Default::default() })
+    }
+
+    /// Headings and names in order, as the list shows them.
+    fn shown(i: &crate::core::store::InstanceState) -> Vec<String> {
+        lines(i, "s", 0)
+            .0
+            .iter()
+            .map(|item| match item {
+                Item::Heading(name, _, n) => format!("{name} {n}"),
+                Item::Member(row) => row.name.clone(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn offline_people_come_last_under_their_own_heading() {
+        let mut i = crate::core::store::InstanceState::new("k", "https://k");
+        i.roles.insert(
+            "s".into(),
+            vec![pb::Role { id: "mods".into(), name: "Mods".into(), hoist: true, ..Default::default() }],
+        );
+        i.members.insert(
+            "s".into(),
+            vec![member("ana", &["mods"]), member("bo", &["mods"]), member("cy", &[]), member("di", &[])],
+        );
+        // Before the instance says who's online, everyone's together as before.
+        assert_eq!(shown(&i), ["Mods 2", "ana", "bo", "Members 2", "cy", "di"]);
+        // Bo is offline and Di is invisible, which reaches us as not online at all.
+        i.people =
+            Some(HashMap::from([here("ana", pb::PresenceStatus::Idle), here("cy", pb::PresenceStatus::DoNotDisturb)]));
+        assert_eq!(shown(&i), ["Mods 1", "ana", "Online 1", "cy", "Offline 2", "bo", "di"]);
     }
 }

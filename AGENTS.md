@@ -64,7 +64,10 @@
     never logged or written down. The web app's side is `web/src/fuwa/presence.ts`
     (its own small store, one subscription per person) and
     `web/src/components/Presence.tsx` (dots, activity lines and cards, one
-    shared clock for timers that writes text without React).
+    shared clock for timers that writes text without React). The desktop's
+    is `desktop/src/core/presence/people.rs` (the stream, put in at most
+    every 400 ms, and idle after 10 minutes without input) and
+    `desktop/src/ui/presence.rs`.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all

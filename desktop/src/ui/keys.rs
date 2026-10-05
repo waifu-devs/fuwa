@@ -101,6 +101,7 @@ impl FuwaApp {
 
     /// Every key on its way down: recorded for the Keyboard page, or run as a shortcut.
     pub(crate) fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.core.idle.seen();
         if let Some(settings) = self.settings.clone()
             && settings.read(cx).recording()
         {

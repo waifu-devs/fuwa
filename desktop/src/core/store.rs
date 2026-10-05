@@ -90,6 +90,9 @@ pub struct InstanceState {
     pub thread_unread: HashMap<String, u32>,
     /// Your friends, requests and blocks.
     pub friends: crate::core::friends::FriendsState,
+    /// Who's online here and what they're doing, by user id (`presence::people`),
+    /// in memory only. None until the instance first says, or if it has no presence.
+    pub people: Option<HashMap<String, pb::Presence>>,
 }
 
 impl InstanceState {
@@ -121,6 +124,7 @@ impl InstanceState {
             followed: HashMap::new(),
             thread_unread: HashMap::new(),
             friends: Default::default(),
+            people: None,
         }
     }
 

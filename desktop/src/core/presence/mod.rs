@@ -7,6 +7,7 @@
 
 pub mod ipc;
 mod listen;
+pub mod people;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use crate::pb;
 use crate::rpc;
 
 pub use listen::listen;
+pub use people::Idle;
 
 /// An instance takes at most this many activities from one app.
 const MAX_ACTIVITIES: usize = 5;
@@ -196,13 +198,16 @@ impl Games {
     }
 }
 
-/// Keeps this app's presence on one instance: every minute, and soon after
-/// what games report changes. An instance without presence is left alone.
-pub(crate) async fn keep(api: Api, games: Arc<Games>) {
+/// Keeps this app's presence on one instance: every minute, soon after what
+/// games report changes, and at once when you step away or come back. An
+/// instance without presence is left alone.
+pub(crate) async fn keep(api: Api, games: Arc<Games>, mut away: watch::Receiver<bool>) {
     let mut changes = games.changes();
     loop {
         changes.mark_unchanged();
-        let request = pb::UpdatePresenceRequest { app: "desktop".into(), idle: false, activities: games.activities() };
+        away.mark_unchanged();
+        let idle = *away.borrow();
+        let request = pb::UpdatePresenceRequest { app: "desktop".into(), idle, activities: games.activities() };
         let renew = match rpc!(api.presence(), update_presence(request)).await {
             Ok(res) => res.renew_seconds.clamp(15, 120),
             Err(problem) if problem.code == tonic::Code::Unimplemented => return,
@@ -210,6 +215,11 @@ pub(crate) async fn keep(api: Api, games: Arc<Games>) {
         };
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(renew.into())) => {}
+            changed = away.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
             changed = changes.changed() => {
                 if changed.is_err() {
                     return;
