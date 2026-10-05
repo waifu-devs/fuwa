@@ -1,0 +1,9 @@
+{
+  "language.title": "Idioma",
+  "language.hint": "Para fuwa en este dispositivo. Lo que escribe la gente se queda como lo escribió.",
+  "language.matchBrowser": "Como mi navegador",
+  "language.matchBrowserNote": "Ahora mismo es {language}",
+  "language.coverage": "{percent} traducido",
+  "language.draft": "Borrador automático, aún sin revisar por un hablante",
+  "language.failed": "No se pudo cargar ese idioma. Revisa tu conexión y vuelve a intentarlo."
+}
