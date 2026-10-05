@@ -243,14 +243,8 @@ impl MediaLink {
     /// adding a part moves only the rooms that land on it).
     fn part(&self, room: &str) -> Result<MediaClient> {
         match self {
-            Self::Remote(parts) => parts
-                .iter()
-                .max_by_key(|(url, _)| {
-                    use sha2::Digest;
-                    let digest = sha2::Sha256::digest(format!("{url}\n{room}").as_bytes());
-                    u64::from_be_bytes(digest[..8].try_into().unwrap_or_default())
-                })
-                .map(|(_, client)| client.clone())
+            Self::Remote(parts) => pick_part(parts, room)
+                .cloned()
                 .ok_or_else(|| Error::Unavailable("calls aren't set up on this instance".into())),
             _ => Err(Error::internal("no media parts")),
         }
@@ -421,6 +415,19 @@ impl MediaLink {
     }
 }
 
+/// Rendezvous hashing over the parts' URLs: the part whose hash with the room
+/// is highest.
+fn pick_part<'a, T>(parts: &'a [(String, T)], room: &str) -> Option<&'a T> {
+    use sha2::Digest;
+    parts
+        .iter()
+        .max_by_key(|(url, _)| {
+            let digest = sha2::Sha256::digest(format!("{url}\n{room}").as_bytes());
+            u64::from_be_bytes(digest[..8].try_into().unwrap_or_default())
+        })
+        .map(|(_, part)| part)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,26 +459,21 @@ mod tests {
     }
 
     #[test]
-    fn rooms_land_on_one_part() {
-        let key = tonic::metadata::AsciiMetadataValue::from_static("k");
-        let link = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            MediaLink::remote(&["http://a:1".into(), "http://b:1".into(), "http://c:1".into()], key).unwrap()
-        });
-        let MediaLink::Remote(parts) = &link else { unreachable!() };
-        let pick = |room: &str| {
-            use sha2::Digest;
-            parts
-                .iter()
-                .max_by_key(|(url, _)| {
-                    let digest = sha2::Sha256::digest(format!("{url}\n{room}").as_bytes());
-                    u64::from_be_bytes(digest[..8].try_into().unwrap())
-                })
-                .unwrap()
-                .0
-                .clone()
-        };
-        let spread: std::collections::HashSet<String> = (0..60).map(|i| pick(&format!("s/{i}/c"))).collect();
+    fn rooms_land_on_one_part_and_a_new_part_takes_only_its_own() {
+        let parts = |n: usize| (0..n).map(|i| (format!("http://{i}:1"), i)).collect::<Vec<_>>();
+        let (three, four) = (parts(3), parts(4));
+        let rooms: Vec<String> = (0..60).map(|i| format!("s/{i}/c")).collect();
+        let spread: std::collections::HashSet<usize> = rooms.iter().map(|r| *pick_part(&three, r).unwrap()).collect();
         assert_eq!(spread.len(), 3, "rooms spread over every part");
-        assert_eq!(pick("d/abc"), pick("d/abc"));
+        let mut moved = 0;
+        for room in &rooms {
+            let (before, after) = (*pick_part(&three, room).unwrap(), *pick_part(&four, room).unwrap());
+            if before != after {
+                assert_eq!(after, 3, "a room only moves onto the new part");
+                moved += 1;
+            }
+        }
+        assert!(moved > 0, "the new part takes some rooms");
+        assert!(pick_part::<usize>(&[], "s/1/c").is_none());
     }
 }

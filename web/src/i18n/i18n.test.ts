@@ -124,12 +124,3 @@ test("every translation matches English's keys, placeholders and plural shape", 
     }
   }
 });
-
-test("prints how much of English each language covers", () => {
-  const total = Object.values(english).reduce((n, ns) => n + Object.keys(ns).length, 0);
-  for (const code of codes) {
-    let have = 0;
-    for (const file of readdirSync(join(root, code))) if (file !== "meta.json") have += Object.keys(read(join(root, code, file))).length;
-    console.log(`${code}: ${have}/${total}`);
-  }
-});

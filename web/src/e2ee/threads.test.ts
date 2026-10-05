@@ -77,6 +77,8 @@ test("a reply whose message isn't on this device stays in its thread", () => {
   const org = organize(items, mods);
   assert.equal(org.channel.length, 0);
   assert.equal(org.threads.get(3)?.replies, 1);
+  assert.equal(org.inThread.get(3)?.length, 1);
+  assert.equal(search(org, new Map(items.map((i) => [i.seq, i])), "older").length, 1);
 });
 
 test("locks count only from moderators, and the latest wins", () => {
@@ -163,16 +165,11 @@ test("threads never ask the server for anything: no record is fetched to fill a 
 
 /** A stand-in for the server and the vault that counts what's asked of the server. */
 function mockChannel(items: Item[]) {
-  const asked = { removed: [] as number[], listed: 0 };
+  const asked = { removed: [] as number[] };
   let stored = items;
   const io = {
     remove: async (seq: number) => {
       asked.removed.push(seq);
-    },
-    // Anything that lists records would come through here; nothing should.
-    records: async () => {
-      asked.listed++;
-      return [];
     },
     locked: async (fn: () => Promise<void>) => fn(),
     load: async () => stored,
@@ -185,7 +182,7 @@ function mockChannel(items: Item[]) {
   return { io, asked, lines: () => stored };
 }
 
-test("deleting a thread's message makes one delete on the server and lists nothing", async () => {
+test("deleting a thread's message makes one delete on the server", async () => {
   const items = [
     line(1, "aoi", "parent"),
     line(2, "mika", "a", { thread: 1 }),
@@ -195,7 +192,6 @@ test("deleting a thread's message makes one delete on the server and lists nothi
   const { io, asked, lines } = mockChannel(items);
   await deleteLine(io, 1, true);
   assert.deepEqual(asked.removed, [1]);
-  assert.equal(asked.listed, 0);
   assert.deepEqual(
     lines().map((i) => [i.seq, i.deleted]),
     [
@@ -212,17 +208,7 @@ test("someone else deleting a thread's message asks the server nothing", async (
   const { io, asked, lines } = mockChannel(items);
   await forgetLine(io, 1, true);
   assert.deepEqual(asked.removed, []);
-  assert.equal(asked.listed, 0);
   assert.ok(lines().every((i) => i.deleted));
-});
-
-test("opening a thread whose message isn't on this device works from what's here", () => {
-  const { asked } = mockChannel([]);
-  const items = [line(7, "mika", "reply to something older", { thread: 3 })];
-  const org = organize(items, mods);
-  assert.equal(org.inThread.get(3)?.length, 1);
-  assert.equal(search(org, new Map(items.map((i) => [i.seq, i])), "older").length, 1);
-  assert.equal(asked.listed, 0);
 });
 
 test("a lock on a deleted or missing message makes no thread", () => {
