@@ -8,6 +8,8 @@ import {
   HandIcon,
   MessageSquareReplyIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   RotateCwIcon,
   ShieldAlertIcon,
   ShieldIcon,
@@ -48,6 +50,9 @@ import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessa
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
+import type { FuwaError } from "@/fuwa/errors";
+import { pinMessage } from "@/fuwa/pins";
+import { PinMark } from "@/components/chat/Pins";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
@@ -141,6 +146,8 @@ type RowActions = {
   keepOut: (userId: string, name: string) => Promise<void>;
   /** Opens the thread under a message (starting it with the first reply). */
   thread: (id: string) => void;
+  /** Pins a message, or unpins it if it's pinned. */
+  pin: (message: Message) => void;
 };
 
 export const MessageList = forwardRef<
@@ -179,6 +186,9 @@ export const MessageList = forwardRef<
   const threads = !threadId && (!channel.shared || threadsShared);
   const canStart = threads && hasIn(access, channel.id, Permission.CREATE_THREADS);
   const canReply = threads && canSend;
+  // Pins are the home's in a shared channel, and need this instance to keep them.
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
+  const canPin = pinsHere && manager && !(channel.shared && !channel.shared.home);
   const openThread = useThreadOpener();
   // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
   // only the home keeps someone from another server out.
@@ -273,6 +283,12 @@ export const MessageList = forwardRef<
         toast(t("chat.messages.keptOut", { name, channel: channel.name }));
       },
       thread: (id) => openThread?.(id),
+      pin: (message) =>
+        pinMessage(instanceKey, serverId, channel.id, message.id, !message.pinnedAt)
+          .then(() =>
+            toast(message.pinnedAt ? t("chattools.pins.unpinnedToast") : t("chattools.pins.pinnedToast", { place: threadId ? t("chat.threads.thread") : `#${channel.name}` })),
+          )
+          .catch((err: FuwaError) => toast(err.message)),
     }),
     [instanceKey, serverId, channel, catalog, at, threadId, openThread, t],
   );
@@ -476,6 +492,7 @@ export const MessageList = forwardRef<
                   animate={!initial.current?.has(row.message.id)}
                   editing={editing === row.message.id}
                   canThread={!row.message.threadId && (row.message.thread ? canReply : canStart)}
+                  canPin={canPin && row.message.kind === MessageKind.UNSPECIFIED}
                   inThread={!!threadId}
                   actions={actions}
                   clock={clock}
@@ -791,6 +808,7 @@ const MessageRow = memo(function MessageRow({
   animate,
   editing,
   canThread,
+  canPin,
   inThread,
   actions,
 }: Redraw & {
@@ -812,6 +830,8 @@ const MessageRow = memo(function MessageRow({
   editing: boolean;
   /** Can open the thread under it: reply in the one there, or start one. */
   canThread: boolean;
+  /** Can pin it or unpin it. */
+  canPin: boolean;
   /** Drawn in a thread's own list, where replies don't get threads of their own. */
   inThread: boolean;
   actions: RowActions;
@@ -826,6 +846,7 @@ const MessageRow = memo(function MessageRow({
       edit: mine && !editing && message.kind === MessageKind.UNSPECIFIED ? () => actions.edit(message.id) : undefined,
       copyText: message.content ? () => copy(t, message.content, t("common.copy.text")) : undefined,
       keepOut: canKeepOut ? { name: displayName(author), ask: () => setConfirming("keep-out") } : undefined,
+      pin: canPin ? { pinned: !!message.pinnedAt, toggle: () => actions.pin(message) } : undefined,
       delete: canDelete ? () => setConfirming("delete") : undefined,
     }),
   );
@@ -859,6 +880,7 @@ const MessageRow = memo(function MessageRow({
                 {t("chat.messages.edited")}
               </span>
             )}
+            {message.pinnedAt && <PinMark />}
             <Attachments files={message.attachments} animate={animate} />
             <Embeds embeds={message.embeds} animate={animate} />
             <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
@@ -921,6 +943,11 @@ const MessageRow = memo(function MessageRow({
               {canThread && (
                 <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>
                   <MessageSquareReplyIcon />
+                </ToolButton>
+              )}
+              {canPin && (
+                <ToolButton label={message.pinnedAt ? t("chattools.pins.unpinMessage") : t("chattools.pins.pin")} onClick={() => actions.pin(message)}>
+                  {message.pinnedAt ? <PinOffIcon /> : <PinIcon />}
                 </ToolButton>
               )}
               {developer && (

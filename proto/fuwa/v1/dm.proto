@@ -57,6 +57,14 @@ service DirectMessageService {
   // Deletes a record you sent: its ciphertext goes, a gap stays, and so do
   // the sealed files it carried.
   rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse);
+  // Pins a message record in a conversation, or unpins it. Either person in
+  // it may, while they may write there. The instance learns only which record
+  // is pinned and when, never what it says or who pinned it: apps draw it from
+  // their own copy. At most
+  // InstanceSettings.pins_per_conversation pins in each conversation.
+  rpc PinRecord(PinRecordRequest) returns (PinRecordResponse);
+  // A conversation's pins, the latest first.
+  rpc ListRecordPins(ListRecordPinsRequest) returns (ListRecordPinsResponse);
   // Reserves a place for a sealed file: something a message carries that's
   // too big to go in it, such as a voice message, encrypted on the device
   // under a key that travels only inside the message. Upload it like a
@@ -346,7 +354,51 @@ message DirectMessageEvent {
     // Someone joined or left the conversation's call, or muted. An empty
     // call means it ended.
     DmCall call_updated = 4;
+    // A record was pinned or unpinned.
+    DmPinUpdated pin_updated = 5;
   }
+}
+
+// A pinned record in a conversation.
+// A pinned record. The instance keeps which record is pinned and when, never
+// what it says or who pinned it; an app that wants to say who pinned it
+// sends that inside the conversation, encrypted.
+message DmPin {
+  string conversation_id = 1;
+  int64 sequence = 2;
+  google.protobuf.Timestamp pinned_at = 3;
+}
+
+message DmPinUpdated {
+  DmPin pin = 1;
+  // False when it was unpinned.
+  bool pinned = 2;
+}
+
+message PinRecordRequest {
+  string conversation_id = 1;
+  int64 sequence = 2;
+  // False unpins it.
+  bool pinned = 3;
+}
+
+message PinRecordResponse {
+  // Unset after unpinning.
+  DmPin pin = 1;
+}
+
+message ListRecordPinsRequest {
+  string conversation_id = 1;
+  // 1 to 100; 50 when unset.
+  int32 limit = 2;
+  // The next page: the pins made before this pinned record's.
+  optional int64 after_sequence = 3;
+}
+
+message ListRecordPinsResponse {
+  // Latest first.
+  repeated DmPin pins = 1;
+  bool has_more = 2;
 }
 
 // What a direct message says: the plaintext inside an encrypted record,

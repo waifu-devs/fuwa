@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/dms/0001_init.sql"),
     include_str!("../migrations/dms/0002_backups.sql"),
     include_str!("../migrations/dms/0003_sealed_files.sql"),
+    include_str!("../migrations/dms/0004_pins.sql"),
 ];
 
 /// The most single-use key packages kept for one device.
@@ -1017,6 +1018,9 @@ impl DmDb {
                 (conversation_id, sequence, now),
             )
             .await?;
+            // Its pin goes with it; apps drop it when they hear it was deleted.
+            conn.execute("DELETE FROM pins WHERE conversation_id = ?1 AND seq = ?2", (conversation_id, sequence))
+                .await?;
             let participants = query_all(
                 conn,
                 "SELECT account_id FROM participants WHERE conversation_id = ?1",
@@ -1030,6 +1034,161 @@ impl DmDb {
             Ok(media_ids)
         })
         .await
+    }
+
+    // ───────────────────────── Pins ─────────────────────────
+
+    /// Pins or unpins a live message record for `caller`, telling whoever
+    /// the pin is shown to. Pinning one that's pinned already, or unpinning
+    /// one that isn't, changes nothing. At most `cap` pins in a conversation
+    /// that the caller sees.
+    ///
+    /// `blocker` is set when the other person blocked the caller: then what
+    /// the caller does never reaches them. A pin the caller makes is hidden
+    /// from the blocker, and unpinning one the blocker sees only hides it
+    /// from the caller. Who pinned isn't kept, so pins made before a block
+    /// stay where they were.
+    pub async fn pin(
+        &self,
+        caller: &str,
+        blocker: Option<&str>,
+        conversation_id: &str,
+        sequence: i64,
+        pinned: bool,
+        cap: Option<i64>,
+    ) -> Result<Option<pb::DmPin>> {
+        self.write(async |conn, outbox| {
+            let existing = query_one(
+                conn,
+                "SELECT pinned_at, hidden_from FROM pins WHERE conversation_id = ?1 AND seq = ?2",
+                (conversation_id, sequence),
+                |r| Ok((r.get::<i64>(0)?, r.get::<Option<String>>(1)?)),
+            )
+            .await?;
+            let everyone = participants(conn, conversation_id).await?;
+            let shown_to = |hidden_from: Option<&str>| -> Vec<String> {
+                everyone.iter().filter(|id| Some(id.as_str()) != hidden_from).cloned().collect()
+            };
+            let mut tell = |to: Vec<String>, pin: &pb::DmPin, pinned: bool| {
+                let event = Payload::PinUpdated(pb::DmPinUpdated { pin: Some(pin.clone()), pinned });
+                outbox.push((to, pb::DirectMessageEvent { payload: Some(event) }));
+            };
+            match (existing, pinned) {
+                // Not pinned, or not for the caller: nothing to unpin.
+                (None, false) => Ok(None),
+                (Some((_, Some(hidden_from))), false) if hidden_from == caller => Ok(None),
+                // The caller unpinned it for themselves before; it's theirs again.
+                (Some((at, Some(hidden_from))), true) if hidden_from == caller => {
+                    conn.execute(
+                        "UPDATE pins SET hidden_from = NULL WHERE conversation_id = ?1 AND seq = ?2",
+                        (conversation_id, sequence),
+                    )
+                    .await?;
+                    let pin = pin_pb(conversation_id, sequence, at);
+                    tell(vec![caller.to_string()], &pin, true);
+                    Ok(Some(pin))
+                }
+                // Pinned where the caller sees it already.
+                (Some((at, _)), true) => Ok(Some(pin_pb(conversation_id, sequence, at))),
+                (Some((at, hidden_from)), false) => {
+                    let pin = pin_pb(conversation_id, sequence, at);
+                    if blocker.is_some() && hidden_from.is_none() {
+                        // The blocker keeps it; it goes for the caller only.
+                        conn.execute(
+                            "UPDATE pins SET hidden_from = ?3 WHERE conversation_id = ?1 AND seq = ?2",
+                            (conversation_id, sequence, caller),
+                        )
+                        .await?;
+                        tell(vec![caller.to_string()], &pin, false);
+                    } else {
+                        conn.execute(
+                            "DELETE FROM pins WHERE conversation_id = ?1 AND seq = ?2",
+                            (conversation_id, sequence),
+                        )
+                        .await?;
+                        tell(shown_to(hidden_from.as_deref()), &pin, false);
+                    }
+                    Ok(None)
+                }
+                (None, true) => {
+                    let live = query_one(
+                        conn,
+                        "SELECT 1 FROM records
+                         WHERE conversation_id = ?1 AND seq = ?2 AND kind = ?3 AND deleted_at IS NULL",
+                        (conversation_id, sequence, pb::ConversationRecordKind::Message as i32),
+                        |_| Ok(()),
+                    )
+                    .await?;
+                    if live.is_none() {
+                        return Err(Error::NotFound("message"));
+                    }
+                    if let Some(cap) = cap {
+                        let count = query_one(
+                            conn,
+                            "SELECT count(*) FROM pins
+                             WHERE conversation_id = ?1 AND (hidden_from IS NULL OR hidden_from != ?2)",
+                            (conversation_id, caller),
+                            |r| r.get::<i64>(0),
+                        )
+                        .await?
+                        .unwrap_or(0);
+                        if count >= cap {
+                            return Err(Error::ResourceExhausted(
+                                "this conversation has as many pins as it can hold; unpin one first".into(),
+                            ));
+                        }
+                    }
+                    let now = now_ms();
+                    conn.execute(
+                        "INSERT INTO pins (conversation_id, seq, pinned_at, hidden_from) VALUES (?1, ?2, ?3, ?4)",
+                        (conversation_id, sequence, now, blocker),
+                    )
+                    .await?;
+                    let pin = pin_pb(conversation_id, sequence, now);
+                    tell(shown_to(blocker), &pin, true);
+                    Ok(Some(pin))
+                }
+            }
+        })
+        .await
+    }
+
+    /// A page of the pins `viewer` sees in a conversation, the latest first:
+    /// up to `limit`, made before `after`'s pin (a pinned record's place), and
+    /// whether more follow. A cursor that's no longer pinned starts over.
+    pub async fn pins(
+        &self,
+        viewer: &str,
+        conversation_id: &str,
+        limit: i64,
+        after: Option<i64>,
+    ) -> Result<(Vec<pb::DmPin>, bool)> {
+        let conn = self.read()?;
+        let at = match after {
+            Some(seq) => query_one(
+                &conn,
+                "SELECT pinned_at FROM pins WHERE conversation_id = ?1 AND seq = ?2",
+                (conversation_id, seq),
+                |r| r.get::<i64>(0),
+            )
+            .await?
+            .map(|at| (at, seq)),
+            None => None,
+        };
+        let (at, seq) = at.unwrap_or((i64::MAX, i64::MAX));
+        let mut pins = query_all(
+            &conn,
+            "SELECT seq, pinned_at FROM pins WHERE conversation_id = ?1
+               AND (pinned_at < ?2 OR (pinned_at = ?2 AND seq < ?3))
+               AND (hidden_from IS NULL OR hidden_from != ?5)
+             ORDER BY pinned_at DESC, seq DESC LIMIT ?4",
+            (conversation_id, at, seq, limit + 1, viewer),
+            |r| Ok(pin_pb(conversation_id, r.get(0)?, r.get(1)?)),
+        )
+        .await?;
+        let more = pins.len() as i64 > limit;
+        pins.truncate(limit as usize);
+        Ok((pins, more))
     }
 
     // ───────────────────────── Watching ─────────────────────────
@@ -1098,6 +1257,17 @@ impl DmDb {
             }
         }
     }
+}
+
+fn pin_pb(conversation_id: &str, sequence: i64, pinned_at: i64) -> pb::DmPin {
+    pb::DmPin { conversation_id: conversation_id.to_string(), sequence, pinned_at: Some(timestamp(pinned_at)) }
+}
+
+async fn participants(conn: &Connection, conversation_id: &str) -> Result<Vec<String>> {
+    query_all(conn, "SELECT account_id FROM participants WHERE conversation_id = ?1", [conversation_id], |r| {
+        r.get::<String>(0)
+    })
+    .await
 }
 
 async fn add_key_packages(conn: &Connection, device_id: &str, key_packages: &[KeyPackage]) -> Result<i64> {
