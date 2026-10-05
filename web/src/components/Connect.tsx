@@ -20,6 +20,8 @@ import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
 import { BuildLabel } from "@/components/BuildLabel";
+import { MotionButton } from "@/components/motion-button";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { CodeInput } from "@/components/CodeInput";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -121,12 +123,11 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             className={cn("h-11 rounded-xl pl-9 text-base", privateField)}
           />
         </div>
-        <AnimatePresence>
+        <AnimatePresence mode="popLayout">
           {lookup.error && (
             <motion.p
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              {...SLIDE_IN}
+              transition={SPRING}
               className="text-sm text-destructive"
             >
               {t("connect.where.notFound", { problem: lookup.error })}
@@ -162,11 +163,11 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
         )}
       </AnimatePresence>
 
-      <Button type="submit" size="lg" disabled={lookup.pending || !address.trim()} className="btn h-11 rounded-xl font-bold">
+      <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={lookup.pending || !address.trim()} className="btn h-11 rounded-xl font-bold">
         {lookup.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
         {lookup.pending ? t("connect.where.looking") : t("common.continue")}
-      </Button>
-      <p className="text-center text-xs text-muted-foreground">
+      </MotionButton>
+      <motion.p layout="position" transition={SPRING} className="text-center text-xs text-muted-foreground">
         <T
           k="connect.where.anyServer"
           values={{
@@ -177,7 +178,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             ),
           }}
         />
-      </p>
+      </motion.p>
     </form>
   );
 }
