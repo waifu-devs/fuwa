@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { hasRegions, regionMark } from "@/lib/regions";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 export function CreateServerDialog({
@@ -26,6 +27,7 @@ export function CreateServerDialog({
   onOpenChange: (open: boolean) => void;
   defaultInstance?: string;
 }) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const instances = useInstances().filter((i) => i.me);
   const [where, setWhere] = useState(defaultInstance ?? instances[0]?.key ?? "");
@@ -42,7 +44,7 @@ export function CreateServerDialog({
   const picked = regions.find((r) => r.id === region) ?? regions.find((r) => r.home) ?? regions[0];
   const blocked =
     policy === ServerCreation.DISABLED || (policy === ServerCreation.ADMINS && !inst?.admin)
-      ? "This fuwa server's operator doesn't let members create servers."
+      ? t("workspace.createServer.blocked")
       : null;
 
   useEffect(() => {
@@ -76,7 +78,7 @@ export function CreateServerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader title="Create a server" description="A home for your people. You can change all of this later." />
+        <DialogHeader title={t("workspace.createServer.title")} description={t("workspace.createServer.about")} />
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div className="flex items-center gap-4">
             {inst && (
@@ -97,14 +99,14 @@ export function CreateServerDialog({
             )}
             <div className="flex min-w-0 flex-1 flex-col gap-2">
               <Label htmlFor="server-name" className="font-bold">
-                Name
+                {t("workspace.createServer.name")}
               </Label>
               <Input
                 id="server-name"
                 autoFocus
                 required
                 maxLength={100}
-                placeholder="Waifu Devs"
+                placeholder={t("workspace.createServer.namePlaceholder")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="h-11 rounded-xl"
@@ -113,13 +115,13 @@ export function CreateServerDialog({
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="server-description" className="font-bold">
-              Description <span className="font-normal text-muted-foreground">(optional)</span>
+              {t("workspace.createServer.description")} <span className="font-normal text-muted-foreground">{t("workspace.createServer.optional")}</span>
             </Label>
             <Textarea
               id="server-description"
               rows={2}
               maxLength={1000}
-              placeholder="What's it about?"
+              placeholder={t("workspace.createServer.descriptionPlaceholder")}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="rounded-xl"
@@ -127,7 +129,7 @@ export function CreateServerDialog({
           </div>
           {instances.length > 1 && (
             <div className="flex flex-col gap-2">
-              <Label className="font-bold">Lives on</Label>
+              <Label className="font-bold">{t("workspace.createServer.livesOn")}</Label>
               <div className="flex flex-wrap gap-2">
                 {instances.map((i) => (
                   <button
@@ -155,8 +157,8 @@ export function CreateServerDialog({
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
                 className="flex flex-col gap-2 overflow-hidden"
               >
-                <Label className="font-bold">Region</Label>
-                <div role="radiogroup" aria-label="Region" className="flex flex-wrap gap-2">
+                <Label className="font-bold">{t("workspace.createServer.region")}</Label>
+                <div role="radiogroup" aria-label={t("workspace.createServer.region")} className="flex flex-wrap gap-2">
                   {regions.map((r) => {
                     const on = r.id === picked?.id;
                     return (
@@ -173,7 +175,7 @@ export function CreateServerDialog({
                           {regionMark(r.name)}
                         </span>
                         <span className="relative">{r.name}</span>
-                        {r.home && <span className="relative text-xs font-normal text-muted-foreground">home</span>}
+                        {r.home && <span className="relative text-xs font-normal text-muted-foreground">{t("workspace.createServer.home")}</span>}
                       </button>
                     );
                   })}
@@ -188,7 +190,7 @@ export function CreateServerDialog({
                     className="flex items-start gap-1.5 text-xs text-muted-foreground"
                   >
                     <MapPinIcon className="mt-px size-3.5 shrink-0 text-primary" />
-                    Its messages, recordings and calls stay in {picked?.name}. Accounts stay in {regions.find((r) => r.home)?.name ?? "the home region"}.
+                    {t("workspace.createServer.regionNote", { region: picked?.name ?? "", home: regions.find((r) => r.home)?.name ?? t("workspace.createServer.homeRegion") })}
                   </motion.p>
                 </AnimatePresence>
               </motion.div>
@@ -196,9 +198,9 @@ export function CreateServerDialog({
           </AnimatePresence>
           <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-3">
             <span>
-              <span className="block text-sm font-bold">Show in Browse</span>
+              <span className="block text-sm font-bold">{t("workspace.createServer.browse")}</span>
               <span className="block text-xs text-muted-foreground">
-                {discoverable ? `Anyone on ${inst?.node?.name ?? "this fuwa server"} can find and join it.` : "Off: people join with an invite link."}
+                {discoverable ? t("workspace.createServer.browseOn", { instance: inst?.node?.name ?? t("workspace.createServer.thisInstance") }) : t("workspace.createServer.browseOff")}
               </span>
             </span>
             <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
@@ -212,7 +214,7 @@ export function CreateServerDialog({
           </AnimatePresence>
           <Button type="submit" size="lg" disabled={create.pending || !name.trim() || !!blocked || !inst} className="btn h-11 rounded-xl font-bold">
             {create.pending && <LoaderCircleIcon className="animate-spin" />}
-            Create server
+            {t("workspace.createServer.submit")}
           </Button>
         </form>
       </DialogContent>

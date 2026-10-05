@@ -7,6 +7,7 @@ import { ModerateDialog } from "@/components/ModerateDialog";
 import { closeMenuDialog as close, subscribeMenuDialogs as subscribe, menuDialogs, type Confirm } from "@/components/menus/dialogs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { useI18n } from "@/i18n/react";
 
 /*
  * Dialogs a right-click menu opens from places that don't have them already:
@@ -63,6 +64,7 @@ export function MenuDialogs() {
 }
 
 function ConfirmBody({ confirm }: { confirm: Confirm }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function go() {
@@ -98,7 +100,7 @@ function ConfirmBody({ confirm }: { confirm: Confirm }) {
       {error && <p className="-mt-2 mb-3 text-sm text-destructive first-letter:uppercase">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={close} className="rounded-xl">
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="button" variant="destructive" disabled={busy} onClick={() => void go()} className="rounded-xl font-bold" autoFocus>
           {busy && <LoaderCircleIcon className="animate-spin" />} {confirm.action}

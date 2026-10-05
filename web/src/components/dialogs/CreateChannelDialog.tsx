@@ -9,14 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 const TYPES = [
-  { type: ChannelType.TEXT, icon: HashIcon, label: "Text", hint: "Messages, links, Markdown" },
-  { type: ChannelType.ANNOUNCEMENT, icon: MegaphoneIcon, label: "Announcements", hint: "News people follow" },
-  { type: ChannelType.SECURE, icon: ShieldCheckIcon, label: "Secure", hint: "End-to-end encrypted: not even the server can read it" },
-  { type: ChannelType.VOICE, icon: Volume2Icon, label: "Voice", hint: "Talk, hang out, play together" },
-  { type: ChannelType.CATEGORY, icon: FolderIcon, label: "Category", hint: "Groups channels" },
+  { type: ChannelType.TEXT, icon: HashIcon, label: "workspace.createChannel.type.text", hint: "workspace.createChannel.type.textHint" },
+  { type: ChannelType.ANNOUNCEMENT, icon: MegaphoneIcon, label: "workspace.createChannel.type.announcement", hint: "workspace.createChannel.type.announcementHint" },
+  { type: ChannelType.SECURE, icon: ShieldCheckIcon, label: "workspace.createChannel.type.secure", hint: "workspace.createChannel.type.secureHint" },
+  { type: ChannelType.VOICE, icon: Volume2Icon, label: "workspace.createChannel.type.voice", hint: "workspace.createChannel.type.voiceHint" },
+  { type: ChannelType.CATEGORY, icon: FolderIcon, label: "workspace.createChannel.type.category", hint: "workspace.createChannel.type.categoryHint" },
 ] as const;
 
 /** Channel names are lowercase with dashes, like the server makes them. */
@@ -43,6 +44,7 @@ export function CreateChannelDialog({
   /** Stay where you are, rather than opening the new channel (as from settings). */
   stay?: boolean;
 }) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [type, setType] = useState<ChannelType>(ChannelType.TEXT);
   const [name, setName] = useState("");
@@ -71,18 +73,18 @@ export function CreateChannelDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader title="Create a channel" />
+        <DialogHeader title={t("workspace.createChannel.title")} />
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <div role="radiogroup" aria-label="Channel type" className="grid gap-2">
-            {TYPES.map((t) => {
-              const active = type === t.type;
+          <div role="radiogroup" aria-label={t("workspace.createChannel.typeLabel")} className="grid gap-2">
+            {TYPES.map((kind) => {
+              const active = type === kind.type;
               return (
                 <motion.button
-                  key={t.type}
+                  key={kind.type}
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  onClick={() => setType(t.type)}
+                  onClick={() => setType(kind.type)}
                   whileHover={{ x: 2 }}
                   whileTap={{ scale: 0.98 }}
                   transition={SPRING}
@@ -101,12 +103,12 @@ export function CreateChannelDialog({
                     )}
                   >
                     <motion.span key={String(active)} initial={active ? { scale: 0.4, rotate: -30 } : false} animate={{ scale: 1, rotate: 0 }} transition={SPRING}>
-                      <t.icon className="size-[18px]" />
+                      <kind.icon className="size-[18px]" />
                     </motion.span>
                   </span>
                   <span className="relative">
-                    <span className="block text-sm font-bold">{t.label}</span>
-                    <span className="block text-xs text-muted-foreground">{t.hint}</span>
+                    <span className="block text-sm font-bold">{t(kind.label)}</span>
+                    <span className="block text-xs text-muted-foreground">{t(kind.hint)}</span>
                   </span>
                 </motion.button>
               );
@@ -114,7 +116,7 @@ export function CreateChannelDialog({
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="channel-name" className="font-bold">
-              Name
+              {t("workspace.createChannel.name")}
             </Label>
             <div className="relative">
               <AnimatePresence initial={false}>
@@ -142,7 +144,7 @@ export function CreateChannelDialog({
                 autoFocus
                 required
                 maxLength={100}
-                placeholder={category ? "Hangout" : type === ChannelType.VOICE ? "Lounge" : "new-channel"}
+                placeholder={t(category ? "workspace.createChannel.placeholder.category" : type === ChannelType.VOICE ? "workspace.createChannel.placeholder.voice" : "workspace.createChannel.placeholder.text")}
                 value={free ? name : slug(name)}
                 onChange={(e) => setName(e.target.value)}
                 className={cn("h-11 rounded-xl transition-[padding]", !category && "pl-9")}
@@ -153,7 +155,7 @@ export function CreateChannelDialog({
           <Button type="submit" size="lg" disabled={create.pending || !name.trim()} className="btn h-11 rounded-xl font-bold">
             {create.pending && <LoaderCircleIcon className="animate-spin" />}
             <span>
-              Create <SwapText>{category ? "category" : "channel"}</SwapText>
+              <SwapText>{t(category ? "workspace.createChannel.createCategory" : "workspace.createChannel.createChannel")}</SwapText>
             </span>
           </Button>
         </form>

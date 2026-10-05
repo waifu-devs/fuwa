@@ -54,7 +54,7 @@ async function duplicate(instanceKey: string, serverId: string, channel: Channel
     reportError("context_menu.duplicate_channel", "channel");
     throw err;
   }
-  toast(`Made a copy of ${channel.type === ChannelType.VOICE ? channel.name : `#${channel.name}`}`);
+  toast(i18n().t("workspace.menu.channel.duplicated", { name: channel.type === ChannelType.VOICE ? channel.name : `#${channel.name}` }));
 }
 
 /**
@@ -106,18 +106,18 @@ export function channelMenu(ctx: MenuContexts["channel"], actions: ChannelMenuAc
     {
       id: "primary",
       items: items(
-        texty(channel) && { id: "mark-read", label: "Mark as read", icon: CheckCheckIcon, disabled: !unread, onSelect: () => markChannelsRead(instanceKey, [channel.id]) },
-        actions.invite && { id: "invite", label: "Invite people", icon: UserPlusIcon, onSelect: actions.invite },
-        { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(t, placeLink(instanceKey, serverId, channel.id), t("common.copy.channelLink")) },
+        texty(channel) && { id: "mark-read", label: t("workspace.menu.markRead"), icon: CheckCheckIcon, disabled: !unread, onSelect: () => markChannelsRead(instanceKey, [channel.id]) },
+        actions.invite && { id: "invite", label: t("workspace.menu.invite"), icon: UserPlusIcon, onSelect: actions.invite },
+        { id: "copy-link", label: t("workspace.menu.copyLink"), icon: LinkIcon, onSelect: () => copy(t, placeLink(instanceKey, serverId, channel.id), t("common.copy.channelLink")) },
       ),
     },
     { id: "notifications", items: texty(channel) ? notificationEntries(instanceKey, serverId, channel.id, "channel") : [] },
     {
       id: "manage",
       items: items(
-        (manages || roles) && { id: "edit", label: "Edit channel", icon: SettingsIcon, onSelect: () => actions.edit(channel.id) },
-        roles && { id: "permissions", label: "Permissions", icon: KeyRoundIcon, onSelect: () => actions.edit(channel.id, "permissions") },
-        copies && { id: "duplicate", label: "Duplicate channel", icon: CopyPlusIcon, onSelect: () => attempt(duplicate(instanceKey, serverId, channel)) },
+        (manages || roles) && { id: "edit", label: t("workspace.menu.channel.edit"), icon: SettingsIcon, onSelect: () => actions.edit(channel.id) },
+        roles && { id: "permissions", label: t("workspace.menu.permissions"), icon: KeyRoundIcon, onSelect: () => actions.edit(channel.id, "permissions") },
+        copies && { id: "duplicate", label: t("workspace.menu.channel.duplicate"), icon: CopyPlusIcon, onSelect: () => attempt(duplicate(instanceKey, serverId, channel)) },
       ),
     },
     { id: "developer", items: items(copyIdItem(channel.id, "channel")) },
@@ -126,15 +126,15 @@ export function channelMenu(ctx: MenuContexts["channel"], actions: ChannelMenuAc
       items: items(
         manages && {
           id: "delete",
-          label: "Delete channel",
+          label: t("workspace.menu.channel.delete"),
           icon: Trash2Icon,
           danger: true,
           onSelect: () =>
             confirmFirst({
-              title: `Delete ${name}?`,
-              body: "Every message in it goes too, for everyone. This can't be undone.",
-              action: "Delete channel",
-              run: () => run(deleteChannel(instanceKey, serverId, channel.id)).then(() => toast(`Deleted ${name}`)),
+              title: t("workspace.menu.channel.deleteTitle", { name }),
+              body: t("workspace.menu.channel.deleteBody"),
+              action: t("workspace.menu.channel.delete"),
+              run: () => run(deleteChannel(instanceKey, serverId, channel.id)).then(() => toast(t("workspace.menu.channel.deleted", { name }))),
             }),
         },
       ),
@@ -151,25 +151,26 @@ export function categoryMenu(ctx: MenuContexts["category"], actions: ChannelMenu
   const unread = children.some((id) => (inst?.unread[id] ?? 0) > 0);
   const manages = hasIn(access, category.id, Permission.MANAGE_CHANNELS);
   const roles = hasIn(access, category.id, Permission.MANAGE_ROLES);
+  const { t } = i18n();
   return withExtensions("category", ctx, [
     {
       id: "primary",
       items: items(
-        { id: "mark-read", label: "Mark as read", icon: CheckCheckIcon, disabled: !unread, onSelect: () => markChannelsRead(instanceKey, children) },
+        { id: "mark-read", label: t("workspace.menu.markRead"), icon: CheckCheckIcon, disabled: !unread, onSelect: () => markChannelsRead(instanceKey, children) },
         actions.toggle && {
           id: "toggle",
-          label: actions.collapsed ? "Expand category" : "Collapse category",
+          label: actions.collapsed ? t("workspace.menu.category.expand") : t("workspace.menu.category.collapse"),
           icon: actions.collapsed ? ChevronRightIcon : ChevronDownIcon,
           onSelect: actions.toggle,
         },
-        manages && actions.create && { id: "create", label: "Create channel", icon: PlusIcon, onSelect: () => actions.create?.(category.id) },
+        manages && actions.create && { id: "create", label: t("workspace.menu.category.create"), icon: PlusIcon, onSelect: () => actions.create?.(category.id) },
       ),
     },
     {
       id: "manage",
       items: items(
-        (manages || roles) && { id: "edit", label: "Edit category", icon: SettingsIcon, onSelect: () => actions.edit(category.id) },
-        roles && { id: "permissions", label: "Permissions", icon: KeyRoundIcon, onSelect: () => actions.edit(category.id, "permissions") },
+        (manages || roles) && { id: "edit", label: t("workspace.menu.category.edit"), icon: SettingsIcon, onSelect: () => actions.edit(category.id) },
+        roles && { id: "permissions", label: t("workspace.menu.permissions"), icon: KeyRoundIcon, onSelect: () => actions.edit(category.id, "permissions") },
       ),
     },
     { id: "developer", items: items(copyIdItem(category.id, "category")) },
@@ -178,15 +179,15 @@ export function categoryMenu(ctx: MenuContexts["category"], actions: ChannelMenu
       items: items(
         manages && {
           id: "delete",
-          label: "Delete category",
+          label: t("workspace.menu.category.delete"),
           icon: Trash2Icon,
           danger: true,
           onSelect: () =>
             confirmFirst({
-              title: `Delete ${category.name}?`,
-              body: "Its channels stay, outside any category.",
-              action: "Delete category",
-              run: () => run(deleteChannel(instanceKey, serverId, category.id)).then(() => toast(`Deleted ${category.name}`)),
+              title: t("workspace.menu.category.deleteTitle", { name: category.name }),
+              body: t("workspace.menu.category.deleteBody"),
+              action: t("workspace.menu.category.delete"),
+              run: () => run(deleteChannel(instanceKey, serverId, category.id)).then(() => toast(t("workspace.menu.category.deleted", { name: category.name }))),
             }),
         },
       ),

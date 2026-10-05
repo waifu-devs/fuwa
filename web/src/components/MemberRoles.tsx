@@ -17,6 +17,7 @@ import {
 import { memberName } from "@/lib/format";
 import { above, has, rolesOf } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -31,6 +32,7 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
   const manage = has(access, Permission.MANAGE_ROLES);
   const assignable = roles.filter((r) => r.id !== member.serverId && above(access, r.position));
   const [busy, setBusy] = useState<string | null>(null);
+  const { t } = useI18n();
   if (!held.length && !(manage && assignable.length)) return null;
 
   const toggle = async (role: Role, give: boolean) => {
@@ -47,7 +49,7 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
 
   return (
     <div className={cn(!compact && "mt-3")}>
-      {!compact && <p className="mb-1.5 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">Roles</p>}
+      {!compact && <p className="mb-1.5 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("workspace.roles.heading")}</p>}
       <motion.ul layout className="flex flex-wrap gap-1">
         <AnimatePresence initial={false} mode="popLayout">
           {held.map((role) => {
@@ -65,7 +67,7 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
                 {removable ? (
                   <button
                     type="button"
-                    aria-label={`Take ${role.name} from ${memberName(member)}`}
+                    aria-label={t("workspace.roles.take", { role: role.name, name: memberName(member) })}
                     disabled={!!busy}
                     onClick={() => void toggle(role, false)}
                     className="relative grid size-3 shrink-0 place-items-center"
@@ -86,14 +88,14 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    aria-label={`Change ${memberName(member)}'s roles`}
+                    aria-label={t("workspace.roles.change", { name: memberName(member) })}
                     className="grid size-6 place-items-center rounded-full border border-dashed text-muted-foreground transition hover:rotate-90 hover:border-primary/50 hover:text-primary data-[state=open]:rotate-45 data-[state=open]:text-primary"
                   >
                     <PlusIcon className="size-3.5" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">Roles you can hand out</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">{t("workspace.roles.assignable")}</DropdownMenuLabel>
                   {assignable.map((role) => {
                     const on = member.roleIds.includes(role.id);
                     return (
