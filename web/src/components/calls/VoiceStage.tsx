@@ -96,8 +96,9 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
                 key="screens"
                 layout
                 initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto", pointerEvents: "auto" }}
+                // Leaving screens stop taking clicks straight away.
+                exit={{ opacity: 0, height: 0, pointerEvents: "none" }}
                 transition={SPRING}
                 className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
               >

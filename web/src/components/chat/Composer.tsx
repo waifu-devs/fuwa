@@ -269,6 +269,7 @@ export function Composer({
         )}
         {shown.voice ? (
           <VoiceRecorder
+            key={draftKey}
             maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
             onSend={sendVoice}
             onProblem={setVoiceProblem}

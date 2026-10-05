@@ -560,7 +560,7 @@ function DeleteRole({ instanceKey, serverId, role, locked }: { instanceKey: stri
   const [confirming, setConfirming] = useState(false);
   const remove = useAction(deleteRole);
   return (
-    <div hidden={locked} className="py-5">
+    <div className="py-5 empty:hidden">
       <AnimatePresence mode="wait" initial={false}>
         {locked ? null : confirming ? (
           <motion.div
@@ -766,10 +766,12 @@ function RoleMembers({
 
   return (
     <div data-setting="role-members" className="flex flex-col gap-3">
-      <div hidden={locked} className="flex flex-col gap-2">
-        <Button type="button" variant={adding ? "secondary" : "outline"} onClick={() => setAdding((a) => !a)} className="self-start rounded-xl font-bold">
-          <UserPlusIcon className={cn("transition-transform duration-300", adding && "rotate-12")} /> {t("serversettings.roles.addMembers")}
-        </Button>
+      <div className="flex flex-col gap-2 empty:hidden">
+        {!locked && (
+          <Button type="button" variant={adding ? "secondary" : "outline"} onClick={() => setAdding((a) => !a)} className="self-start rounded-xl font-bold">
+            <UserPlusIcon className={cn("transition-transform duration-300", adding && "rotate-12")} /> {t("serversettings.roles.addMembers")}
+          </Button>
+        )}
         <AnimatePresence initial={false}>
           {!locked && adding && (
             <motion.div

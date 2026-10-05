@@ -194,9 +194,10 @@ function BrowseResults({
               key={s.id}
               layout
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.4, delay: Math.min(n, 8) * 0.05, ease: [0.22, 1, 0.36, 1] }}
+              animate={{ opacity: 1, y: 0, pointerEvents: "auto" }}
+              exit={{ opacity: 0, scale: 0.95, pointerEvents: "none" }}
+              // A leaving card stops taking clicks at once, whatever its stagger.
+              transition={{ duration: 0.4, delay: Math.min(n, 8) * 0.05, ease: [0.22, 1, 0.36, 1], pointerEvents: { delay: 0 } }}
             >
               <ServerCard instanceKey={instanceKey} server={s} />
             </motion.div>

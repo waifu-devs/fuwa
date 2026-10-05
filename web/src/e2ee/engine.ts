@@ -1125,7 +1125,9 @@ export class DmEngine {
    */
   private async reconcile(c: Room, attempt = 0): Promise<void> {
     const belong = await c.belong();
-    const devices: DeviceInfo[] = (await Promise.all(chunks(belong, LOOKUPS).map((userIds) => this.api.dms.listDevices({ userIds }, CALL)))).flatMap((r) => r.devices);
+    // One lookup at a time: every client runs this on each membership change, so a big channel mustn't fan out.
+    const devices: DeviceInfo[] = [];
+    for (const userIds of chunks(belong, LOOKUPS)) devices.push(...(await this.api.dms.listDevices({ userIds }, CALL)).devices);
     c.check(devices, belong);
     const allowed = unique([...c.allowed, ...belong]);
     const starting = !this.device.isMember(c.id);
@@ -1135,7 +1137,8 @@ export class DmEngine {
     const expected = new Set(devices.map((d) => d.id));
     const adds = devices.filter((d) => !present.has(d.id)).map((d) => d.id);
     const removes = members.filter((m) => !expected.has(m.deviceId) && m.deviceId !== this.device.deviceId).map((m) => m.deviceId);
-    const claimed = (await Promise.all(chunks(adds, LOOKUPS).map((deviceIds) => this.api.dms.claimKeyPackages({ deviceIds }, CALL)))).flatMap((r) => r.keyPackages);
+    const claimed = [];
+    for (const deviceIds of chunks(adds, LOOKUPS)) claimed.push(...(await this.api.dms.claimKeyPackages({ deviceIds }, CALL)).keyPackages);
     // A secure channel starts its group even when nobody else is signed in yet, so its first writer isn't stuck.
     if (!claimed.length && !removes.length && !(starting && c.channel)) {
       if (starting) this.device.forget(c.id);
