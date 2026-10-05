@@ -13,6 +13,7 @@ use gpui_kit::{
 
 use crate::core::compat;
 use crate::core::config::Prefs;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::updates::{self, Manual, Status};
 use crate::ui::motion;
 use crate::ui::settings::{SettingsView, section, toggle_row};
@@ -33,19 +34,23 @@ impl SettingsView {
             .shared
             .read(|s| s.order.first().and_then(|key| s.instance(key)).map(|i| i.name()))
             .filter(|_| !prefs.streamer_mode)
-            .unwrap_or_else(|| "your instance".into());
+            .unwrap_or_else(|| t("desktop.settings.yourInstance"));
 
         let (glyph, tone, line) = match &status {
-            Status::Idle | Status::Checking => ("refresh-cw", p.primary, "Looking for a new version…".to_owned()),
-            Status::UpToDate => ("circle-check", p.success, "You're on the latest version.".to_owned()),
-            Status::Available { release, .. } => ("gift", p.primary, format!("fuwa {} is out.", release.version)),
-            Status::Downloading { release, .. } => {
-                ("download", p.primary, format!("Downloading fuwa {}…", release.version))
+            Status::Idle | Status::Checking => ("refresh-cw", p.primary, t("desktop.updates.looking")),
+            Status::UpToDate => ("circle-check", p.success, t("desktop.updates.upToDate")),
+            Status::Available { release, .. } => {
+                ("gift", p.primary, t_with("desktop.updates.available", &[("version", Arg::Str(&release.version))]))
             }
+            Status::Downloading { release, .. } => (
+                "download",
+                p.primary,
+                t_with("desktop.updates.downloading", &[("version", Arg::Str(&release.version))]),
+            ),
             Status::Ready { release } => {
-                ("sparkles", p.primary, format!("fuwa {} is downloaded and checked.", release.version))
+                ("sparkles", p.primary, t_with("desktop.updates.ready", &[("version", Arg::Str(&release.version))]))
             }
-            Status::Failed { .. } => ("circle-alert", p.destructive, "Couldn't update just now.".to_owned()),
+            Status::Failed { .. } => ("circle-alert", p.destructive, t("desktop.updates.failed")),
         };
         let mark = div()
             .flex_none()
@@ -76,7 +81,7 @@ impl SettingsView {
 
         let busy = matches!(status, Status::Checking | Status::Downloading { .. });
         let core = self.core.clone();
-        let check = soft_button("updates-check", "Check now", p).when(!busy, |el| {
+        let check = soft_button("updates-check", t("desktop.updates.checkNow"), p).when(!busy, |el| {
             el.on_click(move |_, _, _| {
                 let core = core.clone();
                 let install = core.prefs().auto_update;
@@ -85,7 +90,7 @@ impl SettingsView {
         });
         let action: Option<AnyElement> = match &status {
             Status::Ready { .. } => Some(
-                primary_button("updates-restart", "Restart to update", p)
+                primary_button("updates-restart", t("desktop.updates.restart"), p)
                     .on_click(|_, window, cx| match updates::restart() {
                         Ok(()) => cx.quit(),
                         // Why it didn't is on the page now.
@@ -96,7 +101,7 @@ impl SettingsView {
             Status::Available { why: Manual::Off, .. } => {
                 let core = self.core.clone();
                 Some(
-                    primary_button("updates-install", "Download it", p)
+                    primary_button("updates-install", t("desktop.updates.download"), p)
                         .on_click(move |_, _, _| {
                             let core = core.clone();
                             drop(Arc::clone(&core).spawn(async move { core.check_for_update(true).await }));
@@ -108,7 +113,7 @@ impl SettingsView {
                 let page = release.page.clone();
                 // It names the site it opens: github.com sees whoever opens it.
                 Some(
-                    soft_button("updates-page", "Open the release on github.com", p)
+                    soft_button("updates-page", t("desktop.updates.openRelease"), p)
                         .on_click(move |_, _, cx| cx.open_url(&page))
                         .into_any_element(),
                 )
@@ -139,10 +144,12 @@ impl SettingsView {
                             .flex_col()
                             .gap(px(2.0))
                             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(line))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(format!(
-                                "This is fuwa desktop {}, compatibility date {}.",
-                                env!("CARGO_PKG_VERSION"),
-                                compat::client_date()
+                            .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
+                                "desktop.updates.thisIs",
+                                &[
+                                    ("version", Arg::Str(env!("CARGO_PKG_VERSION"))),
+                                    ("date", Arg::Str(compat::client_date())),
+                                ],
                             ))),
                     )
                     .child(check),
@@ -162,15 +169,22 @@ impl SettingsView {
                             ),
                         )
                         .child(div().text_xs().text_color(p.muted_foreground).child(match total {
-                            0 => format!("{:.1} MB", *done as f64 / 1_048_576.0),
-                            _ => format!("{:.1} of {:.1} MB", *done as f64 / 1_048_576.0, *total as f64 / 1_048_576.0),
+                            0 => t_with(
+                                "desktop.updates.size",
+                                &[("size", Arg::Str(&format!("{:.1}", *done as f64 / 1_048_576.0)))],
+                            ),
+                            _ => t_with(
+                                "desktop.updates.progress",
+                                &[
+                                    ("done", Arg::Str(&format!("{:.1}", *done as f64 / 1_048_576.0))),
+                                    ("total", Arg::Str(&format!("{:.1}", *total as f64 / 1_048_576.0))),
+                                ],
+                            ),
                         })),
                 );
         }
         if let Status::Ready { .. } = &status {
-            head = head.child(div().text_sm().text_color(p.muted_foreground).child(
-                "It only installs when you choose to. Until then this version keeps running, start after start.",
-            ));
+            head = head.child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.updates.readyNote")));
         }
         if let Status::Available { why, .. } = &status {
             head = head.child(div().text_sm().text_color(p.muted_foreground).child(why.explain()));
@@ -191,24 +205,20 @@ impl SettingsView {
             .bg(p.secondary)
             .text_sm()
             .child(icon("shield-check").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
-            .child(div().flex_1().min_w_0().child(format!(
-                "fuwa asks {courier} about new versions and downloads them through it, so GitHub, where releases live, never sees your address, and nothing about you goes with the request. Before an update runs, fuwa checks it against Waifu Devs' release signature and its SHA-256; one that doesn't match is thrown away. An update never installs or restarts the app by itself."
-            )));
+            .child(div().flex_1().min_w_0().child(t_with("desktop.updates.how", &[("instance", Arg::Str(&courier))])));
 
-        let mut page = div()
-            .flex()
-            .flex_col()
-            .gap(px(28.0))
-            .child(motion::rise(head, "updates-head", Duration::ZERO, 8.0))
-            .child(toggle_row(
-                "auto-update",
-                "Download updates in the background",
-                "New versions are fetched and checked so they're ready when you are; nothing installs until you press Restart to update. Off, fuwa only tells you when one is out.",
-                prefs.auto_update,
-                p,
-                cx,
-                |this, on, cx| this.set(cx, |pr| pr.auto_update = on),
-            ));
+        let mut page =
+            div().flex().flex_col().gap(px(28.0)).child(motion::rise(head, "updates-head", Duration::ZERO, 8.0)).child(
+                toggle_row(
+                    "auto-update",
+                    &t("desktop.updates.auto"),
+                    &t("desktop.updates.autoHint"),
+                    prefs.auto_update,
+                    p,
+                    cx,
+                    |this, on, cx| this.set(cx, |pr| pr.auto_update = on),
+                ),
+            );
         // Instances with features this app is too old for; everything else keeps working.
         let needs: Vec<(String, String)> = self.core.shared.read(|s| {
             s.order
@@ -216,9 +226,9 @@ impl SettingsView {
                 .filter_map(|key| s.instance(key))
                 .filter_map(|i| {
                     let name =
-                        if prefs.streamer_mode { "An instance you added".to_owned() } else { i.name().to_string() };
+                        if prefs.streamer_mode { t("desktop.updates.instanceYouAdded") } else { i.name().to_string() };
                     let line = compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref()), &name)?;
-                    Some((compat::shown(&name, "An instance"), line))
+                    Some((compat::shown(&name, &t("shell.update.anInstance")), line))
                 })
                 .collect()
         });
@@ -235,11 +245,15 @@ impl SettingsView {
                     .border_color(p.border)
                     .text_sm()
                     .child(icon("sparkles").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
-                    .child(div().flex_1().min_w_0().child(div().font_weight(FontWeight::BOLD).child(name)).child(
-                        div().text_color(p.muted_foreground).child(format!("{line}. Everything else keeps working.")),
-                    ))
+                    .child(
+                        div().flex_1().min_w_0().child(div().font_weight(FontWeight::BOLD).child(name)).child(
+                            div()
+                                .text_color(p.muted_foreground)
+                                .child(t_with("desktop.updates.keepsWorking", &[("line", Arg::Str(&line))])),
+                        ),
+                    )
             }));
-            page = page.child(section("Needs a newer app", rows, p));
+            page = page.child(section(&t("desktop.updates.needsNewer"), rows, p));
         }
         if let Some(release) = status.release().filter(|r| !r.notes.trim().is_empty()) {
             let notes = div()
@@ -261,11 +275,15 @@ impl SettingsView {
                     div()
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child(format!("As {courier} passed them on; release notes aren't signed.")),
+                        .child(t_with("desktop.updates.notesFrom", &[("instance", Arg::Str(&courier))])),
                 )
                 .children(release.notes.lines().map(|line| div().min_h(px(8.0)).child(line.to_owned())));
-            page = page.child(section(&format!("What's new in {}", release.version), notes, p));
+            page = page.child(section(
+                &t_with("desktop.updates.whatsNew", &[("version", Arg::Str(&release.version))]),
+                notes,
+                p,
+            ));
         }
-        page.child(section("How updates work", how, p)).into_any_element()
+        page.child(section(&t("desktop.updates.howTitle"), how, p)).into_any_element()
     }
 }

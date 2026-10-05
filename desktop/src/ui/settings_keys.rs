@@ -11,6 +11,7 @@ use gpui_kit::{
 };
 
 use crate::core::config::Prefs;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::keybinds::{self, ACTIONS, CustomKeybind, Except, Group};
 use crate::ui::keys::{combo_of, keycaps};
 use crate::ui::motion;
@@ -139,9 +140,7 @@ impl SettingsView {
             .text_sm()
             .text_color(p.muted_foreground)
             .child(icon("info").size(px(16.0)).mt(px(2.0)))
-            .child(div().flex_1().min_w_0().child(
-                "Shortcuts work while fuwa is in front. They're written the same as the web app's, so a combo means the same in both. Click one and press the new keys; Escape stops.",
-            ));
+            .child(div().flex_1().min_w_0().child(t("desktop.keys.note")));
 
         // Extra keybinds.
         let mut custom_rows = div().flex().flex_col().gap(px(8.0));
@@ -157,7 +156,7 @@ impl SettingsView {
                     .border_color(p.border)
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("None yet."),
+                    .child(t("appsettings.keybinds.noneYet")),
             );
         }
         for bind in rows {
@@ -174,27 +173,31 @@ impl SettingsView {
                     .items_center()
                     .gap(px(12.0))
                     .child(
-                        div().flex_1().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Custom keybinds")).child(
-                            div()
-                                .text_sm()
-                                .text_color(p.muted_foreground)
-                                .child("Extra shortcuts for any action, on top of the ones below."),
-                        ),
+                        div()
+                            .flex_1()
+                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("appsettings.keybinds.custom")))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("appsettings.keybinds.customHint")),
+                            ),
                     )
-                    .child(soft_button("add-keybind", "Add a keybind", p).when(adding, |el| el.opacity(0.5)).when(
-                        !adding,
-                        |el| {
-                            el.on_click(cx.listener(|this, _, _, cx| {
-                                let draft = CustomKeybind {
-                                    id: "draft".into(),
-                                    action: ACTIONS[0].id.into(),
-                                    combo: String::new(),
-                                };
-                                this.keys.draft = Some(draft);
-                                this.start_recording(Recording::Custom("draft".into()), cx);
-                            }))
-                        },
-                    )),
+                    .child(
+                        soft_button("add-keybind", t("appsettings.keybinds.add"), p)
+                            .when(adding, |el| el.opacity(0.5))
+                            .when(!adding, |el| {
+                                el.on_click(cx.listener(|this, _, _, cx| {
+                                    let draft = CustomKeybind {
+                                        id: "draft".into(),
+                                        action: ACTIONS[0].id.into(),
+                                        combo: String::new(),
+                                    };
+                                    this.keys.draft = Some(draft);
+                                    this.start_recording(Recording::Custom("draft".into()), cx);
+                                }))
+                            }),
+                    ),
             )
             .child(custom_rows);
 
@@ -217,7 +220,7 @@ impl SettingsView {
         }
         if !prefs.keybinds.is_empty() || !prefs.custom_keybinds.is_empty() {
             page = page.child(motion::rise(
-                div().flex().child(soft_button("reset-keys", "Reset every shortcut", p).on_click(cx.listener(
+                div().flex().child(soft_button("reset-keys", t("desktop.keys.resetAll"), p).on_click(cx.listener(
                     |this, _, _, cx| {
                         this.keys = Keys::default();
                         this.set(cx, |pr| {
@@ -261,11 +264,14 @@ impl SettingsView {
             }),
         ));
         if changed {
-            let back = action.combo.map_or("no shortcut".to_owned(), keybinds::label);
+            let back = match action.combo {
+                Some(combo) => t_with("appsettings.keybinds.backTo", &[("keys", Arg::Str(&keybinds::label(combo)))]),
+                None => t("appsettings.keybinds.backToNone"),
+            };
             controls = controls.child(small_button(
                 SharedString::from(format!("reset-{id}")),
                 "rotate-ccw",
-                &format!("Back to {back}"),
+                &back,
                 p,
                 cx.listener(move |this, _, _, cx| this.set(cx, |pr| _ = pr.keybinds.remove(id))),
             ));
@@ -274,7 +280,7 @@ impl SettingsView {
             controls = controls.child(small_button(
                 SharedString::from(format!("clear-{id}")),
                 "x",
-                "Remove this shortcut",
+                &t("appsettings.keybinds.removeShortcut"),
                 p,
                 cx.listener(move |this, _, _, cx| this.set(cx, |pr| _ = pr.keybinds.insert(id.to_owned(), None))),
             ));
@@ -299,7 +305,8 @@ impl SettingsView {
     fn custom_row(&mut self, bind: CustomKeybind, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let me = Recording::Custom(bind.id.clone());
         let recording = self.keys.recording.as_ref() == Some(&me);
-        let label = keybinds::action_by_id(&bind.action).map_or("Pick an action", |a| a.label);
+        let label =
+            keybinds::action_by_id(&bind.action).map_or(t("appsettings.keybinds.pickAction"), |a| a.label.to_owned());
         let picking = self.keys.picking.as_deref() == Some(bind.id.as_str());
         let id = bind.id.clone();
         let picker = div()
@@ -355,7 +362,13 @@ impl SettingsView {
             .gap(px(8.0))
             .child(picker)
             .child(recorder(SharedString::from(format!("rec-c-{id}")), combo, recording, p, toggle))
-            .child(small_button(SharedString::from(format!("rm-{id}")), "trash", "Remove", p, remove));
+            .child(small_button(
+                SharedString::from(format!("rm-{id}")),
+                "trash",
+                &t("system.picture.remove"),
+                p,
+                remove,
+            ));
         let mut card = div()
             .px(px(12.0))
             .py(px(8.0))
@@ -457,7 +470,7 @@ fn recorder(
         div()
             .font_weight(FontWeight::BOLD)
             .text_color(p.primary)
-            .child("Press keys…")
+            .child(t("appsettings.keybinds.pressKeys"))
             .with_animation("press-keys", Animation::new(Duration::from_millis(1200)).repeat(), |el, t| {
                 el.opacity(0.55 + 0.45 * (t * std::f32::consts::TAU).cos().abs())
             })
@@ -465,7 +478,7 @@ fn recorder(
     } else {
         match combo {
             Some(c) => keycaps(c, p).into_any_element(),
-            None => div().text_color(p.muted_foreground).child("Not set").into_any_element(),
+            None => div().text_color(p.muted_foreground).child(t("appsettings.keybinds.notSet")).into_any_element(),
         }
     };
     div()

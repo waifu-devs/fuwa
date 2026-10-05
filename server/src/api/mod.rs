@@ -22,6 +22,7 @@ mod node;
 mod pins;
 mod polls;
 mod presence;
+mod providers;
 mod roles;
 mod search;
 mod secure;

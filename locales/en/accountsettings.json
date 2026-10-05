@@ -306,5 +306,21 @@
   "privacy.activityOff": "{instance} doesn't show what people are doing. Your status still shows.",
   "privacy.saveFailed": "Couldn't save that: {error}",
   "privacy.shareHere": "Share my activity here",
-  "privacy.shareIn": "Share my activity in {server}"
+  "privacy.shareIn": "Share my activity in {server}",
+  "signIn.yours": "How you sign in",
+  "signIn.password": "Password",
+  "signIn.off": "Off here",
+  "signIn.linkedOn": "Linked {date}",
+  "signIn.onlyWay": "This is your only way in, so it stays until you add another.",
+  "signIn.unlink": "Unlink",
+  "signIn.add": "Add a way to sign in",
+  "signIn.link": "Link {name}",
+  "signIn.addNote": "This instance keeps only your account's id there and its name. Your devices show a notice when a way in is added.",
+  "signIn.unlinked": "Unlinked {name}",
+  "signIn.linkTitle": "Link {name}",
+  "signIn.unlinkTitle": "Unlink {name}?",
+  "signIn.freshNote": "For your safety, sign out and back in first, then try again within 10 minutes.",
+  "signIn.passwordLabel": "Your password",
+  "signIn.codeLabel": "Your two-step code",
+  "signIn.continueTo": "Continue to {name}"
 }

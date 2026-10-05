@@ -33,7 +33,7 @@ type ExportStream = Pin<Box<dyn Stream<Item = Result<pb::ExportDataResponse, Sta
 
 impl Api {
     /// Checks the account's password, for changes that need it again.
-    async fn confirm_password(&self, account: &Account, password: &str) -> Result<()> {
+    pub(super) async fn confirm_password(&self, account: &Account, password: &str) -> Result<()> {
         if !account.has_password() {
             return Err(Error::FailedPrecondition(if account.kind == pb::AccountKind::Agent {
                 "agents sign in with their token, not a password".into()
@@ -52,7 +52,7 @@ impl Api {
     }
 
     /// Checks a two-step code (from the app, or a backup code, which it uses up).
-    async fn confirm_code(&self, account: &Account, code: &str) -> Result<()> {
+    pub(super) async fn confirm_code(&self, account: &Account, code: &str) -> Result<()> {
         let guesses = format!("two-factor:{}", account.id);
         self.app.limiter.attempt(&guesses)?;
         if !twofactor::check(self.app.node()?, &account.id, code).await? {
@@ -211,6 +211,53 @@ impl Api {
 
 #[tonic::async_trait]
 impl AccountService for Api {
+    async fn list_sign_in_methods(
+        &self,
+        request: Request<pb::ListSignInMethodsRequest>,
+    ) -> Result<Response<pb::ListSignInMethodsResponse>, Status> {
+        respond(async { self.list_methods(self.caller(request.metadata()).await?).await }.await)
+    }
+
+    async fn start_provider_link(
+        &self,
+        request: Request<pb::StartProviderLinkRequest>,
+    ) -> Result<Response<pb::StartProviderLinkResponse>, Status> {
+        respond(
+            async {
+                let caller = self.caller(request.metadata()).await?;
+                self.start_link(caller, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn finish_provider_link(
+        &self,
+        request: Request<pb::FinishProviderLinkRequest>,
+    ) -> Result<Response<pb::FinishProviderLinkResponse>, Status> {
+        respond(
+            async {
+                let caller = self.caller(request.metadata()).await?;
+                self.finish_link(caller, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn unlink_provider(
+        &self,
+        request: Request<pb::UnlinkProviderRequest>,
+    ) -> Result<Response<pb::UnlinkProviderResponse>, Status> {
+        respond(
+            async {
+                let caller = self.caller(request.metadata()).await?;
+                self.unlink(caller, request.into_inner()).await?;
+                Ok(pb::UnlinkProviderResponse {})
+            }
+            .await,
+        )
+    }
+
     async fn list_sessions(
         &self,
         request: Request<pb::ListSessionsRequest>,

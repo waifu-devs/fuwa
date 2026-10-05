@@ -42,10 +42,17 @@ struct SamlForm {
     RelayState: String,
 }
 
-/// The instance's own sign-in.
+/// The instance's own sign-in, and sign-ins with Google, X and Twitch.
 pub fn instance_routes(app: Arc<App>) -> Router {
-    let (a, b, c) = (app.clone(), app.clone(), app);
+    let (a, b, c, d) = (app.clone(), app.clone(), app.clone(), app);
     Router::new()
+        .route(
+            "/sso/instance/providers/{id}",
+            get(move |Path(id): Path<String>, Query(q): Query<OidcQuery>| {
+                let app = d.clone();
+                async move { provider_came_back(&app, &id, q).await }
+            }),
+        )
         .route(
             "/sso/instance/oidc",
             get(move |Query(q): Query<OidcQuery>| {
@@ -178,6 +185,102 @@ async fn come_back(app: &Arc<App>, scope: Scope, state: String, answer: Answer) 
     response
 }
 
+/// The page a provider-sign-in answer lands on, at the public URL.
+pub const PROVIDER_DONE: &str = "/auth/provider/done";
+
+/// Takes Google's, X's or Twitch's answer, then sends the browser on to
+/// `<public URL>/auth/provider/done#provider=…&state=…&code=…` (with `link=1`
+/// for a link), or with `error`.
+async fn provider_came_back(app: &Arc<App>, id: &str, q: OidcQuery) -> Response {
+    let settings = app.settings();
+    let Some(spec) = super::providers::spec(id) else {
+        return refused_page(Error::NotFound("sign-in provider"));
+    };
+    let Some(setting) = settings.sign_in_provider(spec.id).cloned() else {
+        return refused_page(Error::FailedPrecondition(format!(
+            "signing in with {} is off on this instance",
+            spec.name
+        )));
+    };
+    let state = q.state.trim().to_string();
+    let node = match app.node() {
+        Ok(node) => node,
+        Err(err) => return refused_page(err),
+    };
+    // A link was kept when it started; a sign-in is a ticket until now.
+    let kept = match node.sso_sign_in(&state).await {
+        Ok(kept) => kept.filter(|kept| kept.code_hash.is_none() && !kept.account_id.is_empty()),
+        Err(err) => return refused_page(err),
+    };
+    let link = kept.is_some();
+    let sign_in = match kept {
+        Some(kept) if kept.provider_key == setting.trust_key() => kept,
+        Some(_) => {
+            return refused_page(Error::FailedPrecondition(format!("{} changed meanwhile; start again", spec.name)));
+        }
+        None => match super::ticket::read(
+            app.picture_key(),
+            &setting.trust_key(),
+            &state,
+            crate::id::now_ms(),
+            &settings.public_url,
+            &settings.allowed_origins,
+        ) {
+            Ok(sign_in) => sign_in,
+            Err(err) => return refused_page(err),
+        },
+    };
+    let mut pairs: Vec<(&str, String)> = vec![("provider", spec.id.to_string()), ("state", state.clone())];
+    if link {
+        pairs.push(("link", "1".into()));
+    }
+    let result: Result<String> = async {
+        if !q.error.is_empty() {
+            return Err(Error::denied(format!("{} didn't sign you in", spec.name)));
+        }
+        if q.code.is_empty() {
+            return Err(Error::invalid("that isn't how this provider answers"));
+        }
+        // An answer that came back once already is refused before the
+        // provider hears about it again.
+        if !link && node.sso_state_seen(&state).await? {
+            return Err(Error::FailedPrecondition("this sign-in was already used; start again".into()));
+        }
+        let redirect = super::providers::redirect_uri(&settings.public_url, spec.id);
+        let identity = super::providers::identify(&setting, &redirect, &q.code, &sign_in.verifier).await?;
+        let code = crate::auth::new_token();
+        let hash = crate::auth::hash_token(&code);
+        let answered = if link {
+            node.sso_row_answered(&state, &hash, &identity).await?
+        } else {
+            node.sso_answered(&sign_in, &hash, &identity).await?
+        };
+        if !answered {
+            return Err(Error::FailedPrecondition("this sign-in was already used; start again".into()));
+        }
+        Ok(code)
+    }
+    .await;
+    match result {
+        Ok(code) => pairs.push(("code", code)),
+        Err(err) => {
+            tracing::info!("a sign-in provider's answer was refused");
+            pairs.push(("error", public_message(&err)));
+        }
+    }
+    let base = settings.public_url.trim_end_matches('/');
+    let mut done = reqwest::Url::parse(&format!("{base}{PROVIDER_DONE}"))
+        .unwrap_or_else(|_| reqwest::Url::parse("http://localhost/auth/provider/done").expect("a valid URL"));
+    done.set_fragment(Some(&url::form_urlencoded::Serializer::new(String::new()).extend_pairs(pairs).finish()));
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    if let Ok(location) = HeaderValue::from_str(done.as_str()) {
+        response.headers_mut().insert(header::LOCATION, location);
+    }
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    response
+}
+
 async fn load(app: &Arc<App>, scope: &Scope, state: &str) -> Result<Option<(SignIn, Provider)>> {
     match scope {
         Scope::Instance => {
@@ -186,7 +289,7 @@ async fn load(app: &Arc<App>, scope: &Scope, state: &str) -> Result<Option<(Sign
             let provider = settings.sso_provider.clone();
             let sign_in = super::ticket::read(
                 app.picture_key(),
-                &provider,
+                &provider.trust_key(),
                 state,
                 crate::id::now_ms(),
                 &settings.public_url,

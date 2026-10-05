@@ -18,6 +18,8 @@ pub const FIELDS: &[&str] = &[
     "linked_issuer",
     "sso_accounts",
     "sso_provider",
+    "provider_accounts",
+    "sign_in_providers",
     "server_creation",
     "agent_creation",
     "servers_per_account",
@@ -78,6 +80,10 @@ pub struct Settings {
     pub sso_accounts: Accounts,
     /// Unset (`Protocol::None`) until an admin sets one up.
     pub sso_provider: crate::sso::Provider,
+    /// Whether people signing in with Google, X or Twitch get accounts.
+    pub provider_accounts: Accounts,
+    /// Google, X and Twitch, as the admins set them up; off until then.
+    pub sign_in_providers: Vec<crate::sso::providers::Setting>,
     pub server_creation: pb::ServerCreation,
     pub agent_creation: pb::AgentCreation,
     pub limits: Limits,
@@ -138,6 +144,8 @@ impl Settings {
             linked_issuer: config.linked_issuer.clone(),
             sso_accounts: config.sso_accounts,
             sso_provider: crate::sso::Provider::default(),
+            provider_accounts: Accounts::Open,
+            sign_in_providers: Vec::new(),
             server_creation: config.server_creation,
             agent_creation: config.agent_creation,
             limits: config.limits.clone(),
@@ -222,6 +230,28 @@ impl Settings {
         self.sso_accounts.sign_up() && self.sso_sign_in()
     }
 
+    /// A sign-in provider people can use right now.
+    pub fn sign_in_provider(&self, id: &str) -> Option<&crate::sso::providers::Setting> {
+        if !self.provider_accounts.sign_in() || crate::linked::client_id(&self.public_url).is_none() {
+            return None;
+        }
+        self.sign_in_providers.iter().find(|setting| setting.id == id && setting.ready())
+    }
+
+    /// Every provider people can use right now, in fuwa's order.
+    pub fn sign_in_provider_options(&self) -> Vec<pb::SignInProviderOption> {
+        crate::sso::providers::ALL
+            .iter()
+            .filter(|spec| self.sign_in_provider(spec.id).is_some())
+            .map(|spec| pb::SignInProviderOption {
+                id: spec.id.into(),
+                name: spec.name.into(),
+                host: spec.host(),
+                sign_up: self.provider_accounts.sign_up(),
+            })
+            .collect()
+    }
+
     pub fn to_pb(&self) -> pb::InstanceSettings {
         let limits = &self.limits;
         pb::InstanceSettings {
@@ -245,6 +275,12 @@ impl Settings {
                 Accounts::Off => pb::SsoAccounts::Off,
             } as i32,
             sso_provider: Some(self.sso_provider.to_pb()),
+            provider_accounts: match self.provider_accounts {
+                Accounts::Open => pb::ProviderAccounts::Open,
+                Accounts::Closed => pb::ProviderAccounts::Closed,
+                Accounts::Off => pb::ProviderAccounts::Off,
+            } as i32,
+            sign_in_providers: self.sign_in_providers.iter().map(|setting| setting.to_pb()).collect(),
             server_creation: self.server_creation as i32,
             agent_creation: self.agent_creation as i32,
             servers_per_account: limits.servers_per_account,
@@ -353,6 +389,21 @@ impl Settings {
                     crate::sso::Provider::from_pb(&from.sso_provider.clone().unwrap_or_default(), &self.sso_provider)?;
                 serde_json::to_value(provider).map_err(|err| Error::internal(err.to_string()))?
             }
+            "provider_accounts" => Value::from(
+                match pb::ProviderAccounts::try_from(from.provider_accounts)
+                    .unwrap_or(pb::ProviderAccounts::Unspecified)
+                {
+                    pb::ProviderAccounts::Open => "open",
+                    pb::ProviderAccounts::Closed => "closed",
+                    pb::ProviderAccounts::Off => "off",
+                    pb::ProviderAccounts::Unspecified => "",
+                },
+            ),
+            // Secrets are never sent out, so an empty one keeps the saved one.
+            "sign_in_providers" => {
+                let settings = crate::sso::providers::from_pb(&from.sign_in_providers, &self.sign_in_providers)?;
+                serde_json::to_value(settings).map_err(|err| Error::internal(err.to_string()))?
+            }
             "server_creation" => Value::from(
                 match pb::ServerCreation::try_from(from.server_creation).unwrap_or(pb::ServerCreation::Unspecified) {
                     pb::ServerCreation::Everyone => "everyone",
@@ -455,6 +506,10 @@ impl Settings {
             "sso_provider" => {
                 serde_json::to_value(&self.sso_provider).map_err(|err| Error::internal(err.to_string()))?
             }
+            "provider_accounts" => Value::from(self.provider_accounts.as_str()),
+            "sign_in_providers" => {
+                serde_json::to_value(&self.sign_in_providers).map_err(|err| Error::internal(err.to_string()))?
+            }
             "server_creation" => Value::from(match self.server_creation {
                 pb::ServerCreation::Admins => "admins",
                 pb::ServerCreation::Disabled => "off",
@@ -520,7 +575,7 @@ impl Settings {
             "name" => self.name = name(value)?,
             "public_url" => self.public_url = public_url(value)?,
             "allowed_origins" => self.allowed_origins = origins(value)?,
-            "local_accounts" | "linked_accounts" | "sso_accounts" => {
+            "local_accounts" | "linked_accounts" | "sso_accounts" | "provider_accounts" => {
                 let accounts = value
                     .as_str()
                     .and_then(Accounts::parse)
@@ -528,6 +583,7 @@ impl Settings {
                 match field {
                     "local_accounts" => self.local_accounts = accounts,
                     "linked_accounts" => self.linked_accounts = accounts,
+                    "provider_accounts" => self.provider_accounts = accounts,
                     _ => self.sso_accounts = accounts,
                 }
             }
@@ -535,6 +591,14 @@ impl Settings {
             "sso_provider" => {
                 self.sso_provider = serde_json::from_value(value.clone())
                     .map_err(|err| Error::invalid(format!("sso_provider doesn't read: {err}")))?
+            }
+            "sign_in_providers" => {
+                let settings: Vec<crate::sso::providers::Setting> = serde_json::from_value(value.clone())
+                    .map_err(|err| Error::invalid(format!("sign_in_providers doesn't read: {err}")))?;
+                if settings.iter().any(|setting| setting.spec().is_none()) {
+                    return Err(Error::invalid("sign_in_providers lists a provider fuwa doesn't know"));
+                }
+                self.sign_in_providers = settings;
             }
             "server_creation" => {
                 self.server_creation = match value.as_str() {

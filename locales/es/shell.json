@@ -18,5 +18,7 @@
   "hosted.who": "Quienes hacen fuwa administran esta instancia.",
   "hosted.checked": "{host} · tu navegador verificó su certificado",
   "hosted.why": "Solo las instancias en nuestras propias direcciones llevan esta insignia. La app se fija únicamente en la dirección, porque cualquier servidor podría decir cualquier cosa de sí mismo.",
-  "hosted.about": "Acerca de fuwa"
+  "hosted.about": "Acerca de fuwa",
+  "signInNotice.added": "{name} se agregó como forma de iniciar sesión en tu cuenta el {date}. ¿No fuiste tú?",
+  "signInNotice.review": "Revisar"
 }

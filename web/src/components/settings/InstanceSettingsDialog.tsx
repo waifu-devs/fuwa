@@ -56,6 +56,8 @@ import { FEDERATION_FIELDS, federationSection } from "./instance/federation-fiel
 import { ModerationSettings } from "./instance/Moderation";
 import { MODERATION_FIELDS, moderationSection } from "./instance/moderation-section";
 import { Servers } from "./instance/Servers";
+import { SIGN_IN_PROVIDER_FIELDS, signInProviderSection } from "./instance/provider-fields";
+import { SignInProviderSettings } from "./instance/SignInProviders";
 import { SettingsScreen, type SettingsGroup } from "./SettingsScreen";
 
 /** Every setting, as the API names it, and how to read it for comparing. */
@@ -101,6 +103,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   ...MODERATION_FIELDS,
   ...FEDERATION_FIELDS,
   ...GIF_FIELDS,
+  ...SIGN_IN_PROVIDER_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -341,6 +344,7 @@ function settingsGroups(t: I18n["t"], name: string): SettingsGroup[] {
             { id: "sso-test", label: t("instancesettings.nav.ssoTest"), keywords: "sso check" },
           ],
         },
+        signInProviderSection(t),
         {
           id: "limits",
           label: t("serversettings.nav.limits"),
@@ -440,6 +444,8 @@ function SettingsTab({
       return saved ? <FederationSettings instanceKey={instanceKey} saved={saved} {...props} /> : null;
     case "gifs":
       return saved ? <GifSettings instanceKey={instanceKey} saved={saved} {...props} /> : null;
+    case "sign-in-providers":
+      return saved ? <SignInProviderSettings saved={saved} {...props} /> : null;
     case "privacy":
       return <PrivacySettings {...props} />;
     default:
@@ -1086,6 +1092,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
     MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     FEDERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     GIF_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    SIGN_IN_PROVIDER_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;

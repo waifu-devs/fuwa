@@ -13,6 +13,7 @@ import type {
   Profile,
   Role,
   Server,
+  SignInMethod,
   User,
   VoiceState,
   LiveTile,
@@ -161,6 +162,8 @@ export type InstanceState = {
   node: Node | null;
   me: User | null;
   admin: boolean;
+  /** Ways to sign in added to your account lately, newest first, for the notice every device shows. */
+  recentSignIns: SignInMethod[];
   /** Joined servers, in the order they were joined. */
   servers: Server[];
   /** Per server, sorted for the sidebar. */
@@ -253,6 +256,7 @@ export function emptyInstance(key: string, url: string, account = ""): InstanceS
     node: null,
     me: null,
     admin: false,
+    recentSignIns: [],
     servers: [],
     channels: {},
     members: {},
