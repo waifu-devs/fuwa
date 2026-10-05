@@ -126,6 +126,7 @@ fn may_change_rules(payload: &Payload) -> bool {
         Payload::MessageCreated(_)
             | Payload::MessageUpdated(_)
             | Payload::MessageDeleted(_)
+            | Payload::MessagePinned(_)
             | Payload::MemberJoined(_)
             | Payload::MemberUpdated(_)
             | Payload::MemberLeft(_)
