@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils";
 
 /** What stands between someone and a server, as little chips: applications, rules, waifu.dev only, a minimum account age. */
 export function ServerDoor({ server, className }: { server: Pick<Server, "applications" | "hasRules" | "linkedOnly" | "minAccountAgeSeconds">; className?: string }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const chips = [
     server.applications && { id: "apply", icon: ClipboardPenIcon, label: t("join.apply") },
     server.hasRules && { id: "rules", icon: ScrollTextIcon, label: t("join.door.rules") },
     server.linkedOnly && { id: "linked", icon: BadgeCheckIcon, label: t("join.door.linkedOnly") },
-    server.minAccountAgeSeconds > 0 && { id: "age", icon: HourglassIcon, label: t("join.door.accountAge", { age: formatDuration(server.minAccountAgeSeconds) }) },
+    server.minAccountAgeSeconds > 0 && { id: "age", icon: HourglassIcon, label: t("join.door.accountAge", { age: formatDuration(lang, server.minAccountAgeSeconds) }) },
   ].filter((c) => !!c);
   return (
     <div className={cn("flex flex-wrap gap-1.5 empty:hidden", className)}>

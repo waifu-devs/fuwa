@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { I18n } from "@/i18n/i18n";
 import { reportUsage } from "@/lib/reports";
 
 /**
@@ -71,11 +72,14 @@ export function toast(text: string) {
   setTimeout(() => set({ toasts: ui.toasts.filter((t) => t.id !== id) }), 2200);
 }
 
-/** Copies text and says so. */
-export function copy(text: string, what: string) {
+/**
+ * Copies text and says so in the app's language. `what` is already in that
+ * language, as it reads after "Copied" (common.copy.*, such as "link").
+ */
+export function copy(t: I18n["t"], text: string, what: string) {
   void navigator.clipboard?.writeText(text).then(
-    () => toast(`Copied ${what}`),
-    () => toast(`Couldn't copy ${what}`),
+    () => toast(t("common.copied", { what })),
+    () => toast(t("common.copyFailed", { what })),
   );
 }
 

@@ -6,6 +6,7 @@ import { addFiles, removeFile, retryFile, type Staged } from "@/components/chat/
 import { SPRING } from "@/components/motion";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 type Where = { instanceKey: string; serverId: string; channelId: string };
@@ -63,6 +64,7 @@ export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }
 }
 
 function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
+  const lang = useI18n();
   const { file, preview, sent, done, failed } = staged;
   return (
     <motion.div
@@ -76,7 +78,7 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
         "group/staged relative flex h-24 w-36 shrink-0 flex-col overflow-hidden rounded-xl border bg-muted/40",
         failed && "border-destructive/60 bg-destructive/5",
       )}
-      title={failed ?? `${file.name} · ${formatBytes(file.size)}`}
+      title={failed ?? `${file.name} · ${formatBytes(lang, file.size)}`}
     >
       {preview ? (
         <img src={preview} alt="" className={cn("absolute inset-0 size-full object-cover transition-opacity duration-300", !done && "opacity-60")} />
@@ -88,7 +90,7 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
       <div className={cn("relative mt-auto px-2 pb-1.5", preview && "bg-gradient-to-t from-black/70 to-transparent pt-4 text-white")}>
         <p className="truncate text-[0.7rem] font-bold">{shortName(file.name, 22)}</p>
         <p className={cn("truncate text-[0.65rem] tabular-nums", preview ? "text-white/75" : "text-muted-foreground", failed && "text-destructive")}>
-          {failed ?? formatBytes(file.size)}
+          {failed ?? formatBytes(lang, file.size)}
         </p>
       </div>
       {/* How far it got: a bar along the bottom that fills, then fades once done. */}

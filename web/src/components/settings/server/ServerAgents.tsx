@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ago, displayName, isAgent, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
  * by username (or one of your own with a tap), and taking one out.
  */
 export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const lang = useI18n();
   const inst = useInstance(instanceKey);
   const here = useMemo(() => (inst?.members[serverId] ?? []).filter((m) => isAgent(m.user)), [inst?.members, serverId]);
   const [mine, setMine] = useState<Agent[]>([]);
@@ -212,7 +214,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                       </AnimatePresence>
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      @{m.user?.username} · added {ago(toDate(m.joinedAt))}
+                      @{m.user?.username} · added {ago(lang, toDate(m.joinedAt))}
                     </span>
                   </span>
                   <AnimatePresence initial={false}>

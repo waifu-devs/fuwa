@@ -7,6 +7,7 @@ import { cleanName, MAX_FILES } from "@/files/sealed";
 import { cantSendFiles } from "@/fuwa/dms";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 
 /**
@@ -77,6 +78,7 @@ export function EncryptedAttach({ draft, disabled }: { draft: string; disabled?:
 
 /** The files going with the next encrypted message. */
 export function PickedTray({ draft, files }: { draft: string; files: File[] }) {
+  const lang = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -100,14 +102,14 @@ export function PickedTray({ draft, files }: { draft: string; files: File[] }) {
               exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
               transition={SPRING}
               className="relative flex h-20 w-36 shrink-0 flex-col overflow-hidden rounded-xl border bg-muted/40"
-              title={`${name} · ${formatBytes(file.size)}`}
+              title={`${name} · ${formatBytes(lang, file.size)}`}
             >
               <div className="flex flex-1 items-center justify-center pt-1">
                 <FileBadge name={name} />
               </div>
               <div className="px-2 pb-1.5">
                 <p className="truncate text-[0.7rem] font-bold">{shortName(name, 22)}</p>
-                <p className="truncate text-[0.65rem] text-muted-foreground tabular-nums">{formatBytes(file.size)}</p>
+                <p className="truncate text-[0.65rem] text-muted-foreground tabular-nums">{formatBytes(lang, file.size)}</p>
               </div>
               <button
                 type="button"

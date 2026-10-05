@@ -18,7 +18,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { isMuted, LEVELS, MUTE_FOR, mutedLabel, useNotificationSettings, useNow } from "@/lib/notifications";
+import { useI18n } from "@/i18n/react";
+import { isMuted, LEVELS, MUTE_FOR, muteForLabel, mutedHint, mutedLabel, mutedUntil, useNotificationSettings, useNow } from "@/lib/notifications";
 import { openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -28,8 +29,10 @@ import { cn } from "@/lib/utils";
  * rings when the channel gets muted or unmuted.
  */
 export function NotificationBell({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
+  const { t } = useI18n();
   const now = useNow();
   const server = useNotificationSettings(instanceKey, serverId);
+  const serverUntil = mutedUntil(server, now);
   const settings = useNotificationSettings(instanceKey, serverId, channel.id);
   const channelMuted = isMuted(settings, now);
   const serverMuted = isMuted(server, now);
@@ -48,9 +51,12 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
 
   const level = settings?.level ?? NotificationLevel.UNSPECIFIED;
   const serverDefault = useFuwa((s) => s.instances[instanceKey]?.servers.find((sv) => sv.id === serverId)?.defaultNotifications);
-  const serverLevel =
-    LEVELS.find((l) => l.value === server?.level)?.label ??
-    (serverDefault === NotificationLevel.MENTIONS ? "Only @mentions, the server's default" : undefined);
+  const serverLevelKey = LEVELS.find((l) => l.value === server?.level)?.label;
+  const serverLevel = serverLevelKey
+    ? t(serverLevelKey)
+    : serverDefault === NotificationLevel.MENTIONS
+      ? "Only @mentions, the server's default"
+      : undefined;
 
   return (
     <DropdownMenu>
@@ -59,7 +65,7 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
           type="button"
           whileTap={{ scale: 0.85 }}
           aria-label={muted ? `Notifications for #${channel.name}: ${serverMuted && !channelMuted ? "server muted" : "muted"}` : `Notifications for #${channel.name}`}
-          title={muted ? (channelMuted ? mutedLabel(settings, now) : `Server ${mutedLabel(server, now).toLowerCase()}`) : "Notification settings"}
+          title={muted ? (channelMuted ? mutedLabel(t, settings, now) : serverUntil ? t("common.notify.serverMutedUntil", { time: serverUntil }) : t("common.notify.serverMuted")) : "Notification settings"}
           className={cn(
             "grid size-9 place-items-center rounded-full transition-colors hover:bg-muted data-[state=open]:bg-muted",
             muted ? "text-amber-500" : "text-muted-foreground",
@@ -75,7 +81,7 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
         {channelMuted ? (
           <DropdownMenuItem onSelect={() => void change({ mutedUntil: false })}>
             <BellIcon /> Unmute channel
-            <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedLabel(settings, now).replace(/^Muted /, "")}</span>
+            <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedHint(t, settings, now)}</span>
           </DropdownMenuItem>
         ) : (
           <DropdownMenuSub>
@@ -84,14 +90,18 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-52">
               {MUTE_FOR.map((m) => (
-                <DropdownMenuItem key={m.label} onSelect={() => void change({ mutedUntil: m.ms === null ? null : new Date(Date.now() + m.ms) })}>
-                  {m.label}
+                <DropdownMenuItem key={m.id} onSelect={() => void change({ mutedUntil: m.ms === null ? null : new Date(Date.now() + m.ms) })}>
+                  {muteForLabel(t, m)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
-        {serverMuted && <p className="px-2 pb-1 text-xs text-amber-500">The whole server is {mutedLabel(server, now).toLowerCase()}.</p>}
+        {serverMuted && (
+          <p className="px-2 pb-1 text-xs text-amber-500">
+            {serverUntil ? t("common.notify.wholeServerMutedUntil", { time: serverUntil }) : t("common.notify.wholeServerMuted")}
+          </p>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup value={String(level)} onValueChange={(v) => void change({ level: Number(v) as NotificationLevel })}>
           <DropdownMenuRadioItem value={String(NotificationLevel.UNSPECIFIED)}>
@@ -102,7 +112,7 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
           </DropdownMenuRadioItem>
           {LEVELS.map((l) => (
             <DropdownMenuRadioItem key={l.value} value={String(l.value)}>
-              {l.label}
+              {t(l.label)}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

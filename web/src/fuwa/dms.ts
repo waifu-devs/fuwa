@@ -6,6 +6,7 @@ import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
 import { cleanName, MAX_FILE_BYTES, MAX_FILES, openFile, sealFile } from "@/files/sealed";
 import { formatBytes } from "@/lib/format";
+import { i18n } from "@/i18n/i18n";
 import type { Loader } from "@/voice/player";
 import type { Clip } from "@/voice/recorder";
 import { MAX_VOICE_BYTES, readExactly } from "@/voice/fetch";
@@ -278,7 +279,7 @@ async function measure(file: File): Promise<{ width: number; height: number }> {
 export function cantSendFiles(files: File[]): string | null {
   if (files.length > MAX_FILES) return `A message can carry at most ${MAX_FILES} files.`;
   const big = files.find((f) => f.size > MAX_FILE_BYTES);
-  if (big) return `${cleanName(big.name)} is too big to send encrypted (at most ${formatBytes(MAX_FILE_BYTES)}).`;
+  if (big) return `${cleanName(big.name)} is too big to send encrypted (at most ${formatBytes(i18n(), MAX_FILE_BYTES)}).`;
   return null;
 }
 

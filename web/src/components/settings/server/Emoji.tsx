@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EMOJI_NAME, emojiPicture, nameFromFile } from "@/lib/emoji";
 import { displayName, formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { PICTURE_TYPES } from "@/lib/pictures";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -221,6 +222,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
 
 /** One emoji: its picture, a name you can change in place, who added it, and delete. */
 function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: string; serverId: string; emoji: EmojiT; creator: Parameters<typeof UserAvatar>[0]["user"] }) {
+  const lang = useI18n();
   const [name, setName] = useState(emoji.name);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -288,7 +290,7 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
         <span className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
           <UserAvatar user={creator} className="size-4" />
           <span className="truncate">
-            {creator ? displayName(creator) : "Someone"} · {formatBytes(Number(emoji.size))}
+            {creator ? displayName(creator) : "Someone"} · {formatBytes(lang, Number(emoji.size))}
             {emoji.animated && " · moves"}
           </span>
         </span>

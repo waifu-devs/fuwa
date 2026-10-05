@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { displayName, formatBytes, formatDay, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { hasRegions, regionMark, regionName, sameRegion } from "@/lib/regions";
 import { cn } from "@/lib/utils";
@@ -62,6 +63,7 @@ const membersOf = (s: InstanceServer) => Number(s.usage?.members ?? s.server?.me
  * whether or not they're in it.
  */
 export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave: () => void }) {
+  const lang = useI18n();
   const [servers, setServers] = useState<InstanceServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -131,7 +133,7 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
               <t.icon className="size-3.5" /> {t.label}
             </p>
             <p className="mt-1 truncate text-xl font-extrabold tabular-nums">
-              <CountUp value={t.value} delay={0.1 + n * 0.05} format={t.bytes ? (v) => formatBytes(Math.round(v)) : undefined} />
+              <CountUp value={t.value} delay={0.1 + n * 0.05} format={t.bytes ? (v) => formatBytes(lang, Math.round(v)) : undefined} />
             </p>
           </motion.div>
         ))}
@@ -213,6 +215,7 @@ function ServerRow({
   onDeleted: () => void;
   onLeave: () => void;
 }) {
+  const lang = useI18n();
   const s = entry.server!;
   const storage = storageOf(entry);
   const cap = entry.limits?.storageBytes === undefined ? null : Number(entry.limits.storageBytes);
@@ -261,8 +264,8 @@ function ServerRow({
             <UsersIcon className="size-3" /> {membersOf(entry).toLocaleString()}
           </span>
           <span className={cn("flex items-center gap-1", full && "font-bold text-amber-500")}>
-            <HardDriveIcon className="size-3" /> {formatBytes(storage)}
-            {cap !== null && <span className="text-muted-foreground/70">/ {formatBytes(cap)}</span>}
+            <HardDriveIcon className="size-3" /> {formatBytes(lang, storage)}
+            {cap !== null && <span className="text-muted-foreground/70">/ {formatBytes(lang, cap)}</span>}
           </span>
         </span>
         <motion.span animate={{ rotate: open ? 180 : 0 }} transition={SPRING} className="shrink-0 text-muted-foreground">
@@ -312,6 +315,7 @@ function Details({
   onDeleted: () => void;
   onLeave: () => void;
 }) {
+  const lang = useI18n();
   const s = entry.server!;
   const navigate = useNavigate();
   const [own, setOwn] = useState<Caps | null>(null);
@@ -335,7 +339,7 @@ function Details({
   const changed = own ? CAP_FIELDS.filter((f) => draft[f] !== own[f]).length : 0;
   const fallback = (field: (typeof CAP_FIELDS)[number], bytes = false) => {
     const d = defaults[field];
-    return `Default: ${d === undefined ? "no limit" : bytes ? formatBytes(Number(d)) : Number(d).toLocaleString()}`;
+    return `Default: ${d === undefined ? "no limit" : bytes ? formatBytes(lang, Number(d)) : Number(d).toLocaleString()}`;
   };
   const set = (field: (typeof CAP_FIELDS)[number]) => (value: bigint | undefined) => {
     setDraft((d) => ({ ...d, [field]: value }));
@@ -371,7 +375,7 @@ function Details({
           >
             <p className="text-[0.65rem] font-bold tracking-wide text-muted-foreground uppercase">{st.label}</p>
             <p className="text-lg font-extrabold tabular-nums">
-              <CountUp value={st.value} delay={0.1 + n * 0.04} format={st.bytes ? (v) => formatBytes(Math.round(v)) : undefined} />
+              <CountUp value={st.value} delay={0.1 + n * 0.04} format={st.bytes ? (v) => formatBytes(lang, Math.round(v)) : undefined} />
             </p>
           </motion.div>
         ))}
@@ -645,6 +649,7 @@ function MoveRegion({
 
 /** Saves the server's whole database as one SQLite file, filling up as it arrives. */
 function ExportButton({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const lang = useI18n();
   const [progress, setProgress] = useState<number | null>(null);
   const [done, setDone] = useState(false);
 
@@ -658,7 +663,7 @@ function ExportButton({ instanceKey, serverId }: { instanceKey: string; serverId
       Object.assign(document.createElement("a"), { href: url, download: stamped }).click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setDone(true);
-      toast(`Saved ${stamped} (${formatBytes(blob.size)})`);
+      toast(`Saved ${stamped} (${formatBytes(lang, blob.size)})`);
       setTimeout(() => setDone(false), 2200);
     } catch (e) {
       toast((e as FuwaError).message);

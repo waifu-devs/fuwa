@@ -33,10 +33,11 @@ export function useStanding(instanceKey: string, serverId: string): { standing: 
  * while it waits, and the answer pops in with the reason when there is one.
  */
 export function ApplicationTimeline({ standing, appliedAt, reason }: { standing: Standing; appliedAt: number | null; reason: string }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const done = standing !== "waiting";
   const stops: { id: string; icon: ReactNode; title: string; note: string; state: "done" | "now" | "later" | "no" }[] = [
-    { id: "sent", icon: <SendIcon className="size-3.5" />, title: t("join.timeline.sent"), note: appliedAt ? t("join.timeline.appliedAgo", { when: ago(new Date(appliedAt)) }) : t("join.timeline.applied"), state: "done" },
+    { id: "sent", icon: <SendIcon className="size-3.5" />, title: t("join.timeline.sent"), note: appliedAt ? t("join.timeline.appliedAgo", { when: ago(lang, new Date(appliedAt)) }) : t("join.timeline.applied"), state: "done" },
     {
       id: "read",
       icon: done ? <EyeIcon className="size-3.5" /> : <HourglassIcon className="size-3.5 animate-[flip_3s_ease-in-out_infinite]" />,

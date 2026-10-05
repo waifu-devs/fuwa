@@ -46,6 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -772,6 +773,7 @@ function Actions({
   draft: AutoModRule;
   setAction: (kind: AutoModActionKind, action: Partial<AutoModAction> | null) => void;
 }) {
+  const lang = useI18n();
   const inst = useInstance(instanceKey);
   const textChannels = (inst?.channels[serverId] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   const block = actionOf(draft, AutoModActionKind.BLOCK);
@@ -784,7 +786,7 @@ function Actions({
           ...TIME_OUTS,
           {
             value: timeOut.durationSeconds,
-            label: formatDuration(timeOut.durationSeconds),
+            label: formatDuration(lang, timeOut.durationSeconds),
           },
         ].sort((a, b) => a.value - b.value)
       : TIME_OUTS;

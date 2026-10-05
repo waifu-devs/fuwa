@@ -8,7 +8,7 @@ import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError } from "@/fuwa/errors";
 import { useFuwa } from "@/fuwa/store";
 import { useI18n } from "@/i18n/react";
-import { activeAgo } from "@/lib/devices";
+import { activeWhen } from "@/lib/devices";
 import { formatBytes } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -22,7 +22,8 @@ const problemOf = (err: unknown) => (err instanceof Error && err.name === "Error
  * device or browser can read what came before it.
  */
 export function MessageBackup({ instanceKey }: { instanceKey: string }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const backup = useFuwa((s) => s.instances[instanceKey]?.dms.backup);
   const dmsReady = useFuwa((s) => s.instances[instanceKey]?.dms.status === "ready");
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
@@ -101,13 +102,12 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
   } else {
     const share = backup.maxSize ? Math.min(1, backup.size / backup.maxSize) : 0;
     const full = backup.status === "full";
-    const saved = backup.updatedAt > 0 ? activeAgo(new Date(backup.updatedAt), now) : null;
+    const saved = backup.updatedAt > 0 ? activeWhen(lang, new Date(backup.updatedAt), now) : undefined;
     body = (
       <Card icon={<CheckIcon className="size-5" />} title={full ? t("accountsettings.backup.full") : t("accountsettings.backup.on")} tone={full ? "warn" : "ok"}>
         <p className="text-sm text-muted-foreground">
           {t("accountsettings.backup.onHint")}
-          {saved &&
-            ` ${saved === "Active now" ? t("accountsettings.backup.lastSavedNow") : t("accountsettings.backup.lastSaved", { when: saved.replace(/^Active /, "") })}`}
+          {saved !== undefined && ` ${saved === null ? t("accountsettings.backup.lastSavedNow") : t("accountsettings.backup.lastSaved", { when: saved })}`}
         </p>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
           <motion.div
@@ -118,7 +118,7 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
           />
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
-          {t("accountsettings.backup.size", { used: formatBytes(backup.size), total: formatBytes(backup.maxSize) })}
+          {t("accountsettings.backup.size", { used: formatBytes(lang, backup.size), total: formatBytes(lang, backup.maxSize) })}
         </p>
         <Ask
           open={asking !== null}

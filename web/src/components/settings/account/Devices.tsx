@@ -133,7 +133,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
                       variant="ghost"
                       size="sm"
                       disabled={leaving.has(s.id)}
-                      aria-label={t("accountsettings.devices.signOutDevice", { device: deviceName(describeDevice(s.userAgent)) })}
+                      aria-label={t("accountsettings.devices.signOutDevice", { device: deviceName(t, describeDevice(s.userAgent)) })}
                       onClick={() => void signOut(s.id)}
                       className="group shrink-0 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
@@ -215,7 +215,8 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
 }
 
 function DeviceRow({ session, now, here = false, children }: { session: Session; now: number; here?: boolean; children?: ReactNode }) {
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const device = describeDevice(session.userAgent);
   const Icon = ICONS[device.kind];
   const created = session.createdAt ? timestampDate(session.createdAt) : null;
@@ -231,9 +232,9 @@ function DeviceRow({ session, now, here = false, children }: { session: Session;
         )}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold">{deviceName(device)}</p>
+        <p className="truncate text-sm font-bold">{deviceName(t, device)}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {here ? t("accountsettings.devices.usingNow") : active ? activeAgo(active, now) : t("accountsettings.devices.notUsed")}
+          {here ? t("accountsettings.devices.usingNow") : active ? activeAgo(lang, active, now) : t("accountsettings.devices.notUsed")}
           {created && ` · ${t("accountsettings.devices.signedIn", { date: day(created) })}`}
         </p>
       </div>

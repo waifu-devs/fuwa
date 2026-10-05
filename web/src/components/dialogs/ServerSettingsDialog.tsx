@@ -82,6 +82,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { displayName, formatBytes, formatDuration, initials } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { ACCOUNT_AGES, timeLeft } from "@/lib/invites";
 import { has } from "@/lib/permissions";
 import { hasRegions, regionName } from "@/lib/regions";
@@ -491,6 +492,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
  * and how old their account must be.
  */
 function Access({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const lang = useI18n();
   const inst = useInstance(instanceKey);
   const linkedOffered = !!inst?.node?.auth?.linkedSignIn;
   const [discoverable, setDiscoverable] = useState(server.discoverable);
@@ -507,7 +509,7 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
   // A value set some other way (the API, an older client) still shows as a choice.
   const ages = ACCOUNT_AGES.some((a) => a.value === server.minAccountAgeSeconds)
     ? ACCOUNT_AGES
-    : [...ACCOUNT_AGES, { value: server.minAccountAgeSeconds, label: formatDuration(server.minAccountAgeSeconds) }].sort((a, b) => a.value - b.value);
+    : [...ACCOUNT_AGES, { value: server.minAccountAgeSeconds, label: formatDuration(lang, server.minAccountAgeSeconds) }].sort((a, b) => a.value - b.value);
   const shown = { ...server, discoverable, applications, linkedOnly, minAccountAgeSeconds: minAge };
 
   function discard() {
@@ -734,6 +736,7 @@ function BrowseCard({ server }: { server: Server }) {
 }
 
 function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const lang = useI18n();
   const [data, setData] = useState<GetServerUsageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -784,7 +787,7 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
             >
               <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{r.label}</p>
               <p className="mt-1 text-2xl font-extrabold tabular-nums">
-                <CountUp value={r.value} delay={0.1 + n * 0.05} format={r.bytes ? (v) => formatBytes(Math.round(v)) : undefined} />
+                <CountUp value={r.value} delay={0.1 + n * 0.05} format={r.bytes ? (v) => formatBytes(lang, Math.round(v)) : undefined} />
               </p>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                 <motion.div
@@ -795,7 +798,7 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
                 />
               </div>
               <p className={cn("mt-1.5 text-xs", r.warn ? "font-bold text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
-                {r.note ?? (limit !== null ? `of ${r.bytes ? formatBytes(limit) : limit.toLocaleString()}` : (r.sub ?? "no limit"))}
+                {r.note ?? (limit !== null ? `of ${r.bytes ? formatBytes(lang, limit) : limit.toLocaleString()}` : (r.sub ?? "no limit"))}
               </p>
             </motion.div>
           );
@@ -818,6 +821,7 @@ const caps = (l: ServerLimits | undefined): Caps => ({
 
 /** Instance admins: this server's own caps, over the instance defaults. */
 function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const lang = useI18n();
   const [own, setOwn] = useState<Caps | null>(null);
   const [draft, setDraft] = useState<Caps | null>(null);
   const [defaults, setDefaults] = useState<Caps>({});
@@ -840,7 +844,7 @@ function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: stri
   const changed = CAP_FIELDS.filter((f) => draft[f] !== own[f]).length;
   const fallback = (field: (typeof CAP_FIELDS)[number], bytes = false) => {
     const d = defaults[field];
-    return `Instance default (${d === undefined ? "no limit" : bytes ? formatBytes(Number(d)) : Number(d).toLocaleString()})`;
+    return `Instance default (${d === undefined ? "no limit" : bytes ? formatBytes(lang, Number(d)) : Number(d).toLocaleString()})`;
   };
   const set = (field: (typeof CAP_FIELDS)[number]) => (value: bigint | undefined) => {
     setDraft((d) => ({ ...d, [field]: value }));

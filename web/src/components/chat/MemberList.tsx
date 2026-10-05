@@ -231,7 +231,7 @@ const MemberRow = memo(function MemberRow({
       </span>
       {m.user && (
         <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <CopyId id={m.user.id} what="user ID" />
+          <CopyId id={m.user.id} what="common.copy.userId" />
         </span>
       )}
     </motion.div>

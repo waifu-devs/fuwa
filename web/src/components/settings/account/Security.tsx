@@ -365,7 +365,7 @@ function SecretKey({ secret }: { secret: string }) {
       <code className={cn("min-w-0 flex-1 rounded-xl bg-muted px-3 py-2 font-mono text-sm font-bold tracking-wider break-all transition-[filter] duration-300", streaming && "blur-sm select-none")}>
         {groups.join(" ")}
       </code>
-      <Button type="button" variant="outline" size="icon" className="shrink-0 rounded-xl" aria-label={t("accountsettings.security.copyKey")} onClick={() => copy(secret, "the key")}>
+      <Button type="button" variant="outline" size="icon" className="shrink-0 rounded-xl" aria-label={t("accountsettings.security.copyKey")} onClick={() => copy(t, secret, t("common.copy.key"))}>
         <CopyIcon className="size-4" />
       </Button>
     </div>
@@ -400,7 +400,7 @@ function BackupCodes({ codes, where }: { codes: string[]; where: string }) {
         ))}
       </ul>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => copy(codes.join("\n"), "your backup codes")}>
+        <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => copy(t, codes.join("\n"), t("common.copy.backupCodes"))}>
           <CopyIcon className="size-4" /> {t("accountsettings.security.copyAll")}
         </Button>
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={download}>

@@ -71,7 +71,8 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
   const waiting = applied.status === ApplicationStatus.PENDING;
   const [applying, setApplying] = useState(false);
   const [looking, setLooking] = useState(false);
-  const { t } = useI18n();
+  const lang = useI18n();
+  const { t } = lang;
   const label = t(waiting ? "join.applied.waitingLabel" : "join.applied.turnedDownLabel", { server: server.name });
 
   function withdraw() {
@@ -119,7 +120,7 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
             <span className="truncate font-extrabold">{server.name}</span>
             <span className="text-xs text-muted-foreground">
               {waiting
-                ? t("join.applied.waitingNote", { when: ago(new Date(applied.appliedAt)) })
+                ? t("join.applied.waitingNote", { when: ago(lang, new Date(applied.appliedAt)) })
                 : applied.reason
                   ? t("join.applied.turnedDownBecause", { reason: applied.reason })
                   : t("join.applied.turnedDownNote")}

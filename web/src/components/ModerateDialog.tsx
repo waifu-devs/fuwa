@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration, formatLeft, formatStamp, memberName, timedOutUntil } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { moderationFor, type ModAction } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
@@ -22,7 +23,7 @@ import { cn } from "@/lib/utils";
 export type { ModAction };
 
 /** Discord's time-out lengths. */
-const TIME_OUT = [60, 5 * 60, 10 * 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60].map((s) => ({ value: s, label: formatDuration(s) }));
+const TIME_OUT = [60, 5 * 60, 10 * 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60];
 
 /** How much of a banned person's history goes with them. */
 const DELETE = [
@@ -71,12 +72,13 @@ export function ModerateDialog({
 }
 
 function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: string; serverId: string; member: Member; action: ModAction; onDone: () => void }) {
+  const lang = useI18n();
   const name = memberName(member);
   const userId = member.user?.id ?? "";
   const now = useNow(1000);
   const until = timedOutUntil(member, now);
   const [reason, setReason] = useState("");
-  const [seconds, setSeconds] = useState(TIME_OUT[3]!.value);
+  const [seconds, setSeconds] = useState(TIME_OUT[3]!);
   const [purge, setPurge] = useState(0);
   const [nickname, setNick] = useState(member.nickname);
   const timeOut = useAction(timeOutMember);
@@ -91,7 +93,7 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
     e.preventDefault();
     if (action === "timeout") {
       if ((await timeOut.go(instanceKey, serverId, userId, seconds, reason.trim())) === undefined) return;
-      toast(`${name} is timed out for ${formatDuration(seconds)}`);
+      toast(`${name} is timed out for ${formatDuration(lang, seconds)}`);
     } else if (action === "kick") {
       if ((await kick.go(instanceKey, serverId, userId, reason.trim())) === undefined) return;
       toast(`Kicked ${name}`);
@@ -139,7 +141,7 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
               className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-1 text-xs font-bold text-amber-600 tabular-nums dark:text-amber-400"
               title={`Until ${formatStamp(until)}`}
             >
-              <HourglassIcon className="size-3.5 animate-[spin_3s_ease-in-out_infinite]" /> {formatLeft(until.getTime() - now)}
+              <HourglassIcon className="size-3.5 animate-[spin_3s_ease-in-out_infinite]" /> {formatLeft(lang, until.getTime() - now)}
             </motion.span>
           )}
         </AnimatePresence>
@@ -148,7 +150,7 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
       {action === "timeout" && (
         <div className="flex flex-col gap-2">
           <Label className="font-bold">For how long</Label>
-          <Chips label="Time-out length" value={seconds} onChange={setSeconds} options={TIME_OUT} />
+          <Chips label="Time-out length" value={seconds} onChange={setSeconds} options={TIME_OUT.map((s) => ({ value: s, label: formatDuration(lang, s) }))} />
           <p className="text-xs text-muted-foreground">
             Ends <b>{formatStamp(new Date(now + seconds * 1000))}</b>
             {until && ", in place of the one running now"}.

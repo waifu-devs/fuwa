@@ -61,7 +61,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { displayName, formatDuration, formatStamp, toDate } from "@/lib/format";
+import { displayName, formatDuration, formatStamp, type Lang, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { cssColor, permissionLabel } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
@@ -329,6 +330,7 @@ function Entry({
   open: boolean;
   onToggle: () => void;
 }) {
+  const lang = useI18n();
   const kind = KINDS[entry.action] ?? KINDS[AuditAction.UNSPECIFIED];
   const actor = users[entry.actorId];
   const at = toDate(entry.createdAt);
@@ -348,7 +350,7 @@ function Entry({
           <UserAvatar user={actor} className="absolute -right-1.5 -bottom-1.5 size-5 ring-2 ring-background" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm break-words">{sentence(entry, users, channels, roles)}</span>
+          <span className="block text-sm break-words">{sentence(lang, entry, users, channels, roles)}</span>
           <span className="block text-xs text-muted-foreground" title={formatStamp(at)}>
             {formatStamp(at)}
           </span>
@@ -383,15 +385,15 @@ function Entry({
                 >
                   <span className="text-muted-foreground">{FIELD[change.field] ?? change.field}:</span>
                   {ONE_SIDE[entry.action] ? (
-                    <span className="rounded-md bg-muted px-1.5">{value(change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
+                    <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
                   ) : (
                     <>
                       <span className="rounded-md bg-destructive/10 px-1.5 text-destructive line-through decoration-destructive/50">
-                        {value(change.field, change.before, users, channels, entry)}
+                        {value(lang, change.field, change.before, users, channels, entry)}
                       </span>
                       <ArrowRightIcon className="size-3.5 text-muted-foreground" />
                       <span className="rounded-md bg-emerald-500/10 px-1.5 text-emerald-600 dark:text-emerald-400">
-                        {value(change.field, change.after, users, channels, entry)}
+                        {value(lang, change.field, change.after, users, channels, entry)}
                       </span>
                     </>
                   )}
@@ -406,7 +408,7 @@ function Entry({
 }
 
 /** A value from the log, in words. */
-function value(field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
+function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
   if (field === "discoverable" || field === "enabled") return raw === "true" ? "Yes" : "No";
   if (field === "role") return OLD_RANK[raw] ?? (raw ? entry.roleName : "None");
   if (field === "hoist" || field === "mentionable") return raw === "true" ? "Yes" : "No";
@@ -427,22 +429,22 @@ function value(field: string, raw: string, users: Record<string, User>, channels
     const channel = channels.find((c) => c.id === raw);
     return channel ? (field === "parent_id" ? channel.name : `#${channel.name}`) : "A deleted channel";
   }
-  if (field === "slowmode_seconds") return raw === "0" ? "Off" : formatDuration(Number(raw));
+  if (field === "slowmode_seconds") return raw === "0" ? "Off" : formatDuration(lang, Number(raw));
   if (field === "timed_out_until") {
     if (!raw) return "Not timed out";
     const until = Number(raw);
-    return formatStamp(new Date(until)) + ` (${formatDuration(Math.round((until - toDate(entry.createdAt).getTime()) / 1000))})`;
+    return formatStamp(new Date(until)) + ` (${formatDuration(lang, Math.round((until - toDate(entry.createdAt).getTime()) / 1000))})`;
   }
   if (field === "owner_id") return displayName(users[raw]);
   if (field === "max_uses") return raw === "0" ? "No limit" : raw;
   if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : "Never";
-  if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(Number(raw));
-  if (field === "thread_archive_hours") return raw === "0" ? "Never" : formatDuration(Number(raw) * 3600);
+  if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(lang, Number(raw));
+  if (field === "thread_archive_hours") return raw === "0" ? "Never" : formatDuration(lang, Number(raw) * 3600);
   if (field === "record_video") return raw === "true" ? "Sound and video" : "Sound only";
   return raw || "Nothing";
 }
 
-function sentence(entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
+function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
   const actor = <b>{displayName(users[entry.actorId])}</b>;
   const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
   // Roles go by their name now, like channels, and the one they had once they're gone.
@@ -474,7 +476,7 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
           <>{actor} let in accounts of any age</>
         ) : (
           <>
-            {actor} let in accounts once they're {formatDuration(Number(age.after))} old
+            {actor} let in accounts once they're {formatDuration(lang, Number(age.after))} old
           </>
         );
       return <>{actor} changed the server's settings</>;
@@ -484,7 +486,7 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
     case AuditAction.CHANNEL_UPDATE: {
       const slow = change("slowmode_seconds");
       if (slow && entry.changes.length === 1)
-        return slow.after === "0" ? <>{actor} turned off slow mode in {channel}</> : <>{actor} set slow mode in {channel} to {formatDuration(Number(slow.after))}</>;
+        return slow.after === "0" ? <>{actor} turned off slow mode in {channel}</> : <>{actor} set slow mode in {channel} to {formatDuration(lang, Number(slow.after))}</>;
       return <>{actor} changed {channel}</>;
     }
     case AuditAction.CHANNEL_DELETE:
@@ -543,7 +545,7 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       const until = change("timed_out_until");
       if (!until?.after) return <>{actor} ended {target}'s time-out</>;
       const seconds = Math.round((Number(until.after) - toDate(entry.createdAt).getTime()) / 1000);
-      return <>{actor} timed out {target} for {formatDuration(seconds)}</>;
+      return <>{actor} timed out {target} for {formatDuration(lang, seconds)}</>;
     }
     case AuditAction.MEMBER_KICK:
       return <>{actor} kicked {target}</>;
@@ -622,7 +624,7 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       return (
         <>
           <b>AutoMod</b> timed out {target}
-          {seconds > 0 && ` for ${formatDuration(seconds)}`}
+          {seconds > 0 && ` for ${formatDuration(lang, seconds)}`}
           {entry.channelName && (
             <>
               {" "}

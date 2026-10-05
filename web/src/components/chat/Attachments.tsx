@@ -17,6 +17,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import type { Attachment } from "@/gen/fuwa/v1/types_pb";
 import { familyOf, fitBox, lookOf, shortName, type FileFamily } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { reportError } from "@/lib/reports";
@@ -254,13 +255,14 @@ function Voice({ file, delay, animate }: { file: Attachment; delay: number; anim
 
 /** A file's name and size, with its download button. */
 function FileLine({ file }: { file: Attachment }) {
+  const lang = useI18n();
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-bold" title={file.filename}>
           {shortName(file.filename)}
         </p>
-        <p className="text-xs text-muted-foreground tabular-nums">{formatBytes(Number(file.size))}</p>
+        <p className="text-xs text-muted-foreground tabular-nums">{formatBytes(lang, Number(file.size))}</p>
       </div>
       {shownPicture(file.url) && (
         <Download url={file.url} name={file.filename} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-primary">
@@ -288,6 +290,7 @@ function FileCard({ file, delay, animate }: { file: Attachment; delay: number; a
 
 /** A picture full size over everything, closed with Escape, a click outside or the button. */
 function Viewer({ file, onClose }: { file: Attachment | null; onClose: () => void }) {
+  const lang = useI18n();
   return (
     <DialogPrimitive.Root open={!!file} onOpenChange={(open) => !open && onClose()}>
       <AnimatePresence>
@@ -327,7 +330,7 @@ function Viewer({ file, onClose }: { file: Attachment | null; onClose: () => voi
                   <span className="truncate font-bold" title={file.filename}>
                     {shortName(file.filename, 48)}
                   </span>
-                  <span className="shrink-0 text-white/70 tabular-nums">{formatBytes(Number(file.size))}</span>
+                  <span className="shrink-0 text-white/70 tabular-nums">{formatBytes(lang, Number(file.size))}</span>
                   <Download url={file.url} name={file.filename} className="grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-white/15">
                     <DownloadIcon className="size-4" />
                   </Download>

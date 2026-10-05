@@ -39,7 +39,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { activeAgo } from "@/lib/devices";
+import { useI18n } from "@/i18n/react";
+import { activeWhen } from "@/lib/devices";
 import { displayName, formatDay, hueOf, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
@@ -257,10 +258,12 @@ function AccountRow({
   onTurnOff: () => void;
   onReset: () => void;
 }) {
+  const lang = useI18n();
   const id = a.user?.id ?? "";
   const local = a.user?.kind === AccountKind.LOCAL;
   const agent = a.user?.kind === AccountKind.AGENT;
   const joined = formatDay(toDate(a.createdAt)).replace(/^(Today|Yesterday)$/, (d) => d.toLowerCase());
+  const seen = activeWhen(lang, toDate(a.lastSeenAt), now);
   const facts = [
     `${a.servers} ${a.servers === 1 ? "server" : "servers"}`,
     a.serversOwned ? `owns ${a.serversOwned}` : null,
@@ -331,7 +334,7 @@ function AccountRow({
             )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} · joined {joined} · {activeAgo(toDate(a.lastSeenAt), now).replace(/^Active/, "active")}
+            @{me ? <Private text={a.user?.username ?? ""} kind="name" className="align-top" /> : a.user?.username} · joined {joined} · {seen ? `active ${seen}` : "active now"}
           </p>
           <p className="hidden truncate text-xs text-muted-foreground/80 sm:block">{facts.join(" · ")}</p>
         </div>
@@ -376,7 +379,7 @@ function AccountRow({
                 ))}
               {developer && !me && <DropdownMenuSeparator />}
               {developer && (
-                <DropdownMenuItem onSelect={() => copy(id, "account ID")}>
+                <DropdownMenuItem onSelect={() => copy(lang.t, id, lang.t("common.copy.accountId"))}>
                   <FingerprintIcon /> Copy account ID
                 </DropdownMenuItem>
               )}
@@ -504,6 +507,7 @@ function ResetPassword({ instanceKey, account, onDone }: { instanceKey: string; 
 
 /** The password, typed out letter by letter, behind a veil in streamer mode. */
 function NewPassword({ password }: { password: string }) {
+  const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -552,7 +556,7 @@ function NewPassword({ password }: { password: string }) {
         className="size-12 shrink-0 rounded-xl"
         aria-label="Copy the password"
         onClick={() => {
-          copy(password, "the password");
+          copy(t, password, t("common.copy.password"));
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
         }}

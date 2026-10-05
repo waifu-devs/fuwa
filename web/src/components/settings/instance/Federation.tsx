@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/ui";
 import { ago, formatBytes } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
@@ -88,6 +89,7 @@ export function FederationSettings({
   patch: (fn: (d: InstanceSettings) => void) => void;
   resetter: (...paths: string[]) => Reset;
 }) {
+  const lang = useI18n();
   const privateField = usePrivateField();
   const [info, setInfo] = useState<GetFederationResponse | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -181,7 +183,7 @@ export function FederationSettings({
                 <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> Rotate key
               </Button>
               <span className="text-xs text-muted-foreground">
-                {info.rotatedAt ? `Last rotated ${ago(timestampDate(info.rotatedAt))}.` : "Never rotated."}
+                {info.rotatedAt ? `Last rotated ${ago(lang, timestampDate(info.rotatedAt))}.` : "Never rotated."}
               </span>
             </div>
           </motion.div>
@@ -268,7 +270,7 @@ export function FederationSettings({
         id="federation-files"
         title="Files per server a day"
         hint="How much one server on another instance may send in files to channels shared from here in a day (UTC). The files are kept here, under the home server's room for files."
-        defaultLabel={defaults?.sharedRemoteFileBytesPerDay === undefined ? "no limit" : formatBytes(Number(defaults.sharedRemoteFileBytesPerDay))}
+        defaultLabel={defaults?.sharedRemoteFileBytesPerDay === undefined ? "no limit" : formatBytes(lang, Number(defaults.sharedRemoteFileBytesPerDay))}
         delay={0.28}
         {...resetter("shared_remote_file_bytes_per_day")}
       >
@@ -306,7 +308,8 @@ function withPeer(info: GetFederationResponse, peer: FederationPeer | undefined)
 }
 
 function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
-  const heard = peer.lastHeard ? ago(timestampDate(peer.lastHeard)) : "never";
+  const lang = useI18n();
+  const heard = peer.lastHeard ? ago(lang, timestampDate(peer.lastHeard)) : "never";
   const lastMove = peer.moves.at(-1);
   return (
     <motion.li
@@ -350,7 +353,7 @@ function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
           <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
             <KeyRoundIcon className="size-3 shrink-0" />
             <span className="truncate">
-              Moved to this key {lastMove.movedAt ? ago(timestampDate(lastMove.movedAt)) : ""} from <code className="font-mono">{lastMove.previousFingerprint.split(" ").slice(0, 2).join(" ")}…</code>
+              Moved to this key {lastMove.movedAt ? ago(lang, timestampDate(lastMove.movedAt)) : ""} from <code className="font-mono">{lastMove.previousFingerprint.split(" ").slice(0, 2).join(" ")}…</code>
               {peer.moves.length > 1 && ` (${peer.moves.length} moves)`}
             </span>
           </p>

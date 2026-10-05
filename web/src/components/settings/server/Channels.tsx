@@ -25,14 +25,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDuration, shortDuration } from "@/lib/format";
+import { formatDuration, type Lang, shortDuration } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 /** Discord's slow mode stops, in seconds. */
 const SLOW = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600];
-const slowLabel = (seconds: number) => (seconds ? formatDuration(seconds) : "Off");
+const slowLabel = (lang: Lang, seconds: number) => (seconds ? formatDuration(lang, seconds) : "Off");
 
 /**
  * Every channel, dragged into order by its handle (or moved with the arrow
@@ -189,6 +190,7 @@ function Grip({ label, onKeyMove }: { label: string; onKeyMove: (e: KeyboardEven
 }
 
 function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, movable, locked }: ItemProps & { parent: string }) {
+  const lang = useI18n();
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   return (
     <motion.div
@@ -213,8 +215,8 @@ function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, mov
         <span className="relative truncate">{channel.name}</span>
         <PrivateMark on={locked} />
         {channel.slowmodeSeconds > 0 && (
-          <span className="relative ml-auto flex shrink-0 items-center gap-0.5 text-[0.7rem] text-muted-foreground" title={`Slow mode: ${slowLabel(channel.slowmodeSeconds)}`}>
-            <SnailIcon className="size-3" /> {shortDuration(channel.slowmodeSeconds)}
+          <span className="relative ml-auto flex shrink-0 items-center gap-0.5 text-[0.7rem] text-muted-foreground" title={`Slow mode: ${slowLabel(lang, channel.slowmodeSeconds)}`}>
+            <SnailIcon className="size-3" /> {shortDuration(lang, channel.slowmodeSeconds)}
           </span>
         )}
       </button>
@@ -351,6 +353,7 @@ const draftOf = (c: Channel): Draft => ({ name: c.name, topic: c.topic, parentId
 const slug = (name: string) => name.toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 100);
 
 function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
+  const lang = useI18n();
   const category = channel.type === ChannelType.CATEGORY;
   /** Categories and voice channels keep their names as typed. */
   const free = category || channel.type === ChannelType.VOICE;
@@ -457,7 +460,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
               max={SLOW.length - 1}
               value={index}
               onChange={(i) => set({ slowmode: SLOW[i]! })}
-              format={(i) => slowLabel(SLOW[i]!)}
+              format={(i) => slowLabel(lang, SLOW[i]!)}
               marks={[
                 { value: 0, label: "Off" },
                 { value: 4, label: "30s" },
@@ -467,7 +470,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
               ]}
               className="min-w-0 flex-1 px-2"
             />
-            <span className="min-w-20 shrink-0 text-right text-sm font-bold whitespace-nowrap tabular-nums">{slowLabel(draft.slowmode)}</span>
+            <span className="min-w-20 shrink-0 text-right text-sm font-bold whitespace-nowrap tabular-nums">{slowLabel(lang, draft.slowmode)}</span>
           </div>
         </Row>
       )}

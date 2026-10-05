@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ago, displayName, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -222,6 +223,7 @@ function WebhookCard({
   onChange: (w: Webhook) => void;
   onDelete: () => void;
 }) {
+  const lang = useI18n();
   const [name, setName] = useState(w.name);
   const [busy, setBusy] = useState<null | "save" | "test" | "reset">(null);
   const [confirm, setConfirm] = useState<null | "reset" | "delete">(null);
@@ -323,7 +325,7 @@ function WebhookCard({
             {channel?.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon className="size-3" /> : <HashIcon className="size-3" />}
             <span className="truncate">
               {channel?.name ?? "a deleted channel"} · <Count value={messages} /> {messages === 1 ? "message" : "messages"}
-              {w.lastUsedAt && ` · last ${ago(toDate(w.lastUsedAt))}`}
+              {w.lastUsedAt && ` · last ${ago(lang, toDate(w.lastUsedAt))}`}
             </span>
           </span>
         </span>
@@ -474,7 +476,7 @@ function WebhookCard({
                 </AnimatePresence>
                 <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
                   <UserAvatar user={creator} className="size-4" />
-                  Made by {creator ? displayName(creator) : "someone"} {ago(toDate(w.createdAt))}
+                  Made by {creator ? displayName(creator) : "someone"} {ago(lang, toDate(w.createdAt))}
                 </span>
               </div>
             </div>

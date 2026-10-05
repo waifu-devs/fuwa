@@ -10,6 +10,7 @@ import { Count, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ago, displayName, roughly, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -110,6 +111,7 @@ function Card({
   /** For AnimatePresence, so the card leaves the layout as it flies off. */
   ref?: Ref<HTMLElement>;
 }) {
+  const lang = useI18n();
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState<"in" | "out" | null>(null);
@@ -160,7 +162,7 @@ function Card({
             )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            @{a.user?.username} · account {roughly(Date.now() - made.getTime())} old · applied {ago(toDate(a.createdAt))}
+            @{a.user?.username} · account {roughly(lang, Date.now() - made.getTime())} old · applied {ago(lang, toDate(a.createdAt))}
           </p>
         </div>
       </header>

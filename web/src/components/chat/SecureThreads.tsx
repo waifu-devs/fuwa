@@ -12,6 +12,7 @@ import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
 import { ago, displayName } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,7 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
   hours: number;
   onOpen: (parent: number) => void;
 }) {
+  const lang = useI18n();
   return (
     <motion.button
       type="button"
@@ -77,7 +79,7 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
       {thread.locked && <LockIcon aria-label="Locked" className="size-3 shrink-0 text-muted-foreground" />}
       <span className="grid min-w-0 text-muted-foreground">
         <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
-          {archived(thread, hours) ? "Archived" : thread.lastAt ? `Last reply ${ago(new Date(thread.lastAt))}` : "No replies"}
+          {archived(thread, hours) ? "Archived" : thread.lastAt ? `Last reply ${ago(lang, new Date(thread.lastAt))}` : "No replies"}
         </span>
         <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
           View thread
@@ -317,6 +319,7 @@ export function SecureThreadList({
   onOpen: (parent: number) => void;
   onClose: () => void;
 }) {
+  const lang = useI18n();
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const hours = useArchiveHours(instanceKey, serverId);
@@ -422,7 +425,7 @@ export function SecureThreadList({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <b className="truncate text-sm">{m ? displayName(author) : "Earlier message"}</b>
-                    {m && <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(new Date(m.at))}</span>}
+                    {m && <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, new Date(m.at))}</span>}
                   </span>
                   <span className="line-clamp-2 text-sm break-words text-muted-foreground">{m ? plain(lineText(m)) || "…" : "Not on this device"}</span>
                   <span className="mt-1 flex items-center gap-2 text-xs">
@@ -436,7 +439,7 @@ export function SecureThreadList({
                       </span>
                     )}
                     {t.locked && <LockIcon className="size-3 text-muted-foreground" />}
-                    {t.lastAt > 0 && <span className="truncate text-muted-foreground">last {ago(new Date(t.lastAt))}</span>}
+                    {t.lastAt > 0 && <span className="truncate text-muted-foreground">last {ago(lang, new Date(t.lastAt))}</span>}
                   </span>
                 </span>
               </motion.button>
