@@ -242,6 +242,50 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        page = page.child(self.setting(
+            "profile-effects",
+            "Profile effects",
+            None,
+            &["profile_effects"],
+            if defaults.profile_effects { "on" } else { "off" },
+            8,
+            self.toggle(
+                "profile-effects",
+                draft.profile_effects,
+                false,
+                "People can put an effect on their profile card",
+                "Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, \
+                 and everyone's pick comes back when it's on again.",
+                p,
+                cx,
+                |d, on| d.profile_effects = on,
+            ),
+            p,
+            cx,
+        ));
+        if self.instance_has("rich-presence") {
+            page = page.child(self.setting(
+                "rich-presence",
+                "Rich presence",
+                None,
+                &["rich_presence"],
+                if defaults.rich_presence { "on" } else { "off" },
+                9,
+                self.toggle(
+                    "rich-presence",
+                    draft.rich_presence,
+                    false,
+                    "People can show what they're doing",
+                    "Games and apps people's desktop apps see, shown to people they share a server with, once each \
+                     person turns it on. Kept in memory only. Turned off, nobody's activity shows; statuses still do.",
+                    p,
+                    cx,
+                    |d, on| d.rich_presence = on,
+                ),
+                p,
+                cx,
+            ));
+        }
         page.into_any_element()
     }
 }
