@@ -177,6 +177,9 @@ function AppFields({
         </a>
       </p>
       {provider.id === "x" && <p className="rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">{t("instancesettings.providers.xScopes")}</p>}
+      {provider.id === "twitch" && (
+        <p className="rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">{t("instancesettings.providers.twitchState")}</p>
+      )}
       {redirect ? (
         <CopyRow label={t("instancesettings.providers.redirect")} value={redirect} delay={0.05} />
       ) : (

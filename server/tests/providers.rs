@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
@@ -137,6 +138,20 @@ struct Fake {
     base: String,
     /// code → (provider, PKCE challenge, who)
     codes: Mutex<HashMap<String, (String, String, String)>>,
+    /// Token requests seen, answered or not.
+    token_calls: AtomicUsize,
+}
+
+/// Where a provider says `who`'s picture is. Some people's pictures misbehave:
+/// sent on elsewhere, too big, not a picture, or at another host.
+fn picture_of(base: &str, provider: &str, who: &str) -> String {
+    match who {
+        "moved" => format!("{base}/{provider}/pic-moved/{who}"),
+        "huge" => format!("{base}/{provider}/pic-huge/{who}"),
+        "words" => format!("{base}/{provider}/pic-words/{who}"),
+        "elsewhere" => format!("{}/{provider}/pic/{who}", base.replace("127.0.0.1", "localhost")),
+        _ => format!("{base}/{provider}/pic/{who}"),
+    }
 }
 
 /// Started once for every test in this file, on its own thread, since the
@@ -169,13 +184,33 @@ fn who_of(headers: &HeaderMap) -> Option<String> {
     headers.get("authorization")?.to_str().ok()?.strip_prefix("Bearer tok-").map(str::to_string)
 }
 
-async fn serve(State(fake): State<Arc<Fake>>, uri: Uri, headers: HeaderMap, body: String) -> Response {
+/// Every answer closes its connection: the instance's HTTP client is shared
+/// by the whole process, and a connection it kept from one test's runtime
+/// is dead in the next one's.
+async fn serve(state: State<Arc<Fake>>, uri: Uri, headers: HeaderMap, body: String) -> Response {
+    let mut response = answer(state, uri, headers, body).await;
+    response.headers_mut().insert("connection", axum::http::HeaderValue::from_static("close"));
+    response
+}
+
+async fn answer(State(fake): State<Arc<Fake>>, uri: Uri, headers: HeaderMap, body: String) -> Response {
     let path = uri.path();
     let (provider, rest) = path.trim_start_matches('/').split_once('/').unwrap_or_default();
     if let Some(who) = rest.strip_prefix("pic/") {
         return ([("content-type", "image/png")], [png(), who.as_bytes().to_vec()].concat()).into_response();
     }
+    if let Some(who) = rest.strip_prefix("pic-moved/") {
+        let to = format!("{}/{provider}/pic/{who}", fake.base);
+        return (StatusCode::FOUND, [("location", to)]).into_response();
+    }
+    if rest.starts_with("pic-huge/") {
+        return ([("content-type", "image/png")], [png(), vec![0; 9 * 1024 * 1024]].concat()).into_response();
+    }
+    if rest.starts_with("pic-words/") {
+        return ([("content-type", "image/png")], "not a picture at all").into_response();
+    }
     if rest.ends_with("token") {
+        fake.token_calls.fetch_add(1, Ordering::SeqCst);
         let form: HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
         let Some(code) = form.get("code") else { return StatusCode::BAD_REQUEST.into_response() };
         let basic = format!("Basic {}", STANDARD.encode(format!("client-{provider}:{CLIENT_SECRET}")));
@@ -199,7 +234,7 @@ async fn serve(State(fake): State<Arc<Fake>>, uri: Uri, headers: HeaderMap, body
         return ([("content-type", "application/json")], format!(r#"{{"access_token":"tok-{who}"}}"#)).into_response();
     }
     let Some(who) = who_of(&headers) else { return StatusCode::UNAUTHORIZED.into_response() };
-    let picture = format!("{}/{provider}/pic/{who}", fake.base);
+    let picture = picture_of(&fake.base, provider, &who);
     let body = match provider {
         "google" => serde_json::json!({
             "sub": format!("g-{who}"), "name": format!("{who} G"), "picture": picture, "email": format!("{who}@gmail.com"),
@@ -348,8 +383,39 @@ async fn methods(c: &mut Clients, token: &str) -> pb::ListSignInMethodsResponse 
 }
 
 async fn unlink(c: &mut Clients, token: &str, id: &str, password: &str) -> Result<(), Code> {
-    let request = pb::UnlinkProviderRequest { provider: id.into(), password: password.into(), code: String::new() };
-    c.account.unlink_provider(authed(token, request)).await.map(|_| ()).map_err(|e| e.code())
+    unlink_with(c, token, id, password, "").await.map_err(|e| e.code())
+}
+
+async fn unlink_with(c: &mut Clients, token: &str, id: &str, password: &str, code: &str) -> Result<(), tonic::Status> {
+    let request = pb::UnlinkProviderRequest { provider: id.into(), password: password.into(), code: code.into() };
+    c.account.unlink_provider(authed(token, request)).await.map(|_| ())
+}
+
+/// Links `id` to an account with no password, on its fresh session.
+async fn link_fresh(c: &mut Clients, instance: &Instance, token: &str, id: &str, who: &str) {
+    let started = start_link(c, token, id, "").await.unwrap();
+    let back = landed(&fake().sign_in(instance, &started.authorize_url, who).await);
+    finish_link(c, token, &back).await.unwrap();
+}
+
+/// Every text the instance keeps about sign-ins and linked providers.
+async fn kept_about_providers(instance: &Instance) -> String {
+    fuwa_server::db::write(instance.app.node().unwrap().db(), async |conn| {
+        let mut kept = String::new();
+        for sql in [
+            "SELECT coalesce(identity, '') || ' ' || return_origin FROM sso_sign_ins",
+            "SELECT provider || ' ' || subject || ' ' || name FROM account_providers",
+        ] {
+            let mut rows = conn.query(sql, ()).await?;
+            while let Some(row) = rows.next().await? {
+                kept.push_str(&row.get::<String>(0)?);
+                kept.push('\n');
+            }
+        }
+        Ok(kept)
+    })
+    .await
+    .unwrap()
 }
 
 // ────────────────────────────────── tests ──────────────────────────────────
@@ -524,6 +590,133 @@ async fn links_need_proof_and_the_last_way_in_stays() {
     assert!(two_step.token.is_empty() && !two_step.two_factor_ticket.is_empty());
     // Unlinking now needs the code as well as the password.
     assert_eq!(unlink(&mut c, &ana, "google", PASSWORD).await.unwrap_err(), Code::PermissionDenied);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn provider_pictures_are_fetched_carefully_and_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let fake = fake();
+    let admin = sign_up(&mut c, "admin").await;
+    turn_on(&mut c, &admin, &["google"]).await;
+
+    // One that behaves, to show the others would have had a picture.
+    let fine = sign_in(&mut c, &instance, "google", "fay", Some(("fay", true))).await.unwrap().user.unwrap();
+    assert!(!fine.avatar_url.is_empty());
+    // Sent on elsewhere, too big, not a picture, or not at Google's picture
+    // host: the account is made all the same, without one.
+    for who in ["moved", "huge", "words", "elsewhere"] {
+        let made = sign_in(&mut c, &instance, "google", who, Some((who, true))).await.unwrap();
+        let user = made.user.unwrap();
+        assert!(made.created, "{who}");
+        assert_eq!((user.display_name.as_str(), user.avatar_url.as_str()), (format!("{who} G").as_str(), ""), "{who}");
+    }
+
+    // Someone who never picks a username leaves a row saying where their
+    // picture is, until it runs out and is swept.
+    let started = start_sign_in(&mut c, "google").await.unwrap();
+    let back = landed(&fake.sign_in(&instance, &started.authorize_url, "gus").await);
+    assert!(finish(&mut c, &back, SECRET, None).await.unwrap().new_account.is_some());
+    assert!(kept_about_providers(&instance).await.contains("/pic/gus"));
+    let later = fuwa_server::id::now_ms() + 11 * 60 * 1000;
+    instance.app.node().unwrap().sweep_sso_sign_ins(later).await.unwrap();
+
+    // Nothing at the provider is kept: no picture address, no fake host.
+    let kept = kept_about_providers(&instance).await;
+    assert!(kept.contains("g-fay"), "the links themselves are kept: {kept}");
+    assert!(!kept.contains("/pic") && !kept.contains("127.0.0.1") && !kept.contains("localhost:"), "{kept}");
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn a_used_answer_never_reaches_the_provider_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let fake = fake();
+    let admin = sign_up(&mut c, "admin").await;
+    turn_on(&mut c, &admin, &["twitch"]).await;
+
+    let started = start_sign_in(&mut c, "twitch").await.unwrap();
+    let back = landed(&fake.sign_in(&instance, &started.authorize_url, "hal").await);
+    assert!(back.contains_key("code"));
+    // The same state again, with any code: refused before a token is asked for.
+    let before = fake.token_calls.load(Ordering::SeqCst);
+    let again = browser()
+        .get(format!("http://{}/sso/instance/providers/twitch", instance.addr))
+        .query(&[("state", started.state.as_str()), ("code", "replayed")])
+        .send()
+        .await
+        .unwrap();
+    assert!(landed(&again).contains_key("error"));
+    assert_eq!(fake.token_calls.load(Ordering::SeqCst), before, "no call to Twitch");
+    // The answer it already gave still finishes, once.
+    assert!(finish(&mut c, &back, SECRET, Some(("hal", false))).await.unwrap().created);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn unlinking_two_at_once_keeps_a_way_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let admin = sign_up(&mut c, "admin").await;
+    turn_on(&mut c, &admin, &["google", "twitch"]).await;
+
+    let ivy = sign_in(&mut c, &instance, "twitch", "ivy", Some(("ivy", false))).await.unwrap();
+    link_fresh(&mut c, &instance, &ivy.token, "google", "ivy").await;
+    // Two unlinks at once both see the other provider still linked. The
+    // first goes through; the second, still sure Google works, is refused
+    // as it's written.
+    unlink(&mut c, &ivy.token, "google", "").await.unwrap();
+    let id = ivy.user.unwrap().id;
+    let second = instance.app.node().unwrap().unlink_provider(&id, "twitch", false, &["google"]).await;
+    let refused = second.unwrap_err().to_string();
+    assert!(refused.contains("only way"), "{refused}");
+    let kinds: Vec<String> = methods(&mut c, &ivy.token).await.methods.into_iter().map(|m| m.kind).collect();
+    assert_eq!(kinds, ["twitch"]);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn passwordless_accounts_prove_it_with_a_fresh_session_or_their_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let admin = sign_up(&mut c, "admin").await;
+    turn_on(&mut c, &admin, &["google", "twitch"]).await;
+
+    let jo = sign_in(&mut c, &instance, "twitch", "jo", Some(("jo", false))).await.unwrap().token;
+    link_fresh(&mut c, &instance, &jo, "google", "jo").await;
+
+    // An old session can't take a way in away.
+    instance.age_sessions(11 * 60 * 1000).await;
+    let stale = unlink_with(&mut c, &jo, "google", "", "").await.unwrap_err();
+    assert_eq!(stale.code(), Code::FailedPrecondition);
+    assert!(stale.message().contains("fresh sign-in"), "{}", stale.message());
+
+    // With two-step on, its code is asked for even on a fresh session.
+    let me = c.auth.get_me(authed(&jo, pb::GetMeRequest {})).await.unwrap().into_inner().user.unwrap();
+    let node = instance.app.node().unwrap();
+    let secret = fuwa_server::twofactor::new_secret();
+    node.set_totp_pending(&me.id, &secret).await.unwrap();
+    assert!(node.enable_totp(&me.id, &secret, 0, &[]).await.unwrap());
+    let ticket = sign_in(&mut c, &instance, "twitch", "jo", None).await.unwrap().two_factor_ticket;
+    let now = fuwa_server::id::now_ms();
+    let code = fuwa_server::twofactor::code_for(&secret, now).unwrap();
+    let verified = pb::VerifyTwoFactorRequest { ticket, code };
+    let fresh = c.auth.verify_two_factor(verified).await.unwrap().into_inner().token;
+    let listed = methods(&mut c, &fresh).await;
+    assert!(listed.needs_code && !listed.needs_password && !listed.needs_fresh_sign_in);
+    assert_eq!(unlink_with(&mut c, &fresh, "google", "", "").await.unwrap_err().code(), Code::PermissionDenied);
+    let next = fuwa_server::twofactor::code_for(&secret, now + 30_000).unwrap();
+    unlink_with(&mut c, &fresh, "google", "", &next).await.unwrap();
 
     instance.stop().await;
 }

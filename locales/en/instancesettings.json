@@ -513,5 +513,6 @@
   "providers.clientId": "Client ID",
   "providers.clientSecret": "Client secret",
   "providers.pasteSecret": "Paste the secret {name} gave you",
-  "providers.missing": "It needs both a client ID and a secret before it can be saved."
+  "providers.missing": "It needs both a client ID and a secret before it can be saved.",
+  "providers.twitchState": "Twitch doesn't offer PKCE, so only this instance's one-time state ties Twitch's answer to the sign-in that asked for it. Keep the client secret private."
 }

@@ -513,5 +513,6 @@
   "providers.clientId": "ID de cliente",
   "providers.clientSecret": "Secreto de cliente",
   "providers.pasteSecret": "Pega el secreto que te dio {name}",
-  "providers.missing": "Necesita un ID de cliente y un secreto antes de poder guardarse."
+  "providers.missing": "Necesita un ID de cliente y un secreto antes de poder guardarse.",
+  "providers.twitchState": "Twitch no ofrece PKCE, así que solo el estado de un solo uso de esta instancia une la respuesta de Twitch al inicio de sesión que la pidió. Mantén privado el secreto de cliente."
 }

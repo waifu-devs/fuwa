@@ -241,6 +241,11 @@ async fn provider_came_back(app: &Arc<App>, id: &str, q: OidcQuery) -> Response 
         if q.code.is_empty() {
             return Err(Error::invalid("that isn't how this provider answers"));
         }
+        // An answer that came back once already is refused before the
+        // provider hears about it again.
+        if !link && node.sso_state_seen(&state).await? {
+            return Err(Error::FailedPrecondition("this sign-in was already used; start again".into()));
+        }
         let redirect = super::providers::redirect_uri(&settings.public_url, spec.id);
         let identity = super::providers::identify(&setting, &redirect, &q.code, &sign_in.verifier).await?;
         let code = crate::auth::new_token();

@@ -362,17 +362,20 @@ pub fn read_profile(spec: &Spec, body: &[u8]) -> Result<Identity> {
 pub const MAX_PICTURE: usize = 8 * 1024 * 1024;
 
 /// Whether a picture's address is one of the provider's own picture hosts,
-/// over https (or a test's provider).
+/// over https. A test's provider stands in for the hosts with its own host
+/// and port, so the check still runs.
 pub fn picture_allowed(spec: &Spec, picture: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(picture) else { return false };
-    if let Some(base) = spec.overridden() {
-        return picture.starts_with(&format!("{base}/"));
+    match spec.overridden().and_then(|base| reqwest::Url::parse(&base).ok()) {
+        Some(base) => url.scheme() == base.scheme() && url.host_str() == base.host_str() && url.port() == base.port(),
+        None => {
+            url.scheme() == "https"
+                && url.port().is_none()
+                && url
+                    .host_str()
+                    .is_some_and(|host| spec.picture_hosts.iter().any(|allowed| host.eq_ignore_ascii_case(allowed)))
+        }
     }
-    url.scheme() == "https"
-        && url.port().is_none()
-        && url
-            .host_str()
-            .is_some_and(|host| spec.picture_hosts.iter().any(|allowed| host.eq_ignore_ascii_case(allowed)))
 }
 
 /// Fetches a profile picture from the provider's picture host, capped.

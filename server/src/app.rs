@@ -801,7 +801,7 @@ fn spawn_poll_closings(app: Arc<App>) {
 }
 
 /// Hourly: drops expired sessions, the direct-message devices they had,
-/// uploads nothing uses, and friend requests that ran out.
+/// uploads nothing uses, and friend requests and sign-ins that ran out.
 fn spawn_housekeeping(app: Arc<App>) {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(Duration::from_secs(60 * 60));
@@ -820,6 +820,9 @@ fn spawn_housekeeping(app: Arc<App>) {
                     }
                     if async { app.friends()?.sweep(crate::id::now_ms()).await }.await.is_err() {
                         tracing::warn!("couldn't sweep friend requests that ran out");
+                    }
+                    if async { app.node()?.sweep_sso_sign_ins(crate::id::now_ms()).await }.await.is_err() {
+                        tracing::warn!("couldn't sweep sign-ins that ran out");
                     }
                 }
             }

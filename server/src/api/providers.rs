@@ -224,7 +224,10 @@ impl Api {
             )));
         }
         self.confirm_owner(&caller, &req.password, &req.code).await?;
-        if !self.app.node()?.unlink_provider(&caller.account.id, id).await? {
+        // Checked again as it's written, so two unlinks at once can't both go.
+        let others_work = methods.iter().any(|m| m.works && providers::spec(&m.kind).is_none());
+        let working: Vec<&str> = methods.iter().filter(|m| m.works && m.kind != id).map(|m| m.kind.as_str()).collect();
+        if !self.app.node()?.unlink_provider(&caller.account.id, id, others_work, &working).await? {
             return Err(Error::NotFound("linked provider"));
         }
         tracing::info!("unlinked a sign-in provider");

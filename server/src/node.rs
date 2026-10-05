@@ -798,16 +798,42 @@ impl NodeDb {
         Ok(LinkedProvider { provider: provider.to_string(), name: name.to_string(), linked_at: now })
     }
 
-    /// Unlinks a provider from an account; false if it wasn't linked.
-    pub async fn unlink_provider(&self, account_id: &str, provider: &str) -> Result<bool> {
+    /// Unlinks a provider from an account; false if it wasn't linked. Unless
+    /// `others_work` (a way in that isn't a provider still works), one of the
+    /// `working` providers must stay linked, or nothing changes and it says
+    /// so. Every unlink writes the account's row, so two at once clash and
+    /// the second counts what the first left.
+    pub async fn unlink_provider(
+        &self,
+        account_id: &str,
+        provider: &str,
+        others_work: bool,
+        working: &[&str],
+    ) -> Result<bool> {
         db::write(&self.db, async |conn| {
-            Ok(conn
+            conn.execute("UPDATE accounts SET kind = kind WHERE id = ?1", [account_id]).await?;
+            let gone = conn
                 .execute(
                     "DELETE FROM account_providers WHERE account_id = ?1 AND provider = ?2",
                     (account_id, provider),
                 )
                 .await?
-                == 1)
+                == 1;
+            if gone && !others_work {
+                let left = query_all(
+                    conn,
+                    "SELECT provider FROM account_providers WHERE account_id = ?1",
+                    [account_id],
+                    |r| r.get::<String>(0),
+                )
+                .await?;
+                if !left.iter().any(|p| working.contains(&p.as_str())) {
+                    return Err(Error::FailedPrecondition(
+                        "that's the only way you can sign in right now; add another first".into(),
+                    ));
+                }
+            }
+            Ok(gone)
         })
         .await
     }
@@ -966,6 +992,24 @@ impl NodeDb {
         identity: &crate::sso::Identity,
     ) -> Result<bool> {
         db::write(&self.db, async |conn| crate::sso::answered(conn, state, code_hash, identity).await).await
+    }
+
+    /// Whether a sign-in with this state was kept at all, answered, used or
+    /// not: a ticket that has a row came back once already.
+    pub async fn sso_state_seen(&self, state: &str) -> Result<bool> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT 1 FROM sso_sign_ins WHERE state = ?1", [state], |r| r.get::<i64>(0))
+            .await?
+            .is_some())
+    }
+
+    /// Forgets sign-ins that ran out, with whatever the provider said about
+    /// who signed in (a picture's address, say): nothing reads them anyway.
+    pub async fn sweep_sso_sign_ins(&self, now: i64) -> Result<u64> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM sso_sign_ins WHERE expires_at < ?1", [now]).await?)
+        })
+        .await
     }
 
     /// Ends a single sign-on, so its code works once. False if another request already did.
