@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use prost::Message as _;
@@ -101,6 +101,43 @@ pub struct ServerDb {
     /// Being moved to another shard: it takes no changes until the move is
     /// over (see [`Servers::freeze`]).
     frozen: AtomicBool,
+    /// Moves on after every change that may have changed [`ServerRules`].
+    rules_changed: AtomicU64,
+    /// The server's rules, with the `rules_changed` they were read at.
+    rules: Mutex<Option<(u64, Arc<ServerRules>)>>,
+}
+
+/// What decides what members can see and do in a server, apart from each
+/// member's own row and roles: its roles, channels and overwrites, and its
+/// single sign-on rule. Read once and shared by every stream and request
+/// until a change may have changed it.
+#[derive(PartialEq)]
+pub struct ServerRules {
+    pub rules: permissions::Rules,
+    pub sso: ServerSso,
+}
+
+/// Whether a change that sends this event may change [`ServerRules`]. Only
+/// the kinds listed here leave them alone; any other, including one added
+/// later, counts as changing them.
+fn may_change_rules(payload: &Payload) -> bool {
+    !matches!(
+        payload,
+        Payload::MessageCreated(_)
+            | Payload::MessageUpdated(_)
+            | Payload::MessageDeleted(_)
+            | Payload::MemberJoined(_)
+            | Payload::MemberUpdated(_)
+            | Payload::MemberLeft(_)
+            | Payload::UserUpdated(_)
+            | Payload::EmojisUpdated(_)
+            | Payload::SecureRecordAdded(_)
+            | Payload::SecureRecordDeleted(_)
+            | Payload::PollUpdated(_)
+            | Payload::InteractionCreated(_)
+            | Payload::VoiceStateUpdated(_)
+            | Payload::VoiceStateRemoved(_)
+    )
 }
 
 /// Usage changes are folded into the totals after this many writes.
@@ -353,6 +390,8 @@ impl ServerDb {
 
     /// Appends the events under the next sequences, commits and publishes.
     async fn append_and_commit(&self, conn: &Connection, actor_id: &str, payloads: Vec<Payload>) -> Result<()> {
+        // A change that sends no events may still be one.
+        let rules = payloads.is_empty() || payloads.iter().any(may_change_rules);
         let mut head = self.head.lock().await;
         let last = match *head {
             Some(last) => last,
@@ -379,7 +418,13 @@ impl ServerDb {
         // Unknown until COMMIT returns: if this request is dropped mid-commit,
         // the next write reads the head from the file instead of guessing.
         *head = None;
-        conn.execute("COMMIT", ()).await.inspect_err(|_| *head = Some(last))?;
+        let committed = conn.execute("COMMIT", ()).await;
+        // Before publishing, so a stream reacting to these events reads the
+        // rules as changed; also when COMMIT failed, as it may have landed.
+        if rules {
+            self.rules_changed.fetch_add(1, Ordering::AcqRel);
+        }
+        committed.inspect_err(|_| *head = Some(last))?;
         *head = Some(last + events.len() as i64);
         self.hub.publish(events);
         Ok(())
@@ -447,6 +492,35 @@ impl ServerDb {
     /// The sequence of the last event committed, or 0 for none.
     pub async fn head_sequence(&self) -> Result<i64> {
         self.stored_head().await
+    }
+
+    /// The server's rules as committed now. Read from the file again only
+    /// after a change that may have changed them, by one caller while the
+    /// rest wait for it, so a change that thousands of streams react to at
+    /// once is read once. Nothing swaps the file under a `ServerDb`: a
+    /// server moved away is dropped from the map first, and one moved here
+    /// opens a new one.
+    pub async fn rules(&self) -> Result<Arc<ServerRules>> {
+        let mut cached = self.rules.lock().await;
+        // Read before the file, so a change committing meanwhile makes this
+        // copy stale at once rather than kept.
+        let changed = self.rules_changed.load(Ordering::Acquire);
+        if let Some((at, rules)) = &*cached
+            && *at == changed
+        {
+            return Ok(rules.clone());
+        }
+        let conn = self.read()?;
+        let rules = Arc::new(load_rules(&conn, &self.id).await?);
+        *cached = Some((changed, rules.clone()));
+        Ok(rules)
+    }
+
+    /// [`member_access`] as committed now, with the server's rules shared.
+    pub async fn member_access(&self, user_id: &str) -> Result<Option<(pb::Member, permissions::Access)>> {
+        let rules = self.rules().await?;
+        let conn = self.read()?;
+        member_access_under(&conn, &self.id, user_id, &rules).await
     }
 
     /// Events after `after`, oldest first.
@@ -829,6 +903,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
 }
 
 /// A server's single sign-on, as its file has it.
+#[derive(PartialEq)]
 pub struct ServerSso {
     pub provider: crate::sso::Provider,
     pub required: bool,
@@ -1090,6 +1165,8 @@ impl Servers {
             folding: AtomicBool::new(false),
             hub: self.hub.clone(),
             frozen: AtomicBool::new(false),
+            rules_changed: AtomicU64::new(0),
+            rules: Mutex::new(None),
         })
     }
 
@@ -1539,22 +1616,44 @@ pub async fn member_access(
     server_id: &str,
     user_id: &str,
 ) -> Result<Option<(pb::Member, permissions::Access)>> {
+    member_access_under(conn, server_id, user_id, &load_rules(conn, server_id).await?).await
+}
+
+/// The server's rules, as `conn` sees them.
+pub async fn load_rules(conn: &Connection, server_id: &str) -> Result<ServerRules> {
+    Ok(ServerRules { rules: permissions::load(conn, server_id).await?, sso: load_sso(conn).await? })
+}
+
+/// [`member_access`] under rules already read.
+async fn member_access_under(
+    conn: &Connection,
+    server_id: &str,
+    user_id: &str,
+    rules: &ServerRules,
+) -> Result<Option<(pb::Member, permissions::Access)>> {
     let Some(member) = member(conn, server_id, user_id).await? else {
         return Ok(None);
     };
-    let mut access = permissions::load(conn, server_id).await?.access(user_id, &member.role_ids);
-    if member.pending {
-        access.hold_back();
-    }
-    if member.timed_out_until.as_ref().is_some_and(|until| millis(until) > now_ms()) {
-        access.time_out();
-    }
-    let sso = load_sso(conn).await?;
-    let agent = member.user.as_ref().is_some_and(|u| u.kind == pb::AccountKind::Agent as i32);
-    if sso.required && !agent && !sso.fresh(member.sso_signed_in_at.as_ref().map(millis), now_ms()) {
-        access.lock_out();
-    }
+    let access = rules.access(user_id, &member);
     Ok(Some((member, access)))
+}
+
+impl ServerRules {
+    /// What a member, as read from the server's file, can do under these rules.
+    pub fn access(&self, user_id: &str, member: &pb::Member) -> permissions::Access {
+        let mut access = self.rules.access(user_id, &member.role_ids);
+        if member.pending {
+            access.hold_back();
+        }
+        if member.timed_out_until.as_ref().is_some_and(|until| millis(until) > now_ms()) {
+            access.time_out();
+        }
+        let agent = member.user.as_ref().is_some_and(|u| u.kind == pb::AccountKind::Agent as i32);
+        if self.sso.required && !agent && !self.sso.fresh(member.sso_signed_in_at.as_ref().map(millis), now_ms()) {
+            access.lock_out();
+        }
+        access
+    }
 }
 
 /// One of the usage counters, read inside a write so limits hold under concurrency.
@@ -1969,6 +2068,8 @@ mod tests {
             folding: AtomicBool::new(false),
             hub: Arc::new(Hub::default()),
             frozen: AtomicBool::new(false),
+            rules_changed: AtomicU64::new(0),
+            rules: Mutex::new(None),
         };
         sdb.write("u", async |_, events| {
             events.push(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: "c1".into() }));
@@ -1977,5 +2078,72 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(sdb.head_sequence().await.unwrap(), 3);
+    }
+
+    /// The shared rules are read again after every change that may change
+    /// them, and kept across those that can't: each read matches reading
+    /// the file afresh.
+    #[tokio::test]
+    async fn shared_rules_follow_every_change_to_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let sdb = ServerDb {
+            id: "s".into(),
+            path: path.clone(),
+            db: Arc::new(db::open(&path, None, MIGRATIONS).await.unwrap()),
+            head: Mutex::new(None),
+            unfolded: AtomicU32::new(0),
+            folding: AtomicBool::new(false),
+            hub: Arc::new(Hub::default()),
+            frozen: AtomicBool::new(false),
+            rules_changed: AtomicU64::new(0),
+            rules: Mutex::new(None),
+        };
+        let fresh = async || load_rules(&sdb.read().unwrap(), "s").await.unwrap();
+        let changed = |payload: Payload| vec![payload];
+        let run = async |sql: &'static str, events: Vec<Payload>| {
+            sdb.write("owner", async |conn, out| {
+                conn.execute_batch(sql).await?;
+                out.extend(events.clone());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        };
+        run(
+            "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, system_channel_id, created_at, updated_at, region)
+             VALUES ('s', 'S', '', '', 'owner', 0, NULL, 0, 0, '');
+             INSERT INTO roles (id, name, position, permissions, created_at, updated_at) VALUES ('s', '@everyone', 0, 1, 0, 0);
+             INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('c1', 'general', 1, 0, 0);",
+            changed(Payload::ServerUpdated(Default::default())),
+        )
+        .await;
+        let first = sdb.rules().await.unwrap();
+        assert!(*first == fresh().await);
+
+        // A message changes nothing about them: the same copy, not read again.
+        run("", changed(Payload::MessageCreated(Default::default()))).await;
+        assert!(Arc::ptr_eq(&first, &sdb.rules().await.unwrap()));
+
+        // Each of these changes them, and the next read has it.
+        let steps: [(&str, Vec<Payload>); 5] = [
+            ("UPDATE roles SET permissions = 3 WHERE id = 's'", changed(Payload::RoleUpdated(Default::default()))),
+            (
+                "INSERT INTO channel_overwrites (channel_id, target_id, target, allow, deny) VALUES ('c1', 'm1', 2, 0, 1)",
+                changed(Payload::ChannelUpdated(Default::default())),
+            ),
+            ("UPDATE server SET owner_id = 'someone'", changed(Payload::ServerUpdated(Default::default()))),
+            ("UPDATE server SET sso_required = 1", changed(Payload::ServerUpdated(Default::default()))),
+            // A change that says nothing counts as one.
+            ("DELETE FROM channel_overwrites", vec![]),
+        ];
+        let mut before = first;
+        for (sql, events) in steps {
+            run(sql, events).await;
+            let now = sdb.rules().await.unwrap();
+            assert!(*now == fresh().await, "{sql}");
+            assert!(*now != *before, "{sql}");
+            before = now;
+        }
     }
 }

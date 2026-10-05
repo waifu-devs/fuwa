@@ -182,11 +182,13 @@ pub fn missing(p: P) -> Error {
     Error::denied(format!("you need the {} permission for that", label(p)))
 }
 
+#[derive(PartialEq)]
 pub struct Role {
     pub position: i64,
     pub permissions: Bits,
 }
 
+#[derive(PartialEq)]
 pub struct Overwrite {
     pub target_id: String,
     pub member: bool,
@@ -194,6 +196,7 @@ pub struct Overwrite {
     pub deny: Bits,
 }
 
+#[derive(PartialEq)]
 pub struct Channel {
     pub parent_id: Option<String>,
     pub category: bool,
@@ -201,6 +204,7 @@ pub struct Channel {
 }
 
 /// Everything that decides who can do what in one server.
+#[derive(PartialEq)]
 pub struct Rules {
     /// The server's id, which is also @everyone's.
     pub everyone_id: String,

@@ -348,6 +348,33 @@ impl FuwaApp {
                 4.0,
             ));
         }
+        // Where "Show what I'm doing" lives, and whether it's on.
+        let sharing =
+            self.core.shared.read(|s| s.instance(key).and_then(|i| i.presence.as_ref()).map(|p| p.show_activity));
+        if let Some(sharing) = sharing {
+            let hover = alpha(p.primary, 0.1);
+            let key = key.to_owned();
+            body = body.child(div().mx(px(10.0)).my(px(4.0)).h(px(1.0)).bg(p.border)).child(
+                div()
+                    .id("status-sharing")
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .rounded(corner(10.0))
+                    .cursor_pointer()
+                    .text_sm()
+                    .hover(move |s| s.bg(hover))
+                    .active(|s| s.top(px(1.0)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.menu = None;
+                        this.open_friend_settings(&key, window, cx);
+                    }))
+                    .child(icon(if sharing { "eye" } else { "eye-off" }).size(px(16.0)).text_color(p.muted_foreground))
+                    .child(if sharing { "Sharing what you're doing" } else { "Not sharing what you're doing" }),
+            );
+        }
         div()
             .id("menu-status-away")
             .absolute()

@@ -83,6 +83,10 @@ fn changes_access(payload: &Payload, account_id: &str) -> bool {
 struct View {
     sdb: Arc<ServerDb>,
     account_id: String,
+    /// Their member row and roles as last read, for working out their access
+    /// again after a change to the server's channels or roles, which leaves
+    /// these alone.
+    member: pb::Member,
     access: Access,
     /// Catching up: what the member can see is what they can see now, not
     /// what they could when each event happened.
@@ -121,7 +125,18 @@ impl View {
             return if shown_to(&self.account_id, &self.access, payload) { vec![event.clone()] } else { vec![] };
         }
         let before = self.access.visible();
-        match self.load().await {
+        // Changes to channels and roles leave every member's own row alone
+        // (deleting a role doesn't: it's taken off its members), so thousands
+        // of streams reacting to one don't each read theirs.
+        let own_row = !matches!(
+            payload,
+            Payload::ChannelCreated(_)
+                | Payload::ChannelUpdated(_)
+                | Payload::ChannelDeleted(_)
+                | Payload::RoleCreated(_)
+                | Payload::RoleUpdated(_)
+        );
+        match self.load(own_row).await {
             Ok(Some(access)) => self.access = access,
             Ok(None) => {}
             Err(_) => tracing::warn!("couldn't work out a member's permissions"),
@@ -176,7 +191,7 @@ impl View {
     /// Works out what the member can see now, for a stream that starts live
     /// from the server's head. Gone meanwhile, they subscribe again and hear so.
     async fn reload(&mut self) -> Result<(), Status> {
-        match self.load().await {
+        match self.load(true).await {
             Ok(Some(access)) => {
                 self.access = access;
                 Ok(())
@@ -186,9 +201,16 @@ impl View {
         }
     }
 
-    async fn load(&self) -> Result<Option<Access>> {
-        let conn = self.sdb.read()?;
-        Ok(store::member_access(&conn, &self.sdb.id, &self.account_id).await?.map(|(_, access)| access))
+    /// What the member can do now, reading their own row again too when
+    /// `own_row`. `None` once they're no longer a member.
+    async fn load(&mut self, own_row: bool) -> Result<Option<Access>> {
+        if !own_row {
+            return Ok(Some(self.sdb.rules().await?.access(&self.account_id, &self.member)));
+        }
+        Ok(self.sdb.member_access(&self.account_id).await?.map(|(member, access)| {
+            self.member = member;
+            access
+        }))
     }
 }
 
@@ -227,9 +249,10 @@ impl EventService for Api {
         let mut gone = Vec::new();
         for cursor in cursors {
             let payload = match self.membership(&account, &cursor.server_id).await {
-                Ok(Seat { sdb, access, .. }) => {
+                Ok(Seat { sdb, member, access }) => {
                     let live = self.app.hub.subscribe(&sdb.id);
-                    let view = View { sdb: sdb.clone(), account_id: account.id.clone(), access, replaying: true };
+                    let view =
+                        View { sdb: sdb.clone(), account_id: account.id.clone(), member, access, replaying: true };
                     followed.push((sdb, cursor.after_sequence, live, view));
                     continue;
                 }
@@ -371,7 +394,7 @@ impl EventService for Api {
                         if views.contains_key(&*server_id) || views.len() >= MAX_SERVERS {
                             continue;
                         }
-                        let Ok(Seat { sdb, access, .. }) = api.membership(&account, &server_id).await else {
+                        let Ok(Seat { sdb, member, access }) = api.membership(&account, &server_id).await else {
                             continue; // gone again already
                         };
                         let receiver = app.hub.subscribe(&sdb.id);
@@ -382,9 +405,10 @@ impl EventService for Api {
                                 return;
                             }
                         };
-                        let mut view = View { sdb: sdb.clone(), account_id: account_id.clone(), access, replaying: false };
+                        let mut view =
+                            View { sdb: sdb.clone(), account_id: account_id.clone(), member, access, replaying: false };
                         // Worked out again from after the head, as for a stream that starts live.
-                        match view.load().await {
+                        match view.load(true).await {
                             Ok(Some(access)) => view.access = access,
                             Ok(None) => continue, // gone again already
                             Err(err) => {
