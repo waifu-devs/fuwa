@@ -6,6 +6,8 @@
  * Kept free of the generated types so tests run on plain Node.
  */
 
+import type { I18n } from "../i18n/i18n.ts";
+
 export type RailFolder = { id: string; name: string; color: number; servers: string[] };
 export type RailEntry = { kind: "server"; id: string } | { kind: "folder"; folder: RailFolder };
 export type RailLayout = RailEntry[];
@@ -181,10 +183,12 @@ export const toItems = (layout: RailLayout): RailItem[] =>
   );
 
 /** A folder's name as shown: its own, or its servers' names. */
-export function folderLabel(folder: RailFolder, servers: Map<string, { name: string }>) {
+export function folderLabel(t: I18n["t"], folder: RailFolder, servers: Map<string, { name: string }>) {
   if (folder.name) return folder.name;
   const names = folder.servers.map((id) => servers.get(id)?.name ?? "").filter(Boolean);
-  return names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ") || "Folder";
+  return names.length > 3
+    ? t("workspace.rail.folder.more", { names: names.slice(0, 3).join(", "), count: names.length - 3 })
+    : names.join(", ") || t("workspace.rail.folder.default");
 }
 
 /** A folder name as the instance takes it: no invisible or control characters, trimmed, 32 characters at most. */

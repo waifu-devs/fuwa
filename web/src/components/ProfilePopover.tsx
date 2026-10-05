@@ -14,12 +14,14 @@ import { FriendActions } from "@/components/friends/FriendActions";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
+import type { Key } from "@/i18n/i18n";
+import { useI18n } from "@/i18n/react";
 import { useMediaQuery } from "@/lib/use-media-query";
 
-const MOD_ACTIONS: { action: ModAction; label: string; icon: LucideIcon; hover: string }[] = [
-  { action: "timeout", label: "Time out", icon: HourglassIcon, hover: "group-hover:rotate-180" },
-  { action: "kick", label: "Kick", icon: DoorOpenIcon, hover: "group-hover:translate-x-0.5" },
-  { action: "ban", label: "Ban", icon: GavelIcon, hover: "group-hover:-rotate-45" },
+const MOD_ACTIONS: { action: ModAction; label: Key; icon: LucideIcon; hover: string }[] = [
+  { action: "timeout", label: "workspace.popover.timeout", icon: HourglassIcon, hover: "group-hover:rotate-180" },
+  { action: "kick", label: "workspace.popover.kick", icon: DoorOpenIcon, hover: "group-hover:translate-x-0.5" },
+  { action: "ban", label: "workspace.popover.ban", icon: GavelIcon, hover: "group-hover:-rotate-45" },
 ];
 
 /** How long a profile may take before the card shows a placeholder for it. */
@@ -43,6 +45,7 @@ export function ProfilePopover({
   side?: "right" | "left" | "top" | "bottom";
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   // A phone has no room beside a name for the card, so it opens under it and slides to fit.
   const roomy = useMediaQuery("(min-width: 768px)");
@@ -150,9 +153,9 @@ export function ProfilePopover({
                           )}
                         </motion.span>
                       </AnimatePresence>
-                      Message
+                      {t("workspace.popover.message")}
                       <LockKeyholeIcon
-                        aria-label="End-to-end encrypted"
+                        aria-label={t("workspace.popover.encrypted")}
                         className="size-3.5 opacity-80 transition-transform duration-300 group-hover:translate-x-0.5"
                       />
                     </motion.button>
@@ -188,7 +191,7 @@ export function ProfilePopover({
                         }
                       >
                         <Icon className={`size-3.5 transition-transform duration-300 ${hover}`} />
-                        {action === "timeout" && timedOutUntil(member, now) ? "Timed out" : label}
+                        {action === "timeout" && timedOutUntil(member, now) ? t("workspace.popover.timedOut") : t(label)}
                       </button>
                     ))}
                   </motion.div>

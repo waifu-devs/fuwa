@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { drifted, HOLD_MS, keyboardPoint, opensMenu, type MenuEntry, type MenuPoint, type MenuSection } from "@/lib/context-menu";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { reportTiming, reportUsage } from "@/lib/reports";
 import { cn } from "@/lib/utils";
@@ -318,6 +319,7 @@ export function ContextMenuHost() {
 const POP = { type: "spring", stiffness: 700, damping: 38, mass: 0.6 } as const;
 
 function OneMenu({ menu, open }: { menu: OpenMenu; open: boolean }) {
+  const { t } = useI18n();
   return (
     <DropdownMenu open={open} onOpenChange={(o) => !o && menus.current === menu && closeContextMenu()} modal={false}>
       {createPortal(
@@ -332,7 +334,7 @@ function OneMenu({ menu, open }: { menu: OpenMenu; open: boolean }) {
         sideOffset={2}
         collisionPadding={8}
         loop
-        aria-label="Actions"
+        aria-label={t("workspace.contextMenu.label")}
         onContextMenu={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => {
           e.preventDefault();

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { initials } from "@/lib/format";
+import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { effectiveNotifications, useNow } from "@/lib/notifications";
 import { hostedByUs } from "@/lib/hosted";
@@ -40,6 +41,7 @@ import { toast } from "@/lib/ui";
  * it lives on, so hosted and self-hosted servers sit side by side.
  */
 export function Rail() {
+  const { t } = useI18n();
   const instances = useRailInstances();
   const params = useParams({ strict: false }) as { instance?: string; server?: string };
   const [creating, setCreating] = useState(false);
@@ -52,7 +54,7 @@ export function Rail() {
 
   return (
     <nav
-      aria-label="Servers"
+      aria-label={t("workspace.rail.label")}
       className="surface-rail scroll-none flex h-full w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto py-3"
     >
       <RailItem label="fuwa" active={!params.instance} to="/">
@@ -77,29 +79,29 @@ export function Rail() {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Add a server"
+                aria-label={t("workspace.rail.add")}
                 className="server-icon group grid size-12 place-items-center bg-card text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
               >
                 <PlusIcon className="size-6 transition-transform duration-300 group-hover:rotate-90" />
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent side="right">Add a server</TooltipContent>
+          <TooltipContent side="right">{t("workspace.rail.add")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent side="right" align="start" className="w-64">
           <DropdownMenuItem disabled={signedIn.length === 0} onSelect={() => setCreating(true)}>
-            <PlusIcon /> Create a server
+            <PlusIcon /> {t("workspace.rail.create")}
           </DropdownMenuItem>
           {signedIn.map((inst) => (
             <DropdownMenuItem
               key={inst.key}
               onSelect={() => navigate({ to: "/$instance", params: { instance: inst.key } })}
             >
-              <CompassIcon /> Browse servers on {inst.node?.name ?? <Private text={inst.key} />}
+              <CompassIcon /> <T k="workspace.rail.browseOn" values={{ instance: inst.node?.name ?? <Private text={inst.key} /> }} />
             </DropdownMenuItem>
           ))}
           <DropdownMenuItem onSelect={() => setConnecting(true)}>
-            <GlobeIcon /> Connect to another fuwa server
+            <GlobeIcon /> {t("workspace.rail.connect")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -166,17 +168,24 @@ function useUnread(key: string, serverIds: string[], skip?: string) {
 }
 
 function InstanceGroup({ inst, params }: { inst: RailInstance; params: { instance?: string; server?: string } }) {
+  const { t } = useI18n();
   const here = params.instance === inst.key;
   const address = useAddress(inst.key);
   const label = inst.node?.name ?? address;
-  const hosted = hostedByUs(inst.url) ? " · Hosted by Waifu Devs" : "";
+  const hosted = hostedByUs(inst.url);
   // Unread direct messages show on the instance they're on.
   const dms = useFuwa((s) => Object.values(s.instances[inst.key]?.dms.unread ?? {}).reduce((sum, n) => sum + n, 0));
   return (
     <>
       <Divider />
       <RailItem
-        label={inst.node ? `${label} · ${address}${hosted}` : label}
+        label={
+          inst.node
+            ? hosted
+              ? t("workspace.rail.instanceHosted", { name: label, address, hosted: t("shell.hosted.label") })
+              : t("workspace.rail.instance", { name: label, address })
+            : label
+        }
         active={here && !params.server}
         unread={dms > 0}
         to="/$instance"
@@ -195,7 +204,7 @@ function InstanceGroup({ inst, params }: { inst: RailInstance; params: { instanc
           <AnimatePresence>
             {dms > 0 && (
               <motion.span
-                title="Unread direct messages"
+                title={t("workspace.rail.unreadDms")}
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 exit={{ scale: 0 }}
@@ -223,6 +232,7 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
   const ids = useMemo(() => inst.servers.map((s) => s.id), [inst.servers]);
   const layout = useMemo(() => railLayout(saved, ids), [saved, ids]);
   const byId = useMemo(() => new Map(inst.servers.map((s) => [s.id, s])), [inst.servers]);
+  const { t, number } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<RailMenuTarget | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -244,16 +254,23 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
 
   const nameOf = (id: string) => {
     const entry = layout.find((e) => e.kind === "folder" && e.folder.id === id);
-    return entry?.kind === "folder" ? folderLabel(entry.folder, byId) : (byId.get(id)?.name ?? "");
+    return entry?.kind === "folder" ? folderLabel(t, entry.folder, byId) : (byId.get(id)?.name ?? "");
   };
   /** Says where something went, for screen readers. */
   const announce = (next: RailLayout, id: string) => {
     const top = next.findIndex((e) => keyOf(e) === id);
     const folder = next.find((e) => e.kind === "folder" && e.folder.servers.includes(id));
     if (folder?.kind === "folder") {
-      setSaid(`${nameOf(id)}: ${folder.folder.servers.indexOf(id) + 1} of ${folder.folder.servers.length} in ${folderLabel(folder.folder, byId)}`);
+      setSaid(
+        t("workspace.rail.movedInFolder", {
+          name: nameOf(id),
+          position: number(folder.folder.servers.indexOf(id) + 1),
+          count: number(folder.folder.servers.length),
+          folder: folderLabel(t, folder.folder, byId),
+        }),
+      );
     } else {
-      setSaid(`${nameOf(id)}: ${top + 1} of ${next.length}`);
+      setSaid(t("workspace.rail.moved", { name: nameOf(id), position: number(top + 1), count: number(next.length) }));
     }
   };
 
@@ -317,8 +334,8 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
             folder={
               inst.me
                 ? folder
-                  ? { label: "Take out of folder", icon: FolderMinusIcon, onSelect: () => leaveFolder(id) }
-                  : { label: "Put in a new folder", icon: FolderPlusIcon, onSelect: () => newFolder(id) }
+                  ? { label: t("workspace.rail.takeOut"), icon: FolderMinusIcon, onSelect: () => leaveFolder(id) }
+                  : { label: t("workspace.rail.newFolder"), icon: FolderPlusIcon, onSelect: () => newFolder(id) }
                 : undefined
             }
           />

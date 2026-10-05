@@ -10,6 +10,7 @@ import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
 import { reportTiming, reportUsage } from "@/lib/reports";
 import { toast } from "@/lib/ui";
+import { i18n, type Key } from "@/i18n/i18n";
 import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
 import { watchQuality } from "./quality";
@@ -31,6 +32,9 @@ import {
   setRemoteVideo,
   wanted,
 } from "./video";
+
+/** A sentence in the app's language now. */
+const tr = (key: Key) => i18n().t(key);
 
 /**
  * This browser's call: one RTCPeerConnection to the instance's media
@@ -54,7 +58,7 @@ const KEEP_MS = 5_000;
 /** How long a broken connection gets to come back by itself before joining again. */
 const GRACE_MS = 2_500;
 const CHANNEL = "fuwa";
-const FULL = "This server's recordings are full. Delete some in Recordings to record again.";
+const full = () => tr("workspace.calls.recordingsFull");
 
 type Signal =
   | { type: "offer" | "answer"; sdp: string }
@@ -140,13 +144,13 @@ class Session {
 
   async start() {
     const settings = await this.api.calls.getCallSettings({});
-    if (!settings.enabled) throw new Error("Calls are switched off on this instance.");
+    if (!settings.enabled) throw new Error(tr("workspace.calls.switchedOff"));
     this.settings = settings;
     setCalls(() => ({ serverRecordings: settings.recordings, screenSoundOffered: settings.screenSound }));
     if (this.target.kind === "dm") {
-      if (!canEncryptCalls()) throw new Error("This browser can't encrypt calls. Try a recent Chrome, Edge, Firefox or Safari.");
+      if (!canEncryptCalls()) throw new Error(tr("workspace.calls.cantEncrypt"));
       const dms = dmEngine(this.target.instance);
-      if (!dms) throw new Error("Encrypted messages aren't ready here yet, and calls need them.");
+      if (!dms) throw new Error(tr("workspace.calls.dmsNotReady"));
       this.frames = new FrameCrypto((epoch) => void this.refreshSecret(epoch));
       await this.refreshSecret();
       // A device joining or leaving the conversation moves its group to a new epoch, with a new secret.
@@ -322,7 +326,7 @@ class Session {
     this.videoOff = !!joined.state?.serverVideoOff;
     this.recordSuppressed = !!joined.state?.recordSuppress;
     if ("recordingsFull" in joined && joined.recordingsFull && getCalls().serverRecord) {
-      toast(FULL);
+      toast(full());
       setCalls(() => ({ serverRecord: false }));
     }
     await pc.setRemoteDescription({ type: "answer", sdp: joined.answer });
@@ -415,7 +419,7 @@ class Session {
       if (this.recorder.state !== "inactive") this.recorder.stop();
       this.recorder = null;
       this.speakers.stopRecording();
-      toast("Recording saved to your downloads.");
+      toast(tr("workspace.calls.recordingSaved"));
     }
   }
 
@@ -450,7 +454,7 @@ class Session {
       track.onended = () => {
         if (this.screen === track) void setScreen(false);
       };
-      if (sound && !offered) toast("This server passes the picture on, not the sound: it needs a newer fuwa for that.");
+      if (sound && !offered) toast(tr("workspace.calls.noServerSound"));
       else if (shared.silent) toast(shared.silent);
       if (shared.audio) reportUsage("call.screen_sound");
       else if (shared.silent) reportUsage("call.screen_sound_missing");
@@ -499,10 +503,10 @@ class Session {
         this.reconnect(true);
         break;
       case "replaced":
-        void hangUp("You joined this call somewhere else.", false);
+        void hangUp(tr("workspace.calls.joinedElsewhere"), false);
         break;
       case "closed":
-        void hangUp("You were disconnected from the call.");
+        void hangUp(tr("workspace.calls.disconnected"));
         break;
     }
   }
@@ -527,7 +531,7 @@ class Session {
         await this.connect();
       } catch (err) {
         const e = toFuwaError(err);
-        if (gone(e)) return void hangUp("You're no longer in this call.");
+        if (gone(e)) return void hangUp(tr("workspace.calls.noLongerIn"));
         setTimeout(() => void tryAgain(Math.min(delay * 2, 8_000)), delay * (0.75 + Math.random() / 2));
       }
     };
@@ -550,16 +554,16 @@ class Session {
   private moderated(off: boolean) {
     if (off === this.videoOff) return;
     this.videoOff = off;
-    if (!off) return void toast("A moderator let you turn your camera on again.");
+    if (!off) return void toast(tr("workspace.calls.mod.cameraBack"));
     const { selfVideo, selfStream } = getCalls();
     toast(
       selfVideo && selfStream
-        ? "A moderator turned your camera and screen share off."
+        ? tr("workspace.calls.mod.bothOff")
         : selfStream
-          ? "A moderator stopped your screen share."
+          ? tr("workspace.calls.mod.screenOff")
           : selfVideo
-            ? "A moderator turned your camera off."
-            : "A moderator turned off cameras and screen sharing for you here.",
+            ? tr("workspace.calls.mod.cameraOff")
+            : tr("workspace.calls.mod.allOff"),
     );
     if (selfVideo) void setCamera(false);
     if (selfStream) void setScreen(false);
@@ -578,24 +582,24 @@ class Session {
         this.moderated(!!kept.state?.serverVideoOff);
         // The channel took VIDEO away meanwhile.
         if (this.videoSuppressed && getCalls().selfVideo) {
-          toast("You can't have your camera on in this channel any more.");
+          toast(tr("workspace.calls.noCameraAnyMore"));
           void setCamera(false);
         }
         if (this.videoSuppressed && getCalls().selfStream) {
-          toast("You can't share your screen in this channel any more.");
+          toast(tr("workspace.calls.noScreenAnyMore"));
           void setScreen(false);
         }
         this.recordSuppressed = !!kept.state?.recordSuppress;
         if (this.recordSuppressed && getCalls().selfRecord) {
-          toast("You can't record in this channel any more.");
+          toast(tr("workspace.calls.noRecordAnyMore"));
           setRecording(false);
         }
         // RECORD went away, or the instance stopped recording on the server.
         if (serverRecord && getCalls().serverRecord && !kept.state?.serverRecord) {
-          if (this.recordSuppressed) toast("You can't record in this channel any more.");
-          else if (kept.recordingsFull) toast(FULL);
-          else if (kept.recordingEnded) toast("Recording stopped: what the server's recordings keep changed. Press Record to start a new one.");
-          else toast("This instance stopped recording voice channels on the server.");
+          if (this.recordSuppressed) toast(tr("workspace.calls.noRecordAnyMore"));
+          else if (kept.recordingsFull) toast(full());
+          else if (kept.recordingEnded) toast(tr("workspace.calls.recordingEnded"));
+          else toast(tr("workspace.calls.serverStopped"));
           setCalls(() => ({ serverRecord: false }));
         }
       } else {
@@ -603,7 +607,7 @@ class Session {
       }
     } catch (err) {
       const e = toFuwaError(err);
-      if (gone(e)) void hangUp(t.kind === "voice" ? "You were disconnected from the voice channel." : "The call ended.");
+      if (gone(e)) void hangUp(t.kind === "voice" ? tr("workspace.calls.voiceDisconnected") : tr("workspace.calls.ended"));
       // Anything else (the instance restarting, a blip): the next keep tries again.
     }
   }
@@ -776,8 +780,8 @@ export function toggleDeafen() {
 export async function setCamera(on: boolean) {
   const s = session;
   if (!s || getCalls().selfVideo === on) return;
-  if (on && s.videoSuppressed) return void toast("You can't turn your camera on in this channel.");
-  if (on && s.videoOff) return void toast("A moderator turned your camera off here.");
+  if (on && s.videoSuppressed) return void toast(tr("workspace.calls.noCameraHere"));
+  if (on && s.videoOff) return void toast(tr("workspace.calls.modCameraHere"));
   if (on) reportUsage("call.camera");
   setCalls(() => ({ selfVideo: on }));
   try {
@@ -796,8 +800,8 @@ export const toggleCamera = () => setCamera(!getCalls().selfVideo);
 export async function setScreen(on: boolean) {
   const s = session;
   if (!s || getCalls().selfStream === on) return;
-  if (on && s.videoSuppressed) return void toast("You can't share your screen in this channel.");
-  if (on && s.videoOff) return void toast("A moderator turned screen sharing off for you here.");
+  if (on && s.videoSuppressed) return void toast(tr("workspace.calls.noScreenHere"));
+  if (on && s.videoOff) return void toast(tr("workspace.calls.modScreenHere"));
   if (on) reportUsage("call.screen_share");
   setCalls(() => ({ selfStream: on }));
   try {
@@ -840,8 +844,8 @@ export function toggleScreenQuiet(userId: string) {
 export function setRecording(on: boolean) {
   const s = session;
   if (!s || getCalls().selfRecord === on) return;
-  if (on && s.recordSuppressed) return void toast("You can't record in this channel.");
-  if (on && typeof MediaRecorder === "undefined") return void toast("This browser can't record.");
+  if (on && s.recordSuppressed) return void toast(tr("workspace.calls.noRecordHere"));
+  if (on && typeof MediaRecorder === "undefined") return void toast(tr("workspace.calls.cantRecord"));
   setCalls(() => ({ selfRecord: on }));
   s.setRecording(on);
   cue(on ? "recording" : "mute");
@@ -858,11 +862,11 @@ export const toggleRecording = () => setRecording(!getCalls().selfRecord);
 export function setServerRecording(on: boolean) {
   const s = session;
   if (!s || s.target.kind !== "voice" || getCalls().serverRecord === on) return;
-  if (on && s.recordSuppressed) return void toast("You can't record in this channel.");
-  if (on && !getCalls().serverRecordings) return void toast("This instance doesn't record voice channels on the server.");
+  if (on && s.recordSuppressed) return void toast(tr("workspace.calls.noRecordHere"));
+  if (on && !getCalls().serverRecordings) return void toast(tr("workspace.calls.noServerRecord"));
   setCalls(() => ({ serverRecord: on }));
   cue(on ? "recording" : "mute");
-  if (!on) toast("Stopped. The recording is in this channel's recordings.");
+  if (!on) toast(tr("workspace.calls.serverRecordStopped"));
   void s.keep();
 }
 
@@ -880,7 +884,7 @@ function saveRecording(blob: Blob, started: Date) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `fuwa call ${when}.${ext}`;
+  a.download = `${i18n().t("workspace.calls.fileName", { when })}.${ext}`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

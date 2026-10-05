@@ -10,6 +10,7 @@ import { AppBadge } from "@/components/AppBadge";
 import { ActivityCards, PresenceDot } from "@/components/Presence";
 import { ProfileEffect } from "@/components/ProfileEffect";
 import { colorCss, displayName, hueOf, isAgent, shownStatus, toDate } from "@/lib/format";
+import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
@@ -55,13 +56,14 @@ export function ProfileCard({
   instanceKey?: string;
   className?: string;
 }) {
+  const { t, date } = useI18n();
   const Text = editing ? PlainText : SwapText;
   const name = member?.nickname || displayName(user);
   const status = shownStatus(user);
   const accent = profile?.accentColor;
   const since = profile?.createdAt ? toDate(profile.createdAt) : null;
   const joined = member?.joinedAt ? toDate(member.joinedAt) : null;
-  const day = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const day = (d: Date) => date(d, { year: "numeric", month: "short", day: "numeric" });
   const othersEffects = usePrefs((p) => p.othersEffects);
   const effect = me || othersEffects ? profile?.effect : undefined;
 
@@ -117,7 +119,7 @@ export function ProfileCard({
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={stagger(0)} className="mt-2">
           <p className="flex min-w-0 items-center gap-1.5 text-xl font-extrabold">
             <Text className="truncate">{name}</Text>
-            {owner && <CrownIcon aria-label="Owner" className="size-4 shrink-0 text-amber-400" />}
+            {owner && <CrownIcon aria-label={t("workspace.profile.owner")} className="size-4 shrink-0 text-amber-400" />}
             {isAgent(user) && <AppBadge agent />}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
@@ -152,7 +154,7 @@ export function ProfileCard({
               className="overflow-hidden"
             >
               <div className="mt-3 rounded-2xl bg-muted/60 p-3">
-                <p className="mb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">About me</p>
+                <p className="mb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("workspace.profile.aboutMe")}</p>
                 {profile?.bio ? (
                   <Markdown className="max-h-48 overflow-y-auto text-sm">{profile.bio}</Markdown>
                 ) : (
@@ -174,10 +176,10 @@ export function ProfileCard({
           >
             {since && (
               <span className="flex items-center gap-1.5">
-                <CalendarHeartIcon className="size-3.5" /> Here since {day(since)}
+                <CalendarHeartIcon className="size-3.5" /> {t("workspace.profile.since", { date: day(since) })}
               </span>
             )}
-            {joined && <span className="pl-5">Joined this server {day(joined)}</span>}
+            {joined && <span className="pl-5">{t("workspace.profile.joined", { date: day(joined) })}</span>}
           </motion.div>
         )}
       </div>

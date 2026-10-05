@@ -1,4 +1,8 @@
+import { i18n, type Key } from "@/i18n/i18n";
 import { getPrefs, subscribePrefs, type Prefs } from "@/lib/prefs";
+
+/** A sentence in the app's language now. */
+const tr = (key: Key) => i18n().t(key);
 
 /**
  * Sound in and out of a call, through Web Audio.
@@ -49,11 +53,11 @@ const constraints = (p: Prefs): MediaTrackConstraints => ({
 /** Why the microphone didn't open, in words. */
 export function micProblem(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
-  if (name === "NotAllowedError" || name === "SecurityError") return "Your browser blocks the microphone for fuwa. Allow it in the site's settings.";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "No microphone found. Plug one in, or pick another in Voice & video.";
-  if (name === "NotReadableError") return "Another app is using the microphone.";
-  if (typeof navigator !== "undefined" && !navigator.mediaDevices) return "This page can't use a microphone (it needs https).";
-  return "The microphone didn't start.";
+  if (name === "NotAllowedError" || name === "SecurityError") return tr("workspace.calls.mic.blocked");
+  if (name === "NotFoundError" || name === "OverconstrainedError") return tr("workspace.calls.mic.notFound");
+  if (name === "NotReadableError") return tr("workspace.calls.mic.busy");
+  if (typeof navigator !== "undefined" && !navigator.mediaDevices) return tr("workspace.calls.mic.noHttps");
+  return tr("workspace.calls.mic.failed");
 }
 
 export type MicState = {

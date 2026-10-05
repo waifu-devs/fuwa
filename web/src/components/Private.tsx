@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
+import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { HIDDEN_ADDRESS, hidesPersonal, maskName, shownAddress } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
@@ -9,6 +10,7 @@ import { cn } from "@/lib/utils";
  * into a stand-in instead of snapping, and blurs back when streamer mode ends.
  */
 export function Private({ text, kind = "address", className }: { text: string; kind?: "address" | "name" | "secret"; className?: string }) {
+  const { t } = useI18n();
   const hidden = usePrefs(hidesPersonal);
   const shown = hidden ? (kind === "name" ? maskName(text) : kind === "secret" ? "••••••••" : HIDDEN_ADDRESS) : text;
   return (
@@ -19,7 +21,7 @@ export function Private({ text, kind = "address", className }: { text: string; k
         animate={{ opacity: 1, filter: "blur(0px)" }}
         exit={{ opacity: 0, filter: "blur(8px)" }}
         transition={{ duration: 0.35, ease: "easeOut" }}
-        title={hidden ? "Hidden by streamer mode" : undefined}
+        title={hidden ? t("workspace.private.hidden") : undefined}
         className={cn("inline-block max-w-full truncate align-bottom", hidden && kind === "address" && "italic", className)}
       >
         {shown}

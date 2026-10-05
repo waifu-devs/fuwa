@@ -3,27 +3,19 @@ import { instanceKey, normalizeUrl } from "@/fuwa/saved";
 import type { Key } from "@/i18n/i18n";
 import { formatDuration, type Lang, toDate } from "@/lib/format";
 
-/** How long a new invite lasts, in seconds; 0 is forever. */
-export const EXPIRE_AFTER = [
-  { value: 1800, label: "30 minutes" },
-  { value: 3600, label: "1 hour" },
-  { value: 6 * 3600, label: "6 hours" },
-  { value: 12 * 3600, label: "12 hours" },
-  { value: 86_400, label: "1 day" },
-  { value: 7 * 86_400, label: "7 days" },
-  { value: 0, label: "Never" },
-] as const;
+/** How long a new invite lasts, in seconds; 0 is forever. Labels are catalog keys. */
+export const EXPIRE_AFTER: readonly { value: number; label: Key }[] = [
+  { value: 1800, label: "workspace.invite.expire.minutes30" },
+  { value: 3600, label: "workspace.invite.expire.hour" },
+  { value: 6 * 3600, label: "workspace.invite.expire.hours6" },
+  { value: 12 * 3600, label: "workspace.invite.expire.hours12" },
+  { value: 86_400, label: "workspace.invite.expire.day" },
+  { value: 7 * 86_400, label: "workspace.invite.expire.days7" },
+  { value: 0, label: "workspace.invite.expire.never" },
+];
 
 /** How many people one invite lets in; 0 is anyone with the link. */
-export const MAX_USES = [
-  { value: 0, label: "No limit" },
-  { value: 1, label: "1 use" },
-  { value: 5, label: "5 uses" },
-  { value: 10, label: "10 uses" },
-  { value: 25, label: "25 uses" },
-  { value: 50, label: "50 uses" },
-  { value: 100, label: "100 uses" },
-] as const;
+export const MAX_USES = [0, 1, 5, 10, 25, 50, 100] as const;
 
 /** What a fresh invite starts as, like Discord's: a week, for anyone. */
 export const DEFAULT_INVITE = { maxAgeSeconds: 7 * 86_400, maxUses: 0 };

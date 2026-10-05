@@ -1,4 +1,5 @@
 import { AtSignIcon, DoorOpenIcon, GavelIcon, HourglassIcon, IdCardIcon, MessageCircleIcon, PencilIcon, ShieldIcon, TimerOffIcon, UserRoundIcon } from "lucide-react";
+import { i18n } from "@/i18n/i18n";
 import { Permission, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { giveRole, run, takeRole } from "@/fuwa/actions";
 import { openConversation } from "@/fuwa/dms";
@@ -41,34 +42,35 @@ export function memberMenu(ctx: MenuContexts["member"], trigger: MenuTrigger): M
   // A button that opens their profile card: the one right-clicked, when it is one.
   const card = trigger.element.matches("button, [role=button]") ? trigger.element : null;
 
+  const { t, number } = i18n();
   return withExtensions("member", { ...ctx, member }, [
     {
       id: "primary",
       items: items(
-        card && { id: "profile", label: "Profile", icon: UserRoundIcon, onSelect: () => card.click() },
+        card && { id: "profile", label: t("workspace.menu.member.profile"), icon: UserRoundIcon, onSelect: () => card.click() },
         canMessage && {
           id: "message",
-          label: "Message",
+          label: t("workspace.menu.member.message"),
           icon: MessageCircleIcon,
-          hint: "Encrypted",
+          hint: t("workspace.menu.member.encrypted"),
           onSelect: () => attempt(run(openConversation(instanceKey, user.id)).then((conversation) => goTo({ to: "/$instance/dm/$conversation", params: { instance: instanceKey, conversation } }))),
         },
-        !!serverId && hasCommand(COMPOSER_INSERT) && { id: "mention", label: "Mention", icon: AtSignIcon, onSelect: () => runCommand(COMPOSER_INSERT, `@${user.username} `) },
+        !!serverId && hasCommand(COMPOSER_INSERT) && { id: "mention", label: t("workspace.menu.member.mention"), icon: AtSignIcon, onSelect: () => runCommand(COMPOSER_INSERT, `@${user.username} `) },
       ),
     },
     { id: "social", items: [] },
     {
       id: "manage",
       items: items(
-        me && !!server && { id: "server-profile", label: "Edit server profile", icon: IdCardIcon, onSelect: () => openSettings("server-profiles", serverId) },
-        !me && allowed?.nickname && { id: "nickname", label: "Change nickname", icon: PencilIcon, onSelect: moderate("nickname") },
+        me && !!server && { id: "server-profile", label: t("workspace.menu.member.editServerProfile"), icon: IdCardIcon, onSelect: () => openSettings("server-profiles", serverId) },
+        !me && allowed?.nickname && { id: "nickname", label: t("workspace.menu.member.nickname"), icon: PencilIcon, onSelect: moderate("nickname") },
         assignable.length > 0 &&
           !!held && {
             kind: "sub",
             id: "roles",
-            label: "Roles",
+            label: t("workspace.menu.member.roles"),
             icon: ShieldIcon,
-            hint: String(held.size - (held.has(serverId) ? 1 : 0) || ""),
+            hint: held.size - (held.has(serverId) ? 1 : 0) ? number(held.size - (held.has(serverId) ? 1 : 0)) : "",
             items: assignable.map((role) => ({
               kind: "check" as const,
               id: role.id,
@@ -84,9 +86,9 @@ export function memberMenu(ctx: MenuContexts["member"], trigger: MenuTrigger): M
     {
       id: "moderate",
       items: items(
-        allowed?.timeout && { id: "timeout", label: timedOut ? "End time out" : "Time out", icon: timedOut ? TimerOffIcon : HourglassIcon, danger: !timedOut, onSelect: moderate("timeout") },
-        allowed?.kick && { id: "kick", label: "Kick", icon: DoorOpenIcon, danger: true, onSelect: moderate("kick") },
-        allowed?.ban && { id: "ban", label: "Ban", icon: GavelIcon, danger: true, onSelect: moderate("ban") },
+        allowed?.timeout && { id: "timeout", label: timedOut ? t("workspace.menu.member.endTimeout") : t("workspace.menu.member.timeout"), icon: timedOut ? TimerOffIcon : HourglassIcon, danger: !timedOut, onSelect: moderate("timeout") },
+        allowed?.kick && { id: "kick", label: t("workspace.menu.member.kick"), icon: DoorOpenIcon, danger: true, onSelect: moderate("kick") },
+        allowed?.ban && { id: "ban", label: t("workspace.menu.member.ban"), icon: GavelIcon, danger: true, onSelect: moderate("ban") },
       ),
     },
     { id: "developer", items: items(copyIdItem(user.id, "user")) },

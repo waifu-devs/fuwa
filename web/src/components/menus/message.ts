@@ -43,7 +43,7 @@ async function savePicture(src: string) {
   } catch {
     // Some instances don't let another site read their pictures: open it, to save from there.
     reportError("context_menu.save_picture", "message");
-    toast("Opened the picture to save from there");
+    toast(i18n().t("workspace.menu.target.savedElsewhere"));
     window.open(src, "_blank", "noopener,noreferrer");
   }
 }
@@ -63,12 +63,12 @@ export function targetSection(trigger: MenuTrigger): MenuSection {
   return {
     id: "target",
     items: items(
-      !!selection && { id: "copy-selection", label: "Copy", icon: TextSelectIcon, onSelect: () => copy(t, selection, t("common.copy.text")) },
-      !!href && { id: "open-link", label: "Open link", icon: ExternalLinkIcon, hint: linkHint(href), onSelect: () => link?.click() },
-      !!href && { id: "copy-link", label: "Copy link", icon: LinkIcon, onSelect: () => copy(t, href, t("common.copy.link")) },
-      !!src && { id: "open-picture", label: "Open picture", icon: ImageIcon, onSelect: () => window.open(src, "_blank", "noopener,noreferrer") },
-      !!src && { id: "save-picture", label: "Save picture", icon: DownloadIcon, onSelect: () => void savePicture(src) },
-      !!src && { id: "copy-picture-link", label: "Copy picture link", icon: LinkIcon, onSelect: () => copy(t, src, t("common.copy.pictureLink")) },
+      !!selection && { id: "copy-selection", label: t("workspace.menu.target.copy"), icon: TextSelectIcon, onSelect: () => copy(t, selection, t("common.copy.text")) },
+      !!href && { id: "open-link", label: t("workspace.menu.target.openLink"), icon: ExternalLinkIcon, hint: linkHint(href), onSelect: () => link?.click() },
+      !!href && { id: "copy-link", label: t("workspace.menu.target.copyLink"), icon: LinkIcon, onSelect: () => copy(t, href, t("common.copy.link")) },
+      !!src && { id: "open-picture", label: t("workspace.menu.target.openPicture"), icon: ImageIcon, onSelect: () => window.open(src, "_blank", "noopener,noreferrer") },
+      !!src && { id: "save-picture", label: t("workspace.menu.target.savePicture"), icon: DownloadIcon, onSelect: () => void savePicture(src) },
+      !!src && { id: "copy-picture-link", label: t("workspace.menu.target.copyPictureLink"), icon: LinkIcon, onSelect: () => copy(t, src, t("common.copy.pictureLink")) },
     ),
   };
 }
@@ -89,6 +89,7 @@ export type MessageMenuActions = {
  * reports join through `extendMenu("message", …)` once they exist.
  */
 export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, actions: MessageMenuActions): MenuSection[] {
+  const { t } = i18n();
   return [
     targetSection(trigger),
     ...withExtensions("message", ctx, [
@@ -96,17 +97,17 @@ export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, 
       {
         id: "primary",
         items: items(
-          actions.thread && { id: "thread", label: actions.thread.open ? "Open thread" : "Reply in thread", icon: MessageSquareReplyIcon, onSelect: actions.thread.go },
-          actions.edit && { id: "edit", label: "Edit message", icon: PencilIcon, onSelect: actions.edit },
-          actions.copyText && { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: actions.copyText },
+          actions.thread && { id: "thread", label: actions.thread.open ? t("workspace.menu.message.openThread") : t("workspace.menu.message.replyInThread"), icon: MessageSquareReplyIcon, onSelect: actions.thread.go },
+          actions.edit && { id: "edit", label: t("workspace.menu.message.edit"), icon: PencilIcon, onSelect: actions.edit },
+          actions.copyText && { id: "copy-text", label: t("workspace.menu.message.copyText"), icon: CopyIcon, onSelect: actions.copyText },
         ),
       },
       {
         id: "manage",
-        items: items(actions.keepOut && { id: "keep-out", label: `Keep ${actions.keepOut.name} out`, icon: UserXIcon, danger: true, onSelect: actions.keepOut.ask }),
+        items: items(actions.keepOut && { id: "keep-out", label: t("workspace.menu.message.keepOut", { name: actions.keepOut.name }), icon: UserXIcon, danger: true, onSelect: actions.keepOut.ask }),
       },
       { id: "developer", items: items(copyIdItem(ctx.message.id, "message")) },
-      { id: "danger", items: items(actions.delete && { id: "delete", label: "Delete message", icon: Trash2Icon, danger: true, onSelect: actions.delete }) },
+      { id: "danger", items: items(actions.delete && { id: "delete", label: t("workspace.menu.message.delete"), icon: Trash2Icon, danger: true, onSelect: actions.delete }) },
     ]),
   ].filter((s) => s.items.length > 0);
 }

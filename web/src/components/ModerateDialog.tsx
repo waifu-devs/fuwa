@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration, formatLeft, formatStamp, memberName, timedOutUntil } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { moderationFor, type ModAction } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
@@ -27,15 +27,17 @@ const TIME_OUT = [60, 5 * 60, 10 * 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60];
 
 /** How much of a banned person's history goes with them. */
 const DELETE = [
-  { value: 0, label: "Keep it" },
-  { value: 60 * 60, label: "Last hour" },
-  { value: 6 * 60 * 60, label: "6 hours" },
-  { value: 24 * 60 * 60, label: "24 hours" },
-  { value: 3 * 24 * 60 * 60, label: "3 days" },
-  { value: 7 * 24 * 60 * 60, label: "7 days" },
-];
+  { value: 0, label: "workspace.moderate.purge.keep" },
+  { value: 60 * 60, label: "workspace.moderate.purge.hour" },
+  { value: 6 * 60 * 60, label: "workspace.moderate.purge.hours6" },
+  { value: 24 * 60 * 60, label: "workspace.moderate.purge.hours24" },
+  { value: 3 * 24 * 60 * 60, label: "workspace.moderate.purge.days3" },
+  { value: 7 * 24 * 60 * 60, label: "workspace.moderate.purge.days7" },
+] as const;
 
 const REASON_MAX = 512;
+
+const SUBMIT = { kick: "workspace.moderate.submit.kick", ban: "workspace.moderate.submit.ban", nickname: "workspace.moderate.submit.save" } as const;
 
 /**
  * Time out, kick, ban or rename someone, from the member list, their profile
@@ -73,6 +75,7 @@ export function ModerateDialog({
 
 function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: string; serverId: string; member: Member; action: ModAction; onDone: () => void }) {
   const lang = useI18n();
+  const { t } = lang;
   const name = memberName(member);
   const userId = member.user?.id ?? "";
   const now = useNow(1000);
@@ -93,15 +96,15 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
     e.preventDefault();
     if (action === "timeout") {
       if ((await timeOut.go(instanceKey, serverId, userId, seconds, reason.trim())) === undefined) return;
-      toast(`${name} is timed out for ${formatDuration(lang, seconds)}`);
+      toast(t("workspace.moderate.timedOut", { name, duration: formatDuration(lang, seconds) }));
     } else if (action === "kick") {
       if ((await kick.go(instanceKey, serverId, userId, reason.trim())) === undefined) return;
-      toast(`Kicked ${name}`);
+      toast(t("workspace.moderate.kicked", { name }));
     } else if (action === "ban") {
       await gavel.start({ rotate: [0, -50, 20, 0], transition: { duration: 0.45, times: [0, 0.4, 0.7, 1] } });
       const deleted = await ban.go(instanceKey, serverId, userId, reason.trim(), purge);
       if (deleted === undefined) return;
-      toast(deleted ? `Banned ${name} and deleted ${deleted} ${deleted === 1 ? "message" : "messages"}` : `Banned ${name}`);
+      toast(deleted ? t("workspace.moderate.bannedDeleted", { name, count: deleted }) : t("workspace.moderate.banned", { name }));
     } else {
       if ((await rename.go(instanceKey, serverId, nickname.trim(), userId)) === undefined) return;
     }
@@ -110,17 +113,12 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
 
   async function endTimeOut() {
     if ((await timeOut.go(instanceKey, serverId, userId, 0, "")) === undefined) return;
-    toast(`${name} can talk again`);
+    toast(t("workspace.moderate.canTalk", { name }));
     onDone();
   }
 
-  const title = { timeout: `Time out ${name}`, kick: `Kick ${name}`, ban: `Ban ${name}`, nickname: `Change ${name}'s nickname` }[action];
-  const description = {
-    timeout: "They can still read, but can't send or edit messages until it ends.",
-    kick: "They leave the server. They can join again while it shows in Browse.",
-    ban: "They leave the server and can't join again until someone unbans them.",
-    nickname: "Only this server sees it. Leave it empty to show their display name.",
-  }[action];
+  const title = t(`workspace.moderate.title.${action}`, { name });
+  const description = t(`workspace.moderate.about.${action}`);
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
@@ -139,7 +137,7 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
               exit={{ scale: 0.6, opacity: 0 }}
               transition={SPRING}
               className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-1 text-xs font-bold text-amber-600 tabular-nums dark:text-amber-400"
-              title={`Until ${formatStamp(until)}`}
+              title={t("workspace.moderate.until", { time: formatStamp(until) })}
             >
               <HourglassIcon className="size-3.5 animate-[spin_3s_ease-in-out_infinite]" /> {formatLeft(lang, until.getTime() - now)}
             </motion.span>
@@ -149,31 +147,30 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
 
       {action === "timeout" && (
         <div className="flex flex-col gap-2">
-          <Label className="font-bold">For how long</Label>
-          <Chips label="Time-out length" value={seconds} onChange={setSeconds} options={TIME_OUT.map((s) => ({ value: s, label: formatDuration(lang, s) }))} />
+          <Label className="font-bold">{t("workspace.moderate.howLong")}</Label>
+          <Chips label={t("workspace.moderate.lengthLabel")} value={seconds} onChange={setSeconds} options={TIME_OUT.map((s) => ({ value: s, label: formatDuration(lang, s) }))} />
           <p className="text-xs text-muted-foreground">
-            Ends <b>{formatStamp(new Date(now + seconds * 1000))}</b>
-            {until && ", in place of the one running now"}.
+            <T k={until ? "workspace.moderate.endsReplacing" : "workspace.moderate.ends"} values={{ time: <b>{formatStamp(new Date(now + seconds * 1000))}</b> }} />
           </p>
         </div>
       )}
       {action === "ban" && (
         <div className="flex flex-col gap-2">
-          <Label className="font-bold">Delete their recent messages</Label>
-          <Chips label="Delete messages from" value={purge} onChange={setPurge} options={DELETE} />
+          <Label className="font-bold">{t("workspace.moderate.purgeLabel")}</Label>
+          <Chips label={t("workspace.moderate.purgeChips")} value={purge} onChange={setPurge} options={DELETE.map((d) => ({ value: d.value, label: t(d.label) }))} />
         </div>
       )}
       {action === "nickname" ? (
         <div className="flex flex-col gap-2">
           <Label htmlFor="mod-nickname" className="font-bold">
-            Nickname
+            {t("workspace.moderate.nickname")}
           </Label>
           <Input id="mod-nickname" autoFocus maxLength={32} value={nickname} placeholder={memberName({ ...member, nickname: "" })} onChange={(e) => setNick(e.target.value)} className="h-11 rounded-xl" />
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           <Label htmlFor="mod-reason" className="flex items-center justify-between font-bold">
-            Reason <span className="text-xs font-normal text-muted-foreground">Optional, for the audit log</span>
+            {t("workspace.moderate.reason")} <span className="text-xs font-normal text-muted-foreground">{t("workspace.moderate.reasonHint")}</span>
           </Label>
           <Textarea id="mod-reason" rows={2} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} className="rounded-xl" />
         </div>
@@ -183,11 +180,11 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
       <div className="flex flex-wrap items-center justify-end gap-2">
         {action === "timeout" && until && (
           <Button type="button" variant="ghost" disabled={busy} onClick={endTimeOut} className="mr-auto rounded-xl">
-            <TimerOffIcon /> End time-out
+            <TimerOffIcon /> {t("workspace.moderate.endTimeout")}
           </Button>
         )}
         <Button type="button" variant="ghost" disabled={busy} onClick={onDone} className="rounded-xl">
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           type="submit"
@@ -208,7 +205,7 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
           ) : (
             <PencilIcon />
           )}
-          {{ timeout: until ? "Change time-out" : "Time out", kick: "Kick", ban: "Ban", nickname: "Save" }[action]}
+          {t(action === "timeout" ? (until ? "workspace.moderate.submit.changeTimeout" : "workspace.moderate.submit.timeout") : SUBMIT[action])}
         </Button>
       </div>
     </form>

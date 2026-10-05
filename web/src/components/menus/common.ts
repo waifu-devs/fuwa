@@ -63,7 +63,7 @@ export function notificationEntries(instanceKey: string, serverId: string, chann
   if (isMuted(settings, now)) {
     out.push({
       id: "unmute",
-      label: `Unmute ${what}`,
+      label: what === "server" ? t("workspace.menu.notify.unmuteServer") : t("workspace.menu.notify.unmuteChannel"),
       icon: BellIcon,
       hint: mutedHint(t, settings, now),
       onSelect: () => change({ mutedUntil: false }),
@@ -72,7 +72,7 @@ export function notificationEntries(instanceKey: string, serverId: string, chann
     out.push({
       kind: "sub",
       id: "mute",
-      label: `Mute ${what}`,
+      label: what === "server" ? t("workspace.menu.notify.muteServer") : t("workspace.menu.notify.muteChannel"),
       icon: BellOffIcon,
       items: MUTE_FOR.map((m) => ({
         id: m.id,
@@ -87,16 +87,16 @@ export function notificationEntries(instanceKey: string, serverId: string, chann
     out.push({
       kind: "sub",
       id: "notify",
-      label: "Notifications",
+      label: t("workspace.menu.notify.notifications"),
       icon: SlidersHorizontalIcon,
-      hint: short ? t(short) : "Server's",
+      hint: short ? t(short) : t("workspace.menu.notify.serverDefault"),
       items: [
-        { kind: "check", radio: true, id: "default", label: "Use the server's", checked: level === NotificationLevel.UNSPECIFIED, onSelect: () => change({ level: NotificationLevel.UNSPECIFIED }) },
+        { kind: "check", radio: true, id: "default", label: t("workspace.menu.notify.useServers"), checked: level === NotificationLevel.UNSPECIFIED, onSelect: () => change({ level: NotificationLevel.UNSPECIFIED }) },
         ...LEVELS.map((l) => ({ kind: "check" as const, radio: true, id: String(l.value), label: t(l.label), checked: level === l.value, onSelect: () => change({ level: l.value }) })),
       ],
     });
   } else if (what === "server") {
-    out.push({ id: "notification-settings", label: "Notification settings", icon: BellRingIcon, onSelect: () => openSettings("server-notifications", serverId) });
+    out.push({ id: "notification-settings", label: t("workspace.menu.notify.settings"), icon: BellRingIcon, onSelect: () => openSettings("server-notifications", serverId) });
   }
   return out;
 }

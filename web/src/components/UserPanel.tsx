@@ -20,16 +20,19 @@ import {
 import { displayName, shownStatus } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { openSettings, toast } from "@/lib/ui";
+import type { I18n } from "@/i18n/i18n";
+import { useI18n } from "@/i18n/react";
 
 const CHOICES = [
   { status: PresenceStatus.ONLINE, dot: "online", hint: "" },
-  { status: PresenceStatus.IDLE, dot: "idle", hint: "Shown as away" },
-  { status: PresenceStatus.DO_NOT_DISTURB, dot: "dnd", hint: "No sounds or notifications" },
-  { status: PresenceStatus.INVISIBLE, dot: "offline", hint: "Look offline, still use everything" },
+  { status: PresenceStatus.IDLE, dot: "idle", hint: "workspace.userPanel.hint.idle" },
+  { status: PresenceStatus.DO_NOT_DISTURB, dot: "dnd", hint: "workspace.userPanel.hint.dnd" },
+  { status: PresenceStatus.INVISIBLE, dot: "offline", hint: "workspace.userPanel.hint.invisible" },
 ] as const;
 
 /** Your avatar with your dot, your name, and your custom status or status under it. */
 function Who({ instanceKey, me }: { instanceKey: string; me: User }) {
+  const { t } = useI18n();
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
   const settings = usePresenceSettings(instanceKey);
   const own = usePresence(instanceKey, me.id);
@@ -39,7 +42,7 @@ function Who({ instanceKey, me }: { instanceKey: string; me: User }) {
   const picked = settings?.status ?? PresenceStatus.ONLINE;
   const dot = picked === PresenceStatus.ONLINE && own ? shownOf(own) : (CHOICES.find((c) => c.status === picked)?.dot ?? "online");
   const live = connection === "live";
-  const subtitle = !live ? connectionLabel(connection) : status || (settings && picked !== PresenceStatus.ONLINE ? choiceLabel(picked) : "");
+  const subtitle = !live ? connectionLabel(connection) : status || (settings && picked !== PresenceStatus.ONLINE ? choiceLabel(t, picked) : "");
   return (
     <>
       <span className="relative shrink-0">
@@ -68,14 +71,15 @@ function Who({ instanceKey, me }: { instanceKey: string; me: User }) {
   );
 }
 
-const choiceLabel = (status: PresenceStatus) => {
+const choiceLabel = (t: I18n["t"], status: PresenceStatus) => {
   const choice = CHOICES.find((c) => c.status === status);
   if (!choice) return "";
-  return STATUS_LABEL[status === PresenceStatus.INVISIBLE ? "invisible" : choice.dot];
+  return t(STATUS_LABEL[status === PresenceStatus.INVISIBLE ? "invisible" : choice.dot]);
 };
 
 /** You, on this instance, at the bottom of the sidebar. Your name opens your status menu. */
 export function UserPanel({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const settings = usePresenceSettings(instanceKey);
   const now = useNow(60_000);
@@ -87,7 +91,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const pick = (next: PresenceStatus) => {
     if (next === picked) return;
     savePresenceSettings(instanceKey, engine(instanceKey).api, (s) => ({ ...s, status: next })).catch((err) =>
-      toast(`Couldn't change your status: ${err.message}`),
+      toast(t("workspace.userPanel.statusFailed", { error: err.message })),
     );
   };
 
@@ -98,7 +102,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Your status"
+              aria-label={t("workspace.userPanel.yourStatus")}
               className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1 text-left transition hover:bg-muted data-[state=open]:bg-muted"
             >
               {who}
@@ -109,26 +113,26 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
               <DropdownMenuItem key={c.status} onSelect={() => pick(c.status)} className="items-start gap-2.5 py-2">
                 <StatusDot status={c.dot} className="mt-1 shrink-0" />
                 <span className="min-w-0">
-                  <span className="block font-bold">{choiceLabel(c.status)}</span>
-                  {c.hint && <span className="block text-xs text-muted-foreground">{c.hint}</span>}
+                  <span className="block font-bold">{choiceLabel(t, c.status)}</span>
+                  {c.hint && <span className="block text-xs text-muted-foreground">{t(c.hint)}</span>}
                 </span>
-                {picked === c.status && <span className="ml-auto size-1.5 self-center rounded-full bg-primary" aria-label="Picked" />}
+                {picked === c.status && <span className="ml-auto size-1.5 self-center rounded-full bg-primary" aria-label={t("workspace.userPanel.picked")} />}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => openSettings("profile")}>
-              <PencilIcon /> {status ? "Edit custom status" : "Set a custom status"}
+              <PencilIcon /> {status ? t("workspace.userPanel.editStatus") : t("workspace.userPanel.setStatus")}
             </DropdownMenuItem>
             {status && (
               <DropdownMenuItem
-                onSelect={() => void run(updateProfile(instanceKey, { status: "", statusExpiresAt: null })).catch(() => toast("Couldn't clear your status"))}
+                onSelect={() => void run(updateProfile(instanceKey, { status: "", statusExpiresAt: null })).catch(() => toast(t("workspace.userPanel.clearFailed")))}
               >
-                <XIcon /> Clear custom status
+                <XIcon /> {t("workspace.userPanel.clearStatus")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={() => openSettings("privacy")}>
               {settings.showActivity ? <EyeIcon /> : <EyeOffIcon />}
-              {settings.showActivity ? "Sharing what you're doing" : "Not sharing what you're doing"}
+              {settings.showActivity ? t("workspace.userPanel.sharing") : t("workspace.userPanel.notSharing")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -145,7 +149,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
       <button
         type="button"
         onClick={() => openSettings()}
-        aria-label="Settings"
+        aria-label={t("workspace.userPanel.settings")}
         className="group grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
       >
         <SettingsIcon className="size-[18px] transition-transform duration-500 group-hover:rotate-180" />

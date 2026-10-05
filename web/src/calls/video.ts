@@ -1,5 +1,9 @@
 import { useEffect, useSyncExternalStore, type RefObject } from "react";
+import { i18n, type Key } from "@/i18n/i18n";
 import { getPrefs } from "@/lib/prefs";
+
+/** A sentence in the app's language now. */
+const tr = (key: Key) => i18n().t(key);
 
 /**
  * Cameras and shared screens in your call: everyone else's as their tracks
@@ -161,11 +165,11 @@ export async function openCamera(): Promise<MediaStreamTrack> {
 /** Why the camera didn't open, in words. */
 export function cameraProblem(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
-  if (name === "NotAllowedError" || name === "SecurityError") return "Your browser blocks the camera for fuwa. Allow it in the site's settings.";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "No camera found. Plug one in, or pick another in Voice & video.";
-  if (name === "NotReadableError") return "Another app is using the camera.";
-  if (name === "NotSupportedError" || (typeof navigator !== "undefined" && !navigator.mediaDevices)) return "This page can't use a camera (it needs https).";
-  return "The camera didn't start.";
+  if (name === "NotAllowedError" || name === "SecurityError") return tr("workspace.calls.camera.blocked");
+  if (name === "NotFoundError" || name === "OverconstrainedError") return tr("workspace.calls.camera.notFound");
+  if (name === "NotReadableError") return tr("workspace.calls.camera.busy");
+  if (name === "NotSupportedError" || (typeof navigator !== "undefined" && !navigator.mediaDevices)) return tr("workspace.calls.camera.noHttps");
+  return tr("workspace.calls.camera.failed");
 }
 
 /**
@@ -212,18 +216,18 @@ export async function openScreen(sound: boolean): Promise<SharedScreen> {
   const audio = stream.getAudioTracks()[0] ?? null;
   if (audio) audio.contentHint = "music";
   const surface = (video.getSettings() as MediaTrackSettings & { displaySurface?: string }).displaySurface;
-  const silent = !sound || audio ? null : !canShareSound() ? NO_SOUND_HERE : silentBecause(surface);
+  const silent = !sound || audio ? null : !canShareSound() ? noSoundHere() : silentBecause(surface);
   return { video, audio, silent };
 }
 
 /** Said when this browser can't share sound at all. */
-export const NO_SOUND_HERE = "This browser shares the picture only, no sound. Chrome or Edge can share a tab's sound.";
+export const noSoundHere = () => tr("workspace.calls.screen.noSoundHere");
 
 /** Why a share came without sound, by what was shared. */
 function silentBecause(surface: string | undefined): string {
-  if (surface === "browser") return "The tab's sound isn't shared: it was left unticked in the browser's picker. Share again and tick it to bring the sound.";
-  if (surface === "window") return "Browsers can't share one window's sound. Share a tab, or your whole screen, to bring sound.";
-  return "Your system doesn't let the browser share the whole screen's sound (Chrome and Edge can on Windows and ChromeOS). Share a tab to bring its sound.";
+  if (surface === "browser") return tr("workspace.calls.screen.tabUnticked");
+  if (surface === "window") return tr("workspace.calls.screen.window");
+  return tr("workspace.calls.screen.system");
 }
 
 /** Whether this browser can share sound with a screen at all: Chrome and Edge can; Firefox and Safari share pictures only. */
@@ -240,8 +244,8 @@ export const canShareScreen = () => typeof navigator !== "undefined" && !!naviga
 export function screenProblem(err: unknown): string | null {
   const name = err instanceof DOMException ? err.name : "";
   if (name === "NotAllowedError" || name === "AbortError") return null;
-  if (name === "NotSupportedError") return "This browser can't share a screen.";
-  return "Sharing your screen didn't start.";
+  if (name === "NotSupportedError") return tr("workspace.calls.screen.unsupported");
+  return tr("workspace.calls.screen.failed");
 }
 
 /**
