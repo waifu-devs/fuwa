@@ -46,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format";
-import { type Key, T, useI18n } from "@/i18n/react";
+import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -281,18 +281,18 @@ function RuleCard({
   onDeleted: () => void;
 }) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState(saved);
+  // The edits, kept with the saved rule they started from: a newly saved rule starts them over.
+  const [edit, setEdit] = useState({ base: saved, draft: saved });
+  const draft = edit.base === saved ? edit.draft : saved;
   const [open, setOpen] = useState(isNew);
-  const [confirm, setConfirm] = useState(false);
   const save = useAction(saveAutoModRule);
   const remove = useAction(deleteAutoModRule);
   const shake = useAnimationControls();
   const kind = KINDS.find((k) => k.trigger === saved.trigger)!;
   const dirty = isNew || !equals(AutoModRuleSchema, draft, saved);
-  useEffect(() => setDraft(saved), [saved]);
 
   const set = (patch: Partial<AutoModRule>) => {
-    setDraft((d) => create(AutoModRuleSchema, { ...d, ...patch }));
+    setEdit((e) => ({ base: saved, draft: create(AutoModRuleSchema, { ...(e.base === saved ? e.draft : saved), ...patch }) }));
     save.setError(null);
   };
   const setAction = (kindOf: AutoModActionKind, action: Partial<AutoModAction> | null) => {
@@ -337,21 +337,6 @@ function RuleCard({
 
   const smart = draft.trigger === AutoModTrigger.PROVIDER;
   const provider = providers.find((p) => p.id === draft.provider);
-  const watching = draft.labels.filter((l) => levelOf(l.level) !== AutoModLevel.OFF).length;
-  const doing = smart
-    ? []
-    : [
-        actionOf(draft, AutoModActionKind.BLOCK) && t("serversettings.automod.doingBlocks"),
-        actionOf(draft, AutoModActionKind.ALERT) && t("serversettings.automod.doingAlerts"),
-        actionOf(draft, AutoModActionKind.TIME_OUT) && t("serversettings.automod.doingTimesOut"),
-      ].filter(Boolean);
-  const summary = smart
-    ? `${provider?.name ?? t("serversettings.automod.providerOff")} · ${t("serversettings.automod.watching", { count: watching })}${provider?.pictures && draft.pictures ? ` · ${t("serversettings.automod.withPictures")}` : ""}`
-    : draft.trigger === AutoModTrigger.KEYWORDS
-      ? t("serversettings.automod.words", { count: draft.keywords.length })
-      : draft.trigger === AutoModTrigger.MENTION_SPAM
-        ? t("serversettings.automod.morePings", { count: draft.mentionLimit })
-        : t("serversettings.automod.allowedSitesCount", { count: draft.allowed.length });
 
   return (
     <motion.div
@@ -369,32 +354,15 @@ function RuleCard({
           !draft.enabled && !open && "opacity-70",
         )}
       >
-        <div className="flex items-center gap-3 p-3 pl-4">
-          <button type="button" onClick={() => setOpen((o) => !o)} className="group flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open}>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-bold">{draft.name || t(kind.label)}</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {summary}
-                {doing.length > 0 && ` · ${doing.join(", ")}`}
-              </span>
-            </span>
-            <AnimatePresence initial={false}>
-              {dirty && !isNew && (
-                <motion.span
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  transition={SPRING}
-                  className="rounded-full bg-primary/15 px-2 py-0.5 text-[0.65rem] font-bold text-primary uppercase"
-                >
-                  {t("serversettings.automod.unsaved")}
-                </motion.span>
-              )}
-            </AnimatePresence>
-            <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
-          </button>
-          <Switch checked={draft.enabled} onCheckedChange={(on) => void toggle(on)} aria-label={draft.enabled ? t("serversettings.automod.turnOff") : t("serversettings.automod.turnOn")} />
-        </div>
+        <RuleHeader
+          draft={draft}
+          provider={provider}
+          name={draft.name || t(kind.label)}
+          open={open}
+          unsaved={dirty && !isNew}
+          onOpen={() => setOpen((o) => !o)}
+          onToggle={(on) => void toggle(on)}
+        />
         <AnimatePresence initial={false}>
           {open && (
             <motion.div
@@ -430,63 +398,173 @@ function RuleCard({
                   </>
                 )}
                 <Exemptions instanceKey={instanceKey} serverId={serverId} draft={draft} set={set} />
-                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {confirm ? (
-                      <motion.span
-                        key="sure"
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -8 }}
-                        transition={SPRING}
-                        className="flex items-center gap-1"
-                      >
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          className="rounded-xl font-bold"
-                          disabled={remove.pending}
-                          onClick={() => void destroy()}
-                        >
-                          {remove.pending && <LoaderCircleIcon className="animate-spin" />}
-                          {t("serversettings.automod.deleteNamed", { name: draft.name || t(kind.label) })}
-                        </Button>
-                        <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setConfirm(false)}>
-                          {t("serversettings.shared.keepIt")}
-                        </Button>
-                      </motion.span>
-                    ) : (
-                      <motion.span key="ask" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING}>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-xl text-muted-foreground hover:text-destructive"
-                          onClick={() => (isNew ? onDeleted() : setConfirm(true))}
-                        >
-                          <Trash2Icon /> {isNew ? t("common.cancel") : t("serversettings.shared.delete")}
-                        </Button>
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                  <span className="min-w-0 flex-1 text-right text-sm text-destructive first-letter:uppercase">{save.error ?? remove.error}</span>
-                  {dirty && !isNew && (
-                    <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setDraft(saved)} disabled={save.pending}>
-                      {t("settings.controls.discard")}
-                    </Button>
-                  )}
-                  <Button type="button" size="sm" className="btn rounded-xl px-4 font-bold" disabled={!dirty || save.pending} onClick={() => void submit()}>
-                    {save.pending ? <LoaderCircleIcon className="animate-spin" /> : <CheckIcon />}
-                    {isNew ? t("serversettings.automod.createRule") : t("serversettings.automod.save")}
-                  </Button>
-                </div>
+                <RuleFooter
+                  name={draft.name || t(kind.label)}
+                  isNew={isNew}
+                  dirty={dirty}
+                  saving={save.pending}
+                  deleting={remove.pending}
+                  error={save.error ?? remove.error}
+                  onDelete={() => void destroy()}
+                  onCancel={onDeleted}
+                  onDiscard={() => setEdit({ base: saved, draft: saved })}
+                  onSave={() => void submit()}
+                />
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </motion.div>
     </motion.div>
+  );
+}
+
+/** What a rule does, for its folded header: blocks, alerts, times out. */
+function doingOf(t: I18n["t"], draft: AutoModRule) {
+  if (draft.trigger === AutoModTrigger.PROVIDER) return [];
+  return [
+    actionOf(draft, AutoModActionKind.BLOCK) && t("serversettings.automod.doingBlocks"),
+    actionOf(draft, AutoModActionKind.ALERT) && t("serversettings.automod.doingAlerts"),
+    actionOf(draft, AutoModActionKind.TIME_OUT) && t("serversettings.automod.doingTimesOut"),
+  ].filter(Boolean);
+}
+
+/** What a rule watches for, in a few words: the provider and labels, the words, the pings or the sites. */
+function summaryOf(t: I18n["t"], draft: AutoModRule, provider: AutoModProvider | undefined) {
+  if (draft.trigger === AutoModTrigger.PROVIDER) {
+    const watching = draft.labels.filter((l) => levelOf(l.level) !== AutoModLevel.OFF).length;
+    return `${provider?.name ?? t("serversettings.automod.providerOff")} · ${t("serversettings.automod.watching", { count: watching })}${provider?.pictures && draft.pictures ? ` · ${t("serversettings.automod.withPictures")}` : ""}`;
+  }
+  if (draft.trigger === AutoModTrigger.KEYWORDS) return t("serversettings.automod.words", { count: draft.keywords.length });
+  if (draft.trigger === AutoModTrigger.MENTION_SPAM) return t("serversettings.automod.morePings", { count: draft.mentionLimit });
+  return t("serversettings.automod.allowedSitesCount", { count: draft.allowed.length });
+}
+
+/** A rule's header: its name and what it does, opening it up, and the switch that turns it on and off. */
+function RuleHeader({
+  draft,
+  provider,
+  name,
+  open,
+  unsaved,
+  onOpen,
+  onToggle,
+}: {
+  draft: AutoModRule;
+  provider: AutoModProvider | undefined;
+  name: string;
+  open: boolean;
+  unsaved: boolean;
+  onOpen: () => void;
+  onToggle: (on: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const doing = doingOf(t, draft);
+  return (
+    <div className="flex items-center gap-3 p-3 pl-4">
+      <button type="button" onClick={onOpen} className="group flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open}>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-bold">{name}</span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {summaryOf(t, draft, provider)}
+            {doing.length > 0 && ` · ${doing.join(", ")}`}
+          </span>
+        </span>
+        <AnimatePresence initial={false}>
+          {unsaved && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              transition={SPRING}
+              className="rounded-full bg-primary/15 px-2 py-0.5 text-[0.65rem] font-bold text-primary uppercase"
+            >
+              {t("serversettings.automod.unsaved")}
+            </motion.span>
+          )}
+        </AnimatePresence>
+        <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
+      </button>
+      <Switch
+        checked={draft.enabled}
+        onCheckedChange={onToggle}
+        aria-label={draft.enabled ? t("serversettings.automod.turnOff") : t("serversettings.automod.turnOn")}
+      />
+    </div>
+  );
+}
+
+/** Deleting (asked once more), what went wrong, and saving or throwing away the changes. */
+function RuleFooter({
+  name,
+  isNew,
+  dirty,
+  saving,
+  deleting,
+  error,
+  onDelete,
+  onCancel,
+  onDiscard,
+  onSave,
+}: {
+  name: string;
+  isNew: boolean;
+  dirty: boolean;
+  saving: boolean;
+  deleting: boolean;
+  error: string | null;
+  onDelete: () => void;
+  onCancel: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useI18n();
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+      <AnimatePresence mode="popLayout" initial={false}>
+        {confirm ? (
+          <motion.span
+            key="sure"
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -8 }}
+            transition={SPRING}
+            className="flex items-center gap-1"
+          >
+            <Button type="button" variant="destructive" size="sm" className="rounded-xl font-bold" disabled={deleting} onClick={onDelete}>
+              {deleting && <LoaderCircleIcon className="animate-spin" />}
+              {t("serversettings.automod.deleteNamed", { name })}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setConfirm(false)}>
+              {t("serversettings.shared.keepIt")}
+            </Button>
+          </motion.span>
+        ) : (
+          <motion.span key="ask" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-xl text-muted-foreground hover:text-destructive"
+              onClick={() => (isNew ? onCancel() : setConfirm(true))}
+            >
+              <Trash2Icon /> {isNew ? t("common.cancel") : t("serversettings.shared.delete")}
+            </Button>
+          </motion.span>
+        )}
+      </AnimatePresence>
+      <span className="min-w-0 flex-1 text-right text-sm text-destructive first-letter:uppercase">{error}</span>
+      {dirty && !isNew && (
+        <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onDiscard} disabled={saving}>
+          {t("settings.controls.discard")}
+        </Button>
+      )}
+      <Button type="button" size="sm" className="btn rounded-xl px-4 font-bold" disabled={!dirty || saving} onClick={onSave}>
+        {saving ? <LoaderCircleIcon className="animate-spin" /> : <CheckIcon />}
+        {isNew ? t("serversettings.automod.createRule") : t("serversettings.automod.save")}
+      </Button>
+    </div>
   );
 }
 
@@ -570,7 +648,8 @@ function WordList({
   const { t } = useI18n();
   const [text, setText] = useState("");
   const add = (raw: string[]) => {
-    const fresh = raw.map((w) => w.trim().toLowerCase()).filter((w) => w && !words.includes(w));
+    const have = new Set(words);
+    const fresh = raw.map((w) => w.trim().toLowerCase()).filter((w) => w && !have.has(w));
     if (fresh.length) onChange([...words, ...new Set(fresh)].slice(0, max));
   };
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -650,16 +729,65 @@ function WordList({
   );
 }
 
+type TestResult = { matched: boolean; matches: string[]; error: string; elapsedMs: number };
+
+/** Which verdict shows, so a new one swaps in. */
+const verdictKey = (checking: boolean, result: TestResult | null) => {
+  if (checking) return "checking";
+  if (result?.error) return "error";
+  return result?.matched ? `caught-${result.matches.join()}` : "fine";
+};
+
+/** How a try went: still checking, no answer, caught (and on what), or let through. */
+function TestVerdict({ checking, result, smart }: { checking: boolean; result: TestResult | null; smart: boolean }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {checking || !result ? (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <LoaderCircleIcon className="size-3.5 animate-spin" /> {smart ? t("serversettings.automod.asking") : t("serversettings.automod.checking")}
+        </span>
+      ) : result.error ? (
+        <span className="text-xs text-amber-700 first-letter:uppercase dark:text-amber-400">
+          {t("serversettings.automod.noAnswer", { error: result.error })}
+        </span>
+      ) : result.matched ? (
+        <>
+          <span className="flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-bold text-destructive">
+            <BanIcon className="size-3" /> {t("serversettings.automod.caught")}
+          </span>
+          {result.matches.map((m, n) => (
+            <motion.code
+              key={m}
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{
+                type: "spring",
+                stiffness: 600,
+                damping: 16,
+                delay: n * 0.05,
+              }}
+              className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive"
+            >
+              {m}
+            </motion.code>
+          ))}
+        </>
+      ) : (
+        <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+          <CheckIcon className="size-3" strokeWidth={3} /> {t("serversettings.automod.getsThrough")}
+        </span>
+      )}
+      {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{result.elapsedMs} ms</span>}
+    </>
+  );
+}
+
 /** Try a message against the rule as it stands, saved or not. Matches light up. */
 function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId: string; rule: AutoModRule }) {
   const { t } = useI18n();
   const [text, setText] = useState("");
-  const [result, setResult] = useState<{
-    matched: boolean;
-    matches: string[];
-    error: string;
-    elapsedMs: number;
-  } | null>(null);
+  const [result, setResult] = useState<TestResult | null>(null);
   const [checking, setChecking] = useState(false);
   const smart = rule.trigger === AutoModTrigger.PROVIDER;
   const key = useMemo(
@@ -709,49 +837,14 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
       <AnimatePresence mode="popLayout" initial={false}>
         {text.trim() && (
           <motion.div
-            key={checking ? "checking" : result?.error ? "error" : result?.matched ? `caught-${result.matches.join()}` : "fine"}
+            key={verdictKey(checking, result)}
             initial={{ opacity: 0, y: 6, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6 }}
             transition={SPRING}
             className="flex flex-wrap items-center gap-1.5 text-sm"
           >
-            {checking || !result ? (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <LoaderCircleIcon className="size-3.5 animate-spin" /> {smart ? t("serversettings.automod.asking") : t("serversettings.automod.checking")}
-              </span>
-            ) : result.error ? (
-              <span className="text-xs text-amber-700 first-letter:uppercase dark:text-amber-400">
-                {t("serversettings.automod.noAnswer", { error: result.error })}
-              </span>
-            ) : result.matched ? (
-              <>
-                <span className="flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-bold text-destructive">
-                  <BanIcon className="size-3" /> {t("serversettings.automod.caught")}
-                </span>
-                {result.matches.map((m, n) => (
-                  <motion.code
-                    key={m}
-                    initial={{ scale: 0.6, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{
-                      type: "spring",
-                      stiffness: 600,
-                      damping: 16,
-                      delay: n * 0.05,
-                    }}
-                    className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive"
-                  >
-                    {m}
-                  </motion.code>
-                ))}
-              </>
-            ) : (
-              <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                <CheckIcon className="size-3" strokeWidth={3} /> {t("serversettings.automod.getsThrough")}
-              </span>
-            )}
-            {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{result.elapsedMs} ms</span>}
+            <TestVerdict checking={checking} result={result} smart={smart} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -922,8 +1015,10 @@ function Exemptions({
   const roles = useRoles(instanceKey, serverId).filter((r) => r.id !== serverId);
   const channels = (inst?.channels[serverId] ?? []).filter((c) => c.type !== ChannelType.CATEGORY && c.type !== ChannelType.VOICE);
   const flip = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
-  const chosenRoles = roles.filter((r) => draft.exemptRoleIds.includes(r.id));
-  const chosenChannels = channels.filter((c) => draft.exemptChannelIds.includes(c.id));
+  const exemptRoles = new Set(draft.exemptRoleIds);
+  const exemptChannels = new Set(draft.exemptChannelIds);
+  const chosenRoles = roles.filter((r) => exemptRoles.has(r.id));
+  const chosenChannels = channels.filter((c) => exemptChannels.has(c.id));
   return (
     <Field label={t("serversettings.automod.leaveOut")} hint={t("serversettings.automod.leaveOutHint")}>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -949,7 +1044,7 @@ function Exemptions({
             {roles.map((r) => (
               <DropdownMenuCheckboxItem
                 key={r.id}
-                checked={draft.exemptRoleIds.includes(r.id)}
+                checked={exemptRoles.has(r.id)}
                 onSelect={(e) => e.preventDefault()}
                 onCheckedChange={() => set({ exemptRoleIds: flip(draft.exemptRoleIds, r.id) })}
               >
@@ -968,7 +1063,7 @@ function Exemptions({
             {channels.map((c) => (
               <DropdownMenuCheckboxItem
                 key={c.id}
-                checked={draft.exemptChannelIds.includes(c.id)}
+                checked={exemptChannels.has(c.id)}
                 onSelect={(e) => e.preventDefault()}
                 onCheckedChange={() => set({ exemptChannelIds: flip(draft.exemptChannelIds, c.id) })}
               >

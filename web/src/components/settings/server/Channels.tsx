@@ -5,7 +5,7 @@ import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { deleteChannel, reorderChannels, run, updateChannel } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
-import { CHANNEL_ICON } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON } from "@/components/channel-groups";
 import { useArrange } from "@/hooks/use-arrange";
 import { layoutOf, placements, step, type Layout } from "@/lib/arrange";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";

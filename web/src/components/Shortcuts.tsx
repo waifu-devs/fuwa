@@ -10,7 +10,7 @@ import { watchPushToTalk } from "@/calls/keys";
 import { IncomingCalls } from "@/components/calls/IncomingCalls";
 import { PopOuts, RecordingWatch } from "@/components/calls/Video";
 import { store, useFuwa, type FuwaState } from "@/fuwa/store";
-import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ContextMenuHost } from "@/components/ContextMenu";
 import { ServerIcon } from "@/components/Icons";
 import { Count } from "@/components/motion";

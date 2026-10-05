@@ -26,7 +26,9 @@ export function CodeInput({
   id?: string;
   label?: string;
 }) {
-  const [value, setValue] = useState("");
+  // What's typed, and the shake it was typed after: a new shake clears it.
+  const [typed, setTyped] = useState({ digits: "", shake });
+  const value = typed.shake === shake ? typed.digits : "";
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const controls = useAnimationControls();
@@ -34,13 +36,12 @@ export function CodeInput({
   useEffect(() => {
     if (!shake) return;
     void controls.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
-    setValue("");
     input.current?.focus();
   }, [shake, controls]);
 
   function change(next: string) {
     const digits = next.replace(/\D/g, "").slice(0, LENGTH);
-    setValue(digits);
+    setTyped({ digits, shake });
     if (digits.length === LENGTH) onComplete(digits);
   }
 

@@ -98,7 +98,6 @@ function Browse({ instanceKey }: { instanceKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
-  const address = useAddress(instanceKey);
 
   useEffect(() => {
     if (!inst.me) return;
@@ -110,25 +109,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
 
   return (
     <div className="mx-auto max-w-5xl px-4 pt-6 pb-16 sm:px-8">
-      <section className="relative overflow-hidden rounded-3xl border bg-card p-6 sm:p-10">
-        <div aria-hidden className="dot-grid absolute inset-0 opacity-60" />
-        <div aria-hidden className="absolute -top-20 -right-16 size-64 rounded-full bg-primary/25 blur-3xl" />
-        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-bold text-muted-foreground">
-              <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · <BuildLabel node={inst.node} />
-              <HostedBadge url={inst.url} className="sm:ml-1" />
-            </p>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              <T k="workspace.home.welcome" values={{ name: <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText> }} />
-            </h1>
-            <p className="mt-2 max-w-xl text-muted-foreground">{t("workspace.home.about")}</p>
-          </div>
-          <Button size="lg" onClick={() => setCreating(true)} className="btn h-11 shrink-0 rounded-xl font-bold">
-            <PlusIcon /> {t("workspace.home.create")}
-          </Button>
-        </div>
-      </section>
+      <BrowseHero instanceKey={instanceKey} onCreate={() => setCreating(true)} />
 
       <HaveInvite instanceKey={instanceKey} />
 
@@ -140,41 +121,89 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         </div>
       </div>
 
-      {error ? (
-        <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>
-      ) : servers === null ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[0, 1, 2].map((n) => (
-            <div key={n} className="shimmer h-44 rounded-3xl" />
-          ))}
-        </div>
-      ) : shown.length === 0 ? (
-        <div className="grid place-items-center rounded-3xl border border-dashed p-10 text-center">
-          <p className="font-bold">{q ? t("workspace.home.noMatch") : t("workspace.home.noServers")}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {q ? t("workspace.home.tryAnother") : t("workspace.home.makeFirst")}
-          </p>
-        </div>
-      ) : (
-        <motion.div layout className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <AnimatePresence>
-            {shown.map((s, n) => (
-              <motion.div
-                key={s.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.4, delay: Math.min(n, 8) * 0.05, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <ServerCard instanceKey={instanceKey} server={s} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </motion.div>
-      )}
+      <BrowseResults instanceKey={instanceKey} servers={servers} error={error} searching={!!q} shown={shown} />
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={instanceKey} />
     </div>
+  );
+}
+
+/** The instance's welcome: how it's connected, its name, and making a server. */
+function BrowseHero({ instanceKey, onCreate }: { instanceKey: string; onCreate: () => void }) {
+  const { t } = useI18n();
+  const inst = useInstance(instanceKey)!;
+  const address = useAddress(instanceKey);
+  return (
+    <section className="relative overflow-hidden rounded-3xl border bg-card p-6 sm:p-10">
+      <div aria-hidden className="dot-grid absolute inset-0 opacity-60" />
+      <div aria-hidden className="absolute -top-20 -right-16 size-64 rounded-full bg-primary/25 blur-3xl" />
+      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-bold text-muted-foreground">
+            <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · <BuildLabel node={inst.node} />
+            <HostedBadge url={inst.url} className="sm:ml-1" />
+          </p>
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
+            <T k="workspace.home.welcome" values={{ name: <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText> }} />
+          </h1>
+          <p className="mt-2 max-w-xl text-muted-foreground">{t("workspace.home.about")}</p>
+        </div>
+        <Button size="lg" onClick={onCreate} className="btn h-11 shrink-0 rounded-xl font-bold">
+          <PlusIcon /> {t("workspace.home.create")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** The servers in Browse that match the search, gliding in and out as it changes. */
+function BrowseResults({
+  instanceKey,
+  servers,
+  error,
+  searching,
+  shown,
+}: {
+  instanceKey: string;
+  servers: Server[] | null;
+  error: string | null;
+  searching: boolean;
+  shown: Server[];
+}) {
+  const { t } = useI18n();
+  if (error) return <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>;
+  if (servers === null)
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((n) => (
+          <div key={n} className="shimmer h-44 rounded-3xl" />
+        ))}
+      </div>
+    );
+  return (
+    <>
+      {shown.length === 0 && (
+        <div className="grid place-items-center rounded-3xl border border-dashed p-10 text-center">
+          <p className="font-bold">{searching ? t("workspace.home.noMatch") : t("workspace.home.noServers")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{searching ? t("workspace.home.tryAnother") : t("workspace.home.makeFirst")}</p>
+        </div>
+      )}
+      <motion.div layout className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <AnimatePresence>
+          {shown.map((s, n) => (
+            <motion.div
+              key={s.id}
+              layout
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.4, delay: Math.min(n, 8) * 0.05, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <ServerCard instanceKey={instanceKey} server={s} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </motion.div>
+    </>
   );
 }
 

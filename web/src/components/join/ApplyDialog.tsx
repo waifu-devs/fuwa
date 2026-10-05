@@ -52,7 +52,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
   const [problem, setProblem] = useState<string | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
   const [agreed, setAgreed] = useState(false);
-  const [missing, setMissing] = useState<number[]>([]);
+  const [missing, setMissing] = useState<ReadonlySet<number>>(() => new Set());
   const [sent, setSent] = useState(false);
   const [reload, setReload] = useState(0);
   const apply = useAction(applyToJoin);
@@ -81,7 +81,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
     e.preventDefault();
     if (!form) return;
     const empty = form.questions.flatMap((q, n) => (q.required && !answers[n]?.trim() ? [n] : []));
-    setMissing(empty);
+    setMissing(new Set(empty));
     if (empty.length || (form.rules.length > 0 && !agreed)) {
       void nudge.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
       return;
@@ -136,7 +136,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
               {form.questions.map((q, n) => {
                 const max = q.paragraph ? PARAGRAPH_MAX : LINE_MAX;
                 const value = answers[n] ?? "";
-                const bad = missing.includes(n) && !value.trim();
+                const bad = missing.has(n) && !value.trim();
                 const props = {
                   id: `apply-${n}`,
                   value,

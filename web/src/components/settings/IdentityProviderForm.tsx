@@ -1,4 +1,3 @@
-import { clone, create } from "@bufbuild/protobuf";
 import {
   BuildingIcon,
   CheckIcon,
@@ -14,14 +13,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  IdentityProviderSchema,
-  OidcProviderSchema,
-  SamlProviderSchema,
-  SsoProtocol,
-  type IdentityProvider,
-  type ServiceProvider,
-} from "@/gen/fuwa/v1/sso_pb";
+import { SsoProtocol, type IdentityProvider, type ServiceProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -30,28 +22,6 @@ import { copy } from "@/lib/ui";
 import { cleanDomain, readSamlMetadata } from "@/lib/sso";
 import { cn } from "@/lib/utils";
 import { Choice, Setting, SPRING } from "./controls";
-
-/** A copy of a provider with every part present, so the form can edit any field. */
-export function fullProvider(p: IdentityProvider | undefined): IdentityProvider {
-  const next = p ? clone(IdentityProviderSchema, p) : create(IdentityProviderSchema);
-  next.oidc ??= create(OidcProviderSchema);
-  next.saml ??= create(SamlProviderSchema);
-  next.emailDomains = [...next.emailDomains];
-  return next;
-}
-
-/** Everything a save would send about a provider, as one string to compare. */
-export function providerFingerprint(p: IdentityProvider | undefined) {
-  if (!p || p.protocol === SsoProtocol.UNSPECIFIED) return "";
-  return [
-    p.protocol,
-    p.name.trim(),
-    p.emailDomains.join(","),
-    ...(p.protocol === SsoProtocol.OIDC
-      ? [p.oidc?.issuer.trim(), p.oidc?.clientId.trim(), p.oidc?.clientSecret ?? "", p.oidc?.extraScopes.trim()]
-      : [p.saml?.entityId.trim(), p.saml?.ssoUrl.trim(), p.saml?.certificates.trim()]),
-  ].join("\n");
-}
 
 /**
  * The identity provider people sign in through, the same for an instance
@@ -299,7 +269,8 @@ function Domains({ value, onChange }: { value: string[]; onChange: (domains: str
   const { t } = useI18n();
   const [text, setText] = useState("");
   function add() {
-    const fresh = text.split(/[\s,]+/).map(cleanDomain).filter((d) => d && !value.includes(d));
+    const have = new Set(value);
+    const fresh = text.split(/[\s,]+/).map(cleanDomain).filter((d) => d && !have.has(d));
     if (fresh.length) onChange([...value, ...fresh].slice(0, 20));
     setText("");
   }

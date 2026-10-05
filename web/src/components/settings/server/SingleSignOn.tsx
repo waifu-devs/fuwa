@@ -10,9 +10,9 @@ import { CountUp } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
 import { IdentityCard } from "@/pages/SsoDone";
 import { T, useI18n } from "@/i18n/react";
-import { providerReady } from "@/lib/sso";
+import { fullProvider, providerFingerprint, providerReady } from "@/lib/sso";
 import { Choice, SaveBar, Setting, Toggle } from "../controls";
-import { fullProvider, IdentityProviderForm, providerFingerprint } from "../IdentityProviderForm";
+import { IdentityProviderForm } from "../IdentityProviderForm";
 
 const RECHECKS = [7, 30, 90, 0] as const;
 

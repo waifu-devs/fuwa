@@ -13,7 +13,7 @@ import {
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ListThreadsResponse } from "@/gen/fuwa/v1/message_pb";
-import { Permission, type Channel, type Message, type ThreadSummary } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type Channel, type Message, type ThreadSummary, type User } from "@/gen/fuwa/v1/types_pb";
 import { focusThread, followThread, listThreads, loadFollowed, lockThread, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess } from "@/fuwa/hooks";
@@ -511,60 +511,10 @@ export function ThreadList({
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
         {error && <p className="p-3 text-sm text-destructive">{error}</p>}
-        {!error && !loading && threads.length === 0 && !page?.hasMore && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={SPRING}
-            className="grid place-items-center gap-2 px-6 py-12 text-center"
-          >
-            <span className="float grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
-              <MessagesSquareIcon className="size-6" />
-            </span>
-            <p className="text-sm font-bold">{query ? t("chat.threads.noMatches") : archived ? t("chat.threads.noArchived") : t("chat.threads.none")}</p>
-            <p className="text-xs text-muted-foreground">
-              {query
-                ? t("chat.threads.tryOtherWords")
-                : archived
-                  ? hours >= 48
-                    ? t("chat.threads.archivedHintDays", { count: Math.round(hours / 24) })
-                    : t("chat.threads.archivedHintHours", { count: hours })
-                  : t("chat.threads.noneHint")}
-            </p>
-          </motion.div>
-        )}
+        {!error && !loading && threads.length === 0 && !page?.hasMore && <NoThreads query={query} archived={archived} hours={hours} />}
         <AnimatePresence initial={false}>
           {threads.map((m, n) => (
-            <motion.button
-              key={m.id}
-              type="button"
-              layout="position"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ ...SPRING, delay: Math.min(n, 8) * 0.025 }}
-              onClick={() => onOpen(m.id)}
-              className="flex w-full gap-2.5 rounded-xl p-2.5 text-left transition-colors hover:bg-muted/70"
-            >
-              <UserAvatar user={users?.[m.authorId]} className="size-8 text-xs" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
-                  <b className="truncate text-sm">{m.webhook?.name || displayName(users?.[m.authorId])}</b>
-                  <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, toDate(m.createdAt))}</span>
-                </span>
-                <span className="line-clamp-2 text-sm break-words text-muted-foreground">
-                  {plain(m.content) || m.embeds[0]?.title || "…"}
-                </span>
-                <span className="mt-1 flex items-center gap-2 text-xs">
-                  <Faces instanceKey={instanceKey} ids={m.thread?.participantIds ?? EMPTY} size="size-4" />
-                  <b className="text-primary">
-                    {t("chat.threads.replies", { count: m.thread?.replyCount ?? 0 })}
-                  </b>
-                  {m.thread?.locked && <LockIcon className="size-3 text-muted-foreground" />}
-                  <span className="truncate text-muted-foreground">{t("chat.threads.lastAgo", { time: ago(lang, toDate(m.thread?.lastReplyAt)) })}</span>
-                </span>
-              </span>
-            </motion.button>
+            <ThreadRow key={m.id} instanceKey={instanceKey} message={m} index={n} users={users} onOpen={onOpen} />
           ))}
         </AnimatePresence>
         {loading && <div className="shimmer m-2 h-16 rounded-xl" />}
@@ -579,6 +529,78 @@ export function ThreadList({
         )}
       </div>
     </div>
+  );
+}
+
+/** Nothing to list: no threads yet, none archived, or none matching the search. */
+function NoThreads({ query, archived, hours }: { query: string; archived: boolean; hours: number }) {
+  const { t } = useI18n();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRING}
+      className="grid place-items-center gap-2 px-6 py-12 text-center"
+    >
+      <span className="float grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
+        <MessagesSquareIcon className="size-6" />
+      </span>
+      <p className="text-sm font-bold">{query ? t("chat.threads.noMatches") : archived ? t("chat.threads.noArchived") : t("chat.threads.none")}</p>
+      <p className="text-xs text-muted-foreground">
+        {query
+          ? t("chat.threads.tryOtherWords")
+          : archived
+            ? hours >= 48
+              ? t("chat.threads.archivedHintDays", { count: Math.round(hours / 24) })
+              : t("chat.threads.archivedHintHours", { count: hours })
+            : t("chat.threads.noneHint")}
+      </p>
+    </motion.div>
+  );
+}
+
+/** One thread in the list: who started it, what it says, and how its replies are going. */
+function ThreadRow({
+  instanceKey,
+  message,
+  index,
+  users,
+  onOpen,
+}: {
+  instanceKey: string;
+  message: Message;
+  index: number;
+  users: Record<string, User> | undefined;
+  onOpen: (threadId: string) => void;
+}) {
+  const lang = useI18n();
+  const { t } = lang;
+  return (
+    <motion.button
+      type="button"
+      layout="position"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ ...SPRING, delay: Math.min(index, 8) * 0.025 }}
+      onClick={() => onOpen(message.id)}
+      className="flex w-full gap-2.5 rounded-xl p-2.5 text-left transition-colors hover:bg-muted/70"
+    >
+      <UserAvatar user={users?.[message.authorId]} className="size-8 text-xs" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <b className="truncate text-sm">{message.webhook?.name || displayName(users?.[message.authorId])}</b>
+          <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, toDate(message.createdAt))}</span>
+        </span>
+        <span className="line-clamp-2 text-sm break-words text-muted-foreground">{plain(message.content) || message.embeds[0]?.title || "…"}</span>
+        <span className="mt-1 flex items-center gap-2 text-xs">
+          <Faces instanceKey={instanceKey} ids={message.thread?.participantIds ?? EMPTY} size="size-4" />
+          <b className="text-primary">{t("chat.threads.replies", { count: message.thread?.replyCount ?? 0 })}</b>
+          {message.thread?.locked && <LockIcon className="size-3 text-muted-foreground" />}
+          <span className="truncate text-muted-foreground">{t("chat.threads.lastAgo", { time: ago(lang, toDate(message.thread?.lastReplyAt)) })}</span>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 

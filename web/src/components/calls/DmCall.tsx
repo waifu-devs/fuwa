@@ -11,7 +11,7 @@ import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n/react";
-import { clock } from "./CallPanel";
+import { clock } from "./call-clock";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
 import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
 

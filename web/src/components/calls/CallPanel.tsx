@@ -11,17 +11,10 @@ import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
+import { clock } from "./call-clock";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
 import { CameraButton, RecordButton, ScreenButton } from "./Video";
-
-/** How long a call has gone on: 4:07, or 1:02:33. */
-export function clock(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = String(seconds % 60).padStart(2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
-}
 
 const STATUS: Record<ActiveCall["status"], Key> = {
   connecting: "dms-calls.calls.status.connecting",

@@ -1,8 +1,8 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, MegaphoneIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, ShieldCheckIcon, UserPlusIcon, Volume2Icon } from "lucide-react";
+import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, UserPlusIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
-import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, Permission, type Channel, type Server } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction } from "@/fuwa/hooks";
@@ -35,11 +35,12 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CHANNEL_ICON, groupChannels, type Group } from "@/components/channel-groups";
 import { useArrange } from "@/hooks/use-arrange";
 import { layoutOf, placements } from "@/lib/arrange";
 import { T, useI18n } from "@/i18n/react";
 import { isMuted, MUTE_FOR, muteForLabel, mutedHint, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
-import { has, hasIn, isPrivate } from "@/lib/permissions";
+import { has, hasIn, isPrivate, type Access } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
 import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -48,33 +49,6 @@ const ServerSettingsDialog = lazyComponent(
   () => import("@/components/dialogs/ServerSettingsDialog").then((m) => m.ServerSettingsDialog),
   (p) => p.open,
 );
-
-export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
-  [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
-  [ChannelType.VOICE]: Volume2Icon,
-  [ChannelType.SECURE]: ShieldCheckIcon,
-};
-
-type Group = { category: Channel | null; channels: Channel[] };
-
-/** Channels you can open, in the order the sidebar lists them. */
-export const openableChannels = (channels: Channel[]) =>
-  groupChannels(channels)
-    .flatMap((g) => g.channels)
-    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE);
-
-export function groupChannels(channels: Channel[]): Group[] {
-  const categories = channels.filter((c) => c.type === ChannelType.CATEGORY);
-  const known = new Set(categories.map((c) => c.id));
-  const loose = channels.filter((c) => c.type !== ChannelType.CATEGORY && !known.has(c.parentId));
-  return [
-    { category: null, channels: loose },
-    ...categories.map((category) => ({
-      category,
-      channels: channels.filter((c) => c.parentId === category.id && c.type !== ChannelType.CATEGORY),
-    })),
-  ];
-}
 
 /** Mute a server from its menu, or open its notification settings. */
 function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
@@ -111,8 +85,13 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
   );
 }
 
+/** Where the server menu's invite goes: the channel you're in, the server, or nowhere when you may not invite. */
+function inviteTarget(access: Access, channelId: string | undefined) {
+  if (channelId && hasIn(access, channelId, Permission.CREATE_INVITE)) return channelId;
+  return has(access, Permission.CREATE_INVITE) ? "" : null;
+}
+
 export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const { t } = useI18n();
   // Only what the sidebar shows, so messages and member changes elsewhere don't re-render it.
   const known = useFuwa((s) => !!s.instances[instanceKey]);
   const nodeName = useFuwa((s) => s.instances[instanceKey]?.node?.name);
@@ -141,10 +120,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const [settings, setSettings] = useState<{ tab: string; target?: string } | null>(null);
   const [inviting, setInviting] = useState<string | null>(null);
   // The server menu's invite opens the channel you're in, as Discord's does, if you may invite to it.
-  const inviteTo =
-    params.channel && hasIn(access, params.channel, Permission.CREATE_INVITE) ? params.channel : has(access, Permission.CREATE_INVITE) ? "" : null;
-  const leave = useAction(leaveServer);
-  const developer = usePrefs((p) => p.developerMode);
+  const inviteTo = inviteTarget(access, params.channel);
   const [reading, setReading] = useState(false);
   const [welcoming, setWelcoming] = useState(false);
   // People waiting to be let in, for whoever can let them in.
@@ -162,146 +138,34 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   if (!known) return null;
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition hover:bg-muted/60 data-[state=open]:bg-muted/60"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-extrabold">
-                <SwapText className="truncate align-bottom">{server?.name ?? "…"}</SwapText>
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {server ? (
-                  <T
-                    k="workspace.sidebar.membersOn"
-                    values={{ count: <Count value={Number(server.memberCount)} />, place: nodeName ?? <Private text={instanceKey} /> }}
-                    count={Number(server.memberCount)}
-                  />
-                ) : (
-                  (nodeName ?? <Private text={instanceKey} />)
-                )}
-              </span>
-            </span>
-            <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
-          {inviteTo !== null && (
-            <DropdownMenuItem onSelect={() => setInviting(inviteTo)} className="font-bold text-primary focus:text-primary [&_svg]:text-primary">
-              <UserPlusIcon /> {t("workspace.sidebar.invite")}
-            </DropdownMenuItem>
-          )}
-          {inviteTo !== null && <DropdownMenuSeparator />}
-          {settingsTabs.length > 0 && (
-            <DropdownMenuItem onSelect={() => setSettings({ tab: settingsTabs[0]! })}>
-              <SettingsIcon /> {t("workspace.sidebar.serverSettings")}
-            </DropdownMenuItem>
-          )}
-          {reviews && (
-            <DropdownMenuItem onSelect={() => setSettings({ tab: "applications" })}>
-              <ClipboardListIcon /> {t("workspace.sidebar.applications")}
-              {waiting > 0 && (
-                <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.65rem] font-extrabold text-white">
-                  <Count value={waiting} max={99} />
-                </span>
-              )}
-            </DropdownMenuItem>
-          )}
-          {usage && (
-            <DropdownMenuItem onSelect={() => setSettings({ tab: "usage" })}>
-              <ChartColumnIcon /> {t("workspace.sidebar.usage")}
-            </DropdownMenuItem>
-          )}
-          {canCreate && (
-            <DropdownMenuItem onSelect={() => setCreating({ parentId: "" })}>
-              <PlusIcon /> {t("workspace.sidebar.createChannel")}
-            </DropdownMenuItem>
-          )}
-          {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
-          {server?.hasRules && (
-            <DropdownMenuItem onSelect={() => setReading(true)}>
-              <ScrollTextIcon /> {t("workspace.sidebar.rules")}
-            </DropdownMenuItem>
-          )}
-          {(server?.hasWelcomeScreen || server?.hasOnboarding) && (
-            <DropdownMenuItem onSelect={() => setWelcoming(true)}>
-              <PartyPopperIcon /> {server.hasOnboarding ? t("workspace.sidebar.channelsRoles") : t("workspace.sidebar.welcomeScreen")}
-            </DropdownMenuItem>
-          )}
-          <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
-            <IdCardIcon /> {t("workspace.sidebar.editServerProfile")}
-          </DropdownMenuItem>
-          {developer && (
-            <DropdownMenuItem onSelect={() => copy(t, serverId, t("common.copy.serverId"))}>
-              <FingerprintIcon /> {t("workspace.sidebar.copyServerId")}
-            </DropdownMenuItem>
-          )}
-          {!owner && <DropdownMenuSeparator />}
-          {!owner && (
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={leave.pending}
-              onSelect={async () => {
-                if ((await leave.go(instanceKey, serverId)) !== undefined)
-                  navigate({ to: "/$instance", params: { instance: instanceKey } });
-              }}
-            >
-              <DoorOpenIcon /> {t("workspace.sidebar.leaveServer")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ServerMenu
+        instanceKey={instanceKey}
+        serverId={serverId}
+        server={server}
+        nodeName={nodeName}
+        owner={owner}
+        inviteTo={inviteTo}
+        settingsTabs={settingsTabs}
+        reviews={reviews}
+        waiting={waiting}
+        usage={usage}
+        canCreate={canCreate}
+        onInvite={setInviting}
+        onSettings={setSettings}
+        onCreate={() => setCreating({ parentId: "" })}
+        onRules={() => setReading(true)}
+        onWelcome={() => setWelcoming(true)}
+      />
 
       <div ref={list} className="scroll-thin relative flex-1 overflow-y-auto px-2 pt-3 pb-4">
-        <AnimatePresence initial={false}>
-          {reviews && waiting > 0 && (
-            <motion.button
-              type="button"
-              onClick={() => setSettings({ tab: "applications" })}
-              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-              animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-              transition={SPRING}
-              className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
-            >
-              <span className="relative grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <ClipboardListIcon className="size-4" />
-                <motion.span aria-hidden animate={{ scale: [1, 1.6], opacity: [0.6, 0] }} transition={{ duration: 1.6, repeat: Infinity }} className="absolute inset-0 rounded-lg bg-primary" />
-              </span>
-              <span className="min-w-0 flex-1 truncate">
-                <T k="workspace.sidebar.waiting" values={{ count: <Count value={waiting} /> }} count={waiting} />
-              </span>
-              <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </motion.button>
-          )}
-        </AnimatePresence>
-        <AnimatePresence initial={false}>
-          {server && ssoLocked && (
-            <motion.button
-              type="button"
-              data-testid="sso-sidebar-locked"
-              onClick={() => {
-                navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: serverId } });
-                if (compact) setNavOpen(false);
-              }}
-              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-              animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-              transition={SPRING}
-              className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
-            >
-              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <LockKeyholeIcon className="size-4 transition-transform group-hover:-rotate-12" />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{t("workspace.sidebar.ssoSignIn", { provider: server.ssoName || t("workspace.sidebar.ssoYourOrganization") })}</span>
-              <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </motion.button>
-          )}
-        </AnimatePresence>
+        <ApplicationsNotice show={reviews && waiting > 0} waiting={waiting} onOpen={() => setSettings({ tab: "applications" })} />
+        <SsoNotice
+          server={ssoLocked ? server : undefined}
+          onOpen={() => {
+            navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: serverId } });
+            if (compact) setNavOpen(false);
+          }}
+        />
         {!synced && !channels?.length ? (
           <div className="flex flex-col gap-2 px-2">
             {[70, 55, 80, 45].map((w, n) => (
@@ -310,46 +174,18 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           </div>
         ) : (
           <ul className="flex flex-col gap-0.5">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {groups.flatMap((group) => {
-                const id = group.category?.id ?? "";
-                const closed = !!collapsed[id];
-                const rows = closed
-                  ? []
-                  : group.channels.map((c, n) => (
-                      <ChannelRow
-                        key={c.id}
-                        index={n}
-                        parent={id}
-                        instanceKey={instanceKey}
-                        channel={c}
-                        active={params.channel === c.id}
-                        canConnect={hasIn(access, c.id, Permission.CONNECT)}
-                        onEdit={
-                          hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
-                            ? () => setSettings({ tab: "channels", target: c.id })
-                            : undefined
-                        }
-                        onInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
-                        onMenuEdit={edit}
-                      />
-                    ));
-                if (!group.category) return rows;
-                return [
-                  <CategoryRow
-                    key={id}
-                    category={group.category}
-                    closed={closed}
-                    count={group.channels.length}
-                    onToggle={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
-                    onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => setCreating({ parentId: id }) : undefined}
-                    instanceKey={instanceKey}
-                    onMenuEdit={edit}
-                  />,
-                  ...rows,
-                ];
-              })}
-            </AnimatePresence>
+            <ChannelGroups
+              instanceKey={instanceKey}
+              groups={groups}
+              access={access}
+              activeId={params.channel}
+              collapsed={collapsed}
+              onCollapse={(id, closed) => setCollapsed((c) => ({ ...c, [id]: closed }))}
+              onSettings={setSettings}
+              onInvite={setInviting}
+              onCreate={(parentId) => setCreating({ parentId })}
+              onMenuEdit={edit}
+            />
           </ul>
         )}
       </div>
@@ -370,19 +206,376 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         serverId={serverId}
         parentId={creating?.parentId}
       />
-      {server && <WelcomeGate instanceKey={instanceKey} server={server} open={welcoming} onOpenChange={setWelcoming} />}
-      {server && <RulesDialog open={reading} onOpenChange={setReading} instanceKey={instanceKey} server={server} agree={access.pending} />}
       {server && (
-        <ServerSettingsDialog
-          open={!!settings}
-          onOpenChange={(open) => !open && setSettings(null)}
+        <ServerDialogs
           instanceKey={instanceKey}
           server={server}
-          tab={settings?.tab ?? "overview"}
-          target={settings?.target}
+          welcoming={welcoming}
+          onWelcoming={setWelcoming}
+          reading={reading}
+          onReading={setReading}
+          agree={access.pending}
+          settings={settings}
+          onCloseSettings={() => setSettings(null)}
         />
       )}
     </>
+  );
+}
+
+/** The server's name and member count, opening its menu: invite, settings, notifications, leave. */
+function ServerMenu({
+  instanceKey,
+  serverId,
+  server,
+  nodeName,
+  owner,
+  inviteTo,
+  settingsTabs,
+  reviews,
+  waiting,
+  usage,
+  canCreate,
+  onInvite,
+  onSettings,
+  onCreate,
+  onRules,
+  onWelcome,
+}: {
+  instanceKey: string;
+  serverId: string;
+  server: Server | undefined;
+  nodeName: string | undefined;
+  owner: boolean;
+  /** The channel the menu's invite goes to ("" for the server), or null when they may not invite. */
+  inviteTo: string | null;
+  settingsTabs: string[];
+  reviews: boolean;
+  waiting: number;
+  usage: boolean;
+  canCreate: boolean;
+  onInvite: (channelId: string) => void;
+  onSettings: (settings: { tab: string }) => void;
+  onCreate: () => void;
+  onRules: () => void;
+  onWelcome: () => void;
+}) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const leave = useAction(leaveServer);
+  const developer = usePrefs((p) => p.developerMode);
+  return (
+    <DropdownMenu>
+      <ServerMenuTrigger instanceKey={instanceKey} server={server} nodeName={nodeName} />
+      <DropdownMenuContent align="start" className="w-60">
+        <ManageItems
+          inviteTo={inviteTo}
+          settingsTabs={settingsTabs}
+          reviews={reviews}
+          waiting={waiting}
+          usage={usage}
+          canCreate={canCreate}
+          onInvite={onInvite}
+          onSettings={onSettings}
+          onCreate={onCreate}
+        />
+        {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
+        {server?.hasRules && (
+          <DropdownMenuItem onSelect={onRules}>
+            <ScrollTextIcon /> {t("workspace.sidebar.rules")}
+          </DropdownMenuItem>
+        )}
+        {(server?.hasWelcomeScreen || server?.hasOnboarding) && (
+          <DropdownMenuItem onSelect={onWelcome}>
+            <PartyPopperIcon /> {server.hasOnboarding ? t("workspace.sidebar.channelsRoles") : t("workspace.sidebar.welcomeScreen")}
+          </DropdownMenuItem>
+        )}
+        <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
+          <IdCardIcon /> {t("workspace.sidebar.editServerProfile")}
+        </DropdownMenuItem>
+        {developer && (
+          <DropdownMenuItem onSelect={() => copy(t, serverId, t("common.copy.serverId"))}>
+            <FingerprintIcon /> {t("workspace.sidebar.copyServerId")}
+          </DropdownMenuItem>
+        )}
+        {!owner && <DropdownMenuSeparator />}
+        {!owner && (
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={leave.pending}
+            onSelect={async () => {
+              if ((await leave.go(instanceKey, serverId)) !== undefined) navigate({ to: "/$instance", params: { instance: instanceKey } });
+            }}
+          >
+            <DoorOpenIcon /> {t("workspace.sidebar.leaveServer")}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The server's name and how many are in it, at the top of the sidebar. */
+function ServerMenuTrigger({ instanceKey, server, nodeName }: { instanceKey: string; server: Server | undefined; nodeName: string | undefined }) {
+  return (
+    <DropdownMenuTrigger asChild>
+      <button
+        type="button"
+        className="group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition hover:bg-muted/60 data-[state=open]:bg-muted/60"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-extrabold">
+            <SwapText className="truncate align-bottom">{server?.name ?? "…"}</SwapText>
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {server ? (
+              <T
+                k="workspace.sidebar.membersOn"
+                values={{ count: <Count value={Number(server.memberCount)} />, place: nodeName ?? <Private text={instanceKey} /> }}
+                count={Number(server.memberCount)}
+              />
+            ) : (
+              (nodeName ?? <Private text={instanceKey} />)
+            )}
+          </span>
+        </span>
+        <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
+      </button>
+    </DropdownMenuTrigger>
+  );
+}
+
+/** The server menu's top half: invite, and whatever they may manage. */
+function ManageItems({
+  inviteTo,
+  settingsTabs,
+  reviews,
+  waiting,
+  usage,
+  canCreate,
+  onInvite,
+  onSettings,
+  onCreate,
+}: {
+  inviteTo: string | null;
+  settingsTabs: string[];
+  reviews: boolean;
+  waiting: number;
+  usage: boolean;
+  canCreate: boolean;
+  onInvite: (channelId: string) => void;
+  onSettings: (settings: { tab: string }) => void;
+  onCreate: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      {inviteTo !== null && (
+        <DropdownMenuItem onSelect={() => onInvite(inviteTo)} className="font-bold text-primary focus:text-primary [&_svg]:text-primary">
+          <UserPlusIcon /> {t("workspace.sidebar.invite")}
+        </DropdownMenuItem>
+      )}
+      {inviteTo !== null && <DropdownMenuSeparator />}
+      {settingsTabs.length > 0 && (
+        <DropdownMenuItem onSelect={() => onSettings({ tab: settingsTabs[0]! })}>
+          <SettingsIcon /> {t("workspace.sidebar.serverSettings")}
+        </DropdownMenuItem>
+      )}
+      {reviews && (
+        <DropdownMenuItem onSelect={() => onSettings({ tab: "applications" })}>
+          <ClipboardListIcon /> {t("workspace.sidebar.applications")}
+          {waiting > 0 && (
+            <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.65rem] font-extrabold text-white">
+              <Count value={waiting} max={99} />
+            </span>
+          )}
+        </DropdownMenuItem>
+      )}
+      {usage && (
+        <DropdownMenuItem onSelect={() => onSettings({ tab: "usage" })}>
+          <ChartColumnIcon /> {t("workspace.sidebar.usage")}
+        </DropdownMenuItem>
+      )}
+      {canCreate && (
+        <DropdownMenuItem onSelect={onCreate}>
+          <PlusIcon /> {t("workspace.sidebar.createChannel")}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+}
+
+/** The server's welcome, rules and settings, each opened from the sidebar. */
+function ServerDialogs({
+  instanceKey,
+  server,
+  welcoming,
+  onWelcoming,
+  reading,
+  onReading,
+  agree,
+  settings,
+  onCloseSettings,
+}: {
+  instanceKey: string;
+  server: Server;
+  welcoming: boolean;
+  onWelcoming: (open: boolean) => void;
+  reading: boolean;
+  onReading: (open: boolean) => void;
+  agree: boolean;
+  settings: { tab: string; target?: string } | null;
+  onCloseSettings: () => void;
+}) {
+  return (
+    <>
+      <WelcomeGate instanceKey={instanceKey} server={server} open={welcoming} onOpenChange={onWelcoming} />
+      <RulesDialog open={reading} onOpenChange={onReading} instanceKey={instanceKey} server={server} agree={agree} />
+      <ServerSettingsDialog
+        open={!!settings}
+        onOpenChange={(open) => !open && onCloseSettings()}
+        instanceKey={instanceKey}
+        server={server}
+        tab={settings?.tab ?? "overview"}
+        target={settings?.target}
+      />
+    </>
+  );
+}
+
+/** People waiting to be let in, for whoever can let them in: opens their applications. */
+function ApplicationsNotice({ show, waiting, onOpen }: { show: boolean; waiting: number; onOpen: () => void }) {
+  return (
+    <AnimatePresence initial={false}>
+      {show && (
+        <motion.button
+          type="button"
+          onClick={onOpen}
+          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+          animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          transition={SPRING}
+          className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+        >
+          <span className="relative grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <ClipboardListIcon className="size-4" />
+            <motion.span
+              aria-hidden
+              animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+              transition={{ duration: 1.6, repeat: Infinity }}
+              className="absolute inset-0 rounded-lg bg-primary"
+            />
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            <T k="workspace.sidebar.waiting" values={{ count: <Count value={waiting} /> }} count={waiting} />
+          </span>
+          <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Locked out until they sign in through the server's provider: the way back in, where channels would be. */
+function SsoNotice({ server, onOpen }: { server: Server | undefined; onOpen: () => void }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence initial={false}>
+      {server && (
+        <motion.button
+          type="button"
+          data-testid="sso-sidebar-locked"
+          onClick={onOpen}
+          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+          animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+          exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          transition={SPRING}
+          className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+        >
+          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <LockKeyholeIcon className="size-4 transition-transform group-hover:-rotate-12" />
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            {t("workspace.sidebar.ssoSignIn", { provider: server.ssoName || t("workspace.sidebar.ssoYourOrganization") })}
+          </span>
+          <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** The channels under their categories, each category folding its own away. */
+function ChannelGroups({
+  instanceKey,
+  groups,
+  access,
+  activeId,
+  collapsed,
+  onCollapse,
+  onSettings,
+  onInvite,
+  onCreate,
+  onMenuEdit,
+}: {
+  instanceKey: string;
+  groups: Group[];
+  access: Access;
+  activeId: string | undefined;
+  collapsed: Record<string, boolean>;
+  onCollapse: (id: string, closed: boolean) => void;
+  onSettings: (settings: { tab: string; target?: string }) => void;
+  onInvite: (channelId: string) => void;
+  onCreate: (parentId: string) => void;
+  onMenuEdit: ChannelMenuActions["edit"];
+}) {
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {groups.flatMap((group) => {
+        const id = group.category?.id ?? "";
+        const closed = !!collapsed[id];
+        const rows = closed
+          ? []
+          : group.channels.map((c, n) => (
+              <ChannelRow
+                key={c.id}
+                index={n}
+                parent={id}
+                instanceKey={instanceKey}
+                channel={c}
+                active={activeId === c.id}
+                canConnect={hasIn(access, c.id, Permission.CONNECT)}
+                onEdit={
+                  hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
+                    ? () => onSettings({ tab: "channels", target: c.id })
+                    : undefined
+                }
+                onInvite={
+                  c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE)
+                    ? () => onInvite(c.id)
+                    : undefined
+                }
+                onMenuEdit={onMenuEdit}
+              />
+            ));
+        if (!group.category) return rows;
+        return [
+          <CategoryRow
+            key={id}
+            category={group.category}
+            closed={closed}
+            count={group.channels.length}
+            onToggle={() => onCollapse(id, !closed)}
+            onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => onCreate(id) : undefined}
+            instanceKey={instanceKey}
+            onMenuEdit={onMenuEdit}
+          />,
+          ...rows,
+        ];
+      })}
+    </AnimatePresence>
   );
 }
 
@@ -493,7 +686,6 @@ function ChannelRow({
   /** Opens its settings (or its permissions) from its right-click menu. */
   onMenuEdit: ChannelMenuActions["edit"];
 }) {
-  const { t } = useI18n();
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
   const { compact, setNavOpen } = useLayout();
@@ -544,99 +736,127 @@ function ChannelRow({
           transition={SPRING}
           className="absolute top-1/2 -left-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
         />
-        <span className="relative shrink-0" title={locked ? t("workspace.sidebar.privateChannel") : undefined}>
-          <Icon
-            className={cn(
-              "size-[18px] opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
-              active && "opacity-100",
-            )}
-          />
-          <AnimatePresence initial={false}>
-            {locked && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                exit={{ scale: 0 }}
-                transition={{ type: "spring", stiffness: 600, damping: 18 }}
-                className="absolute -right-1 -bottom-0.5 grid size-2.5 place-items-center rounded-full bg-background"
-              >
-                <LockIcon className="size-2" strokeWidth={3} />
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </span>
+        <ChannelGlyph icon={Icon} locked={locked} active={active} />
         <span className="truncate">{channel.name}</span>
         <SharedBadge channel={channel} />
-        {onInvite && (
-          <span
-            role="button"
-            tabIndex={-1}
-            aria-label={t("workspace.sidebar.inviteTo", { channel: channel.name })}
-            title={t("workspace.sidebar.invite")}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onInvite();
-            }}
-            className={cn(
-              "ml-auto size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:scale-110 hover:text-foreground",
-              active ? "grid" : "hidden",
-            )}
-          >
-            <UserPlusIcon className="size-3.5" />
-          </span>
-        )}
-        {onEdit && (
-          <span
-            role="button"
-            tabIndex={-1}
-            aria-label={t("workspace.sidebar.editChannelNamed", { channel: channel.name })}
-            title={t("workspace.sidebar.editChannel")}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEdit();
-            }}
-            className={cn(
-              !onInvite && "ml-auto",
-              "size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:rotate-45 hover:text-foreground",
-              // Like Discord: always there on the channel you're in, on hover elsewhere.
-              active ? "grid" : "hidden",
-            )}
-          >
-            <SettingsIcon className="size-3.5" />
-          </span>
-        )}
-        <AnimatePresence>
-          {muted && (
-            <motion.span
-              key="muted"
-              initial={{ scale: 0, rotate: -30 }}
-              animate={{ scale: 1, rotate: 0 }}
-              exit={{ scale: 0, rotate: 30 }}
-              transition={{ type: "spring", stiffness: 600, damping: 18 }}
-              className="ml-auto shrink-0"
-              aria-label={t("workspace.sidebar.muted")}
-            >
-              <BellOffIcon className="size-3.5" />
-            </motion.span>
-          )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {unread > 0 && !active && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={{ type: "spring", stiffness: 600, damping: 20 }}
-              className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.7rem] font-extrabold text-white"
-            >
-              <Count value={unread} max={99} />
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <RowActions name={channel.name} active={active} onInvite={onInvite} onEdit={onEdit} />
+        <RowBadges muted={muted} unread={active ? 0 : unread} />
       </Link>
       {voice && <VoiceUsers instanceKey={instanceKey} serverId={channel.serverId} channelId={channel.id} />}
     </motion.li>
+  );
+}
+
+/** A channel's icon, with a padlock on private ones. */
+function ChannelGlyph({ icon: Icon, locked, active }: { icon: typeof HashIcon; locked: boolean; active: boolean }) {
+  const { t } = useI18n();
+  return (
+    <span className="relative shrink-0" title={locked ? t("workspace.sidebar.privateChannel") : undefined}>
+      <Icon
+        className={cn(
+          "size-[18px] opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
+          active && "opacity-100",
+        )}
+      />
+      <AnimatePresence initial={false}>
+        {locked && (
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            exit={{ scale: 0 }}
+            transition={{ type: "spring", stiffness: 600, damping: 18 }}
+            className="absolute -right-1 -bottom-0.5 grid size-2.5 place-items-center rounded-full bg-background"
+          >
+            <LockIcon className="size-2" strokeWidth={3} />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
+
+/** Invite and settings shortcuts at the end of a row. */
+function RowActions({ name, active, onInvite, onEdit }: { name: string; active: boolean; onInvite?: () => void; onEdit?: () => void }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {onInvite && (
+        <span
+          role="button"
+          tabIndex={-1}
+          aria-label={t("workspace.sidebar.inviteTo", { channel: name })}
+          title={t("workspace.sidebar.invite")}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onInvite();
+          }}
+          className={cn(
+            "ml-auto size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:scale-110 hover:text-foreground",
+            active ? "grid" : "hidden",
+          )}
+        >
+          <UserPlusIcon className="size-3.5" />
+        </span>
+      )}
+      {onEdit && (
+        <span
+          role="button"
+          tabIndex={-1}
+          aria-label={t("workspace.sidebar.editChannelNamed", { channel: name })}
+          title={t("workspace.sidebar.editChannel")}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onEdit();
+          }}
+          className={cn(
+            !onInvite && "ml-auto",
+            "size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:rotate-45 hover:text-foreground",
+            // Like Discord: always there on the channel you're in, on hover elsewhere.
+            active ? "grid" : "hidden",
+          )}
+        >
+          <SettingsIcon className="size-3.5" />
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Whether a channel is muted, and how many unread messages it has. */
+function RowBadges({ muted, unread }: { muted: boolean; unread: number }) {
+  const { t } = useI18n();
+  return (
+    <>
+      <AnimatePresence>
+        {muted && (
+          <motion.span
+            key="muted"
+            initial={{ scale: 0, rotate: -30 }}
+            animate={{ scale: 1, rotate: 0 }}
+            exit={{ scale: 0, rotate: 30 }}
+            transition={{ type: "spring", stiffness: 600, damping: 18 }}
+            className="ml-auto shrink-0"
+            aria-label={t("workspace.sidebar.muted")}
+          >
+            <BellOffIcon className="size-3.5" />
+          </motion.span>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {unread > 0 && (
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            exit={{ scale: 0 }}
+            transition={{ type: "spring", stiffness: 600, damping: 20 }}
+            className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.7rem] font-extrabold text-white"
+          >
+            <Count value={unread} max={99} />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

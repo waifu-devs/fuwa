@@ -6,7 +6,7 @@ import { focusChannel } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
-import { CHANNEL_ICON } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON } from "@/components/channel-groups";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";

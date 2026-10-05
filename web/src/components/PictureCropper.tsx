@@ -28,19 +28,20 @@ export function PictureCropper({
   onDone: (picture: Blob) => void;
 }) {
   const { t } = useI18n();
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Each is kept with the picture it's about, so a new picture starts afresh.
+  const [loaded, setLoaded] = useState<{ src: string; image: HTMLImageElement } | null>(null);
+  const [failure, setFailure] = useState<{ src: string | null; message: string } | null>(null);
+  const [savingSrc, setSavingSrc] = useState<string | null>(null);
+  const image = loaded && loaded.src === src ? loaded.image : null;
+  const failed = failure && failure.src === src ? failure.message : null;
+  const saving = !!src && savingSrc === src;
 
   useEffect(() => {
-    setImage(null);
-    setFailed(null);
-    setSaving(false);
     if (!src) return;
     let live = true;
     const img = new Image();
-    img.onload = () => live && setImage(img);
-    img.onerror = () => live && setFailed(t("workspace.picture.notPicture"));
+    img.onload = () => live && setLoaded({ src, image: img });
+    img.onerror = () => live && setFailure({ src, message: t("workspace.picture.notPicture") });
     img.src = src;
     return () => {
       live = false;
@@ -61,12 +62,13 @@ export function PictureCropper({
             onCancel={onCancel}
             onDone={async (crop, frame) => {
               if (!image) return;
-              setSaving(true);
+              setSavingSrc(src);
               try {
                 onDone(await cropped(t, image, crop, kind, frame));
               } catch (err) {
-                setFailed(err instanceof Error ? err.message : t("workspace.picture.cropFailed"));
-                setSaving(false);
+                setFailure({ src, message: err instanceof Error ? err.message : t("workspace.picture.cropFailed") });
+              } finally {
+                setSavingSrc(null);
               }
             }}
           />
@@ -89,7 +91,7 @@ function Framer({
   onCancel: () => void;
   onDone: (crop: Crop, frame: { width: number; height: number }) => void;
 }) {
-  const { t, number } = useI18n();
+  const { t } = useI18n();
   const shape = PICTURE[kind];
   const box = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
@@ -199,105 +201,158 @@ function Framer({
         )}
       >
         {!ready && <div className="absolute inset-0 animate-pulse bg-muted" />}
-        <AnimatePresence>
-          {ready && image && (
-            <motion.img
-              key={image.src}
-              src={image.src}
-              alt=""
-              draggable={false}
-              initial={{ opacity: 0, filter: "blur(8px)" }}
-              animate={{ opacity: 1, filter: "blur(0px)" }}
-              transition={{ duration: 0.45, ease: EASE_OUT }}
-              style={{ width: size!.width * at.scale, height: size!.height * at.scale, transform: `translate(${at.x}px, ${at.y}px)` }}
-              className="pointer-events-none absolute top-0 left-0 max-w-none origin-top-left"
-            />
-          )}
-        </AnimatePresence>
-        {/* Everything outside the shape dims; the shape's edge glows. */}
-        <span
-          aria-hidden
-          className={cn(
-            "pointer-events-none absolute shadow-[0_0_0_9999px_rgb(0_0_0/0.5)] ring-2 ring-white/80",
-            "inset-0",
-            shape.round ? "rounded-full" : kind === "icon" ? "rounded-[32%]" : "rounded-2xl",
-          )}
-        />
-        <AnimatePresence>
-          {moving && (
-            <motion.span
-              aria-hidden
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,transparent_33%,rgb(255_255_255/0.35)_33%,rgb(255_255_255/0.35)_calc(33%+1px),transparent_calc(33%+1px),transparent_66%,rgb(255_255_255/0.35)_66%,rgb(255_255_255/0.35)_calc(66%+1px),transparent_calc(66%+1px)),linear-gradient(to_bottom,transparent_33%,rgb(255_255_255/0.35)_33%,rgb(255_255_255/0.35)_calc(33%+1px),transparent_calc(33%+1px),transparent_66%,rgb(255_255_255/0.35)_66%,rgb(255_255_255/0.35)_calc(66%+1px),transparent_calc(66%+1px))]"
-            />
-          )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {ready && !moving && shown.zoom === 1 && shown.cx === size!.width / 2 && shown.cy === size!.height / 2 && (
-            <motion.span
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={SPRING}
-              className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-xs font-bold whitespace-nowrap text-white"
-            >
-              <MoveIcon className="size-3.5" /> {t("workspace.picture.dragToMove")}
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <FramedImage image={ready ? image : null} at={at} />
+        <ShapeMask kind={kind} />
+        <MoveGrid show={moving} />
+        <DragHint show={ready && !moving && atStart(shown, size)} />
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          aria-label={t("workspace.picture.zoomOut")}
-          disabled={!ready || shown.zoom <= 1}
-          onClick={() => zoomTo(shown.zoom / 1.25)}
-          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
-        >
-          <ZoomOutIcon className="size-4" />
-        </button>
-        <Slider
-          label={t("workspace.picture.zoom")}
-          value={shown.zoom}
-          min={1}
-          max={MAX_ZOOM}
-          step={0.01}
-          format={(z) => number(Math.round(z * 100) / 100, { style: "percent" })}
-          onChange={zoomTo}
-          className="flex-1"
-        />
-        <button
-          type="button"
-          aria-label={t("workspace.picture.zoomIn")}
-          disabled={!ready || shown.zoom >= MAX_ZOOM}
-          onClick={() => zoomTo(shown.zoom * 1.25)}
-          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
-        >
-          <ZoomInIcon className="size-4" />
-        </button>
-      </div>
+      <ZoomControls ready={ready} zoom={shown.zoom} onZoom={zoomTo} />
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={!ready || saving}
-          onClick={() => size && setCrop(centered(size))}
-          className="group mr-auto rounded-xl"
-        >
-          <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-180" /> {t("workspace.picture.reset")}
-        </Button>
-        <Button type="button" variant="ghost" disabled={saving} onClick={onCancel} className="rounded-xl">
-          {t("common.cancel")}
-        </Button>
-        <Button type="button" disabled={!ready || saving} onClick={() => onDone(shown, frame)} className="btn group rounded-xl px-4 font-bold">
-          <CheckIcon className="transition-transform group-hover:scale-125" /> {t("workspace.picture.useIt")}
-        </Button>
-      </div>
+      <FramerActions ready={ready} saving={saving} onReset={() => size && setCrop(centered(size))} onCancel={onCancel} onDone={() => onDone(shown, frame)} />
     </div>
   );
 }
+
+/** Zooming out and in, a step at a time or along the slider. */
+function ZoomControls({ ready, zoom, onZoom }: { ready: boolean; zoom: number; onZoom: (zoom: number) => void }) {
+  const { t, number } = useI18n();
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        aria-label={t("workspace.picture.zoomOut")}
+        disabled={!ready || zoom <= 1}
+        onClick={() => onZoom(zoom / 1.25)}
+        className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
+      >
+        <ZoomOutIcon className="size-4" />
+      </button>
+      <Slider
+        label={t("workspace.picture.zoom")}
+        value={zoom}
+        min={1}
+        max={MAX_ZOOM}
+        step={0.01}
+        format={(z) => number(Math.round(z * 100) / 100, { style: "percent" })}
+        onChange={onZoom}
+        className="flex-1"
+      />
+      <button
+        type="button"
+        aria-label={t("workspace.picture.zoomIn")}
+        disabled={!ready || zoom >= MAX_ZOOM}
+        onClick={() => onZoom(zoom * 1.25)}
+        className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90 disabled:opacity-40"
+      >
+        <ZoomInIcon className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+/** Reset, cancel, or use the picture as framed. */
+function FramerActions({
+  ready,
+  saving,
+  onReset,
+  onCancel,
+  onDone,
+}: {
+  ready: boolean;
+  saving: boolean;
+  onReset: () => void;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button type="button" variant="ghost" disabled={!ready || saving} onClick={onReset} className="group mr-auto rounded-xl">
+        <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-180" /> {t("workspace.picture.reset")}
+      </Button>
+      <Button type="button" variant="ghost" disabled={saving} onClick={onCancel} className="rounded-xl">
+        {t("common.cancel")}
+      </Button>
+      <Button type="button" disabled={!ready || saving} onClick={onDone} className="btn group rounded-xl px-4 font-bold">
+        <CheckIcon className="transition-transform group-hover:scale-125" /> {t("workspace.picture.useIt")}
+      </Button>
+    </div>
+  );
+}
+
+/** "Drag to move", while the picture sits as it started. */
+function DragHint({ show }: { show: boolean }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.span
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 6 }}
+          transition={SPRING}
+          className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-xs font-bold whitespace-nowrap text-white"
+        >
+          <MoveIcon className="size-3.5" /> {t("workspace.picture.dragToMove")}
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Everything outside the shape dims; the shape's edge glows. */
+function ShapeMask({ kind }: { kind: PictureKind }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute shadow-[0_0_0_9999px_rgb(0_0_0/0.5)] ring-2 ring-white/80",
+        "inset-0",
+        PICTURE[kind].round ? "rounded-full" : kind === "icon" ? "rounded-[32%]" : "rounded-2xl",
+      )}
+    />
+  );
+}
+
+/** A rule-of-thirds grid while the picture is being moved. */
+function MoveGrid({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.span
+          aria-hidden
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,transparent_33%,rgb(255_255_255/0.35)_33%,rgb(255_255_255/0.35)_calc(33%+1px),transparent_calc(33%+1px),transparent_66%,rgb(255_255_255/0.35)_66%,rgb(255_255_255/0.35)_calc(66%+1px),transparent_calc(66%+1px)),linear-gradient(to_bottom,transparent_33%,rgb(255_255_255/0.35)_33%,rgb(255_255_255/0.35)_calc(33%+1px),transparent_calc(33%+1px),transparent_66%,rgb(255_255_255/0.35)_66%,rgb(255_255_255/0.35)_calc(66%+1px),transparent_calc(66%+1px))]"
+        />
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** The picture, placed in the frame, fading in from a blur once it's ready. */
+function FramedImage({ image, at }: { image: HTMLImageElement | null; at: { x: number; y: number; scale: number } }) {
+  return (
+    <AnimatePresence>
+      {image && (
+        <motion.img
+          key={image.src}
+          src={image.src}
+          alt=""
+          draggable={false}
+          initial={{ opacity: 0, filter: "blur(8px)" }}
+          animate={{ opacity: 1, filter: "blur(0px)" }}
+          transition={{ duration: 0.45, ease: EASE_OUT }}
+          style={{ width: image.naturalWidth * at.scale, height: image.naturalHeight * at.scale, transform: `translate(${at.x}px, ${at.y}px)` }}
+          className="pointer-events-none absolute top-0 left-0 max-w-none origin-top-left"
+        />
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Whether the picture sits as it started: centered, not zoomed. */
+const atStart = (crop: Crop, size: { width: number; height: number }) => crop.zoom === 1 && crop.cx === size.width / 2 && crop.cy === size.height / 2;

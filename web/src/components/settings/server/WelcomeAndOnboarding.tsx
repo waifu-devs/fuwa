@@ -6,7 +6,8 @@ import { getJoinForm, getOnboarding, getWelcomeScreen, run, setOnboarding, setWe
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
 import { BannerHero, ServerBanner } from "@/components/join/Banner";
-import { OnboardingFlow, stepsFor } from "@/components/join/Onboarding";
+import { OnboardingFlow } from "@/components/join/Onboarding";
+import { stepsFor } from "@/components/join/onboarding-steps";
 import { RulesList } from "@/components/join/Rules";
 import { WelcomeCard } from "@/components/join/Welcome";
 import { SPRING } from "@/lib/motion";

@@ -6,7 +6,7 @@ import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { notificationKey, useFuwa } from "@/fuwa/store";
-import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ServerIcon } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
