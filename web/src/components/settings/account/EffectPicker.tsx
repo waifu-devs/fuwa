@@ -3,25 +3,15 @@ import { motion } from "motion/react";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { hue } from "@/components/Icons";
 import { ProfileEffect } from "@/components/ProfileEffect";
-import { type I18n, type Key, useI18n } from "@/i18n/react";
+import { type I18n, useI18n } from "@/i18n/react";
 import { BUILTIN_EFFECTS, type ProfileEffectSpec } from "@/lib/effects/profile";
+import { effectKeys } from "@/lib/effects/text";
 import { colorCss, hueOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const EFFECT_TEXT: Record<string, { name: Key; about: Key }> = {
-  sakura: { name: "accountsettings.effects.name.sakura", about: "accountsettings.effects.about.sakura" },
-  starfall: { name: "accountsettings.effects.name.starfall", about: "accountsettings.effects.about.starfall" },
-  sparkles: { name: "accountsettings.effects.name.sparkles", about: "accountsettings.effects.about.sparkles" },
-  hearts: { name: "accountsettings.effects.name.hearts", about: "accountsettings.effects.about.hearts" },
-  snow: { name: "accountsettings.effects.name.snow", about: "accountsettings.effects.about.snow" },
-  bubbles: { name: "accountsettings.effects.name.bubbles", about: "accountsettings.effects.about.bubbles" },
-  fireflies: { name: "accountsettings.effects.name.fireflies", about: "accountsettings.effects.about.fireflies" },
-  confetti: { name: "accountsettings.effects.name.confetti", about: "accountsettings.effects.about.confetti" },
-};
-
 /** A built-in effect's name and line in the app's language; any other effect keeps its own. */
 function effectText(t: I18n["t"], effect: ProfileEffectSpec): { name: string; description: string } {
-  const keys = EFFECT_TEXT[effect.id];
+  const keys = effectKeys(effect.id);
   return keys ? { name: t(keys.name), description: t(keys.about) } : effect;
 }
 
