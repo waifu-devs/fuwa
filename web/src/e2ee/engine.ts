@@ -320,7 +320,7 @@ export class DmEngine {
     return exclusive(lockName(vaultKey), async () => {
       let stored = await vault.loadDevice(vaultKey);
       if (stored && stored.session !== session) {
-        await vault.wipe(vaultKey);
+        await vault.wipeVault(vaultKey);
         stored = undefined;
       }
       const device = stored ? e2ee.Device.restore(stored.state) : new e2ee.Device(me.id);
