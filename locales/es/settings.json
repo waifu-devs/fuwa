@@ -1,0 +1,8 @@
+{
+  "language.title": "Idioma",
+  "language.matchBrowser": "Como mi navegador",
+  "language.matchBrowserNote": "Ahora mismo es {language}",
+  "language.coverage": "{percent} traducido",
+  "language.draft": "Borrador automático, aún sin revisar por un hablante",
+  "language.failed": "No se pudo cargar ese idioma. Revisa tu conexión y vuelve a intentarlo."
+}
