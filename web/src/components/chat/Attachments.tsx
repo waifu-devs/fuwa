@@ -86,16 +86,17 @@ function downloadQuietly(url: string, name: string) {
 
 /** A download button: a plain link normally, a button that hides it while streaming. */
 function Download({ url, name, className, children }: { url: string; name: string; className?: string; children: ReactNode }) {
+  const { t } = useI18n();
   const quiet = usePrefs((p) => p.streamer && p.streamerHidePersonal);
   if (quiet) {
     return (
-      <button type="button" onClick={() => downloadQuietly(url, name)} aria-label={`Download ${name}`} className={className}>
+      <button type="button" onClick={() => downloadQuietly(url, name)} aria-label={t("chat.attachments.download", { name })} className={className}>
         {children}
       </button>
     );
   }
   return (
-    <a href={url} download={name} rel="noopener" aria-label={`Download ${name}`} className={className}>
+    <a href={url} download={name} rel="noopener" aria-label={t("chat.attachments.download", { name })} className={className}>
       {children}
     </a>
   );
@@ -157,6 +158,7 @@ function Picture({
   animate: boolean;
   onOpen: () => void;
 }) {
+  const { t } = useI18n();
   const [loaded, setLoaded] = useState(false);
   const [broken, setBroken] = useState(false);
   const size = square ? box : fitBox(file.width, file.height, box);
@@ -168,7 +170,7 @@ function Picture({
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
       onClick={onOpen}
-      aria-label={`Open ${file.filename}`}
+      aria-label={t("chat.attachments.open", { name: file.filename })}
       style={{ width: size.width, aspectRatio: `${size.width} / ${size.height}` }}
       className="relative max-w-full overflow-hidden rounded-xl border bg-muted/60"
     >
@@ -336,7 +338,7 @@ function Viewer({ file, onClose }: { file: Attachment | null; onClose: () => voi
                   </Download>
                   <DialogPrimitive.Close className="grid size-8 shrink-0 place-items-center rounded-full transition hover:rotate-90 hover:bg-white/15">
                     <XIcon className="size-4" />
-                    <span className="sr-only">Close</span>
+                    <span className="sr-only">{lang.t("common.close")}</span>
                   </DialogPrimitive.Close>
                 </motion.div>
               </motion.div>

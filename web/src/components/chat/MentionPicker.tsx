@@ -9,6 +9,7 @@ import { EmojiImage } from "@/components/EmojiImage";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
 import { choiceName, encodeEmoji, rememberEmoji, searchCatalog, toned, useCatalog, useSkinTone, useStandard, type Choice } from "@/lib/emoji-catalog";
+import { useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -165,6 +166,7 @@ export function useMentionPicker(
 }
 
 export function MentionPicker({ picker }: { picker: MentionPickerState }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence>
       {picker.open && (
@@ -178,15 +180,15 @@ export function MentionPicker({ picker }: { picker: MentionPickerState }) {
           <p className="flex items-center gap-1 px-2 pt-0.5 pb-1 text-[0.65rem] font-extrabold tracking-wide text-muted-foreground uppercase">
             {picker.kind === "emoji" ? (
               <>
-                <SmileIcon className="size-3" /> Emoji
+                <SmileIcon className="size-3" /> {t("chat.mentionPicker.emoji")}
               </>
             ) : (
               <>
-                <AtSignIcon className="size-3" /> Mention
+                <AtSignIcon className="size-3" /> {t("chat.mentionPicker.mention")}
               </>
             )}
           </p>
-          <ul role="listbox" aria-label={picker.kind === "emoji" ? "Emoji" : "Mentions"}>
+          <ul role="listbox" aria-label={picker.kind === "emoji" ? t("chat.mentionPicker.emoji") : t("chat.mentionPicker.mentions")}>
             {picker.options.map((option, n) => {
               const on = n === picker.active;
               return (
@@ -213,6 +215,7 @@ export function MentionPicker({ picker }: { picker: MentionPickerState }) {
 }
 
 function OptionBody({ option }: { option: Option }) {
+  const { t } = useI18n();
   if (option.kind === "emoji") {
     const { choice } = option;
     return (
@@ -224,7 +227,7 @@ function OptionBody({ option }: { option: Option }) {
         {choice.kind === "custom" && (
           <span className="relative ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             {!choice.custom.here && <ServerIcon server={choice.custom.server} className="size-4 rounded-md text-[0.4rem]" />}
-            <span className="truncate">{choice.custom.here ? "This server" : choice.custom.server.name}</span>
+            <span className="truncate">{choice.custom.here ? t("chat.mentionPicker.thisServer") : choice.custom.server.name}</span>
           </span>
         )}
       </>
@@ -246,7 +249,7 @@ function OptionBody({ option }: { option: Option }) {
         </span>
         <span className="relative truncate font-bold">@{option.role.name}</span>
         <span className={cn("relative ml-auto flex items-center gap-1 text-xs text-muted-foreground")}>
-          <ShieldIcon className="size-3" /> Role
+          <ShieldIcon className="size-3" /> {t("chat.mentionPicker.role")}
         </span>
       </>
     );
@@ -257,7 +260,7 @@ function OptionBody({ option }: { option: Option }) {
       </span>
       <span className="relative font-bold">@{option.name}</span>
       <span className="relative ml-auto text-xs text-muted-foreground">
-Everyone who can see this channel
+        {t("chat.mentionPicker.everyone")}
       </span>
     </>
   );

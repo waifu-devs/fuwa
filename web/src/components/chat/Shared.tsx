@@ -5,6 +5,7 @@ import type { Channel, SharedServer } from "@/gen/fuwa/v1/types_pb";
 import { ServerIcon } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/i18n/react";
 import { sharedLabel } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +27,7 @@ export function SharedGlyph({ className }: { className?: string }) {
 
 /** The sidebar's mark beside a shared channel's name: pops in, and says who it's shared with. */
 export function SharedBadge({ channel, className }: { channel: Pick<Channel, "shared">; className?: string }) {
-  const label = sharedLabel(channel);
+  const label = sharedLabel(useI18n(), channel);
   return (
     <AnimatePresence initial={false}>
       {label && (
@@ -61,8 +62,10 @@ export function SharedBadge({ channel, className }: { channel: Pick<Channel, "sh
 
 /** The header's pill: where a shared channel's messages live, or who it's shown to. */
 export function SharedPill({ channel }: { channel: Pick<Channel, "shared"> }) {
-  const label = sharedLabel(channel);
-  const text = !label ? "" : label.home ? label.text : `Shared · messages live on ${label.names || "another server"}`;
+  const lang = useI18n();
+  const { t } = lang;
+  const label = sharedLabel(lang, channel);
+  const text = !label ? "" : label.home ? label.text : label.names ? t("chat.shared.livesOn", { names: label.names }) : t("chat.shared.livesOnAnother");
   return (
     <AnimatePresence initial={false}>
       {label && (
@@ -98,9 +101,10 @@ export function SharedPill({ channel }: { channel: Pick<Channel, "shared"> }) {
 
 /** Beside the name of someone from another server: which one, as a small muted chip. */
 export function ServerTag({ server, className }: { server: SharedServer; className?: string }) {
+  const { t } = useI18n();
   return (
     <span
-      title={server.instance ? `From ${server.name} on ${server.instance}` : `From ${server.name}`}
+      title={server.instance ? t("chat.shared.fromOn", { server: server.name, instance: server.instance }) : t("chat.shared.fromServer", { server: server.name })}
       className={cn(
         "server-tag inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.68rem] leading-4 font-bold text-muted-foreground",
         server.instance ? "max-w-64 min-w-0 shrink" : "max-w-40",
@@ -129,12 +133,25 @@ function noteDismissed(channelId: string) {
  * where what's said is kept. Closing it is remembered in this browser.
  */
 export function SharedNote({ channel }: { channel: Pick<Channel, "id" | "shared"> }) {
+  const lang = useI18n();
+  const { t } = lang;
   const [hidden, setHidden] = useState(() => noteDismissed(channel.id));
-  const label = sharedLabel(channel);
+  const label = sharedLabel(lang, channel);
   const shared = channel.shared;
   if (!label || !shared) return null;
-  const home = shared.home ? "this server" : (shared.homeServer?.name ?? "the other server");
-  const others = label.names || "another server";
+  const others = label.names;
+  const title = shared.home
+    ? others
+      ? t("chat.shared.noteShareWith", { names: others })
+      : t("chat.shared.noteShareWithAnother")
+    : others
+      ? t("chat.shared.noteComesFrom", { names: others })
+      : t("chat.shared.noteComesFromAnother");
+  const kept = shared.home
+    ? t("chat.shared.noteKeptHere")
+    : shared.homeServer
+      ? t("chat.shared.noteKeptOn", { server: shared.homeServer.name })
+      : t("chat.shared.noteKeptOther");
   return (
     <AnimatePresence initial={false}>
       {!hidden && (
@@ -155,15 +172,13 @@ export function SharedNote({ channel }: { channel: Pick<Channel, "id" | "shared"
             <SharedGlyph className="size-5" />
           </motion.span>
           <div className="min-w-0 text-sm">
-            <p className="font-bold">{shared.home ? `You share this channel with ${others}` : `This channel comes from ${others}`}</p>
-            <p className="text-muted-foreground">
-              People from both servers read and write here. Messages are kept only on {home}, and each server looks after its own people.
-            </p>
+            <p className="font-bold">{title}</p>
+            <p className="text-muted-foreground">{kept}</p>
           </div>
           <button
             type="button"
-            aria-label="Got it"
-            title="Got it"
+            aria-label={t("chat.shared.gotIt")}
+            title={t("chat.shared.gotIt")}
             onClick={() => {
               setHidden(true);
               try {
