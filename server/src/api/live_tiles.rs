@@ -490,7 +490,6 @@ impl LiveTileService for Api {
                 if !access.can_see(&req.channel_id) {
                     return Err(Error::NotFound("channel"));
                 }
-                super::messages::check_not_timed_out(&member)?;
                 access.require_in(&req.channel_id, Permission::SendMessages)?;
                 let source = Source {
                     id: account.id.clone(),
