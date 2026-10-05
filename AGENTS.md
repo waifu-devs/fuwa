@@ -514,7 +514,7 @@
     `join/Onboarding.tsx`; it takes the welcome screen's place once done),
     `friends.rs` the Friends screen under Home and the friend buttons on
     profile cards (over `core/friends.rs`, which follows `WatchFriends`
-    beside the event stream), `settings_friends.rs` Friends and privacy,
+    beside the event stream), `settings_friends.rs` Friends and privacy (with "Show what I'm doing" and the servers it shows in),
     `commands.rs` agents' "/" commands, their options in place of the box,
     "used /name" and message buttons (over `core/commands.rs`, the web's
     `chat/Commands.tsx`; only where the instance has `agent-commands`),
