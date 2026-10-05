@@ -87,10 +87,8 @@ impl Api {
     /// The server, the caller's membership in it, and what they can do there.
     async fn membership(&self, account: &Account, server_id: &str) -> Result<Seat> {
         let sdb = self.app.servers.get(server_id).await?;
-        let conn = sdb.read()?;
-        let (member, access) = store::member_access(&conn, &sdb.id, &account.id)
-            .await?
-            .ok_or_else(|| Error::denied("join this server first"))?;
+        let (member, access) =
+            sdb.member_access(&account.id).await?.ok_or_else(|| Error::denied("join this server first"))?;
         Ok(Seat { sdb, member, access })
     }
 
