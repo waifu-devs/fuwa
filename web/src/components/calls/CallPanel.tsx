@@ -9,6 +9,7 @@ import { SPRING, SwapText } from "@/components/motion";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+import { type Key, useI18n } from "@/i18n/react";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
 import { CameraButton, RecordButton, ScreenButton } from "./Video";
@@ -21,10 +22,10 @@ export function clock(seconds: number) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-const STATUS: Record<ActiveCall["status"], string> = {
-  connecting: "Connecting…",
-  connected: "Voice connected",
-  reconnecting: "Reconnecting…",
+const STATUS: Record<ActiveCall["status"], Key> = {
+  connecting: "dms-calls.calls.status.connecting",
+  connected: "dms-calls.calls.status.connected",
+  reconnecting: "dms-calls.calls.status.reconnecting",
 };
 
 /** Where you are in a call, above your user panel, with a way out. Shows wherever you go in the app. */
@@ -52,12 +53,13 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
   const t = call.target;
   const now = useNow(1_000);
   const level = useQualityLevel();
+  const { t: tr } = useI18n();
   const where = useFuwa((s) => {
     const inst = s.instances[t.instance];
     if (t.kind === "voice") {
-      const channel = inst?.channels[t.serverId]?.find((c) => c.id === t.channelId)?.name ?? "voice";
+      const channel = inst?.channels[t.serverId]?.find((c) => c.id === t.channelId)?.name ?? tr("dms-calls.calls.panel.voice");
       const server = inst?.servers.find((x) => x.id === t.serverId)?.name ?? "";
-      return `${channel}${server ? ` / ${server}` : ""}`;
+      return server ? tr("dms-calls.calls.panel.where", { channel, server }) : channel;
     }
     const conversation = inst?.dms.conversations.find((c) => c.id === t.conversationId);
     const other = conversation?.users.find((u) => u.id !== inst?.me?.id);
@@ -75,20 +77,20 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
           <ConnectionDetails status={call.status}>
             <button
               type="button"
-              title="Connection details"
+              title={tr("dms-calls.calls.panel.details")}
               className={cn(
                 "-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 rounded-md px-1 text-left text-sm font-extrabold transition hover:bg-muted/60 active:scale-[0.98]",
                 call.status === "connected" ? "text-[#3ba55d]" : call.status === "reconnecting" ? "text-amber-500" : "text-muted-foreground",
               )}
             >
               <Signal status={call.status} level={level} />
-              <SwapText className="truncate">{STATUS[call.status]}</SwapText>
+              <SwapText className="truncate">{tr(STATUS[call.status])}</SwapText>
               {call.status === "connected" && <PingText colored className="ml-auto shrink-0 text-xs font-bold text-muted-foreground" />}
             </button>
           </ConnectionDetails>
           <Link {...link} className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground hover:underline">
             {t.kind === "dm" && (
-              <span title="End-to-end encrypted: only the people in this call can hear it" className="shrink-0">
+              <span title={tr("dms-calls.calls.panel.encrypted")} className="shrink-0">
                 <LockKeyholeIcon className="size-3" />
               </span>
             )}

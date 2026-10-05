@@ -48,12 +48,13 @@ export const clearPicked = (draft: string) => set(draft, []);
 /** The paperclip in an encrypted composer. */
 export function EncryptedAttach({ draft, disabled }: { draft: string; disabled?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
   return (
     <>
       <motion.button
         type="button"
-        aria-label="Attach files"
-        title="Attach files (encrypted on this device)"
+        aria-label={t("dms-calls.dm.files.attach")}
+        title={t("dms-calls.dm.files.attachTitle")}
         disabled={disabled}
         onClick={() => input.current?.click()}
         whileHover={{ scale: 1.12, rotate: 12 }}
@@ -87,7 +88,7 @@ export function PickedTray({ draft, files }: { draft: string; files: File[] }) {
       transition={SPRING}
       className="scroll-thin -mx-1 mb-1.5 flex gap-2 overflow-x-auto px-1 pt-1 pb-1"
       role="list"
-      aria-label="Files to send"
+      aria-label={lang.t("dms-calls.dm.files.tray")}
     >
       <AnimatePresence initial={false} mode="popLayout">
         {files.map((file, n) => {
@@ -113,7 +114,7 @@ export function PickedTray({ draft, files }: { draft: string; files: File[] }) {
               </div>
               <button
                 type="button"
-                aria-label={`Remove ${name}`}
+                aria-label={lang.t("dms-calls.dm.files.remove", { name })}
                 onClick={() => set(draft, files.filter((_, i) => i !== n))}
                 className="absolute top-1 right-1 grid size-6 place-items-center rounded-full bg-card/90 text-foreground shadow-sm transition hover:rotate-90 hover:text-destructive"
               >

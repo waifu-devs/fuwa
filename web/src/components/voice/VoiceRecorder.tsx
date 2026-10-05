@@ -6,6 +6,7 @@ import { SPRING } from "@/components/motion";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError } from "@/lib/reports";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/react";
 import { pauseAll } from "@/voice/player";
 import { canRecord, MIN_MS, Recorder, type Clip } from "@/voice/recorder";
 import { clock } from "@/voice/player";
@@ -52,6 +53,7 @@ export function VoiceRecorder({
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
   const time = useRef<HTMLSpanElement>(null);
   const frame = useRef(0);
+  const { t } = useI18n();
 
   const supported = canRecord();
 
@@ -93,15 +95,15 @@ export function VoiceRecorder({
     try {
       const clip = await r.stop();
       if (clip.durationMs < MIN_MS) {
-        onProblem("Hold the microphone to record, or tap it to start.");
+        onProblem(t("dms-calls.voice.recorder.tooShort"));
       } else {
         onSend(clip);
       }
     } catch {
-      onProblem("The recording couldn't be saved.");
+      onProblem(t("dms-calls.voice.recorder.notSaved"));
     }
     reset();
-  }, [onProblem, onSend, reset]);
+  }, [onProblem, onSend, reset, t]);
 
   const start = async (as: Mode) => {
     if (recorder.current || mode === "starting") return;
@@ -118,7 +120,7 @@ export function VoiceRecorder({
       frame.current = requestAnimationFrame(draw);
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "NotSupportedError")) reportError("voice_mic", "voice.record");
-      onProblem(err instanceof DOMException && err.name === "NotSupportedError" ? "This browser can't record voice messages." : micProblem(err));
+      onProblem(err instanceof DOMException && err.name === "NotSupportedError" ? t("dms-calls.voice.recorder.unsupported") : micProblem(err));
       reset();
     }
   };
@@ -192,8 +194,8 @@ export function VoiceRecorder({
       <button
         type="button"
         disabled
-        aria-label="This browser can't record voice messages"
-        title="This browser can't record voice messages"
+        aria-label={t("dms-calls.voice.recorder.unsupportedLabel")}
+        title={t("dms-calls.voice.recorder.unsupportedLabel")}
         className="relative z-20 mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground/50"
       >
         <MicIcon className="size-[18px]" />
@@ -213,14 +215,14 @@ export function VoiceRecorder({
             transition={SPRING}
             className="absolute inset-0 z-10 flex items-center gap-3 rounded-2xl bg-card pr-14 pl-2"
             role="status"
-            aria-label="Recording a voice message"
+            aria-label={t("dms-calls.voice.recorder.recording")}
           >
             <motion.button
               type="button"
               onClick={cancel}
               whileTap={{ scale: 0.85 }}
-              aria-label="Throw the recording away"
-              title="Throw away (Esc)"
+              aria-label={t("dms-calls.voice.recorder.throwAway")}
+              title={t("dms-calls.voice.recorder.throwAwayTitle")}
               className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
             >
               <Trash2Icon className="size-[18px]" />
@@ -258,7 +260,7 @@ export function VoiceRecorder({
               className={cn("hidden shrink-0 text-xs font-bold text-muted-foreground sm:block", limited && "text-amber-600 dark:text-amber-400")}
               style={{ transform: `translateX(${dragX * 0.4}px)`, opacity: mode === "hold" ? 1 - cancelling : 1 }}
             >
-              {limited ? "That's the longest here" : mode === "hold" ? "‹ Slide to throw away" : "Esc to throw away"}
+              {limited ? t("dms-calls.voice.recorder.longest") : mode === "hold" ? t("dms-calls.voice.recorder.slide") : t("dms-calls.voice.recorder.esc")}
             </span>
           </motion.div>
         )}
@@ -283,8 +285,8 @@ export function VoiceRecorder({
         animate={{ scale: mode === "hold" ? 1.12 : 1, x: dragX }}
         transition={dragX ? { x: { duration: 0 }, scale: SPRING } : SPRING}
         whileTap={{ scale: 0.9 }}
-        aria-label={mode === "tap" ? "Send voice message" : "Record a voice message (hold, or tap to start)"}
-        title={mode === "tap" ? "Send" : "Hold to record, or tap to start"}
+        aria-label={mode === "tap" ? t("dms-calls.voice.recorder.send") : t("dms-calls.voice.recorder.record")}
+        title={mode === "tap" ? t("dms-calls.voice.recorder.sendTitle") : t("dms-calls.voice.recorder.recordTitle")}
         className={cn(
           "relative z-20 mb-0.5 grid size-9 shrink-0 touch-none place-items-center rounded-xl transition-colors select-none",
           recording

@@ -15,6 +15,7 @@ import { displayName, isAgent, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/react";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
 import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
 import { RecordingsButton } from "./Recordings";
@@ -33,6 +34,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
   const joined = useInVoice(instanceKey, channel.id);
   const status = useCalls((s) => (joined ? s.call?.status : null));
   const { compact, setNavOpen } = useLayout();
+  const { t } = useI18n();
   const canConnect = hasIn(access, channel.id, Permission.CONNECT);
   const canSpeak = hasIn(access, channel.id, Permission.SPEAK);
   const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
@@ -54,7 +56,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
         {compact && (
           <button
             type="button"
-            aria-label="Channels"
+            aria-label={t("dms-calls.calls.stage.channels")}
             onClick={() => setNavOpen(true)}
             className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
           >
@@ -78,7 +80,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
               transition={SPRING}
               className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground tabular-nums"
             >
-              {states.length} in voice
+              {t("dms-calls.calls.stage.inVoice", { count: states.length })}
             </motion.span>
           )}
         </AnimatePresence>
@@ -132,14 +134,14 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
           ) : (
             <motion.div key="out" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={SPRING} className="flex flex-col items-center gap-1.5">
               <Button onClick={join} disabled={!canConnect} className="btn group h-12 rounded-2xl px-6 font-extrabold">
-                <HeadphonesIcon className="transition-transform group-hover:-rotate-12 group-hover:scale-110" /> Join voice
+                <HeadphonesIcon className="transition-transform group-hover:-rotate-12 group-hover:scale-110" /> {t("dms-calls.calls.stage.join")}
               </Button>
               {!canConnect ? (
-                <p className="text-xs text-muted-foreground">You can't join this channel.</p>
+                <p className="text-xs text-muted-foreground">{t("dms-calls.calls.stage.cantJoin")}</p>
               ) : (
                 !canSpeak && (
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MicOffIcon className="size-3" /> You can listen here, but not speak.
+                    <MicOffIcon className="size-3" /> {t("dms-calls.calls.stage.listenOnly")}
                   </p>
                 )
               )}
@@ -149,7 +151,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
         <AnimatePresence>
           {joined && status !== "connected" && (
             <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="text-xs font-bold text-muted-foreground">
-              {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+              {t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting")}
             </motion.p>
           )}
         </AnimatePresence>
@@ -210,6 +212,8 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
 /** Who's recording the channel, for everyone to see, while anyone is: on the server (with video, when the server keeps cameras too), or on their device. */
 function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string; serverId: string; states: VoiceState[] }) {
   const onServer = states.some((v) => v.serverRecord);
+  const { t } = useI18n();
+  const count = states.filter((v) => v.selfRecord || v.serverRecord).length;
   const video = useFuwa((s) => !!s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.recordVideo) && onServer;
   const names = useFuwa((s) =>
     states
@@ -228,7 +232,7 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
           animate={{ opacity: 1, scale: 1, x: 0 }}
           exit={{ opacity: 0, scale: 0.8 }}
           transition={SPRING}
-          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel${video ? " on the server, with cameras and shared screens" : onServer ? " (on the server)" : ""}`}
+          title={t(video ? "dms-calls.calls.stage.recordingVideoTitle" : onServer ? "dms-calls.calls.stage.recordingServerTitle" : "dms-calls.calls.stage.recordingTitle", { names, count })}
           className="flex max-w-[45%] items-center gap-1.5 rounded-full bg-[#ed4245]/12 px-2.5 py-1 text-xs font-bold text-[#ed4245]"
         >
           <span aria-hidden className="relative grid size-2 place-items-center">
@@ -236,7 +240,7 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
             <span className="size-2 rounded-full bg-[#ed4245]" />
           </span>
           <span className="truncate">
-            {video ? "Recording with video" : onServer ? "Recording on the server" : "Recording"} · {names}
+            {t(video ? "dms-calls.calls.stage.pillVideo" : onServer ? "dms-calls.calls.stage.pillServer" : "dms-calls.calls.stage.pill", { names })}
           </span>
         </motion.span>
       )}
@@ -249,6 +253,7 @@ function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: strin
   const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
   const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
   const name = member ? memberName(member) : displayName(user);
+  const { t } = useI18n();
   return (
     <motion.li
       layout
@@ -262,7 +267,7 @@ function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: strin
         <TileMedia userId={state.userId} user={user} videoOn self={self} screen speaking={false} />
         <span className="absolute bottom-2 left-2 flex max-w-[80%] items-center gap-1.5 rounded-xl bg-background/80 px-2.5 py-1 backdrop-blur">
           <LiveBadge />
-          <span className="truncate text-sm font-bold">{self ? "Your screen" : `${name}'s screen`}</span>
+          <span className="truncate text-sm font-bold">{self ? t("dms-calls.calls.screen.yours") : t("dms-calls.calls.screen.theirs", { name })}</span>
         </span>
       </div>
       <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId, screen: true }} name={name} className="absolute top-2 right-2" />
@@ -272,6 +277,7 @@ function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: strin
 }
 
 function Empty({ name }: { name: string }) {
+  const { t } = useI18n();
   return (
     <div className="m-auto flex flex-col items-center gap-3 text-center">
       <span className="float relative grid size-20 place-items-center rounded-full bg-primary/12 text-primary">
@@ -279,8 +285,8 @@ function Empty({ name }: { name: string }) {
         <span aria-hidden className="call-wave absolute inset-0 rounded-full border-2 border-primary/30 [animation-delay:1s]" />
         <Volume2Icon className="size-9" />
       </span>
-      <p className="text-lg font-extrabold">Nobody's in {name} yet</p>
-      <p className="max-w-xs text-sm text-muted-foreground">Join, and whoever comes by can talk with you.</p>
+      <p className="text-lg font-extrabold">{t("dms-calls.calls.stage.emptyTitle", { name })}</p>
+      <p className="max-w-xs text-sm text-muted-foreground">{t("dms-calls.calls.stage.emptyText")}</p>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { setPrefs, usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
+import { type Key, useI18n } from "@/i18n/react";
 
 /** Whether someone's talking in your call right now. */
 export const useSpeaking = (userId: string | undefined) => useCalls((s) => !!userId && !!s.speaking[userId]);
@@ -51,26 +52,27 @@ export function VoiceAvatar({ user, speaking, className, ring = 3 }: { user: Use
 
 /** The little icons after someone's name: camera on, muted, deafened, or muted by a moderator (in red). */
 export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "selfMute" | "selfDeaf" | "serverMute" | "serverDeaf" | "suppress" | "selfVideo" | "selfStream" | "selfRecord" | "serverRecord" | "serverVideoOff"> | undefined; className?: string }) {
+  const { t } = useI18n();
   if (!state) return null;
-  const flags: { key: string; icon: typeof MicOffIcon; label: string; mod?: boolean }[] = [];
-  if (state.serverRecord) flags.push({ key: "server-record", icon: ServerIcon, label: "Recording this channel on the server", mod: true });
-  if (state.selfRecord) flags.push({ key: "record", icon: CircleDotIcon, label: "Recording this call", mod: true });
-  if (state.selfStream) flags.push({ key: "screen", icon: MonitorUpIcon, label: "Sharing their screen" });
-  if (state.selfVideo) flags.push({ key: "video", icon: VideoIcon, label: "Camera on" });
-  if (state.serverVideoOff) flags.push({ key: "server-video-off", icon: VideoOffIcon, label: "Camera and screen share turned off by a moderator", mod: true });
-  if (state.serverMute) flags.push({ key: "server-mute", icon: MicOffIcon, label: "Muted by a moderator", mod: true });
-  else if (state.suppress) flags.push({ key: "suppress", icon: MicOffIcon, label: "Can't speak here", mod: true });
-  else if (state.selfMute) flags.push({ key: "mute", icon: MicOffIcon, label: "Muted" });
-  if (state.serverDeaf) flags.push({ key: "server-deaf", icon: HeadphoneOffIcon, label: "Deafened by a moderator", mod: true });
-  else if (state.selfDeaf) flags.push({ key: "deaf", icon: HeadphoneOffIcon, label: "Deafened" });
+  const flags: { key: string; icon: typeof MicOffIcon; label: Key; mod?: boolean }[] = [];
+  if (state.serverRecord) flags.push({ key: "server-record", icon: ServerIcon, label: "dms-calls.calls.flags.serverRecord", mod: true });
+  if (state.selfRecord) flags.push({ key: "record", icon: CircleDotIcon, label: "dms-calls.calls.flags.record", mod: true });
+  if (state.selfStream) flags.push({ key: "screen", icon: MonitorUpIcon, label: "dms-calls.calls.flags.screen" });
+  if (state.selfVideo) flags.push({ key: "video", icon: VideoIcon, label: "dms-calls.calls.flags.video" });
+  if (state.serverVideoOff) flags.push({ key: "server-video-off", icon: VideoOffIcon, label: "dms-calls.calls.flags.serverVideoOff", mod: true });
+  if (state.serverMute) flags.push({ key: "server-mute", icon: MicOffIcon, label: "dms-calls.calls.flags.serverMute", mod: true });
+  else if (state.suppress) flags.push({ key: "suppress", icon: MicOffIcon, label: "dms-calls.calls.flags.suppress", mod: true });
+  else if (state.selfMute) flags.push({ key: "mute", icon: MicOffIcon, label: "dms-calls.calls.flags.mute" });
+  if (state.serverDeaf) flags.push({ key: "server-deaf", icon: HeadphoneOffIcon, label: "dms-calls.calls.flags.serverDeaf", mod: true });
+  else if (state.selfDeaf) flags.push({ key: "deaf", icon: HeadphoneOffIcon, label: "dms-calls.calls.flags.deaf" });
   return (
     <span className={cn("ml-auto flex shrink-0 items-center gap-0.5", className)}>
       <AnimatePresence initial={false}>
         {flags.map(({ key, icon: Icon, label, mod }) => (
           <motion.span
             key={key}
-            title={label}
-            aria-label={label}
+            title={t(label)}
+            aria-label={t(label)}
             initial={{ scale: 0, rotate: -40 }}
             animate={{ scale: 1, rotate: 0 }}
             exit={{ scale: 0, rotate: 40 }}
@@ -85,7 +87,6 @@ export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "self
   );
 }
 
-const shortcut = (combo: string | null) => (combo ? ` (${comboLabel(combo)})` : "");
 
 /** Mute and deafen, for the user panel and the call controls. They work in and out of calls, as Discord's do. */
 export function MuteButtons({ size = "sm" }: { size?: "sm" | "lg" }) {
@@ -93,13 +94,16 @@ export function MuteButtons({ size = "sm" }: { size?: "sm" | "lg" }) {
   const selfDeaf = useCalls((s) => s.selfDeaf);
   const muteKey = usePrefs((p) => bindingOf(actionById("toggleMute")!, p));
   const deafKey = usePrefs((p) => bindingOf(actionById("toggleDeafen")!, p));
+  const { t } = useI18n();
+  /** A button's name, with its keyboard shortcut when it has one. */
+  const named = (action: Key, combo: string | null) => (combo ? t("dms-calls.calls.controls.withShortcut", { action: t(action), keys: comboLabel(combo) }) : t(action));
   return (
     <>
       <ToggleIcon
         size={size}
         on={selfMute}
         onClick={toggleMute}
-        label={`${selfMute ? "Unmute" : "Mute"}${shortcut(muteKey)}`}
+        label={named(selfMute ? "dms-calls.calls.controls.unmute" : "dms-calls.calls.controls.mute", muteKey)}
         icon={selfMute ? MicOffIcon : MicIcon}
         wiggle="mic"
       />
@@ -107,7 +111,7 @@ export function MuteButtons({ size = "sm" }: { size?: "sm" | "lg" }) {
         size={size}
         on={selfDeaf}
         onClick={toggleDeafen}
-        label={`${selfDeaf ? "Undeafen" : "Deafen"}${shortcut(deafKey)}`}
+        label={named(selfDeaf ? "dms-calls.calls.controls.undeafen" : "dms-calls.calls.controls.deafen", deafKey)}
         icon={selfDeaf ? HeadphoneOffIcon : HeadphonesIcon}
         wiggle="phones"
       />
@@ -143,7 +147,9 @@ function ToggleIcon({ on, onClick, label, icon: Icon, size, wiggle }: { on: bool
 }
 
 /** Hang up, big and red. */
-export function HangUpButton({ onClick, size = "sm", label = "Disconnect" }: { onClick: () => void; size?: "sm" | "lg"; label?: string }) {
+export function HangUpButton({ onClick, size = "sm", label: given }: { onClick: () => void; size?: "sm" | "lg"; label?: string }) {
+  const { t } = useI18n();
+  const label = given ?? t("dms-calls.calls.controls.disconnect");
   return (
     <button
       type="button"
@@ -193,6 +199,7 @@ export function ParticipantMenu({
   const canMove = !!channelId && ranked && hasIn(access, channelId, Permission.MOVE_MEMBERS);
   const [open, setOpen] = useState(false);
   const narrow = useMediaQuery("(max-width: 640px)");
+  const { t, number } = useI18n();
   const self = userId === me;
 
   const setVolume = (v: number) => {
@@ -235,21 +242,21 @@ export function ParticipantMenu({
                   <button
                     type="button"
                     onClick={() => setVolume(volume === 0 ? 100 : 0)}
-                    aria-label={volume === 0 ? "Unmute for me" : "Mute for me"}
-                    title={volume === 0 ? "Unmute for me" : "Mute for me"}
+                    aria-label={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
+                    title={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
                     className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
                   >
                     {volume === 0 ? <VolumeXIcon className="size-4 text-destructive" /> : <Volume2Icon className="size-4" />}
                   </button>
                   <Slider
-                    label="Volume for me"
+                    label={t("dms-calls.calls.participant.volume")}
                     className="flex-1"
                     value={volume}
                     min={0}
                     max={200}
                     step={5}
-                    format={(n) => `${n}%`}
-                    marks={[{ value: 100, label: "100%" }]}
+                    format={(n) => number(n / 100, { style: "percent" })}
+                    marks={[{ value: 100, label: number(1, { style: "percent" }) }]}
                     onChange={setVolume}
                   />
                 </div>
@@ -257,22 +264,30 @@ export function ParticipantMenu({
                   <div className="mt-3 flex flex-col gap-1 border-t pt-2">
                     {canMute && (
                       <ModItem on={state.serverMute} onClick={() => void moderate({ serverMute: !state.serverMute })} icon={MicOffIcon}>
-                        {state.serverMute ? "Unmute for everyone" : "Mute for everyone"}
+                        {state.serverMute ? t("dms-calls.calls.participant.unmuteAll") : t("dms-calls.calls.participant.muteAll")}
                       </ModItem>
                     )}
                     {canMute && (
                       <ModItem on={state.serverDeaf} onClick={() => void moderate({ serverDeaf: !state.serverDeaf })} icon={HeadphoneOffIcon}>
-                        {state.serverDeaf ? "Undeafen for everyone" : "Deafen for everyone"}
+                        {state.serverDeaf ? t("dms-calls.calls.participant.undeafenAll") : t("dms-calls.calls.participant.deafenAll")}
                       </ModItem>
                     )}
                     {canMute && (
                       <ModItem on={state.serverVideoOff} onClick={() => void moderate({ serverVideoOff: !state.serverVideoOff })} icon={VideoOffIcon}>
-                        {state.serverVideoOff ? "Allow camera and screen" : state.selfStream && !state.selfVideo ? "Stop their screen share" : state.selfVideo && !state.selfStream ? "Turn their camera off" : "Turn camera and screen off"}
+                        {t(
+                          state.serverVideoOff
+                            ? "dms-calls.calls.participant.allowVideo"
+                            : state.selfStream && !state.selfVideo
+                              ? "dms-calls.calls.participant.stopScreen"
+                              : state.selfVideo && !state.selfStream
+                                ? "dms-calls.calls.participant.stopCamera"
+                                : "dms-calls.calls.participant.stopVideo",
+                        )}
                       </ModItem>
                     )}
                     {canMove && (
                       <ModItem danger onClick={() => void moderate({ disconnect: true })} icon={ShieldOffIcon}>
-                        Disconnect
+                        {t("dms-calls.calls.participant.disconnect")}
                       </ModItem>
                     )}
                   </div>

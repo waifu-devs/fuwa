@@ -15,6 +15,8 @@ import { setPrefs, usePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { i18n } from "@/i18n/i18n";
+import { type I18n, useI18n } from "@/i18n/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useSpeaking, VoiceAvatar } from "./parts";
 
@@ -124,7 +126,8 @@ export function CameraButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   const on = useCalls((s) => s.selfVideo);
   const target = useCalls((s) => s.call?.target);
   const may = useMayFilm(target);
-  const label = !may ? "You can't turn your camera on here" : on ? "Turn camera off" : "Turn camera on";
+  const { t } = useI18n();
+  const label = t(!may ? "dms-calls.calls.video.cameraNotAllowed" : on ? "dms-calls.calls.video.cameraOff" : "dms-calls.calls.video.cameraOn");
   return (
     <button
       type="button"
@@ -163,8 +166,9 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   const offered = useCalls((s) => s.screenSoundOffered);
   const withSound = usePrefs((p) => p.shareSound);
   const may = useMayFilm(target);
+  const { t } = useI18n();
   if (!canShareScreen()) return null;
-  const label = !may ? "You can't share your screen here" : on ? "Stop sharing your screen" : "Share your screen";
+  const label = t(!may ? "dms-calls.calls.video.screenNotAllowed" : on ? "dms-calls.calls.video.screenStop" : "dms-calls.calls.video.screenShare");
   const Icon = on ? MonitorXIcon : MonitorUpIcon;
   const menu = offered && may && !on;
   const button = (
@@ -193,13 +197,13 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="center" className="w-72">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Share your screen</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("dms-calls.calls.video.screenShare")}</DropdownMenuLabel>
         <DropdownMenuItem disabled={!sound} onSelect={() => void shareScreen(true)} className="items-start gap-2.5 py-2">
           <Volume2Icon className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-bold">With its sound</span>
+            <span className="block font-bold">{t("dms-calls.calls.video.withSound")}</span>
             <span className="block text-xs text-muted-foreground">
-              {sound ? "A tab's sound, or the whole screen's where your system allows. Your call's sound stays out." : "This browser shares the picture only. Chrome and Edge can share sound."}
+              {sound ? t("dms-calls.calls.video.withSoundText") : t("dms-calls.calls.video.noSoundHere")}
             </span>
           </span>
           {sound && withSound && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
@@ -207,8 +211,8 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
         <DropdownMenuItem onSelect={() => void shareScreen(false)} className="items-start gap-2.5 py-2">
           <MonitorIcon className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-bold">Picture only</span>
-            <span className="block text-xs text-muted-foreground">No sound goes with it.</span>
+            <span className="block font-bold">{t("dms-calls.calls.video.pictureOnly")}</span>
+            <span className="block text-xs text-muted-foreground">{t("dms-calls.calls.video.pictureOnlyText")}</span>
           </span>
           {(!sound || !withSound) && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
         </DropdownMenuItem>
@@ -229,7 +233,16 @@ export function ScreenSoundButton({ userId, self, className }: { userId: string;
   const playing = useSpeaking(feedOf(userId, true));
   const shown = self ? mine !== null : coming;
   const on = self ? mine === true : !quiet;
-  const label = self ? (on ? "Stop sharing your screen's sound" : "Share your screen's sound again") : on ? "Turn this screen's sound off for you" : "Turn this screen's sound back on";
+  const { t } = useI18n();
+  const label = t(
+    self
+      ? on
+        ? "dms-calls.calls.video.mySoundOff"
+        : "dms-calls.calls.video.mySoundOn"
+      : on
+        ? "dms-calls.calls.video.theirSoundOff"
+        : "dms-calls.calls.video.theirSoundOn",
+  );
   return (
     <AnimatePresence>
       {shown && (
@@ -301,9 +314,18 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   const may = useMayRecord(target);
   const video = useFuwa((s) => target?.kind === "voice" && !!s.instances[target.instance]?.servers.find((x) => x.id === target.serverId)?.recordVideo);
   const on = device || server;
+  const { t } = useI18n();
   if (!may && !on) return null;
   const both = target?.kind === "voice" && (offered || server);
-  const label = !both ? (on ? "Stop recording and save it" : "Record the call's sound (everyone sees you are)") : on ? "Recording: stop it here" : "Record this channel";
+  const label = t(
+    !both
+      ? on
+        ? "dms-calls.calls.video.recordStop"
+        : "dms-calls.calls.video.recordStart"
+      : on
+        ? "dms-calls.calls.video.recordingStop"
+        : "dms-calls.calls.video.recordChannel",
+  );
   const button = (
     <button
       type="button"
@@ -329,21 +351,21 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="center" className="w-72">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Everyone in the channel sees it, and hears a beep</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("dms-calls.calls.video.recordMenu")}</DropdownMenuLabel>
         <DropdownMenuItem onSelect={() => setRecording(!device)} className="items-start gap-2.5 py-2">
           <LaptopIcon className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-bold">{device ? "Stop and save the file" : "On this device"}</span>
-            <span className="block text-xs text-muted-foreground">{device ? "Your recording downloads now." : "The call's sound as you hear it, saved here as one file."}</span>
+            <span className="block font-bold">{device ? t("dms-calls.calls.video.deviceStop") : t("dms-calls.calls.video.device")}</span>
+            <span className="block text-xs text-muted-foreground">{device ? t("dms-calls.calls.video.deviceStopText") : t("dms-calls.calls.video.deviceText")}</span>
           </span>
           {device && <RecordingDot />}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => setServerRecording(!server)} className="items-start gap-2.5 py-2">
           <ServerIcon className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-bold">{server ? "Stop recording on the server" : "On the server"}</span>
+            <span className="block font-bold">{server ? t("dms-calls.calls.video.serverStop") : t("dms-calls.calls.video.server")}</span>
             <span className="block text-xs text-muted-foreground">
-              {server ? "It stays in this channel's recordings." : video ? "Everyone's sound, camera and screen, kept for people who can record here." : "A track per person, kept for people who can record here."}
+              {server ? t("dms-calls.calls.video.serverStopText") : video ? t("dms-calls.calls.video.serverVideoText") : t("dms-calls.calls.video.serverText")}
             </span>
           </span>
           {server && <RecordingDot />}
@@ -378,6 +400,7 @@ export function RecordingWatch() {
       .join(" ");
   });
   const seen = useRef<Set<string>>(new Set());
+  const { t } = useI18n();
   useEffect(() => {
     const now = new Set(recording ? recording.split(" ") : []);
     const fresh = [...now].filter((id) => !seen.current.has(id));
@@ -388,22 +411,23 @@ export function RecordingWatch() {
     const onServer = fresh.filter((id) => id.startsWith("server:")).map((id) => id.slice(7));
     const onDevice = fresh.filter((id) => !id.startsWith("server:"));
     cue("recording");
-    if (onDevice.length) toast(`${name(onDevice)} started recording this call.`);
+    if (onDevice.length) toast(t("dms-calls.calls.video.startedCall", { names: name(onDevice) }));
     const video = target.kind === "voice" && !!inst?.servers.find((x) => x.id === target.serverId)?.recordVideo;
-    if (onServer.length) toast(`${name(onServer)} started recording this channel on the server${video ? ", with cameras and shared screens" : ""}.`);
-  }, [recording, target]);
+    if (onServer.length) toast(t(video ? "dms-calls.calls.video.startedServerVideo" : "dms-calls.calls.video.startedServer", { names: name(onServer) }));
+  }, [recording, target, t]);
   return null;
 }
 
 /** The little "LIVE" mark on a shared screen, breathing while it's live. */
 export function LiveBadge({ className }: { className?: string }) {
+  const { t } = useI18n();
   return (
     <span className={cn("relative inline-flex shrink-0 items-center gap-1 rounded-md bg-[#ed4245] px-1.5 py-px text-[10px] font-extrabold tracking-wider text-white", className)}>
       <span aria-hidden className="relative grid size-1.5 place-items-center">
         <span className="absolute inset-0 animate-ping rounded-full bg-white/70" />
         <span className="size-1.5 rounded-full bg-white" />
       </span>
-      LIVE
+      {t("dms-calls.calls.video.live")}
     </span>
   );
 }
@@ -439,7 +463,7 @@ export function popOut(p: Popped) {
 
 const keyOf = (p: Popped) => `${p.instance}/${feedOf(p.userId, p.screen)}`;
 /** The window's title, which streaming apps show when picking a window. */
-const titleOf = (p: Popped, name: string) => (p.screen ? `${name}'s screen · fuwa` : `${name} · fuwa camera`);
+const titleOf = (t: I18n["t"], p: Popped, name: string) => t(p.screen ? "dms-calls.calls.video.screenWindow" : "dms-calls.calls.video.cameraWindow", { name });
 const windows = new Map<string, Window>();
 
 // Hanging up closes every popped-out camera.
@@ -454,7 +478,7 @@ if (typeof window !== "undefined") {
 
 /** The pop-out button on a tile. */
 export function PopOutButton({ popped: p, name, className }: { popped: Popped; name: string; className?: string }) {
-  const what = p.screen ? `${name}'s screen` : name;
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -462,8 +486,8 @@ export function PopOutButton({ popped: p, name, className }: { popped: Popped; n
         e.stopPropagation();
         popOut(p);
       }}
-      aria-label={`Pop out ${what}`}
-      title={`Pop out ${what} (a window of its own, for streaming apps too)`}
+      aria-label={t(p.screen ? "dms-calls.calls.video.popOutScreen" : "dms-calls.calls.video.popOut", { name })}
+      title={t(p.screen ? "dms-calls.calls.video.popOutScreenTitle" : "dms-calls.calls.video.popOutTitle", { name })}
       className={cn(
         "grid size-8 place-items-center rounded-xl bg-background/75 text-foreground opacity-0 shadow-sm backdrop-blur transition hover:scale-105 hover:bg-background active:scale-90 group-hover/tile:opacity-100 focus-visible:opacity-100 max-sm:opacity-100",
         className,
@@ -506,18 +530,19 @@ function PopOutWindow({ popped: p }: { popped: Popped }) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const nameRef = useRef(name);
   nameRef.current = name;
+  const { t } = useI18n();
 
   useEffect(() => {
     const key = keyOf(p);
     // Named per person, so streaming apps find the same window again next time.
     const w = window.open("", `fuwa-${p.screen ? "screen" : "camera"}-${p.userId}`, p.screen ? "popup,width=960,height=540" : "popup,width=640,height=360");
     if (!w) {
-      toast("Your browser blocked the pop-out window. Allow pop-ups for fuwa, then try again.");
+      toast(i18n().t("dms-calls.calls.video.popupBlocked"));
       setPopped(popped.filter((x) => keyOf(x) !== key));
       return;
     }
     w.document.body.replaceChildren();
-    dress(w.document, titleOf(p, nameRef.current));
+    dress(w.document, titleOf(i18n().t, p, nameRef.current));
     const div = w.document.createElement("div");
     div.className = "h-full";
     w.document.body.appendChild(div);
@@ -534,8 +559,8 @@ function PopOutWindow({ popped: p }: { popped: Popped }) {
 
   useEffect(() => {
     const w = windows.get(keyOf(p));
-    if (w) w.document.title = titleOf(p, name);
-  }, [name, p]);
+    if (w) w.document.title = titleOf(t, p, name);
+  }, [name, p, t]);
 
   return container ? createPortal(<PopOutFeed popped={p} user={user} name={name} />, container) : null;
 }
@@ -567,6 +592,7 @@ function PopOutFeed({ popped: p, user, name }: { popped: Popped; user: User | un
   const glow = usePrefs((x) => x.popoutGlow);
   const fit = usePrefs((x) => x.popoutFit);
   const [awake, setAwake] = useState(true);
+  const { t } = useI18n();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wake = () => {
     setAwake(true);
@@ -592,18 +618,18 @@ function PopOutFeed({ popped: p, user, name }: { popped: Popped; user: User | un
         <span className="absolute bottom-3 left-3 max-w-[70%] truncate rounded-xl bg-black/60 px-3 py-1 text-sm font-bold backdrop-blur">{name}</span>
       )}
       <div className={cn("absolute top-3 right-3 flex gap-1.5 transition-opacity duration-300", awake ? "opacity-100" : "pointer-events-none opacity-0")}>
-        <FeedToggle on={showName} onClick={() => setPrefs({ popoutName: !showName })} label={showName ? "Hide the name" : "Show the name"} icon={TagIcon} />
-        <FeedToggle on={glow} onClick={() => setPrefs({ popoutGlow: !glow })} label={glow ? "No glow while talking" : "Glow while talking"} icon={SparklesIcon} />
+        <FeedToggle on={showName} onClick={() => setPrefs({ popoutName: !showName })} label={showName ? t("dms-calls.calls.video.hideName") : t("dms-calls.calls.video.showName")} icon={TagIcon} />
+        <FeedToggle on={glow} onClick={() => setPrefs({ popoutGlow: !glow })} label={glow ? t("dms-calls.calls.video.noGlow") : t("dms-calls.calls.video.glow")} icon={SparklesIcon} />
         {/* A screen always shows whole: cropping it would cut off what's being shown. */}
         {!p.screen && (
           <FeedToggle
             on={fit === "cover"}
             onClick={() => setPrefs({ popoutFit: fit === "cover" ? "contain" : "cover" })}
-            label={fit === "cover" ? "Fit the whole picture" : "Fill the window"}
+            label={fit === "cover" ? t("dms-calls.calls.video.fit") : t("dms-calls.calls.video.fill")}
             icon={fit === "cover" ? CropIcon : ExpandIcon}
           />
         )}
-        <FeedToggle on={false} onClick={() => setPopped(popped.filter((x) => keyOf(x) !== keyOf(p)))} label="Close" icon={XIcon} />
+        <FeedToggle on={false} onClick={() => setPopped(popped.filter((x) => keyOf(x) !== keyOf(p)))} label={t("common.close")} icon={XIcon} />
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import { displayName } from "@/lib/format";
 import { BLOCKED, FRIEND, INCOMING, OUTGOING, stateWith } from "@/lib/friends";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/react";
 
 /**
  * Where you stand with someone, on their profile card: add them, take or
@@ -24,6 +25,7 @@ export function FriendActions({ instanceKey, user }: { instanceKey: string; user
   const state = useFuwa((s) => stateWith(s.instances[instanceKey]?.friends.list ?? [], user.id));
   const [relation, setRelation] = useState<GetRelationshipResponse | null>(null);
   const [busy, setBusy] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     let live = true;
@@ -72,7 +74,7 @@ export function FriendActions({ instanceKey, user }: { instanceKey: string; user
               ))}
             </span>
             <span className="truncate">
-              {mutual.length === 1 ? `${displayName(mutual[0])} is a friend of you both` : `${mutual.length} mutual friends`}
+              {mutual.length === 1 ? t("dms-calls.friends.actions.mutualOne", { name: displayName(mutual[0]) }) : t("dms-calls.friends.actions.mutual", { count: mutual.length })}
             </span>
           </motion.p>
         )}
@@ -90,26 +92,26 @@ export function FriendActions({ instanceKey, user }: { instanceKey: string; user
             {state === 0 && (
               <Action
                 icon={busy ? <LoaderCircleIcon className="animate-spin" /> : <UserPlusIcon />}
-                label="Add friend"
+                label={t("dms-calls.friends.add")}
                 disabled={busy || !mayRequest}
-                title={mayRequest ? undefined : `${name} isn't taking friend requests`}
-                onClick={() => void act(() => run(sendFriendRequest(instanceKey, { userId: user.id })), `Friend request sent to ${name}`)}
+                title={mayRequest ? undefined : t("dms-calls.friends.actions.notTaking", { name })}
+                onClick={() => void act(() => run(sendFriendRequest(instanceKey, { userId: user.id })), t("dms-calls.friends.actions.sent", { name }))}
               />
             )}
             {state === OUTGOING && (
-              <Action icon={<ClockIcon />} label="Requested" hoverLabel="Cancel request" tone="bad" disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)))} />
+              <Action icon={<ClockIcon />} label={t("dms-calls.friends.actions.requested")} hoverLabel={t("dms-calls.friends.actions.cancelRequest")} tone="bad" disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)))} />
             )}
             {state === INCOMING && (
               <>
-                <Action icon={<CheckIcon />} label="Accept" tone="good" disabled={busy} onClick={() => void act(() => run(acceptFriend(instanceKey, user.id)), `You and ${name} are friends`)} />
-                <Action icon={<XIcon />} label="Decline" disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)))} />
+                <Action icon={<CheckIcon />} label={t("dms-calls.friends.actions.accept")} tone="good" disabled={busy} onClick={() => void act(() => run(acceptFriend(instanceKey, user.id)), t("dms-calls.friends.actions.nowFriends", { name }))} />
+                <Action icon={<XIcon />} label={t("dms-calls.friends.actions.decline")} disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)))} />
               </>
             )}
             {state === FRIEND && (
-              <Action icon={<UserCheckIcon />} label="Friends" hoverLabel="Remove friend" hoverIcon={<UserMinusIcon />} tone="bad" disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)), `Removed ${name} from your friends`)} />
+              <Action icon={<UserCheckIcon />} label={t("dms-calls.friends.actions.friends")} hoverLabel={t("dms-calls.friends.remove")} hoverIcon={<UserMinusIcon />} tone="bad" disabled={busy} onClick={() => void act(() => run(removeFriend(instanceKey, user.id)), t("dms-calls.friends.removed", { name }))} />
             )}
             {state === BLOCKED && (
-              <Action icon={<ShieldOffIcon />} label="Unblock" disabled={busy} onClick={() => void act(() => run(unblockUser(instanceKey, user.id)), `Unblocked ${name}`)} />
+              <Action icon={<ShieldOffIcon />} label={t("dms-calls.friends.unblock")} disabled={busy} onClick={() => void act(() => run(unblockUser(instanceKey, user.id)), t("dms-calls.friends.unblocked", { name }))} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -118,9 +120,9 @@ export function FriendActions({ instanceKey, user }: { instanceKey: string; user
             type="button"
             whileTap={{ scale: 0.9 }}
             disabled={busy}
-            onClick={() => void act(() => run(blockUser(instanceKey, user.id)), `Blocked ${name}. They won't be told.`)}
-            aria-label={`Block ${name}`}
-            title={`Block ${name}: they can't message you or send requests, and aren't told`}
+            onClick={() => void act(() => run(blockUser(instanceKey, user.id)), t("dms-calls.friends.actions.blocked", { name }))}
+            aria-label={t("dms-calls.friends.actions.block", { name })}
+            title={t("dms-calls.friends.actions.blockTitle", { name })}
             className="group grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
           >
             <BanIcon className="size-4 transition-transform duration-300 group-hover:-rotate-45" />

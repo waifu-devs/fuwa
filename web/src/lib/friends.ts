@@ -1,4 +1,5 @@
 import type { Friend, FriendEvent, FriendSettings } from "@/gen/fuwa/v1/friend_pb";
+import type { I18n } from "../i18n/i18n.ts";
 
 /*
  * Friends, requests and blocks on one instance (docs/friends.md): what the
@@ -98,10 +99,10 @@ export const blockedIds = (list: Friend[]) => new Set(list.filter((f) => f.state
 /** A username as typed into "Add friend": a leading @ and spaces don't count. */
 export const cleanUsername = (typed: string) => typed.trim().replace(/^@+/, "").toLowerCase();
 
-/** What a pending request's line says. */
-export function pendingLine(f: Friend, now = Date.now()): string {
+/** What a pending request's line says, in the app's language. */
+export function pendingLine(t: I18n["t"], f: Friend, now = Date.now()): string {
   const at = millis(f.expiresAt);
-  const days = at === null ? null : Math.max(1, Math.ceil((at - now) / 86_400_000));
-  const left = days === null ? "" : ` · ${days === 1 ? "1 day" : `${days} days`} left`;
-  return f.state === INCOMING ? `Wants to be friends${left}` : `Request sent${left}`;
+  const count = at === null ? null : Math.max(1, Math.ceil((at - now) / 86_400_000));
+  if (f.state === INCOMING) return count === null ? t("dms-calls.friends.pending.incoming") : t("dms-calls.friends.pending.incomingLeft", { count });
+  return count === null ? t("dms-calls.friends.pending.outgoing") : t("dms-calls.friends.pending.outgoingLeft", { count });
 }

@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Friend, FriendEvent } from "@/gen/fuwa/v1/friend_pb";
+import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
+import type { I18n } from "../i18n/i18n.ts";
 import { applyFriendEvent, BLOCKED, cleanUsername, FRIEND, inTab, INCOMING, OUTGOING, pendingLine, stateWith, waitingForYou } from "./friends.ts";
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
+
+/** English as the page has it (i18n/i18n.ts needs Vite, so this reads the catalog itself). */
+const english = flatten({ "dms-calls": JSON.parse(readFileSync(new URL("../../../locales/en/dms-calls.json", import.meta.url), "utf8")) as Namespace });
+const t: I18n["t"] = (key, values = {}) =>
+  fill(template("en", english, english, key, typeof values.count === "number" ? values.count : undefined), Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])));
 
 const DAY = 86_400_000;
 const at = (ms: number) => ({ seconds: BigInt(Math.floor(ms / 1000)), nanos: 0 }) as never;
@@ -49,7 +57,7 @@ test("tabs sort people out, and a search narrows them", () => {
   assert.equal(waitingForYou(list, now), 1);
   assert.equal(stateWith(list, "d", now), 0);
   assert.equal(stateWith(list, "e", now), BLOCKED);
-  assert.equal(pendingLine(list[2]!, now), "Wants to be friends · 1 day left");
+  assert.equal(pendingLine(t, list[2]!, now), "Wants to be friends · 1 day left");
 });
 
 test("usernames are read as typed", () => {

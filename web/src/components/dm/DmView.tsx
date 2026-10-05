@@ -56,6 +56,7 @@ import { comboLabel } from "@/lib/keybinds";
 import { setTitle } from "@/lib/notify";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
+import { type I18n, T, useI18n } from "@/i18n/react";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import { PendingFiles, SealedFiles } from "@/components/dm/SealedFiles";
@@ -76,6 +77,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
   const { compact, setNavOpen } = useLayout();
   const [sheet, setSheet] = useState(false);
+  const { t } = useI18n();
   const partner = conversation?.users.find((u) => u.id !== me?.id) ?? conversation?.users[0];
 
   useEffect(() => {
@@ -101,7 +103,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
         {compact && (
           <button
             type="button"
-            aria-label="Conversations"
+            aria-label={t("dms-calls.dm.view.back")}
             onClick={() => setNavOpen(true)}
             className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
           >
@@ -120,7 +122,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             <UserAvatar user={partner} className="size-8 text-xs" />
             <span className="min-w-0">
               <h1 className="truncate leading-tight font-extrabold">
-                <SwapText className="truncate align-bottom">{partner ? displayName(partner) : "Conversation"}</SwapText>
+                <SwapText className="truncate align-bottom">{partner ? displayName(partner) : t("dms-calls.dm.view.untitled")}</SwapText>
               </h1>
               {partner && <p className="truncate text-xs leading-tight text-muted-foreground">@{partner.username}</p>}
             </span>
@@ -137,18 +139,18 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
           <EncryptedComposer
             instanceKey={instanceKey}
             id={conversation.id}
-            placeholder={`Message @${partner?.username ?? "them"}`}
-            promise="Only you two can read this"
+            placeholder={t("dms-calls.dm.view.placeholder", { name: partner?.username ?? t("dms-calls.dm.view.them") })}
+            promise={t("dms-calls.dm.view.promise")}
             voice
             files
-            dropTo={`@${partner?.username ?? "them"}`}
+            dropTo={`@${partner?.username ?? t("dms-calls.dm.view.them")}`}
           />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
       ) : status === "unsupported" || status === "failed" ? (
-        <Unavailable text={problem ?? "Encrypted messages aren't available here."} />
+        <Unavailable text={problem ?? t("dms-calls.dm.unavailable")} />
       ) : status === "ready" ? (
-        <Unavailable text="This conversation isn't here, or you're not in it." icon={UserRoundXIcon} />
+        <Unavailable text={t("dms-calls.dm.view.notHere")} icon={UserRoundXIcon} />
       ) : (
         <Starting />
       )}
@@ -160,9 +162,10 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
 function TrustPill({ instanceKey, conversationId, onOpen }: { instanceKey: string; conversationId: string; onOpen: () => void }) {
   const safety = useFuwa((s) => s.instances[instanceKey]?.dms.safety[conversationId] ?? "");
   const verified = useFuwa((s) => s.instances[instanceKey]?.dms.verified[conversationId] ?? "");
+  const { t } = useI18n();
   const state = safety && verified === safety ? "verified" : verified && safety ? "changed" : "encrypted";
   const Icon = state === "verified" ? BadgeCheckIcon : state === "changed" ? ShieldAlertIcon : LockKeyholeIcon;
-  const label = state === "verified" ? "Verified" : state === "changed" ? "Safety number changed" : "End-to-end encrypted";
+  const label = t(state === "verified" ? "dms-calls.dm.trust.verified" : state === "changed" ? "dms-calls.dm.trust.changed" : "dms-calls.dm.encrypted");
   return (
     <motion.button
       type="button"
@@ -171,7 +174,7 @@ function TrustPill({ instanceKey, conversationId, onOpen }: { instanceKey: strin
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={SPRING}
-      title="See how this conversation is encrypted"
+      title={t("dms-calls.dm.trust.title")}
       className={cn(
         "group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full px-2.5 py-1 text-xs font-bold transition-colors",
         state === "changed"
@@ -198,6 +201,7 @@ function TrustPill({ instanceKey, conversationId, onOpen }: { instanceKey: strin
 }
 
 export function Starting() {
+  const { t } = useI18n();
   return (
     <div className="grid flex-1 place-items-center p-6 text-center">
       <div className="flex flex-col items-center">
@@ -208,8 +212,8 @@ export function Starting() {
         >
           <KeyRoundIcon className="size-7" />
         </motion.span>
-        <p className="mt-4 font-extrabold">Setting up encryption on this device</p>
-        <p className="mt-1 max-w-xs text-sm text-muted-foreground">Making this device's keys. It only takes a moment, once.</p>
+        <p className="mt-4 font-extrabold">{t("dms-calls.dm.starting.title")}</p>
+        <p className="mt-1 max-w-xs text-sm text-muted-foreground">{t("dms-calls.dm.starting.text")}</p>
       </div>
     </div>
   );
@@ -250,7 +254,8 @@ function DmMessages({
     const dms = s.instances[instanceKey]?.dms;
     return earlierFrom(dms?.items[conversation.id], dms?.backup.status === "locked");
   });
-  const describe = useCallback((item: Item) => deviceLine(item, users, me, earlier), [users, me, earlier]);
+  const { t } = useI18n();
+  const describe = useCallback((item: Item) => deviceLine(t, item, users, me, earlier), [t, users, me, earlier]);
   return (
     <EncryptedMessages
       instanceKey={instanceKey}
@@ -259,8 +264,8 @@ function DmMessages({
       userOf={userOf}
       describe={describe}
       beginning={<Beginning partner={partner} />}
-      deleteQuestion="Delete for both of you?"
-      joiningText="Unlocking the conversation on this device…"
+      deleteQuestion={t("dms-calls.dm.view.deleteQuestion")}
+      joiningText={t("dms-calls.dm.view.joining")}
     />
   );
 }
@@ -462,7 +467,7 @@ export function EncryptedMessages({
             className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-lg"
           >
             <ArrowDownIcon className="size-4 animate-bounce" />
-            {missed} new {missed === 1 ? "message" : "messages"}
+            <T k="dms-calls.dm.messages.missed" values={{ count: missed }} />
           </motion.button>
         )}
       </AnimatePresence>
@@ -471,6 +476,7 @@ export function EncryptedMessages({
 }
 
 function Beginning({ partner }: { partner: User | undefined }) {
+  const { t } = useI18n();
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.05 }} className="px-4 pt-10 pb-4">
       <span className="relative inline-flex">
@@ -489,8 +495,7 @@ function Beginning({ partner }: { partner: User | undefined }) {
       <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-900 dark:text-emerald-100">
         <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <span>
-          This conversation is <b>end-to-end encrypted</b>. Only you and {displayName(partner)} can read it, on the devices you're signed in on.
-          Not even this fuwa server can.
+          <T k="dms-calls.dm.beginning.text" values={{ encrypted: <b>{t("dms-calls.dm.beginning.encrypted")}</b>, name: displayName(partner) }} />
         </span>
       </p>
     </motion.div>
@@ -582,6 +587,7 @@ const DmRow = memo(function DmRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
   return (
     <motion.div
       {...(animate ? enter : {})}
@@ -591,7 +597,7 @@ const DmRow = memo(function DmRow({
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         {item.deleted ? (
-          <p className="text-sm text-muted-foreground italic">Message deleted</p>
+          <p className="text-sm text-muted-foreground italic">{t("dms-calls.dm.deleted")}</p>
         ) : item.kind === "voice" && item.voice ? (
           <DmVoice instanceKey={instanceKey} item={item} />
         ) : editing ? (
@@ -602,16 +608,16 @@ const DmRow = memo(function DmRow({
             {item.editedAt > 0 && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(new Date(item.editedAt))}>
                 {" "}
-                (edited)
+                {t("dms-calls.dm.row.edited")}
               </span>
             )}
             {item.sharedBy && (
               <span
                 className="ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.65rem] font-bold text-muted-foreground"
-                title="Passed on when this device joined, and checked against the signature of the sender's device."
+                title={t("dms-calls.dm.row.sharedTitle")}
               >
                 <HistoryIcon className="size-3" />
-                shared
+                {t("dms-calls.dm.row.shared")}
               </span>
             )}
             {item.files && <SealedFiles instanceKey={instanceKey} files={item.files} animate={animate} />}
@@ -629,10 +635,10 @@ const DmRow = memo(function DmRow({
               className="flex items-center gap-0.5"
             >
               <span className="px-2 text-xs font-bold text-destructive">{deleteQuestion}</span>
-              <ToolButton label="Delete" danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
+              <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
-              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+              <ToolButton label={t("dms-calls.dm.row.keep")} onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
             </motion.span>
@@ -640,7 +646,7 @@ const DmRow = memo(function DmRow({
             <>
               {item.kind === "text" && !!item.content && (
                 <ToolButton
-                  label={copied ? "Copied" : "Copy text"}
+                  label={copied ? t("dms-calls.dm.row.copied") : t("dms-calls.dm.row.copy")}
                   onClick={() => {
                     void navigator.clipboard?.writeText(item.content);
                     setCopied(true);
@@ -662,17 +668,17 @@ const DmRow = memo(function DmRow({
                 </ToolButton>
               )}
               {threads?.canStart(item) && (
-                <ToolButton label={threads.has(item) ? "Open thread" : "Reply in thread"} onClick={() => threads.start(item)}>
+                <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
                   <MessageSquareReplyIcon />
                 </ToolButton>
               )}
               {mine && item.kind === "text" && (
-                <ToolButton label="Edit" onClick={() => actions.edit(item.seq)}>
+                <ToolButton label={t("dms-calls.dm.row.edit")} onClick={() => actions.edit(item.seq)}>
                   <PencilIcon />
                 </ToolButton>
               )}
               {deletable && (
-                <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+                <ToolButton label={t("dms-calls.dm.row.delete")} danger onClick={() => setConfirming(true)}>
                   <Trash2Icon />
                 </ToolButton>
               )}
@@ -709,32 +715,35 @@ export function earlierFrom(items: Item[] | undefined, locked: boolean): Earlier
 }
 
 /** What changed about the conversation's devices, in words. */
-function deviceLine(item: Item, users: Map<string, User>, me: User, earlier: Earlier): string {
-  const name = (id: string) => (id === me.id ? "you" : displayName(users.get(id)));
-  const whose = (id: string) => (id === me.id ? "your" : `${displayName(users.get(id))}'s`);
+function deviceLine(t: I18n["t"], item: Item, users: Map<string, User>, me: User, earlier: Earlier): string {
+  const name = (id: string) => displayName(users.get(id));
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
   if (item.kind === "joined") {
-    if (earlier === "backup") return "This device joined the conversation. The messages above came from your message backup.";
-    if (earlier === "restorable") return "This device joined the conversation. To read what came before, restore your message backup in Settings, under Devices.";
-    return "This device joined the conversation. Messages from before it can't be read here.";
+    if (earlier === "backup") return t("dms-calls.dm.devices.joinedBackup");
+    if (earlier === "restorable") return t("dms-calls.dm.devices.joinedRestorable");
+    return t("dms-calls.dm.devices.joined");
   }
-  if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
+  if (item.kind === "unreadable")
+    return item.senderId === me.id ? t("dms-calls.dm.devices.unreadableMine") : t("dms-calls.dm.devices.unreadable", { name: name(item.senderId) });
   // The conversation's first record is the commit that made its group.
-  if (item.seq === 1) return `${capital(name(item.senderId))} started this encrypted conversation.`;
+  if (item.seq === 1)
+    return capital(item.senderId === me.id ? t("dms-calls.dm.devices.startedMine") : t("dms-calls.dm.devices.started", { name: name(item.senderId) }));
   const people = new Set(item.added.map((d) => d.userId));
   const parts: string[] = [];
   for (const userId of people) {
-    const n = item.added.filter((d) => d.userId === userId).length;
-    parts.push(`${name(userId)} signed in on ${n === 1 ? "a new device" : `${n} new devices`}`);
+    const count = item.added.filter((d) => d.userId === userId).length;
+    parts.push(userId === me.id ? t("dms-calls.dm.devices.addedMine", { count }) : t("dms-calls.dm.devices.added", { count, name: name(userId) }));
   }
   for (const userId of new Set(item.removed.map((d) => d.userId))) {
-    const n = item.removed.filter((d) => d.userId === userId).length;
-    parts.push(n === 1 ? `one of ${whose(userId)} devices signed out` : `${n} of ${whose(userId)} devices signed out`);
+    const count = item.removed.filter((d) => d.userId === userId).length;
+    parts.push(userId === me.id ? t("dms-calls.dm.devices.removedMine", { count }) : t("dms-calls.dm.devices.removed", { count, name: name(userId) }));
   }
-  return `${capital(parts.join(", and "))}. The safety number changed.`;
+  const changes = parts.length ? parts.reduce((list, next) => t("dms-calls.dm.devices.and", { list, next })) : "";
+  return capital(t("dms-calls.dm.devices.changed", { changes }));
 }
 
 function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
+  const { date } = useI18n();
   const Icon =
     item.kind === "unreadable"
       ? ShieldAlertIcon
@@ -762,7 +771,7 @@ function SystemLine({ item, text, animate }: { item: Item; text: string; animate
       <p className="min-w-0 flex-1 text-[0.9rem] text-muted-foreground">
         {text}{" "}
         <time className="text-xs whitespace-nowrap" dateTime={new Date(item.at).toISOString()} title={formatFull(new Date(item.at))}>
-          {new Date(item.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+          {date(new Date(item.at), { hour: "numeric", minute: "2-digit" })}
         </time>
       </p>
     </motion.div>
@@ -783,6 +792,7 @@ function PendingDm({
   onDismiss: () => void;
 }) {
   const display = usePrefs((p) => p.messageDisplay);
+  const { t } = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -791,7 +801,7 @@ function PendingDm({
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
-      <MessageLine display={display} first={first} author={me} member={undefined} status="encrypting…">
+      <MessageLine display={display} first={first} author={me} member={undefined} status={t("dms-calls.dm.pending.encrypting")}>
         {pending.voice ? (
           <VoiceMessage id={`pending:${pending.nonce}`} durationMs={pending.voice.durationMs} waveform={pending.voice.waveform} load={null} pending />
         ) : (
@@ -802,10 +812,10 @@ function PendingDm({
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed.replace(/\.$/, "")}.</span>
             <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-bold text-primary hover:underline">
-              <RotateCwIcon className="size-3" /> Retry
+              <RotateCwIcon className="size-3" /> {t("dms-calls.dm.pending.retry")}
             </button>
             <button type="button" onClick={onDismiss} className="font-bold text-muted-foreground hover:underline">
-              Dismiss
+              {t("dms-calls.dm.pending.dismiss")}
             </button>
           </p>
         )}
@@ -858,6 +868,7 @@ export function EncryptedComposer({
   const seal = useAnimationControls();
   const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     setText(drafts.get(draft) ?? "");
@@ -913,7 +924,7 @@ export function EncryptedComposer({
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
       {files && dropTo && !blocked && status === "ready" && (
-        <DropOverlay channelName={dropTo} onFiles={takeFiles} note="Up to 10 files, encrypted on this device before they're sent." />
+        <DropOverlay channelName={dropTo} onFiles={takeFiles} note={t("dms-calls.dm.composer.drop")} />
       )}
       <AnimatePresence initial={false}>{files && !blocked && picked.length > 0 && <PickedTray key="picked" draft={draft} files={picked} />}</AnimatePresence>
       <AnimatePresence mode="popLayout" initial={false}>
@@ -936,7 +947,7 @@ export function EncryptedComposer({
               <KeyRoundIcon className="size-[18px]" />
             </motion.span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold">{locked ? "You can read this, but not write here" : "You can't write here yet"}</p>
+              <p className="text-sm font-bold">{locked ? t("dms-calls.dm.composer.locked") : t("dms-calls.dm.composer.blocked")}</p>
               <p className="text-xs text-muted-foreground">{blocked}</p>
             </div>
             {action !== undefined
@@ -947,7 +958,7 @@ export function EncryptedComposer({
                     onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
                     className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
                   >
-                    Try again
+                    {t("dms-calls.dm.composer.tryAgain")}
                   </button>
                 )}
           </motion.div>
@@ -962,7 +973,7 @@ export function EncryptedComposer({
           >
             <motion.span
               animate={seal}
-              title="Encrypted on this device before it's sent"
+              title={t("dms-calls.dm.composer.sealed")}
               className="mb-2 grid size-5 shrink-0 place-items-center text-emerald-500"
             >
               <LockKeyholeIcon className="size-4" />
@@ -1004,7 +1015,7 @@ export function EncryptedComposer({
                 type="button"
                 onClick={send}
                 disabled={!ready}
-                aria-label="Send"
+                aria-label={t("dms-calls.dm.composer.send")}
                 whileTap={{ scale: 0.85 }}
                 initial={false}
                 animate={{ scale: ready ? 1 : 0.9 }}
@@ -1031,12 +1042,17 @@ export function EncryptedComposer({
               onChange={(e) => setAlsoChannel(e.target.checked)}
               className="size-3.5 accent-[var(--primary)]"
             />
-            <span className="truncate">Also send to #{thread.channelName}</span>
+            <span className="truncate">{t("dms-calls.dm.composer.alsoSend", { channel: thread.channelName })}</span>
           </label>
         )}
         <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
-          <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
-          <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
+          <T
+            k="dms-calls.dm.composer.keys"
+            values={{
+              send: <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b>,
+              newLine: <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b>,
+            }}
+          />
         </p>
         <p className="ml-auto flex shrink-0 items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
           <LockKeyholeIcon className="size-3" /> {error ?? promise}

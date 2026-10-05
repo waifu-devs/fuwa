@@ -12,7 +12,7 @@ import { UserAvatar } from "@/components/Icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { displayName, formatBytes, memberName, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { useNow } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
@@ -32,6 +32,7 @@ export function RecordingsButton({ instanceKey, serverId, channel, states }: { i
   const access = useAccess(instanceKey, serverId);
   const [open, setOpen] = useState(false);
   const live = states.some((s) => s.serverRecord);
+  const { t } = useI18n();
   if (!hasIn(access, channel.id, Permission.RECORD)) return null;
   return (
     <>
@@ -39,8 +40,8 @@ export function RecordingsButton({ instanceKey, serverId, channel, states }: { i
         type="button"
         whileTap={{ scale: 0.88 }}
         onClick={() => setOpen(true)}
-        aria-label="Recordings"
-        title="Recordings on the server"
+        aria-label={t("dms-calls.calls.recordings.button")}
+        title={t("dms-calls.calls.recordings.buttonTitle")}
         className="group relative grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
       >
         <AudioLinesIcon className="size-[18px] transition-transform group-hover:scale-110" />
@@ -58,10 +59,10 @@ export function RecordingsButton({ instanceKey, serverId, channel, states }: { i
           <DialogHeader
             title={
               <span className="flex items-center gap-2">
-                <ServerIcon className="size-5 text-primary" /> Recordings
+                <ServerIcon className="size-5 text-primary" /> {t("dms-calls.calls.recordings.title")}
               </span>
             }
-            description={`Kept on the server for people who can record in ${channel.name}. One track per person, lined up from the start.`}
+            description={t("dms-calls.calls.recordings.description", { channel: channel.name })}
           />
           {open && <RecordingList instanceKey={instanceKey} serverId={serverId} channel={channel} live={live} />}
         </DialogContent>
@@ -74,6 +75,7 @@ function RecordingList({ instanceKey, serverId, channel, live }: { instanceKey: 
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const { t } = useI18n();
   const load = useCallback(async () => {
     try {
       const res = await engine(instanceKey).api.calls.listRecordings({ serverId, channelId: channel.id });
@@ -108,8 +110,8 @@ function RecordingList({ instanceKey, serverId, channel, live }: { instanceKey: 
           <motion.span animate={{ y: [0, -4, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }} className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
             <AudioLinesIcon className="size-6" />
           </motion.span>
-          <p className="font-bold">No recordings yet</p>
-          <p className="max-w-xs text-sm text-muted-foreground">In the call, press Record and pick "On the server". Everyone in the channel sees it, and hears a beep when it starts.</p>
+          <p className="font-bold">{t("dms-calls.calls.recordings.emptyTitle")}</p>
+          <p className="max-w-xs text-sm text-muted-foreground">{t("dms-calls.calls.recordings.emptyText")}</p>
         </motion.div>
       </div>
     );
@@ -155,9 +157,9 @@ function UsageStrip({ usage: { used, cap, keepDays } }: { usage: Usage }) {
       {cap !== null && (
         <>
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className={cn("font-bold", full && "text-destructive")}>{full ? "Full: delete some to record again" : "This server's recordings"}</span>
+            <span className={cn("font-bold", full && "text-destructive")}>{full ? lang.t("dms-calls.calls.recordings.full") : lang.t("dms-calls.calls.recordings.usage")}</span>
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {formatBytes(lang, used)} of {formatBytes(lang, cap)}
+              {lang.t("dms-calls.calls.recordings.usedOf", { used: formatBytes(lang, used), cap: formatBytes(lang, cap) })}
             </span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -173,7 +175,7 @@ function UsageStrip({ usage: { used, cap, keepDays } }: { usage: Usage }) {
       {keepDays !== null && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <HourglassIcon className="size-3.5 shrink-0" />
-          Each recording deletes itself {keepDays === 1 ? "a day" : `${keepDays} days`} after it ends.
+          {lang.t("dms-calls.calls.recordings.keep", { count: keepDays })}
         </p>
       )}
     </motion.div>
@@ -198,12 +200,49 @@ function baseName(channel: Channel, rec: Recording) {
 const safe = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "someone";
 
 /** One of a person's files in a recording. */
-type FilePart = { part: RecordingPart; bytes: (t: RecordingTrack) => bigint; suffix: string; type: string; what: string; icon: typeof VideoIcon };
+type FilePart = {
+  part: RecordingPart;
+  bytes: (t: RecordingTrack) => bigint;
+  suffix: string;
+  type: string;
+  /** While it records ("Recording their camera"), and its download, by name and not ("Download their camera (WebM)"). */
+  live: Key;
+  named: Key;
+  their: Key;
+  icon: typeof VideoIcon;
+};
 
 const PARTS: FilePart[] = [
-  { part: RecordingPart.UNSPECIFIED, bytes: (t) => t.sizeBytes, suffix: ".opus", type: "audio/ogg", what: "sound (Ogg Opus)", icon: DownloadIcon },
-  { part: RecordingPart.CAMERA, bytes: (t) => t.cameraBytes, suffix: " camera.webm", type: "video/webm", what: "camera (WebM)", icon: VideoIcon },
-  { part: RecordingPart.SCREEN, bytes: (t) => t.screenBytes, suffix: " screen.webm", type: "video/webm", what: "shared screen (WebM)", icon: MonitorIcon },
+  {
+    part: RecordingPart.UNSPECIFIED,
+    bytes: (t) => t.sizeBytes,
+    suffix: ".opus",
+    type: "audio/ogg",
+    live: "dms-calls.calls.recordings.liveSound",
+    named: "dms-calls.calls.recordings.downloadSound",
+    their: "dms-calls.calls.recordings.theirSound",
+    icon: DownloadIcon,
+  },
+  {
+    part: RecordingPart.CAMERA,
+    bytes: (t) => t.cameraBytes,
+    suffix: " camera.webm",
+    type: "video/webm",
+    live: "dms-calls.calls.recordings.liveCamera",
+    named: "dms-calls.calls.recordings.downloadCamera",
+    their: "dms-calls.calls.recordings.theirCamera",
+    icon: VideoIcon,
+  },
+  {
+    part: RecordingPart.SCREEN,
+    bytes: (t) => t.screenBytes,
+    suffix: " screen.webm",
+    type: "video/webm",
+    live: "dms-calls.calls.recordings.liveScreen",
+    named: "dms-calls.calls.recordings.downloadScreen",
+    their: "dms-calls.calls.recordings.theirScreen",
+    icon: MonitorIcon,
+  },
 ];
 
 /** The files a person has in a recording. */
@@ -260,7 +299,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     try {
       saveFile(new Blob([await fetchTrack(track, part)], { type: part.type }), fileName(track, part));
     } catch (err) {
-      toast(`Couldn't download it: ${toFuwaError(err).message}`);
+      toast(lang.t("dms-calls.calls.recordings.downloadFailed", { problem: toFuwaError(err).message }));
     } finally {
       done([key]);
     }
@@ -272,7 +311,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
       for (const { track, part } of everything) files.push({ name: fileName(track, part), data: await fetchTrack(track, part) });
       saveFile(zip(files, started), `${safe(baseName(channel, rec))}.zip`);
     } catch (err) {
-      toast(`Couldn't download it: ${toFuwaError(err).message}`);
+      toast(lang.t("dms-calls.calls.recordings.downloadFailed", { problem: toFuwaError(err).message }));
     } finally {
       done(everything.map(({ track, part }) => fileKey(track, part)));
     }
@@ -282,9 +321,9 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     try {
       await engine(instanceKey).api.calls.deleteRecording({ serverId, recordingId: rec.id });
       onDeleted();
-      toast("Recording deleted.");
+      toast(lang.t("dms-calls.calls.recordings.deleted"));
     } catch (err) {
-      toast(`Couldn't delete it: ${toFuwaError(err).message}`);
+      toast(lang.t("dms-calls.calls.recordings.deleteFailed", { problem: toFuwaError(err).message }));
       setDeleting(false);
     }
   };
@@ -301,43 +340,43 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
         <Wave live={live} />
         <div className="min-w-40 flex-1">
           <p className="flex items-center gap-1.5 font-extrabold">
-            <span className="truncate">{started.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+            <span className="truncate">{lang.date(started, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
             {rec.video && (
               <motion.span
                 initial={{ opacity: 0, scale: 0.7 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={SPRING}
-                title="Cameras and shared screens are recorded too"
+                title={lang.t("dms-calls.calls.recordings.videoTitle")}
                 className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-bold text-primary"
               >
-                <VideoIcon className="size-3.5" /> <span className="hidden sm:inline">With video</span>
+                <VideoIcon className="size-3.5" /> <span className="hidden sm:inline">{lang.t("dms-calls.calls.recordings.withVideo")}</span>
               </motion.span>
             )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {live ? (
-              <span className="font-bold text-[#ed4245]">Recording now · {clock(length)}</span>
+              <T
+                k="dms-calls.calls.recordings.liveLine"
+                values={{ now: <span className="font-bold text-[#ed4245]">{lang.t("dms-calls.calls.recordings.now", { time: clock(length) })}</span>, name: starter }}
+              />
             ) : (
-              <>
-                {clock(length)} · {formatBytes(lang, Number(rec.sizeBytes))}
-              </>
-            )}{" "}
-            · started by {starter}
+              lang.t("dms-calls.calls.recordings.doneLine", { time: clock(length), size: formatBytes(lang, Number(rec.sizeBytes)), name: starter })
+            )}
           </p>
         </div>
         {!live && (
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <Button size="sm" variant="secondary" className="group h-8 rounded-xl font-bold" disabled={busy || !everything.length} onClick={() => void downloadAll()}>
-              <FileArchiveIcon className="transition-transform group-hover:-translate-y-0.5" /> <span className="hidden sm:inline">All</span> .zip
+              <FileArchiveIcon className="transition-transform group-hover:-translate-y-0.5" /> <span className="hidden sm:inline">{lang.t("dms-calls.calls.recordings.all")}</span> .zip
             </Button>
             <AnimatePresence mode="wait" initial={false}>
               {!mayDelete ? null : confirming ? (
                 <motion.div key="sure" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="flex items-center gap-1">
                   <Button size="sm" variant="destructive" className="h-8 rounded-xl font-bold" disabled={deleting} onClick={() => void remove()}>
-                    {deleting ? "Deleting…" : "Delete"}
+                    {deleting ? lang.t("dms-calls.calls.recordings.deleting") : lang.t("dms-calls.calls.recordings.delete")}
                   </Button>
                   <Button size="sm" variant="ghost" className="h-8 rounded-xl" disabled={deleting} onClick={() => setConfirming(false)}>
-                    Keep
+                    {lang.t("dms-calls.calls.recordings.keepIt")}
                   </Button>
                 </motion.div>
               ) : (
@@ -349,8 +388,8 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
                   exit={{ opacity: 0, scale: 0.6 }}
                   whileTap={{ scale: 0.85 }}
                   onClick={() => setConfirming(true)}
-                  aria-label="Delete this recording"
-                  title="Delete this recording for everyone"
+                  aria-label={lang.t("dms-calls.calls.recordings.deleteLabel")}
+                  title={lang.t("dms-calls.calls.recordings.deleteTitle")}
                   className="group grid size-8 place-items-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2Icon className="size-4 transition-transform group-hover:-rotate-12" />
@@ -387,7 +426,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
               ? filesOf(track)
                   .filter((part) => part.part !== RecordingPart.UNSPECIFIED)
                   .map((part) => (
-                    <motion.span key={part.part} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING} title={`Recording their ${part.what.split(" (")[0]}`} className="relative text-muted-foreground">
+                    <motion.span key={part.part} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING} title={lang.t(part.live)} className="relative text-muted-foreground">
                       <part.icon className="size-3.5" />
                     </motion.span>
                   ))
@@ -403,8 +442,8 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
                       whileTap={{ scale: 0.85 }}
                       disabled={getting}
                       onClick={() => void downloadOne(track, part)}
-                      aria-label={`Download ${names[track.userId]}'s ${part.what}`}
-                      title={`Download their ${part.what}`}
+                      aria-label={lang.t(part.named, { name: names[track.userId] ?? track.userId })}
+                      title={lang.t(part.their)}
                       className="group relative grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary disabled:opacity-60"
                     >
                       {getting ? <LoaderCircleIcon className="size-4 animate-spin" /> : <part.icon className="size-4 transition-transform group-hover:translate-y-0.5" />}
@@ -413,7 +452,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
                 })}
           </motion.li>
         ))}
-        {!rec.tracks.length && <li className="px-2 py-1.5 text-sm text-muted-foreground">{live ? "Nobody has said anything yet." : "Nobody said anything."}</li>}
+        {!rec.tracks.length && <li className="px-2 py-1.5 text-sm text-muted-foreground">{live ? lang.t("dms-calls.calls.recordings.silentLive") : lang.t("dms-calls.calls.recordings.silent")}</li>}
       </ul>
     </motion.li>
   );
