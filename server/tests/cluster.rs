@@ -1927,7 +1927,7 @@ async fn split_instances_meet_through_their_gateways() {
     ca.shared
         .review_share(authed(
             &admin_a,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
         ))
         .await
         .unwrap();
@@ -1938,7 +1938,52 @@ async fn split_instances_meet_through_their_gateways() {
         .unwrap()
         .into_inner()
         .channels;
-    assert!(shown.iter().any(|ch| ch.shared.as_ref().is_some_and(|s| !s.home)), "{shown:?}");
+    let shown = shown.into_iter().find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home)).expect("shown at the guest");
+
+    // A file sent from B's shard goes to A's: A's directory fetches it from
+    // B's gateway with its ticket (B's directory passing it from the guest's
+    // shard), and B's people read it through B's gateway.
+    let allowed = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
+    ca.shared
+        .update_connection(authed(
+            &admin_a,
+            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id, allowed },
+        ))
+        .await
+        .unwrap();
+    let http = reqwest::Client::new();
+    let notes = b"notes across instances".to_vec();
+    let url = upload_file(&mut cb, &http, &admin_b, &guest, notes.clone()).await;
+    let sent = send_file(&mut cb, &admin_b, &guest, &shown.id, &url).await.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert!(file.url.starts_with(&format!("http://{}/media/shared/", b.gateway.addr)), "{}", file.url);
+    let read = http.get(&file.url).send().await.unwrap();
+    assert_eq!(read.status(), reqwest::StatusCode::OK);
+    assert_eq!(read.bytes().await.unwrap().to_vec(), notes);
+    let at_home = ca
+        .messages
+        .list_messages(authed(
+            &admin_a,
+            pb::ListMessagesRequest { server_id: home.clone(), channel_id: channel.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let kept = at_home.iter().find(|m| m.id == sent.id).unwrap().attachments[0].clone();
+    assert_eq!(http.get(&kept.url).send().await.unwrap().bytes().await.unwrap().to_vec(), notes);
+    ca.messages
+        .delete_message(authed(
+            &admin_a,
+            pb::DeleteMessageRequest {
+                server_id: home.clone(),
+                message_id: sent.id.clone(),
+                channel_id: channel.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(http.get(&file.url).send().await.unwrap().status(), reqwest::StatusCode::NOT_FOUND);
 
     a.stop().await;
     b.stop().await;

@@ -223,6 +223,15 @@ message InstanceSettings {
   // for no limit. A protective default against a runaway client, 32 unless
   // FUWA_STREAMS_PER_ACCOUNT says otherwise (docs/capacity.md).
   optional int64 streams_per_account = 48;
+  // How many bytes of files one server on another instance may send into
+  // channels shared from servers here in a day (UTC); unset for no cap.
+  // FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY.
+  optional int64 shared_remote_file_bytes_per_day = 51;
+  // How many files this instance fetches from other instances at once, for
+  // channels shared with them (each instance gets at most half); more wait
+  // their turn. A protective default, 8 unless
+  // FUWA_SHARED_FILE_FETCHES_IN_FLIGHT says otherwise.
+  optional int64 shared_file_fetches_in_flight = 52;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made

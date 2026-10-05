@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/ui";
-import { ago } from "@/lib/format";
+import { ago, formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
@@ -30,6 +30,16 @@ export const FEDERATION_FIELDS: { path: string; get: (s: InstanceSettings) => un
     copy: (into, from) => (into.sharedRemoteSendsPerMinute = from.sharedRemoteSendsPerMinute),
   },
   { path: "shared_remote_people", get: (s) => s.sharedRemotePeople, copy: (into, from) => (into.sharedRemotePeople = from.sharedRemotePeople) },
+  {
+    path: "shared_remote_file_bytes_per_day",
+    get: (s) => s.sharedRemoteFileBytesPerDay,
+    copy: (into, from) => (into.sharedRemoteFileBytesPerDay = from.sharedRemoteFileBytesPerDay),
+  },
+  {
+    path: "shared_file_fetches_in_flight",
+    get: (s) => s.sharedFileFetchesInFlight,
+    copy: (into, from) => (into.sharedFileFetchesInFlight = from.sharedFileFetchesInFlight),
+  },
 ];
 
 export const FEDERATION_SECTION = {
@@ -46,6 +56,8 @@ export const FEDERATION_SECTION = {
     { id: "federation-blocked", label: "Blocked instances", keywords: "block list deny" },
     { id: "federation-sends", label: "Messages per server a minute", keywords: "limit cap rate flood shared remote" },
     { id: "federation-people", label: "People per server", keywords: "limit cap shared remote guests" },
+    { id: "federation-files", label: "Files per server a day", keywords: "limit cap shared remote attachments bytes" },
+    { id: "federation-fetches", label: "Files fetched at once", keywords: "limit cap shared remote attachments busy" },
   ],
 };
 
@@ -250,6 +262,38 @@ export function FederationSettings({
         {...resetter("shared_remote_people")}
       >
         <Cap label="Up to" placeholder="500" value={draft.sharedRemotePeople} onChange={(v) => patch((d) => (d.sharedRemotePeople = v))} />
+      </Setting>
+
+      <Setting
+        id="federation-files"
+        title="Files per server a day"
+        hint="How much one server on another instance may send in files to channels shared from here in a day (UTC). The files are kept here, under the home server's room for files."
+        defaultLabel={defaults?.sharedRemoteFileBytesPerDay === undefined ? "no limit" : formatBytes(Number(defaults.sharedRemoteFileBytesPerDay))}
+        delay={0.28}
+        {...resetter("shared_remote_file_bytes_per_day")}
+      >
+        <Cap
+          label="Up to"
+          bytes
+          value={draft.sharedRemoteFileBytesPerDay}
+          onChange={(v) => patch((d) => (d.sharedRemoteFileBytesPerDay = v))}
+        />
+      </Setting>
+
+      <Setting
+        id="federation-fetches"
+        title="Files fetched at once"
+        hint="How many files this instance fetches from other instances at the same time, for shared channels; each instance gets at most half, and the rest wait their turn. Leave it empty for no limit."
+        defaultLabel={defaults?.sharedFileFetchesInFlight === undefined ? "no limit" : defaults.sharedFileFetchesInFlight.toLocaleString()}
+        delay={0.32}
+        {...resetter("shared_file_fetches_in_flight")}
+      >
+        <Cap
+          label="Up to"
+          placeholder="8"
+          value={draft.sharedFileFetchesInFlight}
+          onChange={(v) => patch((d) => (d.sharedFileFetchesInFlight = v))}
+        />
       </Setting>
     </>
   );

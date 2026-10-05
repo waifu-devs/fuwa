@@ -82,6 +82,12 @@ service DirectoryService {
   // Passes a call between the two ends of a shared channel on to the shard
   // holding the server it's for.
   rpc PassShared(PassSharedRequest) returns (PassSharedResponse);
+  // Fetches a file a guest server on another instance sent into a shared
+  // channel whose home is on the asking shard: reserves its row for the
+  // home (within the per-day cap), then pulls it from that instance with a
+  // signed request and passes its bytes on. The first piece names the row;
+  // the shard finishes it with FinishServerUpload.
+  rpc FetchSharedFile(FetchSharedFileRequest) returns (stream FetchSharedFileResponse);
 }
 
 // Run by each shard, which keeps some of the servers' files.
@@ -113,6 +119,9 @@ service ShardService {
   // holding the shared channel's home it's being sent to, checked by SHA-256
   // like SendPicture.
   rpc SendSharedFile(SendSharedFileRequest) returns (stream SendSharedFileResponse);
+  // Sends a file a message here has in a channel shared with a server on
+  // another instance (`origin`), for the directory to pass on to it.
+  rpc SendSharedAttachment(SendSharedAttachmentRequest) returns (stream SendSharedAttachmentResponse);
 
   // Moving a server to another shard (and so maybe another region), run by
   // the directory: it asks the new shard to AdoptServer, which takes the
@@ -436,9 +445,42 @@ message SendSharedFileRequest {
   string server_id = 1;
   string media_id = 2;
   // The home server that took it (KeepPictureRequest.taken_from), and who
-  // uploaded it: the file is sent only when its row says both.
+  // uploaded it: the file is sent only when its row says both. Empty
+  // home_id for a home on another instance, which takes a copy: the row is
+  // then still the guest server's.
   string home_id = 3;
   string account_id = 4;
+}
+
+message FetchSharedFileRequest {
+  // The home server here.
+  string home_id = 1;
+  // The guest server, "<id>@<instance>", whose instance is asked.
+  string guest_server_id = 2;
+  // What that instance gave for the file (cluster.v1.SharedFile), and the
+  // size it said the file is: no more is taken.
+  string ticket = 3;
+  int64 size = 4;
+}
+
+message FetchSharedFileResponse {
+  // On the first piece: the row reserved for the home's copy.
+  string media_id = 1;
+  bytes data = 2;
+}
+
+message SendSharedAttachmentRequest {
+  string server_id = 1;
+  string media_id = 2;
+  // The instance asking, which has to have a server the file's channel is
+  // shared with.
+  string origin = 3;
+}
+
+message SendSharedAttachmentResponse {
+  bytes data = 1;
+  // On the first piece: the file's size.
+  int64 size = 2;
 }
 
 // A piece of the file, in order, as SendPictureResponse.
@@ -806,6 +848,16 @@ message GuestSend {
   repeated fuwa.v1.Attachment attachments = 3;
   repeated fuwa.v1.Embed embeds = 4;
   string reply_to_id = 5;
+  // From a guest on another instance: one for each of attachments, in
+  // order, for the home to fetch it with.
+  repeated SharedFile files = 6;
+}
+
+// A file a guest server on another instance sends into a shared channel:
+// the home fetches it from that instance with a signed request
+// (GET /federation/files/<ticket>), once, within ten minutes.
+message SharedFile {
+  string ticket = 1;
 }
 
 message GuestList {

@@ -679,7 +679,11 @@ fn stream_file(mut file: tokio::fs::File) -> mpsc::Receiver<Result<cpb::SendPict
 /// one still loose here whose row says that home took it from `account_id`.
 pub async fn send_shared(app: &App, req: &cpb::SendSharedFileRequest) -> Result<SharedFileStream> {
     let (server_id, media_id) = (parse_id("server_id", &req.server_id)?, canonical(&req.media_id)?);
-    let home_id = parse_id("server_id", &req.home_id)?;
+    // A home on another instance takes a copy: the row stays the guest's.
+    let home_id = match req.home_id.as_str() {
+        "" => server_id.clone(),
+        home_id => parse_id("server_id", home_id)?,
+    };
     if !app.servers.holds(&server_id) {
         return Err(Error::Misrouted);
     }
@@ -778,6 +782,129 @@ pub async fn take_shared(
     }
     Ok(())
 }
+
+/// Takes a file a guest server on another instance (`guest_server_id`)
+/// sends into a channel whose home is on this shard: the directory
+/// reserves its row and fetches it from there with its `ticket`
+/// ([`crate::shared_files::fetch`]), and it's kept here as the home's
+/// ([`take_shared`]'s way), at most `size` bytes, its kind read from its
+/// bytes and its metadata taken out. The id and what it is; nothing is
+/// left when it fails.
+pub async fn take_elsewhere(
+    app: &App,
+    home_id: &str,
+    guest_server_id: &str,
+    ticket: &str,
+    size: i64,
+) -> Result<(String, &'static str, i64)> {
+    let Link::Shard(link) = &app.link else { return Err(Error::internal("only a shard takes files this way")) };
+    let home_id = parse_id("server_id", home_id)?;
+    if app.servers.frozen().contains(&home_id) {
+        return Err(Error::Moving);
+    }
+    let request = cpb::FetchSharedFileRequest {
+        home_id: home_id.clone(),
+        guest_server_id: guest_server_id.to_string(),
+        ticket: ticket.to_string(),
+        size,
+    };
+    let mut stream = link.directory().fetch_shared_file(request).await?.into_inner();
+    let first = stream.message().await?.ok_or_else(|| Error::internal("the directory sent no file"))?;
+    let media_id = canonical(&first.media_id)?;
+    let data = &app.config.data_path;
+    let dir = server_dir(data, &home_id);
+    let temp = dir.join(format!(".incoming-{media_id}"));
+    let dest = dir.join(&media_id);
+    let kept = async {
+        std::fs::create_dir_all(&dir)?;
+        crate::attachments::note_loose(app, &home_id, &media_id).await?;
+        use futures::StreamExt;
+        let rest = tokio_stream::wrappers::ReceiverStream::new(spawn_pieces(stream));
+        let pieces = futures::stream::once(async move { Ok(first.data) }).chain(rest);
+        let body = Body::from_stream(pieces.map(|piece| piece.map(axum::body::Bytes::from)));
+        let received = crate::media::receive_file(pb::MediaPurpose::Attachment, size, &temp, body);
+        let (kind, kept) = received.await.map_err(|(_, why)| Error::Unavailable(why))?;
+        std::fs::rename(&temp, &dest)?;
+        if let Some(replica) = app.servers.replica() {
+            replica.store().put_file(&name(&home_id, &media_id), &dest).await?;
+        }
+        let request = cpb::FinishServerUploadRequest {
+            media_id: media_id.clone(),
+            server_id: home_id.clone(),
+            content_type: kind.to_string(),
+            size: kept,
+        };
+        link.ask(request, |mut d, r| async move { d.finish_server_upload(r).await }).await?;
+        Ok::<_, Error>((kind, kept))
+    }
+    .await;
+    match kept {
+        Ok((kind, kept)) => Ok((media_id, kind, kept)),
+        Err(err) => {
+            let _ = std::fs::remove_file(&temp);
+            drop(app, &home_id, &media_id).await;
+            let request = cpb::FinishServerUploadRequest {
+                media_id: media_id.clone(),
+                server_id: home_id.clone(),
+                ..Default::default()
+            };
+            let _ = link.ask(request, |mut d, r| async move { d.finish_server_upload(r).await }).await;
+            Err(err)
+        }
+    }
+}
+
+/// The bytes of a stream of pieces from the directory, in order, as a
+/// stream a body can take.
+fn spawn_pieces(
+    mut stream: tonic::Streaming<cpb::FetchSharedFileResponse>,
+) -> mpsc::Receiver<std::io::Result<Vec<u8>>> {
+    let (tx, rx) = mpsc::channel(4);
+    tokio::spawn(async move {
+        loop {
+            let piece = match stream.message().await {
+                Ok(Some(piece)) => Ok(piece.data),
+                Ok(None) => return,
+                Err(_) => Err(std::io::Error::other("the directory stopped sending")),
+            };
+            let failed = piece.is_err();
+            if tx.send(piece).await.is_err() || failed {
+                return;
+            }
+        }
+    });
+    rx
+}
+
+/// Sends a file a message of a server here has to the directory, for a
+/// guest's instance (`origin`) that asked for it
+/// ([`crate::shared_files::attachment_file`]): its size first, then its bytes.
+pub async fn send_shared_attachment(
+    app: &App,
+    req: &cpb::SendSharedAttachmentRequest,
+) -> Result<SharedAttachmentStream> {
+    use tokio::io::AsyncReadExt;
+    use tokio_stream::StreamExt;
+
+    let (server_id, media_id) = (parse_id("server_id", &req.server_id)?, canonical(&req.media_id)?);
+    if !app.servers.holds(&server_id) {
+        return Err(Error::Misrouted);
+    }
+    let (size, path) = crate::shared_files::attachment_file(app, &server_id, &media_id, &req.origin)
+        .await
+        .ok_or(Error::NotFound("file"))?;
+    let file = tokio::fs::File::open(path).await.map_err(|_| Error::NotFound("file"))?;
+    let bytes = tokio_util::io::ReaderStream::with_capacity(file.take(size as u64), PIECE);
+    let first = cpb::SendSharedAttachmentResponse { data: Vec::new(), size };
+    let pieces = tokio_stream::once(Ok(first)).chain(bytes.map(|chunk| {
+        chunk
+            .map(|data| cpb::SendSharedAttachmentResponse { data: data.to_vec(), size: 0 })
+            .map_err(|_| Status::internal("couldn't read that file"))
+    }));
+    Ok(Box::pin(pieces))
+}
+
+pub type SharedAttachmentStream = Pin<Box<dyn Stream<Item = Result<cpb::SendSharedAttachmentResponse, Status>> + Send>>;
 
 /// Deletes the directory's copy of a picture its server's shard has taken.
 pub async fn forget(app: &App, server_id: &str, media_id: &str) -> Result<()> {

@@ -115,7 +115,8 @@ audit log notes an instance admin did it.
   checked by SHA-256 and the row's size) when the two servers live apart; in
   one process they stay where they are. The guest's shard then lets go of
   its copy. From then on the file is served, counted and deleted as one of
-  the home's. Files can't come from another instance yet.
+  the home's. From another instance, the home fetches them with a ticket
+  (docs/federation.md).
 - `Channel.shared` tells apps a channel is shared: from here with which
   servers (`home`), or from which server and channel (not `home`).
   `SharedChannelsUpdated` tells managers to re-read `ListConnections`.

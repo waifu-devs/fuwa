@@ -684,4 +684,14 @@ impl ShardService for Internal {
         let req = request.into_inner();
         Ok(Response::new(super::pictures::send_shared(&self.app, &req).await?))
     }
+
+    type SendSharedAttachmentStream = super::pictures::SharedAttachmentStream;
+
+    async fn send_shared_attachment(
+        &self,
+        request: Request<cpb::SendSharedAttachmentRequest>,
+    ) -> Result<Response<Self::SendSharedAttachmentStream>, Status> {
+        let req = request.into_inner();
+        Ok(Response::new(super::pictures::send_shared_attachment(&self.app, &req).await?))
+    }
 }

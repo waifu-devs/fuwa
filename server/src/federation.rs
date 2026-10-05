@@ -62,6 +62,17 @@ const MAX_FOLLOWS: usize = 1024;
 const FOLLOWS_PER_INSTANCE: usize = 8;
 /// What a key rotation's signature starts with.
 const ROTATION_CONTEXT: &[u8] = b"fuwa-federation-v1 rotation";
+/// What a signed request for a file signs before its path, so it can't be
+/// taken for a call or anything else.
+const REQUEST_CONTEXT: &[u8] = b"fuwa-federation-v1 request\0GET ";
+/// The header a signed request for a file carries: a federation envelope,
+/// base64url.
+pub const SIGNATURE_HEADER: &str = "fuwa-signature";
+/// Files fetched from other instances at once, by default
+/// (InstanceSettings 52): a protective default, see [`crate::shared_files`].
+pub const FETCHES_IN_FLIGHT: usize = 8;
+/// How long a file from another instance may take, once it's connected.
+const FILE_TIMEOUT: Duration = Duration::from_secs(120);
 /// The most rotations read from another instance's key.
 const MAX_ROTATIONS_READ: usize = 64;
 
@@ -186,6 +197,10 @@ pub struct Federation {
     /// When the last share code lookups and asks were, by server, for the cap.
     shares: Mutex<HashMap<String, Vec<Instant>>>,
     sends: Mutex<HashMap<String, Vec<Instant>>>,
+    /// As `client`, with the time a file takes.
+    files_client: reqwest::Client,
+    /// Files in channels shared with other instances.
+    pub files: crate::shared_files::State,
 }
 
 impl Federation {
@@ -200,9 +215,20 @@ impl Federation {
             .connect_timeout(Duration::from_secs(5))
             .build()
             .expect("the HTTP client builds");
+        let files_client = reqwest::Client::builder()
+            .dns_resolver(Arc::new(Resolver { allow_private }))
+            .no_proxy()
+            .https_only(!allow_private)
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(FILE_TIMEOUT)
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .expect("the HTTP client builds");
         Self {
             allow_private,
             client,
+            files_client,
+            files: crate::shared_files::State::default(),
             key: RwLock::new(None),
             followed: Mutex::default(),
             nonces: Mutex::default(),
@@ -1123,9 +1149,16 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     call.server_id = server_id;
     call.from_instance.clear();
     call.from_fingerprint.clear();
+    // Files go as tickets the home fetches them with, until it answers.
+    let tickets = match call.call.as_mut() {
+        Some(cpb::shared_call::Call::Send(send)) => crate::shared_files::tickets_for(app, send, &origin)?,
+        _ => Vec::new(),
+    };
     let started = Instant::now();
     let request = fpb::Request { call: Some(fpb::request::Call::Shared(Box::new(call.clone()))) };
-    let answer = call_peer(app, &own, &mut peer, request).await?;
+    let answer = call_peer(app, &own, &mut peer, request).await;
+    app.federation.files.forget(&tickets);
+    let answer = answer?;
     crate::reports::server_timing("federation:shared", started.elapsed());
     let reply = match answer.answer {
         Some(fpb::response::Answer::Shared(reply)) => {
@@ -1145,6 +1178,71 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
         return Err(err);
     }
     Ok(reply)
+}
+
+/// What a signed request for `path` signs.
+fn request_payload(path: &str) -> Vec<u8> {
+    [REQUEST_CONTEXT, path.as_bytes()].concat()
+}
+
+/// A GET of `path` on another instance, signed as this one (the
+/// [`SIGNATURE_HEADER`]), for a file in a channel shared with it: only to
+/// an instance whose key is pinned here. Its answer, if it's a success;
+/// `NotFound` if it said there's no such thing; one fixed `Unavailable`
+/// for anything else, with nothing about why.
+pub async fn signed_get(app: &App, address: &str, path: &str) -> Result<reqwest::Response> {
+    let (own, origin) = allowed(app, address)?;
+    match app.node()?.federation_peer(&origin).await? {
+        Some(peer) if peer.needs_check => return Err(needs_check(&origin)),
+        Some(_) => {}
+        None => return Err(unknown(&origin)),
+    }
+    let envelope = seal(app, &own, &origin, request_payload(path), Vec::new()).await?;
+    let signature = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, envelope.encode_to_vec());
+    let sent =
+        app.federation.files_client.get(format!("{origin}{path}")).header(SIGNATURE_HEADER, signature).send().await;
+    match sent {
+        Ok(response) if response.status().is_success() => {
+            heard(app, &origin).await;
+            Ok(response)
+        }
+        Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => Err(Error::NotFound("file")),
+        _ => {
+            crate::reports::server_error("federation_file_unreachable", Some("federation"));
+            Err(Error::Unavailable(format!("can't reach {} right now", display(&origin))))
+        }
+    }
+}
+
+/// The instance that signed a request for `path` ([`signed_get`]): one
+/// this instance talks to and has pinned, whose signature checks out, fresh
+/// and not seen before. None for anything else, said nowhere.
+pub async fn signed_by(app: &App, headers: &http::HeaderMap, path: &str) -> Option<String> {
+    if !app.settings().federation {
+        return None;
+    }
+    let own = own_origin(app).ok()?;
+    let header = headers.get(SIGNATURE_HEADER)?.to_str().ok().filter(|h| h.len() <= 4096)?;
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, header).ok()?;
+    let envelope = fpb::Envelope::decode(bytes.as_slice()).ok()?;
+    let from = origin(&envelope.from, app.federation.allows_private()).ok().filter(|from| *from == envelope.from)?;
+    if blocked(app, &from) || envelope.payload != request_payload(path) {
+        return None;
+    }
+    let peer = app.node().ok()?.federation_peer(&from).await.ok()??;
+    if peer.needs_check {
+        return None;
+    }
+    match check(&app.federation, &own, &envelope, &peer.public_key, None) {
+        Ok(()) => {
+            heard(app, &from).await;
+            Some(from)
+        }
+        Err(refusal) => {
+            crate::reports::server_error(refusal.report(), Some("federation"));
+            None
+        }
+    }
 }
 
 /// A signed call to another instance, and its answer.

@@ -201,8 +201,56 @@ On "Other instances" in Instance settings (`GetFederation`,
   without anything about the reader. Only pictures on the other instance
   itself are taken (a link anywhere else is dropped), and an instance sends
   only its own. A link preview keeps its words, an https link and its
-  pictures; threads stay with their server, and files can't be sent across
-  instances yet (within one instance they can: docs/shared-channels.md).
+  pictures; threads stay with their server. Files are below.
+- **Files** a guest's people send are the home's, as on one instance
+  (docs/shared-channels.md), and the home's admins let a guest server send
+  them with Attach Files like any other. `crate::shared_files` does it:
+  - Sending: the person uploads to their own instance as anywhere else, which
+    checks the file against its own caps. When the message goes to the home,
+    their instance gives it a ticket for each file (`GuestSend.files`): 32
+    random bytes, kept only as their SHA-256 and only in memory, for ten
+    minutes, used once, and only by the home's instance (at most 4,096 kept,
+    64 for one instance, the oldest going first: internal bounds). Before
+    it writes the message, the home refuses any file over its own
+    `FUWA_LIMIT_ATTACHMENT_UPLOAD`, its server's room for files, or the
+    guest server's bytes for the day (`FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY`,
+    unlimited unless set, counted on a placeholder account
+    `shared:<server>@<instance>` that no one can sign in as). Then it fetches
+    each file, `GET /federation/files/<ticket>`, signed (below), taking
+    exactly the size the guest said and no more. It reads the file's kind
+    from its bytes (never as the guest said), takes out a picture's
+    metadata, and keeps it under its own id with its own files. The guest's
+    upload is then dropped.
+  - Reading: a message leaving the home carries its files by id, name, kind
+    and size, never a link. The guest's instance shows each one at a link of
+    its own, `/media/shared/<signature>?home=…&id=…&size=…&until=…&name=…`,
+    signed by it over all of that and working for a day. Opening one, the
+    guest's instance fetches the file from the home,
+    `GET /federation/attachments/<server>/<id>`, signed, which the home
+    answers only for a file of a message shown in a channel it shares with a
+    server on that instance, now. The guest's instance reads its kind again
+    from its first bytes and serves it under its own rules (pictures shown,
+    audio and video played, anything else downloaded), whole (no `Range`),
+    never more than the size the message said or its own
+    `FUWA_LIMIT_ATTACHMENT_UPLOAD`, and never cached anywhere, so a deleted
+    message's file stops at once. Apps never talk to the other instance.
+  - A signed request carries a `Fuwa-Signature` header: an envelope, as
+    calls use, over the request's path, from an instance whose key is pinned
+    here, fresh and with a fresh nonce. Anything else, and anything the
+    other side may not have, gets one plain 404, so it can't tell which
+    check failed.
+  - Every fetch from another instance, both ways, waits for a slot:
+    `FUWA_SHARED_FILE_FETCHES_IN_FLIGHT`, 8 by default (a protective default,
+    docs/capacity.md; also on the Other instances page), each instance
+    getting at most half. A fetch that waits more than 30 seconds is told to
+    try again. Fetches go through the same client as calls: public
+    addresses only, no redirects, 15 seconds to connect and two minutes in
+    all.
+  - On a split instance the directory does all of this, as it keeps the
+    instance key: the gateways pass `/federation/...` to it, the home's
+    shard takes the bytes from it (`DirectoryService.FetchSharedFile`), and
+    it takes them from the shard holding a server
+    (`ShardService.SendSharedFile`, `SendSharedAttachment`).
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
@@ -216,4 +264,4 @@ who talks to whom.
 
 ## Next
 
-Attachments. The plan is in the shared channels phase 2 design.
+Threads, polls and custom emoji from the other instance in shared channels.
