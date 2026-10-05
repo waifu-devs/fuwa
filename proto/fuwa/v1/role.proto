@@ -55,9 +55,15 @@ message UpdateRoleRequest {
   // Clears the color.
   bool clear_color = 4;
   optional int32 color = 5;
+  // Replaces every permission. Two people editing a role at once lose each
+  // other's changes this way, so new apps send grant and revoke instead.
   PermissionSet permissions = 6;
   optional bool hoist = 7;
   optional bool mentionable = 8;
+  // Turns these on and leaves the rest as they are. Not with permissions.
+  repeated Permission grant = 9;
+  // Turns these off and leaves the rest as they are. Not with permissions.
+  repeated Permission revoke = 10;
 }
 
 message UpdateRoleResponse {

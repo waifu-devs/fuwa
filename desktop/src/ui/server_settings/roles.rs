@@ -36,7 +36,36 @@ struct Edits {
     color: Option<Option<u32>>,
     hoist: Option<bool>,
     mentionable: Option<bool>,
-    permissions: Option<Bits>,
+    /// Permissions switched on and off here. Kept apart from the role's own,
+    /// so a change someone else saves meanwhile shows and isn't undone.
+    grant: Bits,
+    revoke: Bits,
+}
+
+impl Edits {
+    /// The role's permissions as they are, with the switches flipped here on top.
+    fn permissions(&self, role: &pb::Role) -> Bits {
+        (permissions::from_list(&role.permissions) | self.grant) & !self.revoke
+    }
+
+    /// A switch put back as the role has it (`live`) isn't being changed any more.
+    fn switch(&mut self, live: Bits, bits: Bits, on: bool) {
+        if on {
+            self.grant |= bits;
+            self.revoke &= !bits;
+        } else {
+            self.revoke |= bits;
+            self.grant &= !bits;
+        }
+        self.grant &= !live;
+        self.revoke &= live;
+    }
+
+    /// What saving turns on and off in the role as it is.
+    fn changes(&self, role: &pb::Role) -> (Bits, Bits) {
+        let live = permissions::from_list(&role.permissions);
+        (self.grant & !live, self.revoke & live)
+    }
 }
 
 pub(super) struct Roles {
@@ -236,7 +265,7 @@ impl ServerSettingsView {
             e.color.is_some_and(|c| c != role_color(role)),
             e.hoist.is_some_and(|h| h != role.hoist),
             e.mentionable.is_some_and(|m| m != role.mentionable),
-            e.permissions.is_some_and(|b| b != permissions::from_list(&role.permissions)),
+            e.changes(role) != (0, 0),
         ]
         .into_iter()
         .filter(|c| *c)
@@ -251,15 +280,20 @@ impl ServerSettingsView {
             cx.notify();
             return;
         }
+        let (grant, revoke) = e.changes(role);
+        let changes =
+            self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("role-permission-changes")));
+        // Older instances only take every permission at once.
+        let whole = (!changes && (grant, revoke) != (0, 0)).then(|| permissions::to_list(e.permissions(role)));
+        let (grant, revoke) = if changes { (grant, revoke) } else { (0, 0) };
         let patch = RolePatch {
             name: (!everyone && name != role.name).then_some(name),
             color: e.color.filter(|c| *c != role_color(role)),
             hoist: e.hoist.filter(|h| *h != role.hoist),
             mentionable: e.mentionable.filter(|m| *m != role.mentionable),
-            permissions: e
-                .permissions
-                .filter(|b| *b != permissions::from_list(&role.permissions))
-                .map(permissions::to_list),
+            permissions: whole,
+            grant: permissions::to_list(grant),
+            revoke: permissions::to_list(revoke),
         };
         self.roles.saving = true;
         self.error = None;
@@ -994,9 +1028,9 @@ impl ServerSettingsView {
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
-        let bits = e.permissions.unwrap_or_else(|| permissions::from_list(&role.permissions));
+        let bits = e.permissions(role);
+        let live = permissions::from_list(&role.permissions);
         let query = self.roles.perm_query.read(cx).value().trim().to_lowercase();
-        let base = bits;
         let mut out = div().flex().flex_col().gap(px(16.0)).child(
             div().text_sm().text_color(p.muted_foreground).child(if everyone {
                 "What every member can do, before their roles add more. Channels can still say otherwise."
@@ -1020,7 +1054,7 @@ impl ServerSettingsView {
                         .when(locked || clearable == 0, |el| el.opacity(0.5))
                         .when(!locked && clearable != 0, |el| {
                             el.on_click(cx.listener(move |this, _, _, cx| {
-                                this.roles.edits.permissions = Some(base & !clearable);
+                                this.roles.edits.switch(live, clearable, false);
                                 cx.notify();
                             }))
                         }),
@@ -1109,8 +1143,7 @@ impl ServerSettingsView {
                         locked || !allowed,
                         cx,
                         move |this, v, cx| {
-                            let now = this.roles.edits.permissions.unwrap_or(base);
-                            this.roles.edits.permissions = Some(if v { now | bit(perm) } else { now & !bit(perm) });
+                            this.roles.edits.switch(live, bit(perm), v);
                             cx.notify();
                         },
                     ));
@@ -1298,5 +1331,35 @@ impl ServerSettingsView {
             ));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pb::Permission as P;
+
+    #[test]
+    fn a_role_saved_elsewhere_while_open_keeps_both_changes() {
+        // Opened with Manage Messages: here Ban Members goes on and Manage Messages off...
+        let opened = bit(P::ManageMessages);
+        let mut edits = Edits::default();
+        edits.switch(opened, bit(P::BanMembers), true);
+        edits.switch(opened, bit(P::ManageMessages), false);
+        // ...while someone else saves Kick Members.
+        let now = pb::Role { permissions: vec![P::ManageMessages as i32, P::KickMembers as i32], ..Default::default() };
+        assert_eq!(edits.permissions(&now), bit(P::KickMembers) | bit(P::BanMembers));
+        assert_eq!(edits.changes(&now), (bit(P::BanMembers), bit(P::ManageMessages)));
+    }
+
+    #[test]
+    fn a_switch_flipped_and_put_back_leaves_someone_elses_change() {
+        // Ban Members goes on and off again here, then someone else grants it.
+        let opened = bit(P::ManageMessages);
+        let mut edits = Edits::default();
+        edits.switch(opened, bit(P::BanMembers), true);
+        edits.switch(opened, bit(P::BanMembers), false);
+        let now = pb::Role { permissions: vec![P::ManageMessages as i32, P::BanMembers as i32], ..Default::default() };
+        assert_eq!(edits.changes(&now), (0, 0));
     }
 }

@@ -314,7 +314,17 @@ impl EventService for Api {
                     return;
                 }
                 if after.is_some() {
-                    loop {
+                    // Replayed up to a head read under the write lock, so a
+                    // change replayed has had the server's rules marked as
+                    // changed by then; anything after it comes live.
+                    let head = match sdb.head_sequence().await {
+                        Ok(head) => head,
+                        Err(err) => {
+                            send(Err(err.into())).await;
+                            return;
+                        }
+                    };
+                    while sequence < head {
                         let page = match sdb.events_after(sequence, REPLAY_PAGE).await {
                             Ok(page) => page,
                             Err(err) => {
@@ -323,8 +333,8 @@ impl EventService for Api {
                             }
                         };
                         let Some(last) = page.last() else { break };
-                        sequence = last.sequence;
-                        for event in page {
+                        sequence = last.sequence.min(head);
+                        for event in page.into_iter().filter(|e| e.sequence <= head) {
                             for event in view.pass(&event).await {
                                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;

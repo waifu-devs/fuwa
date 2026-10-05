@@ -144,6 +144,14 @@ impl RoleService for Api {
                 let name = req.name.as_deref().map(|v| text("name", v, 1, 100)).transpose()?;
                 let color = color(req.color)?;
                 let bits = req.permissions.as_ref().map(|p| permissions::from_list(&p.permissions)).transpose()?;
+                let grant = permissions::from_list(&req.grant)?;
+                let revoke = permissions::from_list(&req.revoke)?;
+                if bits.is_some() && grant | revoke != 0 {
+                    return Err(Error::invalid("send permissions or grant and revoke, not both"));
+                }
+                if grant & revoke != 0 {
+                    return Err(Error::invalid("a permission can't be granted and revoked at once"));
+                }
                 let role = sdb
                     .write(&account.id, async |conn, events| {
                         let before = load_role(conn, &sdb.id, &req.role_id).await?;
@@ -163,6 +171,9 @@ impl RoleService for Api {
                             check_below(&access, &before)?;
                         }
                         let old = permissions::from_list(&before.permissions)?;
+                        // Changes apply to the role as it is now, so someone else's
+                        // edit made in the meantime stays.
+                        let bits = bits.or((grant | revoke != 0).then_some((old | grant) & !revoke));
                         if let Some(bits) = bits
                             && !access.may_change(old ^ bits, access.server)
                         {

@@ -155,6 +155,7 @@ impl FuwaApp {
         if self.threads.open.as_ref() == Some(&open) {
             return;
         }
+        self.pins = None;
         if self.search.panel.is_some() {
             self.close_search(window, cx);
         }
@@ -205,6 +206,7 @@ impl FuwaApp {
             self.close_search(window, cx);
         }
         self.close_thread(cx);
+        self.pins = None;
         self.threads.query.update(cx, |state, cx| state.set_value("", window, cx));
         self.threads.listing = Some(Listing {
             key,

@@ -710,7 +710,17 @@ export const createRole = (key: string, serverId: string, draft: RoleDraft) =>
   });
 
 /** Changes what's given; `color: null` clears it. @everyone takes only `permissions`. */
-export const updateRole = (key: string, serverId: string, roleId: string, patch: Partial<Omit<RoleDraft, "color">> & { color?: number | null }) =>
+/**
+ * `grant` and `revoke` change only those permissions, so someone else's edit
+ * to the same role stays; `permissions` replaces them all, for instances
+ * without "role-permission-changes".
+ */
+export const updateRole = (
+  key: string,
+  serverId: string,
+  roleId: string,
+  patch: Partial<Omit<RoleDraft, "color">> & { color?: number | null; grant?: Permission[]; revoke?: Permission[] },
+) =>
   Effect.gen(function* () {
     const { color, permissions, ...rest } = patch;
     const { role } = yield* call((signal) =>

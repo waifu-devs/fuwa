@@ -30,6 +30,7 @@ pub mod moderation;
 pub mod notifications;
 pub mod onboarding;
 pub mod permissions;
+pub mod pins;
 pub mod polls;
 pub mod presence;
 pub mod reports;
@@ -643,6 +644,7 @@ impl Core {
             i.problem = Some("Your session ended. Sign in again.".into());
             i.dms = dms::DmState::default();
             i.people = None;
+            i.pins.clear();
         });
         self.shared.notice(Notice::SignedOut { instance: key.to_owned() });
     }
