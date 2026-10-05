@@ -8,7 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { notificationKey, useFuwa } from "@/fuwa/store";
 import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
@@ -122,7 +122,8 @@ function ServerCard({
       ref={ref}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ ...SPRING, delay }}
+      transition={{ ...SPRING, delay, layout: SPRING }}
+      layout="position"
       className={cn("scroll-mt-4 overflow-hidden rounded-2xl border bg-card transition-colors", open && "border-primary/40")}
     >
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-muted/50">
@@ -149,7 +150,7 @@ function ServerCard({
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ ...SPRING, opacity: { duration: 0.2 } }} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={{ ...SPRING, opacity: { duration: 0.2 } }}>
             <ServerBody instanceKey={instanceKey} server={server} settings={settings} muted={muted} now={now} />
           </motion.div>
         )}
@@ -180,13 +181,12 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
           options={levelOptions(t)}
           className="w-full max-w-md"
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {!settings?.level && server.defaultNotifications === NotificationLevel.MENTIONS && (
             <motion.p
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden text-xs text-muted-foreground"
+              {...SLIDE_IN}
+              transition={SPRING}
+              className="text-xs text-muted-foreground"
             >
               {t("accountsettings.serverNotifications.mentionsDefault")}
             </motion.p>

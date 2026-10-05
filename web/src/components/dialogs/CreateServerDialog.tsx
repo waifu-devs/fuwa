@@ -7,6 +7,7 @@ import { createServer } from "@/fuwa/actions";
 import { useAction, useInstances } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
+import { MotionButton } from "@/components/motion-button";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { hasRegions, regionMark } from "@/lib/regions";
 import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -128,17 +130,17 @@ function CreateServerForm({
       {instances.length > 1 && <InstanceChoice instances={instances} current={inst?.key} onPick={pick} />}
       <RegionChoice instanceKey={inst?.key} regions={regions} picked={picked} onPick={setRegion} />
       <BrowseToggle on={discoverable} onChange={setDiscoverable} instanceName={inst?.node?.name} />
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {(create.error || blocked) && (
-          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="text-sm text-destructive first-letter:uppercase">
+          <motion.p {...SLIDE_IN} transition={SPRING} className="text-sm text-destructive first-letter:uppercase">
             {blocked ?? create.error}
           </motion.p>
         )}
       </AnimatePresence>
-      <Button type="submit" size="lg" disabled={create.pending || !name.trim() || !!blocked || !inst} className="btn h-11 rounded-xl font-bold">
+      <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={create.pending || !name.trim() || !!blocked || !inst} className="btn h-11 rounded-xl font-bold">
         {create.pending && <LoaderCircleIcon className="animate-spin" />}
         {t("workspace.createServer.submit")}
-      </Button>
+      </MotionButton>
     </form>
   );
 }
@@ -231,15 +233,13 @@ function InstanceChoice({ instances, current, onPick }: { instances: Instance[];
 function RegionChoice({ instanceKey, regions, picked, onPick }: { instanceKey: string | undefined; regions: Region[]; picked: Region | undefined; onPick: (id: string) => void }) {
   const { t } = useI18n();
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="popLayout">
       {hasRegions(regions) && (
         <motion.div
           key={instanceKey}
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
+          {...SLIDE_IN}
           transition={{ type: "spring", stiffness: 420, damping: 34 }}
-          className="flex flex-col gap-2 overflow-hidden"
+          className="flex flex-col gap-2"
         >
           <Label className="font-bold">{t("workspace.createServer.region")}</Label>
           <div role="radiogroup" aria-label={t("workspace.createServer.region")} className="flex flex-wrap gap-2">

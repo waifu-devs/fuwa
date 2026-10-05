@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion, useAnimationControls } from "motion/react
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { run, uploadPicture } from "@/fuwa/actions";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PictureCropper } from "@/components/PictureCropper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -229,22 +229,22 @@ export function PictureField({
         )}
       </motion.div>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {showLink && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <LinkInput kind={kind} value={value} disabled={disabled || busy} onChange={onChange} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {error && (
           <motion.p
             role="alert"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className={cn("overflow-hidden text-sm font-bold text-destructive", compact && "text-center")}
+            layout="position"
+            {...SLIDE_IN}
+            transition={SPRING}
+            className={cn("text-sm font-bold text-destructive", compact && "text-center")}
           >
             {error}
           </motion.p>

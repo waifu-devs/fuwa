@@ -21,7 +21,7 @@ import { useAccess, useAction, useInstance, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { RoleName } from "@/components/RoleName";
 import { Row, Segmented } from "@/components/settings/account/common";
 import { SaveBar, Toggle } from "@/components/settings/controls";
@@ -390,13 +390,12 @@ function RoleEditor({
         <h3 className="min-w-0 flex-1 truncate text-lg font-extrabold">{everyone ? "@everyone" : <RoleTitle draft={draft} />}</h3>
         {tabs.length > 1 && <Segmented label={t("serversettings.roles.settings")} value={tab} onChange={onTab} options={tabs} />}
       </div>
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {locked && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-4 flex items-center gap-2 overflow-hidden rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground"
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="mb-4 flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground"
           >
             <LockIcon className="size-4 shrink-0" /> {t("serversettings.roles.locked")}
           </motion.p>
@@ -408,7 +407,8 @@ function RoleEditor({
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.18 }}
+          transition={{ duration: 0.18, layout: SPRING }}
+          layout="position"
         >
           {tab === "display" && !everyone && (
             <Display instanceKey={instanceKey} serverId={serverId} role={role} draft={draft} set={set} locked={locked} />
@@ -538,13 +538,12 @@ function RolePreview({ instanceKey, draft }: { instanceKey: string; draft: Draft
           </p>
         </div>
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {draft.hoist && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="flex items-center gap-1.5 overflow-hidden text-xs font-bold tracking-wide text-muted-foreground uppercase"
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase"
           >
             <RoleDot role={{ color: draft.color ?? undefined }} className="size-2" /> {draft.name || t("serversettings.roles.newRole")} — 1
           </motion.p>
@@ -772,14 +771,11 @@ function RoleMembers({
             <UserPlusIcon className={cn("transition-transform duration-300", adding && "rotate-12")} /> {t("serversettings.roles.addMembers")}
           </Button>
         )}
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {!locked && adding && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              {...SLIDE_IN}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
             >
               <div className="flex flex-col gap-2 rounded-2xl border bg-background/40 p-2">
                 <div className="relative">
@@ -811,7 +807,7 @@ function RoleMembers({
           )}
         </AnimatePresence>
       </div>
-      <ul className="flex flex-col gap-1.5">
+      <motion.ul layout="position" transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }} className="flex flex-col gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
           {holders.map((m, n) => (
             <motion.li
@@ -842,10 +838,10 @@ function RoleMembers({
             </motion.li>
           ))}
         </AnimatePresence>
-      </ul>
+      </motion.ul>
       <AnimatePresence>
         {!holders.length && (
-          <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-6 text-center text-sm text-muted-foreground">
+          <motion.p layout="position" transition={{ layout: { duration: 0.25, ease: [0.22, 1, 0.36, 1] } }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-6 text-center text-sm text-muted-foreground">
             {t("serversettings.roles.nobody")}
           </motion.p>
         )}

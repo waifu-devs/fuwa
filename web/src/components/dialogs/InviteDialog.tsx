@@ -6,7 +6,7 @@ import { createInvite, listInvites, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { getInstance, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { usePrivateField } from "@/components/Private";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
@@ -119,19 +119,18 @@ export function InviteDialog({
         <div className="flex flex-col gap-2">
           <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("workspace.invite.link")}</span>
           <LinkField invite={invite} link={link} copied={copied} onCopy={copyLink} />
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} mode="popLayout">
             {error && (
               <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
+                {...SLIDE_IN}
+                transition={SPRING}
                 className="text-sm text-destructive first-letter:uppercase"
               >
                 {error}
               </motion.p>
             )}
           </AnimatePresence>
-          <p className="text-xs text-muted-foreground">
+          <motion.p layout="position" transition={SPRING} className="text-xs text-muted-foreground">
             {invite ? <>{inviteTerms(lang, invite)} </> : null}
             <button
               type="button"
@@ -142,16 +141,13 @@ export function InviteDialog({
               {t("workspace.invite.edit")}
               <ChevronDownIcon className={cn("size-3.5 transition-transform duration-300", editing && "rotate-180")} />
             </button>
-          </p>
+          </motion.p>
         </div>
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {editing && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              {...SLIDE_IN}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
             >
               <InviteOptions options={options} onChange={setOptions} making={making} onGenerate={() => void generate()} />
             </motion.div>

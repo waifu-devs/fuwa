@@ -18,7 +18,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { CodeInput } from "@/components/CodeInput";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PasswordInput, Row, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -214,18 +214,18 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
               <p className="text-sm text-muted-foreground">{t("accountsettings.security.typeCodeHint")}</p>
             </div>
             <CodeInput id="two-step-enable" label={t("accountsettings.security.codeLabel")} onComplete={(code) => void verify(code)} disabled={enable.pending} shake={shakeCode} />
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} mode="popLayout">
               {enable.error && (
-                <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+                <motion.p {...SLIDE_IN} transition={SPRING} className="text-sm font-bold text-destructive first-letter:uppercase">
                   {enable.error}
                 </motion.p>
               )}
             </AnimatePresence>
-            <div className="flex gap-2">
+            <motion.div layout="position" transition={SPRING} className="flex gap-2">
               <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setStep(1)}>
                 {t("common.back")}
               </Button>
-            </div>
+            </motion.div>
           </motion.div>
         )}
         {step === 3 && (
@@ -598,21 +598,21 @@ function Confirm({
           </label>
         )}
       </motion.div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {error && (
-          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+          <motion.p {...SLIDE_IN} transition={SPRING} className="text-sm font-bold text-destructive first-letter:uppercase">
             {error}
           </motion.p>
         )}
       </AnimatePresence>
-      <div className="flex gap-2">
+      <motion.div layout="position" transition={SPRING} className="flex gap-2">
         <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onCancel} disabled={pending}>
           {t("common.cancel")}
         </Button>
         <Button type="submit" size="sm" variant={danger ? "destructive" : "default"} className={cn("rounded-xl font-bold", !danger && "btn")} disabled={pending}>
           {pending ? t("accountsettings.shared.checking") : action}
         </Button>
-      </div>
+      </motion.div>
     </motion.form>
   );
 }
