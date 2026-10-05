@@ -173,6 +173,8 @@ pub struct Prefs {
     pub recent_emoji: Vec<String>,
     /// The skin tone for standard emoji: 0 is the default yellow, 1 to 5 light to dark.
     pub skin_tone: u8,
+    /// The app's language as a shipped locale code (`core::i18n`); none follows the computer's.
+    pub language: Option<String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -210,6 +212,7 @@ impl Default for Prefs {
             game_answers: Default::default(),
             recent_emoji: Vec::new(),
             skin_tone: 0,
+            language: None,
         }
     }
 }

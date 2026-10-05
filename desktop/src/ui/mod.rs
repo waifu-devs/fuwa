@@ -32,6 +32,7 @@ mod server_settings;
 mod settings;
 mod settings_account;
 mod settings_keys;
+mod settings_language;
 mod settings_look;
 mod settings_privacy;
 mod settings_updates;

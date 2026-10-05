@@ -1,6 +1,7 @@
 {
   "language.title": "Language",
   "language.matchBrowser": "Match my browser",
+  "language.matchSystem": "Like my computer",
   "language.matchBrowserNote": "Right now that's {language}",
   "language.coverage": "{percent} translated",
   "language.draft": "Machine draft, not yet checked by a speaker",

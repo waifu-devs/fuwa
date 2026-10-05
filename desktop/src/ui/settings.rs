@@ -15,6 +15,7 @@ use gpui_kit::{
 
 use crate::core::Core;
 use crate::core::config::{MotionChoice, NotifyFor, Prefs};
+use crate::core::i18n::t;
 use crate::core::store::{Connection, user_name};
 use crate::ui::motion;
 use crate::ui::settings_account::AccountForm;
@@ -40,6 +41,7 @@ pub(crate) enum Page {
     Streamer,
     Accounts,
     Keyboard,
+    Language,
     Privacy,
     Updates,
     About,
@@ -49,7 +51,7 @@ pub(crate) enum Page {
 const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
     [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
-const PAGES: [(Page, &str, &str); 10] = [
+const PAGES: [(Page, &str, &str); 11] = [
     (Page::Appearance, "palette", "Appearance"),
     (Page::Background, "image", "Background"),
     (Page::Motion, "sparkles", "Motion"),
@@ -57,6 +59,7 @@ const PAGES: [(Page, &str, &str); 10] = [
     (Page::Streamer, "eye-off", "Streamer mode"),
     (Page::Accounts, "user", "Accounts"),
     (Page::Keyboard, "keyboard", "Keyboard"),
+    (Page::Language, "languages", "Language"),
     (Page::Privacy, "shield-check", "Privacy"),
     (Page::Updates, "refresh-cw", "Updates"),
     (Page::About, "info", "About"),
@@ -350,6 +353,7 @@ impl SettingsView {
                 "Shortcuts that work everywhere in the app. Click one to change it.".into(),
                 self.keyboard_page(prefs, p, cx),
             ),
+            Page::Language => (t("settings.language.title"), String::new(), self.language_page(prefs, p, window, cx)),
             Page::Privacy => (
                 "Privacy".into(),
                 "What this app tells anyone, and only if you let it.".into(),
