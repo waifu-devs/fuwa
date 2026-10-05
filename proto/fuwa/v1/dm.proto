@@ -64,7 +64,7 @@ service DirectMessageService {
   // InstanceSettings.pins_per_conversation pins in each conversation.
   rpc PinRecord(PinRecordRequest) returns (PinRecordResponse);
   // A conversation's pins, the latest first.
-  rpc ListPins(ListDmPinsRequest) returns (ListDmPinsResponse);
+  rpc ListRecordPins(ListRecordPinsRequest) returns (ListRecordPinsResponse);
   // Reserves a place for a sealed file: something a message carries that's
   // too big to go in it, such as a voice message, encrypted on the device
   // under a key that travels only inside the message. Upload it like a
@@ -387,7 +387,7 @@ message PinRecordResponse {
   DmPin pin = 1;
 }
 
-message ListDmPinsRequest {
+message ListRecordPinsRequest {
   string conversation_id = 1;
   // 1 to 100; 50 when unset.
   int32 limit = 2;
@@ -395,7 +395,7 @@ message ListDmPinsRequest {
   optional int64 after_sequence = 3;
 }
 
-message ListDmPinsResponse {
+message ListRecordPinsResponse {
   // Latest first.
   repeated DmPin pins = 1;
   bool has_more = 2;

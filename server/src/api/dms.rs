@@ -779,10 +779,10 @@ impl DirectMessageService for Api {
         )
     }
 
-    async fn list_pins(
+    async fn list_record_pins(
         &self,
-        request: Request<pb::ListDmPinsRequest>,
-    ) -> Result<Response<pb::ListDmPinsResponse>, Status> {
+        request: Request<pb::ListRecordPinsRequest>,
+    ) -> Result<Response<pb::ListRecordPinsResponse>, Status> {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
@@ -792,7 +792,7 @@ impl DirectMessageService for Api {
                 let limit = if req.limit <= 0 { 50 } else { req.limit.min(MAX_PINS_PAGE) };
                 let (pins, has_more) =
                     dms.pins(&account.id, &conversation.id, i64::from(limit), req.after_sequence).await?;
-                Ok(pb::ListDmPinsResponse { pins, has_more })
+                Ok(pb::ListRecordPinsResponse { pins, has_more })
             }
             .await,
         )

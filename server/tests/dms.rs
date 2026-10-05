@@ -729,9 +729,9 @@ async fn pins_page(
     after_sequence: Option<i64>,
 ) -> (Vec<i64>, bool) {
     let page = dms
-        .list_pins(authed(
+        .list_record_pins(authed(
             &person.token,
-            pb::ListDmPinsRequest { conversation_id: conversation.into(), limit, after_sequence },
+            pb::ListRecordPinsRequest { conversation_id: conversation.into(), limit, after_sequence },
         ))
         .await
         .unwrap()
@@ -845,7 +845,10 @@ async fn pins_name_records_and_never_their_content() {
     let outsider = dms.pin_record(authed(&rin.token, pin_request(&cid, sent[1], true))).await.unwrap_err();
     assert_eq!(outsider.code(), Code::NotFound);
     let peek = dms
-        .list_pins(authed(&rin.token, pb::ListDmPinsRequest { conversation_id: cid.clone(), ..Default::default() }))
+        .list_record_pins(authed(
+            &rin.token,
+            pb::ListRecordPinsRequest { conversation_id: cid.clone(), ..Default::default() },
+        ))
         .await
         .unwrap_err();
     assert_eq!(peek.code(), Code::NotFound);

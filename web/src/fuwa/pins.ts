@@ -122,7 +122,7 @@ export async function loadDmPins(instanceKey: string, conversationId: string, mo
   if (!had) put(key, { status: "loading", pins: [], hasMore: false });
   const afterSequence = more ? had?.pins.at(-1)?.sequence : undefined;
   try {
-    const res = await engine(instanceKey).api.dms.listPins({ conversationId, limit: PAGE, afterSequence });
+    const res = await engine(instanceKey).api.dms.listRecordPins({ conversationId, limit: PAGE, afterSequence });
     const pins = more ? [...(had?.pins ?? []), ...res.pins.filter((p) => !had?.pins.some((h) => h.sequence === p.sequence))] : res.pins;
     put(key, { status: "ready", pins, hasMore: res.hasMore });
   } catch {
