@@ -2025,3 +2025,38 @@ async fn presence_goes_through_the_directory() {
 async fn fed_a_fingerprint(c: &mut Clients, admin: &str) -> String {
     c.admin.get_federation(authed(admin, pb::GetFederationRequest {})).await.unwrap().into_inner().fingerprint
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_instance_admins_set_a_servers_caps_through_a_gateway() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[("FUWA_LIMIT_MEMBERS", "3".to_string())]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (owner, _) = sign_up(&mut c, "owner").await;
+    let server = create_server(&mut c, &owner, "Owned").await;
+    let set = |token: &str, members: i64| {
+        let mut admin = c.admin.clone();
+        let request = pb::SetServerLimitsRequest {
+            server_id: server.id.clone(),
+            limits: Some(pb::ServerLimits { members: Some(members), ..Default::default() }),
+        };
+        let request = authed(token, request);
+        async move { admin.set_server_limits(request).await }
+    };
+
+    // The shard holding the server turns its owner away, whichever way.
+    for members in [1_000, 1] {
+        assert_eq!(set(&owner, members).await.unwrap_err().code(), Code::PermissionDenied);
+    }
+    let usage = c
+        .servers
+        .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!((usage.own_limits.unwrap().members, usage.limits.unwrap().members), (None, Some(3)));
+
+    let set_by_admin = set(&juan, 1_000).await.unwrap().into_inner();
+    assert_eq!(set_by_admin.limits.unwrap().members, Some(1_000));
+    cluster.stop().await;
+}
