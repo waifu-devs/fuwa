@@ -149,22 +149,47 @@ impl Core {
         kind: pb::ChannelType,
         parent_id: &str,
     ) -> Result<pb::Channel, Problem> {
+        let request = pb::CreateChannelRequest {
+            server_id: server_id.into(),
+            name: name.into(),
+            r#type: kind as i32,
+            parent_id: parent_id.into(),
+            ..Default::default()
+        };
+        self.create_channel_with(key, request).await
+    }
+
+    /// A copy of a channel: its name, kind, category, topic, slow mode and who
+    /// can see it, all made in one step, so the copy is never seen with other
+    /// permissions than the original's.
+    pub async fn duplicate_channel(
+        &self,
+        key: &str,
+        server_id: &str,
+        of: &pb::Channel,
+    ) -> Result<pb::Channel, Problem> {
+        let request = pb::CreateChannelRequest {
+            server_id: server_id.into(),
+            name: of.name.clone(),
+            r#type: of.r#type,
+            parent_id: of.parent_id.clone(),
+            topic: of.topic.clone(),
+            slowmode_seconds: of.slowmode_seconds,
+            permission_overwrites: of.permission_overwrites.clone(),
+        };
+        let made = self.create_channel_with(key, request).await;
+        if made.is_err() {
+            crate::core::reports::error("context_menu.duplicate_channel", "channel");
+        }
+        made
+    }
+
+    async fn create_channel_with(&self, key: &str, request: pb::CreateChannelRequest) -> Result<pb::Channel, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
-        let channel = rpc!(
-            api.channels(),
-            create_channel(pb::CreateChannelRequest {
-                server_id: server_id.into(),
-                name: name.into(),
-                r#type: kind as i32,
-                parent_id: parent_id.into(),
-                ..Default::default()
-            })
-        )
-        .await?
-        .channel
-        .unwrap_or_default();
+        let server_id = request.server_id.clone();
+        let channel = rpc!(api.channels(), create_channel(request)).await?.channel.unwrap_or_default();
         self.shared.instance(key, |i| {
-            let list = i.channels.entry(server_id.to_owned()).or_default();
+            let list = i.channels.entry(server_id.clone()).or_default();
             list.retain(|c| c.id != channel.id);
             list.push(channel.clone());
             store::sort_channels(list);

@@ -109,3 +109,16 @@ Planned: reactions (a row of recent emoji in `react`), Reply at the start of
 `primary`, Pin and Mark unread in `primary`, Report in
 `danger`, Add friend in `social`, attachments and polls in the composer's
 `insert`.
+
+## Desktop
+
+The desktop app draws the same menus itself (`desktop/src/ui/context_menu.rs`
+for opening, keys, submenus, asking first and motion; `menu_items.rs` for
+what each holds), with the same sections and checks. Differences: right-click
+on a picture in a message adds its items, but links inside a message's text
+don't (the text view doesn't say which link was clicked); categories have no
+Collapse, as the desktop sidebar doesn't fold them; "Edit server profile" and
+"Change nickname" wait for the desktop's server profiles; and the message box
+keeps the system's own menu (Cut, Copy, Paste, Select all) with Emoji and
+Timestamp added. Shift+F10 and the Menu key open the menu of what the pointer
+is over, or of the open channel or conversation.

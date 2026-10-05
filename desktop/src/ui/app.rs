@@ -26,7 +26,7 @@ use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::theme::{self, FONT};
 use crate::ui::widgets::pal;
 
-actions!(fuwa, [CloseOverlay, OpenSettings, AddInstance]);
+actions!(fuwa, [CloseOverlay, OpenSettings, AddInstance, ComposerEmoji, ComposerTimestamp]);
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -296,6 +296,12 @@ pub struct FuwaApp {
     /// Roles picked from the @ list by name, sent as their tokens.
     pub picked_roles: Vec<(String, String)>,
     pub menu: Option<Menu>,
+    /// The open right-click menu.
+    pub(crate) context: Option<crate::ui::context_menu::ContextMenu>,
+    /// What the pointer is over that has a right-click menu, for Shift+F10 and the Menu key.
+    pub(crate) hover_target: Option<crate::ui::context_menu::MenuOf>,
+    /// A picture right-clicked in a message, as (message, which of its files), for its menu.
+    pub right_picture: Option<(String, usize)>,
     /// The emoji picker over the composer, and its search box.
     pub emoji_open: bool,
     pub emoji_query: Entity<InputState>,
@@ -500,6 +506,9 @@ impl FuwaApp {
             picker_dismissed: None,
             picked_roles: Vec::new(),
             menu: None,
+            context: None,
+            hover_target: None,
+            right_picture: None,
             welcome: None,
             welcome_checked: HashSet::new(),
             sso_waiting: None,
@@ -1669,6 +1678,8 @@ impl FuwaApp {
             self.close_switcher(window, cx);
         } else if self.sheet_open {
             self.sheet_open = false;
+        } else if self.context.is_some() {
+            self.context = None;
         } else if self.menu.is_some() {
             self.menu = None;
         } else if self.dialog.is_some() {
@@ -1736,6 +1747,8 @@ impl FuwaApp {
             .capture_key_down(cx.listener(Self::on_key))
             .on_action(cx.listener(Self::close_overlay))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
+            .on_action(cx.listener(|this, _: &ComposerEmoji, window, cx| this.open_emoji(window, cx)))
+            .on_action(cx.listener(|this, _: &ComposerTimestamp, window, cx| this.open_time_picker(window, cx)))
             .on_action(cx.listener(|this, _: &AddInstance, window, cx| {
                 if !this.forward_to_recording("secondary-shift-n", cx) {
                     this.open_connect(true, window, cx)
@@ -1795,6 +1808,7 @@ impl FuwaApp {
             )
         })
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+        .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
         .when_some(self.render_sheet(cx), |el, sheet| el.child(sheet))
         .when_some(self.render_switcher(cx), |el, switcher| el.child(switcher))
         .child(self.render_toasts(window, cx))

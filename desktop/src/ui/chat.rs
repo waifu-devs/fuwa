@@ -14,8 +14,8 @@ use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Focusable as _, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, px, rgb,
+    IntoElement, MouseButton, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, px, rgb,
 };
 
 use crate::core::config::Density;
@@ -24,6 +24,7 @@ use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav, Target};
+use crate::ui::context_menu::{self, MenuOf};
 use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
 use crate::ui::motion;
@@ -926,6 +927,7 @@ impl FuwaApp {
                 .unwrap_or_default(),
             jumped: self.search.jumped.clone().filter(|(_, at)| at.elapsed() < JUMP_GLOW),
             thread,
+            lit: self.context.as_ref().map(|c| c.of.lit()),
         })
     }
 
@@ -985,7 +987,7 @@ impl FuwaApp {
                 .flex_1()
                 .min_w_0()
                 .py(px(4.0))
-                .child(Textarea::new(&self.composer).appearance(false))
+                .child(Textarea::new(&self.composer).appearance(false).context_menu(composer_menu))
                 .into_any_element()
         };
         div()
@@ -1164,6 +1166,14 @@ impl FuwaApp {
                         let dialog =
                             Dialog::Profile { key: k.clone(), user_id: user_id.clone(), server: Some(s.clone()) };
                         this.open_dialog(dialog, window, cx)
+                    }
+                    MembersEvent::Menu { user_id, at } => {
+                        let of = MenuOf::Member { key: k.clone(), server: Some(s.clone()), user_id: user_id.clone() };
+                        this.open_context_menu(of, *at, window, cx)
+                    }
+                    MembersEvent::Hover { user_id, on } => {
+                        let of = MenuOf::Member { key: k.clone(), server: Some(s.clone()), user_id: user_id.clone() };
+                        this.set_hover_target(of, *on)
                     }
                 })
                 .detach();
@@ -1464,6 +1474,8 @@ pub(crate) struct RowCtx {
     jumped: Option<(String, Instant)>,
     /// Drawing the open thread's panel: the id of the message it's under.
     thread: Option<String>,
+    /// What an open right-click menu is for, lit while it's open.
+    lit: Option<String>,
 }
 
 pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
@@ -1631,6 +1643,17 @@ fn shared_note(note: String, title: String, line: String, p: &Palette, ctx: &Rc<
     )
 }
 
+/// Right-clicking someone's name or picture in a message opens their menu.
+fn person_menu(
+    ctx: &Rc<RowCtx>,
+    user_id: String,
+) -> impl Fn(&gpui_kit::MouseDownEvent, &mut Window, &mut App) + 'static {
+    let (key, server) = (ctx.key.clone(), ctx.server.clone());
+    context_menu::on_right_click(ctx.this.clone(), move |_, _| {
+        Some(MenuOf::Member { key: key.clone(), server: server.clone(), user_id: user_id.clone() })
+    })
+}
+
 /// Opens someone's card from a message: their name, their picture, or a mention.
 fn open_profile(ctx: &RowCtx, user_id: String, window: &mut Window, cx: &mut App) {
     open_card(&ctx.this, &ctx.key, ctx.server.clone(), user_id, window, cx);
@@ -1650,7 +1673,7 @@ fn open_card(
     });
 }
 
-fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement {
+fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement {
     let compact = ctx.compact;
     let hover = alpha(p.foreground, if p.dark { 0.035 } else { 0.03 });
     let gutter = if compact { 0.0 } else { 56.0 };
@@ -1702,7 +1725,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
         .hover(|s| s.underline())
         .when_some(author.clone(), |el, id| {
             let ctx = ctx.clone();
-            el.on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+            el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
         })
         .child(m.name.clone());
     let time = div().text_xs().text_color(p.muted_foreground).child(when(m.at));
@@ -1808,7 +1832,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             .cursor_pointer()
             .when_some(author, |el, id| {
                 let ctx = ctx.clone();
-                el.on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+                el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                    .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
             })
             .child(avatar(m.user.as_ref(), 40.0, p))
             .into_any_element()
@@ -1940,9 +1965,37 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     let ping = alpha(p.primary, if p.dark { 0.12 } else { 0.09 });
     let ping_hover = alpha(p.primary, if p.dark { 0.16 } else { 0.13 });
     let bar = p.primary;
+    let lit = ctx.lit.as_deref().and_then(|l| l.strip_prefix("msg|")) == Some(m.id.as_str());
+    let menu_of = {
+        let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
+        move |window: &mut Window, cx: &mut App| {
+            // A picture right-clicked in it says so first (see `attachments_view`).
+            let picture = this
+                .update(cx, |this, _| this.right_picture.take())
+                .ok()
+                .flatten()
+                .filter(|(id, _)| *id == msg.id)
+                .map(|(_, n)| n);
+            let selection = gpui_kit::base::TextSelection::selected_text(window, cx);
+            MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture, selection }
+        }
+    };
+    let hover_of = {
+        let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
+        move |hovered: &bool, _: &mut Window, cx: &mut App| {
+            let of =
+                MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture: None, selection: String::new() };
+            let _ = this.update(cx, |this, _| this.set_hover_target(of, *hovered));
+        }
+    };
     div()
         .id(SharedString::from(format!("msg|{}", m.id)))
         .group("msg")
+        .on_mouse_down(
+            MouseButton::Right,
+            context_menu::on_right_click(ctx.this.clone(), move |w, cx| Some(menu_of(w, cx))),
+        )
+        .on_hover(hover_of)
         .relative()
         .flex()
         .px(px(16.0))
@@ -1952,8 +2005,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
         .py(px(if compact { 1.0 } else { 3.0 }))
         .map(|el| {
             if m.mentions_me {
-                el.bg(ping).hover(move |s| s.bg(ping_hover))
-            } else if m.editing {
+                el.bg(if lit { ping_hover } else { ping }).hover(move |s| s.bg(ping_hover))
+            } else if m.editing || lit {
                 el.bg(hover)
             } else {
                 el.hover(move |s| s.bg(hover))
@@ -1967,6 +2020,24 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
         .child(body)
         .when_some(actions, |el, a| el.child(a))
         .into_any_element()
+}
+
+/// The message box's right-click menu: the usual cut, copy and paste, then
+/// an emoji or a timestamp at the caret.
+fn composer_menu(
+    menu: gpui_kit::component::native_menu::NativeMenu,
+    _: &mut Window,
+    _: &mut App,
+) -> gpui_kit::component::native_menu::NativeMenu {
+    use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
+    menu.menu("Cut", Box::new(Cut))
+        .menu("Copy", Box::new(Copy))
+        .menu("Paste", Box::new(Paste))
+        .separator()
+        .menu("Select all", Box::new(SelectAll))
+        .separator()
+        .menu("Emoji", Box::new(crate::ui::app::ComposerEmoji))
+        .menu("Timestamp", Box::new(crate::ui::app::ComposerTimestamp))
 }
 
 /// Editing in place: Enter saves, Escape stops.

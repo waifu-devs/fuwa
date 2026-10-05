@@ -504,7 +504,9 @@
     only the rows in sight, grouped under each hoisted role like the web's
     `MemberList.tsx`; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
-    makes them links, `menus.rs` the bell menus, `notify.rs` the system
+    makes them links, `menus.rs` the bell menus, `context_menu.rs` the
+    right-click menus (docs/context-menus.md; what's in each is
+    `menu_items.rs`, from the same actions and checks as the buttons), `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,

@@ -44,6 +44,7 @@ pub(crate) enum Page {
     Language,
     Privacy,
     Updates,
+    Advanced,
     About,
 }
 
@@ -51,7 +52,7 @@ pub(crate) enum Page {
 const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
     [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
-const PAGES: [(Page, &str, &str); 11] = [
+const PAGES: [(Page, &str, &str); 12] = [
     (Page::Appearance, "palette", "Appearance"),
     (Page::Background, "image", "Background"),
     (Page::Motion, "sparkles", "Motion"),
@@ -62,6 +63,7 @@ const PAGES: [(Page, &str, &str); 11] = [
     (Page::Language, "languages", "Language"),
     (Page::Privacy, "shield-check", "Privacy"),
     (Page::Updates, "refresh-cw", "Updates"),
+    (Page::Advanced, "wrench", "Advanced"),
     (Page::About, "info", "About"),
 ];
 
@@ -365,6 +367,61 @@ impl SettingsView {
                 "New versions of the app, checked before they run.".into(),
                 self.updates_page(prefs, p, window, cx),
             ),
+            Page::Advanced => {
+                let on = prefs.developer_mode;
+                let body = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(toggle_row(
+                        "developer-mode",
+                        "Developer mode",
+                        "Shows Copy ID on servers, channels, people and messages, in their right-click menus. Handy for bots, the API and bug reports.",
+                        on,
+                        p,
+                        cx,
+                        |this, on, cx| this.set(cx, |pr| pr.developer_mode = on),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .px(px(12.0))
+                            .py(px(10.0))
+                            .rounded(corner(12.0))
+                            .bg(alpha(p.foreground, 0.05))
+                            .text_sm()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(div().flex().gap(px(4.0)).child(div().font_weight(FontWeight::BOLD).child("#general")).child(
+                                        div().text_color(p.muted_foreground).child("· right-click a channel"),
+                                    )),
+                            )
+                            .when(on, |el| {
+                                el.child(crate::ui::motion::slide_in(
+                                    div()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .px(px(8.0))
+                                        .py(px(4.0))
+                                        .rounded(corner(8.0))
+                                        .bg(p.background)
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(icon("binary").size(px(14.0)).text_color(p.primary))
+                                        .child("Copy channel ID"),
+                                    "dev-preview",
+                                    8.0,
+                                ))
+                            }),
+                    );
+                ("Advanced".into(), "For people building on fuwa.".into(), body.into_any_element())
+            }
             Page::About => {
                 let body = div()
                     .flex()

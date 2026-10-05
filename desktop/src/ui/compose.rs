@@ -14,6 +14,15 @@ impl FuwaApp {
     pub(crate) fn intercept(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let m = &key.modifiers;
         let bare = !(m.shift || m.control || m.alt || m.platform || m.function);
+        if self.context_menu_keys(key, window, cx) {
+            return true;
+        }
+        // Shift+F10 and the Menu key open the menu of what the pointer is over, or of where you are.
+        let shift_only = m.shift && !(m.control || m.alt || m.platform);
+        if (key.key == "f10" && shift_only) || (bare && matches!(key.key.as_str(), "menu" | "contextmenu")) {
+            self.open_context_menu_here(window, cx);
+            return true;
+        }
         if self.search_keys(key, window, cx) {
             return true;
         }
