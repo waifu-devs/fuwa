@@ -18,6 +18,7 @@
     { "id": "agent-commands", "date": "2026-10-04", "title": "Slash commands and buttons from agents" },
     { "id": "shared-files-elsewhere", "date": "2026-10-05", "title": "Files in channels with other instances" },
     { "id": "shared-polls", "date": "2026-10-05", "title": "Polls in shared channels" },
-    { "id": "shared-emoji", "date": "2026-10-05", "title": "Custom emoji in shared channels" }
+    { "id": "shared-emoji", "date": "2026-10-05", "title": "Custom emoji in shared channels" },
+    { "id": "shared-threads", "date": "2026-10-05", "title": "Threads in shared channels" }
   ]
 }

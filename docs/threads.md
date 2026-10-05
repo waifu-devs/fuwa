@@ -57,11 +57,10 @@ account, never per address).
 
 ## Secure and shared channels
 
-- Shared channels: the home server refuses threads in them, on both sides.
-  If a channel with threads is shared later, guests get the channel's
-  messages without thread summaries, and replies kept to their threads stay
-  home. Threads there would need `thread_id` in `GuestSend`, `GuestList` and
-  `SharedCall`, and `ThreadUpdated` passed to guests.
+- Shared channels: threads work on both sides and are kept at the home,
+  like the channel's messages: summaries, replies, follows and searches
+  (see [shared-channels.md](shared-channels.md)). Only the home's
+  moderators lock them. Polls stay out of threads there.
 - Secure channels don't use MessageService. Their threads live inside the
   encryption and the devices do what the server does here: see
   [secure-channels.md](secure-channels.md#threads).

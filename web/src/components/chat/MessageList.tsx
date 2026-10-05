@@ -173,8 +173,9 @@ export const MessageList = forwardRef<
   const access = useAccess(instanceKey, serverId);
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
-  // Threads go under messages in the channel itself, not under replies, and not in shared channels yet.
-  const threads = !threadId && !channel.shared;
+  // Threads go under messages in the channel itself, not under replies; in a shared one, once this instance takes them there.
+  const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
+  const threads = !threadId && (!channel.shared || threadsShared);
   const canStart = threads && hasIn(access, channel.id, Permission.CREATE_THREADS);
   const canReply = threads && canSend;
   const openThread = useThreadOpener();

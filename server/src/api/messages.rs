@@ -891,8 +891,8 @@ impl MessageService for Api {
                         // ticket when it's on another instance).
                         self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
                     }
-                    if !req.thread_id.is_empty() {
-                        return Err(Error::invalid("threads aren't in channels shared between servers yet"));
+                    if poll.is_some() && !req.thread_id.is_empty() {
+                        return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
                     }
                     if gif.is_some() {
                         return Err(Error::FailedPrecondition(
@@ -970,6 +970,9 @@ impl MessageService for Api {
                         } else {
                             Some(threads::check_reply(conn, &sdb.id, &access, &channel, &req.thread_id).await?)
                         };
+                        if parent.is_some() && poll.is_some() && channel.shared.is_some() {
+                            return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
+                        }
                         if !req.reply_to_id.is_empty() {
                             let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
                             if replied.is_none_or(|m| m.channel_id != channel.id) {
@@ -1114,9 +1117,6 @@ impl MessageService for Api {
                 let conn = sdb.read()?;
                 load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 if let Some(link) = shared::link_of(&conn, &req.channel_id).await? {
-                    if !req.thread_id.is_empty() {
-                        return Err(Error::NotFound("thread"));
-                    }
                     let guest = shared::guest_of(&self.app, &conn, &sdb.id, &account, &access, &link).await?;
                     return shared::guest_list(&self.app, &sdb.id, &link, guest, &req).await;
                 }

@@ -7939,44 +7939,265 @@ async fn replies_start_threads_under_messages() {
     instance.stop().await;
 }
 
+async fn follow_in(c: &mut Clients, token: &str, server_id: &str, channel_id: &str, thread_id: &str, follow: bool) {
+    let request = pb::FollowThreadRequest {
+        server_id: server_id.into(),
+        channel_id: channel_id.into(),
+        thread_id: thread_id.into(),
+        follow,
+    };
+    c.messages.follow_thread(authed(token, request)).await.unwrap();
+}
+
+async fn lock_thread(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> Result<pb::ThreadSummary, tonic::Status> {
+    let request = pb::UpdateThreadRequest {
+        server_id: server_id.into(),
+        channel_id: channel_id.into(),
+        thread_id: thread_id.into(),
+        locked: Some(true),
+    };
+    c.messages.update_thread(authed(token, request)).await.map(|r| r.into_inner().thread.unwrap())
+}
+
+async fn next_thread_update(
+    stream: &mut tonic::Streaming<pb::SubscribeResponse>,
+    thread_id: &str,
+) -> pb::ThreadUpdated {
+    loop {
+        let event = next_event(stream).await;
+        if let Some(pb::event::Payload::ThreadUpdated(updated)) = event.payload
+            && updated.thread_id == thread_id
+        {
+            return updated;
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn threads_stay_home_when_a_channel_is_shared() {
+async fn threads_in_shared_channels() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
     let mut c = clients(&instance).await;
     let (juan, _, _) = sign_up(&mut c, "juan").await;
     let (mika, _, _) = sign_up(&mut c, "mika").await;
     let (sora, _, _) = sign_up(&mut c, "sora").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
     let home = create_server(&mut c, &juan, "Home", true).await.id;
     let guest = create_server(&mut c, &mika, "Guest", true).await.id;
     join(&mut c, &sora, &home).await;
+    join(&mut c, &rin, &guest).await;
     let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
     let parent = send(&mut c, &juan, &home, &dev.id, "movie night?").await.unwrap();
     let kept = reply(&mut c, &sora, &home, &dev.id, &parent.id, "only in the thread", false).await.unwrap();
     let also = reply(&mut c, &sora, &home, &dev.id, &parent.id, "in both", true).await.unwrap();
 
-    // Shared after the thread started: guests see the channel, not who replied in its threads.
-    let shared = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
-    let seen = messages(&mut c, &mika, &guest, &shared.id).await;
-    assert!(seen.iter().all(|m| m.id != kept.id), "{seen:?}");
+    // Shared after the thread started: guests see it as the home's people do.
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let mut at_guest = events_of(&mut c, &mika, &guest).await;
+    let seen = messages(&mut c, &rin, &guest, &shown.id).await;
+    assert!(seen.iter().all(|m| m.id != kept.id), "replies kept to their thread stay in it");
     let first = seen.iter().find(|m| m.id == parent.id).unwrap();
-    assert!(first.thread.is_none());
+    assert_eq!(first.thread.as_ref().unwrap().reply_count, 2);
     let both = seen.iter().find(|m| m.id == also.id).unwrap();
-    assert!(both.thread_id.is_empty() && !both.also_in_channel);
-    let hidden = c
+    assert!(both.thread_id == parent.id && both.also_in_channel);
+    let got = c
         .messages
         .get_message(authed(
-            &mika,
+            &rin,
             pb::GetMessageRequest {
                 server_id: guest.clone(),
-                channel_id: shared.id.clone(),
+                channel_id: shown.id.clone(),
                 message_id: kept.id.clone(),
             },
         ))
         .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(got.message.unwrap().thread_id, parent.id);
+
+    // A guest replies; both sides read the thread, and its count goes live to guests.
+    let theirs = reply(&mut c, &rin, &guest, &shown.id, &parent.id, "count me in", false).await.unwrap();
+    assert_eq!((theirs.channel_id.as_str(), theirs.thread_id.as_str()), (shown.id.as_str(), parent.id.as_str()));
+    let updated = next_thread_update(&mut at_guest, &parent.id).await;
+    assert_eq!(updated.channel_id, shown.id);
+    assert_eq!(updated.thread.as_ref().unwrap().reply_count, 3);
+    assert_eq!(updated.thread.unwrap().participant_ids[0], rin_user.id);
+    let there = thread_page(&mut c, &rin, &guest, &shown.id, &parent.id).await;
+    assert_eq!(there.messages.len(), 3);
+    assert_eq!(there.parent.as_ref().unwrap().id, parent.id);
+    assert!(there.messages.iter().all(|m| m.channel_id == shown.id));
+    let at_home = thread_page(&mut c, &juan, &home, &dev.id, &parent.id).await;
+    assert!(at_home.messages.iter().any(|m| m.id == theirs.id));
+
+    // A guest starts a thread; the home's people reply in it.
+    let topic = send(&mut c, &rin, &guest, &shown.id, "favourite movie?").await.unwrap();
+    let started = reply(&mut c, &rin, &guest, &shown.id, &topic.id, "Totoro", false).await.unwrap();
+    assert_eq!(started.thread_id, topic.id);
+    reply(&mut c, &juan, &home, &dev.id, &topic.id, "Mononoke", false).await.unwrap();
+    let listed = list_threads(&mut c, &rin, &guest, &shown.id, "").await;
+    let mut ids: Vec<&str> = listed.threads.iter().map(|m| m.id.as_str()).collect();
+    ids.sort();
+    let mut want = vec![parent.id.as_str(), topic.id.as_str()];
+    want.sort();
+    assert_eq!(ids, want);
+    assert!(listed.threads.iter().all(|m| m.channel_id == shown.id));
+    let found = list_threads(&mut c, &rin, &guest, &shown.id, "mononoke").await;
+    assert_eq!(found.threads.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), [topic.id.as_str()]);
+
+    // Polls stay out of threads there.
+    let request = pb::SendMessageRequest {
+        server_id: guest.clone(),
+        channel_id: shown.id.clone(),
+        thread_id: topic.id.clone(),
+        poll: Some(new_poll("Which?", &["A", "B"], false)),
+        ..Default::default()
+    };
+    let refused = c.messages.send_message(authed(&rin, request)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+
+    // Follows are kept at the home: replying followed both, and unfollowing sticks.
+    let mut mine = followed(&mut c, &rin, &guest).await;
+    mine.sort();
+    assert_eq!(mine, want);
+    follow_in(&mut c, &rin, &guest, &shown.id, &parent.id, false).await;
+    assert_eq!(followed(&mut c, &rin, &guest).await, std::slice::from_ref(&topic.id));
+
+    // Others replied, so the guest can't take the thread away with its message.
+    let deleting = c
+        .messages
+        .delete_message(authed(
+            &rin,
+            pb::DeleteMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shown.id.clone(),
+                message_id: topic.id.clone(),
+            },
+        ))
+        .await
         .unwrap_err();
-    assert_eq!(hidden.code(), Code::NotFound);
+    assert_eq!(deleting.code(), Code::PermissionDenied);
+
+    // Only the home locks threads, and a locked one takes no guest's reply.
+    let elsewhere = lock_thread(&mut c, &mika, &guest, &shown.id, &parent.id).await.unwrap_err();
+    assert_eq!(elsewhere.code(), Code::FailedPrecondition);
+    assert!(lock_thread(&mut c, &juan, &home, &dev.id, &parent.id).await.unwrap().locked);
+    let locked = reply(&mut c, &rin, &guest, &shown.id, &parent.id, "late", false).await.unwrap_err();
+    assert_eq!(locked.code(), Code::PermissionDenied);
+
+    // Someone the home keeps out reads and follows no more.
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: true,
+            },
+        ))
+        .await
+        .unwrap();
+    let request = pb::ListMessagesRequest {
+        server_id: guest.clone(),
+        channel_id: shown.id.clone(),
+        thread_id: topic.id.clone(),
+        ..Default::default()
+    };
+    assert_eq!(c.messages.list_messages(authed(&rin, request)).await.unwrap_err().code(), Code::PermissionDenied);
+    assert!(followed(&mut c, &rin, &guest).await.is_empty());
     instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn threads_cross_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, juan_user, _) = sign_up(&mut ca, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let parent = send(&mut ca, &juan, &home, &dev.id, "movie night?").await.unwrap();
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert!(asked.allowed.contains(&(pb::Permission::CreateThreads as i32)));
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+    let mut at_guest = events_of(&mut cb, &mika, &guest).await;
+    let juan_there = format!("{}@{origin_a}", juan_user.id);
+    let mika_there = format!("{}@{origin_b}", mika_user.id);
+
+    // A reply from the other instance starts the thread at the home.
+    let theirs = reply(&mut cb, &mika, &guest, &shown.id, &parent.id, "count me in", false).await.unwrap();
+    assert_eq!(theirs.thread_id, parent.id);
+    let at_home = thread_page(&mut ca, &juan, &home, &dev.id, &parent.id).await;
+    assert_eq!(at_home.messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>(), [mika_there.as_str()]);
+    reply(&mut ca, &juan, &home, &dev.id, &parent.id, "see you there", false).await.unwrap();
+    let updated = loop {
+        let updated = next_thread_update(&mut at_guest, &parent.id).await;
+        if updated.thread.as_ref().unwrap().reply_count == 2 {
+            break updated;
+        }
+    };
+    assert_eq!(updated.channel_id, shown.id);
+    assert_eq!(updated.thread.unwrap().participant_ids, [juan_there.clone(), mika_user.id.clone()]);
+
+    // The other instance reads the thread and the channel's threads, names as it knows them.
+    let there = thread_page(&mut cb, &mika, &guest, &shown.id, &parent.id).await;
+    assert_eq!(
+        there.messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>(),
+        [mika_user.id.as_str(), juan_there.as_str()]
+    );
+    assert_eq!(there.parent.unwrap().author_id, juan_there);
+    let listed = list_threads(&mut cb, &mika, &guest, &shown.id, "movie").await;
+    assert_eq!(listed.threads.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), [parent.id.as_str()]);
+    assert_eq!(listed.threads[0].thread.as_ref().unwrap().reply_count, 2);
+    assert_eq!(followed(&mut cb, &mika, &guest).await, std::slice::from_ref(&parent.id));
+    follow_in(&mut cb, &mika, &guest, &shown.id, &parent.id, false).await;
+    assert!(followed(&mut cb, &mika, &guest).await.is_empty());
+    a.stop().await;
+    b.stop().await;
 }
 
 /// A channel shared with a server on another instance: a code made for

@@ -151,13 +151,30 @@ audit log notes an instance admin did it.
   `ListEmojis` with its `channel_id` gives the home's emoji for the
   picker (`GuestEmojis`); the app offers those and the guest server's own.
   Writing the home's emoji needs nothing more: the home shows its own.
+- **Threads** in a shared channel are the home's too: replies, summaries,
+  who follows what, and archiving by the home's setting. A guest's reply
+  goes as `GuestReply` (a `GuestSend` with the thread), a thread's page as
+  `GuestThread`, the channel's threads as `GuestThreads`, following as
+  `GuestFollow`, and the threads they follow there as `GuestFollowed`
+  (which `ListFollowedThreads` asks each home for at once, waiting at most
+  five seconds). Starting a thread needs Start threads from both the
+  guest's own server and the home's grant (`PERMISSION_CREATE_THREADS`
+  joins what a home can let guests do). Only the home's moderators lock a
+  thread, and a locked one takes no guest's reply; a guest's message that
+  others replied under can then be deleted only at the home. ThreadUpdated
+  reaches guests like message events, and their apps decide notifications
+  from it and the threads they follow. A thread search in a shared channel
+  goes to the home's instance, search text included, since the home holds
+  the threads and counts the search (30 a minute for each person). When a
+  connection ends, its people's follows there go with it. Polls stay out
+  of threads in shared channels.
 - `Channel.shared` tells apps a channel is shared: from here with which
   servers (`home`), or from which server and channel (not `home`).
   `SharedChannelsUpdated` tells managers to re-read `ListConnections`.
 
 ## What can't be shared
 
-- Voice channels, categories, threads and forums (phase 1).
+- Voice channels, categories and forums (phase 1).
 - End-to-end encrypted channels and direct messages, ever: the home server
   stores the messages, so there'd be no end-to-end left.
 - A channel shown from another server can't be shared on, take webhooks,

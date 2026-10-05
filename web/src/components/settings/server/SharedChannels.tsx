@@ -22,6 +22,7 @@ import {
   UnplugIcon,
   XIcon,
   BarChart3Icon,
+  MessagesSquareIcon,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -82,6 +83,7 @@ const SHAREABLE: readonly { permission: Permission; label: Key; icon: typeof Eye
   { permission: Permission.EMBED_LINKS, label: "serversettings.permission.embedLinks", icon: LinkIcon },
   { permission: Permission.ATTACH_FILES, label: "serversettings.permission.attachFiles", icon: ImageIcon },
   { permission: Permission.CREATE_POLLS, label: "serversettings.permission.createPolls", icon: BarChart3Icon },
+  { permission: Permission.CREATE_THREADS, label: "serversettings.permission.createThreads", icon: MessagesSquareIcon },
 ];
 
 const waiting = (c: SharedConnection) => c.state === SharedConnectionState.WAITING;
@@ -711,7 +713,11 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
   const [saving, setSaving] = useState<Permission | null>(null);
   // Polls go to other servers once this instance takes their votes.
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
-  const toggles = SHAREABLE.filter((s) => s.permission !== Permission.CREATE_POLLS || pollsShared);
+  // And threads once it keeps them for guests.
+  const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
+  const toggles = SHAREABLE.filter(
+    (s) => (s.permission !== Permission.CREATE_POLLS || pollsShared) && (s.permission !== Permission.CREATE_THREADS || threadsShared),
+  );
   if (!c.home)
     return (
       <ul className="flex flex-wrap gap-1.5 pl-[3.25rem]">
