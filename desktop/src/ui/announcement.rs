@@ -205,7 +205,7 @@ impl crate::ui::app::FuwaApp {
         use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
         let key = match &self.nav {
             Nav::Instance { key } | Nav::Server { key, .. } => key.clone(),
-            Nav::Home { dm: Some((key, _)) } => key.clone(),
+            Nav::Home { dm: Some((key, _)) } | Nav::Friends { key } => key.clone(),
             Nav::Home { dm: None } => return None,
         };
         let now = crate::core::dms::now_ms();

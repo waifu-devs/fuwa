@@ -34,6 +34,7 @@ pub enum SettingsEvent {
 pub(crate) enum Page {
     Profile,
     Security,
+    Friends,
     Appearance,
     Background,
     Motion,
@@ -49,8 +50,11 @@ pub(crate) enum Page {
 }
 
 /// Your account's pages, then the app's.
-const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
-    [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
+const ACCOUNT_PAGES: [(Page, &str, &str); 3] = [
+    (Page::Profile, "user-round-pen", "Profile"),
+    (Page::Security, "key-round", "Password and devices"),
+    (Page::Friends, "heart-handshake", "Friends and privacy"),
+];
 
 const PAGES: [(Page, &str, &str); 12] = [
     (Page::Appearance, "palette", "Appearance"),
@@ -75,6 +79,8 @@ pub struct SettingsView {
     pub(crate) look: Look,
     /// The reports' counts last shown on the Privacy page.
     pub(crate) pending: crate::core::reports::Pending,
+    /// Why the last friends setting didn't save.
+    pub(crate) friends_error: Option<String>,
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -104,6 +110,7 @@ impl SettingsView {
             account: AccountForm::new(window, cx),
             look,
             pending: Default::default(),
+            friends_error: None,
         }
     }
 
@@ -127,6 +134,11 @@ impl SettingsView {
             Page::Security => {
                 ("Password and devices".into(), "Keep your account yours.".into(), self.security_page(p, window, cx))
             }
+            Page::Friends => (
+                "Friends and privacy".into(),
+                "Who can reach you, and what your friends see. Kept on the instance, for every device.".into(),
+                self.friends_page(p, window, cx),
+            ),
             Page::Appearance => (
                 "Appearance".into(),
                 "How fuwa looks on this computer, the same themes as everywhere else.".into(),

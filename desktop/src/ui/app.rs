@@ -40,6 +40,8 @@ pub fn bind_keys(cx: &mut App) {
 pub enum Nav {
     /// Direct messages from every instance; one open, or none.
     Home { dm: Option<(String, String)> },
+    /// Your friends on an instance, under Home.
+    Friends { key: String },
     /// An instance's own page: its connection, and making or joining servers there.
     Instance { key: String },
     /// A server, with the channel last opened in it.
@@ -284,6 +286,7 @@ pub struct FuwaApp {
     /// Searching the server on screen: the header's field and the results beside the chat.
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
+    pub friends: crate::ui::friends::Friends,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
     pub time_style: crate::core::timestamps::Style,
@@ -347,6 +350,7 @@ impl FuwaApp {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
+        let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 match event {
@@ -398,6 +402,7 @@ impl FuwaApp {
         // and Escape, Up to edit your last message, Escape to stop editing.
         let weak = cx.entity().downgrade();
         subscriptions.extend(thread_subs);
+        subscriptions.extend(friend_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 if this.intercept(&event.keystroke, window, cx) {
@@ -446,6 +451,9 @@ impl FuwaApp {
                             if let Some(thread) = click.thread {
                                 this.open_thread(thread, window, cx);
                             }
+                        }
+                        None if click.channel.is_empty() => {
+                            this.navigate(Nav::Friends { key: click.instance }, window, cx)
                         }
                         None => this.navigate(Nav::Home { dm: Some((click.instance, click.channel)) }, window, cx),
                     }
@@ -498,6 +506,7 @@ impl FuwaApp {
             files: Default::default(),
             search,
             threads,
+            friends,
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
@@ -546,11 +555,13 @@ impl FuwaApp {
             Nav::Server { key, server } => {
                 self.core.shared.read(|s| s.instance(key).and_then(|i| i.server(server)).is_none())
             }
-            Nav::Instance { key } => self.core.shared.read(|s| s.instance(key).is_none()),
-            Nav::Home { dm: Some((key, id)) } => self
-                .core
-                .shared
-                .read(|s| s.instance(key).is_none_or(|i| !i.dms.conversations.iter().any(|c| &c.id == id))),
+            Nav::Instance { key } | Nav::Friends { key } => self.core.shared.read(|s| s.instance(key).is_none()),
+            // A conversation with someone just blocked goes out of sight too.
+            Nav::Home { dm: Some((key, id)) } => self.core.shared.read(|s| {
+                s.instance(key).is_none_or(|i| {
+                    i.dms.conversations.iter().find(|c| &c.id == id).is_none_or(|c| crate::core::friends::hidden(i, c))
+                })
+            }),
             Nav::Home { dm: None } => false,
         };
         if gone {
@@ -625,6 +636,26 @@ impl FuwaApp {
             }
             Notice::Removed { server } => {
                 self.toast("door-open", "You're no longer in a server".into(), server, None, None, cx);
+            }
+            Notice::Friend { instance, title } => {
+                if !self.prefs.notifications {
+                    return;
+                }
+                let body = if self.prefs.streamer_mode {
+                    "Friends".to_owned()
+                } else {
+                    self.core.shared.read(|s| s.instance(&instance).map(|i| i.name())).unwrap_or_default()
+                };
+                if !window.is_window_active() {
+                    // An empty channel opens Friends.
+                    crate::ui::notify::show(
+                        title,
+                        body,
+                        crate::ui::notify::Clicked { instance, server: None, channel: String::new(), thread: None },
+                    );
+                    return;
+                }
+                self.toast("user-plus", title, body, Some(Nav::Friends { key: instance }), None, cx);
             }
             Notice::SignedOut { instance } => {
                 let name =
@@ -1093,6 +1124,19 @@ impl FuwaApp {
         }
     }
 
+    /// Settings, on Friends and privacy for one instance.
+    pub fn open_friend_settings(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        if let Some(view) = &self.settings {
+            let key = key.to_owned();
+            view.update(cx, |view, cx| {
+                view.page = crate::ui::settings::Page::Friends;
+                view.account.key = Some(key);
+                cx.notify();
+            });
+        }
+    }
+
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings.is_some() {
             return;
@@ -1213,6 +1257,8 @@ impl FuwaApp {
         self.rules = None;
         match &dialog {
             Dialog::Profile { key, user_id, .. } => {
+                self.friends.relation = None;
+                self.load_relation(key, user_id, cx);
                 let (core, key, user) = (self.core.clone(), key.clone(), user_id.clone());
                 self.run(cx, async move { core.profile(&key, &user).await }, |this, result, cx| {
                     if let Ok(profile) = result {

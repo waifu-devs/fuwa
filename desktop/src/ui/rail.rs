@@ -46,7 +46,7 @@ impl FuwaApp {
         let dm_unread: u32 =
             self.core.shared.read(|s| s.instances.values().map(|i| i.dms.unread.values().sum::<u32>()).sum());
 
-        let home_active = matches!(self.nav, Nav::Home { .. });
+        let home_active = matches!(self.nav, Nav::Home { .. } | Nav::Friends { .. });
         let mut list = div().flex().flex_col().items_center().gap(px(8.0)).pt(px(12.0)).pb(px(12.0));
 
         // Home: the little cloud.

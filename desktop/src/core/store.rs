@@ -88,6 +88,8 @@ pub struct InstanceState {
     pub followed: HashMap<String, HashSet<String>>,
     /// Per thread you follow: replies from others that came while it wasn't open.
     pub thread_unread: HashMap<String, u32>,
+    /// Your friends, requests and blocks.
+    pub friends: crate::core::friends::FriendsState,
 }
 
 impl InstanceState {
@@ -118,6 +120,7 @@ impl InstanceState {
             thread_parents: HashMap::new(),
             followed: HashMap::new(),
             thread_unread: HashMap::new(),
+            friends: Default::default(),
         }
     }
 

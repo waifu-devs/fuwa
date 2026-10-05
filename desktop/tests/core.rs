@@ -1026,6 +1026,120 @@ fn secure_channels_stay_between_devices() {
     drop(instance.runtime);
 }
 
+#[test]
+fn friends_follow_live_and_blocks_hide_conversations() {
+    use fuwa_desktop::core::friends::{self, BLOCKED, FRIEND, FriendsStatus, INCOMING, OUTGOING};
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let alice = Core::start(Paths::under(home_a.path())).unwrap();
+    let bob = Core::start(Paths::under(home_b.path())).unwrap();
+    let key = {
+        let (core, url) = (alice.clone(), instance.url.clone());
+        wait(&alice, async move { core.sign_up(&url, "alice", "correct horse battery", "Alice").await }).unwrap()
+    };
+    {
+        let (core, url) = (bob.clone(), instance.url.clone());
+        wait(&bob, async move { core.sign_up(&url, "bob", "correct horse battery", "Bob").await }).unwrap();
+    }
+    for core in [&alice, &bob] {
+        until(core, "friends followed", |s| {
+            s.instance(&key)
+                .is_some_and(|i| i.friends.status == FriendsStatus::Ready && i.dms.status == DmStatus::Ready)
+        });
+    }
+    let me = |core: &Core| core.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap());
+    let (a, b) = (me(&alice), me(&bob));
+    let state = |core: &Core, id: &str| {
+        core.shared.read(|s| friends::state_with(&s.instance(&key).unwrap().friends.list, id, now_ms()))
+    };
+
+    // Alice asks Bob by username, typed loosely; Bob hears of it live, with a notice.
+    let mut notices = bob.take_notices().unwrap();
+    let sent = {
+        let (core, key, name) = (alice.clone(), key.clone(), format!("  @{}", b.username.to_uppercase()));
+        wait(&alice, async move { core.send_friend_request(&key, "", &name).await }).unwrap()
+    };
+    assert_eq!(sent.state, OUTGOING);
+    assert_eq!(state(&alice, &b.id), OUTGOING);
+    until(&bob, "Alice's request", |s| {
+        friends::waiting_for_you(&s.instance(&key).unwrap().friends.list, now_ms()) == 1
+    });
+    assert_eq!(state(&bob, &a.id), INCOMING);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let notice = loop {
+        match notices.try_recv() {
+            Ok(notice) => break notice,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => panic!("no notice for the request"),
+        }
+    };
+    assert!(matches!(notice, Notice::Friend { ref title, .. } if title == "Alice wants to be friends"), "{notice:?}");
+
+    // Bob takes it: friends on both sides, and each sees the other online.
+    {
+        let (core, key, id) = (bob.clone(), key.clone(), a.id.clone());
+        wait(&bob, async move { core.accept_friend(&key, &id).await }).unwrap();
+    }
+    assert_eq!(state(&bob, &a.id), FRIEND);
+    until(&alice, "Bob a friend, online", |s| {
+        s.instance(&key).unwrap().friends.list.iter().any(|f| f.state == FRIEND && f.online)
+    });
+    let relation = {
+        let (core, key, id) = (alice.clone(), key.clone(), b.id.clone());
+        wait(&alice, async move { core.relationship(&key, &id).await }).unwrap()
+    };
+    assert_eq!(relation.state, FRIEND);
+    assert!(relation.may_message, "friends may write without a server in common");
+
+    // Settings follow the account: saved on one copy, read on the next list.
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        let settings =
+            pb::FriendSettings { direct_messages_from: pb::DirectMessagesFrom::Friends as i32, ..Default::default() };
+        wait(&bob, async move { core.save_friend_settings(&key, settings).await }).unwrap();
+    }
+    assert_eq!(
+        bob.shared.read(|s| s.instance(&key).unwrap().friends.settings.unwrap().direct_messages_from),
+        pb::DirectMessagesFrom::Friends as i32
+    );
+
+    // Friends can talk privately; blocking hides the conversation and unfriends.
+    let conversation = {
+        let (core, key, id) = (alice.clone(), key.clone(), b.id.clone());
+        wait(&alice, async move { core.open_conversation(&key, &id).await }).unwrap()
+    };
+    let hidden = |core: &Core| {
+        core.shared.read(|s| {
+            let i = s.instance(&key).unwrap();
+            i.dms.conversations.iter().find(|c| c.id == conversation).is_some_and(|c| friends::hidden(i, c))
+        })
+    };
+    until(&alice, "the conversation", |s| {
+        s.instance(&key).unwrap().dms.conversations.iter().any(|c| c.id == conversation)
+    });
+    assert!(!hidden(&alice));
+    {
+        let (core, key, id) = (alice.clone(), key.clone(), b.id.clone());
+        wait(&alice, async move { core.block_user(&key, &id).await }).unwrap();
+    }
+    assert_eq!(state(&alice, &b.id), BLOCKED);
+    assert!(hidden(&alice));
+    until(&bob, "Alice gone from Bob's list", |s| {
+        friends::state_with(&s.instance(&key).unwrap().friends.list, &a.id, now_ms()) == 0
+    });
+    {
+        let (core, key, id) = (alice.clone(), key.clone(), b.id.clone());
+        wait(&alice, async move { core.unblock_user(&key, &id).await }).unwrap();
+    }
+    assert_eq!(state(&alice, &b.id), 0);
+    assert!(!hidden(&alice));
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap().flatten() {

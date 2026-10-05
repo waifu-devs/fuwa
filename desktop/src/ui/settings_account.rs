@@ -80,6 +80,19 @@ fn accounts(view: &SettingsView) -> Vec<(String, String, pb::User)> {
 }
 
 impl SettingsView {
+    /// The account the account pages show: the one picked, or the first.
+    pub(crate) fn account_key(&mut self) -> Option<String> {
+        let list = accounts(self);
+        let key = self
+            .account
+            .key
+            .clone()
+            .filter(|k| list.iter().any(|(key, ..)| key == k))
+            .or_else(|| list.first().map(|(key, ..)| key.clone()))?;
+        self.account.key = Some(key.clone());
+        Some(key)
+    }
+
     /// Picks the account to show, and fills the fields from it once.
     fn account_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, pb::User)> {
         let list = accounts(self);
@@ -132,7 +145,7 @@ impl SettingsView {
     }
 
     /// The row of instances to pick from, when there's more than one.
-    fn account_picker(&self, current: &str, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn account_picker(&self, current: &str, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let list = accounts(self);
         if list.len() < 2 {
             return None;

@@ -714,6 +714,7 @@ impl FuwaApp {
             Nav::Server { key, server } => self.channel_view(&key, &server, window, cx),
             Nav::Home { dm: Some((key, id)) } => self.dm_view(&key, &id, window, cx),
             Nav::Home { dm: None } => home_splash(&p, window).into_any_element(),
+            Nav::Friends { key } => self.friends_view(&key, window, cx),
             Nav::Instance { key } => self.instance_page(&key, window, cx),
         };
         div().flex_1().h_full().min_w_0().flex().bg(p.chat_surface).child(body)
@@ -2267,7 +2268,7 @@ fn home_splash(p: &Palette, window: &Window) -> impl IntoElement {
                 .max_w(px(440.0))
                 .text_center()
                 .text_color(p.muted_foreground)
-                .child("Pick a conversation on the left, or open someone from a server's member list. Everything here is end-to-end encrypted: only your devices and theirs can read it."),
+                .child("Pick a conversation on the left, or message a friend or someone from a server's member list. Everything here is end-to-end encrypted: only your devices and theirs can read it."),
             "splash-body",
             Duration::from_millis(160),
             12.0,

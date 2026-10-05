@@ -114,7 +114,11 @@ badge in the instance's sidebar, `components/friends/FriendActions.tsx` on
 profile cards, and Settings > Friends and privacy. The pure parts (events,
 tabs, counts) are `lib/friends.ts`, tested in `lib/friends.test.ts`.
 
-The desktop app needs the same: a Friends screen under the instance's home
-with the four tabs and an add box, the badge, the buttons on its profile
-card, the settings page, following `WatchFriends` in its sync task, and
-hiding conversations with people you blocked.
+The desktop app follows `WatchFriends` beside the event stream in its sync
+task (`core/friends.rs`, the same pure parts as `lib/friends.ts` with their
+tests), and draws a Friends row with its request badge at the top of Home
+for each signed-in instance, the Friends screen with the four tabs, a search
+and the add box (`ui/friends.rs`), the buttons and mutual friends on
+profile cards, friend items in a person's right-click menu, and Settings >
+Friends and privacy (`ui/settings_friends.rs`). Conversations with people
+you blocked leave Home's list, and one that's open closes.

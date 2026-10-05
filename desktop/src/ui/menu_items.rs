@@ -214,6 +214,8 @@ impl FuwaApp {
             member: Option<pb::Member>,
             roles: Vec<pb::Role>,
             allowed: Vec<P>,
+            /// Where you stand with them, when this instance has friends.
+            friend: Option<i32>,
         }
         let facts = self.core.shared.read(|s| {
             let i = s.instance(key)?;
@@ -251,6 +253,11 @@ impl FuwaApp {
                 member,
                 roles,
                 allowed,
+                friend: matches!(
+                    i.friends.status,
+                    crate::core::friends::FriendsStatus::Ready | crate::core::friends::FriendsStatus::Loading
+                )
+                .then(|| crate::core::friends::state_with(&i.friends.list, user_id, crate::core::dms::now_ms())),
             })
         });
         let Some(f) = facts else { return Built::of(Vec::new()) };
@@ -266,7 +273,7 @@ impl FuwaApp {
                 }),
             ));
         }
-        if !f.me && !f.agent && f.dms {
+        if !f.me && !f.agent && f.dms && f.friend != Some(crate::core::friends::BLOCKED) {
             let (k, uid) = (key.to_owned(), user_id.to_owned());
             primary.push(
                 Item::act(
@@ -365,8 +372,36 @@ impl FuwaApp {
                 );
             }
         }
+        let mut friend = Vec::new();
+        if let Some(state) = f.friend.filter(|_| !f.me && !f.agent) {
+            use crate::core::friends::{BLOCKED, FRIEND, INCOMING, OUTGOING};
+            use crate::ui::friends::Act;
+            let item = |label: &str, glyph: &'static str, act: Act| {
+                let (k, uid) = (key.to_owned(), user_id.to_owned());
+                Item::act(label, glyph, run(move |this, _, cx| this.friend_act(&k, &uid, act, cx)))
+            };
+            match state {
+                0 => friend.push(item("Add friend", "user-plus", Act::Request)),
+                OUTGOING => friend.push(item("Cancel request", "x", Act::Remove)),
+                INCOMING => {
+                    friend.push(item("Accept request", "user-check", Act::Accept));
+                    friend.push(item("Decline request", "x", Act::Remove));
+                }
+                FRIEND => friend.push(item("Remove friend", "user-minus", Act::Remove)),
+                _ => {}
+            }
+            if state == BLOCKED {
+                friend.push(item("Unblock", "shield-off", Act::Unblock));
+            } else {
+                friend.push(item("Block", "ban", Act::Block).danger().confirm(
+                    format!("Block @{}?", f.username),
+                    "They can't message you, call you or send you requests, and they aren't told.",
+                    "Block",
+                ));
+            }
+        }
         let _ = cx;
-        Built::of(vec![primary, manage, moderate, developer])
+        Built::of(vec![primary, friend, manage, moderate, developer])
     }
 
     fn channel_items(&self, key: &str, server: &str, channel: &str, developer: Vec<Item>) -> Built {

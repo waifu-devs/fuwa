@@ -612,8 +612,19 @@ impl FuwaApp {
         if let Some(buttons) = server.and_then(|sid| self.moderation_buttons(key, sid, user_id, &p, cx)) {
             info = info.child(buttons);
         }
-        // Agents have no private messages.
-        if !me && !crate::ui::widgets::is_agent(user.as_ref()) {
+        // Agents have no friends and no private messages.
+        let person = !me && !crate::ui::widgets::is_agent(user.as_ref());
+        if let Some(buttons) = person.then(|| self.profile_friend_buttons(key, user_id, &p, cx)).flatten() {
+            info = info.child(buttons);
+        }
+        // Someone you blocked can't be written to until you unblock them.
+        let blocked = self.core.shared.read(|s| {
+            s.instance(key).is_some_and(|i| {
+                crate::core::friends::state_with(&i.friends.list, user_id, crate::core::dms::now_ms())
+                    == crate::core::friends::BLOCKED
+            })
+        });
+        if person && !blocked {
             info = info.child(
                 primary_button("profile-message", "Message", &p)
                     .w_full()

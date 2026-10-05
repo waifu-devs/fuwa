@@ -12,6 +12,7 @@ use gpui_kit::{
 };
 
 use crate::core::dms::DmStatus;
+use crate::core::friends::{self, FriendsStatus};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
@@ -42,6 +43,7 @@ impl FuwaApp {
         let (header, body) = match self.nav.clone() {
             Nav::Server { key, server } => self.server_sidebar(&key, &server, window, cx),
             Nav::Home { dm } => self.dm_sidebar(dm, window, cx),
+            Nav::Friends { .. } => self.dm_sidebar(None, window, cx),
             Nav::Instance { key } => self.instance_sidebar(&key, window, cx),
         };
         let call_bar = self.call_bar(window, cx);
@@ -544,13 +546,21 @@ impl FuwaApp {
             unread: u32,
         }
         type Status = (String, DmStatus, Option<String>);
-        let (rows, statuses): (Vec<Row>, Vec<Status>) = self.core.shared.read(|s| {
+        /// An instance's Friends row: its key, its name, and requests waiting.
+        type FriendsRow = (String, String, usize);
+        let now = crate::core::dms::now_ms();
+        let (rows, statuses, friends): (Vec<Row>, Vec<Status>, Vec<FriendsRow>) = self.core.shared.read(|s| {
             let mut rows = Vec::new();
             let mut statuses = Vec::new();
+            let mut friends = Vec::new();
             for i in s.order.iter().filter_map(|k| s.instance(k)) {
                 statuses.push((i.name(), i.dms.status, i.dms.problem.clone()));
+                if matches!(i.friends.status, FriendsStatus::Loading | FriendsStatus::Ready) {
+                    friends.push((i.key.clone(), i.name(), friends::waiting_for_you(&i.friends.list, now)));
+                }
                 let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
-                for c in &i.dms.conversations {
+                // Conversations with people you blocked stay out of sight until you unblock them.
+                for c in i.dms.conversations.iter().filter(|c| !friends::hidden(i, c)) {
                     rows.push(Row {
                         key: i.key.clone(),
                         id: c.id.clone(),
@@ -560,8 +570,47 @@ impl FuwaApp {
                     });
                 }
             }
-            (rows, statuses)
+            (rows, statuses, friends)
         });
+        let several = friends.len() > 1;
+        let mut top = div().flex().flex_col().gap(px(2.0)).pt(px(8.0));
+        for (n, (key, instance, waiting)) in friends.into_iter().enumerate() {
+            let active = matches!(&self.nav, Nav::Friends { key: k } if *k == key);
+            let hover = alpha(p.primary, 0.08);
+            let nav = Nav::Friends { key: key.clone() };
+            top = top.child(motion::rise(
+                div()
+                    .id(SharedString::from(format!("friends|{key}")))
+                    .h(px(40.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .rounded(corner(12.0))
+                    .cursor_pointer()
+                    .when(active, |el| el.bg(alpha(p.primary, 0.16)))
+                    .when(!active, |el| el.hover(move |s| s.bg(hover)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                    .child(icon("users").size(px(18.0)).text_color(if active { p.primary } else { p.muted_foreground }))
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .font_weight(FontWeight::BOLD)
+                            .child(if several && !self.prefs.streamer_mode {
+                                format!("Friends · {instance}")
+                            } else {
+                                "Friends".to_owned()
+                            }),
+                    )
+                    .when(waiting > 0, |el| el.child(badge(waiting as u32, &p).border_color(p.sidebar))),
+                SharedString::from(format!("friends-in|{key}")),
+                Duration::from_millis(24 * n as u64),
+                6.0,
+            ));
+        }
 
         let mut list = div().relative().pt(px(8.0));
         let mut highlight = None;
@@ -647,7 +696,7 @@ impl FuwaApp {
                     .py(px(16.0))
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("Nobody yet. Open someone from a server's member list to message them privately."),
+                    .child("Nobody yet. Message a friend, or someone from a server's member list."),
             );
         }
         for (name, status, problem) in statuses {
@@ -669,7 +718,7 @@ impl FuwaApp {
                     .child(line),
             );
         }
-        (header, list.into_any_element())
+        (header, div().child(top).child(list).into_any_element())
     }
 
     fn instance_sidebar(
@@ -749,7 +798,10 @@ impl FuwaApp {
     fn me_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let key = match &self.nav {
-            Nav::Server { key, .. } | Nav::Instance { key } | Nav::Home { dm: Some((key, _)) } => Some(key.clone()),
+            Nav::Server { key, .. }
+            | Nav::Instance { key }
+            | Nav::Friends { key }
+            | Nav::Home { dm: Some((key, _)) } => Some(key.clone()),
             Nav::Home { dm: None } => self.core.shared.read(|s| s.order.first().cloned()),
         };
         let (me, instance, connection, status, presence) = key
