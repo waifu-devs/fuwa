@@ -5,14 +5,15 @@ import type { ActiveCall } from "@/calls/state";
 import { formatPing, useQualityEffect, useQualityLevel, useQualityText, type Level, type Quality, type Route } from "@/calls/quality";
 import { SPRING, SwapText } from "@/components/motion";
 import { cn } from "@/lib/utils";
+import { type Key, useI18n } from "@/i18n/react";
 
 export const COLOR: Record<Level, string> = { good: "#3ba55d", okay: "#f0b232", poor: "#ed4245" };
 const LIT: Record<Level, number> = { good: 3, okay: 2, poor: 1 };
-const LABEL: Record<Level, string> = { good: "Great connection", okay: "Okay connection", poor: "Poor connection" };
-const ROUTE: Record<Route, string> = {
-  udp: "Direct (UDP)",
-  tcp: "Direct (TCP)",
-  relay: "Relayed (TURN)",
+const LABEL: Record<Level, Key> = { good: "dms-calls.calls.connection.good", okay: "dms-calls.calls.connection.okay", poor: "dms-calls.calls.connection.poor" };
+const ROUTE: Record<Route, Key> = {
+  udp: "dms-calls.calls.connection.udp",
+  tcp: "dms-calls.calls.connection.tcp",
+  relay: "dms-calls.calls.connection.relay",
 };
 
 /**
@@ -97,15 +98,27 @@ function Row({ label, value }: { label: string; value: (q: Quality) => string })
   );
 }
 
-const loss = (q: Quality) => (q.ping === null ? "–" : `${(q.loss * 100).toFixed(q.loss < 0.1 ? 1 : 0)}%`);
-const jitter = (q: Quality) => (q.ping === null ? "–" : `${q.jitter} ms`);
-const route = (q: Quality) => (q.route ? ROUTE[q.route] : "–");
 
 /** Opens a card with your ping over the last minute, packet loss, jitter and how you're connected. */
 export function ConnectionDetails({ status, children }: { status: ActiveCall["status"]; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const level = useQualityLevel();
-  const heading = status !== "connected" ? (status === "reconnecting" ? "Reconnecting…" : "Connecting…") : level ? LABEL[level] : "Measuring…";
+  const { t, number } = useI18n();
+  const loss = useCallback(
+    (q: Quality) => {
+      const digits = q.loss < 0.1 ? 1 : 0;
+      return q.ping === null ? "–" : number(q.loss, { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits });
+    },
+    [number],
+  );
+  const jitter = useCallback((q: Quality) => (q.ping === null ? "–" : number(q.jitter, { style: "unit", unit: "millisecond" })), [number]);
+  const route = useCallback((q: Quality) => (q.route ? t(ROUTE[q.route]) : "–"), [t]);
+  const heading =
+    status !== "connected"
+      ? t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting")
+      : level
+        ? t(LABEL[level])
+        : t("dms-calls.calls.connection.measuring");
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>{children}</Popover.Trigger>
@@ -126,18 +139,18 @@ export function ConnectionDetails({ status, children }: { status: ActiveCall["st
                 </div>
                 <div className="mt-3 flex items-baseline gap-1.5">
                   <PingText className="text-2xl font-extrabold" />
-                  <span className="text-xs text-muted-foreground">ping</span>
+                  <span className="text-xs text-muted-foreground">{t("dms-calls.calls.connection.ping")}</span>
                 </div>
                 <div className="mt-1 mb-3">
                   <PingGraph level={level} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Row label="Packet loss" value={loss} />
-                  <Row label="Jitter" value={jitter} />
-                  <Row label="Route" value={route} />
+                  <Row label={t("dms-calls.calls.connection.loss")} value={loss} />
+                  <Row label={t("dms-calls.calls.connection.jitter")} value={jitter} />
+                  <Row label={t("dms-calls.calls.connection.route")} value={route} />
                 </div>
                 <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-                  Ping is how long sound takes to reach this call's media server and come back.
+                  {t("dms-calls.calls.connection.about")}
                 </p>
               </motion.div>
             </Popover.Content>

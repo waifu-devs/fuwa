@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { describeDevice, deviceName, type DeviceKind } from "@/lib/devices";
 import { displayName } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -89,18 +89,13 @@ export function EncryptionDialog({
           <Padlock delay={0.1} />
         </div>
         <DialogHeader
-          title="End-to-end encrypted"
-          description={
-            <>
-              Messages with {displayName(partner)} are locked on your device and only open on the devices below. This fuwa server only
-              passes them along: it can't read them, and neither can anyone who runs it.
-            </>
-          }
+          title={t("dms-calls.dm.encrypted")}
+          description={<T k="dms-calls.dm.encryption.description" values={{ name: displayName(partner) }} />}
         />
 
         <section className="rounded-2xl border bg-muted/40 p-4">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-extrabold">Safety number</p>
+            <p className="text-sm font-extrabold">{t("dms-calls.dm.encryption.safety")}</p>
             <AnimatePresence mode="popLayout" initial={false}>
               {isVerified ? (
                 <motion.span
@@ -111,7 +106,7 @@ export function EncryptionDialog({
                   transition={{ type: "spring", stiffness: 600, damping: 16 }}
                   className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300"
                 >
-                  <BadgeCheckIcon className="size-3.5" /> Verified
+                  <BadgeCheckIcon className="size-3.5" /> {t("dms-calls.dm.trust.verified")}
                 </motion.span>
               ) : changed ? (
                 <motion.span
@@ -121,7 +116,7 @@ export function EncryptionDialog({
                   exit={{ scale: 0.5, opacity: 0 }}
                   className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300"
                 >
-                  <ShieldAlertIcon className="size-3.5" /> Changed
+                  <ShieldAlertIcon className="size-3.5" /> {t("dms-calls.dm.encryption.changed")}
                 </motion.span>
               ) : null}
             </AnimatePresence>
@@ -146,17 +141,17 @@ export function EncryptionDialog({
               ))}
             </motion.div>
           ) : (
-            <p className="mt-2 text-sm text-muted-foreground">It shows once both of you have a device in the conversation.</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t("dms-calls.dm.encryption.noNumber")}</p>
           )}
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
             {changed
-              ? `It changed since you checked it: one of you signed in or out somewhere. Check it with ${displayName(partner)} again.`
-              : `Compare it with what ${displayName(partner)} sees, in person or on a call. If it matches, nobody slipped a device in between you.`}
+              ? t("dms-calls.dm.encryption.changedText", { name: displayName(partner) })
+              : t("dms-calls.dm.encryption.compare", { name: displayName(partner) })}
           </p>
           {groups.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant={isVerified ? "outline" : "default"} disabled={busy} onClick={() => void toggle()} className="btn rounded-xl font-bold">
-                {isVerified ? "Clear verification" : "Mark as verified"}
+                {isVerified ? t("dms-calls.dm.encryption.clear") : t("dms-calls.dm.encryption.mark")}
               </Button>
               <Button
                 size="sm"
@@ -180,14 +175,14 @@ export function EncryptionDialog({
                     {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
                   </motion.span>
                 </AnimatePresence>
-                {copied ? "Copied" : "Copy"}
+                {copied ? t("dms-calls.dm.encryption.copied") : t("dms-calls.dm.encryption.copy")}
               </Button>
             </div>
           )}
         </section>
 
         <section className="mt-4">
-          <p className="mb-2 text-sm font-extrabold">Devices that can read this conversation</p>
+          <p className="mb-2 text-sm font-extrabold">{t("dms-calls.dm.encryption.devices")}</p>
           <div className="flex flex-col gap-3">
             {conversation.users.map((user) => {
               const own = members.filter((m) => m.userId === user.id);
@@ -195,9 +190,9 @@ export function EncryptionDialog({
                 <div key={user.id}>
                   <p className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
                     <UserAvatar user={user} className="size-5 text-[0.6rem]" />
-                    {user.id === me?.id ? "You" : displayName(user)}
+                    {user.id === me?.id ? t("dms-calls.dm.encryption.you") : displayName(user)}
                   </p>
-                  {own.length === 0 && <p className="pl-7 text-xs text-muted-foreground">No devices in it yet.</p>}
+                  {own.length === 0 && <p className="pl-7 text-xs text-muted-foreground">{t("dms-calls.dm.encryption.noDevices")}</p>}
                   <ul className="flex flex-col gap-1">
                     {own.map((m, n) => {
                       const device = devices.get(m.deviceId);
@@ -222,8 +217,8 @@ export function EncryptionDialog({
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-1.5 text-sm font-bold">
-                              <span className="truncate">{device ? deviceName(t, described) : "Signed out"}</span>
-                              {mine && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[0.65rem] text-primary">This device</span>}
+                              <span className="truncate">{device ? deviceName(t, described) : t("dms-calls.dm.encryption.signedOut")}</span>
+                              {mine && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[0.65rem] text-primary">{t("dms-calls.dm.encryption.thisDevice")}</span>}
                             </span>
                             <span className="block font-mono text-[0.7rem] text-muted-foreground" title={m.deviceId}>
                               {fingerprint(m.deviceId)}
@@ -238,8 +233,7 @@ export function EncryptionDialog({
             })}
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            Each device has its own key. Signing in somewhere adds that device; signing out takes it away. Messages sent before a device
-            joined don't open on it.
+            {t("dms-calls.dm.encryption.footer")}
           </p>
         </section>
       </DialogContent>

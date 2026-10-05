@@ -13,6 +13,7 @@ import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";
 import { blockedIds } from "@/lib/friends";
 import { cn } from "@/lib/utils";
+import { type I18n, T, useI18n } from "@/i18n/react";
 
 const NONE: Conversation[] = [];
 
@@ -29,13 +30,14 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
   }, [all, friends, meId]);
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
+  const { t } = useI18n();
   if (status === "off") return null;
   return (
-    <section aria-label="Direct messages" className="mt-4">
+    <section aria-label={t("dms-calls.dm.list.label")} className="mt-4">
       <p className="mb-1 flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-        Direct messages
+        {t("dms-calls.dm.list.label")}
         <motion.span
-          title="End-to-end encrypted"
+          title={t("dms-calls.dm.encrypted")}
           initial={{ scale: 0.4, rotate: -30, opacity: 0 }}
           animate={{ scale: 1, rotate: 0, opacity: 1 }}
           transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}
@@ -54,7 +56,7 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
             className="mx-2 my-1 flex items-start gap-2 rounded-xl bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300"
           >
             <ShieldAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-            <span>{problem ?? "Encrypted messages aren't available here."}</span>
+            <span>{problem ?? t("dms-calls.dm.unavailable")}</span>
           </motion.p>
         )}
         {status !== "unsupported" && status !== "failed" && conversations.length === 0 && (
@@ -70,10 +72,10 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
               <span className="grid size-6 place-items-center rounded-lg bg-emerald-500/15 text-emerald-600 transition-transform duration-500 group-hover:rotate-[-12deg] dark:text-emerald-400">
                 <LockKeyholeIcon className="size-3.5" />
               </span>
-              Private by default
+              {t("dms-calls.dm.list.emptyTitle")}
             </p>
             <p className="mt-1.5 leading-relaxed">
-              Open someone's profile and press <b className="text-foreground">Message</b>. Only the two of you can read what you write.
+              <T k="dms-calls.dm.list.emptyText" values={{ message: <b className="text-foreground">{t("dms-calls.dm.list.emptyMessage")}</b> }} />
             </p>
           </motion.div>
         )}
@@ -86,14 +88,14 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
 }
 
 /** What a conversation's last line says, for the list. Read from this browser's copy, never the instance. */
-function preview(items: Item[] | undefined, meId: string | undefined): string {
+function preview(t: I18n["t"], items: Item[] | undefined, meId: string | undefined): string {
   if (!items) return "";
   for (let n = items.length - 1; n >= 0; n--) {
     const item = items[n]!;
     if (!isMessage(item)) continue;
-    if (item.deleted) return "Message deleted";
+    if (item.deleted) return t("dms-calls.dm.deleted");
     const text = lineText(item).replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
-    return item.senderId === meId ? `You: ${text}` : text;
+    return item.senderId === meId ? t("dms-calls.dm.list.youSaid", { text }) : text;
   }
   return "";
 }
@@ -110,12 +112,13 @@ function DmLink({
   ref?: Ref<HTMLDivElement>;
 }) {
   const { compact, setNavOpen } = useLayout();
+  const { t } = useI18n();
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[conversation.id]);
   const unread = useFuwa((s) => s.instances[instanceKey]?.dms.unread[conversation.id] ?? 0);
   const calling = useFuwa((s) => !!s.instances[instanceKey]?.dms.calls[conversation.id]?.participants.length);
   const other = conversation.users.find((u) => u.id !== meId) ?? conversation.users[0];
-  const line = preview(items, meId);
+  const line = preview(t, items, meId);
   const menu = useContextMenu("dm", () => dmMenu({ instanceKey, conversation, other }));
   return (
     <motion.div
@@ -152,7 +155,7 @@ function DmLink({
               transition={SPRING}
               className={cn("block truncate text-xs", unread > 0 ? "font-bold text-foreground/80" : "text-muted-foreground")}
             >
-              {line || "End-to-end encrypted"}
+              {line || t("dms-calls.dm.encrypted")}
             </motion.span>
           </AnimatePresence>
         </span>
@@ -164,7 +167,7 @@ function DmLink({
               animate={{ scale: 1, rotate: 0 }}
               exit={{ scale: 0, rotate: 40 }}
               transition={{ type: "spring", stiffness: 600, damping: 16 }}
-              title="A call is going on"
+              title={t("dms-calls.dm.list.calling")}
               className="grid size-6 shrink-0 place-items-center rounded-full bg-[#3ba55d] text-white"
             >
               <PhoneCallIcon className="ringing size-3.5" />

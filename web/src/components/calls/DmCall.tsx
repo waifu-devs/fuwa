@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/react";
 import { clock } from "./CallPanel";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
 import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
@@ -21,6 +22,7 @@ export const useDmCall = (instanceKey: string, conversationId: string) => useFuw
 export function CallButton({ instanceKey, conversationId }: { instanceKey: string; conversationId: string }) {
   const call = useDmCall(instanceKey, conversationId);
   const inCall = useInDmCall(instanceKey, conversationId);
+  const { t } = useI18n();
   if (inCall) return null;
   const going = !!call?.participants.length;
   return (
@@ -28,8 +30,8 @@ export function CallButton({ instanceKey, conversationId }: { instanceKey: strin
       type="button"
       whileTap={{ scale: 0.85 }}
       onClick={() => void joinCall({ kind: "dm", instance: instanceKey, conversationId })}
-      aria-label={going ? "Join the call" : "Start a call"}
-      title={going ? "Join the call" : "Start a call (end-to-end encrypted)"}
+      aria-label={going ? t("dms-calls.calls.dm.join") : t("dms-calls.calls.dm.start")}
+      title={going ? t("dms-calls.calls.dm.join") : t("dms-calls.calls.dm.startTitle")}
       className={cn(
         "group grid size-9 place-items-center rounded-full transition-colors",
         going ? "bg-[#3ba55d] text-white hover:brightness-110" : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -51,6 +53,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   const status = useCalls((s) => (inCall ? s.call?.status : null));
   const since = useCalls((s) => (inCall ? s.call?.since : null));
   const now = useNow(1_000);
+  const { t } = useI18n();
   const show = inCall || !!call?.participants.length;
   const here = new Set((call?.participants ?? []).map((p) => p.userId));
   if (inCall) here.add(me.id);
@@ -66,13 +69,13 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   if (inCall && myStream) sharing.add(me.id);
 
   let line: string;
-  if (!inCall) line = `${displayName(startedBy ?? partner)} started a call`;
-  else if (status !== "connected") line = status === "reconnecting" ? "Reconnecting…" : "Connecting…";
-  else if (!partnerIn) line = `Calling ${displayName(partner)}…`;
-  else line = since ? clock(Math.max(0, Math.floor((now - since) / 1000))) : "In call";
+  if (!inCall) line = t("dms-calls.calls.dm.started", { name: displayName(startedBy ?? partner) });
+  else if (status !== "connected") line = t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting");
+  else if (!partnerIn) line = t("dms-calls.calls.dm.calling", { name: displayName(partner) });
+  else line = since ? clock(Math.max(0, Math.floor((now - since) / 1000))) : t("dms-calls.calls.dm.inCall");
   const myRecord = useCalls((s) => s.selfRecord);
   const recorders = conversation.users.filter((u) => (u.id === me.id ? inCall && myRecord : call?.participants.some((p) => p.userId === u.id && p.selfRecord)));
-  if (recorders.length) line += ` · Recording: ${recorders.map((u) => (u.id === me.id ? "you" : displayName(u))).join(", ")}`;
+  if (recorders.length) line = t("dms-calls.calls.dm.recording", { line, names: recorders.map((u) => (u.id === me.id ? t("dms-calls.calls.dm.you") : displayName(u))).join(", ") });
 
   return (
     <AnimatePresence initial={false}>
@@ -114,7 +117,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
               )}
             </AnimatePresence>
             <p className="flex items-center gap-1.5 text-sm font-bold text-muted-foreground tabular-nums">
-              <LockKeyholeIcon className="size-3.5" aria-label="End-to-end encrypted" />
+              <LockKeyholeIcon className="size-3.5" aria-label={t("dms-calls.dm.encrypted")} />
               {line}
             </p>
             {inCall ? (
@@ -123,14 +126,14 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
                 <CameraButton size="lg" />
                 <ScreenButton size="lg" />
                 <RecordButton size="lg" />
-                <HangUpButton size="lg" label="Hang up" onClick={() => void hangUp(null)} />
+                <HangUpButton size="lg" label={t("dms-calls.calls.dm.hangUp")} onClick={() => void hangUp(null)} />
               </div>
             ) : (
               <Button
                 onClick={() => void joinCall({ kind: "dm", instance: instanceKey, conversationId: conversation.id })}
                 className="group h-11 rounded-2xl bg-[#3ba55d] px-5 font-extrabold text-white hover:bg-[#3ba55d] hover:brightness-110"
               >
-                <PhoneIcon className="transition-transform group-hover:-rotate-12" /> Join call
+                <PhoneIcon className="transition-transform group-hover:-rotate-12" /> {t("dms-calls.calls.dm.joinCall")}
               </Button>
             )}
           </div>
@@ -186,13 +189,14 @@ function Camera({ instanceKey, user, self, here, videoOn }: { instanceKey: strin
 /** A shared screen in the call: the whole width, shown whole. */
 function Screen({ instanceKey, user, self }: { instanceKey: string; user: User; self: boolean }) {
   const name = displayName(user);
+  const { t } = useI18n();
   return (
     <motion.div layout initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={SPRING} className="group/tile relative sm:col-span-2">
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl border bg-black shadow-lg">
         <TileMedia userId={user.id} user={user} videoOn self={self} screen speaking={false} avatarClass="size-14 text-lg sm:size-16 sm:text-xl" />
         <span className="absolute bottom-2 left-2 flex max-w-[80%] items-center gap-1.5 rounded-lg bg-background/80 px-2 py-0.5 backdrop-blur">
           <LiveBadge />
-          <span className="truncate text-xs font-bold">{self ? "Your screen" : `${name}'s screen`}</span>
+          <span className="truncate text-xs font-bold">{self ? t("dms-calls.calls.screen.yours") : t("dms-calls.calls.screen.theirs", { name })}</span>
         </span>
       </div>
       <PopOutButton popped={{ instance: instanceKey, userId: user.id, screen: true }} name={name} className="absolute top-2 right-2" />

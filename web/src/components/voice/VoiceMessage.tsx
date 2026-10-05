@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { SPRING } from "@/components/motion";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/react";
 import { clock, nextRate, onPosition, positionOf, seek, toggle, useVoice, type Loader } from "@/voice/player";
 import { heights } from "@/voice/waveform";
 
@@ -37,6 +38,7 @@ export const VoiceMessage = memo(function VoiceMessage({
   className?: string;
 }) {
   const { current, playing, loading, failed, rate } = useVoice(id);
+  const { t } = useI18n();
   const bars = useMemo(() => heights(waveform, BARS), [waveform]);
   const reveal = useRef<HTMLDivElement>(null);
   const unreveal = useRef<HTMLDivElement>(null);
@@ -106,7 +108,7 @@ export const VoiceMessage = memo(function VoiceMessage({
         onClick={() => load && void toggle(id, load)}
         whileTap={usable ? { scale: 0.88 } : undefined}
         transition={SPRING}
-        aria-label={playing ? "Pause voice message" : "Play voice message"}
+        aria-label={playing ? t("dms-calls.voice.message.pause") : t("dms-calls.voice.message.play")}
         className={cn(
           "grid size-9 shrink-0 place-items-center rounded-full transition-colors",
           usable ? "bg-primary text-primary-foreground shadow-[0_6px_16px_-8px_var(--primary)]" : "bg-muted text-muted-foreground",
@@ -137,7 +139,7 @@ export const VoiceMessage = memo(function VoiceMessage({
         ref={track}
         role="slider"
         tabIndex={usable ? 0 : -1}
-        aria-label="Voice message position"
+        aria-label={t("dms-calls.voice.message.position")}
         aria-valuemin={0}
         aria-valuemax={Math.round(durationMs / 1000)}
         aria-valuenow={0}
@@ -168,8 +170,8 @@ export const VoiceMessage = memo(function VoiceMessage({
         type="button"
         onClick={nextRate}
         whileTap={{ scale: 0.88 }}
-        aria-label={`Playback speed ${rate}×`}
-        title="Playback speed"
+        aria-label={t("dms-calls.voice.message.speed", { rate })}
+        title={t("dms-calls.voice.message.speedTitle")}
         className="h-6 w-10 shrink-0 overflow-hidden rounded-full bg-muted text-[0.7rem] font-bold tabular-nums text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
       >
         <AnimatePresence mode="popLayout" initial={false}>
@@ -181,7 +183,7 @@ export const VoiceMessage = memo(function VoiceMessage({
             transition={SPRING}
             className="block"
           >
-            {rate}×
+            {t("dms-calls.voice.message.rate", { rate })}
           </motion.span>
         </AnimatePresence>
       </motion.button>

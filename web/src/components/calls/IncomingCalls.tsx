@@ -10,6 +10,7 @@ import { UserAvatar } from "@/components/Icons";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { play } from "@/lib/sounds";
+import { useI18n } from "@/i18n/react";
 
 /** How long a new call rings for. After that it's still there to join from the conversation. */
 const RING_MS = 45_000;
@@ -88,6 +89,7 @@ function CallCard({ call }: { call: Ringing }) {
   const navigate = useNavigate();
   const caller = useFuwa((s) => s.instances[call.instance]?.dms.conversations.find((c) => c.id === call.conversationId)?.users.find((u) => u.id === call.callerId));
   const where = useFuwa((s) => (s.order.length > 1 ? s.instances[call.instance]?.node?.name : undefined));
+  const { t } = useI18n();
   const decline = () => setCalls((s) => ({ declined: { ...s.declined, [call.key]: true } }));
   const answer = () => {
     void joinCall({ kind: "dm", instance: call.instance, conversationId: call.conversationId });
@@ -97,7 +99,7 @@ function CallCard({ call }: { call: Ringing }) {
     <motion.div
       layout
       role="alertdialog"
-      aria-label={`${displayName(caller)} is calling`}
+      aria-label={t("dms-calls.calls.incoming.calling", { name: displayName(caller) })}
       initial={{ opacity: 0, y: -24, scale: 0.9 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.18 } }}
@@ -112,15 +114,15 @@ function CallCard({ call }: { call: Ringing }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate font-extrabold">{displayName(caller)}</span>
         <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-          <LockKeyholeIcon className="size-3 shrink-0" /> Encrypted call{where ? ` on ${where}` : ""}
+          <LockKeyholeIcon className="size-3 shrink-0" /> {where ? t("dms-calls.calls.incoming.encryptedOn", { place: where }) : t("dms-calls.calls.incoming.encrypted")}
         </span>
       </span>
       <motion.button
         type="button"
         whileTap={{ scale: 0.85 }}
         onClick={decline}
-        aria-label="Decline"
-        title="Decline"
+        aria-label={t("dms-calls.calls.incoming.decline")}
+        title={t("dms-calls.calls.incoming.decline")}
         className="group grid size-11 shrink-0 place-items-center rounded-full bg-destructive text-white transition hover:brightness-110"
       >
         <PhoneOffIcon className="size-5 transition-transform group-hover:rotate-[135deg]" />
@@ -129,8 +131,8 @@ function CallCard({ call }: { call: Ringing }) {
         type="button"
         whileTap={{ scale: 0.85 }}
         onClick={answer}
-        aria-label="Answer"
-        title="Answer"
+        aria-label={t("dms-calls.calls.incoming.answer")}
+        title={t("dms-calls.calls.incoming.answer")}
         className="grid size-11 shrink-0 place-items-center rounded-full bg-[#3ba55d] text-white transition hover:brightness-110"
       >
         <PhoneIcon className="ringing size-5" />

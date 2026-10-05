@@ -93,7 +93,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
       setState({ at: "open", opened: next });
       return next;
     } catch (err) {
-      setState({ at: "failed", problem: err instanceof Error ? err.message : "this file couldn't be opened" });
+      setState({ at: "failed", problem: err instanceof Error ? err.message : lang.t("dms-calls.dm.sealed.cantOpen") });
       return null;
     }
   };
@@ -142,8 +142,8 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
         <button
           type="button"
           onClick={() => save(opened.blob, file.name)}
-          aria-label={`Download ${file.name}`}
-          title={`Download ${file.name}`}
+          aria-label={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
+          title={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
           className="absolute top-2 right-2 grid size-8 place-items-center rounded-lg bg-black/55 text-white opacity-0 shadow transition group-hover/sealed:opacity-100 hover:scale-110 focus-visible:opacity-100"
         >
           <DownloadIcon className="size-4" />
@@ -162,7 +162,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
     >
       <span className="relative">
         <FileBadge name={file.name} />
-        <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title="Encrypted">
+        <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
           <LockKeyholeIcon className="size-2.5" />
         </span>
       </span>
@@ -185,21 +185,21 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
                 {state.problem}
               </span>
             ) : busy ? (
-              "Opening on this device…"
+              lang.t("dms-calls.dm.sealed.opening")
             ) : size > 0 ? (
               formatBytes(lang, size)
             ) : (
-              "Encrypted file"
+              lang.t("dms-calls.dm.sealed.file")
             )}
           </motion.p>
         </AnimatePresence>
       </div>
       {hinted && !opened && (
-        <CardButton label={`Show ${file.name}`} onClick={() => void open()} disabled={busy}>
+        <CardButton label={lang.t("dms-calls.dm.sealed.show", { name: file.name })} onClick={() => void open()} disabled={busy}>
           {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <EyeIcon className="size-4" />}
         </CardButton>
       )}
-      <CardButton label={`Download ${file.name}`} onClick={() => void download()} disabled={busy}>
+      <CardButton label={lang.t("dms-calls.dm.sealed.download", { name: file.name })} onClick={() => void download()} disabled={busy}>
         <DownloadIcon className="size-4" />
       </CardButton>
     </motion.div>
@@ -230,6 +230,7 @@ function CardButton({ label, onClick, disabled, children }: { label: string; onC
 function Still({ url, name, width, height }: { url: string; name: string; width: number; height: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(false);
+  const { t } = useI18n();
   useEffect(() => {
     if (playing) return;
     const img = new Image();
@@ -247,7 +248,7 @@ function Still({ url, name, width, height }: { url: string; name: string; width:
     <button
       type="button"
       onClick={() => setPlaying(true)}
-      aria-label={`Play ${name}`}
+      aria-label={t("dms-calls.dm.sealed.play", { name })}
       className="relative block w-full overflow-hidden rounded-xl border bg-muted/60"
       style={{ aspectRatio: `${width} / ${height}` }}
     >
