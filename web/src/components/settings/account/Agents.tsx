@@ -27,7 +27,7 @@ import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -119,19 +119,20 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
         )}
       </div>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {making && (
-          <NewAgent
-            key="new"
-            instanceKey={instanceKey}
-            onCancel={() => setMaking(false)}
-            onMade={(agent, token) => {
-              setAgents((list) => [...(list ?? []), agent]);
-              setMaking(false);
-              setOpen(agent.user?.id ?? null);
-              setFresh({ agentId: agent.user?.id ?? "", token });
-            }}
-          />
+          <motion.div key="new" initial={{ ...SLIDE_IN.initial, scale: 0.97 }} animate={{ ...SLIDE_IN.animate, scale: 1 }} exit={{ ...SLIDE_IN.exit, scale: 0.97 }} transition={SPRING}>
+            <NewAgent
+              instanceKey={instanceKey}
+              onCancel={() => setMaking(false)}
+              onMade={(agent, token) => {
+                setAgents((list) => [...(list ?? []), agent]);
+                setMaking(false);
+                setOpen(agent.user?.id ?? null);
+                setFresh({ agentId: agent.user?.id ?? "", token });
+              }}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -152,7 +153,7 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
           </motion.div>
         )
       ) : (
-        <ul className="flex flex-col gap-2">
+        <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {agents.map((a) => (
               <AgentCard
@@ -169,18 +170,18 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
               />
             ))}
           </AnimatePresence>
-        </ul>
+        </motion.ul>
       )}
 
-      <div className="rounded-2xl border">
+      <motion.div layout="position" transition={SPRING} className="rounded-2xl border">
         <button type="button" onClick={() => setHowTo((h) => !h)} className="flex w-full items-center gap-2 p-3 text-left text-sm font-bold">
           <TerminalIcon className="size-4 text-primary" />
           <span className="flex-1">{t("accountsettings.agents.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {howTo && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+            <motion.div {...SLIDE_IN} transition={SPRING}>
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
                   <T
@@ -198,7 +199,7 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -256,14 +257,7 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
   }
 
   return (
-    <motion.form
-      onSubmit={(e) => void submit(e)}
-      initial={{ opacity: 0, height: 0, scale: 0.97 }}
-      animate={{ opacity: 1, height: "auto", scale: 1 }}
-      exit={{ opacity: 0, height: 0, scale: 0.97 }}
-      transition={SPRING}
-      className="overflow-hidden"
-    >
+    <form onSubmit={(e) => void submit(e)}>
       <motion.div animate={shake} className="flex flex-col gap-3 rounded-2xl border border-primary/40 bg-background/60 p-4 shadow-lg shadow-primary/5">
         <div className="flex flex-wrap gap-3">
           <label className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
@@ -298,7 +292,7 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
           </Button>
         </div>
       </motion.div>
-    </motion.form>
+    </form>
   );
 }
 
@@ -323,13 +317,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -6, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, height: 0, scale: 0.97 }}
-      transition={SPRING}
-      className="relative flex flex-col gap-2 overflow-hidden rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3"
-    >
+    <div className="relative flex flex-col gap-2 overflow-hidden rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3">
       <motion.span
         aria-hidden
         initial={{ x: "-100%" }}
@@ -370,7 +358,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
           {t("accountsettings.shared.savedIt")}
         </Button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -477,13 +465,19 @@ function AgentCard({
     >
       <AgentSummary agent={a} open={open} saving={busy === "save"} onToggle={onToggle} />
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-4 border-t p-4">
-              <AnimatePresence initial={false}>{token && <TokenReveal key={token} token={token} onDone={onTokenSeen} />}</AnimatePresence>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {token && (
+                  <motion.div key={token} initial={{ ...SLIDE_IN.initial, scale: 0.97 }} animate={{ ...SLIDE_IN.animate, scale: 1 }} exit={{ ...SLIDE_IN.exit, scale: 0.97 }} transition={SPRING}>
+                    <TokenReveal token={token} onDone={onTokenSeen} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <div className="flex flex-wrap items-start gap-4">
+              <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-start gap-4">
                 <PictureField
                   instanceKey={instanceKey}
                   kind="avatar"
@@ -526,20 +520,22 @@ function AgentCard({
                     />
                   </label>
                 </div>
-              </div>
+              </motion.div>
 
-              <Toggle
-                checked={a.public}
-                onChange={(pub) => void save({ public: pub })}
-                label={t("accountsettings.agents.public")}
-                hint={t("accountsettings.agents.publicHint")}
-              />
+              <motion.div layout="position" transition={SPRING}>
+                <Toggle
+                  checked={a.public}
+                  onChange={(pub) => void save({ public: pub })}
+                  label={t("accountsettings.agents.public")}
+                  hint={t("accountsettings.agents.publicHint")}
+                />
+              </motion.div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-center gap-2">
                 <AddToServer servers={servers} busy={busy} added={added} inServer={inServer} onAdd={(server) => void addTo(server)} />
                 <DangerActions confirm={confirm} busy={busy} onConfirm={setConfirm} onReset={() => void reset()} onRemove={() => void remove()} />
                 <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(lang, toDate(a.createdAt)) })}</span>
-              </div>
+              </motion.div>
             </div>
           </motion.div>
         )}

@@ -25,7 +25,6 @@ import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { CodeInput } from "@/components/CodeInput";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
@@ -328,22 +327,21 @@ export function Account({
         password={password}
         onPassword={setPassword}
       />
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {action.error && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-sm text-destructive first-letter:uppercase"
           >
             {action.error}
           </motion.p>
         )}
       </AnimatePresence>
-      <Button type="submit" size="lg" disabled={action.pending} className="btn h-11 rounded-xl font-bold">
+      <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={action.pending} className="btn h-11 rounded-xl font-bold">
         {action.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
         {tab === "sign-in" ? t("connect.account.signIn") : t("connect.account.signUp")}
-      </Button>
+      </MotionButton>
     </form>
   );
 }
@@ -513,12 +511,11 @@ function TwoFactorStep({
           </motion.div>
         )}
       </AnimatePresence>
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {error && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-center text-sm text-destructive first-letter:uppercase"
           >
             {error}
@@ -526,12 +523,14 @@ function TwoFactorStep({
         )}
       </AnimatePresence>
       {backup && (
-        <Button type="submit" size="lg" disabled={pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
+        <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
           {pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon />}
           {t("connect.account.signIn")}
-        </Button>
+        </MotionButton>
       )}
-      <button
+      <motion.button
+        layout="position"
+        transition={SPRING}
         type="button"
         onClick={() => {
           setBackup((b) => !b);
@@ -541,7 +540,7 @@ function TwoFactorStep({
         className="self-center text-sm font-bold text-primary hover:underline"
       >
         {backup ? t("connect.twoStep.useApp") : t("connect.twoStep.useBackup")}
-      </button>
+      </motion.button>
     </motion.form>
   );
 }
@@ -664,12 +663,11 @@ export function ProviderButton({
         </AnimatePresence>
         <ArrowRightIcon className={cn("size-4 transition group-hover:translate-x-1", leaving && "translate-x-2 opacity-0")} />
       </motion.button>
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {error ? (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-center text-sm text-destructive first-letter:uppercase"
           >
             {error}

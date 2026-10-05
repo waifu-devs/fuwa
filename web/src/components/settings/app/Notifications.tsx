@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { FuwaMark } from "@/components/Icons";
 import { Count } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -38,16 +38,14 @@ export function Notifications() {
 
   return (
     <div className="flex flex-col">
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {streamerMutes && (
           <motion.button
             type="button"
             onClick={() => openSettings("streamer")}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
             transition={SPRING}
-            className="mb-4 flex items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-3 py-2 text-left text-sm text-primary"
+            className="mb-10 flex items-center gap-2 rounded-xl bg-primary/10 px-3 py-2 text-left text-sm text-primary"
           >
             <TvMinimalPlayIcon className="size-4 shrink-0" />
             {p.streamerMuteNotifications && p.streamerMuteSounds
@@ -58,82 +56,86 @@ export function Notifications() {
           </motion.button>
         )}
       </AnimatePresence>
-      <PrefSetting id="desktop-notifications" title={t("appsettings.notifications.desktop")} keys={["desktopNotifications"]}>
-        <Toggle
-          checked={p.desktopNotifications && permission === "granted"}
-          onChange={(on) => void turnOn(on)}
-          disabled={!supported}
-          label={t("appsettings.notifications.desktopToggle")}
-          hint={
-            !supported
-              ? t("appsettings.notifications.unsupported")
-              : permission === "denied"
-                ? t("appsettings.notifications.blocked")
-                : t("appsettings.notifications.asks")
-          }
-        />
-        <AnimatePresence initial={false}>
-          {p.desktopNotifications && permission === "granted" && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
-              <Button type="button" variant="outline" size="sm" className="group rounded-xl" onClick={() => testNotification()}>
-                <BellRingIcon className="transition-transform group-hover:rotate-12" /> {t("appsettings.notifications.test")}
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </PrefSetting>
-      <PrefSetting id="notify-for" title={t("appsettings.notifications.notifyFor")} keys={["notifyFor"]} delay={0.04}>
-        <Choice<NotifyFor>
-          value={p.notifyFor}
-          onChange={(notifyFor) => setPrefs({ notifyFor })}
-          options={[
-            { value: "mentions", label: t("appsettings.notifications.mentions"), hint: t("appsettings.notifications.mentionsHint"), icon: <AtSignIcon className="size-4" /> },
-            { value: "all", label: t("appsettings.notifications.all"), hint: t("appsettings.notifications.allHint"), icon: <MessagesSquareIcon className="size-4" /> },
-          ]}
-        />
-      </PrefSetting>
-      <PrefSetting id="unread-badge" title={t("appsettings.notifications.unreadBadge")} keys={["unreadBadge"]} delay={0.08}>
-        <Toggle
-          checked={p.unreadBadge}
-          onChange={(unreadBadge) => setPrefs({ unreadBadge })}
-          label={t("appsettings.notifications.unreadBadgeToggle")}
-          hint={t("appsettings.notifications.unreadBadgeToggleHint")}
-        />
-        <TabPreview on={p.unreadBadge} />
-      </PrefSetting>
-      <PrefSetting id="sounds" title={t("appsettings.notifications.sounds")} keys={["sounds", "volume"]} delay={0.12}>
-        <div className="flex flex-col gap-3">
-          {SOUNDS.map(({ sound, label, hint, play: playLabel }) => (
-            <div key={sound} className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => play(sound, true)}
-                aria-label={t(playLabel)}
-                className="group grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:bg-primary hover:text-primary-foreground active:scale-90"
-              >
-                <PlayIcon className="size-4 translate-x-px transition-transform group-hover:scale-110" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <Toggle checked={p.sounds[sound]} onChange={(on) => setPrefs((x) => ({ sounds: { ...x.sounds, [sound]: on } }))} label={t(label)} hint={t(hint)} />
+      <motion.div layout="position" transition={SPRING} className="flex flex-col">
+        <PrefSetting id="desktop-notifications" title={t("appsettings.notifications.desktop")} keys={["desktopNotifications"]}>
+          <Toggle
+            checked={p.desktopNotifications && permission === "granted"}
+            onChange={(on) => void turnOn(on)}
+            disabled={!supported}
+            label={t("appsettings.notifications.desktopToggle")}
+            hint={
+              !supported
+                ? t("appsettings.notifications.unsupported")
+                : permission === "denied"
+                  ? t("appsettings.notifications.blocked")
+                  : t("appsettings.notifications.asks")
+            }
+          />
+          <AnimatePresence mode="popLayout" initial={false}>
+            {p.desktopNotifications && permission === "granted" && (
+              <motion.div {...SLIDE_IN} transition={SPRING}>
+                <Button type="button" variant="outline" size="sm" className="group rounded-xl" onClick={() => testNotification()}>
+                  <BellRingIcon className="transition-transform group-hover:rotate-12" /> {t("appsettings.notifications.test")}
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </PrefSetting>
+        <motion.div layout="position" transition={SPRING} className="flex flex-col pt-6">
+          <PrefSetting id="notify-for" title={t("appsettings.notifications.notifyFor")} keys={["notifyFor"]} delay={0.04}>
+            <Choice<NotifyFor>
+              value={p.notifyFor}
+              onChange={(notifyFor) => setPrefs({ notifyFor })}
+              options={[
+                { value: "mentions", label: t("appsettings.notifications.mentions"), hint: t("appsettings.notifications.mentionsHint"), icon: <AtSignIcon className="size-4" /> },
+                { value: "all", label: t("appsettings.notifications.all"), hint: t("appsettings.notifications.allHint"), icon: <MessagesSquareIcon className="size-4" /> },
+              ]}
+            />
+          </PrefSetting>
+          <PrefSetting id="unread-badge" title={t("appsettings.notifications.unreadBadge")} keys={["unreadBadge"]} delay={0.08}>
+            <Toggle
+              checked={p.unreadBadge}
+              onChange={(unreadBadge) => setPrefs({ unreadBadge })}
+              label={t("appsettings.notifications.unreadBadgeToggle")}
+              hint={t("appsettings.notifications.unreadBadgeToggleHint")}
+            />
+            <TabPreview on={p.unreadBadge} />
+          </PrefSetting>
+          <PrefSetting id="sounds" title={t("appsettings.notifications.sounds")} keys={["sounds", "volume"]} delay={0.12}>
+            <div className="flex flex-col gap-3">
+              {SOUNDS.map(({ sound, label, hint, play: playLabel }) => (
+                <div key={sound} className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => play(sound, true)}
+                    aria-label={t(playLabel)}
+                    className="group grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:bg-primary hover:text-primary-foreground active:scale-90"
+                  >
+                    <PlayIcon className="size-4 translate-x-px transition-transform group-hover:scale-110" />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <Toggle checked={p.sounds[sound]} onChange={(on) => setPrefs((x) => ({ sounds: { ...x.sounds, [sound]: on } }))} label={t(label)} hint={t(hint)} />
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center gap-3 pt-1">
+                <Volume2Icon className="size-5 shrink-0 text-muted-foreground" />
+                <Slider
+                  label={t("appsettings.notifications.volume")}
+                  className="flex-1"
+                  value={p.volume}
+                  min={0}
+                  max={100}
+                  step={5}
+                  format={(n) => number(n / 100, { style: "percent" })}
+                  onChange={(volume) => setPrefs({ volume })}
+                  onCommit={() => play("message", true)}
+                />
               </div>
             </div>
-          ))}
-          <div className="flex items-center gap-3 pt-1">
-            <Volume2Icon className="size-5 shrink-0 text-muted-foreground" />
-            <Slider
-              label={t("appsettings.notifications.volume")}
-              className="flex-1"
-              value={p.volume}
-              min={0}
-              max={100}
-              step={5}
-              format={(n) => number(n / 100, { style: "percent" })}
-              onChange={(volume) => setPrefs({ volume })}
-              onCommit={() => play("message", true)}
-            />
-          </div>
-        </div>
-      </PrefSetting>
+          </PrefSetting>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }
@@ -161,9 +163,9 @@ function TabPreview({ on }: { on: boolean }) {
           </AnimatePresence>
         </span>
         <span className="truncate">
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {on && (
-              <motion.b initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: "auto" }} exit={{ opacity: 0, width: 0 }} className="inline-block overflow-hidden align-bottom whitespace-nowrap">
+              <motion.b initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={SPRING} className="inline-block align-bottom whitespace-nowrap">
                 (<Count value={3} />)&nbsp;
               </motion.b>
             )}

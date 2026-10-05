@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
 import { VideoView } from "@/components/calls/Video";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -276,9 +276,9 @@ export function Voice() {
             { value: "ptt", label: t("appsettings.voice.pushToTalk"), hint: t("appsettings.voice.pushToTalkHint"), icon: <KeyboardIcon className="size-4" /> },
           ]}
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {p.inputMode === "ptt" && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-3 overflow-hidden">
+            <motion.div {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-muted-foreground">{t("appsettings.voice.yourKey")}</span>
                 {ptt ? <Keycaps combo={ptt} /> : <span className="font-bold text-destructive">{t("appsettings.voice.noKey")}</span>}
@@ -291,14 +291,14 @@ export function Voice() {
           )}
         </AnimatePresence>
       </PrefSetting>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {p.inputMode === "voice" && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <PrefSetting id="sensitivity" title={t("appsettings.voice.sensitivity")} keys={["autoSensitivity", "sensitivity"]} delay={0.12}>
               <Toggle checked={p.autoSensitivity} onChange={(autoSensitivity) => setPrefs({ autoSensitivity })} label={t("appsettings.voice.autoSensitivity")} hint={t("appsettings.voice.autoSensitivityHint")} />
-              <AnimatePresence initial={false}>
+              <AnimatePresence mode="popLayout" initial={false}>
                 {!p.autoSensitivity && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+                  <motion.div {...SLIDE_IN} transition={SPRING}>
                     <Slider label={t("appsettings.voice.opensAt")} value={p.sensitivity} min={-100} max={0} step={1} format={(n) => t("appsettings.voice.decibels", { value: n })} onChange={(sensitivity) => setPrefs({ sensitivity })} />
                   </motion.div>
                 )}
@@ -307,21 +307,23 @@ export function Voice() {
           </motion.div>
         )}
       </AnimatePresence>
-      <PrefSetting id="processing" title={t("appsettings.voice.processing")} keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
-        <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label={t("appsettings.voice.echo")} hint={t("appsettings.voice.echoHint")} />
-        <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label={t("appsettings.voice.noise")} hint={t("appsettings.voice.noiseHint")} />
-        <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label={t("appsettings.voice.gain")} hint={t("appsettings.voice.gainHint")} />
-      </PrefSetting>
-      <PrefSetting id="camera" title={t("appsettings.voice.camera")} keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
-        <div className="flex flex-col gap-4">
-          <DevicePicker icon={VideoIcon} label={t("appsettings.voice.camera")} unnamed="appsettings.voice.unnamedCamera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
-          <CameraTest />
-        </div>
-      </PrefSetting>
-      <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
-        <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
-        <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
-      </PrefSetting>
+      <motion.div layout="position" transition={SPRING} className="flex flex-col pt-6">
+        <PrefSetting id="processing" title={t("appsettings.voice.processing")} keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
+          <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label={t("appsettings.voice.echo")} hint={t("appsettings.voice.echoHint")} />
+          <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label={t("appsettings.voice.noise")} hint={t("appsettings.voice.noiseHint")} />
+          <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label={t("appsettings.voice.gain")} hint={t("appsettings.voice.gainHint")} />
+        </PrefSetting>
+        <PrefSetting id="camera" title={t("appsettings.voice.camera")} keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
+          <div className="flex flex-col gap-4">
+            <DevicePicker icon={VideoIcon} label={t("appsettings.voice.camera")} unnamed="appsettings.voice.unnamedCamera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
+            <CameraTest />
+          </div>
+        </PrefSetting>
+        <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
+          <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
+          <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
+        </PrefSetting>
+      </motion.div>
     </div>
   );
 }

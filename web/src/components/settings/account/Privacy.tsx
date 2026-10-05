@@ -1,13 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, m as motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { deleteAccount, exportData, getTwoFactor, run } from "@/fuwa/actions";
 import type { User } from "@/gen/fuwa/v1/types_pb";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { hasPassword } from "@/lib/accounts";
 import { PasswordInput, useShake } from "@/components/settings/account/common";
@@ -38,47 +38,50 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
   return (
     <div className="flex flex-col gap-8">
       <ActivitySharing instanceKey={instanceKey} where={where} />
-      <Export instanceKey={instanceKey} where={where} />
+      <LayoutGroup>
+        <Export instanceKey={instanceKey} where={where} />
 
-      <motion.section
-        data-setting="delete-account"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ ...SPRING, delay: 0.06 }}
-        className="rounded-3xl border border-destructive/30 bg-destructive/5 p-5"
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-destructive/15 text-destructive">
-            <Trash2Icon className="size-6" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-extrabold">{t("settings.nav.deleteAccount")}</p>
-            <p className="text-sm text-muted-foreground">{t("accountsettings.privacy.deleteHint", { instance: where })}</p>
+        <motion.section
+          data-setting="delete-account"
+          layout="position"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...SPRING, delay: 0.06, layout: SPRING }}
+          className="rounded-3xl border border-destructive/30 bg-destructive/5 p-5"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-destructive/15 text-destructive">
+              <Trash2Icon className="size-6" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-extrabold">{t("settings.nav.deleteAccount")}</p>
+              <p className="text-sm text-muted-foreground">{t("accountsettings.privacy.deleteHint", { instance: where })}</p>
+            </div>
+            <Button type="button" variant="destructive" className="shrink-0 rounded-xl font-bold" onClick={() => setDeleting(true)} disabled={owned.length > 0}>
+              {t("accountsettings.privacy.deleteButton")}
+            </Button>
           </div>
-          <Button type="button" variant="destructive" className="shrink-0 rounded-xl font-bold" onClick={() => setDeleting(true)} disabled={owned.length > 0}>
-            {t("accountsettings.privacy.deleteButton")}
-          </Button>
-        </div>
-        <AnimatePresence initial={false}>
-          {owned.length > 0 && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="mt-4 rounded-2xl bg-background/60 p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
-                  <CrownIcon className="size-4 text-amber-400" /> {t("accountsettings.privacy.owned", { count: owned.length })}
-                </p>
-                <ul className="flex flex-wrap gap-2">
-                  {owned.map((s) => (
-                    <li key={s.id} className="flex items-center gap-2 rounded-xl border bg-card py-1 pr-3 pl-1 text-sm font-bold">
-                      <ServerIcon server={s} className="size-6 rounded-lg text-[0.6rem]" />
-                      {s.name}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.section>
+          <AnimatePresence mode="popLayout" initial={false}>
+            {owned.length > 0 && (
+              <motion.div {...SLIDE_IN} transition={SPRING}>
+                <div className="mt-4 rounded-2xl bg-background/60 p-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
+                    <CrownIcon className="size-4 text-amber-400" /> {t("accountsettings.privacy.owned", { count: owned.length })}
+                  </p>
+                  <ul className="flex flex-wrap gap-2">
+                    {owned.map((s) => (
+                      <li key={s.id} className="flex items-center gap-2 rounded-xl border bg-card py-1 pr-3 pl-1 text-sm font-bold">
+                        <ServerIcon server={s} className="size-6 rounded-lg text-[0.6rem]" />
+                        {s.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.section>
+      </LayoutGroup>
 
       <DeleteDialog instanceKey={instanceKey} where={where} open={deleting} onOpenChange={setDeleting} />
     </div>
@@ -156,9 +159,9 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
           )}
         </AnimatePresence>
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {state !== "idle" && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="mt-4 flex items-center gap-3">
               <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
                 {state === "working" ? (
@@ -296,30 +299,30 @@ function DeleteForm({
             <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" spellCheck={false} className="h-11 rounded-xl" />
           </label>
         )}
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {standalone && twoStep && (
-            <motion.label initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-1.5 overflow-hidden">
+            <motion.label {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-1.5">
               <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.codeOrBackup")}</span>
               <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" maxLength={16} spellCheck={false} placeholder="123456" className="h-11 rounded-xl font-mono tracking-wider" />
             </motion.label>
           )}
         </AnimatePresence>
       </motion.div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {error && (
-          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+          <motion.p layout="position" {...SLIDE_IN} transition={SPRING} className="text-sm font-bold text-destructive first-letter:uppercase">
             {error}
           </motion.p>
         )}
       </AnimatePresence>
-      <div className="flex justify-end gap-2">
+      <motion.div layout="position" transition={SPRING} className="flex justify-end gap-2">
         <Button type="button" variant="ghost" className="rounded-xl" onClick={onClose} disabled={pending}>
           {t("accountsettings.privacy.keep")}
         </Button>
         <Button type="submit" variant="destructive" className={cn("rounded-xl font-bold transition-opacity", !ready && "opacity-60")} disabled={pending}>
           {pending ? t("accountsettings.privacy.deleting") : t("accountsettings.privacy.deleteForever")}
         </Button>
-      </div>
+      </motion.div>
     </form>
   );
 }
