@@ -69,6 +69,8 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     return last;
   });
   const access = useAccess(instanceKey, serverId);
+  // Files go into a channel shared from another instance once this one sends them there.
+  const filesElsewhere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-files-elsewhere"));
   const [, tick] = useState(0);
   const now = Date.now();
   const exempt = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
@@ -86,13 +88,13 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     /** Synced and allowed to write here. */
     canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
     /**
-     * May send files here. Not yet in a channel shared from another
-     * instance; a home on this one takes and keeps them.
+     * May send files here. The channel's home takes and keeps them; one on
+     * another instance only once this instance sends files there.
      */
     canAttach:
       !!member &&
       hasIn(access, channel.id, Permission.ATTACH_FILES) &&
-      !(channel.shared && !channel.shared.home && channel.shared.homeServer?.instance),
+      (filesElsewhere || !(channel.shared && !channel.shared.home && channel.shared.homeServer?.instance)),
     canStartThreads: !member || hasIn(access, channel.id, Permission.CREATE_THREADS),
     /** Joined, but hasn't agreed to the server's rules yet. */
     pending: !!member && access.pending,

@@ -558,8 +558,7 @@ function askCopy(ask: Ask, c: SharedConnection, otherName: string, homeName: str
 /** What a connection with a server on another instance says beside that instance's key. */
 function instanceNote(c: SharedConnection) {
   if (c.home && waiting(c)) return "Before approving, check their key fingerprint with their admins somewhere you trust:";
-  if (waiting(c)) return "Their key fingerprint:";
-  return "Messages don't cross instances yet. Their key fingerprint:";
+  return "Their key fingerprint:";
 }
 
 /** One connection, from this server's side, with what you can do about it. */

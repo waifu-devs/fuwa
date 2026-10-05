@@ -36,7 +36,8 @@ pub(crate) use polls::{close_due as close_due_polls, forget_voter as forget_poll
 pub use search::spawn_search_indexer;
 pub use secure::MAX_SECURE_MEMBERS;
 pub use shared::{
-    arrived as shared_arrived, returned as shared_returned, shared_call, spawn_shared_fanout, undo as shared_undo,
+    arrived as shared_arrived, file_for as shared_file_for, returned as shared_returned, shared_call,
+    spawn_shared_fanout, undo as shared_undo,
 };
 pub use sso::note_lapses;
 pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};

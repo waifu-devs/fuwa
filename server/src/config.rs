@@ -119,6 +119,11 @@ pub struct Config {
     /// may hold open at once on this part, default 32 (a protective default);
     /// `unlimited` for none. Admins can change it in the instance settings.
     pub streams_per_account: Option<usize>,
+    /// FUWA_SHARED_FILE_FETCHES_IN_FLIGHT: files fetched from other
+    /// instances at once for shared channels, default 8 (a protective
+    /// default), each instance at most half; `unlimited` for none. Admins
+    /// can change it in the instance settings.
+    pub shared_file_fetches_in_flight: Option<usize>,
     /// FUWA_MAX_STREAMS: live connections this part holds open at once, for
     /// everyone. Unlimited by default; see docs/capacity.md for what a box holds.
     pub max_streams: Option<usize>,
@@ -268,6 +273,9 @@ pub struct Limits {
     /// FUWA_LIMIT_SHARED_REMOTE_PEOPLE: people one server on another
     /// instance may bring to a server's shared channels.
     pub shared_remote_people: Option<i64>,
+    /// FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY: bytes of files one
+    /// server on another instance may send into shared channels here a day.
+    pub shared_remote_file_bytes_per_day: Option<i64>,
 }
 
 impl Limits {
@@ -423,6 +431,7 @@ impl Config {
             commands_per_minute: count("FUWA_LIMIT_COMMANDS_PER_MINUTE")?,
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
+            shared_remote_file_bytes_per_day: upload_bytes("FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -558,6 +567,8 @@ impl Config {
         };
         let streams_per_account = count("FUWA_STREAMS_PER_ACCOUNT", Some(crate::streams::PER_ACCOUNT))?;
         let max_streams = count("FUWA_MAX_STREAMS", None)?;
+        let shared_file_fetches_in_flight =
+            count("FUWA_SHARED_FILE_FETCHES_IN_FLIGHT", Some(crate::federation::FETCHES_IN_FLIGHT))?;
         let write_queue = count("FUWA_WRITE_QUEUE", Some(crate::db::WRITE_QUEUE))?;
         let sign_in_queue = count("FUWA_SIGN_IN_QUEUE", Some(crate::auth::HASH_WAITING))?;
 
@@ -624,6 +635,7 @@ impl Config {
             media_urls,
             replica,
             streams_per_account,
+            shared_file_fetches_in_flight,
             max_streams,
             write_queue,
             sign_in_queue,

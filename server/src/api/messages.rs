@@ -14,9 +14,7 @@ use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
 
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
-const MAX_ATTACHMENTS: usize = 10;
-/// Why a file can't go in a channel shared from another instance.
-pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel shared from another instance yet";
+pub(super) const MAX_ATTACHMENTS: usize = 10;
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
@@ -488,7 +486,12 @@ pub(super) async fn check_files(
 /// Checks a voice message's file against what the sending app said of it
 /// and the instance's caps on voice messages. Its length is the app's word,
 /// bounded by its size (Opus at 32 kbps is about 4 KB a second).
-fn check_voice(voice: &pb::VoiceNote, content_type: &str, size: i64, limits: &crate::config::Limits) -> Result<()> {
+pub(super) fn check_voice(
+    voice: &pb::VoiceNote,
+    content_type: &str,
+    size: i64,
+    limits: &crate::config::Limits,
+) -> Result<()> {
     if content_type != media::OGG_OPUS {
         return Err(Error::invalid("a voice message is an Ogg Opus recording"));
     }
@@ -881,11 +884,9 @@ impl MessageService for Api {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
                     if !req.attachments.is_empty() {
-                        if link.elsewhere() {
-                            return Err(Error::invalid(NO_SHARED_FILES));
-                        }
                         // The sender's uploads for this server, which the
-                        // channel's home takes and keeps.
+                        // channel's home takes and keeps (fetched with a
+                        // ticket when it's on another instance).
                         self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
                     }
                     if !req.thread_id.is_empty() {

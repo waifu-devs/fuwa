@@ -33,8 +33,9 @@ use crate::servers::{self as store, Audit, Payload, ServerDb, load_channel};
 /// What a guest server's people may be let do in a shared channel, at most;
 /// the home picks which. Seeing it comes with being shown it.
 pub const SHAREABLE: Bits = bit(Permission::SendMessages) | bit(Permission::EmbedLinks) | bit(Permission::AttachFiles);
-/// The same for a server on another instance: files don't cross instances yet.
-const SHAREABLE_ELSEWHERE: Bits = SHAREABLE & !bit(Permission::AttachFiles);
+/// The same for a server on another instance: as much, now that files
+/// cross instances too ([`crate::shared_files`]).
+const SHAREABLE_ELSEWHERE: Bits = SHAREABLE;
 /// How long a share code works.
 const CODE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Requests from one other instance a server keeps waiting, at most.
@@ -372,7 +373,7 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     }
     message.author_id = from_there(&message.author_id, at, own)?;
     message.content = message.content.chars().take(messages::MAX_MESSAGE_LENGTH).collect();
-    message.attachments.clear();
+    message.attachments = their_files(&message.attachments);
     message.embeds = message.embeds.iter().take(10).map(|e| their_embed(e, pictures)).collect();
     message.auto_mod = None;
     // Threads stay in the channel's own server for now.
@@ -503,15 +504,65 @@ fn their_embed(embed: &pb::Embed, pictures: &Pictures) -> pb::Embed {
     }
 }
 
-/// What a guest on another instance sends to be said: text and links, no
-/// files, and no previews it made (apps here would fetch their pictures
-/// from wherever it found them).
-fn their_text(content: &str, attachments: &[pb::Attachment], embeds: &mut Vec<pb::Embed>) -> Result<()> {
-    if !attachments.is_empty() {
-        return Err(Error::invalid("files can't be sent to a channel on another instance yet"));
+/// What a guest on another instance sends to be said: text, links and
+/// files, each with its ticket (fetched from there and checked by the home,
+/// [`take_files`]), and no previews it made (apps here would fetch their
+/// pictures from wherever it found them).
+fn their_text(send: &mut cpb::GuestSend) -> Result<()> {
+    if send.files.len() != send.attachments.len() {
+        return Err(Error::invalid("each file needs its ticket"));
     }
-    embeds.clear();
-    messages::check_content(content, false)
+    for file in &mut send.attachments {
+        let id = crate::media::parse_id(&file.id).ok_or_else(|| Error::invalid("a file's id doesn't read"))?;
+        *file = pb::Attachment {
+            id,
+            filename: crate::attachments::clean_name(&file.filename),
+            size: file.size,
+            width: file.width,
+            height: file.height,
+            voice: file.voice.take(),
+            ..Default::default()
+        };
+    }
+    send.embeds.clear();
+    messages::check_content(&send.content, !send.attachments.is_empty())
+}
+
+/// The files of a message from a home on another instance, as this one
+/// shows them: at most ten, each named by its id there, its name cleaned
+/// up and its kind one fuwa knows. Read through this instance
+/// ([`crate::shared_files`]), never from there; [`files_here`] links them.
+fn their_files(files: &[pb::Attachment]) -> Vec<pb::Attachment> {
+    files
+        .iter()
+        .filter_map(|file| {
+            let id = crate::media::parse_id(&file.id)?;
+            let kind = crate::media::ATTACHMENT_TYPES.iter().find(|kind| **kind == file.content_type);
+            let pixels = |n: i32| n.clamp(0, 65_535);
+            let voice = file.voice.clone().filter(|v| v.waveform.len() <= 128);
+            (file.size > 0).then(|| pb::Attachment {
+                id,
+                filename: crate::attachments::clean_name(&file.filename),
+                content_type: kind.copied().unwrap_or(crate::media::OCTET_STREAM).to_string(),
+                size: file.size,
+                width: pixels(file.width),
+                height: pixels(file.height),
+                voice,
+                url: String::new(),
+            })
+        })
+        .take(10)
+        .collect()
+}
+
+/// A message's files from a home on another instance, linked for people
+/// here: through this instance, signed, for a day.
+fn files_here(app: &App, link: &LinkRow, message: &mut pb::Message) {
+    if link.elsewhere() {
+        for file in &mut message.attachments {
+            file.url = crate::shared_files::link(app, &link.home.id, file);
+        }
+    }
 }
 
 /// Text another instance sent, on one line and clipped.
@@ -570,7 +621,7 @@ pub fn arrived(
         // To the home: someone there acting in the channel.
         Some(Call::Send(send)) => {
             their_guest(send.guest.as_mut(), at, &pictures)?;
-            their_text(&send.content, &send.attachments, &mut send.embeds)?;
+            their_text(send)?;
             message_id(&send.reply_to_id)?;
         }
         Some(Call::List(list)) => {
@@ -1107,10 +1158,11 @@ pub(super) async fn guest_of(
 }
 
 /// A message as this server shows it: in its own channel.
-fn shown_here(mut message: pb::Message, server_id: &str, link: &LinkRow) -> pb::Message {
+fn shown_here(app: &App, mut message: pb::Message, server_id: &str, link: &LinkRow) -> pb::Message {
     message.server_id = server_id.to_string();
     message.channel_id = link.channel_id.clone().unwrap_or_default();
     no_pings(&mut message);
+    files_here(app, link, &mut message);
     message
 }
 
@@ -1134,7 +1186,7 @@ async fn shown_from(
         {
             continue;
         }
-        shown.push(shown_here(message, server_id, link));
+        shown.push(shown_here(app, message, server_id, link));
     }
     Ok(shown)
 }
@@ -1269,14 +1321,18 @@ pub(super) async fn guest_send(
         attachments: req.attachments,
         embeds: req.embeds,
         reply_to_id: req.reply_to_id,
+        ..Default::default()
     });
     let reply = to_home(app, &sdb.id, link, call).await?;
     // The home has its own copies now; on a split instance this server's
-    // shard lets go of its own. One that went wrong is left to the sweeps.
+    // shard lets go of its own, and so does one process for a home on
+    // another instance. One that went wrong is left to the sweeps.
     if matches!(app.link, crate::app::Link::Shard(_)) {
         for id in &files {
             crate::cluster::pictures::drop(app, &sdb.id, id).await;
         }
+    } else if link.elsewhere() && !files.is_empty() {
+        crate::attachments::drop_soon(app, &sdb.id, files);
     }
     shown_one(app, &sdb.id, link, reply.message).await
 }
@@ -1579,7 +1635,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
         return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
     }
     let mut send = send;
-    let files = take_files(app, sdb, &guest, &mut send.attachments).await?;
+    let files = take_files(app, sdb, &guest, &mut send.attachments, &send.files).await?;
     let file_bytes: i64 = send.attachments.iter().map(|file| file.size).sum();
     // AutoMod reads the embeds' words and the files' names with the text.
     let reviewed = messages::reviewed_text(&pb::Message {
@@ -1663,33 +1719,34 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     Ok(cpb::SharedReply { message: Some(message?), ..Default::default() })
 }
 
-/// Takes the files a guest on this instance sends into the home, before
-/// the write: each their own upload for their server, checked as the home
-/// checks its own people's, within its room for files, then claimed for the
-/// home (so a file goes in one message) and put with it
-/// ([`crate::cluster::pictures::take_shared`]). The ids taken, which are
-/// dropped if the message isn't written. Files from another instance don't
-/// come yet.
+/// Takes the files a guest sends into the home, before the write, checked
+/// as the home checks its own people's and within its room for files: one
+/// on this instance, its own upload for its server, claimed for the home
+/// (so a file goes in one message) and put with it
+/// ([`crate::cluster::pictures::take_shared`]); one on another instance,
+/// fetched from there with its ticket ([`take_from_elsewhere`]). The ids
+/// taken, which are dropped if the message isn't written.
 async fn take_files(
     app: &Arc<App>,
     sdb: &ServerDb,
     guest: &cpb::Guest,
     files: &mut [pb::Attachment],
+    tickets: &[cpb::SharedFile],
 ) -> Result<Vec<String>> {
     if files.is_empty() {
         return Ok(vec![]);
     }
     let server_id = guest.server.as_ref().map(|s| s.id.clone()).unwrap_or_default();
     let user_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-    if server_id.contains('@') {
-        return Err(Error::invalid(messages::NO_SHARED_FILES));
-    }
     {
         let conn = sdb.read()?;
         let (row, _, _) = connection(&conn, guest).await?;
         let access = Access::guest(&row.channel_id, row.allowed);
         access.require_in(&row.channel_id, Permission::SendMessages)?;
         access.require_in(&row.channel_id, Permission::AttachFiles)?;
+    }
+    if server_id.contains('@') {
+        return take_from_elsewhere(app, sdb, &server_id, files, tickets).await;
     }
     messages::check_extras(files, &[])?;
     // Each one as its upload's own link, whatever server's link it came as.
@@ -1729,6 +1786,125 @@ async fn take_files(
         return Err(err);
     }
     Ok(taken)
+}
+
+/// Takes the files a guest server on another instance (`server_id`) sends,
+/// as [`take_files`] says: refused before anything is fetched when any is
+/// over this instance's caps (each file's size as that instance said it),
+/// then each fetched with its ticket, its kind read here from its bytes
+/// (never as that instance said), at most the size it said, and counted
+/// toward that server's bytes for the day.
+async fn take_from_elsewhere(
+    app: &Arc<App>,
+    sdb: &ServerDb,
+    server_id: &str,
+    files: &mut [pb::Attachment],
+    tickets: &[cpb::SharedFile],
+) -> Result<Vec<String>> {
+    if tickets.len() != files.len() {
+        return Err(Error::invalid("each file needs its ticket"));
+    }
+    if files.len() > messages::MAX_ATTACHMENTS {
+        return Err(Error::invalid(format!("at most {} files per message", messages::MAX_ATTACHMENTS)));
+    }
+    if files.len() > 1 && files.iter().any(|file| file.voice.is_some()) {
+        return Err(Error::invalid("a voice message is sent on its own"));
+    }
+    let caps = app.settings().limits.clone();
+    let mut bytes = 0i64;
+    for file in files.iter() {
+        if file.size <= 0 {
+            return Err(Error::invalid("a file's size is off"));
+        }
+        if let Some(cap) = caps.attachment_upload_bytes
+            && file.size > cap
+        {
+            return Err(Error::ResourceExhausted(format!(
+                "files can be at most {} here",
+                crate::media::size_label(cap)
+            )));
+        }
+        if file.voice.is_some()
+            && let Some(cap) = caps.voice_message_bytes
+            && file.size > cap
+        {
+            return Err(Error::ResourceExhausted(format!(
+                "voice messages can be at most {} here",
+                crate::media::size_label(cap)
+            )));
+        }
+        bytes = bytes.saturating_add(file.size);
+    }
+    let limits = sdb.limits(&caps).await?;
+    if let Some(limit) = limits.attachment_bytes
+        && sdb.usage().await?.attachment_bytes + bytes > limit
+    {
+        return Err(Error::ResourceExhausted(format!(
+            "this channel's home server is out of room for files ({} in all)",
+            crate::media::size_label(limit)
+        )));
+    }
+    let mut taken = Vec::with_capacity(files.len());
+    let took = async {
+        for (file, ticket) in files.iter_mut().zip(tickets) {
+            let (id, kind, size) = match &app.link {
+                crate::app::Link::Shard(_) => {
+                    crate::cluster::pictures::take_elsewhere(app, &sdb.id, server_id, &ticket.ticket, file.size).await?
+                }
+                _ => crate::shared_files::take(app, &sdb.id, server_id, &ticket.ticket, file.size).await?,
+            };
+            taken.push(id.clone());
+            let voice = file.voice.take();
+            if let Some(voice) = &voice {
+                messages::check_voice(voice, kind, size, &caps)?;
+            }
+            let sized = kind.starts_with("image/") || kind.starts_with("video/");
+            let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
+            *file = pb::Attachment {
+                url: crate::attachments::link(app, &sdb.id, &id),
+                filename: crate::attachments::clean_name(&file.filename),
+                content_type: kind.to_string(),
+                size,
+                width: pixels(file.width),
+                height: pixels(file.height),
+                id,
+                voice,
+            };
+        }
+        Ok::<_, Error>(())
+    }
+    .await;
+    if let Err(err) = took {
+        crate::attachments::drop_soon(app, &sdb.id, taken);
+        return Err(err);
+    }
+    Ok(taken)
+}
+
+/// A file a message here has, for the instance at `origin`: only one in a
+/// message shown in a channel this server shares with a server there now.
+pub async fn file_for(
+    conn: &turso::Connection,
+    server_id: &str,
+    media_id: &str,
+    origin: &str,
+) -> Result<Option<crate::attachments::Attached>> {
+    let found = query_one(
+        conn,
+        "SELECT a.message_id FROM attachments a
+         JOIN channel_guests g ON g.channel_id = a.channel_id AND g.active = 1 AND g.instance = ?2
+         WHERE a.media_id = ?1 LIMIT 1",
+        (media_id, origin),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    let Some(message_id) = found else { return Ok(None) };
+    match load_message(conn, server_id, &message_id).await? {
+        Some(message) if in_channel(&message) && message.kind == pb::MessageKind::Unspecified as i32 => {
+            crate::attachments::lookup(conn, media_id).await
+        }
+        _ => Ok(None),
+    }
 }
 
 async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedReply> {
@@ -2095,6 +2271,7 @@ async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> 
                     m.server_id = sdb.id.clone();
                     m.channel_id = channel_id.clone();
                     no_pings(m);
+                    files_here(app, &link, m);
                 }
                 Payload::MessageDeleted(d) => d.channel_id = channel_id.clone(),
                 _ => return None,
@@ -2377,11 +2554,15 @@ fn leaving(event: &pb::Event, public_url: &str) -> pb::Event {
     event
 }
 
-/// A message as it leaves for another instance, as [`leaving`] says: no
-/// files (kept here), and only this instance's own pictures, which the
-/// other fetches through its own proxy.
+/// A message as it leaves for another instance, as [`leaving`] says: its
+/// files only by id (kept here, fetched for that instance's people with a
+/// signed request, [`crate::shared_files`]), and only this instance's own
+/// pictures, which the other fetches through its own proxy.
 fn plain_message(message: &mut pb::Message, public_url: &str) {
-    message.attachments.clear();
+    message.attachments.retain(|file| crate::media::parse_id(&file.id).is_some());
+    for file in &mut message.attachments {
+        file.url.clear();
+    }
     message.emojis.retain_mut(|emoji| {
         emoji.url = own_picture(&emoji.url, public_url);
         emoji.creator_id.clear();

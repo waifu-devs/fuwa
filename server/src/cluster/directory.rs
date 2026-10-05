@@ -842,4 +842,26 @@ impl DirectoryService for Internal {
         let call = request.into_inner().call.ok_or_else(|| Status::invalid_argument("call is required"))?;
         respond(self.app.shared(call).await.map(|reply| cpb::PassSharedResponse { reply: Some(reply) }))
     }
+
+    type FetchSharedFileStream =
+        std::pin::Pin<Box<dyn futures::Stream<Item = Result<cpb::FetchSharedFileResponse, Status>> + Send>>;
+
+    async fn fetch_shared_file(
+        &self,
+        request: Request<cpb::FetchSharedFileRequest>,
+    ) -> Result<Response<Self::FetchSharedFileStream>, Status> {
+        use futures::StreamExt;
+        let req = request.into_inner();
+        let home_id = crate::id::parse_id("server_id", &req.home_id)?;
+        let (media_id, slot, bytes) =
+            crate::shared_files::fetch(&self.app, &home_id, &req.guest_server_id, &req.ticket, req.size).await?;
+        let first = cpb::FetchSharedFileResponse { media_id, data: Vec::new() };
+        let rest = bytes.map(move |chunk| {
+            let _held = &slot;
+            chunk
+                .map(|data| cpb::FetchSharedFileResponse { data: data.to_vec(), ..Default::default() })
+                .map_err(|_| Status::unavailable("the other instance stopped sending that file"))
+        });
+        Ok(Response::new(Box::pin(futures::stream::once(async move { Ok(first) }).chain(rest))))
+    }
 }

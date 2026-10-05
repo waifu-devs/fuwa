@@ -474,7 +474,10 @@ impl App {
             );
         }
         if self.node.is_some() {
-            router = router.merge(crate::media::routes(self.clone())).merge(crate::outside::routes(self.clone()));
+            router = router
+                .merge(crate::media::routes(self.clone()))
+                .merge(crate::outside::routes(self.clone()))
+                .merge(crate::shared_files::routes(self.clone()));
         }
         if self.node.is_some() {
             router = router.merge(crate::sso::http::instance_routes(self.clone()));

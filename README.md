@@ -161,6 +161,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_COMMANDS_PER_MINUTE` | unlimited | Times one account may run agents' slash commands or press their buttons in a minute |
 | `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE` | unlimited | Messages a minute all the people of one server on another instance may send together to channels shared from here (also set from the app: Instance settings, Other instances) |
 | `FUWA_LIMIT_SHARED_REMOTE_PEOPLE` | unlimited | People one server on another instance may bring to a server's shared channels; past it, no one new from that server joins in (also set from the app: Instance settings, Other instances) |
+| `FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY` | unlimited | Bytes of files one server on another instance may send into channels shared from here in a day (UTC), like `1GiB` (also set from the app: Instance settings, Other instances) |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_REPORTS_URL` | `FUWA_TELEMETRY_URL` with `/signals` changed to `/reports` | Where the hourly health report goes |

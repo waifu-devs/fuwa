@@ -1817,6 +1817,67 @@ impl NodeDb {
         .await
     }
 
+    /// Reserves the row for a home server's copy of a file a guest server on
+    /// another instance sends into a shared channel (see
+    /// [`crate::shared_files`]): counted for the day under `account_id`
+    /// (that server's "shared:<id>@<instance>"), refused past
+    /// `bytes_per_day`. It's the home's and used, by the message being
+    /// written; until its bytes are stored it's never served, and swept
+    /// if they don't come.
+    pub async fn reserve_shared_media(
+        &self,
+        id: &str,
+        account_id: &str,
+        home_id: &str,
+        size: i64,
+        bytes_per_day: Option<i64>,
+    ) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            let day = now / DAY_MS;
+            conn.execute(
+                "INSERT INTO attachment_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                (account_id, day, size),
+            )
+            .await?;
+            if let Some(cap) = bytes_per_day {
+                let today = query_one(
+                    conn,
+                    "SELECT bytes FROM attachment_days WHERE account_id = ?1 AND day = ?2",
+                    (account_id, day),
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if today > cap {
+                    return Err(Error::ResourceExhausted(format!(
+                        "that server can send {} of files a day here; try again tomorrow",
+                        crate::media::size_label(cap)
+                    )));
+                }
+            }
+            conn.execute(
+                "INSERT INTO media (id, account_id, purpose, content_type, size, created_at, expires_at, server_id,
+                                    used_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?6)",
+                (
+                    id,
+                    account_id,
+                    pb::MediaPurpose::Attachment as i64,
+                    crate::media::OCTET_STREAM,
+                    size,
+                    now,
+                    now + crate::media::RECEIVE_TTL_MS,
+                    home_id,
+                ),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Uses up an upload link: the reserved upload it's for, if it still
     /// works. It then has until `receive_by` to arrive.
     pub async fn start_upload(&self, upload_hash: &str, now: i64, receive_by: i64) -> Result<Option<MediaRow>> {

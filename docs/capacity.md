@@ -72,6 +72,7 @@ rather than limit what people do. Each can be raised, or turned off with
 | `FUWA_MAX_STREAMS` | unlimited | People online at once on this part, for everyone. Set it from the table above to answer "this instance is full" instead of slowing down for everyone. |
 | `FUWA_LIMIT_*` | unlimited | Members, channels and storage per server ([self-hosting](self-hosting.md)). |
 | `FUWA_WRITE_QUEUE` | 512 (protective) | Writes one server's file may have waiting. Past it, that server's writes are told it's busy. 4 run at once, built in. |
+| `FUWA_SHARED_FILE_FETCHES_IN_FLIGHT` | 8 (protective) | Files fetched from other instances at once for shared channels, both ways; each instance gets at most half, and the rest wait up to 30 seconds. Admins can change it live (`shared_file_fetches_in_flight`). |
 | `FUWA_SIGN_IN_QUEUE` | 256 (protective) | Password checks that may wait. Half the cores check at once, built in. Past it, sign-ins and sign-ups are told the instance is busy. |
 | Gateway streams per shard connection | 100 | Built in. |
 

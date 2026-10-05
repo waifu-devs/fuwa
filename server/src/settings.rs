@@ -52,6 +52,8 @@ pub const FIELDS: &[&str] = &[
     "federation_blocked_hosts",
     "call_recordings_keep_days",
     "streams_per_account",
+    "shared_file_fetches_in_flight",
+    "shared_remote_file_bytes_per_day",
     "ice_urls",
     "turn_secret",
     "automod_providers",
@@ -94,6 +96,9 @@ pub struct Settings {
     /// Live streams (apps and tabs) one account may hold open at once;
     /// `None` for no limit. A protective default (docs/capacity.md).
     pub streams_per_account: Option<i64>,
+    /// Files fetched from other instances at once for shared channels;
+    /// `None` for no limit. A protective default (docs/federation.md).
+    pub shared_file_fetches_in_flight: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
     /// Moderation providers servers' AutoMod can use, keys and all; only
@@ -107,6 +112,11 @@ impl Settings {
     /// [`streams_per_account`](Self::streams_per_account) as a count.
     pub fn streams_per_account(&self) -> Option<usize> {
         self.streams_per_account.map(|n| usize::try_from(n).unwrap_or(usize::MAX))
+    }
+
+    /// [`shared_file_fetches_in_flight`](Self::shared_file_fetches_in_flight) as a count.
+    pub fn shared_file_fetches_in_flight(&self) -> Option<usize> {
+        self.shared_file_fetches_in_flight.map(|n| usize::try_from(n).unwrap_or(usize::MAX))
     }
 
     /// The settings with nothing changed from a client: the environment's values.
@@ -136,6 +146,9 @@ impl Settings {
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
             streams_per_account: config.streams_per_account.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
+            shared_file_fetches_in_flight: config
+                .shared_file_fetches_in_flight
+                .map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
             automod_providers: config.automod_providers.clone(),
@@ -250,6 +263,8 @@ impl Settings {
             commands_per_minute: limits.commands_per_minute,
             shared_remote_sends_per_minute: limits.shared_remote_sends_per_minute,
             shared_remote_people: limits.shared_remote_people,
+            shared_remote_file_bytes_per_day: limits.shared_remote_file_bytes_per_day,
+            shared_file_fetches_in_flight: self.shared_file_fetches_in_flight,
             calls: self.calls,
             call_recordings: self.call_recordings,
             call_recording_video: self.call_recording_video,
@@ -372,6 +387,8 @@ impl Settings {
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
             "streams_per_account" => Value::from(from.streams_per_account),
+            "shared_file_fetches_in_flight" => Value::from(from.shared_file_fetches_in_flight),
+            "shared_remote_file_bytes_per_day" => Value::from(from.shared_remote_file_bytes_per_day),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
             // Keys are never sent out, so an empty one keeps the saved key.
@@ -461,6 +478,8 @@ impl Settings {
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
             "streams_per_account" => Value::from(self.streams_per_account),
+            "shared_file_fetches_in_flight" => Value::from(self.shared_file_fetches_in_flight),
+            "shared_remote_file_bytes_per_day" => Value::from(limits.shared_remote_file_bytes_per_day),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
             "automod_providers" => {
@@ -557,6 +576,17 @@ impl Settings {
                     streams => streams,
                 }
             }
+            "shared_file_fetches_in_flight" => {
+                self.shared_file_fetches_in_flight = match cap(field, value)? {
+                    Some(0) => {
+                        return Err(Error::invalid(
+                            "shared_file_fetches_in_flight must be 1 or more, or unset for no limit",
+                        ));
+                    }
+                    fetches => fetches,
+                }
+            }
+            "shared_remote_file_bytes_per_day" => self.limits.shared_remote_file_bytes_per_day = cap(field, value)?,
             "ice_urls" => {
                 let invalid = || Error::invalid("ice_urls must be a list of stun:, turn: or turns: URLs");
                 let list = value.as_array().ok_or_else(invalid)?;

@@ -15,6 +15,7 @@
     { "id": "voice-messages-in-channels", "date": "2026-10-04", "title": "Voice messages in server channels" },
     { "id": "video-recordings", "date": "2026-10-04", "title": "Video in server recordings" },
     { "id": "secure-files", "date": "2026-10-04", "title": "Files in encrypted chats" },
-    { "id": "agent-commands", "date": "2026-10-04", "title": "Slash commands and buttons from agents" }
+    { "id": "agent-commands", "date": "2026-10-04", "title": "Slash commands and buttons from agents" },
+    { "id": "shared-files-elsewhere", "date": "2026-10-05", "title": "Files in channels with other instances" }
   ]
 }

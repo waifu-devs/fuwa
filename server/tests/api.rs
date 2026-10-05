@@ -7982,8 +7982,6 @@ async fn channels_shared_across_instances() {
     assert_eq!(seen.channel_name, "dev");
     assert_eq!(seen.instance, a.addr.to_string());
     assert_eq!(seen.fingerprint, fed_a.fingerprint);
-    // Files don't cross instances yet, so the home can't let them.
-    assert!(!seen.allowed.contains(&(pb::Permission::AttachFiles as i32)));
     assert!(seen.allowed.contains(&(pb::Permission::SendMessages as i32)));
     let home_server = seen.home_server.unwrap();
     assert_eq!(home_server.name, "Home");
@@ -8013,20 +8011,24 @@ async fn channels_shared_across_instances() {
     assert_eq!(request.id, asked.id);
     assert_eq!(request.instance, b.addr.to_string());
     assert_eq!(request.fingerprint, fed_b.fingerprint);
-    // Nor can its admins let them later.
+    // Its admins choose what the guest may do there, files included.
     let all = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
     let updated = ca
         .shared
         .update_connection(authed(
             &juan,
-            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id.clone(), allowed: all },
+            pb::UpdateConnectionRequest {
+                server_id: home.clone(),
+                connection_id: asked.id.clone(),
+                allowed: all.clone(),
+            },
         ))
         .await
         .unwrap()
         .into_inner()
         .connection
         .unwrap();
-    assert_eq!(updated.allowed, vec![pb::Permission::SendMessages as i32]);
+    assert_eq!(updated.allowed, all);
     let from = request.server.unwrap();
     assert_eq!(from.id, format!("{guest}@{origin_b}"));
     assert_eq!(from.name, "Guest");
@@ -8110,8 +8112,9 @@ async fn channels_shared_across_instances() {
         "the guest's own people show as their instance has them"
     );
 
-    // Files don't cross yet; editing and deleting their own does, and the
-    // home's messages aren't theirs to touch.
+    // Files are their own uploads (files_cross_instances_to_the_home);
+    // editing and deleting their own messages crosses too, and the home's
+    // messages aren't theirs to touch.
     let with_file = cb
         .messages
         .send_message(authed(
@@ -8276,6 +8279,140 @@ async fn channels_shared_across_instances() {
     let unreachable = send(&mut cb, &mika, &guest, &shown.id, "anyone?").await.unwrap_err();
     assert_eq!(unreachable.code(), Code::Unavailable, "{unreachable:?}");
     assert!(unreachable.message().contains(&format!("can't reach {a_addr}")), "{unreachable:?}");
+    b.stop().await;
+}
+
+/// A guest's file in a channel shared from another instance goes to the
+/// home: fetched there with a one-time ticket, kept under the home's own
+/// id and room, counted for the guest server's day, and read by the
+/// guest's people through their own instance, only while its message is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn files_cross_instances_to_the_home() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let capped = [federated[0], federated[1], ("FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY", "100")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &capped).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, _, _) = sign_up(&mut ca, "juan").await;
+    let (mika, _, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let all = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
+    ca.shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id.clone(), allowed: all },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+
+    let notes = b"notes from another instance".to_vec();
+    let url = attach(&mut cb, &b, &mika, &guest, notes.clone()).await;
+    let uploaded = url.rsplit('/').next().unwrap().to_string();
+    let sent = send_files(&mut cb, &mika, &guest, &shown.id, &[(&url, "../notes.txt")]).await.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!((file.filename.as_str(), file.size), ("notes.txt", notes.len() as i64));
+    assert!(file.url.starts_with(&format!("{origin_b}/media/shared/")), "{}", file.url);
+
+    // The home keeps it under its own id, counted in its room and for the
+    // guest server's day; the guest's upload goes.
+    let at_home = messages(&mut ca, &juan, &home, &dev.id).await;
+    let kept = at_home.iter().find(|m| m.id == sent.id).unwrap().attachments[0].clone();
+    assert_eq!((kept.id.as_str(), kept.filename.as_str()), (file.id.as_str(), "notes.txt"));
+    assert_ne!(kept.id, uploaded, "the home makes its own id");
+    let row = a.app.node().unwrap().media(&kept.id).await.unwrap().unwrap();
+    assert_eq!((row.server_id.as_deref(), row.used, row.stored), (Some(home.as_str()), true, true));
+    assert_eq!(row.account_id, format!("shared:{guest}@{origin_b}"));
+    assert_eq!(fetch(&a, &kept.url).await.2, notes);
+    assert_eq!(usage(&mut ca, &juan, &home).await.attachment_bytes, notes.len() as i64);
+    for _ in 0..100 {
+        if b.app.node().unwrap().media(&uploaded).await.unwrap().is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(b.app.node().unwrap().media(&uploaded).await.unwrap().is_none(), "the guest's upload is dropped");
+
+    // People on the guest's instance read it through it, never from the home.
+    // Links with a query, fetched whole.
+    let get = |url: String| async move {
+        let response = reqwest::get(url).await.unwrap();
+        let (status, headers) = (response.status(), response.headers().clone());
+        (status, headers, response.bytes().await.unwrap().to_vec())
+    };
+    let (status, headers, body) = get(file.url.clone()).await;
+    assert_eq!((status, body), (reqwest::StatusCode::OK, notes.clone()));
+    assert_eq!(headers[reqwest::header::CONTENT_TYPE], "application/octet-stream");
+    assert_eq!(headers[reqwest::header::CACHE_CONTROL], "no-store");
+    let listed = messages(&mut cb, &mika, &guest, &shown.id).await;
+    let listed = &listed.iter().find(|m| m.id == sent.id).unwrap().attachments[0];
+    assert!(listed.url.starts_with(&format!("{origin_b}/media/shared/")));
+    let bigger = file.url.replace(&format!("size={}", notes.len()), "size=99999");
+    assert_eq!(get(bigger).await.0, reqwest::StatusCode::NOT_FOUND, "a changed link isn't signed");
+
+    // Neither instance hands anything over without a signed request.
+    let ticket = "A".repeat(43);
+    assert_eq!(fetch(&b, &format!("{origin_b}/federation/files/{ticket}")).await.0, reqwest::StatusCode::NOT_FOUND);
+    let direct = format!("{origin_a}/federation/attachments/{home}/{}", kept.id);
+    assert_eq!(fetch(&a, &direct).await.0, reqwest::StatusCode::NOT_FOUND);
+
+    // Past the guest server's bytes for the day, the home takes no more.
+    let more = attach(&mut cb, &b, &mika, &guest, vec![7; 90]).await;
+    let refused = send_files(&mut cb, &mika, &guest, &shown.id, &[(&more, "more.bin")]).await.unwrap_err();
+    assert!(refused.message().contains("a day here"), "{refused:?}");
+
+    // Once its message is deleted at home, the guest's link stops working.
+    ca.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: home.clone(),
+                message_id: sent.id.clone(),
+                channel_id: dev.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(get(file.url.clone()).await.0, reqwest::StatusCode::NOT_FOUND);
+    a.stop().await;
     b.stop().await;
 }
 

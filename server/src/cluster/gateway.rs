@@ -278,6 +278,7 @@ impl Gateway {
             .layer(tonic_web::GrpcWebLayer::new());
 
         let media = self.clone();
+        let federation_files = self.clone();
         let webhooks = self.clone();
         let sso_servers = self.clone();
         let server_pictures = self.clone();
@@ -344,6 +345,14 @@ impl Gateway {
                             _ => gateway.upload_to_shard(&server_id, request).await,
                         }
                     }
+                }),
+            )
+            .route(
+                // Other instances' signed requests for files in shared channels.
+                "/federation/{*rest}",
+                any(move |request: Request| {
+                    let gateway = federation_files.clone();
+                    async move { gateway.pass(gateway.directory_channel.clone(), request).await }
                 }),
             )
             .route(
