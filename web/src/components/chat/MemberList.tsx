@@ -1,5 +1,5 @@
 import { CrownIcon, HourglassIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Member, Role } from "@/gen/fuwa/v1/types_pb";
 import type { Activity } from "@/gen/fuwa/v1/presence_pb";

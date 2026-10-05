@@ -35,6 +35,7 @@ pub(crate) mod overlay;
 pub mod perf;
 mod png;
 mod polls;
+mod presence;
 mod rail;
 mod search;
 mod secure;

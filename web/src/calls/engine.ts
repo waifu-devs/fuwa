@@ -4,7 +4,7 @@ import { createClient } from "@connectrpc/connect";
 import { CallService, type GetCallSettingsResponse } from "@/gen/fuwa/v1/call_pb";
 import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError, type FuwaError } from "@/fuwa/errors";
-import { engine } from "@/fuwa/sync";
+import { engine, onLeaveAccount } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
 import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
@@ -695,8 +695,9 @@ function preferOpus(transceiver: RTCRtpTransceiver) {
   if (!codecs || !transceiver.setCodecPreferences) return;
   const opus = codecs.filter((c) => c.mimeType.toLowerCase() === "audio/opus");
   if (!opus.length) return;
+  const first = new Set(opus);
   try {
-    transceiver.setCodecPreferences([...opus, ...codecs.filter((c) => !opus.includes(c))]);
+    transceiver.setCodecPreferences([...opus, ...codecs.filter((c) => !first.has(c))]);
   } catch {
     // The browser's own order is fine.
   }
@@ -745,6 +746,14 @@ export async function joinCall(target: CallTarget) {
     toast(e);
   }
 }
+
+// A call belongs to the account that joined it: switching or signing out on its instance leaves it.
+onLeaveAccount((key) => {
+  if (getCalls().call?.target.instance !== key) return;
+  // Told now, while the instance still has the token of the account that joined.
+  session?.unload();
+  void hangUp(null, false);
+});
 
 /** Leaves the call, with `why` shown when it wasn't you. */
 export async function hangUp(why: string | null, tell = true) {

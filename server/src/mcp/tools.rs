@@ -237,6 +237,40 @@ const TOOLS: &[Tool] = &[
         destructive: true,
     },
     Tool {
+        name: "pin_message",
+        title: "Pin a message",
+        description: "Pins a message to its channel (a thread reply to its thread), or unpins it with pinned \
+                      false. Needs a role that can manage messages there.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "message_id": message_id(),
+                "pinned": { "type": "boolean", "description": "False unpins it. Defaults to true." }
+            })
+        },
+        required: &["server_id", "channel_id", "message_id"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "list_pins",
+        title: "Read pinned messages",
+        description: "A channel's pinned messages, or a thread's, the latest pin first, with their authors.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "thread_id": { "type": "string", "description": "The message a thread is under, for its pins." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Defaults to 50." },
+                "after_id": { "type": "string", "description": "The page after this pinned message." }
+            })
+        },
+        required: &["server_id", "channel_id"],
+        read_only: true,
+        destructive: false,
+    },
+    Tool {
         name: "list_events",
         title: "Follow what happens",
         description: "What happened in a server since a cursor: messages sent, edited and deleted, members \
@@ -699,6 +733,32 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 channel_id: args.optional("channel_id")?,
             };
             call!(cx, message_service_client::MessageServiceClient.delete_message(req)).map(|_| json!({ "deleted": true }))
+        }
+        "pin_message" => {
+            let pinned = match args.0.get("pinned") {
+                None | Some(Value::Null) => true,
+                Some(Value::Bool(pinned)) => *pinned,
+                _ => return Err(RpcError::invalid("pinned must be true or false")),
+            };
+            let req = pb::PinMessageRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                message_id: args.text("message_id")?,
+                pinned,
+            };
+            call!(cx, message_service_client::MessageServiceClient.pin_message(req))
+                .map(|r| json!({ "message": view::messages(r.message.as_slice(), &[]).pop() }))
+        }
+        "list_pins" => {
+            let req = pb::ListPinsRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                thread_id: args.optional("thread_id")?,
+                limit: args.number("limit")?.unwrap_or(50).clamp(1, 100) as i32,
+                after_id: args.optional("after_id")?,
+            };
+            call!(cx, message_service_client::MessageServiceClient.list_pins(req))
+                .map(|r| json!({ "messages": view::messages(&r.messages, &r.authors), "has_more": r.has_more }))
         }
         "list_events" => {
             let limit = args.number("limit")?.unwrap_or(50).clamp(1, 200) as i32;

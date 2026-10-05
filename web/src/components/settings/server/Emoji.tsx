@@ -1,5 +1,5 @@
 import { CheckIcon, ImagePlusIcon, LoaderCircleIcon, SmilePlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { Emoji as EmojiT } from "@/gen/fuwa/v1/types_pb";
@@ -7,7 +7,8 @@ import { createEmoji, deleteEmoji, renameEmoji, run, serverUsage, uploadPicture 
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EMOJI_NAME, emojiPicture, nameFromFile } from "@/lib/emoji";
@@ -18,7 +19,7 @@ import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 /** A file on its way up: its picture, the name it'll get, and how far it's gone. */
-type Pending = { key: string; preview: string; name: string; sent: number; error?: string };
+type Pending = { key: string; file: File; name: string; sent: number; error?: string };
 
 /**
  * The server's own emoji: drop pictures in (several at once), name them, and
@@ -57,7 +58,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
       for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${nameFromFile(file.name).slice(0, 29)}_${n}`;
       taken.add(name.toLowerCase());
       const key = `${file.name}-${Math.random()}`;
-      setPending((list) => [...list, { key, preview: URL.createObjectURL(file), name, sent: 0 }]);
+      setPending((list) => [...list, { key, file, name, sent: 0 }]);
       void send(key, file, name);
     }
   }
@@ -138,77 +139,41 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
             <div key={n} className="shimmer h-16 rounded-2xl" />
           ))}
         </div>
-      ) : count === 0 && pending.length === 0 ? (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-2 py-8 text-center">
-          <motion.span
-            animate={{ rotate: [0, -10, 10, -6, 0], y: [0, -4, 0] }}
-            transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 1.2 }}
-            className="text-4xl"
-          >
-            🫥
-          </motion.span>
-          <p className="font-bold">{t("serversettings.emoji.none")}</p>
-          <p className="text-sm text-muted-foreground">{t("serversettings.emoji.noneHint")}</p>
-        </motion.div>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2">
-          <AnimatePresence initial={false}>
-            {pending.map((p) => (
-              <motion.li
-                key={p.key}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={SPRING}
-                className={cn("relative flex items-center gap-3 overflow-hidden rounded-2xl border p-3", p.error && "border-destructive/50 bg-destructive/5")}
+        // One box, so the list stays mounted (and its last emoji can still leave) when it empties.
+        <div>
+          {count === 0 && pending.length === 0 && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-2 py-8 text-center">
+              <motion.span
+                animate={{ rotate: [0, -10, 10, -6, 0], y: [0, -4, 0] }}
+                transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 1.2 }}
+                className="text-4xl"
               >
-                <motion.span
-                  className="absolute inset-y-0 left-0 bg-primary/10"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${p.sent * 100}%` }}
-                  transition={{ ease: "easeOut" }}
-                />
-                <img src={p.preview} alt="" className="relative size-10 object-contain" />
-                <span className="relative min-w-0 flex-1">
-                  <span className="block truncate font-bold">:{p.name}:</span>
-                  <span className={cn("block truncate text-xs", p.error ? "text-destructive first-letter:uppercase" : "text-muted-foreground")}>
-                    {p.error ?? (p.sent >= 1 ? t("serversettings.emoji.added") : t("serversettings.emoji.uploading"))}
-                  </span>
-                </span>
-                {p.error ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("serversettings.emoji.dismiss")}
-                    className="relative rounded-full"
-                    onClick={() => setPending((list) => list.filter((x) => x.key !== p.key))}
-                  >
-                    <XIcon />
-                  </Button>
-                ) : p.sent >= 1 ? (
-                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 700, damping: 15 }} className="relative text-emerald-500">
-                    <CheckIcon className="size-5" strokeWidth={3} />
-                  </motion.span>
-                ) : (
-                  <LoaderCircleIcon className="relative size-5 animate-spin text-muted-foreground" />
-                )}
-              </motion.li>
-            ))}
-            {[...emojis]
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((emoji) => (
-                <EmojiRow
-                  key={emoji.id}
-                  instanceKey={instanceKey}
-                  serverId={serverId}
-                  emoji={emoji}
-                  creator={members?.find((m) => m.user?.id === emoji.creatorId)?.user}
-                />
+                🫥
+              </motion.span>
+              <p className="font-bold">{t("serversettings.emoji.none")}</p>
+              <p className="text-sm text-muted-foreground">{t("serversettings.emoji.noneHint")}</p>
+            </motion.div>
+          )}
+          <ul className="grid gap-2 sm:grid-cols-2">
+            <AnimatePresence initial={false}>
+              {pending.map((p) => (
+                <PendingRow key={p.key} pending={p} onDismiss={() => setPending((list) => list.filter((x) => x.key !== p.key))} />
               ))}
-          </AnimatePresence>
-        </ul>
+              {[...emojis]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((emoji) => (
+                  <EmojiRow
+                    key={emoji.id}
+                    instanceKey={instanceKey}
+                    serverId={serverId}
+                    emoji={emoji}
+                    creator={members?.find((m) => m.user?.id === emoji.creatorId)?.user}
+                  />
+                ))}
+            </AnimatePresence>
+          </ul>
+        </div>
       )}
       {cap !== null && full && (
         <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
@@ -216,6 +181,59 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
         </p>
       )}
     </div>
+  );
+}
+
+/** A picture on its way up, filling as it goes. Its preview is let go once it has left the list. */
+function PendingRow({ pending: p, onDismiss }: { pending: Pending; onDismiss: () => void }) {
+  const { t } = useI18n();
+  const [preview, setPreview] = useState<string>();
+  useEffect(() => {
+    const url = URL.createObjectURL(p.file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [p.file]);
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={SPRING}
+      className={cn("relative flex items-center gap-3 overflow-hidden rounded-2xl border p-3", p.error && "border-destructive/50 bg-destructive/5")}
+    >
+      <motion.span
+        className="absolute inset-0 bg-primary/10"
+        initial={{ x: "-100%" }}
+        animate={{ x: `${p.sent * 100 - 100}%` }}
+        transition={{ ease: "easeOut" }}
+      />
+      <img src={preview} alt="" className="relative size-10 object-contain" />
+      <span className="relative min-w-0 flex-1">
+        <span className="block truncate font-bold">:{p.name}:</span>
+        <span className={cn("block truncate text-xs", p.error ? "text-destructive first-letter:uppercase" : "text-muted-foreground")}>
+          {p.error ?? (p.sent >= 1 ? t("serversettings.emoji.added") : t("serversettings.emoji.uploading"))}
+        </span>
+      </span>
+      {p.error ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("serversettings.emoji.dismiss")}
+          className="relative rounded-full"
+          onClick={onDismiss}
+        >
+          <XIcon />
+        </Button>
+      ) : p.sent >= 1 ? (
+        <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 700, damping: 15 }} className="relative text-emerald-500">
+          <CheckIcon className="size-5" strokeWidth={3} />
+        </motion.span>
+      ) : (
+        <LoaderCircleIcon className="relative size-5 animate-spin text-muted-foreground" />
+      )}
+    </motion.li>
   );
 }
 
@@ -238,11 +256,14 @@ function EmojiRow({ instanceKey, serverId, emoji, creator }: { instanceKey: stri
       return setName(emoji.name);
     }
     setSaving(true);
-    await run(renameEmoji(instanceKey, serverId, emoji.id, name)).catch((err: FuwaError) => {
-      toast(err.message);
+    try {
+      await run(renameEmoji(instanceKey, serverId, emoji.id, name));
+    } catch (err) {
+      toast((err as FuwaError).message);
       setName(emoji.name);
-    });
-    setSaving(false);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function remove() {

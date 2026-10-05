@@ -1,12 +1,12 @@
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { Permission, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
 import { giveRole, run, takeRole } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +31,7 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
   const held = rolesOf(roles, member);
   const manage = has(access, Permission.MANAGE_ROLES);
   const assignable = roles.filter((r) => r.id !== member.serverId && above(access, r.position));
+  const heldIds = new Set(member.roleIds);
   const [busy, setBusy] = useState<string | null>(null);
   const { t } = useI18n();
   if (!held.length && !(manage && assignable.length)) return null;
@@ -97,7 +98,7 @@ export function MemberRoles({ instanceKey, member, compact = false }: { instance
                 <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
                   <DropdownMenuLabel className="text-xs text-muted-foreground">{t("workspace.roles.assignable")}</DropdownMenuLabel>
                   {assignable.map((role) => {
-                    const on = member.roleIds.includes(role.id);
+                    const on = heldIds.has(role.id);
                     return (
                       <DropdownMenuItem
                         key={role.id}

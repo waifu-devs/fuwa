@@ -52,6 +52,7 @@
   "edit.hint": "Escape para {cancel} · {keys} para {save}",
   "edit.cancel": "cancelar",
   "edit.save": "guardar",
+  "edit.label": "Editar mensaje",
   "pending.sending": "enviando…",
   "pending.retry": "Reintentar",
   "pending.dismiss": "Descartar",

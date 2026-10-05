@@ -1,7 +1,7 @@
 import { CheckIcon, PlusIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import type { MouseEvent, ReactNode } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Setting } from "@/components/settings/controls";
 import { type Key, useI18n } from "@/i18n/react";
 import { keycaps } from "@/lib/keybinds";

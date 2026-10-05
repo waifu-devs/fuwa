@@ -1,7 +1,7 @@
 import { RefreshCwIcon, SparklesIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { updateLine } from "@/lib/compat";
 import { FRESH, entryOf, look, type Freshness } from "@/lib/fresh";
 import { useInstances } from "@/fuwa/hooks";

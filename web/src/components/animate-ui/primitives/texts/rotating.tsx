@@ -1,6 +1,6 @@
 
 import * as React from 'react';
-import { motion, AnimatePresence, type HTMLMotionProps } from 'motion/react';
+import { m as motion, AnimatePresence, type HTMLMotionProps } from 'motion/react';
 
 import {
   useIsInView,
@@ -51,20 +51,13 @@ function RotatingTextContainer({
     if (!Array.isArray(text)) return;
     if (inView && !isInView) return;
 
-    let intervalId: ReturnType<typeof setInterval> | undefined;
-
-    const timeoutId = setTimeout(() => {
+    // One timer at a time: the first after `delay`, then one every `duration`.
+    let timeoutId = setTimeout(function tick() {
       setIndex((prev) => (prev + 1) % text.length);
-      intervalId = setInterval(
-        () => setIndex((prev) => (prev + 1) % text.length),
-        duration,
-      );
+      timeoutId = setTimeout(tick, duration);
     }, delay);
 
-    return () => {
-      clearTimeout(timeoutId);
-      if (intervalId) clearInterval(intervalId);
-    };
+    return () => clearTimeout(timeoutId);
   }, [text, duration, delay, inView, isInView]);
 
   const currentText = Array.isArray(text) ? text[index] : text;

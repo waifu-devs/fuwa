@@ -10,10 +10,10 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, m as motion } from "motion/react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ListThreadsResponse } from "@/gen/fuwa/v1/message_pb";
-import { Permission, type Channel, type Message, type ThreadSummary } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type Channel, type Message, type ThreadSummary, type User } from "@/gen/fuwa/v1/types_pb";
 import { focusThread, followThread, listThreads, loadFollowed, lockThread, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess } from "@/fuwa/hooks";
@@ -23,12 +23,15 @@ import { Embeds } from "@/components/chat/Embeds";
 import { useServerLook } from "@/components/chat/mentions";
 import { MessageBody, MessageLine, MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { ago, displayName, toDate } from "@/lib/format";
 import { type Key, T, useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { isArchived, type ThreadPanelState } from "@/lib/threads";
 import { usePrefs } from "@/lib/prefs";
+import { instanceHas } from "@/lib/compat";
+import { ChannelPinsButton } from "@/components/chat/Pins";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -269,6 +272,36 @@ function whereKey(archived: boolean, locked: boolean): Key {
   return locked ? "chat.threads.whereLocked" : "chat.threads.where";
 }
 
+/** A thread's pins, where this instance keeps them; in a shared channel only the home lists them. */
+function ThreadPins({
+  instanceKey,
+  serverId,
+  channel,
+  threadId,
+  canUnpin,
+  list,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  threadId: string;
+  canUnpin: boolean;
+  list: RefObject<MessageListHandle | null>;
+}) {
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins")) && !(channel.shared && !channel.shared.home);
+  if (!pinsHere) return null;
+  return (
+    <ChannelPinsButton
+      instanceKey={instanceKey}
+      serverId={serverId}
+      channelId={channel.id}
+      threadId={threadId}
+      canUnpin={canUnpin}
+      onJump={(id) => void list.current?.jumpTo(id)}
+    />
+  );
+}
+
 /**
  * A thread beside its channel: the message it's under, its replies (drawn
  * a window at a time, as the channel is) and a composer of its own, with
@@ -350,6 +383,7 @@ export function ThreadPanel({
             {locked ? <LockIcon /> : <LockOpenIcon />}
           </PanelButton>
         )}
+        {!!parent?.thread && <ThreadPins instanceKey={instanceKey} serverId={serverId} channel={channel} threadId={threadId} canUnpin={manager} list={list} />}
         <PanelButton label={t("chat.threads.jump")} onClick={() => onJump(threadId)}>
           <CornerUpLeftIcon />
         </PanelButton>
@@ -384,6 +418,65 @@ function plain(content: string) {
     .replace(/[*_~`>#]+/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** The thread list's search box, and Open and Archived when threads get archived. */
+export function ThreadFilters({
+  query,
+  onQuery,
+  tabs,
+  archived,
+  onArchived,
+  glide,
+}: {
+  query: string;
+  onQuery: (query: string) => void;
+  tabs: boolean[];
+  archived: boolean;
+  onArchived: (archived: boolean) => void;
+  /** The selected tab's layout id, one per list. */
+  glide: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
+        <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+        <input
+          value={query}
+          onChange={(e) => onQuery(e.target.value.slice(0, 100))}
+          placeholder={t("chat.threads.search")}
+          aria-label={t("chat.threads.search")}
+          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        />
+      </label>
+      {tabs.length > 1 && (
+        <div className="relative grid grid-cols-2 rounded-xl bg-muted p-0.5 text-xs font-bold">
+          {tabs.map((tab) => (
+            <button
+              key={String(tab)}
+              type="button"
+              onClick={() => onArchived(tab)}
+              className={cn(
+                "relative z-10 flex items-center justify-center gap-1 rounded-lg py-1.5 transition-colors",
+                archived === tab ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {archived === tab && (
+                <motion.span
+                  layoutId={glide}
+                  transition={SPRING}
+                  className="absolute inset-0 -z-10 rounded-lg bg-card shadow-sm"
+                />
+              )}
+              {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
+              {tab ? t("chat.threads.archived") : t("chat.threads.open")}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 /**
@@ -447,98 +540,14 @@ export function ThreadList({
     <div className="flex h-full min-h-0 flex-col">
       <ThreadListHeader where={t("chat.threads.where", { channel: channel.name })} onClose={onClose} />
       <div className="flex flex-col gap-2 border-b p-3">
-        <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
-          <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value.slice(0, 100))}
-            placeholder={t("chat.threads.search")}
-            aria-label={t("chat.threads.search")}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </label>
-        {tabs.length > 1 && (
-          <div className="relative grid grid-cols-2 rounded-xl bg-muted p-0.5 text-xs font-bold">
-            {tabs.map((tab) => (
-              <button
-                key={String(tab)}
-                type="button"
-                onClick={() => setArchived(tab)}
-                className={cn(
-                  "relative z-10 flex items-center justify-center gap-1 rounded-lg py-1.5 transition-colors",
-                  archived === tab ? "text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {archived === tab && (
-                  <motion.span
-                    layoutId={`thread-tab-${channel.id}`}
-                    transition={SPRING}
-                    className="absolute inset-0 -z-10 rounded-lg bg-card shadow-sm"
-                  />
-                )}
-                {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
-                {tab ? t("chat.threads.archived") : t("chat.threads.open")}
-              </button>
-            ))}
-          </div>
-        )}
+        <ThreadFilters query={query} onQuery={setQuery} tabs={tabs} archived={archived} onArchived={setArchived} glide={`thread-tab-${channel.id}`} />
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
         {error && <p className="p-3 text-sm text-destructive">{error}</p>}
-        {!error && !loading && threads.length === 0 && !page?.hasMore && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={SPRING}
-            className="grid place-items-center gap-2 px-6 py-12 text-center"
-          >
-            <span className="float grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
-              <MessagesSquareIcon className="size-6" />
-            </span>
-            <p className="text-sm font-bold">{query ? t("chat.threads.noMatches") : archived ? t("chat.threads.noArchived") : t("chat.threads.none")}</p>
-            <p className="text-xs text-muted-foreground">
-              {query
-                ? t("chat.threads.tryOtherWords")
-                : archived
-                  ? hours >= 48
-                    ? t("chat.threads.archivedHintDays", { count: Math.round(hours / 24) })
-                    : t("chat.threads.archivedHintHours", { count: hours })
-                  : t("chat.threads.noneHint")}
-            </p>
-          </motion.div>
-        )}
+        {!error && !loading && threads.length === 0 && !page?.hasMore && <NoThreads query={query} archived={archived} hours={hours} />}
         <AnimatePresence initial={false}>
           {threads.map((m, n) => (
-            <motion.button
-              key={m.id}
-              type="button"
-              layout="position"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ ...SPRING, delay: Math.min(n, 8) * 0.025 }}
-              onClick={() => onOpen(m.id)}
-              className="flex w-full gap-2.5 rounded-xl p-2.5 text-left transition-colors hover:bg-muted/70"
-            >
-              <UserAvatar user={users?.[m.authorId]} className="size-8 text-xs" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
-                  <b className="truncate text-sm">{m.webhook?.name || displayName(users?.[m.authorId])}</b>
-                  <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, toDate(m.createdAt))}</span>
-                </span>
-                <span className="line-clamp-2 text-sm break-words text-muted-foreground">
-                  {plain(m.content) || m.embeds[0]?.title || "…"}
-                </span>
-                <span className="mt-1 flex items-center gap-2 text-xs">
-                  <Faces instanceKey={instanceKey} ids={m.thread?.participantIds ?? EMPTY} size="size-4" />
-                  <b className="text-primary">
-                    {t("chat.threads.replies", { count: m.thread?.replyCount ?? 0 })}
-                  </b>
-                  {m.thread?.locked && <LockIcon className="size-3 text-muted-foreground" />}
-                  <span className="truncate text-muted-foreground">{t("chat.threads.lastAgo", { time: ago(lang, toDate(m.thread?.lastReplyAt)) })}</span>
-                </span>
-              </span>
-            </motion.button>
+            <ThreadRow key={m.id} instanceKey={instanceKey} message={m} index={n} users={users} onOpen={onOpen} />
           ))}
         </AnimatePresence>
         {loading && <div className="shimmer m-2 h-16 rounded-xl" />}
@@ -553,6 +562,78 @@ export function ThreadList({
         )}
       </div>
     </div>
+  );
+}
+
+/** Nothing to list: no threads yet, none archived, or none matching the search. */
+function NoThreads({ query, archived, hours }: { query: string; archived: boolean; hours: number }) {
+  const { t } = useI18n();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRING}
+      className="grid place-items-center gap-2 px-6 py-12 text-center"
+    >
+      <span className="float grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
+        <MessagesSquareIcon className="size-6" />
+      </span>
+      <p className="text-sm font-bold">{query ? t("chat.threads.noMatches") : archived ? t("chat.threads.noArchived") : t("chat.threads.none")}</p>
+      <p className="text-xs text-muted-foreground">
+        {query
+          ? t("chat.threads.tryOtherWords")
+          : archived
+            ? hours >= 48
+              ? t("chat.threads.archivedHintDays", { count: Math.round(hours / 24) })
+              : t("chat.threads.archivedHintHours", { count: hours })
+            : t("chat.threads.noneHint")}
+      </p>
+    </motion.div>
+  );
+}
+
+/** One thread in the list: who started it, what it says, and how its replies are going. */
+function ThreadRow({
+  instanceKey,
+  message,
+  index,
+  users,
+  onOpen,
+}: {
+  instanceKey: string;
+  message: Message;
+  index: number;
+  users: Record<string, User> | undefined;
+  onOpen: (threadId: string) => void;
+}) {
+  const lang = useI18n();
+  const { t } = lang;
+  return (
+    <motion.button
+      type="button"
+      layout="position"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ ...SPRING, delay: Math.min(index, 8) * 0.025 }}
+      onClick={() => onOpen(message.id)}
+      className="flex w-full gap-2.5 rounded-xl p-2.5 text-left transition-colors hover:bg-muted/70"
+    >
+      <UserAvatar user={users?.[message.authorId]} className="size-8 text-xs" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <b className="truncate text-sm">{message.webhook?.name || displayName(users?.[message.authorId])}</b>
+          <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, toDate(message.createdAt))}</span>
+        </span>
+        <span className="line-clamp-2 text-sm break-words text-muted-foreground">{plain(message.content) || message.embeds[0]?.title || "…"}</span>
+        <span className="mt-1 flex items-center gap-2 text-xs">
+          <Faces instanceKey={instanceKey} ids={message.thread?.participantIds ?? EMPTY} size="size-4" />
+          <b className="text-primary">{t("chat.threads.replies", { count: message.thread?.replyCount ?? 0 })}</b>
+          {message.thread?.locked && <LockIcon className="size-3 text-muted-foreground" />}
+          <span className="truncate text-muted-foreground">{t("chat.threads.lastAgo", { time: ago(lang, toDate(message.thread?.lastReplyAt)) })}</span>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 

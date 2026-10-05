@@ -231,5 +231,28 @@
   "search.start": "Buscar en este servidor",
   "search.startAbout": "Escribe palabras, o filtros como from:, in: y has:, y presiona Enter.",
   "search.voiceMessage": "Mensaje de voz ({duration})",
-  "search.jump": "Ir"
+  "search.jump": "Ir",
+  "pins.button": "Mensajes fijados",
+  "pins.title": "Mensajes fijados",
+  "pins.count": {
+    "one": "{count} fijado",
+    "other": "{count} fijados"
+  },
+  "pins.empty": "Todavía no hay nada fijado aquí.",
+  "pins.emptyChannel": "Quienes pueden gestionar mensajes fijan los importantes desde el menú de cada mensaje.",
+  "pins.emptyDm": "Fija un mensaje desde su menú para tenerlo siempre a mano.",
+  "pins.jump": "Ir",
+  "pins.unpin": "Desfijar",
+  "pins.pin": "Fijar mensaje",
+  "pins.unpinMessage": "Desfijar mensaje",
+  "pins.pinned": "Fijado",
+  "pins.pinnedToast": "Fijado en {place}",
+  "pins.unpinnedToast": "Desfijado",
+  "pins.notOnDevice": "Este mensaje no está en este dispositivo.",
+  "pins.voice": "Mensaje de voz",
+  "pins.files": "Archivos",
+  "pins.failed": "No se pudieron cargar los fijados. Inténtalo de nuevo en un momento.",
+  "pins.retry": "Reintentar",
+  "pins.more": "Mostrar más",
+  "pins.thisConversation": "esta conversación"
 }

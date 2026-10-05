@@ -1,6 +1,6 @@
 
 import * as React from 'react';
-import { AnimatePresence, motion, type Transition } from 'motion/react';
+import { AnimatePresence, m as motion, type Transition } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 
@@ -18,6 +18,12 @@ const DEFAULT_BOUNDS_OFFSET: Bounds = {
   left: 0,
   width: 0,
   height: 0,
+};
+
+const DEFAULT_TRANSITION: Transition = {
+  type: 'spring',
+  stiffness: 350,
+  damping: 35,
 };
 
 type HighlightContextType<T extends string> = {
@@ -128,7 +134,7 @@ function Highlight<T extends React.ElementType = 'div'>({
     onValueChange,
     className,
     style,
-    transition = { type: 'spring', stiffness: 350, damping: 35 },
+    transition = DEFAULT_TRANSITION,
     hover = false,
     click = true,
     enabled = true,
@@ -172,19 +178,35 @@ function Highlight<T extends React.ElementType = 'div'>({
   const [activeValue, setActiveValue] = React.useState<string | null>(
     value ?? defaultValue ?? null,
   );
+  // A new value or defaultValue prop takes over from whatever was picked locally.
+  const [syncedProps, setSyncedProps] = React.useState({ value, defaultValue });
+  if (
+    syncedProps.value !== value ||
+    syncedProps.defaultValue !== defaultValue
+  ) {
+    setSyncedProps({ value, defaultValue });
+    if (value !== undefined) setActiveValue(value);
+    else if (defaultValue !== undefined) setActiveValue(defaultValue);
+  }
   const [boundsState, setBoundsState] = React.useState<Bounds | null>(null);
   const [activeClassNameState, setActiveClassNameState] =
     React.useState<string>('');
 
-  const safeSetActiveValue = (id: string | null) => {
-    setActiveValue((prev) => {
-      if (prev !== id) {
-        onValueChange?.(id);
-        return id;
-      }
-      return prev;
-    });
-  };
+  // Latest value, so several calls in one event compare against each other.
+  const latestActiveValueRef = React.useRef(activeValue);
+  React.useLayoutEffect(() => {
+    latestActiveValueRef.current = activeValue;
+  }, [activeValue]);
+
+  const safeSetActiveValue = React.useCallback(
+    (id: string | null) => {
+      if (latestActiveValueRef.current === id) return;
+      latestActiveValueRef.current = id;
+      setActiveValue(id);
+      onValueChange?.(id);
+    },
+    [onValueChange],
+  );
 
   const safeSetBoundsRef = React.useRef<
     ((bounds: DOMRect) => void) | undefined
@@ -218,18 +240,13 @@ function Highlight<T extends React.ElementType = 'div'>({
     };
   });
 
-  const safeSetBounds = (bounds: DOMRect) => {
+  const safeSetBounds = React.useCallback((bounds: DOMRect) => {
     safeSetBoundsRef.current?.(bounds);
-  };
+  }, []);
 
   const clearBounds = React.useCallback(() => {
     setBoundsState((prev) => (prev === null ? prev : null));
   }, []);
-
-  React.useEffect(() => {
-    if (value !== undefined) setActiveValue(value);
-    else if (defaultValue !== undefined) setActiveValue(defaultValue);
-  }, [value, defaultValue]);
 
   const id = React.useId();
 
@@ -264,20 +281,9 @@ function Highlight<T extends React.ElementType = 'div'>({
             {boundsState && (
               <motion.div
                 data-slot="motion-highlight"
-                animate={{
-                  top: boundsState.top,
-                  left: boundsState.left,
-                  width: boundsState.width,
-                  height: boundsState.height,
-                  opacity: 1,
-                }}
-                initial={{
-                  top: boundsState.top,
-                  left: boundsState.left,
-                  width: boundsState.width,
-                  height: boundsState.height,
-                  opacity: 0,
-                }}
+                layout
+                animate={{ opacity: 1 }}
+                initial={{ opacity: 0 }}
                 exit={{
                   opacity: 0,
                   transition: {
@@ -286,7 +292,16 @@ function Highlight<T extends React.ElementType = 'div'>({
                   },
                 }}
                 transition={transition}
-                style={{ position: 'absolute', zIndex: 0, ...style }}
+                style={{
+                  position: 'absolute',
+                  zIndex: 0,
+                  ...style,
+                  // The box moves and resizes with a layout animation, which motion runs as transforms.
+                  top: boundsState.top,
+                  left: boundsState.left,
+                  width: boundsState.width,
+                  height: boundsState.height,
+                }}
                 className={cn(className, activeClassNameState)}
               />
             )}
@@ -299,35 +314,57 @@ function Highlight<T extends React.ElementType = 'div'>({
     return children;
   };
 
+  const forceUpdateBounds = (props as ParentModeHighlightProps)
+    ?.forceUpdateBounds;
+  const contextValue = React.useMemo(
+    () => ({
+      mode,
+      activeValue,
+      setActiveValue: safeSetActiveValue,
+      id,
+      hover,
+      click,
+      className,
+      style,
+      transition,
+      disabled,
+      enabled,
+      exitDelay,
+      setBounds: safeSetBounds,
+      clearBounds,
+      activeClassName: activeClassNameState,
+      setActiveClassName: setActiveClassNameState,
+      forceUpdateBounds,
+    }),
+    [
+      mode,
+      activeValue,
+      safeSetActiveValue,
+      id,
+      hover,
+      click,
+      className,
+      style,
+      transition,
+      disabled,
+      enabled,
+      exitDelay,
+      safeSetBounds,
+      clearBounds,
+      activeClassNameState,
+      forceUpdateBounds,
+    ],
+  );
+
   return (
-    <HighlightContext.Provider
-      value={{
-        mode,
-        activeValue,
-        setActiveValue: safeSetActiveValue,
-        id,
-        hover,
-        click,
-        className,
-        style,
-        transition,
-        disabled,
-        enabled,
-        exitDelay,
-        setBounds: safeSetBounds,
-        clearBounds,
-        activeClassName: activeClassNameState,
-        setActiveClassName: setActiveClassNameState,
-        forceUpdateBounds: (props as ParentModeHighlightProps)
-          ?.forceUpdateBounds,
-      }}
-    >
+    <HighlightContext.Provider value={contextValue}>
       {enabled
         ? controlledItems
           ? render(children)
           : render(
-              React.Children.map(children, (child, index) => (
-                <HighlightItem key={index} className={props?.itemsClassName}>
+              // Children.map keys each wrapper from its child's own key.
+              React.Children.map(children, (child) => (
+                <HighlightItem className={props?.itemsClassName}>
                   {child}
                 </HighlightItem>
               )),
@@ -378,56 +415,114 @@ type HighlightItemProps<T extends React.ElementType = 'div'> =
     forceUpdateBounds?: boolean;
   };
 
-function HighlightItem<T extends React.ElementType>({
-  ref,
-  as,
-  children,
-  id,
-  value,
-  className,
+// Mouse handlers that move the highlight onto (true) or off (false) an item, keeping the child's own handlers.
+function itemHandlers(
+  trigger: 'hover' | 'click' | null,
+  element: React.ReactElement<ExtendedChildProps>,
+  activate: (active: boolean) => void,
+) {
+  if (trigger === 'hover') {
+    return {
+      onMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => {
+        activate(true);
+        element.props.onMouseEnter?.(e);
+      },
+      onMouseLeave: (e: React.MouseEvent<HTMLDivElement>) => {
+        activate(false);
+        element.props.onMouseLeave?.(e);
+      },
+    };
+  }
+  if (trigger === 'click') {
+    return {
+      onClick: (e: React.MouseEvent<HTMLDivElement>) => {
+        activate(true);
+        element.props.onClick?.(e);
+      },
+    };
+  }
+  return {};
+}
+
+type HighlightBackgroundProps = {
+  show: boolean;
+  style?: React.CSSProperties;
+  activeClassName?: string;
+  transition?: Transition;
+  exitDelay?: number;
+  dataAttributes: Record<string, unknown>;
+};
+
+// The sliding background behind the active item in children mode.
+function HighlightBackground({
+  show,
   style,
-  transition,
-  disabled = false,
   activeClassName,
+  transition,
   exitDelay,
-  asChild = false,
-  forceUpdateBounds,
-  ...props
-}: HighlightItemProps<T>) {
-  const itemId = React.useId();
+  dataAttributes,
+}: HighlightBackgroundProps) {
   const {
-    activeValue,
-    setActiveValue,
-    mode,
-    setBounds,
-    clearBounds,
-    hover,
-    click,
-    enabled,
+    id: contextId,
     className: contextClassName,
     style: contextStyle,
     transition: contextTransition,
-    id: contextId,
-    disabled: contextDisabled,
     exitDelay: contextExitDelay,
+  } = useHighlight();
+  const itemTransition = transition ?? contextTransition;
+  const delay = (exitDelay ?? contextExitDelay ?? 0) / 1000;
+
+  return (
+    <AnimatePresence initial={false} mode="wait">
+      {show && (
+        <motion.div
+          layoutId={`transition-background-${contextId}`}
+          data-slot="motion-highlight"
+          style={{
+            position: 'absolute',
+            zIndex: 0,
+            ...contextStyle,
+            ...style,
+          }}
+          className={cn(contextClassName, activeClassName)}
+          transition={itemTransition}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{
+            opacity: 0,
+            transition: {
+              ...itemTransition,
+              delay: (itemTransition?.delay ?? 0) + delay,
+            },
+          }}
+          {...dataAttributes}
+        />
+      )}
+    </AnimatePresence>
+  );
+}
+
+// In parent mode, keeps the shared highlight sized to the active item (every frame when forced).
+function useItemBounds(
+  localRef: React.RefObject<HTMLDivElement | null>,
+  {
+    isActive,
+    activeClassName,
+    forceUpdateBounds,
+  }: {
+    isActive: boolean;
+    activeClassName?: string;
+    forceUpdateBounds?: boolean;
+  },
+) {
+  const {
+    activeValue,
+    mode,
+    setBounds,
+    clearBounds,
     forceUpdateBounds: contextForceUpdateBounds,
     setActiveClassName,
   } = useHighlight();
-
-  const Component = as ?? 'div';
-  const element = children as React.ReactElement<ExtendedChildProps>;
-  const childValue =
-    id ?? value ?? element.props?.['data-value'] ?? element.props?.id ?? itemId;
-  const isActive = activeValue === childValue;
-  const isDisabled = disabled === undefined ? contextDisabled : disabled;
-  const itemTransition = transition ?? contextTransition;
-
-  const localRef = React.useRef<HTMLDivElement>(null);
-  React.useImperativeHandle(ref, () => localRef.current as HTMLDivElement);
-
-  const refCallback = React.useCallback((node: HTMLElement | null) => {
-    localRef.current = node as HTMLDivElement;
-  }, []);
 
   React.useEffect(() => {
     if (mode !== 'parent') return;
@@ -476,106 +571,129 @@ function HighlightItem<T extends React.ElementType>({
     setActiveClassName,
     forceUpdateBounds,
     contextForceUpdateBounds,
+    localRef,
   ]);
+}
+
+// The item's highlight value: explicit id/value first, then the child's own data-value or id.
+function resolveItemValue(
+  element: React.ReactElement<ExtendedChildProps>,
+  explicit: string | undefined,
+  fallback: string,
+): string {
+  return (
+    explicit ?? element.props?.['data-value'] ?? element.props?.id ?? fallback
+  );
+}
+
+function HighlightItem<T extends React.ElementType>({
+  ref,
+  as,
+  children,
+  id,
+  value,
+  className,
+  style,
+  transition,
+  disabled = false,
+  activeClassName,
+  exitDelay,
+  asChild = false,
+  forceUpdateBounds,
+  ...props
+}: HighlightItemProps<T>) {
+  const itemId = React.useId();
+  const { activeValue, setActiveValue, mode, hover, click, enabled } =
+    useHighlight();
+
+  const Component = as ?? 'div';
+  const element = children as React.ReactElement<ExtendedChildProps>;
+  const childValue = resolveItemValue(element, id ?? value, itemId);
+  const isActive = activeValue === childValue;
+
+  const localRef = React.useRef<HTMLDivElement>(null);
+  React.useImperativeHandle(ref, () => localRef.current as HTMLDivElement);
+
+  const refCallback = React.useCallback((node: HTMLElement | null) => {
+    localRef.current = node as HTMLDivElement;
+  }, []);
+
+  useItemBounds(localRef, {
+    isActive,
+    activeClassName,
+    forceUpdateBounds,
+  });
 
   if (!React.isValidElement(children)) return children;
 
   const dataAttributes = {
-    'data-active': isActive ? 'true' : 'false',
+    'data-active': String(isActive),
     'aria-selected': isActive,
-    'data-disabled': isDisabled,
+    'data-disabled': disabled,
     'data-value': childValue,
     'data-highlight': true,
   };
 
-  const commonHandlers = hover
-    ? {
-        onMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => {
-          setActiveValue(childValue);
-          element.props.onMouseEnter?.(e);
-        },
-        onMouseLeave: (e: React.MouseEvent<HTMLDivElement>) => {
-          setActiveValue(null);
-          element.props.onMouseLeave?.(e);
-        },
-      }
-    : click
-      ? {
-          onClick: (e: React.MouseEvent<HTMLDivElement>) => {
-            setActiveValue(childValue);
-            element.props.onClick?.(e);
-          },
-        }
-      : {};
+  const commonHandlers = itemHandlers(
+    hover ? 'hover' : click ? 'click' : null,
+    element,
+    (next) => setActiveValue(next ? childValue : null),
+  );
+
+  const background = (
+    <HighlightBackground
+      show={isActive && !disabled}
+      style={style}
+      activeClassName={activeClassName}
+      transition={transition}
+      exitDelay={exitDelay}
+      dataAttributes={dataAttributes}
+    />
+  );
+
+  const childAttributes = (slot: string) =>
+    getNonOverridingDataAttributes(element, {
+      ...dataAttributes,
+      'data-slot': slot,
+    });
+
+  if (asChild && mode === 'children') {
+    return React.cloneElement(
+      element,
+      {
+        key: childValue,
+        ref: refCallback,
+        className: cn('relative', element.props.className),
+        ...childAttributes('motion-highlight-item-container'),
+        ...commonHandlers,
+        ...props,
+      },
+      <>
+        {background}
+
+        <Component
+          data-slot="motion-highlight-item"
+          style={{ position: 'relative', zIndex: 1 }}
+          className={className}
+          {...dataAttributes}
+        >
+          {children}
+        </Component>
+      </>,
+    );
+  }
 
   if (asChild) {
-    if (mode === 'children') {
-      return React.cloneElement(
-        element,
-        {
-          key: childValue,
-          ref: refCallback,
-          className: cn('relative', element.props.className),
-          ...getNonOverridingDataAttributes(element, {
-            ...dataAttributes,
-            'data-slot': 'motion-highlight-item-container',
-          }),
-          ...commonHandlers,
-          ...props,
-        },
-        <>
-          <AnimatePresence initial={false} mode="wait">
-            {isActive && !isDisabled && (
-              <motion.div
-                layoutId={`transition-background-${contextId}`}
-                data-slot="motion-highlight"
-                style={{
-                  position: 'absolute',
-                  zIndex: 0,
-                  ...contextStyle,
-                  ...style,
-                }}
-                className={cn(contextClassName, activeClassName)}
-                transition={itemTransition}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{
-                  opacity: 0,
-                  transition: {
-                    ...itemTransition,
-                    delay:
-                      (itemTransition?.delay ?? 0) +
-                      (exitDelay ?? contextExitDelay ?? 0) / 1000,
-                  },
-                }}
-                {...dataAttributes}
-              />
-            )}
-          </AnimatePresence>
-
-          <Component
-            data-slot="motion-highlight-item"
-            style={{ position: 'relative', zIndex: 1 }}
-            className={className}
-            {...dataAttributes}
-          >
-            {children}
-          </Component>
-        </>,
-      );
-    }
-
     return React.cloneElement(element, {
       ref: refCallback,
-      ...getNonOverridingDataAttributes(element, {
-        ...dataAttributes,
-        'data-slot': 'motion-highlight-item',
-      }),
+      ...childAttributes('motion-highlight-item'),
       ...commonHandlers,
     });
   }
 
-  return enabled ? (
+  if (!enabled) return children;
+
+  return (
     <Component
       key={childValue}
       ref={localRef}
@@ -585,48 +703,14 @@ function HighlightItem<T extends React.ElementType>({
       {...props}
       {...commonHandlers}
     >
-      {mode === 'children' && (
-        <AnimatePresence initial={false} mode="wait">
-          {isActive && !isDisabled && (
-            <motion.div
-              layoutId={`transition-background-${contextId}`}
-              data-slot="motion-highlight"
-              style={{
-                position: 'absolute',
-                zIndex: 0,
-                ...contextStyle,
-                ...style,
-              }}
-              className={cn(contextClassName, activeClassName)}
-              transition={itemTransition}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{
-                opacity: 0,
-                transition: {
-                  ...itemTransition,
-                  delay:
-                    (itemTransition?.delay ?? 0) +
-                    (exitDelay ?? contextExitDelay ?? 0) / 1000,
-                },
-              }}
-              {...dataAttributes}
-            />
-          )}
-        </AnimatePresence>
-      )}
+      {mode === 'children' && background}
 
       {React.cloneElement(element, {
         style: { position: 'relative', zIndex: 1 },
         className: element.props.className,
-        ...getNonOverridingDataAttributes(element, {
-          ...dataAttributes,
-          'data-slot': 'motion-highlight-item',
-        }),
+        ...childAttributes('motion-highlight-item'),
       })}
     </Component>
-  ) : (
-    children
   );
 }
 

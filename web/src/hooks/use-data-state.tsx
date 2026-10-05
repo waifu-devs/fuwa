@@ -23,12 +23,26 @@ function useDataState<T extends HTMLElement = HTMLElement>(
     return el ? parseDatasetValue(el.getAttribute(`data-${key}`)) : null;
   };
 
+  // Told straight from the attribute changing, not after a render.
+  const onChangeRef = React.useRef(onChange);
+  React.useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+  });
+
+  // Told once on mount too, so an element that starts out highlighted still registers.
+  const toldOnMount = React.useRef(false);
+
   const subscribe = (callback: () => void) => {
     const el = localRef.current;
     if (!el) return () => {};
+    if (!toldOnMount.current) {
+      toldOnMount.current = true;
+      onChangeRef.current?.(parseDatasetValue(el.getAttribute(`data-${key}`)));
+    }
     const observer = new MutationObserver((records) => {
       for (const record of records) {
         if (record.attributeName === `data-${key}`) {
+          onChangeRef.current?.(parseDatasetValue(el.getAttribute(`data-${key}`)));
           callback();
           break;
         }
@@ -42,10 +56,6 @@ function useDataState<T extends HTMLElement = HTMLElement>(
   };
 
   const value = React.useSyncExternalStore(subscribe, getSnapshot);
-
-  React.useEffect(() => {
-    if (onChange) onChange(value);
-  }, [value, onChange]);
 
   return [value, localRef];
 }

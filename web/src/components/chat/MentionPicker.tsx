@@ -1,5 +1,5 @@
 import { AtSignIcon, ShieldIcon, SmileIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Permission, type Channel, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useRoles } from "@/fuwa/hooks";
@@ -7,7 +7,7 @@ import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { EmojiImage } from "@/components/EmojiImage";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { choiceName, encodeEmoji, rememberEmoji, searchCatalog, toned, useCatalog, useSkinTone, useStandard, type Choice } from "@/lib/emoji-catalog";
 import { useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
@@ -51,7 +51,8 @@ export function useMentionPicker(
   const access = useAccess(instanceKey, serverId);
   const everyone = hasIn(access, channel.id, Permission.MENTION_EVERYONE);
   const [caret, setCaret] = useState(0);
-  const [active, setActive] = useState(0);
+  // The highlighted option, kept with the word it was picked in: a new word starts at the top.
+  const [highlight, setHighlight] = useState({ at: "", n: 0 });
   const [dismissed, setDismissed] = useState<number | null>(null);
   /** Roles picked by name, sent as their tokens. */
   const picked = useRef(new Map<string, string>());
@@ -106,7 +107,16 @@ export function useMentionPicker(
     return [...people.slice(0, MAX - Math.min(pingable.length + loud.length, 4)), ...pingable, ...loud].slice(0, MAX);
   }, [token, dismissed, members, roles, serverId, everyone, catalog, standard, tone]);
 
-  useEffect(() => setActive(0), [token?.start, token?.query]);
+  const tokenKey = token ? `${token.start}:${token.query}` : "";
+  const active = highlight.at === tokenKey ? highlight.n : 0;
+  const setActive = useCallback(
+    (next: number | ((n: number) => number)) =>
+      setHighlight((h) => {
+        const current = h.at === tokenKey ? h.n : 0;
+        return { at: tokenKey, n: typeof next === "function" ? next(current) : next };
+      }),
+    [tokenKey],
+  );
 
   const pick = useCallback(
     (option: Option) => {
@@ -192,9 +202,11 @@ export function MentionPicker({ picker }: { picker: MentionPickerState }) {
             {picker.options.map((option, n) => {
               const on = n === picker.active;
               return (
-                <li key={option.key} role="option" aria-selected={on}>
+                <li key={option.key} role="none">
                   <button
                     type="button"
+                    role="option"
+                    aria-selected={on}
                     // Keep the caret in the box.
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseEnter={() => picker.setActive(n)}

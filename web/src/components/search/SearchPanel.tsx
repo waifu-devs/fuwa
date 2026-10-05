@@ -1,14 +1,15 @@
 import { useNavigate } from "@tanstack/react-router";
 import { clock } from "@/voice/player";
 import { ArrowRightIcon, HashIcon, HourglassIcon, PaperclipIcon, SearchXIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SearchResult } from "@/gen/fuwa/v1/search_pb";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { closeSearch, loadMoreResults, requestJump, useSearch } from "@/fuwa/search";
-import { Mention, remarkMentions, ServerLookProvider, type ServerLook } from "@/components/chat/mentions";
+import { Mention, ServerLookProvider, type ServerLook } from "@/components/chat/mentions";
+import { remarkMentions } from "@/components/chat/remark-mentions";
 import { UserAvatar } from "@/components/Icons";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
 import { Count } from "@/components/motion";

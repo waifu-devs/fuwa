@@ -19,6 +19,7 @@ mod live_tiles;
 mod media;
 mod messages;
 mod node;
+mod pins;
 mod polls;
 mod presence;
 mod roles;

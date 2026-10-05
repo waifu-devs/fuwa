@@ -1,5 +1,5 @@
 import { StarIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import type { MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
@@ -14,7 +14,7 @@ const MAX_W = 320;
 const MAX_H = 260;
 
 /** How big a GIF shows: its own size, shrunk to fit, never stretched. */
-export function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H) {
+function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H) {
   const w = Math.max(1, width);
   const h = Math.max(1, height);
   const scale = Math.min(1, maxW / w, maxH / h);

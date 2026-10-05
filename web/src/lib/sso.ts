@@ -7,7 +7,14 @@
  * fragment, and that page finishes (or hands the code back to the fuwa app on
  * another address that started it).
  */
-import { SsoProtocol, type IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
+import { clone, create } from "@bufbuild/protobuf";
+import {
+  IdentityProviderSchema,
+  OidcProviderSchema,
+  SamlProviderSchema,
+  SsoProtocol,
+  type IdentityProvider,
+} from "@/gen/fuwa/v1/sso_pb";
 
 /** Where an instance sends the browser once the provider answers, on every fuwa app. */
 export const DONE = "/auth/sso/done";
@@ -24,6 +31,8 @@ export type PendingSso = {
   serverId?: string;
   /** For a server: join it once signed in. */
   join?: boolean;
+  /** For a server: the account that started it (the instance only lets that account finish). */
+  userId?: string;
   /** For a server out of Browse: the invite joining takes. */
   inviteCode?: string;
   /** An admin checking the instance's provider: nobody gets signed in. */
@@ -94,7 +103,7 @@ export function readSamlMetadata(xml: string): { entityId: string; ssoUrl: strin
     .filter(Boolean);
   const pem = [...new Set(certs)]
     .slice(0, 4)
-    .map((b64) => `-----BEGIN CERTIFICATE-----\n${b64.match(/.{1,64}/g)!.join("\n")}\n-----END CERTIFICATE-----`)
+    .map((b64) => `-----BEGIN CERTIFICATE-----\n${(b64.match(/.{1,64}/g) ?? []).join("\n")}\n-----END CERTIFICATE-----`)
     .join("\n");
   return { entityId: descriptor.getAttribute("entityID") ?? "", ssoUrl: sso?.getAttribute("Location") ?? "", certificates: pem };
 }
@@ -132,20 +141,42 @@ export function ssoLocked(
 
 const SIGNED_IN = "fuwa.sso.signed-in.";
 
-/** Remembers, for this tab, that you signed in for a server you haven't joined, so it offers to apply next. */
-export function rememberServerSignIn(instanceKey: string, serverId: string) {
+/** Remembers, for this tab and account ("<instance>|<user id>"), that you signed in for a server you haven't joined, so it offers to apply next. */
+export function rememberServerSignIn(account: string, serverId: string) {
   try {
-    sessionStorage.setItem(`${SIGNED_IN}${instanceKey}/${serverId}`, String(Date.now()));
+    sessionStorage.setItem(`${SIGNED_IN}${account}/${serverId}`, String(Date.now()));
   } catch {
     // The instance still knows; the button just asks to sign in again.
   }
 }
 
-export function signedInForServer(instanceKey: string, serverId: string) {
+export function signedInForServer(account: string, serverId: string) {
   try {
-    const at = Number(sessionStorage.getItem(`${SIGNED_IN}${instanceKey}/${serverId}`) ?? 0);
+    const at = Number(sessionStorage.getItem(`${SIGNED_IN}${account}/${serverId}`) ?? 0);
     return Date.now() - at < DAY;
   } catch {
     return false;
   }
+}
+
+/** A copy of a provider with every part present, so the form can edit any field. */
+export function fullProvider(p: IdentityProvider | undefined): IdentityProvider {
+  const next = p ? clone(IdentityProviderSchema, p) : create(IdentityProviderSchema);
+  next.oidc ??= create(OidcProviderSchema);
+  next.saml ??= create(SamlProviderSchema);
+  next.emailDomains = [...next.emailDomains];
+  return next;
+}
+
+/** Everything a save would send about a provider, as one string to compare. */
+export function providerFingerprint(p: IdentityProvider | undefined) {
+  if (!p || p.protocol === SsoProtocol.UNSPECIFIED) return "";
+  return [
+    p.protocol,
+    p.name.trim(),
+    p.emailDomains.join(","),
+    ...(p.protocol === SsoProtocol.OIDC
+      ? [p.oidc?.issuer.trim(), p.oidc?.clientId.trim(), p.oidc?.clientSecret ?? "", p.oidc?.extraScopes.trim()]
+      : [p.saml?.entityId.trim(), p.saml?.ssoUrl.trim(), p.saml?.certificates.trim()]),
+  ].join("\n");
 }

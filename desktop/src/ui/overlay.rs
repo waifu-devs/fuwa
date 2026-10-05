@@ -502,8 +502,8 @@ impl FuwaApp {
     /// names, pronouns and bio, and a button to message them.
     fn render_profile(&mut self, key: &str, user_id: &str, server: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
-        let (user, nickname, me, roles) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(key) else { return (None, String::new(), false, Vec::new()) };
+        let (user, nickname, me, roles, presence) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(key) else { return (None, String::new(), false, Vec::new(), None) };
             let member = server.and_then(|sid| {
                 i.members.get(sid)?.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id)).cloned()
             });
@@ -523,6 +523,8 @@ impl FuwaApp {
                 member.map(|m| m.nickname).unwrap_or_default(),
                 i.me.as_ref().is_some_and(|m| m.id == user_id),
                 roles,
+                // None on an instance without presence: no dot then.
+                i.people.as_ref().map(|people| people.get(user_id).cloned()),
             )
         });
         let profile = self.profile.clone().filter(|pr| pr.user.as_ref().is_some_and(|u| u.id == user_id));
@@ -582,6 +584,23 @@ impl FuwaApp {
                     .child(icon("message-circle-heart").size(px(14.0)).text_color(p.primary))
                     .child(status),
             );
+        }
+        let activities = presence.clone().flatten().map(|pr| pr.activities).unwrap_or_default();
+        if !activities.is_empty() {
+            let now = crate::core::dms::now_ms();
+            let leaving = self.profile_leaving.clone();
+            info = info.children(crate::ui::presence::activity_cards(&activities, leaving.as_deref(), now, &p, cx));
+            // A running timer counts: drawn again each second while the card is open.
+            let timed = activities.iter().any(|a| a.started_at.is_some() || a.ends_at.is_some());
+            if timed && self.profile_tick.is_none() {
+                self.profile_tick = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.profile_tick = None;
+                        cx.notify();
+                    });
+                }));
+            }
         }
         if let Some(bio) = profile.as_ref().map(|pr| pr.bio.clone()).filter(|b| !b.is_empty()) {
             info = info.child(
@@ -644,12 +663,17 @@ impl FuwaApp {
             .child(
                 div().px(px(20.0)).mt(px(-44.0)).mb(px(10.0)).child(
                     div()
+                        .relative()
                         .size(px(88.0))
                         .rounded_full()
                         .border_4()
                         .border_color(p.card)
                         .bg(p.card)
-                        .child(crate::ui::widgets::avatar(user.as_ref(), 80.0, &p)),
+                        .child(crate::ui::widgets::avatar(user.as_ref(), 80.0, &p))
+                        .when_some(presence.as_ref(), |el, pr| {
+                            let status = crate::ui::presence::shown(pr.as_ref());
+                            el.child(crate::ui::presence::avatar_dot(status, 24.0, p.card, &p))
+                        }),
                 ),
             )
             .child(info);

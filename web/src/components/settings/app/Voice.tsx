@@ -1,31 +1,21 @@
 import { AudioLinesIcon, CheckIcon, ChevronDownIcon, HeadphonesIcon, KeyboardIcon, MicIcon, PlayIcon, SquareIcon, VideoIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
 import { VideoView } from "@/components/calls/Video";
-import { SPRING } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
-import { type I18n, type Key, useI18n } from "@/i18n/react";
+import { type Key, useI18n } from "@/i18n/react";
 import { actionById, bindingOf } from "@/lib/keybinds";
 import { setPrefs, usePrefs, type InputMode } from "@/lib/prefs";
 import { cue, play } from "@/lib/sounds";
 import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { Keycaps, PrefSetting } from "./common";
-
-export const voiceSettings = (t: I18n["t"]) => [
-  { id: "devices", label: t("appsettings.voice.devices"), keywords: "input output device headset" },
-  { id: "mic-test", label: t("appsettings.voice.micTest"), keywords: "check level meter" },
-  { id: "input-mode", label: t("appsettings.voice.inputMode"), keywords: "voice activity push to talk ptt" },
-  { id: "sensitivity", label: t("appsettings.voice.sensitivity"), keywords: "threshold gate noise" },
-  { id: "processing", label: t("appsettings.voice.processing"), keywords: "echo noise suppression gain" },
-  { id: "camera", label: t("appsettings.voice.camera"), keywords: "video webcam mirror preview" },
-  { id: "call-sounds", label: t("appsettings.voice.callSounds"), keywords: "ring ringtone join leave" },
-];
 
 /** A device; `label` is empty until the browser has been allowed to name it, so it goes by its place in the list. */
 type Device = { id: string; label: string; n: number };
@@ -230,18 +220,18 @@ function CameraTest() {
 function Meter({ level, threshold, open }: { level: number; threshold?: number; open: boolean }) {
   const { t } = useI18n();
   return (
-    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={Math.round(level)} aria-label={t("appsettings.voice.micLevel")}>
+    <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted">
+      {/* The real meter is for screen readers; the bars below draw it. */}
+      <meter className="sr-only" min={-100} max={0} value={Math.round(level)} aria-label={t("appsettings.voice.micLevel")} />
       <motion.div
-        className={cn("absolute inset-y-0 left-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
-        animate={{ width: `${meterAt(level) * 100}%` }}
+        className={cn("absolute inset-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
+        animate={{ x: `${meterAt(level) * 100 - 100}%` }}
         transition={{ type: "spring", stiffness: 900, damping: 40 }}
       />
       {threshold !== undefined && (
-        <motion.div
-          className="absolute inset-y-0 w-0.5 bg-foreground/70"
-          animate={{ left: `${meterAt(threshold) * 100}%` }}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        />
+        <motion.div className="absolute inset-0" animate={{ x: `${meterAt(threshold) * 100}%` }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+          <div className="absolute inset-y-0 left-0 w-0.5 bg-foreground/70" />
+        </motion.div>
       )}
     </div>
   );
@@ -286,9 +276,9 @@ export function Voice() {
             { value: "ptt", label: t("appsettings.voice.pushToTalk"), hint: t("appsettings.voice.pushToTalkHint"), icon: <KeyboardIcon className="size-4" /> },
           ]}
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {p.inputMode === "ptt" && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-3 overflow-hidden">
+            <motion.div {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-muted-foreground">{t("appsettings.voice.yourKey")}</span>
                 {ptt ? <Keycaps combo={ptt} /> : <span className="font-bold text-destructive">{t("appsettings.voice.noKey")}</span>}
@@ -301,14 +291,14 @@ export function Voice() {
           )}
         </AnimatePresence>
       </PrefSetting>
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {p.inputMode === "voice" && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <PrefSetting id="sensitivity" title={t("appsettings.voice.sensitivity")} keys={["autoSensitivity", "sensitivity"]} delay={0.12}>
               <Toggle checked={p.autoSensitivity} onChange={(autoSensitivity) => setPrefs({ autoSensitivity })} label={t("appsettings.voice.autoSensitivity")} hint={t("appsettings.voice.autoSensitivityHint")} />
-              <AnimatePresence initial={false}>
+              <AnimatePresence mode="popLayout" initial={false}>
                 {!p.autoSensitivity && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+                  <motion.div {...SLIDE_IN} transition={SPRING}>
                     <Slider label={t("appsettings.voice.opensAt")} value={p.sensitivity} min={-100} max={0} step={1} format={(n) => t("appsettings.voice.decibels", { value: n })} onChange={(sensitivity) => setPrefs({ sensitivity })} />
                   </motion.div>
                 )}
@@ -317,21 +307,23 @@ export function Voice() {
           </motion.div>
         )}
       </AnimatePresence>
-      <PrefSetting id="processing" title={t("appsettings.voice.processing")} keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
-        <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label={t("appsettings.voice.echo")} hint={t("appsettings.voice.echoHint")} />
-        <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label={t("appsettings.voice.noise")} hint={t("appsettings.voice.noiseHint")} />
-        <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label={t("appsettings.voice.gain")} hint={t("appsettings.voice.gainHint")} />
-      </PrefSetting>
-      <PrefSetting id="camera" title={t("appsettings.voice.camera")} keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
-        <div className="flex flex-col gap-4">
-          <DevicePicker icon={VideoIcon} label={t("appsettings.voice.camera")} unnamed="appsettings.voice.unnamedCamera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
-          <CameraTest />
-        </div>
-      </PrefSetting>
-      <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
-        <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
-        <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
-      </PrefSetting>
+      <motion.div layout="position" transition={SPRING} className="flex flex-col pt-6">
+        <PrefSetting id="processing" title={t("appsettings.voice.processing")} keys={["echoCancellation", "noiseSuppression", "autoGainControl"]} delay={0.16}>
+          <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label={t("appsettings.voice.echo")} hint={t("appsettings.voice.echoHint")} />
+          <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label={t("appsettings.voice.noise")} hint={t("appsettings.voice.noiseHint")} />
+          <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label={t("appsettings.voice.gain")} hint={t("appsettings.voice.gainHint")} />
+        </PrefSetting>
+        <PrefSetting id="camera" title={t("appsettings.voice.camera")} keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
+          <div className="flex flex-col gap-4">
+            <DevicePicker icon={VideoIcon} label={t("appsettings.voice.camera")} unnamed="appsettings.voice.unnamedCamera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
+            <CameraTest />
+          </div>
+        </PrefSetting>
+        <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
+          <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
+          <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
+        </PrefSetting>
+      </motion.div>
     </div>
   );
 }

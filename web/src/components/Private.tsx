@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { HIDDEN_ADDRESS, hidesPersonal, maskName, shownAddress } from "@/lib/streamer";

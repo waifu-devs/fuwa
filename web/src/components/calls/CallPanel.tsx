@@ -1,26 +1,20 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { hangUp } from "@/calls/engine";
 import { useQualityLevel } from "@/calls/quality";
 import { useCalls, type ActiveCall } from "@/calls/state";
 import { useFuwa } from "@/fuwa/store";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
+import { clock } from "./call-clock";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
 import { CameraButton, RecordButton, ScreenButton } from "./Video";
-
-/** How long a call has gone on: 4:07, or 1:02:33. */
-export function clock(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = String(seconds % 60).padStart(2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
-}
 
 const STATUS: Record<ActiveCall["status"], Key> = {
   connecting: "dms-calls.calls.status.connecting",
@@ -32,15 +26,13 @@ const STATUS: Record<ActiveCall["status"], Key> = {
 export function CallPanel() {
   const call = useCalls((s) => s.call);
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="popLayout">
       {call && (
         <motion.div
           key="call"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
-          className="shrink-0 overflow-hidden border-t bg-[color-mix(in_srgb,var(--background)_60%,transparent)]"
+          className="shrink-0 border-t bg-[color-mix(in_srgb,var(--background)_60%,transparent)]"
         >
           <CallPanelBody call={call} />
         </motion.div>
@@ -105,13 +97,12 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
         <ScreenButton className="h-8 flex-1" />
         <RecordButton className="h-8 flex-1" />
       </div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {call.problem && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="flex items-start gap-1.5 overflow-hidden px-1.5 text-xs text-amber-600 dark:text-amber-400"
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="flex items-start gap-1.5 px-1.5 text-xs text-amber-600 dark:text-amber-400"
           >
             <TriangleAlertIcon className="mt-0.5 size-3 shrink-0" /> {call.problem}
           </motion.p>

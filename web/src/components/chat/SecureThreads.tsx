@@ -1,5 +1,5 @@
 import { ArchiveIcon, BellIcon, BellOffIcon, CornerDownRightIcon, LockIcon, LockOpenIcon, MessagesSquareIcon, SearchIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Channel, Member, User } from "@/gen/fuwa/v1/types_pb";
 import { archived, following, search, unreadIn, type Organized, type SecureThread } from "@/e2ee/threads";
@@ -7,10 +7,11 @@ import { lineText, type Item } from "@/e2ee/vault";
 import { dmProblem, followSecureThread, lockSecureThread, markSecureThreadRead } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage, type ThreadNote } from "@/fuwa/store";
 import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/components/dm/DmView";
-import { Faces, PanelButton, SWAP, ThreadListHeader } from "@/components/chat/Threads";
+import { Faces, PanelButton, SWAP, ThreadFilters, ThreadListHeader } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { ago, displayName } from "@/lib/format";
 import { T, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
@@ -220,43 +221,16 @@ export function SecureThreadPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-        <MessagesSquareIcon className="size-5 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate leading-tight font-extrabold">{t("chat.threads.thread")}</h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {t(
-              archived(thread, hours) && locked
-                ? "chat.threads.whereArchivedLocked"
-                : archived(thread, hours)
-                  ? "chat.threads.whereArchived"
-                  : locked
-                    ? "chat.threads.whereLocked"
-                    : "chat.threads.where",
-              { channel: channel.name },
-            )}
-          </p>
-        </div>
-        <PanelButton label={followed ? t("chat.threads.unfollow") : t("chat.threads.follow")} active={followed} onClick={follow}>
-          <motion.span
-            key={followed ? "on" : "off"}
-            initial={{ rotate: -25, scale: 0.6, opacity: 0 }}
-            animate={{ rotate: 0, scale: 1, opacity: 1 }}
-            transition={SPRING}
-            className="grid place-items-center"
-          >
-            {followed ? <BellIcon /> : <BellOffIcon />}
-          </motion.span>
-        </PanelButton>
-        {canModerate && canSend && (
-          <PanelButton label={locked ? t("chat.threads.unlock") : t("chat.threads.lock")} active={locked} onClick={lock}>
-            {locked ? <LockIcon /> : <LockOpenIcon />}
-          </PanelButton>
-        )}
-        <PanelButton label={t("chat.threads.close")} onClick={onClose}>
-          <XIcon />
-        </PanelButton>
-      </header>
+      <SecureThreadHeader
+        channelName={channel.name}
+        archived={archived(thread, hours)}
+        locked={locked}
+        followed={followed}
+        canLock={canModerate && canSend}
+        onFollow={follow}
+        onLock={lock}
+        onClose={onClose}
+      />
       <EncryptedMessages
         key={parent}
         instanceKey={instanceKey}
@@ -287,17 +261,73 @@ export function SecureThreadPanel({
         placeholder={t("chat.threads.placeholder")}
         promise={t("chat.secure.promise")}
         files={canAttach}
-        locked={
-          !canSend
-            ? t("chat.secure.noPermission")
-            : locked && !canModerate
-              ? t("chat.secureThreads.locked")
-              : ""
-        }
+        locked={!canSend ? t("chat.secure.noPermission") : locked && !canModerate ? t("chat.secureThreads.locked") : ""}
         action={null}
         thread={{ parent, channelName: channel.name }}
       />
     </div>
+  );
+}
+
+/** The thread's header: where it is and whether it's archived or locked, with follow, lock and close. */
+function SecureThreadHeader({
+  channelName,
+  archived,
+  locked,
+  followed,
+  canLock,
+  onFollow,
+  onLock,
+  onClose,
+}: {
+  channelName: string;
+  archived: boolean;
+  locked: boolean;
+  followed: boolean;
+  canLock: boolean;
+  onFollow: () => void;
+  onLock: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+      <MessagesSquareIcon className="size-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <h2 className="truncate leading-tight font-extrabold">{t("chat.threads.thread")}</h2>
+        <p className="truncate text-xs text-muted-foreground">
+          {t(
+            archived && locked
+              ? "chat.threads.whereArchivedLocked"
+              : archived
+                ? "chat.threads.whereArchived"
+                : locked
+                  ? "chat.threads.whereLocked"
+                  : "chat.threads.where",
+            { channel: channelName },
+          )}
+        </p>
+      </div>
+      <PanelButton label={followed ? t("chat.threads.unfollow") : t("chat.threads.follow")} active={followed} onClick={onFollow}>
+        <motion.span
+          key={followed ? "on" : "off"}
+          initial={{ rotate: -25, scale: 0.6, opacity: 0 }}
+          animate={{ rotate: 0, scale: 1, opacity: 1 }}
+          transition={SPRING}
+          className="grid place-items-center"
+        >
+          {followed ? <BellIcon /> : <BellOffIcon />}
+        </motion.span>
+      </PanelButton>
+      {canLock && (
+        <PanelButton label={locked ? t("chat.threads.unlock") : t("chat.threads.lock")} active={locked} onClick={onLock}>
+          {locked ? <LockIcon /> : <LockOpenIcon />}
+        </PanelButton>
+      )}
+      <PanelButton label={t("chat.threads.close")} onClick={onClose}>
+        <XIcon />
+      </PanelButton>
+    </header>
   );
 }
 
@@ -346,41 +376,7 @@ export function SecureThreadList({
     <div className="flex h-full min-h-0 flex-col">
       <ThreadListHeader where={t("chat.secureThreads.where", { channel: channel.name })} onClose={onClose} />
       <div className="flex flex-col gap-2 border-b p-3">
-        <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
-          <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value.slice(0, 100))}
-            placeholder={t("chat.threads.search")}
-            aria-label={t("chat.threads.search")}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </label>
-        {tabs.length > 1 && (
-          <div className="relative grid grid-cols-2 rounded-xl bg-muted p-0.5 text-xs font-bold">
-            {tabs.map((tab) => (
-              <button
-                key={String(tab)}
-                type="button"
-                onClick={() => setShowArchived(tab)}
-                className={cn(
-                  "relative z-10 flex items-center justify-center gap-1 rounded-lg py-1.5 transition-colors",
-                  showArchived === tab ? "text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {showArchived === tab && (
-                  <motion.span
-                    layoutId={`secure-thread-tab-${channel.id}`}
-                    transition={SPRING}
-                    className="absolute inset-0 -z-10 rounded-lg bg-card shadow-sm"
-                  />
-                )}
-                {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
-                {tab ? t("chat.threads.archived") : t("chat.threads.open")}
-              </button>
-            ))}
-          </div>
-        )}
+        <ThreadFilters query={query} onQuery={setQuery} tabs={tabs} archived={showArchived} onArchived={setShowArchived} glide={`secure-thread-tab-${channel.id}`} />
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
         {threads.length === 0 && (

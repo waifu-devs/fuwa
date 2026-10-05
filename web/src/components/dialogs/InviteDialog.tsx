@@ -1,26 +1,21 @@
 import { CheckIcon, ChevronDownIcon, CopyIcon, HashIcon, LoaderCircleIcon, RefreshCwIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import type { Invite } from "@/gen/fuwa/v1/types_pb";
+import type { Channel, Invite, Server } from "@/gen/fuwa/v1/types_pb";
 import { createInvite, listInvites, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { getInstance, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { usePrivateField } from "@/components/Private";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n/react";
-import { DEFAULT_INVITE, EXPIRE_AFTER, MAX_USES, expiresAt, inviteLink, timeLeft, works } from "@/lib/invites";
+import type { Lang } from "@/lib/format";
+import { DEFAULT_INVITE, EXPIRE_AFTER, MAX_USES, expiresAt, inviteLink, publicBase, timeLeft, works } from "@/lib/invites";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
-
-/** An instance's own address, as links to it should read. */
-export const publicBase = (key: string) => {
-  const inst = getInstance(key);
-  return inst?.node?.publicUrl || inst?.url || "";
-};
 
 /**
  * Invite people to a server, or into one of its channels, like Discord: a
@@ -53,7 +48,6 @@ export function InviteDialog({
   const [making, setMaking] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const privateField = usePrivateField();
 
   // Opening reuses a link of yours that's still good for a while, as Discord does, so
   // inviting twice doesn't leave two links lying around; otherwise it makes one.
@@ -118,106 +112,26 @@ export function InviteDialog({
     }
   }
 
-  const until = invite && expiresAt(invite);
-  const limit = invite?.maxUses ?? 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader
-          title={
-            <span className="flex items-center gap-3">
-              {server && (
-                <motion.span initial={{ scale: 0.6, rotate: -12 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14 }}>
-                  <ServerIcon server={server} active className="size-10 text-sm" />
-                </motion.span>
-              )}
-              <span className="min-w-0">
-                <span className="block truncate">{t("workspace.invite.title", { server: server?.name ?? t("workspace.invite.thisServer") })}</span>
-                {channel && (
-                  <span className="flex items-center gap-1 text-sm font-bold text-muted-foreground">
-                    <HashIcon className="size-3.5" />
-                    {channel.name}
-                  </span>
-                )}
-              </span>
-            </span>
-          }
-          description={t("workspace.invite.about")}
-        />
+        <DialogHeader title={<InviteTitle server={server} channel={channel} />} description={t("workspace.invite.about")} />
         <div className="flex flex-col gap-2">
           <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{t("workspace.invite.link")}</span>
-          <div
-            className={cn(
-              "flex items-center gap-2 rounded-xl border bg-background/60 p-1.5 pl-3 transition-colors duration-300",
-              copied && "border-emerald-500/60 bg-emerald-500/5",
-            )}
-          >
-            <div className="relative min-w-0 flex-1 overflow-hidden">
-              <AnimatePresence mode="popLayout" initial={false}>
-                {invite ? (
-                  <motion.span
-                    key={invite.code}
-                    initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
-                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, y: -12, filter: "blur(4px)" }}
-                    transition={SPRING}
-                    className={cn("block truncate font-mono text-sm select-all", privateField)}
-                    data-testid="invite-link"
-                  >
-                    {link}
-                  </motion.span>
-                ) : (
-                  <motion.span key="loading" exit={{ opacity: 0 }} className="shimmer block h-5 w-4/5 rounded-md" />
-                )}
-              </AnimatePresence>
-            </div>
-            <motion.div whileTap={{ scale: 0.92 }}>
-              <Button
-                type="button"
-                onClick={copyLink}
-                disabled={!invite}
-                className={cn("btn h-9 w-24 overflow-hidden rounded-lg font-bold transition-colors", copied && "bg-emerald-500 text-white hover:bg-emerald-500")}
-              >
-                <AnimatePresence mode="popLayout" initial={false}>
-                  <motion.span
-                    key={copied ? "copied" : "copy"}
-                    initial={{ y: 16, opacity: 0, scale: 0.8 }}
-                    animate={{ y: 0, opacity: 1, scale: 1 }}
-                    exit={{ y: -16, opacity: 0, scale: 0.8 }}
-                    transition={{ type: "spring", stiffness: 600, damping: 22 }}
-                    className="flex items-center gap-1.5"
-                  >
-                    {copied ? <CheckIcon className="size-4" strokeWidth={3} /> : <CopyIcon className="size-4" />}
-                    {copied ? t("workspace.invite.copied") : t("workspace.invite.copy")}
-                  </motion.span>
-                </AnimatePresence>
-              </Button>
-            </motion.div>
-          </div>
-          <AnimatePresence initial={false}>
+          <LinkField invite={invite} link={link} copied={copied} onCopy={copyLink} />
+          <AnimatePresence initial={false} mode="popLayout">
             {error && (
               <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
+                {...SLIDE_IN}
+                transition={SPRING}
                 className="text-sm text-destructive first-letter:uppercase"
               >
                 {error}
               </motion.p>
             )}
           </AnimatePresence>
-          <p className="text-xs text-muted-foreground">
-            {invite ? (
-              <>
-                {until
-                  ? limit > 0
-                    ? t("workspace.invite.expiresInUses", { time: timeLeft(lang, until.getTime() - Date.now()), count: limit })
-                    : t("workspace.invite.expiresIn", { time: timeLeft(lang, until.getTime() - Date.now()) })
-                  : limit > 0
-                    ? t("workspace.invite.neverUses", { count: limit })
-                    : t("workspace.invite.never")}{" "}
-              </>
-            ) : null}
+          <motion.p layout="position" transition={SPRING} className="text-xs text-muted-foreground">
+            {invite ? <>{inviteTerms(lang, invite)} </> : null}
             <button
               type="button"
               onClick={() => setEditing((e) => !e)}
@@ -227,43 +141,146 @@ export function InviteDialog({
               {t("workspace.invite.edit")}
               <ChevronDownIcon className={cn("size-3.5 transition-transform duration-300", editing && "rotate-180")} />
             </button>
-          </p>
+          </motion.p>
         </div>
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {editing && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              {...SLIDE_IN}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
             >
-              <div className="mt-4 flex flex-col gap-4 rounded-2xl border bg-muted/30 p-4">
-                <div className="flex flex-col gap-2">
-                  <span className="text-sm font-bold">{t("workspace.invite.expireAfter")}</span>
-                  <Chips
-                    label={t("workspace.invite.expireAfter")}
-                    value={options.maxAgeSeconds}
-                    options={EXPIRE_AFTER.map((o) => ({ value: o.value, label: t(o.label) }))}
-                    onChange={(maxAgeSeconds) => setOptions((o) => ({ ...o, maxAgeSeconds }))}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <span className="text-sm font-bold">{t("workspace.invite.howMany")}</span>
-                  <Chips
-                    label={t("workspace.invite.howMany")}
-                    value={options.maxUses}
-                    options={MAX_USES.map((n) => ({ value: n, label: n ? t("workspace.invite.uses.count", { count: n }) : t("workspace.invite.uses.none") }))} onChange={(maxUses) => setOptions((o) => ({ ...o, maxUses }))} />
-                </div>
-                <Button type="button" onClick={() => void generate()} disabled={making} className="btn self-end rounded-xl font-bold">
-                  {making ? <LoaderCircleIcon className="animate-spin" /> : <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" />}
-                  {t("workspace.invite.generate")}
-                </Button>
-              </div>
+              <InviteOptions options={options} onChange={setOptions} making={making} onGenerate={() => void generate()} />
             </motion.div>
           )}
         </AnimatePresence>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** How long the invite lasts and how many it lets in. */
+function inviteTerms(lang: Lang, invite: Invite) {
+  const { t } = lang;
+  const until = expiresAt(invite);
+  const limit = invite.maxUses;
+  if (!until) return limit > 0 ? t("workspace.invite.neverUses", { count: limit }) : t("workspace.invite.never");
+  const time = timeLeft(lang, until.getTime() - Date.now());
+  return limit > 0 ? t("workspace.invite.expiresInUses", { time, count: limit }) : t("workspace.invite.expiresIn", { time });
+}
+
+function InviteTitle({ server, channel }: { server?: Server; channel?: Channel }) {
+  const { t } = useI18n();
+  return (
+    <span className="flex items-center gap-3">
+      {server && (
+        <motion.span initial={{ scale: 0.6, rotate: -12 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14 }}>
+          <ServerIcon server={server} active className="size-10 text-sm" />
+        </motion.span>
+      )}
+      <span className="min-w-0">
+        <span className="block truncate">{t("workspace.invite.title", { server: server?.name ?? t("workspace.invite.thisServer") })}</span>
+        {channel && (
+          <span className="flex items-center gap-1 text-sm font-bold text-muted-foreground">
+            <HashIcon className="size-3.5" />
+            {channel.name}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/** The link, sliding in when a new one is made, beside its copy button. */
+function LinkField({ invite, link, copied, onCopy }: { invite: Invite | null; link: string; copied: boolean; onCopy: () => void }) {
+  const { t } = useI18n();
+  const privateField = usePrivateField();
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-xl border bg-background/60 p-1.5 pl-3 transition-colors duration-300",
+        copied && "border-emerald-500/60 bg-emerald-500/5",
+      )}
+    >
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <AnimatePresence mode="popLayout" initial={false}>
+          {invite ? (
+            <motion.span
+              key={invite.code}
+              initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -12, filter: "blur(4px)" }}
+              transition={SPRING}
+              className={cn("block truncate font-mono text-sm select-all", privateField)}
+              data-testid="invite-link"
+            >
+              {link}
+            </motion.span>
+          ) : (
+            <motion.span key="loading" exit={{ opacity: 0 }} className="shimmer block h-5 w-4/5 rounded-md" />
+          )}
+        </AnimatePresence>
+      </div>
+      <motion.div whileTap={{ scale: 0.92 }}>
+        <Button
+          type="button"
+          onClick={onCopy}
+          disabled={!invite}
+          className={cn("btn h-9 w-24 overflow-hidden rounded-lg font-bold transition-colors", copied && "bg-emerald-500 text-white hover:bg-emerald-500")}
+        >
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={copied ? "copied" : "copy"}
+              initial={{ y: 16, opacity: 0, scale: 0.8 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: -16, opacity: 0, scale: 0.8 }}
+              transition={{ type: "spring", stiffness: 600, damping: 22 }}
+              className="flex items-center gap-1.5"
+            >
+              {copied ? <CheckIcon className="size-4" strokeWidth={3} /> : <CopyIcon className="size-4" />}
+              {copied ? t("workspace.invite.copied") : t("workspace.invite.copy")}
+            </motion.span>
+          </AnimatePresence>
+        </Button>
+      </motion.div>
+    </div>
+  );
+}
+
+/** "Edit invite link": how long a new link lasts and how many it lets in. */
+function InviteOptions({
+  options,
+  onChange,
+  making,
+  onGenerate,
+}: {
+  options: typeof DEFAULT_INVITE;
+  onChange: (update: (o: typeof DEFAULT_INVITE) => typeof DEFAULT_INVITE) => void;
+  making: boolean;
+  onGenerate: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-4 flex flex-col gap-4 rounded-2xl border bg-muted/30 p-4">
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-bold">{t("workspace.invite.expireAfter")}</span>
+        <Chips
+          label={t("workspace.invite.expireAfter")}
+          value={options.maxAgeSeconds}
+          options={EXPIRE_AFTER.map((o) => ({ value: o.value, label: t(o.label) }))}
+          onChange={(maxAgeSeconds) => onChange((o) => ({ ...o, maxAgeSeconds }))}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-bold">{t("workspace.invite.howMany")}</span>
+        <Chips
+          label={t("workspace.invite.howMany")}
+          value={options.maxUses}
+          options={MAX_USES.map((n) => ({ value: n, label: n ? t("workspace.invite.uses.count", { count: n }) : t("workspace.invite.uses.none") }))} onChange={(maxUses) => onChange((o) => ({ ...o, maxUses }))} />
+      </div>
+      <Button type="button" onClick={onGenerate} disabled={making} className="btn self-end rounded-xl font-bold">
+        {making ? <LoaderCircleIcon className="animate-spin" /> : <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" />}
+        {t("workspace.invite.generate")}
+      </Button>
+    </div>
   );
 }

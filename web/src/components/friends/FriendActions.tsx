@@ -1,5 +1,5 @@
 import { BanIcon, CheckIcon, ClockIcon, LoaderCircleIcon, ShieldOffIcon, UserCheckIcon, UserMinusIcon, UserPlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { GetRelationshipResponse } from "@/gen/fuwa/v1/friend_pb";
 import type { User } from "@/gen/fuwa/v1/types_pb";
@@ -8,7 +8,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { acceptFriend, blockUser, getRelationship, removeFriend, sendFriendRequest, unblockUser } from "@/fuwa/friends";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { displayName } from "@/lib/format";
 import { BLOCKED, FRIEND, INCOMING, OUTGOING, stateWith } from "@/lib/friends";
 import { toast } from "@/lib/ui";

@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, LoaderCircleIcon, MessageCircleHeartIcon, PartyPopperIcon, SendIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   OnboardingStepKind,
@@ -17,14 +17,15 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useInstance, useMyMember, useRoles } from "@/fuwa/hooks";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { BannerHero } from "@/components/join/Banner";
+import { stepsFor } from "@/components/join/onboarding-steps";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { StartHere, suggestedChannels, type Suggested } from "@/components/join/StartHere";
+import { StartHere } from "@/components/join/StartHere";
+import { suggestedChannels, type Suggested } from "@/components/join/suggested";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { i18n } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
 import { accentVars, type BannerServer } from "@/lib/banner";
 import { canSee, cssColor } from "@/lib/permissions";
@@ -41,23 +42,99 @@ const SLIDE = {
   exit: (dir: number) => ({ opacity: 0, x: dir * -48, filter: "blur(4px)" }),
 };
 
-/**
- * The steps someone goes through, as they'll see them: rules only while they
- * still have to agree (added when the admin left them out), hello only where
- * they can see the channel.
- */
-export function stepsFor(onboarding: Pick<Onboarding, "steps">, opts: { mustAgree: boolean; canSeeChannel: (id: string) => boolean }): OnboardingStep[] {
-  const steps = onboarding.steps.filter((s) => {
-    if (s.kind === OnboardingStepKind.RULES) return opts.mustAgree;
-    if (s.kind === OnboardingStepKind.HELLO) return opts.canSeeChannel(s.channelId);
-    return s.kind === OnboardingStepKind.PICK && s.options.length > 0;
-  });
-  if (opts.mustAgree && !steps.some((s) => s.kind === OnboardingStepKind.RULES)) {
-    const hello = steps.findIndex((s) => s.kind === OnboardingStepKind.HELLO);
-    const rules = { kind: OnboardingStepKind.RULES, id: "rules", title: i18n().t("join.onboarding.rulesTitle"), description: "", skippable: false } as OnboardingStep;
-    steps.splice(hello === -1 ? steps.length : hello, 0, rules);
+/** Which step the flow is on and what's been picked, typed and agreed so far, and moving between steps. */
+function useFlow({
+  steps,
+  preview,
+  onAgree,
+  onHello,
+  onFinish,
+  onClose,
+}: {
+  steps: OnboardingStep[];
+  preview: boolean;
+  onAgree?: () => Promise<boolean>;
+  onHello?: (channelId: string, text: string) => Promise<boolean>;
+  onFinish?: (optionIds: string[]) => Promise<boolean>;
+  onClose?: () => void;
+}) {
+  const shown: Shown[] = useMemo(() => [...steps, { kind: "done", id: "done" }], [steps]);
+  const [at, setAt] = useState(0);
+  const [dir, setDir] = useState(1);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [agreed, setAgreed] = useState(false);
+  const [hello, setHello] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const nudge = useAnimationControls();
+  const { t } = useI18n();
+  /** What the hello says until they change it, when the admin didn't write one. */
+  const greeting = (s: OnboardingStep) => s.hello || t("join.onboarding.hello");
+  const [started] = useState(() => performance.now());
+  const index = Math.min(at, shown.length - 1);
+  const step = shown[index]!;
+  const last = index === shown.length - 2;
+
+  useEffect(() => {
+    if (index >= shown.length) setAt(shown.length - 1);
+  }, [index, shown.length]);
+
+  function move(to: number) {
+    setError(null);
+    setDir(to > index ? 1 : -1);
+    setAt(to);
   }
-  return steps;
+
+  const optionIds = (s: OnboardingStep) => new Set(s.options.map((o) => o.id));
+  const pickedIn = (s: OnboardingStep) => {
+    const ids = optionIds(s);
+    return picked.filter((id) => ids.has(id));
+  };
+
+  function toggle(s: OnboardingStep, id: string) {
+    setError(null);
+    const ids = optionIds(s);
+    setPicked((list) => {
+      const on = list.includes(id);
+      if (s.multiple) return on ? list.filter((x) => x !== id) : [...list, id];
+      const others = list.filter((x) => !ids.has(x));
+      return on ? others : [...others, id];
+    });
+  }
+
+  function refuse(message: string) {
+    setError(message);
+    void nudge.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
+  }
+
+  async function finish() {
+    if (!preview && onFinish && !(await onFinish(picked))) return false;
+    reportTiming("onboarding.duration", performance.now() - started);
+    return true;
+  }
+
+  async function next(skip = false) {
+    if (step.kind === "done") return onClose?.();
+    if (busy) return;
+    if (!skip && step.kind === OnboardingStepKind.PICK && !step.skippable && pickedIn(step).length === 0) return refuse(t("join.onboarding.pickOne"));
+    if (step.kind === OnboardingStepKind.RULES && !agreed) return refuse(t("join.onboarding.agreeFirst"));
+    setBusy(true);
+    try {
+      if (step.kind === OnboardingStepKind.RULES && !preview && onAgree && !(await onAgree())) return;
+      if (step.kind === OnboardingStepKind.HELLO && !skip && !preview && onHello) {
+        const text = (hello[step.id] ?? greeting(step)).trim();
+        if (text && !(await onHello(step.channelId, text))) return;
+      }
+      if (last && !(await finish())) return;
+      move(index + 1);
+    } catch (err) {
+      setError((err as FuwaError).message ?? t("join.onboarding.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return { shown, index, step, last, dir, picked, agreed, setAgreed, hello, setHello, greeting, busy, error, nudge, move, toggle, pickedIn, next };
 }
 
 /**
@@ -98,82 +175,15 @@ export function OnboardingFlow({
   onPick?: (channelId: string) => void;
   onClose?: () => void;
 }) {
-  const shown: Shown[] = useMemo(() => [...steps, { kind: "done", id: "done" }], [steps]);
-  const [at, setAt] = useState(0);
-  const [dir, setDir] = useState(1);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [agreed, setAgreed] = useState(false);
-  const [hello, setHello] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nudge = useAnimationControls();
   const { t } = useI18n();
-  /** What the hello says until they change it, when the admin didn't write one. */
-  const greeting = (s: OnboardingStep) => s.hello || t("join.onboarding.hello");
-  const [started] = useState(() => performance.now());
-  const index = Math.min(at, shown.length - 1);
-  const step = shown[index]!;
-  const last = index === shown.length - 2;
-
-  useEffect(() => {
-    if (index >= shown.length) setAt(shown.length - 1);
-  }, [index, shown.length]);
-
-  function move(to: number) {
-    setError(null);
-    setDir(to > index ? 1 : -1);
-    setAt(to);
-  }
-
-  const optionIds = (s: OnboardingStep) => s.options.map((o) => o.id);
-  const pickedIn = (s: OnboardingStep) => picked.filter((id) => optionIds(s).includes(id));
-
-  function toggle(s: OnboardingStep, id: string) {
-    setError(null);
-    setPicked((list) => {
-      const on = list.includes(id);
-      if (s.multiple) return on ? list.filter((x) => x !== id) : [...list, id];
-      const others = list.filter((x) => !optionIds(s).includes(x));
-      return on ? others : [...others, id];
-    });
-  }
-
-  function refuse(message: string) {
-    setError(message);
-    void nudge.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
-  }
-
-  async function finish() {
-    if (!preview && onFinish && !(await onFinish(picked))) return false;
-    reportTiming("onboarding.duration", performance.now() - started);
-    return true;
-  }
-
-  async function next(skip = false) {
-    if (step.kind === "done") return onClose?.();
-    if (busy) return;
-    if (!skip && step.kind === OnboardingStepKind.PICK && !step.skippable && pickedIn(step).length === 0) return refuse(t("join.onboarding.pickOne"));
-    if (step.kind === OnboardingStepKind.RULES && !agreed) return refuse(t("join.onboarding.agreeFirst"));
-    setBusy(true);
-    try {
-      if (step.kind === OnboardingStepKind.RULES && !preview && onAgree && !(await onAgree())) return;
-      if (step.kind === OnboardingStepKind.HELLO && !skip && !preview && onHello) {
-        const text = (hello[step.id] ?? greeting(step)).trim();
-        if (text && !(await onHello(step.channelId, text))) return;
-      }
-      if (last && !(await finish())) return;
-      move(index + 1);
-    } catch (err) {
-      setError((err as FuwaError).message ?? t("join.onboarding.failed"));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { shown, index, step, last, dir, picked, agreed, setAgreed, hello, setHello, greeting, busy, error, nudge, move, toggle, pickedIn, next } =
+    useFlow({ steps, preview, onAgree, onHello, onFinish, onClose });
 
   const suggested: Suggested[] = useMemo(() => {
+    const chosen = new Set(picked);
     const fromPicks = steps
       .flatMap((s) => s.options)
-      .filter((o) => picked.includes(o.id))
+      .filter((o) => chosen.has(o.id))
       .flatMap((o) => o.channelIds.map((channelId) => ({ channelId, description: t("join.onboarding.becausePicked", { option: o.label }), emoji: o.emoji })));
     const all = [...fromPicks, ...(welcome?.enabled ? welcome.channels : [])];
     const once = all.filter((w, n) => all.findIndex((x) => x.channelId === w.channelId) === n).slice(0, 6);
@@ -198,107 +208,183 @@ export function OnboardingFlow({
             {step.kind === "done" ? (
               <Done server={server} suggested={suggested} emojis={emojis} onPick={onPick} />
             ) : (
-              <>
-                <div>
-                  <h3 className="text-lg font-extrabold tracking-tight break-words">{step.title}</h3>
-                  {step.description && (
-                    <p className="text-sm break-words text-muted-foreground">
-                      <InlineMarkdown>{step.description}</InlineMarkdown>
-                    </p>
-                  )}
-                </div>
-                {step.kind === OnboardingStepKind.PICK && (
-                  <Picks step={step} picked={picked} roles={roles} emojis={emojis} onToggle={(id) => toggle(step, id)} compact={compact} />
-                )}
-                {step.kind === OnboardingStepKind.RULES && (
-                  <>
-                    <RulesList rules={rules} className="scroll-thin max-h-60 overflow-y-auto pr-1" />
-                    <AgreeCheck checked={agreed} onChange={setAgreed}>
-                      {t("join.rules.agree")}
-                    </AgreeCheck>
-                  </>
-                )}
-                {step.kind === OnboardingStepKind.HELLO && (
-                  <Hello
-                    channel={channels.find((c) => c.id === step.channelId)}
-                    value={hello[step.id] ?? greeting(step)}
-                    onChange={(text) => setHello((h) => ({ ...h, [step.id]: text }))}
-                  />
-                )}
-              </>
+              <StepBody
+                step={step}
+                picked={picked}
+                rules={rules}
+                channels={channels}
+                roles={roles}
+                emojis={emojis}
+                compact={compact}
+                agreed={agreed}
+                onAgreed={setAgreed}
+                hello={hello[step.id] ?? greeting(step)}
+                onHello={(text) => setHello((h) => ({ ...h, [step.id]: text }))}
+                onToggle={(id) => toggle(step, id)}
+              />
             )}
           </motion.div>
         </AnimatePresence>
       </motion.div>
-      <AnimatePresence initial={false}>
-        {error && (
-          <motion.p
-            role="alert"
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            className={cn("text-sm font-bold text-destructive first-letter:uppercase", compact && "px-4")}
-          >
-            {error}
-          </motion.p>
-        )}
-      </AnimatePresence>
+      <FlowError error={error} compact={compact} />
       <motion.div animate={nudge} className={cn("mt-4 flex items-center gap-2", compact && "px-4 pb-4")}>
-        <AnimatePresence initial={false} mode="popLayout">
-          {index > 0 && step.kind !== "done" && (
-            <motion.span key="back" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={SPRING}>
-              <Button type="button" variant="ghost" size="icon" aria-label={t("common.back")} onClick={() => move(index - 1)} className="group size-10 rounded-xl">
-                <ArrowLeftIcon className="transition-transform group-hover:-translate-x-0.5" />
-              </Button>
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <BackButton show={index > 0 && step.kind !== "done"} onBack={() => move(index - 1)} />
         <span className="flex-1" />
         {skippable && (
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void next(true)} className="h-10 rounded-xl font-bold text-muted-foreground">
             {t("join.onboarding.skip")}
           </Button>
         )}
-        <Button
-          type="button"
-          disabled={busy}
-          onClick={() => void next()}
-          style={{ background: "var(--accent-server)" }}
-          className={cn("group h-10 min-w-32 rounded-xl font-bold text-white shadow-md transition-[filter,opacity] hover:brightness-110", empty && !step.skippable && "opacity-70")}
-          data-burst={step.kind === "done" || last ? "" : undefined}
-        >
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.span
-              key={busy ? "busy" : `${step.id}:${step.kind === OnboardingStepKind.HELLO}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={SPRING}
-              className="flex items-center gap-2"
-            >
-              {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
-              {step.kind === "done" ? (
-                <>
-                  {t("join.onboarding.startExploring")} <PartyPopperIcon />
-                </>
-              ) : step.kind === OnboardingStepKind.HELLO ? (
-                <>
-                  {t("join.onboarding.send")} <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                </>
-              ) : step.kind === OnboardingStepKind.RULES ? (
-                <>
-                  {t("join.onboarding.agree")} <CheckIcon />
-                </>
-              ) : (
-                <>
-                  {last ? t("join.onboarding.finish") : t("join.onboarding.next")} <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
-                </>
-              )}
-            </motion.span>
-          </AnimatePresence>
-        </Button>
+        <NextButton step={step} last={last} busy={busy} dim={empty && !step.skippable} onClick={() => void next()} />
       </motion.div>
     </div>
+  );
+}
+
+/** A step's heading and what it asks for: options to pick, rules to agree to, or a hello to send. */
+function StepBody({
+  step,
+  picked,
+  rules,
+  channels,
+  roles,
+  emojis,
+  compact,
+  agreed,
+  onAgreed,
+  hello,
+  onHello,
+  onToggle,
+}: {
+  step: OnboardingStep;
+  picked: string[];
+  rules: string[];
+  channels: Channel[];
+  roles: Role[];
+  emojis: Emoji[] | undefined;
+  compact: boolean;
+  agreed: boolean;
+  onAgreed: (on: boolean) => void;
+  hello: string;
+  onHello: (text: string) => void;
+  onToggle: (id: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      <div>
+        <h3 className="text-lg font-extrabold tracking-tight break-words">{step.title}</h3>
+        {step.description && (
+          <p className="text-sm break-words text-muted-foreground">
+            <InlineMarkdown>{step.description}</InlineMarkdown>
+          </p>
+        )}
+      </div>
+      {step.kind === OnboardingStepKind.PICK && <Picks step={step} picked={picked} roles={roles} emojis={emojis} onToggle={onToggle} compact={compact} />}
+      {step.kind === OnboardingStepKind.RULES && (
+        <>
+          <RulesList rules={rules} className="scroll-thin max-h-60 overflow-y-auto pr-1" />
+          <AgreeCheck checked={agreed} onChange={onAgreed}>
+            {t("join.rules.agree")}
+          </AgreeCheck>
+        </>
+      )}
+      {step.kind === OnboardingStepKind.HELLO && <Hello channel={channels.find((c) => c.id === step.channelId)} value={hello} onChange={onHello} />}
+    </>
+  );
+}
+
+/** Why the last step didn't go through, sliding in under it. */
+function FlowError({ error, compact }: { error: string | null; compact: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {error && (
+        <motion.p
+          role="alert"
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          className={cn("text-sm font-bold text-destructive first-letter:uppercase", compact && "px-4")}
+        >
+          {error}
+        </motion.p>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Back a step, popping in from the second step on. */
+function BackButton({ show, onBack }: { show: boolean; onBack: () => void }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {show && (
+        <motion.span key="back" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={SPRING}>
+          <Button type="button" variant="ghost" size="icon" aria-label={t("common.back")} onClick={onBack} className="group size-10 rounded-xl">
+            <ArrowLeftIcon className="transition-transform group-hover:-translate-x-0.5" />
+          </Button>
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** The main button: next, agree, send or finish, with a spinner while it works. */
+function NextButton({ step, last, busy, dim, onClick }: { step: Shown; last: boolean; busy: boolean; dim: boolean; onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      style={{ background: "var(--accent-server)" }}
+      className={cn("group h-10 min-w-32 rounded-xl font-bold text-white shadow-md transition-[filter,opacity] hover:brightness-110", dim && "opacity-70")}
+      data-burst={step.kind === "done" || last ? "" : undefined}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={busy ? "busy" : `${step.id}:${step.kind === OnboardingStepKind.HELLO}`}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={SPRING}
+          className="flex items-center gap-2"
+        >
+          {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
+          <NextLabel kind={step.kind} last={last} />
+        </motion.span>
+      </AnimatePresence>
+    </Button>
+  );
+}
+
+/** What the main button says for a step. */
+function NextLabel({ kind, last }: { kind: Shown["kind"]; last: boolean }) {
+  const { t } = useI18n();
+  if (kind === "done") {
+    return (
+      <>
+        {t("join.onboarding.startExploring")} <PartyPopperIcon />
+      </>
+    );
+  }
+  if (kind === OnboardingStepKind.HELLO) {
+    return (
+      <>
+        {t("join.onboarding.send")} <SendIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+      </>
+    );
+  }
+  if (kind === OnboardingStepKind.RULES) {
+    return (
+      <>
+        {t("join.onboarding.agree")} <CheckIcon />
+      </>
+    );
+  }
+  return (
+    <>
+      {last ? t("join.onboarding.finish") : t("join.onboarding.next")} <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
+    </>
   );
 }
 
@@ -345,10 +431,11 @@ function Picks({
   onToggle: (id: string) => void;
   compact: boolean;
 }) {
+  const chosen = new Set(picked);
   return (
     <div role={step.multiple ? "group" : "radiogroup"} className={cn("grid gap-2", !compact && "sm:grid-cols-2")}>
       {step.options.map((o, n) => {
-        const on = picked.includes(o.id);
+        const on = chosen.has(o.id);
         const given = o.roleIds.flatMap((id) => roles.filter((r) => r.id === id));
         return (
           <motion.button

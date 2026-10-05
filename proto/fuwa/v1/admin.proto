@@ -232,17 +232,24 @@ message InstanceSettings {
   // their turn. A protective default, 8 unless
   // FUWA_SHARED_FILE_FETCHES_IN_FLIGHT says otherwise.
   optional int64 shared_file_fetches_in_flight = 52;
+  // Most pinned messages in one channel, and in one thread
+  // (MessageService.PinMessage); unset for no cap. FUWA_LIMIT_PINS_PER_CHANNEL.
+  optional int64 pins_per_channel = 53;
+  // Most pinned messages in one direct-message conversation
+  // (DirectMessageService.PinRecord); unset for no cap.
+  // FUWA_LIMIT_PINS_PER_CONVERSATION.
+  optional int64 pins_per_conversation = 54;
   // How many app live tiles one channel may hold at once (LiveTileService);
-  // unset for no cap. FUWA_LIMIT_LIVE_TILES_PER_CHANNEL.
-  optional int64 live_tiles_per_channel = 53;
+  // unset for no cap. FUWA_LIMIT_LIVE_TILES_PER_CHANNEL. (55 and 56 are taken.)
+  optional int64 live_tiles_per_channel = 57;
   // How many times a minute one agent or webhook may set or end live tiles
   // in a server; unset for no cap. FUWA_LIMIT_LIVE_TILE_UPDATES_PER_MINUTE.
-  optional int64 live_tile_updates_per_minute = 54;
+  optional int64 live_tile_updates_per_minute = 58;
   // The shortest time, in milliseconds, between two updates of one live tile
   // sent to the people who see it; changes in between are stored and the
   // latest goes out when the time is up. A protective default, 1000 unless
   // FUWA_LIVE_TILE_PUBLISH_MS says otherwise; unset sends every change.
-  optional int64 live_tile_publish_ms = 55;
+  optional int64 live_tile_publish_ms = 59;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made

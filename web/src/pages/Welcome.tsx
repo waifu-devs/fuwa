@@ -1,5 +1,5 @@
 import { DatabaseIcon, LayersIcon, ServerCogIcon } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { m as motion, useReducedMotion } from "motion/react";
 import { useMemo } from "react";
 import { BubbleBackground } from "@/components/animate-ui/components/backgrounds/bubble";
 import { RotatingText, RotatingTextContainer } from "@/components/animate-ui/primitives/texts/rotating";

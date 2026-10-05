@@ -231,5 +231,28 @@
   "search.start": "Search this server",
   "search.startAbout": "Type words, or filters like from:, in: and has:, then press Enter.",
   "search.voiceMessage": "Voice message ({duration})",
-  "search.jump": "Jump"
+  "search.jump": "Jump",
+  "pins.button": "Pinned messages",
+  "pins.title": "Pinned messages",
+  "pins.count": {
+    "one": "{count} pinned",
+    "other": "{count} pinned"
+  },
+  "pins.empty": "Nothing is pinned here yet.",
+  "pins.emptyChannel": "People who can manage messages pin the important ones from a message's menu.",
+  "pins.emptyDm": "Pin a message from its menu to keep it close at hand.",
+  "pins.jump": "Jump",
+  "pins.unpin": "Unpin",
+  "pins.pin": "Pin message",
+  "pins.unpinMessage": "Unpin message",
+  "pins.pinned": "Pinned",
+  "pins.pinnedToast": "Pinned to {place}",
+  "pins.unpinnedToast": "Unpinned",
+  "pins.notOnDevice": "This message isn't on this device.",
+  "pins.voice": "Voice message",
+  "pins.files": "Files",
+  "pins.failed": "Couldn't load the pins. Try again in a moment.",
+  "pins.retry": "Try again",
+  "pins.more": "Show more",
+  "pins.thisConversation": "this conversation"
 }

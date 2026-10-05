@@ -1,7 +1,11 @@
 
 import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
-import { AnimatePresence, motion, type HTMLMotionProps } from 'motion/react';
+import {
+  AnimatePresence,
+  m as motion,
+  type HTMLMotionProps,
+} from 'motion/react';
 
 import {
   Highlight,
@@ -166,6 +170,26 @@ function DropdownMenuSubTrigger({
   );
 }
 
+// Hints will-change only while the open/close animation runs, then lets the layer go.
+function useAnimationWillChange({
+  onAnimationStart,
+  onAnimationComplete,
+}: Pick<HTMLMotionProps<'div'>, 'onAnimationStart' | 'onAnimationComplete'>) {
+  // Mounting starts the open animation, so the hint starts on.
+  const [animating, setAnimating] = React.useState(true);
+  return {
+    animating,
+    onAnimationStart: ((definition) => {
+      setAnimating(true);
+      onAnimationStart?.(definition);
+    }) satisfies HTMLMotionProps<'div'>['onAnimationStart'],
+    onAnimationComplete: ((definition) => {
+      setAnimating(false);
+      onAnimationComplete?.(definition);
+    }) satisfies HTMLMotionProps<'div'>['onAnimationComplete'],
+  };
+}
+
 type DropdownMenuSubContentProps = Omit<
   React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>,
   'forceMount' | 'asChild'
@@ -193,9 +217,15 @@ function DropdownMenuSubContent({
   transition = { duration: 0.2 },
   style,
   container,
+  onAnimationStart,
+  onAnimationComplete,
   ...props
 }: DropdownMenuSubContentProps) {
   const { isOpen } = useDropdownMenuSub();
+  const { animating, ...animationHandlers } = useAnimationWillChange({
+    onAnimationStart,
+    onAnimationComplete,
+  });
 
   return (
     <AnimatePresence>
@@ -225,7 +255,11 @@ function DropdownMenuSubContent({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={transition}
-              style={{ willChange: 'opacity, transform', ...style }}
+              style={{
+                willChange: animating ? 'opacity, transform' : undefined,
+                ...style,
+              }}
+              {...animationHandlers}
               {...props}
             />
           </DropdownMenuPrimitive.SubContent>
@@ -290,9 +324,15 @@ function DropdownMenuContent({
   transition = { duration: 0.2 },
   style,
   container,
+  onAnimationStart,
+  onAnimationComplete,
   ...props
 }: DropdownMenuContentProps) {
   const { isOpen } = useDropdownMenu();
+  const { animating, ...animationHandlers } = useAnimationWillChange({
+    onAnimationStart,
+    onAnimationComplete,
+  });
 
   return (
     <AnimatePresence>
@@ -324,7 +364,11 @@ function DropdownMenuContent({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={transition}
-              style={{ willChange: 'opacity, transform', ...style }}
+              style={{
+                willChange: animating ? 'opacity, transform' : undefined,
+                ...style,
+              }}
+              {...animationHandlers}
               {...props}
             />
           </DropdownMenuPrimitive.Content>

@@ -1,7 +1,7 @@
 import { ChevronDownIcon, InfoIcon, PlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import { SPRING } from "@/components/motion";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,12 +29,6 @@ import {
 import { getPrefs, setPrefs, usePrefs, type CustomKeybind } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { Keycaps } from "./common";
-
-/** Where the Keybinds page's own rows sit for settings search. */
-export const keybindSettings = (t: I18n["t"]) => [
-  { id: "custom-keybinds", label: t("appsettings.keybinds.custom"), keywords: "add shortcut" },
-  ...ACTIONS.map((a) => ({ id: `key-${a.id}`, label: actionName(t, a), keywords: "shortcut hotkey" })),
-];
 
 type Recording = { kind: "action"; id: string } | { kind: "custom"; id: string } | null;
 
@@ -303,8 +297,8 @@ function Recorder({
   const { t } = useI18n();
   const [held, setHeld] = useState<string[]>([]);
   const button = useRef<HTMLButtonElement>(null);
-  const latest = useRef({ onRecord, onRecording });
-  latest.current = { onRecord, onRecording };
+  const record = useEffectEvent(onRecord);
+  const stopRecording = useEffectEvent(() => onRecording(false));
 
   useEffect(() => {
     if (!recording) return;
@@ -315,12 +309,12 @@ function Recorder({
       e.preventDefault();
       e.stopImmediatePropagation();
       const bare = !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
-      if (e.key === "Escape" && bare) return latest.current.onRecording(false);
+      if (e.key === "Escape" && bare) return stopRecording();
       setHeld(modifiersOf(e));
       const next = comboOf(e);
       if (!next) return;
       setHeld([]);
-      if (latest.current.onRecord(normalize(next))) latest.current.onRecording(false);
+      if (record(normalize(next))) stopRecording();
     };
     const up = (e: KeyboardEvent) => {
       e.preventDefault();
@@ -375,15 +369,13 @@ function Recorder({
 
 function Problem({ text }: { text: string | null }) {
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="popLayout">
       {text && (
         <motion.p
           key={text}
-          initial={{ opacity: 0, height: 0, y: -4 }}
-          animate={{ opacity: 1, height: "auto", y: 0 }}
-          exit={{ opacity: 0, height: 0 }}
+          {...SLIDE_IN}
           transition={SPRING}
-          className="overflow-hidden pt-1.5 text-xs font-bold text-destructive"
+          className="pt-1.5 text-xs font-bold text-destructive"
         >
           {text}
         </motion.p>

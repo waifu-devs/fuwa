@@ -1,14 +1,15 @@
-import { Outlet, useParams, useRouterState } from "@tanstack/react-router";
-import { AnimatePresence, motion } from "motion/react";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { AnimatePresence, m as motion } from "motion/react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { UpdateReady } from "@/components/UpdateReady";
 import { AppliedWatcher } from "@/components/join/Applied";
 import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
-import { EASE_OUT } from "@/components/motion";
+import { EASE_OUT } from "@/lib/motion";
 import { Rail } from "@/components/Rail";
 import { useFuwa } from "@/fuwa/store";
+import { rememberPath } from "@/lib/last-path";
 import { onCommand } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -33,16 +34,6 @@ export function useLayout(): Layout {
   const layout = useContext(LayoutContext);
   if (!layout) throw new Error("useLayout outside Shell");
   return layout;
-}
-
-const LAST_PATH = "fuwa:last-path";
-
-export function rememberedPath(): string | null {
-  try {
-    return localStorage.getItem(LAST_PATH);
-  } catch {
-    return null;
-  }
 }
 
 export function Shell() {
@@ -73,15 +64,22 @@ export function Shell() {
   // The members shortcut works while a channel is open.
   const inChannel = !!params.channel;
   useEffect(() => (inChannel ? onCommand("toggleMembers", () => setMembersOpen((open) => !open)) : undefined), [inChannel]);
+  // Switched to another account here (in this tab or another): the page open may be one it can't see, so go home.
+  const account = useFuwa((s) => (params.instance ? (s.instances[params.instance]?.account ?? "") : ""));
+  const navigate = useNavigate();
+  const shown = useRef({ instance: params.instance, account });
+  useEffect(() => {
+    const before = shown.current;
+    shown.current = { instance: params.instance, account };
+    const switched = before.instance === params.instance && !!before.account && !!account && before.account !== account;
+    if (switched && params.instance && pathname !== `/${params.instance}`) {
+      void navigate({ to: "/$instance", params: { instance: params.instance }, replace: true });
+    }
+  }, [params.instance, account, pathname, navigate]);
   // An invite isn't a place to come back to, so it isn't remembered.
   const invite = !!params.code;
   useEffect(() => {
-    if (invite) return;
-    try {
-      localStorage.setItem(LAST_PATH, pathname);
-    } catch {
-      // Not remembered; the app still opens on the first server next time.
-    }
+    if (!invite) rememberPath(pathname);
   }, [pathname, invite]);
 
   const layout = useMemo(
@@ -145,9 +143,11 @@ function Nav({ side }: { side: ReactNode }) {
 /** The page, rising in softly when you go to another server or instance. */
 function Page() {
   const params = useParams({ strict: false }) as { instance?: string; server?: string; conversation?: string };
+  // Switching accounts rises in the same way, as the other account's page.
+  const account = useFuwa((s) => (params.instance ? (s.instances[params.instance]?.account ?? "") : ""));
   return (
     <motion.div
-      key={`${params.instance}/${params.server ?? (params.conversation ? "dm" : "")}`}
+      key={`${params.instance}|${account}/${params.server ?? (params.conversation ? "dm" : "")}`}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: EASE_OUT }}

@@ -3,7 +3,7 @@ import { i18n } from "@/i18n/i18n";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, markServerRead, run } from "@/fuwa/actions";
 import { accessNow, getInstance } from "@/fuwa/hooks";
-import { openableChannels } from "@/components/ChannelSidebar";
+import { openableChannels } from "@/components/channel-groups";
 import { settingsTabsFor } from "@/components/dialogs/serverSettingsTabs";
 import { copyIdItem, goTo, notificationEntries } from "@/components/menus/common";
 import { confirmFirst, openMenuDialog } from "@/components/menus/dialogs";

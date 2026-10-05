@@ -15,7 +15,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Agent } from "@/gen/fuwa/v1/agent_pb";
 import { AgentCreation, type Server } from "@/gen/fuwa/v1/types_pb";
@@ -26,7 +26,8 @@ import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -118,19 +119,20 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
         )}
       </div>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {making && (
-          <NewAgent
-            key="new"
-            instanceKey={instanceKey}
-            onCancel={() => setMaking(false)}
-            onMade={(agent, token) => {
-              setAgents((list) => [...(list ?? []), agent]);
-              setMaking(false);
-              setOpen(agent.user?.id ?? null);
-              setFresh({ agentId: agent.user?.id ?? "", token });
-            }}
-          />
+          <motion.div key="new" initial={{ ...SLIDE_IN.initial, scale: 0.97 }} animate={{ ...SLIDE_IN.animate, scale: 1 }} exit={{ ...SLIDE_IN.exit, scale: 0.97 }} transition={SPRING}>
+            <NewAgent
+              instanceKey={instanceKey}
+              onCancel={() => setMaking(false)}
+              onMade={(agent, token) => {
+                setAgents((list) => [...(list ?? []), agent]);
+                setMaking(false);
+                setOpen(agent.user?.id ?? null);
+                setFresh({ agentId: agent.user?.id ?? "", token });
+              }}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -151,7 +153,7 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
           </motion.div>
         )
       ) : (
-        <ul className="flex flex-col gap-2">
+        <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {agents.map((a) => (
               <AgentCard
@@ -168,18 +170,18 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
               />
             ))}
           </AnimatePresence>
-        </ul>
+        </motion.ul>
       )}
 
-      <div className="rounded-2xl border">
+      <motion.div layout="position" transition={SPRING} className="rounded-2xl border">
         <button type="button" onClick={() => setHowTo((h) => !h)} className="flex w-full items-center gap-2 p-3 text-left text-sm font-bold">
           <TerminalIcon className="size-4 text-primary" />
           <span className="flex-1">{t("accountsettings.agents.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {howTo && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+            <motion.div {...SLIDE_IN} transition={SPRING}>
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
                   <T
@@ -197,7 +199,7 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -255,14 +257,7 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
   }
 
   return (
-    <motion.form
-      onSubmit={(e) => void submit(e)}
-      initial={{ opacity: 0, height: 0, scale: 0.97 }}
-      animate={{ opacity: 1, height: "auto", scale: 1 }}
-      exit={{ opacity: 0, height: 0, scale: 0.97 }}
-      transition={SPRING}
-      className="overflow-hidden"
-    >
+    <form onSubmit={(e) => void submit(e)}>
       <motion.div animate={shake} className="flex flex-col gap-3 rounded-2xl border border-primary/40 bg-background/60 p-4 shadow-lg shadow-primary/5">
         <div className="flex flex-wrap gap-3">
           <label className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
@@ -297,7 +292,7 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
           </Button>
         </div>
       </motion.div>
-    </motion.form>
+    </form>
   );
 }
 
@@ -322,13 +317,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -6, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, height: 0, scale: 0.97 }}
-      transition={SPRING}
-      className="relative flex flex-col gap-2 overflow-hidden rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3"
-    >
+    <div className="relative flex flex-col gap-2 overflow-hidden rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3">
       <motion.span
         aria-hidden
         initial={{ x: "-100%" }}
@@ -369,7 +358,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
           {t("accountsettings.shared.savedIt")}
         </Button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -474,43 +463,21 @@ function AgentCard({
       transition={SPRING}
       className={cn("overflow-hidden rounded-2xl border bg-background/50 transition-colors", open ? "border-primary/40 shadow-lg shadow-primary/5" : "hover:border-primary/30")}
     >
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left">
-        <motion.span whileHover={{ rotate: -8, scale: 1.08 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="relative">
-          <UserAvatar user={user} className="size-10" />
-          <AnimatePresence>
-            {a.lastActiveAt && Date.now() - toDate(a.lastActiveAt).getTime() < 10 * 60_000 && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                exit={{ scale: 0 }}
-                title={t("accountsettings.agents.recentlyUsed")}
-                className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-background bg-emerald-500"
-              />
-            )}
-          </AnimatePresence>
-        </motion.span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate font-bold">{displayName(user)}</span>
-            <AppBadge agent />
-            {a.public && <span className="rounded-full bg-muted px-1.5 py-px text-[0.6rem] font-bold text-muted-foreground uppercase">{t("accountsettings.agents.public")}</span>}
-          </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            @{user.username} · <T k="accountsettings.agents.servers" values={{ count: <Count value={a.servers} /> }} count={a.servers} /> ·{" "}
-            {a.lastActiveAt ? t("accountsettings.agents.active", { when: ago(lang, toDate(a.lastActiveAt)) }) : t("accountsettings.agents.neverSignedIn")}
-          </span>
-        </span>
-        {busy === "save" && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
-        <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
-      </button>
+      <AgentSummary agent={a} open={open} saving={busy === "save"} onToggle={onToggle} />
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-4 border-t p-4">
-              <AnimatePresence initial={false}>{token && <TokenReveal key={token} token={token} onDone={onTokenSeen} />}</AnimatePresence>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {token && (
+                  <motion.div key={token} initial={{ ...SLIDE_IN.initial, scale: 0.97 }} animate={{ ...SLIDE_IN.animate, scale: 1 }} exit={{ ...SLIDE_IN.exit, scale: 0.97 }} transition={SPRING}>
+                    <TokenReveal token={token} onDone={onTokenSeen} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <div className="flex flex-wrap items-start gap-4">
+              <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-start gap-4">
                 <PictureField
                   instanceKey={instanceKey}
                   kind="avatar"
@@ -553,79 +520,190 @@ function AgentCard({
                     />
                   </label>
                 </div>
-              </div>
+              </motion.div>
 
-              <Toggle
-                checked={a.public}
-                onChange={(pub) => void save({ public: pub })}
-                label={t("accountsettings.agents.public")}
-                hint={t("accountsettings.agents.publicHint")}
-              />
+              <motion.div layout="position" transition={SPRING}>
+                <Toggle
+                  checked={a.public}
+                  onChange={(pub) => void save({ public: pub })}
+                  label={t("accountsettings.agents.public")}
+                  hint={t("accountsettings.agents.publicHint")}
+                />
+              </motion.div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button type="button" size="sm" className="btn rounded-xl font-bold" disabled={!!busy}>
-                      <AnimatePresence mode="popLayout" initial={false}>
-                        <motion.span
-                          key={added ? "added" : busy === "add" ? "adding" : "add"}
-                          initial={{ y: 10, opacity: 0 }}
-                          animate={{ y: 0, opacity: 1 }}
-                          exit={{ y: -10, opacity: 0 }}
-                          transition={SPRING}
-                          className="flex items-center gap-1.5"
-                        >
-                          {added ? <CheckIcon strokeWidth={3} /> : busy === "add" ? <LoaderCircleIcon className="animate-spin" /> : <ServerIcon />}
-                          {added ? t("accountsettings.agents.added") : t("accountsettings.agents.addToServer")}
-                        </motion.span>
-                      </AnimatePresence>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">{t("accountsettings.agents.managed")}</DropdownMenuLabel>
-                    {servers.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("accountsettings.agents.noManaged")}</p>}
-                    {servers.map((s) => {
-                      const here = inServer(s);
-                      return (
-                        <DropdownMenuItem key={s.id} disabled={here} onSelect={() => void addTo(s)}>
-                          <ServerIcon /> <span className="truncate">{s.name}</span>
-                          {here && <CheckIcon className="ml-auto" />}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {confirm ? (
-                    <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
-                      <span className="flex items-center gap-1 px-1 text-xs font-bold">
-                        <TriangleAlertIcon className="size-3.5 text-amber-500" />
-                        {confirm === "reset" ? t("accountsettings.agents.resetWarning") : t("accountsettings.agents.deleteWarning")}
-                      </span>
-                      <Button type="button" size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs font-bold" onClick={() => void (confirm === "reset" ? reset() : remove())}>
-                        {confirm === "reset" ? t("accountsettings.agents.newToken") : t("accountsettings.agents.delete")}
-                      </Button>
-                      <Button type="button" size="icon" variant="ghost" aria-label={t("accountsettings.agents.neverMind")} className="size-8 rounded-full" onClick={() => setConfirm(null)}>
-                        <XIcon />
-                      </Button>
-                    </motion.span>
-                  ) : (
-                    <motion.span key="actions" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={SPRING} className="flex gap-2">
-                      <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => setConfirm("reset")}>
-                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("accountsettings.agents.newToken")}
-                      </Button>
-                      <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}>
-                        <Trash2Icon /> {t("accountsettings.agents.delete")}
-                      </Button>
-                    </motion.span>
-                  )}
-                </AnimatePresence>
+              <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-center gap-2">
+                <AddToServer servers={servers} busy={busy} added={added} inServer={inServer} onAdd={(server) => void addTo(server)} />
+                <DangerActions confirm={confirm} busy={busy} onConfirm={setConfirm} onReset={() => void reset()} onRemove={() => void remove()} />
                 <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(lang, toDate(a.createdAt)) })}</span>
-              </div>
+              </motion.div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.li>
+  );
+}
+
+/** The folded card: who the agent is, whether it's been used lately, and where it's been. */
+function AgentSummary({ agent: a, open, saving, onToggle }: { agent: Agent; open: boolean; saving: boolean; onToggle: () => void }) {
+  const lang = useI18n();
+  const { t } = lang;
+  const user = a.user!;
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left">
+      <motion.span whileHover={{ rotate: -8, scale: 1.08 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="relative">
+        <UserAvatar user={user} className="size-10" />
+        <AnimatePresence>
+          {a.lastActiveAt && Date.now() - toDate(a.lastActiveAt).getTime() < 10 * 60_000 && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              title={t("accountsettings.agents.recentlyUsed")}
+              className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-background bg-emerald-500"
+            />
+          )}
+        </AnimatePresence>
+      </motion.span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate font-bold">{displayName(user)}</span>
+          <AppBadge agent />
+          {a.public && (
+            <span className="rounded-full bg-muted px-1.5 py-px text-[0.6rem] font-bold text-muted-foreground uppercase">
+              {t("accountsettings.agents.public")}
+            </span>
+          )}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          @{user.username} · <T k="accountsettings.agents.servers" values={{ count: <Count value={a.servers} /> }} count={a.servers} /> ·{" "}
+          {a.lastActiveAt ? t("accountsettings.agents.active", { when: ago(lang, toDate(a.lastActiveAt)) }) : t("accountsettings.agents.neverSignedIn")}
+        </span>
+      </span>
+      {saving && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+      <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
+    </button>
+  );
+}
+
+/** Adding the agent to a server you manage. */
+function AddToServer({
+  servers,
+  busy,
+  added,
+  inServer,
+  onAdd,
+}: {
+  servers: Server[];
+  busy: null | "save" | "reset" | "add";
+  added: string | null;
+  inServer: (server: Server) => boolean;
+  onAdd: (server: Server) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="sm" className="btn rounded-xl font-bold" disabled={!!busy}>
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={added ? "added" : busy === "add" ? "adding" : "add"}
+              initial={{ y: 10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -10, opacity: 0 }}
+              transition={SPRING}
+              className="flex items-center gap-1.5"
+            >
+              {added ? <CheckIcon strokeWidth={3} /> : busy === "add" ? <LoaderCircleIcon className="animate-spin" /> : <ServerIcon />}
+              {added ? t("accountsettings.agents.added") : t("accountsettings.agents.addToServer")}
+            </motion.span>
+          </AnimatePresence>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("accountsettings.agents.managed")}</DropdownMenuLabel>
+        {servers.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("accountsettings.agents.noManaged")}</p>}
+        {servers.map((s) => {
+          const here = inServer(s);
+          return (
+            <DropdownMenuItem key={s.id} disabled={here} onSelect={() => onAdd(s)}>
+              <ServerIcon /> <span className="truncate">{s.name}</span>
+              {here && <CheckIcon className="ml-auto" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** A new token or deleting the agent, each asked once more. */
+function DangerActions({
+  confirm,
+  busy,
+  onConfirm,
+  onReset,
+  onRemove,
+}: {
+  confirm: null | "reset" | "delete";
+  busy: null | "save" | "reset" | "add";
+  onConfirm: (confirm: null | "reset" | "delete") => void;
+  onReset: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {confirm ? (
+        <motion.span
+          key="confirm"
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 8 }}
+          transition={SPRING}
+          className="flex items-center gap-1"
+        >
+          <span className="flex items-center gap-1 px-1 text-xs font-bold">
+            <TriangleAlertIcon className="size-3.5 text-amber-500" />
+            {confirm === "reset" ? t("accountsettings.agents.resetWarning") : t("accountsettings.agents.deleteWarning")}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            className="h-8 rounded-full px-3 text-xs font-bold"
+            onClick={confirm === "reset" ? onReset : onRemove}
+          >
+            {confirm === "reset" ? t("accountsettings.agents.newToken") : t("accountsettings.agents.delete")}
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={t("accountsettings.agents.neverMind")}
+            className="size-8 rounded-full"
+            onClick={() => onConfirm(null)}
+          >
+            <XIcon />
+          </Button>
+        </motion.span>
+      ) : (
+        <motion.span
+          key="actions"
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -8 }}
+          transition={SPRING}
+          className="flex gap-2"
+        >
+          <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => onConfirm("reset")}>
+            <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("accountsettings.agents.newToken")}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => onConfirm("delete")}>
+            <Trash2Icon /> {t("accountsettings.agents.delete")}
+          </Button>
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }

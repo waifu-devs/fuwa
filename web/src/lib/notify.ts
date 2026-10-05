@@ -37,6 +37,26 @@ export const setDmNotificationTarget = (open: OpenDm) => {
 const FRESH_MS = 30_000;
 const lastSound = { message: 0, mention: 0, join: 0 };
 
+/** Notifications on screen, per instance, so switching accounts or signing out can take its account's away. */
+const onScreen = new Map<string, Set<Notification>>();
+
+/** Shows a notification for the account signed in at `key`, tagged as that account's so another's never replaces it. */
+function show(key: string, title: string, options: NotificationOptions & { tag: string }): Notification {
+  const me = store.get().instances[key]?.me?.id ?? "";
+  const n = new Notification(title, { ...options, tag: `${key}|${me}/${options.tag}` });
+  const set = onScreen.get(key) ?? new Set();
+  set.add(n);
+  onScreen.set(key, set);
+  n.addEventListener("close", () => set.delete(n));
+  return n;
+}
+
+/** Takes away every notification the account at `key` showed: it's being switched away from or signed out. */
+export function closeNotifications(key: string) {
+  for (const n of onScreen.get(key) ?? []) n.close();
+  onScreen.delete(key);
+}
+
 function playSome(sound: keyof typeof lastSound, gap: number) {
   const now = Date.now();
   if (now - lastSound[sound] < gap) return;
@@ -98,7 +118,7 @@ export function onDirectMessage(key: string, conversationId: string, author: Use
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
-    const n = new Notification(displayName(author), {
+    const n = show(key, displayName(author), {
       body: body.length > 160 ? `${body.slice(0, 159)}…` : body,
       icon: "/favicon.svg",
       tag: conversationId,
@@ -159,7 +179,7 @@ export function onFriendNews(key: string, user: User | undefined, what: "asked" 
   if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   try {
-    const n = new Notification(text, { icon: "/favicon.svg", tag: `friend-${user?.id ?? ""}` });
+    const n = show(key, text, { icon: "/favicon.svg", tag: `friend-${user?.id ?? ""}` });
     n.onclick = () => {
       window.focus();
       openFriends?.(key);
@@ -204,7 +224,7 @@ function notify(
         ? t("workspace.notify.titleIn", { author, channel: channel.name })
         : author;
     const text = body.length > 160 ? `${body.slice(0, 159)}…` : body;
-    const n = new Notification(title, {
+    const n = show(inst.key, title, {
       body: mention ? t("workspace.notify.mentioned", { text }) : text,
       icon: "/favicon.svg",
       tag: thread || channelId,

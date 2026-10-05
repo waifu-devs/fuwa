@@ -66,6 +66,11 @@ export const hideStreamerBanner = (hidden = true) => set({ streamerBannerHidden:
 let nextToast = 1;
 
 /** A short note at the bottom of the screen, gone after a moment. */
+/** Takes away every toast on screen: what they said belonged to the account just switched away from. */
+export function clearToasts() {
+  if (ui.toasts.length) set({ toasts: [] });
+}
+
 export function toast(text: string) {
   const id = nextToast++;
   set({ toasts: [...ui.toasts.slice(-2), { id, text }] });

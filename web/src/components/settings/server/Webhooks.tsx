@@ -15,7 +15,7 @@ import {
   WebhookIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { ChannelType, type Channel, type User, type Webhook } from "@/gen/fuwa/v1/types_pb";
 import { createWebhook, deleteWebhook, listWebhooks, resetWebhookToken, run, testWebhook, updateWebhook, webhookUrl } from "@/fuwa/actions";
@@ -23,7 +23,8 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -152,14 +153,11 @@ export function Webhooks({ instanceKey, serverId }: { instanceKey: string; serve
           <span className="flex-1">{t("serversettings.webhooks.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {howTo && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              {...SLIDE_IN}
               transition={SPRING}
-              className="overflow-hidden"
             >
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
@@ -242,7 +240,6 @@ function WebhookCard({
   const shake = useAnimationControls();
   useEffect(() => setName(w.name), [w.name]);
   const channel = channels.find((c) => c.id === w.channelId);
-  const messages = Number(w.messages);
 
   async function save(change: Partial<{ name: string; avatarUrl: string; channelId: string }>) {
     const next = { name: w.name, avatarUrl: w.avatarUrl, channelId: w.channelId, ...change };
@@ -309,49 +306,20 @@ function WebhookCard({
     }
   }
 
-  // Hidden, it's only dots, so nothing of it shows on a shared screen.
-  const masked = "•".repeat(28);
-
   return (
     <motion.li
-      layout
+      layout="position"
       initial={{ opacity: 0, y: 10, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
       transition={SPRING}
       className={cn("overflow-hidden rounded-2xl border bg-background/50 transition-colors", open ? "border-primary/40 shadow-lg shadow-primary/5" : "hover:border-primary/30")}
     >
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left">
-        <motion.span whileHover={{ rotate: -8, scale: 1.08 }} transition={{ type: "spring", stiffness: 600, damping: 14 }}>
-          <UserAvatar user={asUser(w)} className="size-10" />
-        </motion.span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate font-bold">{w.name}</span>
-            <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-primary">{t("system.webhook.appBadge")}</span>
-          </span>
-          <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-            {channel?.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon className="size-3" /> : <HashIcon className="size-3" />}
-            <span className="truncate">
-              <T
-                k={w.lastUsedAt ? "serversettings.webhooks.lineUsed" : "serversettings.webhooks.line"}
-                values={{
-                  channel: channel?.name ?? t("serversettings.invites.deletedChannel"),
-                  count: <Count value={messages} />,
-                  when: w.lastUsedAt ? ago(lang, toDate(w.lastUsedAt)) : "",
-                }}
-                count={messages}
-              />
-            </span>
-          </span>
-        </span>
-        {busy === "save" && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
-        <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
-      </button>
+      <WebhookSummary webhook={w} channel={channel} open={open} saving={busy === "save"} onToggle={onToggle} />
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-4 border-t p-4">
               <div className="flex flex-wrap items-start gap-4">
                 <PictureField
@@ -382,67 +350,14 @@ function WebhookCard({
                   </label>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.webhooks.postsIn")}</span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="group flex h-9 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60"
-                        >
-                          {channel?.type === ChannelType.ANNOUNCEMENT ? (
-                            <MegaphoneIcon className="size-4 text-muted-foreground" />
-                          ) : (
-                            <HashIcon className="size-4 text-muted-foreground" />
-                          )}
-                          <span className="flex-1 truncate font-bold">{channel?.name ?? t("serversettings.shared.pickChannel")}</span>
-                          <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
-                        {channels.map((c) => (
-                          <DropdownMenuItem key={c.id} onSelect={() => void save({ channelId: c.id })}>
-                            {c.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon /> : <HashIcon />} {c.name}
-                            {c.id === w.channelId && <CheckIcon className="ml-auto" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <ChannelPicker channels={channels} channel={channel} onPick={(channelId) => void save({ channelId })} />
                   </div>
                 </div>
               </div>
 
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.webhooks.address")}</span>
-                <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 pl-3">
-                  <AnimatePresence mode="wait" initial={false}>
-                    <motion.code
-                      key={shown ? "shown" : "hidden"}
-                      initial={{ opacity: 0, filter: "blur(4px)" }}
-                      animate={{ opacity: 1, filter: "blur(0px)" }}
-                      exit={{ opacity: 0, filter: "blur(4px)" }}
-                      transition={{ duration: 0.18 }}
-                      className={cn("min-w-0 flex-1 font-mono text-xs", shown ? "break-all" : "truncate")}
-                    >
-                      {shown ? url : masked}
-                    </motion.code>
-                  </AnimatePresence>
-                  <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg" aria-label={shown ? t("serversettings.webhooks.hide") : t("serversettings.webhooks.show")} onClick={() => setShown((s) => !s)}>
-                    {shown ? <EyeOffIcon /> : <EyeIcon />}
-                  </Button>
-                  <Button type="button" size="sm" className="btn h-8 shrink-0 rounded-lg px-3 font-bold" onClick={copyUrl}>
-                    <AnimatePresence mode="popLayout" initial={false}>
-                      <motion.span
-                        key={copied ? "done" : "copy"}
-                        initial={{ y: 12, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: -12, opacity: 0 }}
-                        transition={SPRING}
-                        className="flex items-center gap-1.5"
-                      >
-                        {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("serversettings.webhooks.copied") : t("serversettings.webhooks.copy")}
-                      </motion.span>
-                    </AnimatePresence>
-                  </Button>
-                </div>
+                <AddressField url={url} shown={shown} copied={copied} onShown={() => setShown((s) => !s)} onCopy={copyUrl} />
                 <p className="text-xs text-muted-foreground">{t("serversettings.webhooks.secret")}</p>
               </div>
 
@@ -462,45 +377,221 @@ function WebhookCard({
                     </motion.span>
                   </AnimatePresence>
                 </Button>
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {confirm ? (
-                    <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
-                      <span className="px-1 text-xs font-bold">{confirm === "reset" ? t("serversettings.webhooks.resetAsk") : t("serversettings.webhooks.deleteAsk")}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        className="h-8 rounded-full px-3 text-xs font-bold"
-                        onClick={() => void (confirm === "reset" ? reset() : remove())}
-                      >
-                        {confirm === "reset" ? t("serversettings.webhooks.newAddress") : t("serversettings.shared.delete")}
-                      </Button>
-                      <Button type="button" size="icon" variant="ghost" aria-label={t("serversettings.shared.neverMind")} className="size-8 rounded-full" onClick={() => setConfirm(null)}>
-                        <XIcon />
-                      </Button>
-                    </motion.span>
-                  ) : (
-                    <motion.span key="actions" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={SPRING} className="flex gap-2">
-                      <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => setConfirm("reset")}>
-                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("serversettings.webhooks.newAddress")}
-                      </Button>
-                      <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}>
-                        <Trash2Icon /> {t("serversettings.shared.delete")}
-                      </Button>
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-                <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <UserAvatar user={creator} className="size-4" />
-                  {creator
-                    ? t("serversettings.webhooks.madeBy", { name: displayName(creator), when: ago(lang, toDate(w.createdAt)) })
-                    : t("serversettings.webhooks.madeBySomeone", { when: ago(lang, toDate(w.createdAt)) })}
-                </span>
+                <DangerActions confirm={confirm} busy={busy} onConfirm={setConfirm} onReset={() => void reset()} onRemove={() => void remove()} />
+                <MadeBy creator={creator} createdAt={w.createdAt} />
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.li>
+  );
+}
+
+/** The folded card: who the webhook posts as, where, and how much. */
+function WebhookSummary({
+  webhook: w,
+  channel,
+  open,
+  saving,
+  onToggle,
+}: {
+  webhook: Webhook;
+  channel: Channel | undefined;
+  open: boolean;
+  saving: boolean;
+  onToggle: () => void;
+}) {
+  const lang = useI18n();
+  const { t } = lang;
+  const messages = Number(w.messages);
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left">
+      <motion.span whileHover={{ rotate: -8, scale: 1.08 }} transition={{ type: "spring", stiffness: 600, damping: 14 }}>
+        <UserAvatar user={asUser(w)} className="size-10" />
+      </motion.span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate font-bold">{w.name}</span>
+          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-primary">{t("system.webhook.appBadge")}</span>
+        </span>
+        <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+          {channel?.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon className="size-3" /> : <HashIcon className="size-3" />}
+          <span className="truncate">
+            <T
+              k={w.lastUsedAt ? "serversettings.webhooks.lineUsed" : "serversettings.webhooks.line"}
+              values={{
+                channel: channel?.name ?? t("serversettings.invites.deletedChannel"),
+                count: <Count value={messages} />,
+                when: w.lastUsedAt ? ago(lang, toDate(w.lastUsedAt)) : "",
+              }}
+              count={messages}
+            />
+          </span>
+        </span>
+      </span>
+      {saving && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+      <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180")} />
+    </button>
+  );
+}
+
+/** The channel a webhook posts in. */
+function ChannelPicker({ channels, channel, onPick }: { channels: Channel[]; channel: Channel | undefined; onPick: (channelId: string) => void }) {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="group flex h-9 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60"
+        >
+          {channel?.type === ChannelType.ANNOUNCEMENT ? (
+            <MegaphoneIcon className="size-4 text-muted-foreground" />
+          ) : (
+            <HashIcon className="size-4 text-muted-foreground" />
+          )}
+          <span className="flex-1 truncate font-bold">{channel?.name ?? t("serversettings.shared.pickChannel")}</span>
+          <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
+        {channels.map((c) => (
+          <DropdownMenuItem key={c.id} onSelect={() => onPick(c.id)}>
+            {c.type === ChannelType.ANNOUNCEMENT ? <MegaphoneIcon /> : <HashIcon />} {c.name}
+            {c.id === channel?.id && <CheckIcon className="ml-auto" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The webhook's address: hidden until asked for, and copied in one press. */
+function AddressField({ url, shown, copied, onShown, onCopy }: { url: string; shown: boolean; copied: boolean; onShown: () => void; onCopy: () => void }) {
+  const { t } = useI18n();
+  // Hidden, it's only dots, so nothing of it shows on a shared screen.
+  const masked = "•".repeat(28);
+  return (
+    <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 pl-3">
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.code
+          key={shown ? "shown" : "hidden"}
+          initial={{ opacity: 0, filter: "blur(4px)" }}
+          animate={{ opacity: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, filter: "blur(4px)" }}
+          transition={{ duration: 0.18 }}
+          className={cn("min-w-0 flex-1 font-mono text-xs", shown ? "break-all" : "truncate")}
+        >
+          {shown ? url : masked}
+        </motion.code>
+      </AnimatePresence>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 rounded-lg"
+        aria-label={shown ? t("serversettings.webhooks.hide") : t("serversettings.webhooks.show")}
+        onClick={onShown}
+      >
+        {shown ? <EyeOffIcon /> : <EyeIcon />}
+      </Button>
+      <Button type="button" size="sm" className="btn h-8 shrink-0 rounded-lg px-3 font-bold" onClick={onCopy}>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={copied ? "done" : "copy"}
+            initial={{ y: 12, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -12, opacity: 0 }}
+            transition={SPRING}
+            className="flex items-center gap-1.5"
+          >
+            {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("serversettings.webhooks.copied") : t("serversettings.webhooks.copy")}
+          </motion.span>
+        </AnimatePresence>
+      </Button>
+    </div>
+  );
+}
+
+/** A new address or deleting the webhook, each asked once more. */
+function DangerActions({
+  confirm,
+  busy,
+  onConfirm,
+  onReset,
+  onRemove,
+}: {
+  confirm: null | "reset" | "delete";
+  busy: null | "save" | "test" | "reset";
+  onConfirm: (confirm: null | "reset" | "delete") => void;
+  onReset: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {confirm ? (
+        <motion.span
+          key="confirm"
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 8 }}
+          transition={SPRING}
+          className="flex items-center gap-1"
+        >
+          <span className="px-1 text-xs font-bold">{confirm === "reset" ? t("serversettings.webhooks.resetAsk") : t("serversettings.webhooks.deleteAsk")}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            className="h-8 rounded-full px-3 text-xs font-bold"
+            onClick={confirm === "reset" ? onReset : onRemove}
+          >
+            {confirm === "reset" ? t("serversettings.webhooks.newAddress") : t("serversettings.shared.delete")}
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={t("serversettings.shared.neverMind")}
+            className="size-8 rounded-full"
+            onClick={() => onConfirm(null)}
+          >
+            <XIcon />
+          </Button>
+        </motion.span>
+      ) : (
+        <motion.span
+          key="actions"
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -8 }}
+          transition={SPRING}
+          className="flex gap-2"
+        >
+          <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => onConfirm("reset")}>
+            <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("serversettings.webhooks.newAddress")}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => onConfirm("delete")}>
+            <Trash2Icon /> {t("serversettings.shared.delete")}
+          </Button>
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Who made the webhook, and when. */
+function MadeBy({ creator, createdAt }: { creator: User | undefined; createdAt: Webhook["createdAt"] }) {
+  const lang = useI18n();
+  const { t } = lang;
+  return (
+    <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+      <UserAvatar user={creator} className="size-4" />
+      {creator
+        ? t("serversettings.webhooks.madeBy", { name: displayName(creator), when: ago(lang, toDate(createdAt)) })
+        : t("serversettings.webhooks.madeBySomeone", { when: ago(lang, toDate(createdAt)) })}
+    </span>
   );
 }

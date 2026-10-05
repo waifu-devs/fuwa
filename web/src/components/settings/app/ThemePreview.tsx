@@ -1,6 +1,7 @@
-import { motion } from "motion/react";
-import { BackdropLayers, usePageVisible } from "@/components/Backdrop";
-import { SPRING } from "@/components/motion";
+import { m as motion } from "motion/react";
+import { BackdropLayers } from "@/components/Backdrop";
+import { usePageVisible } from "@/hooks/use-page-visible";
+import { SPRING } from "@/lib/motion";
 import { type Key, useI18n } from "@/i18n/react";
 import { hasBackdrop, type Backdrop } from "@/lib/backdrop";
 import { reduceMotion, usePrefs } from "@/lib/prefs";

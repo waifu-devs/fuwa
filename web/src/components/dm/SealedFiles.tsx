@@ -1,5 +1,5 @@
 import { DownloadIcon, EyeIcon, LoaderCircleIcon, LockKeyholeIcon, PlayIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import type { FileRef } from "@/e2ee/vault";
@@ -74,16 +74,14 @@ export const SealedFiles = memo(function SealedFiles({ instanceKey, files, anima
   );
 });
 
-function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string; file: FileRef; delay: number; animate: boolean }) {
+/**
+ * Opening one file on this device, once: by hand, or by itself when `auto`
+ * and its place (`place`) comes on screen.
+ */
+function useOpening(instanceKey: string, file: FileRef, auto: boolean) {
   const lang = useI18n();
   const [state, setState] = useState<State>({ at: "idle" });
   const place = useRef<HTMLDivElement>(null);
-  const hinted = file.type.startsWith("image/") || file.type.startsWith("video/") || file.width > 0;
-  const auto = hinted && (file.fileSize || file.size) <= AUTO_OPEN_BYTES;
-  const opened = state.at === "open" ? state.opened : null;
-  const url = useBlobUrl(opened);
-  usePrefs((p) => p.reduceMotion);
-  const calm = reduceMotion();
 
   const open = async (): Promise<Opened | null> => {
     if (state.at === "open") return state.opened;
@@ -113,6 +111,17 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, state.at]);
 
+  return { state, open, place };
+}
+
+function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string; file: FileRef; delay: number; animate: boolean }) {
+  const lang = useI18n();
+  const hinted = file.type.startsWith("image/") || file.type.startsWith("video/") || file.width > 0;
+  const auto = hinted && (file.fileSize || file.size) <= AUTO_OPEN_BYTES;
+  const { state, open, place } = useOpening(instanceKey, file, auto);
+  const opened = state.at === "open" ? state.opened : null;
+  const url = useBlobUrl(opened);
+
   const download = async () => {
     const o = await open();
     if (o) save(o.blob, file.name);
@@ -126,19 +135,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
     const size = fitBox(file.width, file.height, MEDIA_BOX);
     return (
       <motion.div {...enterWith} className="group/sealed relative max-w-full" style={{ width: size.width }}>
-        {opened.preview.kind === "video" ? (
-          <video src={url} controls playsInline preload="metadata" className="max-h-80 w-full rounded-xl border bg-black" aria-label={file.name} />
-        ) : opened.moves && calm ? (
-          <Still url={url} name={file.name} width={size.width} height={size.height} />
-        ) : (
-          <img
-            src={url}
-            alt={file.name}
-            draggable={false}
-            style={{ aspectRatio: file.width > 0 && file.height > 0 ? `${size.width} / ${size.height}` : undefined }}
-            className="w-full rounded-xl border bg-muted/60 object-contain"
-          />
-        )}
+        <Shown file={file} opened={opened} url={url} size={size} />
         <button
           type="button"
           onClick={() => save(opened.blob, file.name)}
@@ -179,18 +176,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
             transition={{ duration: 0.15 }}
             className={cn("truncate text-xs tabular-nums", state.at === "failed" ? "text-destructive" : "text-muted-foreground")}
           >
-            {state.at === "failed" ? (
-              <span className="inline-flex items-center gap-1 first-letter:uppercase">
-                <ShieldAlertIcon className="size-3" />
-                {state.problem}
-              </span>
-            ) : busy ? (
-              lang.t("dms-calls.dm.sealed.opening")
-            ) : size > 0 ? (
-              formatBytes(lang, size)
-            ) : (
-              lang.t("dms-calls.dm.sealed.file")
-            )}
+            <Status state={state} size={size} />
           </motion.p>
         </AnimatePresence>
       </div>
@@ -204,6 +190,40 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
       </CardButton>
     </motion.div>
   );
+}
+
+/** An opened picture or video; a moving picture holds still under reduce motion. */
+function Shown({ file, opened, url, size }: { file: FileRef; opened: Opened; url: string; size: { width: number; height: number } }) {
+  usePrefs((p) => p.reduceMotion);
+  const calm = reduceMotion();
+  if (opened.preview?.kind === "video") {
+    return <video src={url} controls playsInline preload="metadata" className="max-h-80 w-full rounded-xl border bg-black" aria-label={file.name} />;
+  }
+  if (opened.moves && calm) return <Still url={url} name={file.name} width={size.width} height={size.height} />;
+  return (
+    <img
+      src={url}
+      alt={file.name}
+      draggable={false}
+      style={{ aspectRatio: file.width > 0 && file.height > 0 ? `${size.width} / ${size.height}` : undefined }}
+      className="w-full rounded-xl border bg-muted/60 object-contain"
+    />
+  );
+}
+
+/** The card's second line: why it failed, that it's opening, or how big it is. */
+function Status({ state, size }: { state: State; size: number }) {
+  const lang = useI18n();
+  if (state.at === "failed") {
+    return (
+      <span className="inline-flex items-center gap-1 first-letter:uppercase">
+        <ShieldAlertIcon className="size-3" />
+        {state.problem}
+      </span>
+    );
+  }
+  if (state.at === "opening") return lang.t("dms-calls.dm.sealed.opening");
+  return size > 0 ? formatBytes(lang, size) : lang.t("dms-calls.dm.sealed.file");
 }
 
 function CardButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {

@@ -1,10 +1,11 @@
 import { RotateCcwIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { T, useI18n } from "@/i18n/react";
 import { useUnsavedGuard, type GuardScope } from "./SettingsScreen";
 import { cn } from "@/lib/utils";

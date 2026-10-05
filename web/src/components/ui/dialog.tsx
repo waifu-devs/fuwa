@@ -1,5 +1,5 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { XIcon } from "lucide-react";
 import { createContext, useContext, type ReactNode } from "react";
 import { useI18n } from "@/i18n/react";

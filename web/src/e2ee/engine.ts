@@ -5,6 +5,7 @@ import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
 import { store, updateDms, updateInstance, type DmMember } from "@/fuwa/store";
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
+import { onDmPinEvent } from "@/fuwa/pins";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -321,7 +322,7 @@ export class DmEngine {
     return exclusive(lockName(vaultKey), async () => {
       let stored = await vault.loadDevice(vaultKey);
       if (stored && stored.session !== session) {
-        await vault.wipe(vaultKey);
+        await vault.wipeVault(vaultKey);
         stored = undefined;
       }
       const device = stored ? e2ee.Device.restore(stored.state) : new e2ee.Device(me.id);
@@ -470,10 +471,14 @@ export class DmEngine {
         break;
       }
       case "recordDeleted":
+        onDmPinEvent(this.key, event);
         void this.forgetDeleted(p.value.conversationId, Number(p.value.sequence)).catch(() => {});
         break;
       case "callUpdated":
         this.setCall(p.value);
+        break;
+      case "pinUpdated":
+        onDmPinEvent(this.key, event);
         break;
     }
   }
@@ -941,7 +946,8 @@ export class DmEngine {
       }
     }
     if (!opened.length) return;
-    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => c.allowed.includes(id));
+    const allowedIds = new Set(c.allowed);
+    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => allowedIds.has(id));
     const devices = new Set<string>();
     for (const userIds of chunks(senders, LOOKUPS)) {
       for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) devices.add(`${d.userId}/${d.id}`);
@@ -1123,6 +1129,7 @@ export class DmEngine {
    */
   private async reconcile(c: Room, attempt = 0): Promise<void> {
     const belong = await c.belong();
+    // One lookup at a time: every client runs this on each membership change, so a big channel mustn't fan out.
     const devices: DeviceInfo[] = [];
     for (const userIds of chunks(belong, LOOKUPS)) devices.push(...(await this.api.dms.listDevices({ userIds }, CALL)).devices);
     c.check(devices, belong);
@@ -1541,12 +1548,18 @@ export function stopDms(key: string) {
   engines.delete(key);
 }
 
-/** Stops direct messages and forgets everything this browser kept for them on an instance: on signing out. */
-export async function wipeDms(key: string) {
-  stopDms(key);
+/**
+ * Forgets everything this browser kept for direct messages and secure
+ * channels as one account on an instance (signing out of it), or, without
+ * `userId`, as every account on it (forgetting the instance). Other
+ * accounts' devices are left alone.
+ */
+export async function wipeDms(key: string, userId?: string) {
+  if (userId === undefined || engines.get(key)?.me.id === userId) stopDms(key);
   try {
-    await vault.wipe(`${key}|`);
-  } catch (err) {
-    console.warn("fuwa: couldn't wipe encrypted messages from this browser", err);
+    if (userId === undefined) await vault.wipe(`${key}|`);
+    else await vault.wipeVault(`${key}|${userId}`);
+  } catch {
+    console.warn("fuwa: couldn't wipe encrypted messages from this browser");
   }
 }

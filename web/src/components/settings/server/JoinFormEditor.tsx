@@ -1,12 +1,14 @@
 import { AlignLeftIcon, GripVerticalIcon, MinusIcon, PlusIcon, ScrollTextIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { getJoinForm, run, setJoinForm, type QuestionDraft } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { MotionButton } from "@/components/motion-button";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
@@ -107,14 +109,11 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
               ))}
             </AnimatePresence>
           </Reorder.Group>
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {ideas.length > 0 && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
+                {...SLIDE_IN}
                 transition={SPRING}
-                className="overflow-hidden"
               >
                 <div className="flex flex-col gap-2 rounded-2xl border border-dashed p-4">
                   <p className="text-sm text-muted-foreground">
@@ -133,7 +132,10 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
                           whileHover={{ y: -2 }}
                           whileTap={{ scale: 0.95 }}
                           transition={SPRING}
-                          onClick={() => setRules((list) => [...list, { id: nextId++, text }])}
+                          onClick={() => {
+                            const id = nextId++;
+                            setRules((list) => [...list, { id, text }]);
+                          }}
                           className="flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition-colors hover:border-primary/50 hover:text-primary"
                         >
                           <PlusIcon className="size-3" /> {text}
@@ -145,21 +147,24 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
               </motion.div>
             )}
           </AnimatePresence>
-          <Button
+          <MotionButton
+            layout="position"
+            transition={SPRING}
             type="button"
             variant="outline"
             disabled={rules.length >= MAX_RULES}
             onClick={() => {
               focusLast.current = "rule";
-              setRules((list) => [...list, { id: nextId++, text: "" }]);
+              const id = nextId++;
+              setRules((list) => [...list, { id, text: "" }]);
             }}
             className="group self-start rounded-xl font-bold"
           >
             <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> {t("serversettings.joinForm.addRule")}
-          </Button>
+          </MotionButton>
         </section>
 
-        <section data-setting="questions" className="flex flex-col gap-3 pt-6">
+        <motion.section layout="position" transition={SPRING} data-setting="questions" className="flex flex-col gap-3 pt-6">
           <span className="flex items-end justify-between gap-3">
             <span>
               <span className="block font-extrabold">{t("serversettings.joinForm.questions")}</span>
@@ -169,13 +174,12 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
               <Count value={questions.length} />/{MAX_QUESTIONS}
             </span>
           </span>
-          <AnimatePresence initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {!server.applications && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex flex-wrap items-center gap-3 overflow-hidden rounded-2xl bg-muted/60 p-3 text-sm"
+                {...SLIDE_IN}
+                transition={SPRING}
+                className="flex flex-wrap items-center gap-3 rounded-2xl bg-muted/60 p-3 text-sm"
               >
                 <span className="min-w-0 flex-1 text-muted-foreground">{t("serversettings.joinForm.notAsked")}</span>
                 <Button type="button" size="sm" variant="outline" onClick={onOpenAccess} className="rounded-xl font-bold">
@@ -196,19 +200,22 @@ export function JoinFormEditor({ instanceKey, server, onOpenAccess }: { instance
               />
             ))}
           </AnimatePresence>
-          <Button
+          <MotionButton
+            layout="position"
+            transition={SPRING}
             type="button"
             variant="outline"
             disabled={questions.length >= MAX_QUESTIONS}
             onClick={() => {
               focusLast.current = "question";
-              setQuestions((list) => [...list, { id: nextId++, prompt: "", paragraph: false, required: true }]);
+              const id = nextId++;
+              setQuestions((list) => [...list, { id, prompt: "", paragraph: false, required: true }]);
             }}
             className="group self-start rounded-xl font-bold"
           >
             <PlusIcon className="transition-transform duration-300 group-hover:rotate-90" /> {t("serversettings.joinForm.addQuestion")}
-          </Button>
-        </section>
+          </MotionButton>
+        </motion.section>
       </div>
       <SaveBar
         count={changes}

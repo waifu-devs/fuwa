@@ -193,6 +193,7 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "poll": m.poll.as_ref().map(poll),
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
+        "pinned_at": time(&m.pinned_at),
     }))
 }
 
@@ -351,6 +352,15 @@ pub fn event(e: &pb::Event) -> Value {
                 "thread_id": p.thread_id,
                 "reply_count": p.thread.as_ref().map_or(0, |t| t.reply_count),
                 "locked": p.thread.as_ref().is_some_and(|t| t.locked),
+            }),
+        ),
+        Some(Payload::MessagePinned(p)) => (
+            "message_pinned",
+            json!({
+                "channel_id": p.channel_id,
+                "message_id": p.message_id,
+                "thread_id": p.thread_id,
+                "pinned": p.pinned_at.is_some(),
             }),
         ),
         // Only the agent it's for ever gets this (events.rs), so it shows

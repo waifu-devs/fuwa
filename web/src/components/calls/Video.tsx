@@ -1,6 +1,6 @@
 import { CheckIcon, CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { AnimatePresence, m as motion } from "motion/react";
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { setRecording, setScreenSound, setServerRecording, shareScreen, toggleCamera, toggleRecording, toggleScreen, toggleScreenQuiet } from "@/calls/engine";
@@ -8,7 +8,7 @@ import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/sta
 import { canShareScreen, canShareSound, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
 import { store, useFuwa } from "@/fuwa/store";
-import { hue } from "@/components/Icons";
+import { hue } from "@/components/icons-utils";
 import { displayName, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setPrefs, usePrefs } from "@/lib/prefs";
@@ -30,11 +30,12 @@ import { useSpeaking, VoiceAvatar } from "./parts";
 /** A camera track, playing. Fades in once its first frame is there. */
 export function VideoView({ track, mirror, fit = "cover", className }: { track: MediaStreamTrack; mirror?: boolean; fit?: "cover" | "contain"; className?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const [ready, setReady] = useState(false);
+  // Ready once this track's first frame is in; a new track starts unready.
+  const [loaded, setLoaded] = useState<MediaStreamTrack | null>(null);
+  const ready = loaded === track;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setReady(false);
     el.srcObject = new MediaStream([track]);
     void el.play().catch(() => {});
     return () => {
@@ -47,7 +48,7 @@ export function VideoView({ track, mirror, fit = "cover", className }: { track: 
       autoPlay
       playsInline
       muted
-      onLoadedData={() => setReady(true)}
+      onLoadedData={() => setLoaded(track)}
       className={cn(
         "size-full transition-opacity duration-300",
         fit === "cover" ? "object-cover" : "object-contain",
@@ -121,6 +122,16 @@ export function useMayFilm(target: CallTarget | null | undefined): boolean {
   return hasIn(access, target.channelId, Permission.VIDEO);
 }
 
+/** A call button's size and colors; `onClass` colors it while it's on. */
+function callButtonClass(size: "sm" | "lg", on: boolean, onClass: string) {
+  return cn(
+    size === "sm" ? "size-8 rounded-lg" : "size-12 rounded-2xl",
+    on ? onClass : size === "sm" ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground hover:bg-muted/70",
+  );
+}
+
+const iconSize = (size: "sm" | "lg") => (size === "sm" ? "size-[18px]" : "size-5");
+
 /** Turns your camera on and off in the call you're in. */
 export function CameraButton({ size = "sm", className }: { size?: "sm" | "lg"; className?: string }) {
   const on = useCalls((s) => s.selfVideo);
@@ -138,16 +149,15 @@ export function CameraButton({ size = "sm", className }: { size?: "sm" | "lg"; c
       title={label}
       className={cn(
         "group relative grid shrink-0 place-items-center transition active:scale-90 disabled:pointer-events-none disabled:opacity-40",
-        size === "sm" ? "size-8 rounded-lg" : "size-12 rounded-2xl",
-        on ? "bg-[#3ba55d] text-white hover:brightness-110" : size === "sm" ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground hover:bg-muted/70",
+        callButtonClass(size, on, "bg-[#3ba55d] text-white hover:brightness-110"),
         className,
       )}
     >
       <motion.span key={String(on)} initial={{ scale: 0.5, y: 4 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="grid place-items-center">
         {on ? (
-          <VideoIcon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform group-hover:scale-110")} />
+          <VideoIcon className={cn(iconSize(size), "transition-transform group-hover:scale-110")} />
         ) : (
-          <VideoOffIcon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform group-hover:scale-110")} />
+          <VideoOffIcon className={cn(iconSize(size), "transition-transform group-hover:scale-110")} />
         )}
       </motion.span>
     </button>
@@ -181,21 +191,26 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
       title={label}
       className={cn(
         "group relative grid shrink-0 place-items-center transition active:scale-90 disabled:pointer-events-none disabled:opacity-40",
-        size === "sm" ? "size-8 rounded-lg" : "size-12 rounded-2xl",
-        on ? "bg-primary text-primary-foreground hover:brightness-110" : size === "sm" ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground hover:bg-muted/70",
+        callButtonClass(size, on, "bg-primary text-primary-foreground hover:brightness-110"),
         className,
       )}
     >
       <motion.span key={String(on)} initial={{ scale: 0.5, y: on ? 6 : -4 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="grid place-items-center">
-        <Icon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform", on ? "group-hover:scale-110" : "group-hover:-translate-y-0.5")} />
+        <Icon className={cn(iconSize(size), "transition-transform", on ? "group-hover:scale-110" : "group-hover:-translate-y-0.5")} />
       </motion.span>
     </button>
   );
   if (!menu) return button;
+  return <ScreenShareMenu trigger={button} withSound={withSound} />;
+}
+
+/** Starting a screen share: with its sound, or the picture only. */
+function ScreenShareMenu({ trigger, withSound }: { trigger: ReactNode; withSound: boolean }) {
+  const { t } = useI18n();
   const sound = canShareSound();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="center" className="w-72">
         <DropdownMenuLabel className="text-xs text-muted-foreground">{t("dms-calls.calls.video.screenShare")}</DropdownMenuLabel>
         <DropdownMenuItem disabled={!sound} onSelect={() => void shareScreen(true)} className="items-start gap-2.5 py-2">
@@ -312,20 +327,11 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   const offered = useCalls((s) => s.serverRecordings);
   const target = useCalls((s) => s.call?.target);
   const may = useMayRecord(target);
-  const video = useFuwa((s) => target?.kind === "voice" && !!s.instances[target.instance]?.servers.find((x) => x.id === target.serverId)?.recordVideo);
   const on = device || server;
   const { t } = useI18n();
   if (!may && !on) return null;
   const both = target?.kind === "voice" && (offered || server);
-  const label = t(
-    !both
-      ? on
-        ? "dms-calls.calls.video.recordStop"
-        : "dms-calls.calls.video.recordStart"
-      : on
-        ? "dms-calls.calls.video.recordingStop"
-        : "dms-calls.calls.video.recordChannel",
-  );
+  const label = t(recordLabel(!!both, on));
   const button = (
     <button
       type="button"
@@ -335,21 +341,33 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
       title={label}
       className={cn(
         "group relative grid shrink-0 place-items-center transition active:scale-90",
-        size === "sm" ? "size-8 rounded-lg" : "size-12 rounded-2xl",
-        on ? "bg-[#ed4245] text-white hover:brightness-110" : size === "sm" ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground hover:bg-muted/70",
+        callButtonClass(size, on, "bg-[#ed4245] text-white hover:brightness-110"),
         className,
       )}
     >
       {on && <span aria-hidden className="absolute inset-0 animate-ping rounded-[inherit] bg-[#ed4245]/40 [animation-duration:2s]" />}
       <motion.span key={String(on)} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="relative grid place-items-center">
-        <CircleDotIcon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform group-hover:scale-110")} />
+        <CircleDotIcon className={cn(iconSize(size), "transition-transform group-hover:scale-110")} />
       </motion.span>
     </button>
   );
   if (!both) return button;
+  return <RecordMenu trigger={button} target={target} device={device} server={server} />;
+}
+
+/** The record button's words, by whether the server can record too and whether it's on. */
+function recordLabel(both: boolean, on: boolean) {
+  if (both) return on ? "dms-calls.calls.video.recordingStop" : "dms-calls.calls.video.recordChannel";
+  return on ? "dms-calls.calls.video.recordStop" : "dms-calls.calls.video.recordStart";
+}
+
+/** Recording a voice channel: on this device, or everyone's sound on the server. */
+function RecordMenu({ trigger, target, device, server }: { trigger: ReactNode; target: CallTarget; device: boolean; server: boolean }) {
+  const { t } = useI18n();
+  const video = useFuwa((s) => target.kind === "voice" && !!s.instances[target.instance]?.servers.find((x) => x.id === target.serverId)?.recordVideo);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="center" className="w-72">
         <DropdownMenuLabel className="text-xs text-muted-foreground">{t("dms-calls.calls.video.recordMenu")}</DropdownMenuLabel>
         <DropdownMenuItem onSelect={() => setRecording(!device)} className="items-start gap-2.5 py-2">
@@ -453,7 +471,7 @@ const usePopped = () =>
   );
 
 /** Opens someone's camera (or avatar, while it's off) in a window of its own. */
-export function popOut(p: Popped) {
+function popOut(p: Popped) {
   if (popped.some((x) => keyOf(x) === keyOf(p))) {
     windows.get(keyOf(p))?.focus();
     return;
@@ -528,9 +546,8 @@ function PopOutWindow({ popped: p }: { popped: Popped }) {
   const member = useFuwa((s) => (p.serverId ? s.instances[p.instance]?.members[p.serverId]?.find((m) => m.user?.id === p.userId) : undefined));
   const name = member ? memberName(member) : displayName(user);
   const [container, setContainer] = useState<HTMLElement | null>(null);
-  const nameRef = useRef(name);
-  nameRef.current = name;
   const { t } = useI18n();
+  const windowTitle = useEffectEvent(() => titleOf(i18n().t, p, name));
 
   useEffect(() => {
     const key = keyOf(p);
@@ -542,7 +559,7 @@ function PopOutWindow({ popped: p }: { popped: Popped }) {
       return;
     }
     w.document.body.replaceChildren();
-    dress(w.document, titleOf(i18n().t, p, nameRef.current));
+    dress(w.document, windowTitle());
     const div = w.document.createElement("div");
     div.className = "h-full";
     w.document.body.appendChild(div);

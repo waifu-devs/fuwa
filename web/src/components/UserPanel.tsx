@@ -1,15 +1,19 @@
 import { EyeIcon, EyeOffIcon, PencilIcon, SettingsIcon, XIcon } from "lucide-react";
+import { useState } from "react";
 import { useFuwa } from "@/fuwa/store";
 import type { User } from "@/gen/fuwa/v1/types_pb";
 import { run, updateProfile } from "@/fuwa/actions";
 import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
 import { savePresenceSettings, usePresence, usePresenceSettings } from "@/fuwa/presence";
 import { engine } from "@/fuwa/sync";
-import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
+import { ConnDot, UserAvatar } from "@/components/Icons";
+import { connectionLabel } from "@/components/icons-utils";
 import { MuteButtons } from "@/components/calls/parts";
 import { SwapText } from "@/components/motion";
+import { AccountItems, AddAccountDialog } from "@/components/AccountSwitcher";
 import { Private } from "@/components/Private";
-import { STATUS_LABEL, StatusDot, shownOf } from "@/components/Presence";
+import { StatusDot } from "@/components/Presence";
+import { STATUS_LABEL, shownOf } from "@/components/presence-status";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,12 +81,13 @@ const choiceLabel = (t: I18n["t"], status: PresenceStatus) => {
   return t(STATUS_LABEL[status === PresenceStatus.INVISIBLE ? "invisible" : choice.dot]);
 };
 
-/** You, on this instance, at the bottom of the sidebar. Your name opens your status menu. */
+/** You, on this instance, at the bottom of the sidebar. Your name opens your status and accounts menu. */
 export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const { t } = useI18n();
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const settings = usePresenceSettings(instanceKey);
   const now = useNow(60_000);
+  const [adding, setAdding] = useState(false);
   if (!me) return null;
   const status = shownStatus(me, now);
   const picked = settings?.status ?? PresenceStatus.ONLINE;
@@ -97,54 +102,55 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
 
   return (
     <div className="flex items-center gap-0.5 border-t bg-[color-mix(in_srgb,var(--background)_50%,transparent)] p-2">
-      {settings ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("workspace.userPanel.yourStatus")}
-              className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1 text-left transition hover:bg-muted data-[state=open]:bg-muted"
-            >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={t("workspace.userPanel.yourStatus")}
+            className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1 text-left transition hover:bg-muted data-[state=open]:bg-muted"
+          >
+            {/* A new key when you switch accounts, so the other one lifts in. */}
+            <span key={me.id} className="swap-in flex min-w-0 items-center gap-2">
               {who}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="w-64">
-            {CHOICES.map((c) => (
-              <DropdownMenuItem key={c.status} onSelect={() => pick(c.status)} className="items-start gap-2.5 py-2">
-                <StatusDot status={c.dot} className="mt-1 shrink-0" />
-                <span className="min-w-0">
-                  <span className="block font-bold">{choiceLabel(t, c.status)}</span>
-                  {c.hint && <span className="block text-xs text-muted-foreground">{t(c.hint)}</span>}
-                </span>
-                {picked === c.status && <span className="ml-auto size-1.5 self-center rounded-full bg-primary" aria-label={t("workspace.userPanel.picked")} />}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => openSettings("profile")}>
-              <PencilIcon /> {status ? t("workspace.userPanel.editStatus") : t("workspace.userPanel.setStatus")}
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" className="w-64">
+          {settings && (
+            <>
+              {CHOICES.map((c) => (
+                <DropdownMenuItem key={c.status} onSelect={() => pick(c.status)} className="items-start gap-2.5 py-2">
+                  <StatusDot status={c.dot} className="mt-1 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block font-bold">{choiceLabel(t, c.status)}</span>
+                    {c.hint && <span className="block text-xs text-muted-foreground">{t(c.hint)}</span>}
+                  </span>
+                  {picked === c.status && <span className="ml-auto size-1.5 self-center rounded-full bg-primary" aria-label={t("workspace.userPanel.picked")} />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem onSelect={() => openSettings("profile")}>
+            <PencilIcon /> {status ? t("workspace.userPanel.editStatus") : t("workspace.userPanel.setStatus")}
+          </DropdownMenuItem>
+          {status && (
+            <DropdownMenuItem
+              onSelect={() => void run(updateProfile(instanceKey, { status: "", statusExpiresAt: null })).catch(() => toast(t("workspace.userPanel.clearFailed")))}
+            >
+              <XIcon /> {t("workspace.userPanel.clearStatus")}
             </DropdownMenuItem>
-            {status && (
-              <DropdownMenuItem
-                onSelect={() => void run(updateProfile(instanceKey, { status: "", statusExpiresAt: null })).catch(() => toast(t("workspace.userPanel.clearFailed")))}
-              >
-                <XIcon /> {t("workspace.userPanel.clearStatus")}
-              </DropdownMenuItem>
-            )}
+          )}
+          {settings && (
             <DropdownMenuItem onSelect={() => openSettings("privacy")}>
               {settings.showActivity ? <EyeIcon /> : <EyeOffIcon />}
               {settings.showActivity ? t("workspace.userPanel.sharing") : t("workspace.userPanel.notSharing")}
             </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        <button
-          type="button"
-          onClick={() => openSettings("profile")}
-          className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1 text-left transition hover:bg-muted"
-        >
-          {who}
-        </button>
-      )}
+          )}
+          <AccountItems instanceKey={instanceKey} onAdd={() => setAdding(true)} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AddAccountDialog instanceKey={instanceKey} open={adding} onOpenChange={setAdding} />
       <MuteButtons />
       <button
         type="button"

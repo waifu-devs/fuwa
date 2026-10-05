@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { move, sameLayout, type Drop, type Layout } from "@/lib/arrange";
 import { reduceMotion } from "@/lib/prefs";
 
@@ -34,7 +34,10 @@ export function useArrange({
   handle?: string;
 }) {
   const latest = useRef({ layout, onArrange });
-  latest.current = { layout, onArrange };
+  // Kept fresh after each commit, before any pointer event can read it.
+  useLayoutEffect(() => {
+    latest.current = { layout, onArrange };
+  });
 
   useEffect(() => {
     const root = container.current;
@@ -193,7 +196,8 @@ function start(root: HTMLElement, row: HTMLElement, x: number, y: number, layout
   // What moves: the row, and a category's channels with it.
   const moving = all.filter((s) => s.id === id || (kind === "category" && s.parent === id));
   for (const s of moving) s.el.setAttribute("data-dragging", "");
-  const rest = all.filter((s) => !moving.includes(s));
+  const movingSet = new Set(moving);
+  const rest = all.filter((s) => !movingSet.has(s));
 
   // The copy under the pointer.
   const from = row.getBoundingClientRect();

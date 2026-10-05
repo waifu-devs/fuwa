@@ -1,12 +1,13 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { LaptopIcon, LogOutIcon, ShieldCheckIcon, SmartphoneIcon, TabletIcon, TerminalIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@/gen/fuwa/v1/account_pb";
 import { listSessions, revokeOtherSessions, revokeSession, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { T, useI18n } from "@/i18n/react";
 import { MessageBackup } from "./MessageBackup";
@@ -172,15 +173,9 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
         )}
       </section>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {others.length > 1 && (
-          <motion.section
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.section {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold">{t("accountsettings.devices.signOutAll")}</p>
@@ -209,7 +204,9 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
         )}
       </AnimatePresence>
 
-      <MessageBackup instanceKey={instanceKey} />
+      <motion.div layout="position" transition={SPRING}>
+        <MessageBackup instanceKey={instanceKey} />
+      </motion.div>
     </div>
   );
 }

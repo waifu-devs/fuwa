@@ -907,6 +907,8 @@ message Message {
   repeated ComponentRow components = 24;
   // An agent's answer to a command or a button: who used what.
   MessageInteraction interaction = 25;
+  // When someone pinned it (MessageService.PinMessage); unset when it isn't.
+  google.protobuf.Timestamp pinned_at = 26;
 }
 
 // A row of up to 5 buttons under an agent's message.
@@ -1232,6 +1234,7 @@ message Event {
     ThreadUpdated thread_updated = 30;
     PollUpdated poll_updated = 31;
     InteractionCreated interaction_created = 32;
+    MessagePinned message_pinned = 33;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1392,6 +1395,16 @@ message MessageCreated {
 
 message MessageUpdated {
   Message message = 1;
+}
+
+// Someone pinned a message or unpinned it (MessageService.PinMessage).
+message MessagePinned {
+  string channel_id = 1;
+  string message_id = 2;
+  // A reply in a thread: the message the thread is under.
+  string thread_id = 3;
+  // When it was pinned; unset once it's unpinned.
+  google.protobuf.Timestamp pinned_at = 4;
 }
 
 // Someone voted in a poll, took a vote back, or the poll was ended (or,

@@ -1,8 +1,8 @@
 import { useRouterState } from "@tanstack/react-router";
 import { KeyboardIcon, MonitorPlayIcon, TvMinimalPlayIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { Toggle, WithPreview } from "@/components/settings/controls";
 import { Switch } from "@/components/ui/switch";

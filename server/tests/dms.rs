@@ -24,12 +24,16 @@ struct Instance {
 }
 
 async fn start(dir: &Path) -> Instance {
+    start_with(dir, &[]).await
+}
+
+async fn start_with(dir: &Path, vars: &[(&str, &str)]) -> Instance {
     let dir = dir.to_str().unwrap().to_string();
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
         "FUWA_UPDATE_CHECK" => Some("off".into()),
-        _ => None,
+        _ => vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()),
     })
     .unwrap();
     let app = App::open(config).await.unwrap();
@@ -704,6 +708,179 @@ async fn voice_messages_carry_sealed_files() {
     .await
     .unwrap();
     assert_eq!(http.get(on(&instance, &reserved.url)).send().await.unwrap().status(), reqwest::StatusCode::NOT_FOUND);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+fn pin_request(conversation: &str, sequence: i64, pinned: bool) -> pb::PinRecordRequest {
+    pb::PinRecordRequest { conversation_id: conversation.into(), sequence, pinned }
+}
+
+async fn pinned(dms: &mut Dms, person: &Person, conversation: &str) -> Vec<i64> {
+    pins_page(dms, person, conversation, 0, None).await.0
+}
+
+async fn pins_page(
+    dms: &mut Dms,
+    person: &Person,
+    conversation: &str,
+    limit: i32,
+    after_sequence: Option<i64>,
+) -> (Vec<i64>, bool) {
+    let page = dms
+        .list_record_pins(authed(
+            &person.token,
+            pb::ListRecordPinsRequest { conversation_id: conversation.into(), limit, after_sequence },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    (page.pins.iter().map(|p| p.sequence).collect(), page.has_more)
+}
+
+#[tokio::test]
+async fn pins_name_records_and_never_their_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start_with(dir.path(), &[("FUWA_LIMIT_PINS_PER_CONVERSATION", "2")]).await;
+    let channel = Channel::from_shared(format!("http://{}", instance.addr)).unwrap().connect().await.unwrap();
+    let mut dms = Dms::new(channel.clone());
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    let juan = sign_up(&channel, "juan").await;
+    let mika = sign_up(&channel, "mika").await;
+    let rin = sign_up(&channel, "rin").await;
+    let sid = servers
+        .create_server(authed(
+            &juan.token,
+            pb::CreateServerRequest { name: "Pins".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    servers
+        .join_server(authed(&mika.token, pb::JoinServerRequest { server_id: sid, ..Default::default() }))
+        .await
+        .unwrap();
+    let allowed = vec![juan.id.clone(), mika.id.clone()];
+    register(&mut dms, &juan).await;
+    register(&mut dms, &mika).await;
+    let cid = dms
+        .open_conversation(authed(&juan.token, pb::OpenConversationRequest { user_id: mika.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .conversation
+        .unwrap()
+        .id;
+    juan.device.create_group(&cid).unwrap();
+    let mika_device = vec![mika.device.device_id().to_string()];
+    let claimed = dms
+        .claim_key_packages(authed(&juan.token, pb::ClaimKeyPackagesRequest { device_ids: mika_device.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .key_packages;
+    let adds: Vec<(String, Vec<u8>)> = claimed.into_iter().map(|k| (k.device_id, k.key_package)).collect();
+    let commit = juan.device.commit(&cid, &adds, &[], &allowed).unwrap();
+    let commit = dms
+        .post_commit(authed(
+            &juan.token,
+            pb::PostCommitRequest {
+                conversation_id: cid.clone(),
+                commit: commit.commit.clone(),
+                group_info: commit.group_info.clone(),
+                welcome: commit.welcome.clone().unwrap(),
+                welcome_device_ids: mika_device,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    juan.device.process(&cid, &commit.data, true, &allowed).unwrap();
+    let mut sent = Vec::new();
+    for text in ["one", "two", "three", "four"] {
+        let sealed = juan.device.encrypt(&cid, text.as_bytes()).unwrap();
+        let record = dms
+            .post_message(authed(
+                &juan.token,
+                pb::PostMessageRequest { conversation_id: cid.clone(), message: sealed, ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .record
+            .unwrap();
+        sent.push(record.sequence);
+    }
+    let mut watch = dms.watch(authed(&mika.token, pb::WatchRequest {})).await.unwrap().into_inner();
+    assert!(watch.next().await.unwrap().unwrap().ready);
+
+    // Either person pins a message by its place; the other hears of it.
+    dms.pin_record(authed(&mika.token, pin_request(&cid, sent[0], true))).await.unwrap();
+    let event = watch.next().await.unwrap().unwrap().event.unwrap();
+    let Some(Payload::PinUpdated(update)) = event.payload else { panic!("{event:?}") };
+    assert!(update.pinned);
+    assert_eq!(update.pin.unwrap().sequence, sent[0]);
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[1], true))).await.unwrap();
+    assert_eq!(pinned(&mut dms, &mika, &cid).await, [sent[1], sent[0]], "latest first");
+
+    // Two is the cap here; unpinning makes room.
+    let full = dms.pin_record(authed(&juan.token, pin_request(&cid, sent[2], true))).await.unwrap_err();
+    assert_eq!(full.code(), Code::ResourceExhausted);
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[1], false))).await.unwrap();
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[2], true))).await.unwrap();
+    assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[2], sent[0]]);
+    // A page at a time.
+    assert_eq!(pins_page(&mut dms, &juan, &cid, 1, None).await, (vec![sent[2]], true));
+    assert_eq!(pins_page(&mut dms, &juan, &cid, 1, Some(sent[2])).await, (vec![sent[0]], false));
+
+    // Only messages, only in your own conversations.
+    let commit_pin = dms.pin_record(authed(&juan.token, pin_request(&cid, commit.sequence, true))).await.unwrap_err();
+    assert_eq!(commit_pin.code(), Code::NotFound);
+    let outsider = dms.pin_record(authed(&rin.token, pin_request(&cid, sent[1], true))).await.unwrap_err();
+    assert_eq!(outsider.code(), Code::NotFound);
+    let peek = dms
+        .list_record_pins(authed(
+            &rin.token,
+            pb::ListRecordPinsRequest { conversation_id: cid.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(peek.code(), Code::NotFound);
+
+    // A deleted message takes its pin along.
+    dms.delete_record(authed(&juan.token, pb::DeleteRecordRequest { conversation_id: cid.clone(), sequence: sent[2] }))
+        .await
+        .unwrap();
+    assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[0]]);
+    let gone = dms.pin_record(authed(&juan.token, pin_request(&cid, sent[2], true))).await.unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+
+    // Once Mika blocks Juan, she can't pin there, and nothing Juan pins or
+    // unpins reaches her: his pins are his alone, and his unpinning hers
+    // only takes it from his own list.
+    pb::friend_service_client::FriendServiceClient::new(channel.clone())
+        .block_user(authed(&mika.token, pb::BlockUserRequest { user_id: juan.id.clone() }))
+        .await
+        .unwrap();
+    let blocker = dms.pin_record(authed(&mika.token, pin_request(&cid, sent[1], true))).await.unwrap_err();
+    assert_eq!(blocker.code(), Code::FailedPrecondition);
+    while let Ok(Some(_)) = tokio::time::timeout(std::time::Duration::from_millis(500), watch.next()).await {}
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[1], true))).await.unwrap();
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[0], false))).await.unwrap();
+    assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[1]]);
+    assert_eq!(pinned(&mut dms, &mika, &cid).await, [sent[0]]);
+    // The cap counts the pins each sees: Mika's hidden one leaves Juan room.
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[3], true))).await.unwrap();
+    assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[3], sent[1]]);
+    assert_eq!(pinned(&mut dms, &mika, &cid).await, [sent[0]]);
+    let heard = tokio::time::timeout(std::time::Duration::from_secs(1), watch.next()).await;
+    assert!(heard.is_err(), "Mika heard of Juan's pins: {heard:?}");
 
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();

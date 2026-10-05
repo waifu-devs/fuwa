@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, BuildingIcon, CheckIcon, CloudOffIcon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowRightIcon, BuildingIcon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react";
+import { AnimatePresence, m as motion, useReducedMotion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import type { SsoIdentity } from "@/gen/fuwa/v1/sso_pb";
 import { finishServerSso, finishSsoSignIn, run, ssoSignInInfo } from "@/fuwa/actions";
 import { normalizeUrl } from "@/fuwa/saved";
@@ -9,6 +9,7 @@ import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
+import { Cancelled, Check, Failed, Title } from "@/pages/CallbackParts";
 import type { Key } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
 import { DONE, takePendingSso } from "@/lib/sso";
@@ -206,27 +207,8 @@ export function SsoDone() {
                 </div>
               </>
             )}
-            {phase.kind === "cancelled" && (
-              <>
-                <Badge tone="muted">
-                  <CheckIcon className="size-7" />
-                </Badge>
-                <Title>{t("connect.callback.cancelledTitle")}</Title>
-                <p className="text-sm text-muted-foreground">{t("connect.callback.closeTab")}</p>
-              </>
-            )}
-            {phase.kind === "error" && (
-              <>
-                <Badge tone="error">
-                  <CloudOffIcon className="size-7" />
-                </Badge>
-                <Title>{t(phase.title)}</Title>
-                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message || (phase.note && t(phase.note))}</p>
-                <Button size="lg" className="btn h-11 w-full rounded-xl font-bold" onClick={() => navigate({ to: "/", replace: true })}>
-                  {t("connect.callback.backToFuwa")}
-                </Button>
-              </>
-            )}
+            {phase.kind === "cancelled" && <Cancelled />}
+            {phase.kind === "error" && <Failed title={phase.title} message={phase.message} note={phase.note} />}
           </motion.div>
         </AnimatePresence>
       </motion.div>
@@ -262,27 +244,6 @@ export function IdentityCard({ identity }: { identity: SsoIdentity | undefined }
   );
 }
 
-function Title({ children }: { children: ReactNode }) {
-  return <h1 className="text-2xl font-extrabold tracking-tight">{children}</h1>;
-}
-
-function Badge({ tone, children }: { tone: "error" | "muted"; children: ReactNode }) {
-  return (
-    <motion.span
-      initial={{ scale: 0, rotate: -20 }}
-      animate={{ scale: 1, rotate: 0 }}
-      transition={{ type: "spring", stiffness: 420, damping: 16 }}
-      className={
-        tone === "error"
-          ? "grid size-16 place-items-center rounded-3xl bg-destructive/15 text-destructive"
-          : "grid size-16 place-items-center rounded-3xl bg-muted text-muted-foreground"
-      }
-    >
-      {children}
-    </motion.span>
-  );
-}
-
 /** The organization's building and fuwa's mark, with a key's dots travelling between them while it works. */
 function Bridge({ still = false }: { still?: boolean }) {
   const reduce = useReducedMotion();
@@ -308,30 +269,5 @@ function Bridge({ still = false }: { still?: boolean }) {
       </span>
       <FuwaMark className="float size-14" />
     </div>
-  );
-}
-
-/** A check that pops in with a ring rippling out behind it. */
-function Check() {
-  return (
-    <span className="relative grid size-16 place-items-center">
-      <motion.span
-        aria-hidden
-        className="absolute inset-0 rounded-full bg-emerald-500/30"
-        initial={{ scale: 0.6, opacity: 0.8 }}
-        animate={{ scale: 1.8, opacity: 0 }}
-        transition={{ duration: 0.9, ease: "easeOut" }}
-      />
-      <motion.span
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        transition={{ type: "spring", stiffness: 500, damping: 15 }}
-        className="grid size-16 place-items-center rounded-full bg-emerald-500 text-white shadow-[0_12px_30px_-10px_rgb(16_185_129)]"
-      >
-        <motion.svg viewBox="0 0 24 24" className="size-8" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
-          <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.4, delay: 0.15 }} />
-        </motion.svg>
-      </motion.span>
-    </span>
   );
 }

@@ -123,9 +123,14 @@ pub fn arguments(command: &pb::Command, values: &HashMap<String, String>) -> Vec
 /// in it a system opener could read as something else.
 pub fn opens(button: &pb::Button) -> Option<&str> {
     let url = button.url.as_str();
+    (button.style() == pb::ButtonStyle::Link && https_link(url)).then_some(url)
+}
+
+/// A link from someone else this app opens: https (in any case), something
+/// after the scheme, and no whitespace or control characters.
+pub fn https_link(url: &str) -> bool {
     let https = url.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) && url.len() > 8;
-    let plain = !url.chars().any(|c| c.is_whitespace() || c.is_control());
-    (button.style() == pb::ButtonStyle::Link && https && plain).then_some(url)
+    https && !url.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 /// Whether a channel takes commands: not shared, and never a secure one, whose

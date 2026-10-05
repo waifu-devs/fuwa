@@ -1,6 +1,6 @@
 import type { Effect } from "effect";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Channel, Member, Role } from "@/gen/fuwa/v1/types_pb";
 import { accessOf, NO_ACCESS, type Access } from "@/lib/permissions";
 import { run } from "./actions";
@@ -16,7 +16,9 @@ export function useAction<Args extends unknown[], A>(action: (...args: Args) => 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(action);
-  latest.current = action;
+  useLayoutEffect(() => {
+    latest.current = action;
+  });
   const go = useCallback(async (...args: Args): Promise<A | undefined> => {
     setPending(true);
     setError(null);

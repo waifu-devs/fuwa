@@ -1,19 +1,22 @@
 import { CheckIcon, ClipboardPenIcon, MonitorIcon, PaletteIcon, PartyPopperIcon, SendIcon, SmartphoneIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { type JoinForm, type Onboarding, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
+import { type Channel, type Emoji, type JoinForm, type Onboarding, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { getJoinForm, getOnboarding, getWelcomeScreen, run, setOnboarding, setWelcomeScreen, updateServer } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
 import { BannerHero, ServerBanner } from "@/components/join/Banner";
-import { OnboardingFlow, stepsFor } from "@/components/join/Onboarding";
+import { OnboardingFlow } from "@/components/join/Onboarding";
+import { stepsFor } from "@/components/join/onboarding-steps";
 import { RulesList } from "@/components/join/Rules";
 import { WelcomeCard } from "@/components/join/Welcome";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { PictureField } from "@/components/PictureField";
 import { SaveBar } from "@/components/settings/controls";
-import { OnboardingFields, onboardingChanges, onboardingDraft, onboardingOf, type OnboardingDraft } from "@/components/settings/server/OnboardingEditor";
-import { WelcomeFields, welcomeChanges, welcomeDraft, welcomeScreen, type WelcomeDraft } from "@/components/settings/server/WelcomeScreenEditor";
+import { OnboardingFields } from "@/components/settings/server/OnboardingEditor";
+import { onboardingChanges, onboardingDraft, onboardingOf, type OnboardingDraft } from "@/components/settings/server/onboarding-draft";
+import { WelcomeFields } from "@/components/settings/server/WelcomeScreenEditor";
+import { welcomeChanges, welcomeDraft, welcomeScreen, type WelcomeDraft } from "@/components/settings/server/welcome-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -401,10 +404,6 @@ function Preview({
   focusStep: number;
 }) {
   const { t } = useI18n();
-  const inst = useInstance(instanceKey);
-  const roles = useRoles(instanceKey, server.id);
-  const channels = inst?.channels[server.id] ?? [];
-  const emojis = inst?.emojis[server.id];
   const outer = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
@@ -416,7 +415,6 @@ function Preview({
   }, []);
   const frame = DEVICES[device];
   const scale = width ? Math.min(device === "phone" ? 0.62 : 1, width / frame.width) : 0;
-  const steps = useMemo(() => stepsFor(onboarding, { mustAgree: server.hasRules, canSeeChannel: () => true }), [onboarding, server.hasRules]);
   const phone = device === "phone";
 
   const views: { id: View; label: string; icon: typeof PartyPopperIcon }[] = [
@@ -440,47 +438,122 @@ function Preview({
             <div style={{ width: frame.width, height: frame.height, transform: `scale(${scale})`, transformOrigin: "top left" }} className="absolute top-0 left-0">
               <FakeApp server={server} phone={phone} />
               <div className={cn("absolute inset-0 grid bg-black/50", phone ? "place-items-end" : "place-items-center p-8")}>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={`${view}:${device}`}
-                    initial={{ opacity: 0, y: 40, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 24, scale: 0.97 }}
-                    transition={SPRING}
-                    className={cn("scroll-thin max-h-[92%] w-full overflow-x-hidden overflow-y-auto border bg-card p-6 text-card-foreground shadow-2xl", phone ? "rounded-t-3xl" : "max-w-2xl rounded-3xl")}
-                  >
-                    {view === "welcome" ? (
-                      welcome.enabled || welcome.description || welcome.channels.length ? (
-                        <WelcomeCard server={server} screen={welcome} channels={channels} emojis={emojis} bleed wide={!phone} onPick={() => {}} />
-                      ) : (
-                        <Empty server={server} text={t("serversettings.welcome.emptyWelcome")} />
-                      )
-                    ) : view === "apply" ? (
-                      <ApplyPreview server={server} form={form} />
-                    ) : steps.length ? (
-                      <OnboardingFlow
-                        key={`${focusStep}:${steps.map((s) => s.id).join()}`}
-                        server={server}
-                        steps={steps}
-                        rules={form.rules}
-                        channels={channels}
-                        roles={roles}
-                        emojis={emojis}
-                        welcome={welcome}
-                        preview
-                        compact={false}
-                      />
-                    ) : (
-                      <Empty server={server} text={t("serversettings.welcome.emptyOnboarding")} />
-                    )}
-                  </motion.div>
-                </AnimatePresence>
+                <PreviewCard
+                  instanceKey={instanceKey}
+                  server={server}
+                  view={view}
+                  phone={phone}
+                  welcome={welcome}
+                  onboarding={onboarding}
+                  form={form}
+                  focusStep={focusStep}
+                />
               </div>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** The card over the blurred app, changing with the view and device. */
+function PreviewCard({
+  instanceKey,
+  server,
+  view,
+  phone,
+  welcome,
+  onboarding,
+  form,
+  focusStep,
+}: {
+  instanceKey: string;
+  server: Server;
+  view: View;
+  phone: boolean;
+  welcome: WelcomeScreen;
+  onboarding: Onboarding;
+  form: JoinForm;
+  focusStep: number;
+}) {
+  const inst = useInstance(instanceKey);
+  const roles = useRoles(instanceKey, server.id);
+  const channels = inst?.channels[server.id] ?? [];
+  const emojis = inst?.emojis[server.id];
+  const steps = useMemo(() => stepsFor(onboarding, { mustAgree: server.hasRules, canSeeChannel: () => true }), [onboarding, server.hasRules]);
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={`${view}:${phone}`}
+        initial={{ opacity: 0, y: 40, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 24, scale: 0.97 }}
+        transition={SPRING}
+        className={cn("scroll-thin max-h-[92%] w-full overflow-x-hidden overflow-y-auto border bg-card p-6 text-card-foreground shadow-2xl", phone ? "rounded-t-3xl" : "max-w-2xl rounded-3xl")}
+      >
+        <PreviewBody
+          server={server}
+          view={view}
+          phone={phone}
+          welcome={welcome}
+          steps={steps}
+          form={form}
+          channels={channels}
+          roles={roles}
+          emojis={emojis}
+          focusStep={focusStep}
+        />
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/** What the card shows: the welcome screen, the join form, or onboarding (or that there's nothing yet). */
+function PreviewBody({
+  server,
+  view,
+  phone,
+  welcome,
+  steps,
+  form,
+  channels,
+  roles,
+  emojis,
+  focusStep,
+}: {
+  server: Server;
+  view: View;
+  phone: boolean;
+  welcome: WelcomeScreen;
+  steps: ReturnType<typeof stepsFor>;
+  form: JoinForm;
+  channels: Channel[];
+  roles: ReturnType<typeof useRoles>;
+  emojis: Emoji[] | undefined;
+  focusStep: number;
+}) {
+  const { t } = useI18n();
+  if (view === "welcome") {
+    if (welcome.enabled || welcome.description || welcome.channels.length)
+      return <WelcomeCard server={server} screen={welcome} channels={channels} emojis={emojis} bleed wide={!phone} onPick={() => {}} />;
+    return <Empty server={server} text={t("serversettings.welcome.emptyWelcome")} />;
+  }
+  if (view === "apply") return <ApplyPreview server={server} form={form} />;
+  if (!steps.length) return <Empty server={server} text={t("serversettings.welcome.emptyOnboarding")} />;
+  return (
+    <OnboardingFlow
+      key={`${focusStep}:${steps.map((s) => s.id).join()}`}
+      server={server}
+      steps={steps}
+      rules={form.rules}
+      channels={channels}
+      roles={roles}
+      emojis={emojis}
+      welcome={welcome}
+      preview
+      compact={false}
+    />
   );
 }
 

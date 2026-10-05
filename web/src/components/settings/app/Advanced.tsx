@@ -1,6 +1,7 @@
 import { BugIcon, CheckIcon, FingerprintIcon, GaugeIcon, MousePointerClickIcon, ServerIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { Count, SPRING } from "@/components/motion";
+import { AnimatePresence, m as motion } from "motion/react";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
 import { useFuwa } from "@/fuwa/store";
 import { type Key, T, useI18n } from "@/i18n/react";
@@ -107,16 +108,9 @@ function ShareReports() {
           ))}
         </ul>
       </motion.div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {on && (
-          <motion.div
-            key="waiting"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={SPRING}
-            className="overflow-hidden"
-          >
+          <motion.div key="waiting" {...SLIDE_IN} transition={SPRING}>
             <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{t("appsettings.advanced.waiting")}</span>

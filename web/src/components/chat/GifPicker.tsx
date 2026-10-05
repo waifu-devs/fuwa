@@ -11,14 +11,14 @@ import {
   useInteractions,
   useRole,
 } from "@floating-ui/react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { providerName, sendGif, useGifSettings } from "@/fuwa/gifs";
 import { lazyComponent } from "@/components/lazy";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
