@@ -319,6 +319,8 @@ pub struct FuwaApp {
     pub emoji: crate::ui::emoji_picker::EmojiPicker,
     /// When the picker opened, so its emoji ripple in only then.
     pub emoji_born: Option<std::time::Instant>,
+    /// The GIF picker over the composer, and what it knows of each instance's GIFs.
+    pub gifs: crate::ui::gifs::Gifs,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The rules the rules dialog shows, once they arrive.
@@ -359,6 +361,7 @@ impl FuwaApp {
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
+        let (gifs, gif_subs) = crate::ui::gifs::Gifs::new(window, cx);
         let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
@@ -413,6 +416,7 @@ impl FuwaApp {
         let weak = cx.entity().downgrade();
         subscriptions.extend(thread_subs);
         subscriptions.extend(friend_subs);
+        subscriptions.extend(gif_subs);
         subscriptions.extend(onboarding_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
@@ -547,6 +551,7 @@ impl FuwaApp {
             emoji_query,
             emoji: Default::default(),
             emoji_born: None,
+            gifs,
             profile: None,
             rules: None,
             _subscriptions: subscriptions,
@@ -795,6 +800,7 @@ impl FuwaApp {
     /// Keeps the draft, the focus and the message list in step with where you are.
     fn after_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.emoji_open = false;
+        self.close_gifs(cx);
         // A recording belongs to where it was started; what's playing stops with the conversation.
         self.discard_recording(cx);
         self.stop_voice();

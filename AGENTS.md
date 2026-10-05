@@ -230,7 +230,8 @@
     the server checks in `send_message` and clears. `media/still.rs` draws a
     GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
     `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
-    a lazy file).
+    a lazy file). Desktop: `core/gifs.rs` (calls, sent-lately kept in prefs)
+    and `ui/gifs.rs` (button, picker, GIFs in messages).
   - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
     `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
     JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
