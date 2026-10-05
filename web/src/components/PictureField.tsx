@@ -1,5 +1,5 @@
 import { CameraIcon, CheckIcon, ImageUpIcon, LinkIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { run, uploadPicture } from "@/fuwa/actions";
@@ -356,7 +356,7 @@ function Progress({ kind, sent, done }: { kind: PictureKind; sent: number; done:
           </motion.span>
         ) : kind === "banner" ? (
           <motion.span key="bar" className="absolute inset-x-3 bottom-3 h-1.5 overflow-hidden rounded-full bg-white/30">
-            <motion.span className="block h-full rounded-full bg-white" initial={{ width: 0 }} animate={{ width: `${sent * 100}%` }} transition={SPRING} />
+            <motion.span className="block h-full rounded-full bg-white" initial={{ x: "-100%" }} animate={{ x: `${sent * 100 - 100}%` }} transition={SPRING} />
           </motion.span>
         ) : (
           <motion.svg key="ring" viewBox="0 0 44 44" className="size-11 -rotate-90 drop-shadow">

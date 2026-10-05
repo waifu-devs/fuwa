@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { BackdropLayers, usePageVisible } from "@/components/Backdrop";
 import { SPRING } from "@/components/motion";
 import { type Key, useI18n } from "@/i18n/react";

@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, ChevronLeftIcon, PlusIcon, SearchIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { discover, run } from "@/fuwa/actions";

@@ -1,5 +1,5 @@
 import { EyeIcon, EyeOffIcon, ListChecksIcon, LoaderCircleIcon, PlusIcon, SmilePlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { Channel } from "@/gen/fuwa/v1/types_pb";
 import { sendPoll, type PollDraft } from "@/fuwa/actions";

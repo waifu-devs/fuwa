@@ -1,5 +1,5 @@
 import { BellIcon, BellOffIcon, ChevronDownIcon, HashIcon, PlusIcon, ServerIcon as ServerGlyph, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { NotificationLevel, type Channel, type NotificationSettings, type Server } from "@/gen/fuwa/v1/types_pb";
 import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions";

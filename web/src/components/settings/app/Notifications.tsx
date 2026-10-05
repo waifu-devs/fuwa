@@ -1,5 +1,5 @@
 import { AtSignIcon, BellRingIcon, MessagesSquareIcon, PlayIcon, TvMinimalPlayIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { FuwaMark } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";

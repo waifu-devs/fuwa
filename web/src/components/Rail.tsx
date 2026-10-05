@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { CompassIcon, FolderMinusIcon, FolderPlusIcon, GlobeIcon, PlusIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";

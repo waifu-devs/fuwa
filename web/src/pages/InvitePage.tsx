@@ -2,7 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { Effect } from "effect";
 import { ChevronLeftIcon, GlobeIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { lookUpInvite, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";

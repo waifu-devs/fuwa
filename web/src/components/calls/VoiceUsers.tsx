@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo } from "react";
 import type { VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";

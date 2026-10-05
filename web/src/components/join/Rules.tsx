@@ -1,5 +1,5 @@
 import { LoaderCircleIcon, PartyPopperIcon, ScrollTextIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, run } from "@/fuwa/actions";

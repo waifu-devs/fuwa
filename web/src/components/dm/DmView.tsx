@@ -19,7 +19,7 @@ import {
   UserRoundXIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";

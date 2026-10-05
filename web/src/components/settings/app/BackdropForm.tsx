@@ -1,5 +1,5 @@
 import { CheckIcon, CodeXmlIcon, Grid2x2Icon, ImageOffIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, Trash2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { deleteBackground, keepBackground, listBackgrounds, run, uploadPicture } from "@/fuwa/actions";

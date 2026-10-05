@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { CheckIcon, ClipboardPenIcon, EyeIcon, HourglassIcon, PartyPopperIcon, SendIcon, Undo2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import type { ReactNode } from "react";
 import { ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
 import { withdrawApplication } from "@/fuwa/actions";

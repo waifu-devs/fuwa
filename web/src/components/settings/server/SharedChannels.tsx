@@ -24,7 +24,7 @@ import {
   BarChart3Icon,
   MessagesSquareIcon,
 } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SharedConnectionState, type ChannelBlock, type PreviewShareResponse, type ShareCode, type SharedConnection } from "@/gen/fuwa/v1/channel_pb";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";

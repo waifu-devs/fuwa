@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { LockKeyholeIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo } from "react";
 import { joinCall } from "@/calls/engine";
 import { declineKey, setCalls, useCalls } from "@/calls/state";

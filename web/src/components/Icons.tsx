@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import type { Server, User } from "@/gen/fuwa/v1/types_pb";
 import type { Connection } from "@/fuwa/store";

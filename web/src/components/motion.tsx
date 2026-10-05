@@ -1,5 +1,5 @@
 
-import { animate, AnimatePresence, motion } from "motion/react";
+import { animate, AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { reduceMotion } from "@/lib/prefs";
 import { cn } from "@/lib/utils";

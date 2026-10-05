@@ -1,5 +1,5 @@
 import { BanIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { hue } from "@/components/Icons";
 import { ProfileEffect } from "@/components/ProfileEffect";

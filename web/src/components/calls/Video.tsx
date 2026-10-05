@@ -1,5 +1,5 @@
 import { CheckIcon, CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";

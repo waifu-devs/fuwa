@@ -1,5 +1,5 @@
 import { FolderIcon, GripVerticalIcon, HashIcon, LoaderCircleIcon, LockIcon, PlusIcon, SnailIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { deleteChannel, reorderChannels, run, updateChannel } from "@/fuwa/actions";

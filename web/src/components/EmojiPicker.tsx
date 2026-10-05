@@ -25,7 +25,7 @@ import {
   TrophyIcon,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import {
   memo,
   useCallback,

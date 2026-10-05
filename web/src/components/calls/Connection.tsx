@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import type { ActiveCall } from "@/calls/state";
 import { formatPing, useQualityEffect, useQualityLevel, useQualityText, type Level, type Quality, type Route } from "@/calls/quality";

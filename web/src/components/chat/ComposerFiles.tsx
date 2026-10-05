@@ -1,5 +1,5 @@
 import { CheckIcon, PaperclipIcon, RotateCwIcon, UploadIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import { addFiles, removeFile, retryFile, type Staged } from "@/components/chat/staged";

@@ -1,5 +1,5 @@
 import { CheckIcon, LinkIcon, LockIcon, LockOpenIcon, PlusIcon, SlashIcon, Trash2Icon, TriangleAlertIcon, UnlinkIcon, UserIcon, UsersIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChannelType, OverwriteTarget, Permission, type Channel, type Member, type PermissionOverwrite, type Role } from "@/gen/fuwa/v1/types_pb";
 import { setChannelPermissions } from "@/fuwa/actions";

@@ -1,5 +1,5 @@
 import { CheckIcon, ExternalLinkIcon, Flower2Icon, KeyRoundIcon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, UserPenIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useState, type FormEvent } from "react";
 import { AccountKind, type User } from "@/gen/fuwa/v1/types_pb";
 import { changePassword, forget, signOut } from "@/fuwa/actions";
@@ -179,7 +179,7 @@ export function Password({ instanceKey }: { instanceKey: string }) {
                     <motion.span
                       className={cn("block h-full rounded-full", STRENGTH[level]!.tone)}
                       initial={false}
-                      animate={{ width: level >= n ? "100%" : "0%" }}
+                      animate={{ x: level >= n ? "0%" : "-100%" }}
                       transition={{ ...SPRING, delay: (n - 1) * 0.04 }}
                     />
                   </span>

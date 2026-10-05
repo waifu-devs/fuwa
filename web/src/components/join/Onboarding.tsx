@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, LoaderCircleIcon, MessageCircleHeartIcon, PartyPopperIcon, SendIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   OnboardingStepKind,

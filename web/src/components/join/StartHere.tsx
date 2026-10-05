@@ -1,5 +1,5 @@
 import { ArrowRightIcon, HashIcon, MegaphoneIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { ChannelType, type Channel, type Emoji, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { useI18n } from "@/i18n/react";

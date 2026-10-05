@@ -18,7 +18,7 @@ import {
   BotIcon,
   BuildingIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { NewerRelease } from "@/components/settings/instance/NewerRelease";
 import {

@@ -13,7 +13,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
 import { useState } from "react";
 import {
   ChannelType,

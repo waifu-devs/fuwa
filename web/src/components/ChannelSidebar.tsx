@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, MegaphoneIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, ShieldCheckIcon, UserPlusIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";

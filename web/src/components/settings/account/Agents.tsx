@@ -15,7 +15,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Agent } from "@/gen/fuwa/v1/agent_pb";
 import { AgentCreation, type Server } from "@/gen/fuwa/v1/types_pb";

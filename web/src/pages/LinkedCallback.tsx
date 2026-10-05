@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, CheckIcon, CloudOffIcon, Flower2Icon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, m as motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { finishLinkedSignIn, linkedSignInOrigin, probe, run } from "@/fuwa/actions";
 import { FuwaMark } from "@/components/Icons";

@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, BuildingIcon, CheckIcon, CloudOffIcon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, m as motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SsoIdentity } from "@/gen/fuwa/v1/sso_pb";
 import { finishServerSso, finishSsoSignIn, run, ssoSignInInfo } from "@/fuwa/actions";

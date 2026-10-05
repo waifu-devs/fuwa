@@ -1,5 +1,5 @@
 import { AlertCircleIcon, LoaderCircleIcon, PauseIcon, PlayIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { SPRING } from "@/components/motion";
 import { cn } from "@/lib/utils";

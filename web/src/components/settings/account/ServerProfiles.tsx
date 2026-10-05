@@ -1,5 +1,5 @@
 import { ServerIcon as ServerGlyph } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { setNickname } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";

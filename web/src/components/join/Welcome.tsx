@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { LoaderCircleIcon, PartyPopperIcon, ScrollTextIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls, useScroll } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls, useScroll } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Permission, type Channel, type Emoji, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions";

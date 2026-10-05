@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { LoaderCircleIcon, MapPinIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { ServerCreation } from "@/gen/fuwa/v1/types_pb";
 import { createServer } from "@/fuwa/actions";

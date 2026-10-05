@@ -1,5 +1,5 @@
 import { XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import type { Channel, SharedServer } from "@/gen/fuwa/v1/types_pb";
 import { ServerIcon } from "@/components/Icons";

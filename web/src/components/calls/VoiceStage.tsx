@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, HeadphonesIcon, MicOffIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { hangUp, joinCall } from "@/calls/engine";

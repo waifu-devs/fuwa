@@ -1,5 +1,5 @@
 import { LanguagesIcon, MonitorIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SPRING } from "@/components/motion";
 import { Choice } from "@/components/settings/controls";

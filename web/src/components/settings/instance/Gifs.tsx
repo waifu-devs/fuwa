@@ -1,6 +1,6 @@
 import { clone, create } from "@bufbuild/protobuf";
 import { CircleCheckIcon, CircleXIcon, FilmIcon, KeyRoundIcon, LoaderCircleIcon, PowerOffIcon, ShieldIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { GifSettingsSchema, type GifSettings as GifSetup, type InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { TestGifProviderResponse } from "@/gen/fuwa/v1/gif_pb";

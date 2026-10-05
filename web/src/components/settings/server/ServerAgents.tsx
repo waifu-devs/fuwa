@@ -1,5 +1,5 @@
 import { AtSignIcon, BotIcon, CheckIcon, LoaderCircleIcon, PlugZapIcon, PlusIcon, UserMinusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { McpAccessMode, type Agent, type McpAccess } from "@/gen/fuwa/v1/agent_pb";
 import { addAgent, getMcpAccess, kickMember, listAgents, run, setMcpAccess } from "@/fuwa/actions";

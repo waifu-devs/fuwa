@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ClipboardPenIcon, LoaderCircleIcon, SendIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls, useScroll } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls, useScroll } from "motion/react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { JoinForm, Server } from "@/gen/fuwa/v1/types_pb";
 import { applyToJoin, getJoinForm, run } from "@/fuwa/actions";

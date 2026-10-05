@@ -1,5 +1,5 @@
 import { BarChart3Icon, HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SmileIcon, SnailIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage, uploadVoice } from "@/fuwa/actions";

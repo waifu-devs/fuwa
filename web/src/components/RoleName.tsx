@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import type { CSSProperties } from "react";
 import { hueOf } from "@/lib/format";
 import { cssColor } from "@/lib/permissions";

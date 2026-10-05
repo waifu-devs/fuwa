@@ -1,5 +1,5 @@
 import { AlertTriangleIcon, BookOpenIcon, ChevronDownIcon, CpuIcon, Loader2Icon, RotateCcwIcon, SparklesIcon, TurtleIcon, ZapOffIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { SPRING } from "@/components/motion";
 import { type I18n, type Key, T, useI18n } from "@/i18n/react";

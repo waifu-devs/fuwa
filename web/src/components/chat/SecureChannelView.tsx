@@ -12,7 +12,7 @@ import {
   ShieldOffIcon,
   UserPlusIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { SECURE_BROKEN, secureModerates } from "@/e2ee/engine";

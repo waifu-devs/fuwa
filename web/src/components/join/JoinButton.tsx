@@ -1,5 +1,5 @@
 import { ArrowRightIcon, BuildingIcon, CheckIcon, ClipboardPenIcon, HourglassIcon, LoaderCircleIcon, LockIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AccountKind, ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
 import { joinServer, startServerSso, withdrawApplication } from "@/fuwa/actions";

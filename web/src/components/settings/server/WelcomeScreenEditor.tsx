@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
 import { ChevronDownIcon, GripVerticalIcon, HashIcon, PlusIcon, SmilePlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
 import {
   ChannelType,
   WelcomeChannelSchema,

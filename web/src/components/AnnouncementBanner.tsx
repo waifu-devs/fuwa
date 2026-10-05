@@ -1,5 +1,5 @@
 import { MegaphoneIcon, SirenIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { AnnouncementTone, type Announcement } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";

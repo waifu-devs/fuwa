@@ -1,5 +1,5 @@
 import { RefreshCwIcon, SparklesIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { SPRING } from "@/components/motion";
 import { updateLine } from "@/lib/compat";

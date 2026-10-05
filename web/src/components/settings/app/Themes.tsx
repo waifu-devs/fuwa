@@ -13,7 +13,7 @@ import {
   TriangleAlertIcon,
   WandSparklesIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { keepBackground, run, uploadPicture } from "@/fuwa/actions";

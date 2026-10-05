@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { hangUp } from "@/calls/engine";
 import { useQualityLevel } from "@/calls/quality";
 import { useCalls, type ActiveCall } from "@/calls/state";

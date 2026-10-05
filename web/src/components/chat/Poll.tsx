@@ -1,5 +1,5 @@
 import { BarChart3Icon, CheckIcon, EyeIcon, EyeOffIcon, FlagIcon, LoaderCircleIcon, TrophyIcon, UndoIcon, UsersIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Emoji, Message, Poll, PollAnswer, User } from "@/gen/fuwa/v1/types_pb";
 import { endPoll, listPollVoters, run, votePoll } from "@/fuwa/actions";

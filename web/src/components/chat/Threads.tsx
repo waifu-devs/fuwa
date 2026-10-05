@@ -10,7 +10,7 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ListThreadsResponse } from "@/gen/fuwa/v1/message_pb";
 import { Permission, type Channel, type Message, type ThreadSummary } from "@/gen/fuwa/v1/types_pb";

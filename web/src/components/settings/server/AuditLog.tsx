@@ -44,7 +44,7 @@ import {
   BanIcon,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuditAction, type AuditChange, type AuditEntry } from "@/gen/fuwa/v1/server_pb";
 import { ChannelType, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";

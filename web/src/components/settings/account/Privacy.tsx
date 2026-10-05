@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { deleteAccount, exportData, getTwoFactor, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
@@ -162,11 +162,13 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
               <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
                 {state === "working" ? (
                   <motion.span
-                    className="absolute inset-y-0 w-1/3 rounded-full bg-primary"
-                    initial={{ left: "-33%" }}
-                    animate={{ left: "100%" }}
+                    className="absolute inset-0"
+                    initial={{ x: "-33%" }}
+                    animate={{ x: "100%" }}
                     transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
-                  />
+                  >
+                    <span className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-primary" />
+                  </motion.span>
                 ) : (
                   <motion.span className="absolute inset-0 origin-left rounded-full bg-emerald-500" initial={{ scaleX: 0.3 }} animate={{ scaleX: 1 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} />
                 )}

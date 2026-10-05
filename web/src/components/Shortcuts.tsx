@@ -1,7 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, EyeOffIcon, HashIcon, KeyboardIcon, SearchIcon, SparklesIcon, TvMinimalPlayIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";

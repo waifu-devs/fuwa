@@ -1,7 +1,7 @@
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { LoaderCircleIcon, MegaphoneIcon, MegaphoneOffIcon, SirenIcon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useState, type FormEvent } from "react";
 import { AnnouncementSchema, AnnouncementTone } from "@/gen/fuwa/v1/types_pb";
 import { setAnnouncement } from "@/fuwa/actions";

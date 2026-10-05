@@ -1,5 +1,5 @@
 import { CheckIcon, CopyIcon, HashIcon, InfinityIcon, LinkIcon, PlusIcon, ServerIcon as ServerGlyph, TimerIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 import { ChannelType, Permission, type Invite, type User } from "@/gen/fuwa/v1/types_pb";
 import { deleteInvite, listInvites, run } from "@/fuwa/actions";
@@ -195,8 +195,8 @@ function Row({
         <span className="h-1 overflow-hidden rounded-full bg-muted">
           <motion.span
             className="block h-full rounded-full bg-primary"
-            initial={{ width: 0 }}
-            animate={{ width: invite.maxUses ? `${share * 100}%` : "100%", opacity: invite.maxUses ? 1 : 0.25 }}
+            initial={{ x: "-100%" }}
+            animate={{ x: invite.maxUses ? `${share * 100 - 100}%` : "0%", opacity: invite.maxUses ? 1 : 0.25 }}
             transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           />
         </span>

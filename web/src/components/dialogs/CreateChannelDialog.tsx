@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon, ShieldCheckIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { ChannelType, createChannel } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";

@@ -1,6 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { ArrowUpRightIcon, LockIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { Private } from "@/components/Private";
 import { SPRING } from "@/components/motion";

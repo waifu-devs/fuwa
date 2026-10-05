@@ -1,5 +1,5 @@
 import { ArchiveIcon, BellIcon, BellOffIcon, CornerDownRightIcon, LockIcon, LockOpenIcon, MessagesSquareIcon, SearchIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Channel, Member, User } from "@/gen/fuwa/v1/types_pb";
 import { archived, following, search, unreadIn, type Organized, type SecureThread } from "@/e2ee/threads";

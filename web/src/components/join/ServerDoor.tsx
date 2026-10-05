@@ -1,5 +1,5 @@
 import { BadgeCheckIcon, ClipboardPenIcon, HourglassIcon, ScrollTextIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { SPRING } from "@/components/motion";
 import { useI18n } from "@/i18n/react";

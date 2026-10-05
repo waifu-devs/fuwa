@@ -1,5 +1,5 @@
 import { CheckIcon, ImagePlusIcon, LoaderCircleIcon, SmilePlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { Emoji as EmojiT } from "@/gen/fuwa/v1/types_pb";
@@ -164,9 +164,9 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
                 className={cn("relative flex items-center gap-3 overflow-hidden rounded-2xl border p-3", p.error && "border-destructive/50 bg-destructive/5")}
               >
                 <motion.span
-                  className="absolute inset-y-0 left-0 bg-primary/10"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${p.sent * 100}%` }}
+                  className="absolute inset-0 bg-primary/10"
+                  initial={{ x: "-100%" }}
+                  animate={{ x: `${p.sent * 100 - 100}%` }}
                   transition={{ ease: "easeOut" }}
                 />
                 <img src={p.preview} alt="" className="relative size-10 object-contain" />

@@ -1,5 +1,5 @@
 import { CheckIcon, EyeIcon, EyeOffIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useId, type ReactNode } from "react";
 import { SPRING } from "@/components/motion";
 import { Input } from "@/components/ui/input";

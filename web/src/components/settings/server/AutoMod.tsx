@@ -20,7 +20,7 @@ import {
   TypeIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { AutoModProvider } from "@/gen/fuwa/v1/automod_pb";
 import {

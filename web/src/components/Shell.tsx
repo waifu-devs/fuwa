@@ -1,5 +1,5 @@
 import { Outlet, useParams, useRouterState } from "@tanstack/react-router";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { UpdateReady } from "@/components/UpdateReady";

@@ -10,7 +10,7 @@ import {
   ShieldOffIcon,
   SmartphoneIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { encode } from "uqr";
 import { disableTwoFactor, enableTwoFactor, getTwoFactor, regenerateBackupCodes, run, setUpTwoFactor } from "@/fuwa/actions";
@@ -286,7 +286,7 @@ function Steps({ step }: { step: number }) {
           </span>
           {n < STEPS.length - 1 && (
             <span className="h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-muted">
-              <motion.span className="block h-full rounded-full bg-primary" initial={false} animate={{ width: n < step ? "100%" : "0%" }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} />
+              <motion.span className="block h-full rounded-full bg-primary" initial={false} animate={{ x: n < step ? "0%" : "-100%" }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} />
             </span>
           )}
         </li>

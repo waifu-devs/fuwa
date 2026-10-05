@@ -1,5 +1,5 @@
 import { CalendarIcon, ClockIcon, HashIcon, PaperclipIcon, SearchIcon, UserIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useFuwa } from "@/fuwa/store";
 import { closeSearch, openSearch, runSearch, searchableChannel, searchPlace, useSearch } from "@/fuwa/search";

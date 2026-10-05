@@ -1,5 +1,5 @@
 import { PaperclipIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useRef, useSyncExternalStore } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import { SPRING } from "@/components/motion";

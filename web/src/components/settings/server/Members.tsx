@@ -11,7 +11,7 @@ import {
   SearchIcon,
   UsersIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState } from "react";
 import type { Member } from "@/gen/fuwa/v1/types_pb";
 import { useInstance, useRoles } from "@/fuwa/hooks";

@@ -15,7 +15,7 @@ import {
   WebhookIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { ChannelType, type Channel, type User, type Webhook } from "@/gen/fuwa/v1/types_pb";
 import { createWebhook, deleteWebhook, listWebhooks, resetWebhookToken, run, testWebhook, updateWebhook, webhookUrl } from "@/fuwa/actions";

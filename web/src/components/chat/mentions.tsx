@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { createContext, use, useMemo, type ReactNode } from "react";
 import type { Emoji, Member, Role, User } from "@/gen/fuwa/v1/types_pb";
 import { EmojiImage } from "@/components/EmojiImage";

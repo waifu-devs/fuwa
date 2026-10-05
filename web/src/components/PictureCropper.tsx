@@ -1,5 +1,5 @@
 import { CheckIcon, MoveIcon, RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
 import { EASE_OUT, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";

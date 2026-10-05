@@ -1,5 +1,5 @@
 import { BuildingIcon, CalendarClockIcon, CalendarDaysIcon, InfinityIcon, ShieldCheckIcon, UserCheckIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SsoProtocol, type IdentityProvider, type ServerSso, type SsoIdentity } from "@/gen/fuwa/v1/sso_pb";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -126,8 +126,8 @@ export function SingleSignOn({ instanceKey, server }: { instanceKey: string; ser
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
             <motion.div
               className="h-full rounded-full bg-primary"
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min(100, (Number(saved.signedInMembers) / Math.max(1, Number(server.memberCount))) * 100)}%` }}
+              initial={{ x: "-100%" }}
+              animate={{ x: `${Math.min(100, (Number(saved.signedInMembers) / Math.max(1, Number(server.memberCount))) * 100) - 100}%` }}
               transition={{ type: "spring", stiffness: 120, damping: 20, delay: 0.2 }}
             />
           </div>

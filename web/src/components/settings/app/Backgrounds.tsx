@@ -1,5 +1,5 @@
 import { PaletteIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { SPRING } from "@/components/motion";
 import { BackdropForm } from "@/components/settings/app/BackdropForm";
 import { ThemePreview } from "@/components/settings/app/ThemePreview";

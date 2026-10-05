@@ -1,5 +1,5 @@
 import { BanIcon, CheckIcon, ClockIcon, LoaderCircleIcon, ShieldOffIcon, UserCheckIcon, UserMinusIcon, UserPlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { GetRelationshipResponse } from "@/gen/fuwa/v1/friend_pb";
 import type { User } from "@/gen/fuwa/v1/types_pb";

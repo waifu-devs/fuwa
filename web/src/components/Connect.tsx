@@ -11,7 +11,7 @@ import {
   SparklesIcon,
   GlobeIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
 import { probe, run, signIn, signUp, startLinkedSignIn, startSsoSignIn, verifyTwoFactor } from "@/fuwa/actions";

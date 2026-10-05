@@ -1,5 +1,5 @@
 import { AudioLinesIcon, CheckIcon, ChevronDownIcon, HeadphonesIcon, KeyboardIcon, MicIcon, PlayIcon, SquareIcon, VideoIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
@@ -232,16 +232,14 @@ function Meter({ level, threshold, open }: { level: number; threshold?: number; 
   return (
     <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={0} aria-valuenow={Math.round(level)} aria-label={t("appsettings.voice.micLevel")}>
       <motion.div
-        className={cn("absolute inset-y-0 left-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
-        animate={{ width: `${meterAt(level) * 100}%` }}
+        className={cn("absolute inset-0 rounded-full transition-colors duration-150", open ? "bg-[#3ba55d]" : "bg-primary/60")}
+        animate={{ x: `${meterAt(level) * 100 - 100}%` }}
         transition={{ type: "spring", stiffness: 900, damping: 40 }}
       />
       {threshold !== undefined && (
-        <motion.div
-          className="absolute inset-y-0 w-0.5 bg-foreground/70"
-          animate={{ left: `${meterAt(threshold) * 100}%` }}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        />
+        <motion.div className="absolute inset-0" animate={{ x: `${meterAt(threshold) * 100}%` }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+          <div className="absolute inset-y-0 left-0 w-0.5 bg-foreground/70" />
+        </motion.div>
       )}
     </div>
   );

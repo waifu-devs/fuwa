@@ -1,5 +1,5 @@
 import { DownloadIcon, EyeIcon, LoaderCircleIcon, LockKeyholeIcon, PlayIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import type { FileRef } from "@/e2ee/vault";

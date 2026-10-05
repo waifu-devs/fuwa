@@ -1,5 +1,5 @@
 import { ChevronDownIcon, InfoIcon, PlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";

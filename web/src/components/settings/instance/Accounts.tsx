@@ -14,7 +14,7 @@ import {
   ShieldIcon,
   ShieldOffIcon,
   UsersIcon, BuildingIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { AccountFilter, type AccountSummary, type AccountTotals, type ListAccountsResponse } from "@/gen/fuwa/v1/admin_pb";
 import { AccountKind } from "@/gen/fuwa/v1/types_pb";

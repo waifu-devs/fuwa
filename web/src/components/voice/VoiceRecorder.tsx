@@ -1,5 +1,5 @@
 import { MicIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { micProblem } from "@/calls/audio";
 import { SPRING } from "@/components/motion";

@@ -18,7 +18,7 @@ import {
   UnlinkIcon,
   UsersIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { InstanceServer } from "@/gen/fuwa/v1/admin_pb";
 import { SharedConnectionState, type SharedConnection } from "@/gen/fuwa/v1/channel_pb";
@@ -278,8 +278,8 @@ function ServerRow({
         <span className="absolute inset-x-3 bottom-0 h-0.5 overflow-hidden rounded-full bg-muted/60">
           <motion.span
             className={cn("block h-full rounded-full", full ? "bg-amber-500" : "bg-primary/70")}
-            initial={{ width: 0 }}
-            animate={{ width: `${Math.max(2, share * 100)}%` }}
+            initial={{ x: "-100%" }}
+            animate={{ x: `${Math.max(2, share * 100) - 100}%` }}
             transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: 0.1 + Math.min(index, 14) * 0.03 }}
           />
         </span>
@@ -617,12 +617,12 @@ function MoveRegion({
                 <span className="truncate">{here}</span>
                 <span className="relative h-px min-w-12 flex-1 bg-border">
                   <motion.span
-                    className="absolute top-1/2 -translate-y-1/2 text-primary"
-                    initial={{ left: "0%" }}
-                    animate={move.pending ? { left: ["0%", "88%"], opacity: [0, 1, 1, 0] } : { left: "44%" }}
+                    className="absolute inset-0"
+                    initial={{ x: "0%" }}
+                    animate={move.pending ? { x: ["0%", "88%"], opacity: [0, 1, 1, 0] } : { x: "44%" }}
                     transition={move.pending ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : SPRING}
                   >
-                    <PlaneIcon className="size-4" />
+                    <PlaneIcon className="absolute top-1/2 left-0 size-4 -translate-y-1/2 text-primary" />
                   </motion.span>
                 </span>
                 <span className="truncate text-primary">{target.name}</span>
@@ -680,9 +680,9 @@ function ExportButton({ instanceKey, serverId }: { instanceKey: string; serverId
       <AnimatePresence>
         {working && (
           <motion.span
-            className="absolute inset-y-0 left-0 bg-primary/20"
-            initial={{ width: 0 }}
-            animate={{ width: `${Math.max(4, progress * 100)}%` }}
+            className="absolute inset-0 bg-primary/20"
+            initial={{ x: "-100%" }}
+            animate={{ x: `${Math.max(4, progress * 100) - 100}%` }}
             exit={{ opacity: 0 }}
             transition={SPRING}
           />

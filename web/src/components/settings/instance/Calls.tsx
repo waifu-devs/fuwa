@@ -1,5 +1,5 @@
 import { AudioLinesIcon, KeyRoundIcon, RadioTowerIcon, ServerIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import type { InstanceConfig, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import { usePrivateField } from "@/components/Private";
 import { Input } from "@/components/ui/input";

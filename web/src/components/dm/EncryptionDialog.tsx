@@ -1,5 +1,5 @@
 import { BadgeCheckIcon, CheckIcon, CopyIcon, LaptopIcon, ShieldAlertIcon, SmartphoneIcon, TabletIcon, TerminalIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { Conversation, Device } from "@/gen/fuwa/v1/dm_pb";
 import { verifyDm } from "@/fuwa/dms";

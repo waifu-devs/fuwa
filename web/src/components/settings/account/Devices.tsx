@@ -1,6 +1,6 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { LaptopIcon, LogOutIcon, ShieldCheckIcon, SmartphoneIcon, TabletIcon, TerminalIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@/gen/fuwa/v1/account_pb";
 import { listSessions, revokeOtherSessions, revokeSession, run } from "@/fuwa/actions";

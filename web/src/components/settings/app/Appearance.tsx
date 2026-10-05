@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
 import { AlignJustifyIcon, MessageSquareTextIcon, MonitorIcon, Rows2Icon, Rows3Icon, Rows4Icon, SnailIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { UserSchema } from "@/gen/fuwa/v1/types_pb";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";

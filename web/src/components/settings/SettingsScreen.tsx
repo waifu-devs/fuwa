@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeftIcon, ChevronRightIcon, CornerDownRightIcon, SearchIcon, SearchXIcon, XIcon, type LucideIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Count, EASE_OUT, SPRING } from "@/components/motion";
 import { useI18n } from "@/i18n/react";

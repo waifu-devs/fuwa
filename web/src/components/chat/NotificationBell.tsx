@@ -1,5 +1,5 @@
 import { BellIcon, BellOffIcon, SettingsIcon } from "lucide-react";
-import { motion, useAnimationControls } from "motion/react";
+import { m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef } from "react";
 import { NotificationLevel, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions";

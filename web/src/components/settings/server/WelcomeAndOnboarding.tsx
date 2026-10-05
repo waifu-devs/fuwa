@@ -1,5 +1,5 @@
 import { CheckIcon, ClipboardPenIcon, MonitorIcon, PaletteIcon, PartyPopperIcon, SendIcon, SmartphoneIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { type JoinForm, type Onboarding, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { getJoinForm, getOnboarding, getWelcomeScreen, run, setOnboarding, setWelcomeScreen, updateServer } from "@/fuwa/actions";

@@ -1,5 +1,5 @@
 import { BotIcon, ExternalLinkIcon, LoaderCircleIcon, SlashIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Command, ListCommandsResponse } from "@/gen/fuwa/v1/command_pb";

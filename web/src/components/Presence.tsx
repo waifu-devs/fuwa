@@ -1,6 +1,6 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { ExternalLinkIcon, Gamepad2Icon, HeadphonesIcon, RadioIcon, TrophyIcon, TvIcon, type LucideIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { ActivityKind, PresenceStatus, type Activity, type Presence } from "@/gen/fuwa/v1/presence_pb";
 import { usePresence } from "@/fuwa/presence";

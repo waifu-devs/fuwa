@@ -36,7 +36,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
 import { AccountKind, ChannelType, NotificationLevel, Permission, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
@@ -811,8 +811,8 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                 <motion.div
                   className={cn("h-full rounded-full", r.warn ? "bg-amber-500" : "bg-primary")}
-                  initial={{ width: 0 }}
-                  animate={{ width: limit ? `${share * 100}%` : "100%", opacity: limit ? 1 : 0.25 }}
+                  initial={{ x: "-100%" }}
+                  animate={{ x: limit ? `${share * 100 - 100}%` : "0%", opacity: limit ? 1 : 0.25 }}
                   transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: 0.1 + n * 0.05 }}
                 />
               </div>

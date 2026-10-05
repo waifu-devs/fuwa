@@ -1,6 +1,6 @@
 import { clone, create } from "@bufbuild/protobuf";
 import { CheckIcon, FlaskConicalIcon, GlobeLockIcon, KeyRoundIcon, LoaderCircleIcon, PlusIcon, ShieldAlertIcon, SparklesIcon, Trash2Icon, TriangleAlertIcon, WebhookIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import {
   AutoModProviderSettingsSchema,

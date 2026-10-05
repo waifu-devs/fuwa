@@ -1,5 +1,5 @@
 import { AtSignIcon, ShieldIcon, SmileIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Permission, type Channel, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useRoles } from "@/fuwa/hooks";

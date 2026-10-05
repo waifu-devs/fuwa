@@ -1,5 +1,5 @@
 import { ArrowRightIcon, CrownIcon, LoaderCircleIcon, SearchIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState, type FormEvent } from "react";
 import type { Member, Server } from "@/gen/fuwa/v1/types_pb";
 import { transferOwnership } from "@/fuwa/actions";

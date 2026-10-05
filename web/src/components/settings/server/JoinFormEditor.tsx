@@ -1,5 +1,5 @@
 import { AlignLeftIcon, GripVerticalIcon, MinusIcon, PlusIcon, ScrollTextIcon, Trash2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { getJoinForm, run, setJoinForm, type QuestionDraft } from "@/fuwa/actions";

@@ -1,5 +1,5 @@
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, PencilIcon, TimerOffIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Member } from "@/gen/fuwa/v1/types_pb";
 import { banMember, kickMember, setNickname, timeOutMember } from "@/fuwa/actions";

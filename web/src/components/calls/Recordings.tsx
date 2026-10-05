@@ -1,5 +1,5 @@
 import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, HourglassIcon, LoaderCircleIcon, MonitorIcon, ServerIcon, Trash2Icon, VideoIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { RecordingPart, type Recording, type RecordingTrack } from "@/gen/fuwa/v1/call_pb";

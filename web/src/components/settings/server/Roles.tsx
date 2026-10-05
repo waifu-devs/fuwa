@@ -12,7 +12,7 @@ import {
   UserPlusIcon,
   UsersIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Permission, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
 import { createRole, deleteRole, giveRole, reorderRoles, run, takeRole, updateRole } from "@/fuwa/actions";

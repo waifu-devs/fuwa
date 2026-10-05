@@ -1,6 +1,6 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { CheckIcon, EyeIcon, PencilLineIcon, PipetteIcon, SparklesIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { loadProfile, run, updateProfile, type ProfilePatch } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";

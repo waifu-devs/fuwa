@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import { useNavigate } from "@tanstack/react-router";
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, LockKeyholeIcon, MessageCircleIcon, type LucideIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { loadProfile, run } from "@/fuwa/actions";

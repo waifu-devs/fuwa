@@ -1,6 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type { User, VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { Permission } from "@/gen/fuwa/v1/types_pb";

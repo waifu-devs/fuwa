@@ -1,5 +1,5 @@
 import { UsersIcon } from "lucide-react";
-import { motion, useTransform, type MotionValue } from "motion/react";
+import { m as motion, useTransform, type MotionValue } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { ServerIcon } from "@/components/Icons";
 import { Count } from "@/components/motion";

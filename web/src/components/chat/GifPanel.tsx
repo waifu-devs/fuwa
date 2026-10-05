@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ClockIcon, LoaderCircleIcon, SearchIcon, StarIcon, TrendingUpIcon, UploadIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GifCategory, GifResult } from "@/gen/fuwa/v1/gif_pb";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";

@@ -12,7 +12,7 @@ import {
   useRole,
 } from "@floating-ui/react";
 import { CalendarClockIcon, CheckIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { SPRING } from "@/components/motion";
 import { type Key, useI18n } from "@/i18n/react";

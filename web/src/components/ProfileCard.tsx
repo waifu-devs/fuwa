@@ -1,5 +1,5 @@
 import { CalendarHeartIcon, CrownIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import type { ReactNode } from "react";
 import type { Member, Profile, User } from "@/gen/fuwa/v1/types_pb";
 import { hue, UserAvatar } from "@/components/Icons";

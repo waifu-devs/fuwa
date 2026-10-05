@@ -1,5 +1,5 @@
 import { CheckIcon, InboxIcon, LoaderCircleIcon, SparklesIcon, UserCheckIcon, UserXIcon } from "lucide-react";
-import { AnimatePresence, motion, type Variants } from "motion/react";
+import { AnimatePresence, m as motion, type Variants } from "motion/react";
 import { useEffect, useState, type Ref } from "react";
 import type { Application } from "@/gen/fuwa/v1/types_pb";
 import { listApplications, reviewApplication, run } from "@/fuwa/actions";
