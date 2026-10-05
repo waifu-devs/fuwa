@@ -177,6 +177,8 @@ pub struct Prefs {
     pub language: Option<String>,
     /// Searches made lately, newest first, by `instance/account/server` (see `search::place`).
     pub recent_searches: std::collections::BTreeMap<String, Vec<String>>,
+    /// GIFs sent lately, newest first, by instance (`core::gifs`).
+    pub recent_gifs: std::collections::BTreeMap<String, Vec<crate::core::gifs::KeptGif>>,
     /// Shows "Copy … ID" on servers, channels, people and messages.
     pub developer_mode: bool,
 }
@@ -218,6 +220,7 @@ impl Default for Prefs {
             skin_tone: 0,
             language: None,
             recent_searches: Default::default(),
+            recent_gifs: Default::default(),
             developer_mode: false,
         }
     }
@@ -273,6 +276,11 @@ impl Prefs {
             list.truncate(crate::core::search::MAX_RECENT);
         }
         self.recent_searches.retain(|_, list| !list.is_empty());
+        for list in self.recent_gifs.values_mut() {
+            list.retain(|g| !g.url.is_empty() && !g.seal.is_empty());
+            list.truncate(crate::core::gifs::RECENT);
+        }
+        self.recent_gifs.retain(|_, list| !list.is_empty());
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }
