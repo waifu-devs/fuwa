@@ -492,7 +492,14 @@ impl ServerDb {
 
     /// The sequence of the last event committed, or 0 for none.
     pub async fn head_sequence(&self) -> Result<i64> {
-        self.stored_head().await
+        // Under the lock a write holds from COMMIT until its rules are
+        // marked changed: a stream that starts from this head and then asks
+        // for the rules gets them with every change up to it.
+        let head = self.head.lock().await;
+        match *head {
+            Some(last) => Ok(last),
+            None => self.stored_head().await,
+        }
     }
 
     /// The server's rules as committed now. Read from the file again only
@@ -2146,5 +2153,69 @@ mod tests {
             assert!(*now != *before, "{sql}");
             before = now;
         }
+    }
+
+    /// A change is in the file from its COMMIT, and the server's rules are
+    /// marked changed just after. A stream that starts from the head in
+    /// between gets that change in the rules it then works out its access
+    /// from: otherwise the change's event, at or below the head, is skipped
+    /// and the stream keeps the access from before it (a new channel never
+    /// shows).
+    #[tokio::test]
+    async fn a_head_read_mid_commit_comes_with_the_changed_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let sdb = Arc::new(ServerDb {
+            id: "s".into(),
+            path: path.clone(),
+            db: Arc::new(db::open(&path, None, MIGRATIONS).await.unwrap()),
+            head: Mutex::new(None),
+            unfolded: AtomicU32::new(0),
+            folding: AtomicBool::new(false),
+            hub: Arc::new(Hub::default()),
+            frozen: AtomicBool::new(false),
+            rules_changed: AtomicU64::new(0),
+            rules: Mutex::new(None),
+        });
+        sdb.write("owner", async |conn, out| {
+            conn.execute_batch(
+                "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, system_channel_id, created_at, updated_at, region)
+                 VALUES ('s', 'S', '', '', 'owner', 0, NULL, 0, 0, '');
+                 INSERT INTO roles (id, name, position, permissions, created_at, updated_at) VALUES ('s', '@everyone', 0, 1, 0, 0);
+                 INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('c1', 'general', 1, 0, 0);",
+            )
+            .await?;
+            out.push(Payload::ServerUpdated(Default::default()));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(sdb.rules().await.unwrap().rules.channels.len(), 1);
+
+        // A channel made as `append_and_commit` makes it: committed under the
+        // head's lock with its event, and marked as a change to the rules after.
+        let mut head = sdb.head.lock().await;
+        let last = sdb.stored_head().await.unwrap();
+        *head = None;
+        sdb.read()
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('c2', 'plans', 1, 0, 0);
+                 INSERT INTO events (id, actor_id, created_at, payload) VALUES ('e2', 'owner', 0, x'');",
+            )
+            .await
+            .unwrap();
+        // A stream starts from the head in between.
+        let starting = tokio::spawn({
+            let sdb = sdb.clone();
+            async move { (sdb.head_sequence().await.unwrap(), sdb.rules().await.unwrap()) }
+        });
+        tokio::task::yield_now().await;
+        sdb.rules_changed.fetch_add(1, Ordering::AcqRel);
+        *head = Some(last + 1);
+        drop(head);
+        let (from, rules) = starting.await.unwrap();
+        assert_eq!(from, last + 1);
+        assert!(rules.rules.channels.contains_key("c2"), "starts from the change with rules from before it");
     }
 }
