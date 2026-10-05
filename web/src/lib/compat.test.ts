@@ -20,7 +20,8 @@ test("the copy in src/gen is the feature list itself", () => {
   const source = readFileSync(new URL("../../../proto/fuwa/v1/features.json", import.meta.url), "utf8");
   const copy = readFileSync(new URL("../gen/features.json", import.meta.url), "utf8");
   assert.equal(copy, source, "run pnpm generate");
-  assert.equal(CLIENT_DATE, FEATURES.map((f) => f.date).sort().at(-1));
+  assert.ok(FEATURES.some((f) => f.date === CLIENT_DATE), "CLIENT_DATE is one of the features' dates");
+  assert.ok(FEATURES.every((f) => f.date <= CLIENT_DATE), "no feature is newer than CLIENT_DATE");
 });
 
 test("a newer instance's unknown features need an update; the rest keep working", () => {

@@ -563,8 +563,10 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
     assert!(metadata.text().await.unwrap().contains(&sp.saml_acs_url));
 
     // A server's provider can't send the instance to private addresses.
-    let local = c.sso.update_server_sso(authed(&owner, update(Some(oidc_provider("http://127.0.0.1:9")), None))).await;
-    assert!(local.is_err() || start_server_sso(&mut c, &ana, &id).await.is_err());
+    c.sso.update_server_sso(authed(&owner, update(Some(oidc_provider("https://127.0.0.1:9")), None))).await.unwrap();
+    let local = start_server_sso(&mut c, &ana, &id).await.unwrap_err();
+    assert_eq!(local.code(), Code::FailedPrecondition);
+    assert!(local.message().contains("won't fetch"), "{}", local.message());
     c.sso.update_server_sso(authed(&owner, update(Some(saml_provider()), None))).await.unwrap();
 
     // The owner can require it without signing in; everyone else must.
