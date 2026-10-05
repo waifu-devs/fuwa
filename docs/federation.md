@@ -263,6 +263,14 @@ On "Other instances" in Instance settings (`GetFederation`,
   instance vouches for its own people, so it could vote under as many of
   its own accounts as it has; only the pace and keeping people out bound
   that, as for its messages.
+- **Custom emoji** cross as pictures on their own server's instance, which
+  the reader's instance fetches through its proxy, as for avatars. A
+  guest's own server's emoji go with its message (`GuestSend.emojis`, and
+  in `GuestEdit` and `GuestPoll`), each named by its server under that
+  instance's address and kept only with a picture on that instance; a home
+  too old for them shows their names. The home's emoji go out with each
+  message that uses them, and to the picker with `GuestEmojis` (at most
+  1000), which counts toward the home's pace for that server like a send.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.

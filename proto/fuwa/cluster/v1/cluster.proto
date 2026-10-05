@@ -789,6 +789,8 @@ message SharedCall {
     GuestVote vote = 20;
     GuestEndPoll end_poll = 21;
     GuestPollVoters voters = 22;
+    // To the home: its custom emoji, for the guest's picker.
+    GuestEmojis emojis = 23;
   }
   // Set only by the instance that received the call from another instance
   // (whatever the other instance sent there): that instance's origin and
@@ -812,6 +814,8 @@ message SharedReply {
   // For GuestVote and GuestEndPoll: the poll as the guest sees it, with
   // their own picks.
   fuwa.v1.Poll poll = 9;
+  // For GuestEmojis.
+  repeated fuwa.v1.Emoji emojis = 10;
 }
 
 message AdminShares {}
@@ -862,6 +866,10 @@ message GuestSend {
   // From a guest on another instance: one for each of attachments, in
   // order, for the home to fetch it with.
   repeated SharedFile files = 6;
+  // Custom emoji of the guest's own server the content uses, checked there
+  // (the home doesn't have them). A home that predates this shows them as
+  // their names.
+  repeated fuwa.v1.Emoji emojis = 7;
 }
 
 // A file a guest server on another instance sends into a shared channel:
@@ -877,6 +885,8 @@ message GuestPoll {
   string content = 2;
   fuwa.v1.NewPoll poll = 3;
   string reply_to_id = 4;
+  // As in GuestSend.
+  repeated fuwa.v1.Emoji emojis = 5;
 }
 
 message GuestVote {
@@ -915,6 +925,13 @@ message GuestEdit {
   Guest guest = 1;
   string message_id = 2;
   string content = 3;
+  // As in GuestSend: ones the new text uses that the message didn't have.
+  repeated fuwa.v1.Emoji emojis = 4;
+}
+
+// The home server's custom emoji, for a guest's picker in the channel.
+message GuestEmojis {
+  Guest guest = 1;
 }
 
 message GuestDelete {

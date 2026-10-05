@@ -22,6 +22,9 @@ service EmojiService {
 
 message ListEmojisRequest {
   string server_id = 1;
+  // A channel this server shows from another server: that server's emoji
+  // instead, for the picker there. Any other channel is ignored.
+  string channel_id = 2;
 }
 
 message ListEmojisResponse {

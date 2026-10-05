@@ -5291,7 +5291,7 @@ async fn custom_emoji_and_the_welcome_screen() {
     assert_eq!(fetch(&instance, &second).await.0, reqwest::StatusCode::NOT_FOUND);
     let listed = c
         .emojis
-        .list_emojis(authed(&member, pb::ListEmojisRequest { server_id: server.id.clone() }))
+        .list_emojis(authed(&member, pb::ListEmojisRequest { server_id: server.id.clone(), ..Default::default() }))
         .await
         .unwrap()
         .into_inner()
@@ -8929,6 +8929,209 @@ async fn polls_cross_instances() {
     assert_eq!(paced.expect("the pace never held").code(), Code::ResourceExhausted);
     a.stop().await;
     b.stop().await;
+}
+
+async fn add_emoji(
+    c: &mut Clients,
+    instance: &Instance,
+    token: &str,
+    server_id: &str,
+    name: &str,
+    seed: u8,
+) -> pb::Emoji {
+    let url = upload(c, instance, token, pb::MediaPurpose::Emoji, png(200, seed)).await;
+    c.emojis
+        .create_emoji(authed(token, pb::CreateEmojiRequest { server_id: server_id.into(), name: name.into(), url }))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap()
+}
+
+async fn emojis_in(c: &mut Clients, token: &str, server_id: &str, channel_id: &str) -> Vec<String> {
+    let request = pb::ListEmojisRequest { server_id: server_id.into(), channel_id: channel_id.into() };
+    let listed = c.emojis.list_emojis(authed(token, request)).await.unwrap().into_inner().emojis;
+    listed.into_iter().map(|e| e.name).collect()
+}
+
+async fn edit_in(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    id: &str,
+    content: &str,
+) -> pb::Message {
+    let request = pb::UpdateMessageRequest {
+        server_id: server_id.into(),
+        message_id: id.into(),
+        content: content.into(),
+        channel_id: channel_id.into(),
+        ..Default::default()
+    };
+    c.messages.update_message(authed(token, request)).await.unwrap().into_inner().message.unwrap()
+}
+
+fn emoji_names(m: &pb::Message) -> Vec<&str> {
+    m.emojis.iter().map(|e| e.name.as_str()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn emoji_in_shared_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    let third = create_server(&mut c, &rin, "Third", true).await.id;
+    join(&mut c, &rin, &guest).await;
+    let wave = add_emoji(&mut c, &instance, &juan, &home, "wave", 1).await;
+    let blob = add_emoji(&mut c, &instance, &mika, &guest, "blob", 2).await;
+    let cat = add_emoji(&mut c, &instance, &rin, &third, "cat", 3).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let lounge = new_channel(&mut c, &mika, &guest, "lounge", pb::ChannelType::Text).await;
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let mut at_guest = events_of(&mut c, &mika, &guest).await;
+
+    // The home's emoji show to guests, in pages and live.
+    let hi = send(&mut c, &juan, &home, &dev.id, &format!("hi <:wave:{}>", wave.id)).await.unwrap();
+    assert!(hi.emojis.is_empty(), "the home's own aren't kept with the message");
+    let live = loop {
+        let event = next_event(&mut at_guest).await;
+        if let Some(pb::event::Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = event.payload
+            && m.id == hi.id
+        {
+            break m;
+        }
+    };
+    assert_eq!(emoji_names(&live), ["wave"]);
+    assert!(live.emojis[0].creator_id.is_empty() && live.emojis[0].url == wave.url);
+    let listed = messages(&mut c, &rin, &guest, &shown.id).await;
+    assert_eq!(emoji_names(listed.iter().find(|m| m.id == hi.id).unwrap()), ["wave"]);
+
+    // A guest writes their own server's emoji and the home's; another
+    // server's they belong to goes as its name.
+    let text = format!("<:blob:{}> <:wave:{}> <:cat:{}>", blob.id, wave.id, cat.id);
+    let request = pb::SendMessageRequest {
+        server_id: guest.clone(),
+        channel_id: shown.id.clone(),
+        content: text,
+        emojis: vec![cat.clone()],
+        ..Default::default()
+    };
+    let theirs = c.messages.send_message(authed(&rin, request)).await.unwrap().into_inner().message.unwrap();
+    assert_eq!(emoji_names(&theirs), ["blob", "wave"]);
+    let kept = messages(&mut c, &juan, &home, &dev.id).await.into_iter().find(|m| m.id == theirs.id).unwrap();
+    assert_eq!(emoji_names(&kept), ["blob"], "the home keeps only the guest server's");
+    assert_eq!(kept.emojis[0].url, blob.url);
+    let listed = messages(&mut c, &mika, &guest, &shown.id).await;
+    assert_eq!(emoji_names(listed.iter().find(|m| m.id == theirs.id).unwrap()), ["blob", "wave"]);
+
+    // An edit keeps what the new text still uses.
+    let edited = edit_in(&mut c, &rin, &guest, &shown.id, &theirs.id, &format!("<:wave:{}> only", wave.id)).await;
+    assert_eq!(emoji_names(&edited), ["wave"]);
+    let kept = messages(&mut c, &juan, &home, &dev.id).await.into_iter().find(|m| m.id == theirs.id).unwrap();
+    assert!(kept.emojis.is_empty());
+    let edited = edit_in(&mut c, &rin, &guest, &shown.id, &theirs.id, &format!("<:blob:{}> back", blob.id)).await;
+    assert_eq!(emoji_names(&edited), ["blob"]);
+
+    // The picker in the shared channel offers the home's emoji; anywhere
+    // else a channel changes nothing.
+    assert_eq!(emojis_in(&mut c, &rin, &guest, &shown.id).await, ["wave"]);
+    assert_eq!(emojis_in(&mut c, &rin, &guest, &lounge.id).await, ["blob"]);
+    assert_eq!(emojis_in(&mut c, &rin, &guest, "").await, ["blob"]);
+    assert_eq!(emojis_in(&mut c, &juan, &home, &dev.id).await, ["wave"]);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn emoji_cross_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, _, _) = sign_up(&mut ca, "juan").await;
+    let (mika, _, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let wave = add_emoji(&mut ca, &a, &juan, &home, "wave", 1).await;
+    let blob = add_emoji(&mut cb, &b, &mika, &guest, "blob", 2).await;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+    // Each instance's people load the other's pictures through their own.
+    let through = |origin: &str| format!("{origin}/media/outside/");
+
+    let hi = send(&mut ca, &juan, &home, &dev.id, &format!("hi <:wave:{}>", wave.id)).await.unwrap();
+    let seen = messages(&mut cb, &mika, &guest, &shown.id).await.into_iter().find(|m| m.id == hi.id).unwrap();
+    assert_eq!(emoji_names(&seen), ["wave"]);
+    assert!(seen.emojis[0].url.starts_with(&through(&origin_b)), "{}", seen.emojis[0].url);
+
+    let theirs =
+        send(&mut cb, &mika, &guest, &shown.id, &format!("<:blob:{}> <:wave:{}>", blob.id, wave.id)).await.unwrap();
+    assert_eq!(emoji_names(&theirs), ["blob", "wave"]);
+    let kept = messages(&mut ca, &juan, &home, &dev.id).await.into_iter().find(|m| m.id == theirs.id).unwrap();
+    assert_eq!(emoji_names(&kept), ["blob"]);
+    assert!(kept.emojis[0].url.starts_with(&through(&origin_a)), "{}", kept.emojis[0].url);
+    assert_eq!(kept.emojis[0].server_id, format!("{guest}@{origin_b}"));
+
+    let picker = ListEmojisFor { server_id: &guest, channel_id: &shown.id };
+    let offered = picker.list(&mut cb, &mika).await;
+    assert_eq!(offered.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["wave"]);
+    assert!(offered[0].url.starts_with(&through(&origin_b)) && offered[0].creator_id.is_empty());
+    a.stop().await;
+    b.stop().await;
+}
+
+struct ListEmojisFor<'a> {
+    server_id: &'a str,
+    channel_id: &'a str,
+}
+
+impl ListEmojisFor<'_> {
+    async fn list(&self, c: &mut Clients, token: &str) -> Vec<pb::Emoji> {
+        let request = pb::ListEmojisRequest { server_id: self.server_id.into(), channel_id: self.channel_id.into() };
+        c.emojis.list_emojis(authed(token, request)).await.unwrap().into_inner().emojis
+    }
 }
 
 #[tokio::test]

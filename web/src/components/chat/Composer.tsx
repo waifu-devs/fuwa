@@ -158,7 +158,7 @@ export function Composer({
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
   const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && (!channel.shared || pollsShared);
   const [polling, setPolling] = useState(false);
-  const catalog = useCatalog(instanceKey, serverId);
+  const catalog = useCatalog(instanceKey, serverId, channel);
   const staged = useStaged(channelId);
   const where = { instanceKey, serverId, channelId };
 

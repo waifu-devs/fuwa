@@ -43,7 +43,7 @@ export function useMentionPicker(
 ) {
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? NO_MEMBERS);
   const roles = useRoles(instanceKey, serverId);
-  const catalog = useCatalog(instanceKey, serverId);
+  const catalog = useCatalog(instanceKey, serverId, channel);
   // Loads the standard set while the composer is up, so it's there for the first colon.
   const standard = useStandard();
   const tone = useSkinTone();

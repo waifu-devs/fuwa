@@ -1727,12 +1727,16 @@ pub async fn load_emojis(conn: &Connection, server_id: &str) -> Result<Vec<pb::E
 /// The server's emoji with these ids, the ones that exist.
 pub async fn load_emojis_by_id(conn: &Connection, server_id: &str, ids: &[String]) -> Result<Vec<pb::Emoji>> {
     let mut found = Vec::new();
-    for id in ids {
-        let sql = format!("SELECT {EMOJI_COLUMNS} FROM emojis WHERE id = ?1");
-        if let Some(emoji) = query_one(conn, &sql, [id.as_str()], emoji_row(server_id)).await? {
-            found.push(emoji);
-        }
+    for chunk in ids.chunks(100) {
+        let placeholders = (1..=chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let sql = format!("SELECT {EMOJI_COLUMNS} FROM emojis WHERE id IN ({placeholders})");
+        let values = chunk.iter().map(|id| turso::Value::from(id.as_str())).collect::<Vec<_>>();
+        found.extend(query_all(conn, &sql, values, emoji_row(server_id)).await?);
     }
+    // In the order asked for, as one at a time gave them.
+    let order: std::collections::HashMap<&str, usize> =
+        ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+    found.sort_by_key(|emoji| order.get(emoji.id.as_str()).copied());
     Ok(found)
 }
 
