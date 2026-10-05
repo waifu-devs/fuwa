@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { BellOffIcon, BotIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, RotateCcwIcon, TrophyIcon, VideoIcon, Volume2Icon, WebhookIcon } from "lucide-react";
+import { BellOffIcon, BotIcon, ChartColumnIcon, ChevronRightIcon, EllipsisIcon, EyeOffIcon, MessagesSquareIcon, Trash2Icon, MonitorUpIcon, PowerOffIcon, RadioTowerIcon, RotateCcwIcon, TrophyIcon, VideoIcon, Volume2Icon, WebhookIcon } from "lucide-react";
 import { AnimatePresence, LayoutGroup, m as motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { joinCall } from "@/calls/engine";
@@ -9,14 +9,17 @@ import { SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
 import { UserAvatar } from "@/components/Icons";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { loadFollowed, run, updateServer } from "@/fuwa/actions";
+import { endLiveTile, loadFollowed, run, updateServer } from "@/fuwa/actions";
+import { useAccess } from "@/fuwa/hooks";
 import { usePresenceSettings } from "@/fuwa/presence";
 import { notificationKey, useFuwa } from "@/fuwa/store";
 import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
+import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { useI18n } from "@/i18n/react";
 import { instanceHas } from "@/lib/compat";
 import { formatTime } from "@/lib/format";
-import { BIG_SERVER, collectTiles, kindNumbers, pickTiles, POLL_SOON_MS, shownKinds, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
+import { hasIn } from "@/lib/permissions";
+import { BIG_SERVER, collectTiles, kindNumbers, pickTiles, POLL_SOON_MS, removable, shownKinds, TILE_KINDS, type Tile, type TileKind } from "@/lib/live-tiles";
 import { hideTile, setServerQuiet, setTilesOn, useLiveTilesLocal } from "@/lib/live-tiles-store";
 import { toast } from "@/lib/ui";
 import { isMuted, useNow } from "@/lib/notifications";
@@ -194,7 +197,7 @@ function TileCard({ tile, index, instanceKey, serverId, now }: { tile: Tile; ind
             <span className="block truncate text-xs leading-4 text-muted-foreground">{body.line}</span>
           </span>
         </button>
-        <TileMenu tile={tile} serverId={serverId} />
+        <TileMenu tile={tile} instanceKey={instanceKey} serverId={serverId} />
       </div>
       {body.rows}
       <div className="flex items-center gap-2 px-2 pb-2">
@@ -361,8 +364,10 @@ function Sweep() {
   );
 }
 
-function TileMenu({ tile, serverId }: { tile: Tile; serverId: string }) {
+function TileMenu({ tile, instanceKey, serverId }: { tile: Tile; instanceKey: string; serverId: string }) {
   const { t } = useI18n();
+  const access = useAccess(instanceKey, serverId);
+  const remove = removable(tile, (channelId) => hasIn(access, channelId, Permission.MANAGE_MESSAGES)) ? tile : null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -381,6 +386,18 @@ function TileMenu({ tile, serverId }: { tile: Tile; serverId: string }) {
         <DropdownMenuItem onSelect={() => setServerQuiet(serverId, true)}>
           <BellOffIcon /> {t("tiles.strip.quiet")}
         </DropdownMenuItem>
+        {remove && (
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() =>
+              void run(endLiveTile(instanceKey, serverId, remove.channelId, remove.sourceId, remove.tileId)).catch((e: { message?: string }) =>
+                toast(e.message ?? t("tiles.strip.removeFailed")),
+              )
+            }
+          >
+            <Trash2Icon /> {t("tiles.strip.remove")}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => setTilesOn(false)}>
           <PowerOffIcon /> {t("tiles.strip.off")}

@@ -46,6 +46,9 @@ export type AppTile = Base & {
   /** Its picture, through the instance like every avatar. */
   avatarUrl: string;
   webhook: boolean;
+  /** The agent's or webhook's id and the app's own id for the tile, which a moderator's removal names. */
+  sourceId: string;
+  tileId: string;
   title: string;
   /** A short state, such as "67'" or "Half time". */
   status: string;
@@ -208,6 +211,8 @@ export function collectTiles(s: Sources, now: number): Tile[] {
         app: t.sourceName,
         avatarUrl: t.sourceAvatarUrl,
         webhook: t.sourceKind === WEBHOOK,
+        sourceId: t.sourceId,
+        tileId: t.id,
         title: c?.title ?? "",
         status: c?.status ?? "",
         live: !!c?.live,
@@ -252,6 +257,10 @@ export const TILE_KINDS: readonly TileKind[] = ["voice", "poll", "thread", "shar
 export function serverKinds(kinds: readonly number[] | undefined): Set<TileKind> {
   return new Set((kinds ?? []).flatMap((k) => (KIND_NUMBERS[k] ? [KIND_NUMBERS[k]] : [])));
 }
+
+/** Whether someone may take a tile down for everyone: an app's, in a channel where they manage messages. */
+export const removable = (tile: Tile, managesMessages: (channelId: string) => boolean): tile is AppTile =>
+  tile.kind === "app" && managesMessages(tile.channelId);
 
 /**
  * The kinds a server shows now. A server that never chose follows its size,

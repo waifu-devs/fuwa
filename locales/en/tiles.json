@@ -4,6 +4,8 @@
   "strip.hide": "Hide this one",
   "strip.quiet": "No live tiles in this server",
   "strip.off": "Turn live tiles off",
+  "strip.remove": "Remove for everyone",
+  "strip.removeFailed": "Couldn't remove the tile",
   "menu.show": "Live tiles",
   "menu.server": "Tiles for everyone here",
   "menu.bigServer": {

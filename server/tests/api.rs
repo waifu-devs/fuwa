@@ -10649,6 +10649,24 @@ async fn apps_keep_live_tiles_that_reach_only_who_can_see_them() {
     assert_eq!(log.entries.len(), 1);
     assert_eq!(log.entries[0].target_id, bot_id);
 
+    // A moderator's time-out quiets an agent's tiles as well as its messages.
+    let time_out = |seconds: i64| {
+        authed(
+            &juan,
+            pb::TimeOutMemberRequest {
+                server_id: sid.clone(),
+                user_id: bot_id.clone(),
+                seconds,
+                reason: String::new(),
+            },
+        )
+    };
+    c.servers.time_out_member(time_out(60)).await.unwrap();
+    let quiet = set_tile(&mut c, &bot, &sid, &general, "final", tile_content("Cup final", "4")).await.unwrap_err();
+    assert_eq!(quiet.code(), Code::PermissionDenied);
+    assert!(quiet.message().contains("timed out"), "says why, as for messages: {}", quiet.message());
+    c.servers.time_out_member(time_out(0)).await.unwrap();
+
     // An agent that may no longer send in a channel no longer shows tiles there.
     assert_eq!(tiles(&mut c, &rin, &sid).await, [(general.clone(), "final".to_string())]);
     set_permissions(&mut c, &juan, &sid, &general, vec![overwrite(&bot_id, T::Member, &[], &[P::SendMessages])])

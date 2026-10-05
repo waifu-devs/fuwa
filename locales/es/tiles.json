@@ -4,6 +4,8 @@
   "strip.hide": "Ocultar esta",
   "strip.quiet": "Sin tarjetas en vivo en este servidor",
   "strip.off": "Desactivar las tarjetas en vivo",
+  "strip.remove": "Quitar para todos",
+  "strip.removeFailed": "No se pudo quitar la tarjeta",
   "menu.show": "Tarjetas en vivo",
   "menu.server": "Tarjetas para todo el servidor",
   "menu.bigServer": {

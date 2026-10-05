@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Channel, LiveTile, Message, VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { collectTiles, fitApp, kindNumbers, pickTiles, serverKinds, shownKinds, type AppTile, type Sources, type Tile } from "./live-tiles.ts";
+import { collectTiles, fitApp, kindNumbers, pickTiles, removable, serverKinds, shownKinds, type AppTile, type Sources, type Tile } from "./live-tiles.ts";
 
 const NOW = 1_800_000_000_000;
 const ts = (ms: number) => ({ seconds: BigInt(Math.floor(ms / 1000)), nanos: (ms % 1000) * 1e6 }) as Message["createdAt"];
@@ -87,7 +87,7 @@ test("a shared channel is a tile once enough has happened in it", () => {
   assert.equal(tile?.kind === "shared" && tile.servers, 3);
 });
 
-const scoreboard: AppTile = { kind: "app", id: "s", channelId: "c", app: "Scorebot", avatarUrl: "", webhook: false, title: "Cup final", status: "67'", live: true, rows: [], progress: null, action: "", expiresAt: NOW + 60_000 };
+const scoreboard: AppTile = { kind: "app", id: "s", channelId: "c", app: "Scorebot", avatarUrl: "", webhook: false, sourceId: "bot", tileId: "s", title: "Cup final", status: "67'", live: true, rows: [], progress: null, action: "", expiresAt: NOW + 60_000 };
 
 test("the most urgent tiles show, up to the cap, without the hidden ones", () => {
   const tiles: Tile[] = [
@@ -118,6 +118,14 @@ test("a server's kinds come from its setting, and only those show", () => {
     { kind: "thread", id: "thread", channelId: "c", threadId: "t", title: "", replies: 1, unread: 1, userIds: [] },
   ];
   assert.deepEqual(pickTiles(tiles, new Set(), NOW, serverKinds([2, 3, 4, 5])).map((t) => t.id), ["thread"]);
+});
+
+test("only an app's tile, and only where you manage messages, can be removed for everyone", () => {
+  const managesHere = (channelId: string) => channelId === "c";
+  assert.ok(removable(scoreboard, managesHere));
+  assert.ok(!removable({ ...scoreboard, channelId: "elsewhere" }, managesHere));
+  const voiceTile: Tile = { kind: "voice", id: "voice", channelId: "c", channelName: "", userIds: ["a", "b"], since: 0, video: false, screen: false };
+  assert.ok(!removable(voiceTile, managesHere), "fuwa's own tiles aren't anyone's to remove");
 });
 
 test("a server that never chose drops voice rooms once it grows past the big-server line, without a new setting", () => {

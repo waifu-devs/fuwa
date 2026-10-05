@@ -1519,6 +1519,15 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
     });
   });
 
+/** Takes an app's live tile down for everyone (Manage Messages in its channel); the server's LiveTileEnded follows. */
+export const endLiveTile = (key: string, serverId: string, channelId: string, sourceId: string, tileId: string) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).liveTiles.endLiveTile({ serverId, channelId, sourceId, tileId }, { signal }));
+    updateInstance(key, (i) =>
+      applyEvent(i, create(EventSchema, { serverId, payload: { case: "liveTileEnded", value: { channelId, sourceId, tileId } } }), null),
+    );
+  });
+
 export const deleteMessage = (key: string, serverId: string, channelId: string, messageId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).messages.deleteMessage({ serverId, messageId, channelId }, { signal }));
