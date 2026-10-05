@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Count, SPRING } from "@/components/motion";
+import { T, useI18n } from "@/i18n/react";
 import { useUnsavedGuard, type GuardScope } from "./SettingsScreen";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ export function Setting({
   /** Show whether it follows the default. */
   badge?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <motion.section
       data-setting={id}
@@ -65,18 +67,18 @@ export function Setting({
               transition={SPRING}
               className="flex shrink-0 items-center gap-1"
             >
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[0.65rem] font-bold text-primary uppercase">Changed</span>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[0.65rem] font-bold text-primary uppercase">{t("settings.controls.changed")}</span>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 disabled={resetting}
                 onClick={onReset}
-                title={defaultLabel ? `Back to the default: ${defaultLabel}` : "Back to the default"}
+                title={defaultLabel ? t("settings.controls.backToDefaultIs", { value: defaultLabel }) : t("settings.controls.backToDefault")}
                 className="group h-7 rounded-full px-2 text-xs"
               >
                 <RotateCcwIcon className="size-3.5 transition-transform duration-500 group-hover:-rotate-[360deg]" />
-                Reset
+                {t("settings.controls.reset")}
               </Button>
             </motion.div>
           ) : (
@@ -88,7 +90,7 @@ export function Setting({
               transition={SPRING}
               className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.65rem] font-bold text-muted-foreground uppercase"
             >
-              Default
+              {t("settings.controls.default")}
             </motion.span>
           )}
         </AnimatePresence>
@@ -103,6 +105,7 @@ export function Setting({
  * beside the form on wide screens, above it on narrow ones.
  */
 export function WithPreview({ preview, children }: { preview: ReactNode; children: ReactNode }) {
+  const { t } = useI18n();
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:gap-10">
       <div className="order-2 min-w-0 xl:order-1">{children}</div>
@@ -112,7 +115,7 @@ export function WithPreview({ preview, children }: { preview: ReactNode; childre
         transition={{ ...SPRING, delay: 0.08 }}
         className="order-1 xl:sticky xl:top-16 xl:order-2 xl:self-start"
       >
-        <p className="mb-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Preview</p>
+        <p className="mb-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{t("settings.controls.preview")}</p>
         {preview}
       </motion.aside>
     </div>
@@ -231,6 +234,7 @@ export function Cap({
   placeholder?: string;
 }) {
   const id = useId();
+  const { t } = useI18n();
   const on = value !== undefined;
   const [text, setText] = useState(() => (bytes ? splitBytes(value).amount : (value?.toString() ?? "")));
   const [unit, setUnit] = useState(() => splitBytes(value).unit);
@@ -281,7 +285,7 @@ export function Cap({
             <Input
               inputMode="decimal"
               value={text}
-              aria-label={`${label} limit`}
+              aria-label={t("settings.controls.limitOf", { label })}
               onChange={(e) => {
                 setText(e.target.value);
                 const parsed = parse(e.target.value, unit);
@@ -318,7 +322,7 @@ export function Cap({
             transition={SPRING}
             className="text-sm text-muted-foreground"
           >
-            {placeholder ?? "No limit"}
+            {placeholder ?? t("settings.controls.noLimit")}
           </motion.span>
         )}
       </AnimatePresence>
@@ -349,6 +353,7 @@ export function SaveBar({
   onDiscard: () => void;
   scope?: GuardScope;
 }) {
+  const { t } = useI18n();
   const held = useUnsavedGuard(count > 0, scope) + nudge;
   const shake = useAnimationControls();
   const [alarm, setAlarm] = useState(false);
@@ -356,8 +361,8 @@ export function SaveBar({
     if (!held) return;
     setAlarm(true);
     void shake.start({ x: [0, -10, 10, -8, 8, -4, 4, 0], transition: { duration: 0.5 } });
-    const t = setTimeout(() => setAlarm(false), 1800);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setAlarm(false), 1800);
+    return () => clearTimeout(timer);
   }, [held, shake]);
   return (
     <AnimatePresence>
@@ -380,21 +385,21 @@ export function SaveBar({
               {error ? (
                 <span className="text-destructive first-letter:uppercase">{error}</span>
               ) : alarm ? (
-                <span className="font-bold text-destructive">Careful, you have unsaved changes</span>
+                <span className="font-bold text-destructive">{t("settings.controls.careful")}</span>
               ) : (
                 <>
-                  <span className="font-bold">Unsaved changes</span>{" "}
+                  <span className="font-bold">{t("settings.controls.unsaved")}</span>{" "}
                   <span className="text-muted-foreground">
-                    (<Count value={count} /> {count === 1 ? "setting" : "settings"})
+                    <T k="settings.controls.unsavedCount" values={{ count: <Count value={count} /> }} count={count} />
                   </span>
                 </>
               )}
             </p>
             <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onDiscard} disabled={saving}>
-              Discard
+              {t("settings.controls.discard")}
             </Button>
             <Button type="button" size="sm" className="btn rounded-xl px-4 font-bold" onClick={onSave} disabled={saving}>
-              {saving ? "Saving…" : "Save changes"}
+              {saving ? t("settings.controls.saving") : t("settings.controls.save")}
             </Button>
           </motion.div>
         </motion.div>

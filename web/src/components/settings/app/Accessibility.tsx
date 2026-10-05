@@ -3,51 +3,54 @@ import { Markdown } from "@/components/Markdown";
 import { RoleName } from "@/components/RoleName";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion, setPrefs, usePrefs } from "@/lib/prefs";
 import { MotionChoice } from "./Appearance";
 import { PrefSetting } from "./common";
 
 export function Accessibility() {
+  const { t, number } = useI18n();
+  const percent = (n: number) => number(n / 100, { style: "percent" });
   const p = usePrefs((x) => x);
   const systemCalm = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   return (
     <div className="flex flex-col">
       <PrefSetting
         id="reduce-motion"
-        title="Motion"
+        title={t("appsettings.accessibility.motion")}
         hint={
           p.reduceMotion === "system"
             ? systemCalm
-              ? "Your system asks for less motion, so fuwa keeps it calm."
-              : "Your system is fine with motion, so fuwa moves."
+              ? t("appsettings.accessibility.motionSystemCalm")
+              : t("appsettings.accessibility.motionSystemMoves")
             : reduceMotion(p)
-              ? "Springs, slides and sparkles are off."
-              : "Everything moves, whatever your system says."
+              ? t("appsettings.accessibility.motionOff")
+              : t("appsettings.accessibility.motionOn")
         }
         keys={["reduceMotion"]}
       >
         <MotionChoice />
       </PrefSetting>
-      <PrefSetting id="saturation" title="Saturation" hint="Softens every color in the app, down to greys." keys={["saturation"]} delay={0.04}>
+      <PrefSetting id="saturation" title={t("appsettings.accessibility.saturation")} hint={t("appsettings.accessibility.saturationHint")} keys={["saturation"]} delay={0.04}>
         <Slider
-          label="Saturation"
+          label={t("appsettings.accessibility.saturation")}
           value={p.saturation}
           min={0}
           max={100}
           step={5}
-          format={(n) => `${n}%`}
+          format={percent}
           onChange={(saturation) => setPrefs({ saturation })}
           marks={[
-            { value: 0, label: "0%" },
-            { value: 50, label: "50%" },
-            { value: 100, label: "100%" },
+            { value: 0, label: percent(0) },
+            { value: 50, label: percent(50) },
+            { value: 100, label: percent(100) },
           ]}
         />
       </PrefSetting>
       <PrefSetting
         id="role-colors"
-        title="Role colors"
-        hint="Roles can give people's names a color. Show it on the name, as a dot beside it, or not at all."
+        title={t("appsettings.accessibility.roleColors")}
+        hint={t("appsettings.accessibility.roleColorsHint")}
         keys={["roleColors"]}
         delay={0.06}
       >
@@ -55,9 +58,9 @@ export function Accessibility() {
           value={p.roleColors}
           onChange={(roleColors) => setPrefs({ roleColors })}
           options={[
-            { value: "names", label: "On names", hint: "Names take their role's color.", icon: <PaletteIcon className="size-4" /> },
-            { value: "beside", label: "Beside names", hint: "A dot in the role's color.", icon: <CircleIcon className="size-4" /> },
-            { value: "off", label: "Off", hint: "Names keep their own tint.", icon: <CircleOffIcon className="size-4" /> },
+            { value: "names", label: t("appsettings.accessibility.roleNames"), hint: t("appsettings.accessibility.roleNamesHint"), icon: <PaletteIcon className="size-4" /> },
+            { value: "beside", label: t("appsettings.accessibility.roleBeside"), hint: t("appsettings.accessibility.roleBesideHint"), icon: <CircleIcon className="size-4" /> },
+            { value: "off", label: t("appsettings.accessibility.roleOff"), hint: t("appsettings.accessibility.roleOffHint"), icon: <CircleOffIcon className="size-4" /> },
           ]}
         />
         <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-xl bg-muted/50 px-3 py-2 text-sm">
@@ -68,27 +71,27 @@ export function Accessibility() {
       </PrefSetting>
       <PrefSetting
         id="others-effects"
-        title="Profile effects"
-        hint={reduceMotion(p) ? "With motion calmed, effects show as a still picture." : "Petals, stars and the like that people put on their profile cards."}
+        title={t("appsettings.accessibility.effects")}
+        hint={reduceMotion(p) ? t("appsettings.accessibility.effectsStill") : t("appsettings.accessibility.effectsHint")}
         keys={["othersEffects"]}
         delay={0.07}
       >
         <Toggle
           checked={p.othersEffects}
           onChange={(othersEffects) => setPrefs({ othersEffects })}
-          label="Show effects on other people's cards"
-          hint="Your own always shows to you, so you can see what others do."
+          label={t("appsettings.accessibility.effectsToggle")}
+          hint={t("appsettings.accessibility.effectsToggleHint")}
         />
       </PrefSetting>
-      <PrefSetting id="underline-links" title="Links" keys={["underlineLinks"]} delay={0.08}>
+      <PrefSetting id="underline-links" title={t("appsettings.accessibility.links")} keys={["underlineLinks"]} delay={0.08}>
         <Toggle
           checked={p.underlineLinks}
           onChange={(underlineLinks) => setPrefs({ underlineLinks })}
-          label="Always underline links"
-          hint="So links stand out by more than their color."
+          label={t("appsettings.accessibility.linksToggle")}
+          hint={t("appsettings.accessibility.linksToggleHint")}
         />
         <div className="rounded-xl bg-muted/50 px-3 py-2 text-sm">
-          <Markdown className="chat">{"The docs are at [fuwa's README](https://github.com/waifu-devs/fuwa) if you get stuck."}</Markdown>
+          <Markdown className="chat">{t("appsettings.accessibility.linksSample", { link: `[${t("appsettings.accessibility.linksSampleLink")}](https://github.com/waifu-devs/fuwa)` })}</Markdown>
         </div>
       </PrefSetting>
     </div>

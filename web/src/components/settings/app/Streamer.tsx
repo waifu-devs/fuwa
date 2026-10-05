@@ -7,6 +7,7 @@ import { Private } from "@/components/Private";
 import { Toggle, WithPreview } from "@/components/settings/controls";
 import { Switch } from "@/components/ui/switch";
 import { useInstance } from "@/fuwa/hooks";
+import { T, useI18n } from "@/i18n/react";
 import { actionById, bindingOf } from "@/lib/keybinds";
 import { displayName } from "@/lib/format";
 import { setPrefs, usePrefs } from "@/lib/prefs";
@@ -15,13 +16,14 @@ import { cn } from "@/lib/utils";
 import { Keycaps, PrefSetting } from "./common";
 
 export function Streamer({ instanceKey }: { instanceKey?: string }) {
+  const { t } = useI18n();
   const p = usePrefs((x) => x);
   const toggle = actionById("toggleStreamer")!;
   const combo = bindingOf(toggle, p);
   return (
     <WithPreview preview={<StreamPreview instanceKey={instanceKey} />}>
       <div className="flex flex-col">
-        <PrefSetting id="streamer" title="Streamer mode" keys={["streamer"]}>
+        <PrefSetting id="streamer" title={t("appsettings.streamer.title")} keys={["streamer"]}>
           <label className="flex cursor-pointer items-center gap-4 rounded-2xl border p-4 transition-colors has-[[data-state=checked]]:border-primary/60 has-[[data-state=checked]]:bg-primary/5">
             <motion.span
               animate={p.streamer ? { rotate: [0, -10, 10, 0], scale: [1, 1.15, 1] } : { rotate: 0, scale: 1 }}
@@ -31,53 +33,51 @@ export function Streamer({ instanceKey }: { instanceKey?: string }) {
               <TvMinimalPlayIcon className="size-5" />
             </motion.span>
             <span className="min-w-0 flex-1">
-              <span className="block font-bold">{p.streamer ? "On" : "Off"}</span>
-              <span className="block text-sm text-muted-foreground">Hides what a stream shouldn't show while you share your screen.</span>
+              <span className="block font-bold">{p.streamer ? t("appsettings.streamer.on") : t("appsettings.streamer.off")}</span>
+              <span className="block text-sm text-muted-foreground">{t("appsettings.streamer.hint")}</span>
             </span>
             <Switch checked={p.streamer} onCheckedChange={(streamer) => setPrefs({ streamer })} />
           </label>
           <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
             <KeyboardIcon className="size-4" />
             {combo ? (
-              <>
-                Turn it on or off anywhere with <Keycaps combo={combo} />
-              </>
+              <T k="appsettings.streamer.shortcut" values={{ keys: <Keycaps combo={combo} /> }} />
             ) : (
               <>
-                No shortcut yet.
+                {t("appsettings.streamer.noShortcut")}
                 <button type="button" onClick={() => openSettings("keybinds")} className="font-bold text-primary hover:underline">
-                  Add one in Keybinds
+                  {t("appsettings.streamer.addShortcut")}
                 </button>
               </>
             )}
           </p>
         </PrefSetting>
-        <PrefSetting id="streamer-hide-personal" title="Hide personal information" keys={["streamerHidePersonal"]} delay={0.04}>
+        <PrefSetting id="streamer-hide-personal" title={t("appsettings.streamer.hidePersonal")} keys={["streamerHidePersonal"]} delay={0.04}>
           <Toggle
             checked={p.streamerHidePersonal}
             onChange={(streamerHidePersonal) => setPrefs({ streamerHidePersonal })}
-            label="Instance addresses and your username"
-            hint="A self-hosted address can be a home IP. Addresses turn into a name like /~waifu-devs in fuwa's links and pages. The browser still shows this page's own address in its bar, so share the page itself or use the desktop app."
+            label={t("appsettings.streamer.hidePersonalToggle")}
+            hint={t("appsettings.streamer.hidePersonalHint", { alias: "/~waifu-devs" })}
           />
         </PrefSetting>
-        <PrefSetting id="streamer-sounds" title="Sounds" keys={["streamerMuteSounds"]} delay={0.08}>
-          <Toggle checked={p.streamerMuteSounds} onChange={(streamerMuteSounds) => setPrefs({ streamerMuteSounds })} label="Mute sounds" hint="No blips on stream." />
+        <PrefSetting id="streamer-sounds" title={t("appsettings.notifications.sounds")} keys={["streamerMuteSounds"]} delay={0.08}>
+          <Toggle checked={p.streamerMuteSounds} onChange={(streamerMuteSounds) => setPrefs({ streamerMuteSounds })} label={t("appsettings.streamer.muteSounds")} hint={t("appsettings.streamer.muteSoundsHint")} />
         </PrefSetting>
-        <PrefSetting id="streamer-notifications" title="Notifications" keys={["streamerMuteNotifications"]} delay={0.12}>
+        <PrefSetting id="streamer-notifications" title={t("settings.nav.notifications")} keys={["streamerMuteNotifications"]} delay={0.12}>
           <Toggle
             checked={p.streamerMuteNotifications}
             onChange={(streamerMuteNotifications) => setPrefs({ streamerMuteNotifications })}
-            label="Mute desktop notifications"
-            hint="Messages don't pop up over the game."
+            label={t("appsettings.streamer.muteNotifications")}
+            hint={t("appsettings.streamer.muteNotificationsHint")}
           />
         </PrefSetting>
         <section data-setting="streamer-auto" className="flex items-center gap-4 py-6 opacity-70">
           <MonitorPlayIcon className="size-5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-bold">Turn on when OBS or XSplit goes live</span>
-            <span className="block text-xs text-muted-foreground">Needs to see which programs run, so it comes with the desktop app.</span>
+            <span className="block text-sm font-bold">{t("appsettings.streamer.auto")}</span>
+            <span className="block text-xs text-muted-foreground">{t("appsettings.streamer.autoHint")}</span>
           </span>
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.65rem] font-bold text-muted-foreground uppercase">Desktop app</span>
+          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.65rem] font-bold text-muted-foreground uppercase">{t("appsettings.streamer.desktopApp")}</span>
         </section>
       </div>
     </WithPreview>
@@ -86,6 +86,7 @@ export function Streamer({ instanceKey }: { instanceKey?: string }) {
 
 /** What a stream would see: the address, your name and a server's tooltip, live. */
 function StreamPreview({ instanceKey }: { instanceKey?: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const href = useRouterState({ select: (s) => s.location.publicHref ?? s.location.href });
   const on = usePrefs((p) => p.streamer);
@@ -105,7 +106,7 @@ function StreamPreview({ instanceKey }: { instanceKey?: string }) {
               transition={SPRING}
               className="ml-auto flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[0.6rem] font-extrabold text-white uppercase"
             >
-              <span className="size-1.5 animate-pulse rounded-full bg-white" /> Live
+              <span className="size-1.5 animate-pulse rounded-full bg-white" /> {t("appsettings.streamer.live")}
             </motion.span>
           )}
         </AnimatePresence>
@@ -128,7 +129,7 @@ function StreamPreview({ instanceKey }: { instanceKey?: string }) {
       )}
       {inst && (
         <div className="self-start rounded-lg bg-popover px-2.5 py-1.5 text-xs font-bold shadow-md">
-          {inst.node?.name ?? "Instance"} · <Private text={inst.key} />
+          {inst.node?.name ?? t("appsettings.streamer.instance")} · <Private text={inst.key} />
         </div>
       )}
     </div>

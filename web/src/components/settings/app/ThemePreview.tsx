@@ -1,16 +1,19 @@
 import { motion } from "motion/react";
 import { BackdropLayers, usePageVisible } from "@/components/Backdrop";
 import { SPRING } from "@/components/motion";
+import { type Key, useI18n } from "@/i18n/react";
 import { hasBackdrop, type Backdrop } from "@/lib/backdrop";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { isDark, themeStyle, type Theme } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 const LINES = [
-  { name: "Hana", width: "78%", second: "52%" },
-  { name: "Ren", width: "64%", second: null },
-  { name: "You", width: "70%", second: "38%" },
+  { id: "hana", name: "Hana", width: "78%", second: "52%" },
+  { id: "ren", name: "Ren", width: "64%", second: null },
+  { id: "you", name: null, width: "70%", second: "38%" },
 ];
+
+const CHANNELS: Key[] = ["appsettings.preview.general", "appsettings.preview.art", "appsettings.preview.music", "appsettings.preview.games"];
 
 /**
  * fuwa in miniature, in a theme and over a backdrop: the rail, the sidebar
@@ -18,6 +21,7 @@ const LINES = [
  * exactly what the app will look like. The backdrop runs live here too.
  */
 export function ThemePreview({ theme, backdrop, className }: { theme: Theme; backdrop: Backdrop; className?: string }) {
+  const { t: text } = useI18n();
   const visible = usePageVisible();
   const still = usePrefs(reduceMotion);
   const t = theme.variant.tokens;
@@ -43,23 +47,23 @@ export function ThemePreview({ theme, backdrop, className }: { theme: Theme; bac
       </div>
       <div className="flex w-28 shrink-0 flex-col gap-1.5 border-r p-3" style={{ background: panel(`color-mix(in srgb, ${t.card} 55%, ${t.background})`, 20), borderColor: t.border }}>
         <span className="mb-1 h-2.5 w-16 rounded-full" style={{ background: t.foreground, opacity: 0.8 }} />
-        {["general", "art", "music", "games"].map((name, n) => (
+        {CHANNELS.map((name, n) => (
           <span
             key={name}
             className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[0.6rem] font-bold"
             style={n === 0 ? { background: t.accent, color: t["accent-foreground"] } : { color: t["muted-foreground"] }}
           >
-            # {name}
+            # {text(name)}
           </span>
         ))}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-3 p-3" style={{ background: panel(t.background) }}>
         {LINES.map((line, n) => (
-          <div key={line.name} className="flex gap-2">
+          <div key={line.id} className="flex gap-2">
             <span className="size-6 shrink-0 rounded-full" style={{ background: n === 2 ? t.primary : t.secondary, border: `1px solid ${t.border}` }} />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="text-[0.65rem] font-extrabold" style={{ color: n === 2 ? t.primary : t.foreground }}>
-                {line.name}
+                {line.name ?? text("appsettings.preview.you")}
               </span>
               <span className="h-2 rounded-full" style={{ width: line.width, background: t.foreground, opacity: 0.55 }} />
               {line.second && <span className="h-2 rounded-full" style={{ width: line.second, background: t.foreground, opacity: 0.35 }} />}
@@ -69,7 +73,7 @@ export function ThemePreview({ theme, backdrop, className }: { theme: Theme; bac
         <div className="mt-auto flex items-center gap-2 rounded-[var(--radius)] border px-2 py-1.5" style={{ background: panel(t.card, 40), borderColor: t.border }}>
           <span className="h-2 flex-1 rounded-full" style={{ background: t["muted-foreground"], opacity: 0.35 }} />
           <span className="rounded-[calc(var(--radius)-4px)] px-2 py-0.5 text-[0.6rem] font-bold" style={{ background: t.primary, color: t["primary-foreground"] }}>
-            Send
+            {text("appsettings.preview.send")}
           </span>
         </div>
       </div>

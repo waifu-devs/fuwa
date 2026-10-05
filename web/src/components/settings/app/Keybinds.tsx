@@ -11,12 +11,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { type I18n, useI18n } from "@/i18n/react";
 import {
   ACTIONS,
   GROUPS,
   actionById,
+  actionName,
   bindingOf,
   comboOf,
+  groupName,
   keycaps,
   modifiersOf,
   normalize,
@@ -28,9 +31,9 @@ import { cn } from "@/lib/utils";
 import { Keycaps } from "./common";
 
 /** Where the Keybinds page's own rows sit for settings search. */
-export const KEYBIND_SETTINGS = [
-  { id: "custom-keybinds", label: "Custom keybinds", keywords: "add shortcut" },
-  ...ACTIONS.map((a) => ({ id: `key-${a.id}`, label: a.label, keywords: "shortcut hotkey" })),
+export const keybindSettings = (t: I18n["t"]) => [
+  { id: "custom-keybinds", label: t("appsettings.keybinds.custom"), keywords: "add shortcut" },
+  ...ACTIONS.map((a) => ({ id: `key-${a.id}`, label: actionName(t, a), keywords: "shortcut hotkey" })),
 ];
 
 type Recording = { kind: "action"; id: string } | { kind: "custom"; id: string } | null;
@@ -38,6 +41,7 @@ type Recording = { kind: "action"; id: string } | { kind: "custom"; id: string }
 let draftIds = 0;
 
 export function Keybinds() {
+  const { t } = useI18n();
   const p = usePrefs((x) => x);
   const [recording, setRecording] = useState<Recording>(null);
   const [draft, setDraft] = useState<CustomKeybind | null>(null);
@@ -54,16 +58,14 @@ export function Keybinds() {
     <div className="flex flex-col gap-8">
       <p className="flex gap-2 rounded-xl bg-muted/60 px-3 py-2.5 text-sm text-muted-foreground">
         <InfoIcon className="mt-0.5 size-4 shrink-0" />
-        <span>
-          Shortcuts work while fuwa is in front, in the browser too. Global ones that work from other apps, like push to talk, come with the desktop app.
-        </span>
+        <span>{t("appsettings.keybinds.about")}</span>
       </p>
 
       <section data-setting="custom-keybinds" className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="font-extrabold">Custom keybinds</h3>
-            <p className="text-sm text-muted-foreground">Extra shortcuts for any action, on top of the ones below.</p>
+            <h3 className="font-extrabold">{t("appsettings.keybinds.custom")}</h3>
+            <p className="text-sm text-muted-foreground">{t("appsettings.keybinds.customHint")}</p>
           </div>
           <Button
             type="button"
@@ -76,7 +78,7 @@ export function Keybinds() {
               setRecording({ kind: "custom", id: bind.id });
             }}
           >
-            <PlusIcon /> Add a keybind
+            <PlusIcon /> {t("appsettings.keybinds.add")}
           </Button>
         </div>
         <div className="flex flex-col gap-2">
@@ -105,13 +107,13 @@ export function Keybinds() {
               />
             ))}
           </AnimatePresence>
-          {p.customKeybinds.length === 0 && !draft && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">None yet.</p>}
+          {p.customKeybinds.length === 0 && !draft && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">{t("appsettings.keybinds.noneYet")}</p>}
         </div>
       </section>
 
       {GROUPS.map((group) => (
         <section key={group} className="flex flex-col">
-          <h3 className="mb-1 text-xs font-bold tracking-wide text-muted-foreground uppercase">{group}</h3>
+          <h3 className="mb-1 text-xs font-bold tracking-wide text-muted-foreground uppercase">{groupName(t, group)}</h3>
           {ACTIONS.filter((a) => a.group === group).map((action, n) => (
             <ActionRow
               key={action.id}
@@ -128,7 +130,7 @@ export function Keybinds() {
         {changedAny && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={SPRING}>
             <Button type="button" variant="outline" className="group rounded-xl" onClick={() => setPrefs({ keybinds: {}, customKeybinds: [] })}>
-              <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-[360deg]" /> Reset every keybind
+              <RotateCcwIcon className="transition-transform duration-500 group-hover:-rotate-[360deg]" /> {t("appsettings.keybinds.resetAll")}
             </Button>
           </motion.div>
         )}
@@ -148,6 +150,7 @@ function ActionRow({
   recording: boolean;
   onRecording: (on: boolean) => void;
 }) {
+  const { t } = useI18n();
   const p = usePrefs((x) => x);
   const combo = bindingOf(action, p);
   const changed = action.id in p.keybinds;
@@ -162,7 +165,7 @@ function ActionRow({
       className="border-b border-border/70 py-2.5 last:border-b-0"
     >
       <motion.div animate={shake} className="flex min-h-10 flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 text-sm font-bold">{action.label}</span>
+        <span className="min-w-0 flex-1 text-sm font-bold">{actionName(t, action)}</span>
         <Recorder
           combo={combo}
           recording={recording}
@@ -171,7 +174,7 @@ function ActionRow({
             if (on) setProblem(null);
           }}
           onRecord={(next) => {
-            const why = problemWith(next, getPrefs(), { action: action.id });
+            const why = problemWith(next, getPrefs(), { action: action.id }, t);
             if (why) {
               setProblem(why);
               void shake.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
@@ -186,14 +189,14 @@ function ActionRow({
         <AnimatePresence initial={false} mode="popLayout">
           {changed && (
             <motion.span key="reset" initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={SPRING}>
-              <IconButton label={`Back to ${action.combo ? keycaps(action.combo).join(" ") : "no shortcut"}`} onClick={() => setPrefs((x) => ({ keybinds: without(x.keybinds, action.id) }))}>
+              <IconButton label={action.combo ? t("appsettings.keybinds.backTo", { keys: keycaps(action.combo).join(" ") }) : t("appsettings.keybinds.backToNone")} onClick={() => setPrefs((x) => ({ keybinds: without(x.keybinds, action.id) }))}>
                 <RotateCcwIcon />
               </IconButton>
             </motion.span>
           )}
           {combo && (
             <motion.span key="remove" initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={SPRING}>
-              <IconButton label="Remove this shortcut" onClick={() => setPrefs((x) => ({ keybinds: { ...x.keybinds, [action.id]: null } }))}>
+              <IconButton label={t("appsettings.keybinds.removeShortcut")} onClick={() => setPrefs((x) => ({ keybinds: { ...x.keybinds, [action.id]: null } }))}>
                 <XIcon />
               </IconButton>
             </motion.span>
@@ -218,6 +221,7 @@ function CustomRow({
   onChange: (bind: CustomKeybind) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const shake = useAnimationControls();
   const [problem, setProblem] = useState<string | null>(null);
   const action = actionById(bind.action);
@@ -234,7 +238,7 @@ function CustomRow({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm font-bold transition hover:bg-muted">
-              <span className="truncate">{action?.label ?? "Pick an action"}</span>
+              <span className="truncate">{action ? actionName(t, action) : t("appsettings.keybinds.pickAction")}</span>
               <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
             </button>
           </DropdownMenuTrigger>
@@ -242,10 +246,10 @@ function CustomRow({
             {GROUPS.map((group, g) => (
               <div key={group}>
                 {g > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{group}</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{groupName(t, group)}</DropdownMenuLabel>
                 {ACTIONS.filter((a) => a.group === group).map((a) => (
                   <DropdownMenuItem key={a.id} onSelect={() => onChange({ ...bind, action: a.id })}>
-                    {a.label}
+                    {actionName(t, a)}
                   </DropdownMenuItem>
                 ))}
               </div>
@@ -260,7 +264,7 @@ function CustomRow({
             if (on) setProblem(null);
           }}
           onRecord={(next) => {
-            const why = problemWith(next, getPrefs(), { custom: bind.id });
+            const why = problemWith(next, getPrefs(), { custom: bind.id }, t);
             if (why) {
               setProblem(why);
               void shake.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
@@ -271,7 +275,7 @@ function CustomRow({
             return true;
           }}
         />
-        <IconButton label="Remove this keybind" danger onClick={onRemove}>
+        <IconButton label={t("appsettings.keybinds.removeKeybind")} danger onClick={onRemove}>
           <Trash2Icon />
         </IconButton>
       </motion.div>
@@ -296,6 +300,7 @@ function Recorder({
   /** Tries a combo; false keeps recording (it was refused). */
   onRecord: (combo: string) => boolean;
 }) {
+  const { t } = useI18n();
   const [held, setHeld] = useState<string[]>([]);
   const button = useRef<HTMLButtonElement>(null);
   const latest = useRef({ onRecord, onRecording });
@@ -336,7 +341,7 @@ function Recorder({
       type="button"
       onClick={() => onRecording(!recording)}
       onBlur={() => recording && onRecording(false)}
-      aria-label={recording ? "Press the keys for this shortcut, or Escape to stop" : combo ? `Change the shortcut ${keycaps(combo).join(" ")}` : "Set a shortcut"}
+      aria-label={recording ? t("appsettings.keybinds.recording") : combo ? t("appsettings.keybinds.change", { keys: keycaps(combo).join(" ") }) : t("appsettings.keybinds.set")}
       className={cn(
         "group flex h-10 min-w-36 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm transition-colors",
         recording ? "recording border-primary bg-primary/10 text-primary" : "hover:border-primary/50 hover:bg-muted/60",
@@ -351,7 +356,7 @@ function Recorder({
             </motion.span>
           ) : (
             <motion.span key="press" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={SPRING} className="font-bold">
-              Press keys…
+              {t("appsettings.keybinds.pressKeys")}
             </motion.span>
           )
         ) : combo ? (
@@ -360,7 +365,7 @@ function Recorder({
           </motion.span>
         ) : (
           <motion.span key="none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-muted-foreground group-hover:text-foreground">
-            Not set
+            {t("appsettings.keybinds.notSet")}
           </motion.span>
         )}
       </AnimatePresence>

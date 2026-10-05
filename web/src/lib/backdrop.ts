@@ -8,6 +8,7 @@
  * shown only while that instance is one the app trusts (lib/shown.ts).
  */
 
+import type { Key } from "@/i18n/i18n";
 import { sanitizeShader, type CustomShader } from "@/lib/effects/custom";
 
 /** Effects drawn on the GPU (with a CSS stand-in where WebGPU isn't available). */
@@ -24,17 +25,18 @@ export const isShader = (effect: Effect): effect is ShaderEffect => (SHADER_EFFE
 /** Effects that move (built-in shaders and custom ones), so they have a speed. */
 export const moves = (effect: Effect) => isShader(effect) || effect === CUSTOM;
 
-export const EFFECT_INFO: Record<Effect, { name: string; hint: string }> = {
-  none: { name: "None", hint: "Just the theme." },
-  aurora: { name: "Aurora", hint: "Slow ribbons of the theme's colors." },
-  petals: { name: "Petals", hint: "Blossoms drifting down." },
-  stars: { name: "Starfield", hint: "Twinkling stars, gently drifting." },
-  waves: { name: "Waves", hint: "Soft layered waves rolling by." },
-  custom: { name: "Custom", hint: "A shader you write, or one a theme brought." },
-  grain: { name: "Film grain", hint: "A fine, still noise." },
-  paper: { name: "Paper", hint: "Warm fibers like washi paper." },
-  dots: { name: "Dots", hint: "A tidy dot pattern." },
-  grid: { name: "Grid", hint: "Notebook grid lines." },
+/** Each effect's name and what it looks like, as catalog keys (locales/, appsettings.backdrop.effect.*). */
+export const EFFECT_INFO: Record<Effect, { name: Key; hint: Key }> = {
+  none: { name: "appsettings.backdrop.effect.none", hint: "appsettings.backdrop.effect.noneHint" },
+  aurora: { name: "appsettings.backdrop.effect.aurora", hint: "appsettings.backdrop.effect.auroraHint" },
+  petals: { name: "appsettings.backdrop.effect.petals", hint: "appsettings.backdrop.effect.petalsHint" },
+  stars: { name: "appsettings.backdrop.effect.stars", hint: "appsettings.backdrop.effect.starsHint" },
+  waves: { name: "appsettings.backdrop.effect.waves", hint: "appsettings.backdrop.effect.wavesHint" },
+  custom: { name: "appsettings.backdrop.effect.custom", hint: "appsettings.backdrop.effect.customHint" },
+  grain: { name: "appsettings.backdrop.effect.grain", hint: "appsettings.backdrop.effect.grainHint" },
+  paper: { name: "appsettings.backdrop.effect.paper", hint: "appsettings.backdrop.effect.paperHint" },
+  dots: { name: "appsettings.backdrop.effect.dots", hint: "appsettings.backdrop.effect.dotsHint" },
+  grid: { name: "appsettings.backdrop.effect.grid", hint: "appsettings.backdrop.effect.gridHint" },
 };
 
 export type Fit = "cover" | "contain" | "tile";

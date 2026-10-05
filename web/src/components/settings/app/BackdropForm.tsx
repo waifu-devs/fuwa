@@ -7,6 +7,7 @@ import { SPRING } from "@/components/motion";
 import { Choice } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
 import { ShaderEditor } from "@/components/settings/app/ShaderEditor";
+import { useI18n } from "@/i18n/react";
 import { CUSTOM, EFFECT_INFO, EFFECTS, isShader, LIMITS, moves, type Backdrop, type Effect } from "@/lib/backdrop";
 import { DEFAULT_SHADER } from "@/lib/effects/custom";
 import { backgroundPicture, PICTURE_TYPES } from "@/lib/pictures";
@@ -30,9 +31,13 @@ export function BackdropForm({
   value: Backdrop;
   onChange: (patch: Partial<Backdrop>) => void;
 }) {
+  const { t, number } = useI18n();
+  const percent = (n: number) => number(n / 100, { style: "percent" });
+  const px = (n: number) => `${number(n)}px`;
+  const speed = (n: number) => (n === 0 ? t("appsettings.backdrop.still") : percent(n));
   return (
     <div className="flex flex-col gap-6">
-      <Block title="Picture" hint="Uploaded to your instance and kept with your account there. Only fuwa instances serve backgrounds.">
+      <Block title={t("appsettings.backdrop.picture")} hint={t("appsettings.backdrop.pictureHint")}>
         <PictureLibrary instanceKey={instanceKey} value={value.image} onChange={(image) => onChange({ image })} />
         <AnimatePresence initial={false}>
           {value.image && (
@@ -47,25 +52,21 @@ export function BackdropForm({
                 value={value.fit}
                 onChange={(fit) => onChange({ fit })}
                 options={[
-                  { value: "cover", label: "Fill", hint: "Covers the window.", icon: <Maximize2Icon className="size-4" /> },
-                  { value: "contain", label: "Fit", hint: "The whole picture shows.", icon: <Minimize2Icon className="size-4" /> },
-                  { value: "tile", label: "Tile", hint: "Repeats, for patterns.", icon: <Grid2x2Icon className="size-4" /> },
+                  { value: "cover", label: t("appsettings.backdrop.fill"), hint: t("appsettings.backdrop.fillHint"), icon: <Maximize2Icon className="size-4" /> },
+                  { value: "contain", label: t("appsettings.backdrop.fit"), hint: t("appsettings.backdrop.fitHint"), icon: <Minimize2Icon className="size-4" /> },
+                  { value: "tile", label: t("appsettings.backdrop.tile"), hint: t("appsettings.backdrop.tileHint"), icon: <Grid2x2Icon className="size-4" /> },
                 ]}
               />
-              <Labeled label="Dim" shown={`${value.dim}%`}><Slider label="Dim" value={value.dim} min={LIMITS.dim[0]} max={LIMITS.dim[1]} format={(n) => `${n}%`} onChange={(dim) => onChange({ dim })} className="pt-6" /></Labeled>
-              <Labeled label="Blur" shown={`${value.blur}px`}><Slider label="Blur" value={value.blur} min={LIMITS.blur[0]} max={LIMITS.blur[1]} format={(n) => `${n}px`} onChange={(blur) => onChange({ blur })} className="pt-6" /></Labeled>
+              <Labeled label={t("appsettings.backdrop.dim")} shown={percent(value.dim)}><Slider label={t("appsettings.backdrop.dim")} value={value.dim} min={LIMITS.dim[0]} max={LIMITS.dim[1]} format={percent} onChange={(dim) => onChange({ dim })} className="pt-6" /></Labeled>
+              <Labeled label={t("appsettings.backdrop.blur")} shown={px(value.blur)}><Slider label={t("appsettings.backdrop.blur")} value={value.blur} min={LIMITS.blur[0]} max={LIMITS.blur[1]} format={px} onChange={(blur) => onChange({ blur })} className="pt-6" /></Labeled>
             </motion.div>
           )}
         </AnimatePresence>
       </Block>
 
       <Block
-        title="Effect"
-        hint={
-          hasWebGpu()
-            ? "Moving effects are drawn on your GPU, at most 30 frames a second, and stop while fuwa is hidden."
-            : "This browser has no WebGPU, so moving effects use a lighter version drawn with CSS."
-        }
+        title={t("appsettings.backdrop.effect")}
+        hint={hasWebGpu() ? t("appsettings.backdrop.effectGpu") : t("appsettings.backdrop.effectCss")}
       >
         <EffectGrid
           value={value.effect}
@@ -84,17 +85,17 @@ export function BackdropForm({
               transition={SPRING}
               className="flex flex-col gap-2 overflow-hidden"
             >
-              <Labeled label="Strength" shown={`${value.intensity}%`}><Slider label="Strength" value={value.intensity} min={LIMITS.intensity[0]} max={LIMITS.intensity[1]} format={(n) => `${n}%`} onChange={(intensity) => onChange({ intensity })} className="pt-6" /></Labeled>
+              <Labeled label={t("appsettings.backdrop.strength")} shown={percent(value.intensity)}><Slider label={t("appsettings.backdrop.strength")} value={value.intensity} min={LIMITS.intensity[0]} max={LIMITS.intensity[1]} format={percent} onChange={(intensity) => onChange({ intensity })} className="pt-6" /></Labeled>
               {moves(value.effect) && (
-                <Labeled label="Speed" shown={value.speed === 0 ? "Still" : `${value.speed}%`}><Slider label="Speed" value={value.speed} min={LIMITS.speed[0]} max={LIMITS.speed[1]} step={10} format={(n) => (n === 0 ? "Still" : `${n}%`)} onChange={(speed) => onChange({ speed })} className="pt-6" /></Labeled>
+                <Labeled label={t("appsettings.backdrop.speed")} shown={speed(value.speed)}><Slider label={t("appsettings.backdrop.speed")} value={value.speed} min={LIMITS.speed[0]} max={LIMITS.speed[1]} step={10} format={speed} onChange={(speed) => onChange({ speed })} className="pt-6" /></Labeled>
               )}
             </motion.div>
           )}
         </AnimatePresence>
       </Block>
 
-      <Block title="Panels" hint="How solid the sidebar and chat are over the backdrop. More solid reads better.">
-        <Labeled label="Panels" shown={`${value.panels}%`}><Slider label="Panels" value={value.panels} min={LIMITS.panels[0]} max={LIMITS.panels[1]} format={(n) => `${n}%`} onChange={(panels) => onChange({ panels })} className="pt-6" /></Labeled>
+      <Block title={t("appsettings.backdrop.panels")} hint={t("appsettings.backdrop.panelsHint")}>
+        <Labeled label={t("appsettings.backdrop.panels")} shown={percent(value.panels)}><Slider label={t("appsettings.backdrop.panels")} value={value.panels} min={LIMITS.panels[0]} max={LIMITS.panels[1]} format={percent} onChange={(panels) => onChange({ panels })} className="pt-6" /></Labeled>
       </Block>
     </div>
   );
@@ -125,6 +126,7 @@ function Block({ title, hint, children }: { title: string; hint: string; childre
 
 /** Effect cards, each showing its effect in miniature (the light CSS version, so a grid of them costs nothing). */
 function EffectGrid({ value, custom, onChange }: { value: Effect; custom: string | null; onChange: (effect: Effect) => void }) {
+  const { t } = useI18n();
   return (
     <div role="radiogroup" className="grid grid-cols-3 gap-2 sm:grid-cols-5">
       {EFFECTS.map((effect, n) => {
@@ -135,7 +137,7 @@ function EffectGrid({ value, custom, onChange }: { value: Effect; custom: string
             type="button"
             role="radio"
             aria-checked={active}
-            title={EFFECT_INFO[effect].hint}
+            title={t(EFFECT_INFO[effect].hint)}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0, transition: { ...SPRING, delay: n * 0.025 } }}
             whileHover={{ y: -2 }}
@@ -159,7 +161,7 @@ function EffectGrid({ value, custom, onChange }: { value: Effect; custom: string
                 ))}
             </span>
             <span className="flex items-center justify-between gap-1 px-2 py-1.5 text-xs font-bold">
-              <span className="truncate">{effect === CUSTOM && custom ? custom : EFFECT_INFO[effect].name}</span>
+              <span className="truncate">{effect === CUSTOM && custom ? custom : t(EFFECT_INFO[effect].name)}</span>
               {active && (
                 <motion.span layoutId="effect-check" transition={SPRING} className="grid size-4 place-items-center rounded-full bg-primary text-primary-foreground">
                   <CheckIcon className="size-3" />
@@ -177,6 +179,7 @@ type Uploading = { preview: string; sent: number };
 
 /** Your backgrounds on this instance, a tile to add one (click or drop), and None. */
 function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string; value: string; onChange: (url: string) => void }) {
+  const { t, number } = useI18n();
   const [pictures, setPictures] = useState<string[] | null>(null);
   const [uploading, setUploading] = useState<Uploading | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,7 +205,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
   async function add(file: File | undefined) {
     if (!file || !instanceKey || uploading) return;
     setError(null);
-    if (!PICTURE_TYPES.includes(file.type)) return setError("Pick a PNG, JPEG, GIF, WebP or AVIF picture.");
+    if (!PICTURE_TYPES.includes(file.type)) return setError(t("appsettings.backdrop.pickType"));
     const picture = await backgroundPicture(file);
     const preview = URL.createObjectURL(picture);
     setUploading({ preview, sent: 0 });
@@ -212,7 +215,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
       setPictures((list) => [kept.url, ...(list ?? []).filter((u) => u !== kept.url)]);
       onChange(kept.url);
     } catch (err) {
-      setError(((err as Error).message || "the upload didn't go through").replace(/^./, (c) => c.toUpperCase()));
+      setError(((err as Error).message || t("appsettings.backdrop.uploadFailed")).replace(/^./, (c) => c.toUpperCase()));
     } finally {
       setUploading(null);
       URL.revokeObjectURL(preview);
@@ -249,7 +252,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
   return (
     <div className="flex flex-col gap-2" {...drop}>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-        <Tile active={!value} onClick={() => onChange("")} label="No picture">
+        <Tile active={!value} onClick={() => onChange("")} label={t("appsettings.backdrop.noPicture")}>
           <span className="grid size-full place-items-center bg-muted text-muted-foreground">
             <ImageOffIcon className="size-5" />
           </span>
@@ -273,7 +276,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
                 <img src={uploading.preview} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: `blur(${(1 - uploading.sent) * 6}px)`, opacity: 0.4 + uploading.sent * 0.6 }} />
                 <span className="relative flex items-center gap-1 rounded-full bg-background/85 px-2 py-0.5 text-xs font-bold text-foreground">
                   <Loader2Icon className="size-3 animate-spin" />
-                  {Math.round(uploading.sent * 100)}%
+                  {number(uploading.sent, { style: "percent" })}
                 </span>
               </>
             ) : (
@@ -281,7 +284,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
                 <motion.span animate={dragging ? { y: [0, -3, 0] } : { y: 0 }} transition={{ duration: 0.8, repeat: dragging ? Infinity : 0 }}>
                   <ImagePlusIcon className="size-5" />
                 </motion.span>
-                {dragging ? "Drop it" : "Add"}
+                {dragging ? t("appsettings.backdrop.dropIt") : t("appsettings.backdrop.add")}
               </span>
             )}
           </motion.button>
@@ -291,11 +294,11 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
             const src = shownPicture(url);
             return (
               <motion.div key={url} layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={SPRING} className="group relative">
-                <Tile active={value === url} onClick={() => onChange(url)} label="Use this picture">
+                <Tile active={value === url} onClick={() => onChange(url)} label={t("appsettings.backdrop.usePicture")}>
                   {src ? (
                     <img src={src} alt="" loading="lazy" draggable={false} className="size-full object-cover transition-transform duration-500 group-hover:scale-105" />
                   ) : (
-                    <span className="grid size-full place-items-center bg-muted text-[0.6rem] text-muted-foreground">Not on your instances</span>
+                    <span className="grid size-full place-items-center bg-muted text-[0.6rem] text-muted-foreground">{t("appsettings.backdrop.elsewhere")}</span>
                   )}
                 </Tile>
                 {kept.has(url) && (
@@ -303,14 +306,14 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
                     type="button"
                     onClick={() => void remove(url)}
                     onBlur={() => setConfirming(null)}
-                    title="Delete this background from your instance"
+                    title={t("appsettings.backdrop.delete")}
                     className={cn(
                       "absolute top-1 right-1 flex items-center gap-1 rounded-full bg-background/90 px-1.5 py-1 text-[0.65rem] font-bold text-destructive opacity-0 shadow transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
                       confirming === url && "opacity-100",
                     )}
                   >
                     <Trash2Icon className="size-3" />
-                    {confirming === url && "Delete?"}
+                    {confirming === url && t("appsettings.backdrop.confirmDelete")}
                   </button>
                 )}
               </motion.div>
@@ -318,7 +321,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
           })}
         </AnimatePresence>
       </div>
-      {!instanceKey && <p className="text-xs text-muted-foreground">Open an instance you're signed in to, to upload pictures to it.</p>}
+      {!instanceKey && <p className="text-xs text-muted-foreground">{t("appsettings.backdrop.needInstance")}</p>}
       <AnimatePresence>
         {error && (
           <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0, x: [0, -6, 5, -3, 0] }} exit={{ opacity: 0 }} className="text-xs font-bold text-destructive">

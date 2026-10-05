@@ -115,7 +115,11 @@ test("every translation matches English's keys, placeholders and plural shape", 
           for (const category of Object.keys(entry)) assert.ok(rule.includes(category as Intl.LDMLPluralRule), `${where}: ${code} has no "${category}"`);
         }
         assert.deepEqual(placeholders(entry), placeholders(want), `${where}: placeholders differ from English`);
-        for (const text of typeof entry === "string" ? [entry] : Object.values(entry)) assert.ok(!/<[a-z/]/i.test(text ?? ""), `${where}: no markup in catalogs`);
+        for (const text of typeof entry === "string" ? [entry] : Object.values(entry)) {
+          assert.ok(!/<[a-z/]/i.test(text ?? ""), `${where}: no markup in catalogs`);
+          // Some lines go through Markdown, so no links or images either.
+          assert.ok(!/\]\(|!\[/.test(text ?? ""), `${where}: no Markdown links or images in catalogs`);
+        }
       }
     }
   }
