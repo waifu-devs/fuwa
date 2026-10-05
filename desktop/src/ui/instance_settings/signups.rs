@@ -201,12 +201,33 @@ impl InstanceSettingsView {
             cx,
         ));
         page = page.child(self.setting(
+            "mcp",
+            "Agents through MCP",
+            None,
+            &["mcp"],
+            if defaults.mcp { "on" } else { "off" },
+            6,
+            self.toggle(
+                "mcp",
+                draft.mcp,
+                false,
+                "Agents can use this instance as an MCP server",
+                "AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent \
+                 has. Server managers can still pick which agents may use theirs.",
+                p,
+                cx,
+                |d, on| d.mcp = on,
+            ),
+            p,
+            cx,
+        ));
+        page = page.child(self.setting(
             "shared-channels",
             "Shared channels",
             None,
             &["shared_channels"],
             if defaults.shared_channels { "on" } else { "off" },
-            6,
+            7,
             self.toggle(
                 "shared-channels",
                 draft.shared_channels,

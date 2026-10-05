@@ -1320,50 +1320,7 @@ async fn channels_are_shared_across_shards() {
     join(&mut c, &rin, &guest.id).await.unwrap();
     let dev = general(&mut c, &juan, &home.id).await;
 
-    let code = c
-        .shared
-        .create_share_code(authed(
-            &juan,
-            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone(), ..Default::default() },
-        ))
-        .await
-        .unwrap()
-        .into_inner()
-        .code
-        .unwrap()
-        .code;
-    let preview = c
-        .shared
-        .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.id.clone(), code: code.clone() }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(preview.home_server.unwrap().name, "Home");
-    let asked = c
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.id.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    c.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.id.clone(), connection_id: asked.id, approve: true },
-        ))
-        .await
-        .unwrap();
-    let shown = c
-        .channels
-        .list_channels(authed(&rin, pb::ListChannelsRequest { server_id: guest.id.clone() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .channels
-        .into_iter()
-        .find(|ch| ch.shared.is_some())
-        .unwrap();
+    let shown = share(&mut c, &juan, &home.id, &dev.id, &mika, &rin, &guest.id).await;
 
     let mut stream = c
         .events
@@ -1396,7 +1353,143 @@ async fn channels_are_shared_across_shards() {
         .messages;
     let back = at_home.iter().find(|m| m.content == "and back").unwrap();
     assert_eq!(back.shared.as_ref().unwrap().server.as_ref().unwrap().name, "Guest");
+
+    // A guest's file goes to the home's shard and stays only there.
+    let http = reqwest::Client::new();
+    let node = cluster.directory.app().node().unwrap();
+    let kept = |shard: &str, server_id: &str, media_id: &str| {
+        let shard = format!("shard-{shard}");
+        root.path().join(shard).join("server-pictures").join(server_id).join(media_id)
+    };
+    let (home_shard, guest_shard) = (cluster.placement(&home.id).unwrap(), cluster.placement(&guest.id).unwrap());
+    let notes = b"notes from the guest's side".to_vec();
+    let url = upload_file(&mut c, &http, &rin, &guest.id, notes.clone()).await;
+    let file_id = url.rsplit('/').next().unwrap().to_string();
+    assert!(kept(&guest_shard, &guest.id, &file_id).exists());
+    let sent = send_file(&mut c, &rin, &guest.id, &shown.id, &url).await.unwrap();
+    let file = &sent.attachments[0];
+    assert_eq!(file.url, format!("{}/media/servers/{}/{file_id}", cluster.gateway.url(), home.id));
+    assert_eq!((file.filename.as_str(), file.size), ("notes.txt", notes.len() as i64));
+    let fetched = http.get(&file.url).send().await.unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), notes);
+    assert!(kept(&home_shard, &home.id, &file_id).exists());
+    assert!(!kept(&guest_shard, &guest.id, &file_id).exists(), "the guest's shard let go of its copy");
+    let row = node.media(&file_id).await.unwrap().unwrap();
+    assert_eq!((row.server_id.as_deref(), row.used), (Some(home.id.as_str()), true));
+    // A file goes in one message.
+    let again = send_file(&mut c, &rin, &guest.id, &shown.id, &url).await.unwrap_err();
+    assert_eq!(again.code(), Code::PermissionDenied, "{}", again.message());
+    // Deleting the message deletes the file where the home keeps it.
+    let request = pb::DeleteMessageRequest {
+        server_id: home.id.clone(),
+        channel_id: dev.id.clone(),
+        message_id: sent.id.clone(),
+    };
+    c.messages.delete_message(authed(&juan, request)).await.unwrap();
+    wait_for_async(async || node.media(&file_id).await.unwrap().is_none()).await;
+    wait_for(|| !kept(&home_shard, &home.id, &file_id).exists()).await;
+
+    // A guest server on the home's own shard hands its file over in place.
+    let mut nearby = create_server(&mut c, &mika, "Nearby").await;
+    while cluster.placement(&nearby.id).unwrap() != home_shard {
+        nearby = create_server(&mut c, &mika, "Nearby").await;
+    }
+    join(&mut c, &rin, &nearby.id).await.unwrap();
+    let request = pb::CreateChannelRequest {
+        server_id: home.id.clone(),
+        name: "ops".into(),
+        r#type: pb::ChannelType::Text as i32,
+        ..Default::default()
+    };
+    let ops = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+    let close = share(&mut c, &juan, &home.id, &ops.id, &mika, &rin, &nearby.id).await;
+    let url = upload_file(&mut c, &http, &rin, &nearby.id, notes.clone()).await;
+    let file_id = url.rsplit('/').next().unwrap().to_string();
+    let sent = send_file(&mut c, &rin, &nearby.id, &close.id, &url).await.unwrap();
+    let fetched = http.get(&sent.attachments[0].url).send().await.unwrap();
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), notes);
+    assert!(kept(&home_shard, &home.id, &file_id).exists());
+    assert!(!kept(&home_shard, &nearby.id, &file_id).exists());
     cluster.stop().await;
+}
+
+/// Shares `channel_id` of `home` with `guest`, as its owner `guest_owner`
+/// asks, and the channel as `reader` sees it there.
+async fn share(
+    c: &mut Clients,
+    home_owner: &str,
+    home: &str,
+    channel_id: &str,
+    guest_owner: &str,
+    reader: &str,
+    guest: &str,
+) -> pb::Channel {
+    let request = pb::CreateShareCodeRequest {
+        server_id: home.to_string(),
+        channel_id: channel_id.to_string(),
+        ..Default::default()
+    };
+    let code = c.shared.create_share_code(authed(home_owner, request)).await.unwrap().into_inner().code.unwrap().code;
+    let preview = c
+        .shared
+        .preview_share(authed(
+            guest_owner,
+            pb::PreviewShareRequest { server_id: guest.to_string(), code: code.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.home_server.unwrap().name, "Home");
+    let request = pb::AcceptShareRequest { server_id: guest.to_string(), code, ..Default::default() };
+    let asked = c.shared.accept_share(authed(guest_owner, request)).await.unwrap().into_inner().connection.unwrap();
+    c.shared
+        .review_share(authed(
+            home_owner,
+            pb::ReviewShareRequest { server_id: home.to_string(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    c.channels
+        .list_channels(authed(reader, pb::ListChannelsRequest { server_id: guest.to_string() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.shared.is_some())
+        .unwrap()
+}
+
+/// Uploads `bytes` as a file for `server_id`; its link.
+async fn upload_file(c: &mut Clients, http: &reqwest::Client, token: &str, server_id: &str, bytes: Vec<u8>) -> String {
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        size: bytes.len() as i64,
+        server_id: server_id.to_string(),
+        ..Default::default()
+    };
+    let reserved = c.media.create_upload(authed(token, request)).await.unwrap().into_inner();
+    let put = http.put(&reserved.upload_url).body(bytes).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    reserved.media.unwrap().url
+}
+
+async fn send_file(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    url: &str,
+) -> Result<pb::Message, tonic::Status> {
+    let file = pb::Attachment { url: url.to_string(), filename: "notes.txt".into(), ..Default::default() };
+    let request = pb::SendMessageRequest {
+        server_id: server_id.to_string(),
+        channel_id: channel_id.to_string(),
+        attachments: vec![file],
+        ..Default::default()
+    };
+    c.messages.send_message(authed(token, request)).await.map(|r| r.into_inner().message.unwrap())
 }
 
 /// Servers live in the region their creator picked, and an admin can move one

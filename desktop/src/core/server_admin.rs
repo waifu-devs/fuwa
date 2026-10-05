@@ -562,6 +562,26 @@ impl Core {
         Ok(rpc!(api.agents(), list_agents(pb::ListAgentsRequest {})).await?.agents)
     }
 
+    /// Which agents may use a server through the instance's MCP endpoint.
+    pub async fn mcp_access(&self, key: &str, server_id: &str) -> Result<pb::McpAccess, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let req = pb::GetMcpAccessRequest { server_id: server_id.into() };
+        Ok(rpc!(api.agents(), get_mcp_access(req)).await?.access.unwrap_or_default())
+    }
+
+    /// Picks which agents may use a server through MCP: every one, only the
+    /// chosen ones, or none. What they can do there is still up to their roles.
+    pub async fn set_mcp_access(
+        &self,
+        key: &str,
+        server_id: &str,
+        access: pb::McpAccess,
+    ) -> Result<pb::McpAccess, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let req = pb::SetMcpAccessRequest { server_id: server_id.into(), access: Some(access) };
+        Ok(rpc!(api.agents(), set_mcp_access(req)).await?.access.unwrap_or_default())
+    }
+
     /// Adds an agent to a server by its username. It's a member at once.
     pub async fn add_agent(&self, key: &str, server_id: &str, username: &str) -> Result<pb::Member, Problem> {
         let api = self.api(key).ok_or_else(missing)?;

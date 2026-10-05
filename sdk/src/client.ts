@@ -8,16 +8,20 @@ import { AuthService } from "./gen/fuwa/v1/auth_pb.js";
 import { AutoModService } from "./gen/fuwa/v1/automod_pb.js";
 import { CallService } from "./gen/fuwa/v1/call_pb.js";
 import { ChannelService, SharedChannelService } from "./gen/fuwa/v1/channel_pb.js";
+import { CommandService } from "./gen/fuwa/v1/command_pb.js";
 import { DirectMessageService } from "./gen/fuwa/v1/dm_pb.js";
 import { EmojiService } from "./gen/fuwa/v1/emoji_pb.js";
 import { EventService } from "./gen/fuwa/v1/event_pb.js";
 import { FriendService } from "./gen/fuwa/v1/friend_pb.js";
+import { GifService } from "./gen/fuwa/v1/gif_pb.js";
 import { InviteService } from "./gen/fuwa/v1/invite_pb.js";
 import { JoinService } from "./gen/fuwa/v1/join_pb.js";
 import { MediaService } from "./gen/fuwa/v1/media_pb.js";
 import { MessageService } from "./gen/fuwa/v1/message_pb.js";
 import { NodeService } from "./gen/fuwa/v1/node_pb.js";
+import { PresenceService } from "./gen/fuwa/v1/presence_pb.js";
 import { RoleService } from "./gen/fuwa/v1/role_pb.js";
+import { SearchService } from "./gen/fuwa/v1/search_pb.js";
 import { SecureChannelService } from "./gen/fuwa/v1/secure_pb.js";
 import { ServerService } from "./gen/fuwa/v1/server_pb.js";
 import { SsoService } from "./gen/fuwa/v1/sso_pb.js";
@@ -83,6 +87,11 @@ export interface Fuwa {
   agents: Client<typeof AgentService>;
   sso: Client<typeof SsoService>;
   shared: Client<typeof SharedChannelService>;
+  /** Slash commands and buttons: agents set theirs, members run and press them. */
+  commands: Client<typeof CommandService>;
+  gifs: Client<typeof GifService>;
+  presence: Client<typeof PresenceService>;
+  search: Client<typeof SearchService>;
   /** What the instance says it runs: its version and build, from NodeService.GetNode. */
   serverVersion(): Promise<ServerVersion>;
   /** The fetch the client uses, for uploads. */
@@ -200,6 +209,10 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     agents: client(AgentService),
     sso: client(SsoService),
     shared: client(SharedChannelService),
+    commands: client(CommandService),
+    gifs: client(GifService),
+    presence: client(PresenceService),
+    search: client(SearchService),
     async serverVersion() {
       const { node: n } = await node.getNode({});
       if (!n) throw toFuwaError(new Error("the instance didn't describe itself"), "fuwa.v1.NodeService/GetNode");

@@ -1,0 +1,7 @@
+{
+  "time.today": "Hoy",
+  "time.yesterday": "Ayer",
+  "time.todayAt": "Hoy, {time}",
+  "time.yesterdayAt": "Ayer, {time}",
+  "time.dayTime": "{day}, {time}"
+}

@@ -45,7 +45,7 @@ export function Language() {
   };
   return (
     <div className="flex flex-col">
-      <PrefSetting id="language" title={t("settings.language.title")} hint={t("settings.language.hint")} keys={["language"]}>
+      <PrefSetting id="language" title={t("settings.language.title")} keys={["language"]}>
         <Choice<string>
           value={LANGUAGES.some((l) => l.code === language) ? language : "auto"}
           onChange={pick}
