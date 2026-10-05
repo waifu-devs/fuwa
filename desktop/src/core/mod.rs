@@ -16,6 +16,7 @@ pub mod config;
 pub mod dms;
 pub mod emoji;
 pub mod history;
+pub mod i18n;
 pub mod instance_admin;
 pub mod instance_manage;
 pub mod instance_servers;
@@ -209,6 +210,7 @@ impl Core {
         let (version_tx, version) = watch::channel(0u64);
         let (notices_tx, notices) = mpsc::unbounded_channel();
         let prefs = config::load_prefs(&paths);
+        i18n::set_language(prefs.language.as_deref());
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
@@ -293,11 +295,15 @@ impl Core {
     }
 
     pub fn set_prefs(&self, f: impl FnOnce(&mut Prefs)) {
-        let prefs = {
+        let (prefs, language_changed) = {
             let mut prefs = self.shared.prefs.lock();
+            let language = prefs.language.clone();
             f(&mut prefs);
-            prefs.clone()
+            (prefs.clone(), prefs.language != language)
         };
+        if language_changed {
+            i18n::set_language(prefs.language.as_deref());
+        }
         reports::set_enabled(prefs.share_reports);
         self.listen_for_games(prefs.game_activity);
         self.games.set_answers(prefs.game_answers.clone());
