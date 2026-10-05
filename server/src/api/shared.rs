@@ -36,7 +36,8 @@ use crate::servers::{self as store, Audit, Payload, ServerDb, load_channel};
 pub const SHAREABLE: Bits = bit(Permission::SendMessages)
     | bit(Permission::EmbedLinks)
     | bit(Permission::AttachFiles)
-    | bit(Permission::CreatePolls);
+    | bit(Permission::CreatePolls)
+    | bit(Permission::CreateThreads);
 /// The same for a server on another instance: as much, now that files
 /// cross instances too ([`crate::shared_files`]).
 const SHAREABLE_ELSEWHERE: Bits = SHAREABLE;
@@ -135,6 +136,11 @@ fn link_row(r: &turso::Row) -> turso::Result<LinkRow> {
 }
 
 impl LinkRow {
+    /// The channel here that shows the home's, once approved.
+    pub(super) fn channel_id(&self) -> &str {
+        self.channel_id.as_deref().unwrap_or_default()
+    }
+
     /// Whether the channel's home is on another instance.
     pub(super) fn elsewhere(&self) -> bool {
         self.instance.origin.is_some()
@@ -383,8 +389,10 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     message.attachments = their_files(&message.attachments);
     message.embeds = message.embeds.iter().take(10).map(|e| their_embed(e, pictures)).collect();
     message.auto_mod = None;
-    // Threads stay in the channel's own server for now.
-    no_threads(message);
+    if !message.thread_id.is_empty() {
+        parse_id("message", &message.thread_id)?;
+    }
+    message.thread = message.thread.take().map(|summary| their_summary(summary, at, own)).transpose()?;
     message.emojis = message.emojis.iter().take(MAX_OUTSIDE_EMOJIS).filter_map(|e| their_emoji(e, pictures)).collect();
     message.gif = message.gif.as_ref().and_then(|gif| their_gif(gif, pictures));
     message.poll = message.poll.take().map(|poll| their_poll(poll, at, own)).transpose()?;
@@ -459,6 +467,22 @@ async fn own_authors(conn: &turso::Connection, authors: Vec<pb::User>) -> Result
         }
     }
     Ok(shown)
+}
+
+/// A thread's summary from a home on another instance: counts that make
+/// sense, and at most five people, read like authors.
+fn their_summary(summary: pb::ThreadSummary, at: &str, own: &str) -> Result<pb::ThreadSummary> {
+    Ok(pb::ThreadSummary {
+        reply_count: summary.reply_count.max(0),
+        last_reply_at: summary.last_reply_at,
+        participant_ids: summary
+            .participant_ids
+            .iter()
+            .take(5)
+            .map(|id| from_there(id, at, own))
+            .collect::<Result<_>>()?,
+        locked: summary.locked,
+    })
 }
 
 /// A custom emoji in a message from another instance: its name and its
@@ -674,6 +698,29 @@ pub fn arrived(
             poll.emojis = their_emojis(&poll.emojis, at, &pictures);
         }
         Some(Call::Emojis(emojis)) => their_guest(emojis.guest.as_mut(), at, &pictures)?,
+        Some(Call::Reply(reply)) => {
+            let send = reply.send.as_mut().ok_or_else(|| Error::invalid("send is required"))?;
+            their_guest(send.guest.as_mut(), at, &pictures)?;
+            their_text(send)?;
+            message_id(&send.reply_to_id)?;
+            send.emojis = their_emojis(&send.emojis, at, &pictures);
+            parse_id("message", &reply.thread_id)?;
+        }
+        Some(Call::Thread(thread)) => {
+            their_guest(thread.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &thread.thread_id)?;
+            message_id(&thread.before_id)?;
+            message_id(&thread.after_id)?;
+        }
+        Some(Call::Threads(threads)) => {
+            their_guest(threads.guest.as_mut(), at, &pictures)?;
+            message_id(&threads.after_thread_id)?;
+        }
+        Some(Call::Follow(follow)) => {
+            their_guest(follow.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &follow.thread_id)?;
+        }
+        Some(Call::Followed(followed)) => their_guest(followed.guest.as_mut(), at, &pictures)?,
         Some(Call::Vote(vote)) => {
             their_guest(vote.guest.as_mut(), at, &pictures)?;
             parse_id("message", &vote.message_id)?;
@@ -705,6 +752,11 @@ pub fn arrived(
                     ) => their_message(m, at, own, &pictures)?,
                     Some(Payload::MessageDeleted(deleted)) => {
                         parse_id("message", &deleted.message_id)?;
+                    }
+                    Some(Payload::ThreadUpdated(updated)) => {
+                        parse_id("message", &updated.thread_id)?;
+                        let summary = updated.thread.take().ok_or_else(|| Error::invalid("thread is required"))?;
+                        updated.thread = Some(their_summary(summary, at, own)?);
                     }
                     Some(Payload::PollUpdated(updated)) => {
                         parse_id("message", &updated.message_id)?;
@@ -761,7 +813,7 @@ pub fn returned(
     let own = federation::address(own);
     let mut out = cpb::SharedReply::default();
     match &call.call {
-        Some(Call::Send(_) | Call::Get(_) | Call::Edit(_) | Call::Poll(_)) => {
+        Some(Call::Send(_) | Call::Get(_) | Call::Edit(_) | Call::Poll(_) | Call::Reply(_)) => {
             if let Some(mut message) = reply.message {
                 their_message(&mut message, at, own, &pictures)?;
                 out.message = Some(message);
@@ -772,13 +824,22 @@ pub fn returned(
             }
             return Ok(out);
         }
-        Some(Call::List(_)) => {
+        Some(Call::List(_) | Call::Thread(_)) => {
             let mut page = reply.page.unwrap_or_default();
             for message in &mut page.messages {
                 their_message(message, at, own, &pictures)?;
             }
-            page.authors.truncate(page.messages.len());
-            page.parent = None;
+            // One author a message, and the thread's parent's on a thread's page.
+            let thread = matches!(&call.call, Some(Call::Thread(_)));
+            page.authors.truncate(page.messages.len() + usize::from(thread));
+            // Only a thread's page has the message it's under.
+            page.parent = match (&call.call, page.parent) {
+                (Some(Call::Thread(_)), Some(mut parent)) => {
+                    their_message(&mut parent, at, own, &pictures)?;
+                    Some(parent)
+                }
+                _ => None,
+            };
             for author in &mut page.authors {
                 their_user(author, at, own, &pictures)?;
             }
@@ -787,6 +848,32 @@ pub fn returned(
         }
         Some(Call::Vote(_) | Call::EndPoll(_)) => {
             out.poll = reply.poll.map(|poll| their_poll(poll, at, own)).transpose()?;
+            return Ok(out);
+        }
+        Some(Call::Threads(_)) => {
+            let mut page = reply.threads.unwrap_or_default();
+            page.threads.truncate(50);
+            for message in &mut page.threads {
+                their_message(message, at, own, &pictures)?;
+            }
+            // Each thread's author and up to five people who replied.
+            page.authors.truncate(page.threads.len() * 6);
+            for author in &mut page.authors {
+                their_user(author, at, own, &pictures)?;
+            }
+            if !page.next_after_thread_id.is_empty() {
+                parse_id("message", &page.next_after_thread_id)?;
+            }
+            out.threads = Some(page);
+            return Ok(out);
+        }
+        Some(Call::Followed(_)) => {
+            out.thread_ids = reply
+                .thread_ids
+                .iter()
+                .take(super::threads::MAX_FOLLOWED as usize)
+                .filter_map(|id| parse_id("message", id).ok())
+                .collect();
             return Ok(out);
         }
         Some(Call::Emojis(_)) => {
@@ -1398,6 +1485,9 @@ pub(super) async fn guest_send(
     let emojis = own_emojis(app, &*sdb.read()?, &sdb.id, &req.content, link).await?;
     // A poll goes as a call of its own, which a home too old for polls here
     // refuses instead of keeping the message without it.
+    let thread = (!req.thread_id.is_empty()).then(|| {
+        (req.thread_id.clone(), req.also_send_to_channel, access.has_in(&channel_id, Permission::CreateThreads))
+    });
     let call = match req.poll {
         Some(poll) => Call::Poll(cpb::GuestPoll {
             guest: Some(guest),
@@ -1415,6 +1505,14 @@ pub(super) async fn guest_send(
             emojis,
             ..Default::default()
         }),
+    };
+    // A reply in a thread goes as a call of its own, which a home too old
+    // for threads here refuses instead of putting it in the channel.
+    let call = match (call, thread) {
+        (Call::Send(send), Some((thread_id, also_in_channel, may_start))) => {
+            Call::Reply(cpb::GuestReply { send: Some(send), thread_id, also_in_channel, may_start })
+        }
+        (call, _) => call,
     };
     let reply = to_home(app, &sdb.id, link, call).await?;
     // The home has its own copies now; on a split instance this server's
@@ -1437,14 +1535,28 @@ pub(super) async fn guest_list(
     guest: cpb::Guest,
     req: &pb::ListMessagesRequest,
 ) -> Result<pb::ListMessagesResponse> {
-    let call = Call::List(cpb::GuestList {
-        guest: Some(guest),
-        limit: req.limit,
-        before_id: req.before_id.clone(),
-        after_id: req.after_id.clone(),
-    });
+    let call = if req.thread_id.is_empty() {
+        Call::List(cpb::GuestList {
+            guest: Some(guest),
+            limit: req.limit,
+            before_id: req.before_id.clone(),
+            after_id: req.after_id.clone(),
+        })
+    } else {
+        Call::Thread(cpb::GuestThread {
+            guest: Some(guest),
+            thread_id: req.thread_id.clone(),
+            limit: req.limit,
+            before_id: req.before_id.clone(),
+            after_id: req.after_id.clone(),
+        })
+    };
     let mut page = to_home(app, server_id, link, call).await?.page.unwrap_or_default();
     page.messages = shown_from(app, server_id, link, std::mem::take(&mut page.messages)).await?;
+    page.parent = match page.parent.take() {
+        Some(parent) if !req.thread_id.is_empty() => shown_from(app, server_id, link, vec![parent]).await?.pop(),
+        _ => None,
+    };
     if link.instance.origin.is_some() {
         let conn = app.servers.get(server_id).await?.read()?;
         page.authors = own_authors(&conn, std::mem::take(&mut page.authors)).await?;
@@ -1504,6 +1616,66 @@ pub(super) async fn guest_emojis(
 ) -> Result<Vec<pb::Emoji>> {
     let call = Call::Emojis(cpb::GuestEmojis { guest: Some(guest) });
     Ok(to_home(app, server_id, link, call).await?.emojis)
+}
+
+/// A page of the threads in a channel this server shows from another: its
+/// home keeps them, and counts the search for the guest.
+pub(super) async fn guest_threads(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    req: &pb::ListThreadsRequest,
+) -> Result<pb::ListThreadsResponse> {
+    let call = Call::Threads(cpb::GuestThreads {
+        guest: Some(guest),
+        query: req.query.clone(),
+        archived: req.archived,
+        limit: req.limit,
+        after_thread_id: req.after_thread_id.clone(),
+    });
+    let mut page = to_home(app, server_id, link, call).await?.threads.unwrap_or_default();
+    page.threads = shown_from(app, server_id, link, std::mem::take(&mut page.threads)).await?;
+    if link.elsewhere() {
+        let conn = app.servers.get(server_id).await?.read()?;
+        page.authors = own_authors(&conn, std::mem::take(&mut page.authors)).await?;
+    }
+    Ok(page)
+}
+
+pub(super) async fn guest_follow(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    thread_id: &str,
+    follow: bool,
+) -> Result<()> {
+    let call = Call::Follow(cpb::GuestFollow { guest: Some(guest), thread_id: thread_id.to_string(), follow });
+    to_home(app, server_id, link, call).await.map(|_| ())
+}
+
+/// How long a home gets to say which of its threads someone follows.
+const FOLLOWED_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The threads a guest follows in a channel this server shows from another,
+/// as its home keeps them; none when it doesn't answer in time.
+pub(super) async fn guest_followed(
+    app: &Arc<App>,
+    server_id: &str,
+    link: LinkRow,
+    guest: cpb::Guest,
+) -> Result<Vec<String>> {
+    let call = Call::Followed(cpb::GuestFollowed { guest: Some(guest) });
+    match tokio::time::timeout(FOLLOWED_WAIT, to_home(app, server_id, &link, call)).await {
+        Ok(reply) => Ok(reply?.thread_ids),
+        Err(_) => Ok(vec![]),
+    }
+}
+
+/// The channels this server shows from others, approved and in use.
+pub(super) async fn links_in(conn: &turso::Connection) -> Result<Vec<LinkRow>> {
+    Ok(all_links(conn).await?.into_iter().filter(|l| l.active && l.channel_id.is_some()).collect())
 }
 
 /// This server's own custom emoji that `content` uses, for a home that
@@ -1692,16 +1864,30 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
     match call.call.ok_or_else(|| Error::invalid("call is required"))? {
         Call::Lookup(lookup) => home_lookup(app, &sdb, lookup, &from).await,
         Call::Ask(ask) => home_ask(&sdb, ask, &from).await,
-        Call::Send(send) => home_send(app, &sdb, send, None).await,
+        // Boxed, the big ones: their futures would make this one too big for a stack.
+        Call::Send(send) => Box::pin(home_send(app, &sdb, send, None, None)).await,
         Call::List(list) => home_list(app, &sdb, list).await,
         Call::Get(get) => home_get(app, &sdb, get).await,
-        Call::Edit(edit) => home_edit(app, &sdb, edit).await,
+        Call::Edit(edit) => Box::pin(home_edit(app, &sdb, edit)).await,
         Call::Delete(delete) => home_delete(app, &sdb, delete).await,
-        Call::Poll(poll) => home_poll(app, &sdb, poll).await,
+        Call::Poll(poll) => Box::pin(home_poll(app, &sdb, poll)).await,
         Call::Vote(vote) => home_vote(app, &sdb, vote).await,
         Call::EndPoll(end) => home_end_poll(&sdb, end).await,
         Call::Voters(voters) => home_voters(app, &sdb, voters).await,
         Call::Emojis(emojis) => home_emoji_list(app, &sdb, emojis).await,
+        Call::Reply(reply) => {
+            let send = reply.send.ok_or_else(|| Error::invalid("send is required"))?;
+            let thread = Reply {
+                thread_id: reply.thread_id,
+                also_in_channel: reply.also_in_channel,
+                may_start: reply.may_start,
+            };
+            Box::pin(home_send(app, &sdb, send, None, Some(thread))).await
+        }
+        Call::Thread(thread) => Box::pin(home_thread(app, &sdb, thread)).await,
+        Call::Threads(threads) => Box::pin(home_threads(app, &sdb, threads)).await,
+        Call::Follow(follow) => home_follow(app, &sdb, follow).await,
+        Call::Followed(followed) => home_followed(&sdb, followed).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
@@ -1901,7 +2087,14 @@ async fn home_poll(app: &Arc<App>, sdb: &ServerDb, poll: cpb::GuestPoll) -> Resu
         emojis: poll.emojis,
         ..Default::default()
     };
-    home_send(app, sdb, send, Some(checked)).await
+    home_send(app, sdb, send, Some(checked), None).await
+}
+
+/// Where a guest's reply in a thread goes ([`cpb::GuestReply`]).
+struct Reply {
+    thread_id: String,
+    also_in_channel: bool,
+    may_start: bool,
 }
 
 async fn home_send(
@@ -1909,6 +2102,7 @@ async fn home_send(
     sdb: &ServerDb,
     send: cpb::GuestSend,
     poll: Option<pb::Poll>,
+    thread: Option<Reply>,
 ) -> Result<cpb::SharedReply> {
     let guest = send.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
@@ -1986,10 +2180,20 @@ async fn home_send(
             }
             if !send.reply_to_id.is_empty() {
                 let replied = load_message(conn, &sdb.id, &send.reply_to_id).await?;
-                if replied.is_none_or(|m| m.channel_id != channel.id || !in_channel(&m)) {
+                if replied.is_none_or(|m| m.channel_id != channel.id || m.kind != pb::MessageKind::Unspecified as i32) {
                     return Err(Error::NotFound("message being replied to"));
                 }
             }
+            // Starting a thread takes the guest's own server's word and this one's grant.
+            let parent = match &thread {
+                Some(thread) => {
+                    if !thread.may_start && super::threads::load(conn, &thread.thread_id).await?.is_none() {
+                        return Err(Error::denied("you can't start threads here"));
+                    }
+                    Some(super::threads::check_reply(conn, &sdb.id, &access, &channel, &thread.thread_id).await?)
+                }
+                None => None,
+            };
             remember(conn, &user, &server).await?;
             let verdict =
                 review_guest(conn, &sdb.id, &user, &server, &access, &channel, text, asked.as_ref(), events).await?;
@@ -2012,10 +2216,19 @@ async fn home_send(
                 shared: Some(pb::SharedAuthor { user: Some(user), server: Some(server) }),
                 poll: poll.clone(),
                 emojis: emojis.clone(),
+                thread_id: parent.as_ref().map(|p| p.id.clone()).unwrap_or_default(),
+                also_in_channel: parent.is_some() && thread.as_ref().is_some_and(|t| t.also_in_channel),
                 ..Default::default()
             };
             messages::insert_message(conn, &message, now).await?;
             events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+            if let Some(parent) = parent {
+                super::threads::follow_quietly(conn, &parent.id, &message.author_id).await?;
+                if parent.webhook.is_none() {
+                    super::threads::follow_quietly(conn, &parent.id, &parent.author_id).await?;
+                }
+                super::threads::refresh(conn, &channel.id, &parent.id, events).await?;
+            }
             Ok(Ok(message))
         })
         .await
@@ -2210,7 +2423,7 @@ pub async fn file_for(
     .await?;
     let Some(message_id) = found else { return Ok(None) };
     match load_message(conn, server_id, &message_id).await? {
-        Some(message) if in_channel(&message) && message.kind == pb::MessageKind::Unspecified as i32 => {
+        Some(message) if message.kind == pb::MessageKind::Unspecified as i32 => {
             crate::attachments::lookup(conn, media_id).await
         }
         _ => Ok(None),
@@ -2226,7 +2439,7 @@ async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cp
     }
     let (mut messages, has_more) =
         messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
-    messages.iter_mut().for_each(no_threads);
+    super::threads::attach(&conn, &mut messages).await?;
     super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
@@ -2252,9 +2465,9 @@ async fn home_get(app: &App, sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::
     }
     let mut message = load_message(&conn, &sdb.id, &get.message_id)
         .await?
-        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m))
+        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32)
         .ok_or(Error::NotFound("message"))?;
-    no_threads(&mut message);
+    super::threads::attach(&conn, std::slice::from_mut(&mut message)).await?;
     super::polls::mark_mine(&conn, &user.id, std::slice::from_mut(&mut message)).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
@@ -2390,6 +2603,19 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, mut edit: cpb::GuestEdit) -> 
 }
 
 /// The home server's custom emoji, for a guest's picker in the channel.
+/// A server on another instance counts as one sender here, reads too; it
+/// can make up any number of people, so its calls are paced per server.
+/// Gives that server's id when the guest is elsewhere.
+fn pace_elsewhere(app: &App, guest: &cpb::Guest) -> Result<Option<String>> {
+    let elsewhere = guest.server.as_ref().map(|s| s.id.clone()).filter(|id| id.contains('@'));
+    if let Some(server_id) = &elsewhere
+        && !app.federation.take_send(server_id, app.settings().limits.shared_remote_sends_per_minute)
+    {
+        return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
+    }
+    Ok(elsewhere)
+}
+
 async fn home_emoji_list(app: &App, sdb: &ServerDb, call: cpb::GuestEmojis) -> Result<cpb::SharedReply> {
     let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
     let conn = sdb.read()?;
@@ -2397,13 +2623,7 @@ async fn home_emoji_list(app: &App, sdb: &ServerDb, call: cpb::GuestEmojis) -> R
     if blocked(&conn, &row.channel_id, &user.id).await? {
         return Err(Error::denied(KEPT_OUT));
     }
-    // A server on another instance counts as one sender here, reads too.
-    let elsewhere = guest.server.as_ref().map(|s| s.id.clone()).filter(|id| id.contains('@'));
-    if let Some(server_id) = &elsewhere
-        && !app.federation.take_send(server_id, app.settings().limits.shared_remote_sends_per_minute)
-    {
-        return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
-    }
+    let elsewhere = pace_elsewhere(app, &guest)?;
     let public_url = &app.settings().public_url;
     let mut emojis: Vec<pb::Emoji> =
         store::load_emojis(&conn, &sdb.id).await?.into_iter().take(MAX_HOME_EMOJIS).map(shown_emoji).collect();
@@ -2416,6 +2636,107 @@ async fn home_emoji_list(app: &App, sdb: &ServerDb, call: cpb::GuestEmojis) -> R
     Ok(cpb::SharedReply { emojis, ..Default::default() })
 }
 
+/// A page of the replies in a thread in the channel, with the message it's under.
+async fn home_thread(app: &App, sdb: &ServerDb, call: cpb::GuestThread) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    let (_, mut parent, summary) = super::threads::find_in(&conn, &sdb.id, &row.channel_id, &call.thread_id).await?;
+    parent.thread = Some(summary);
+    let (mut messages, has_more) = messages::page(
+        &conn,
+        &sdb.id,
+        &row.channel_id,
+        &call.thread_id,
+        call.limit,
+        &call.before_id,
+        &call.after_id,
+        true,
+    )
+    .await?;
+    messages.push(parent);
+    super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
+    let home = this_server(&conn, &sdb.id).await?;
+    decorate(&conn, Some(&home), &mut messages).await?;
+    home_emojis(&conn, &sdb.id, &mut messages).await?;
+    let mut authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
+    if user.id.contains('@') {
+        let public_url = &app.settings().public_url;
+        messages.iter_mut().for_each(|m| plain_message(m, public_url));
+        authors = authors.iter().map(|a| plain_user(a, public_url)).collect();
+    }
+    let parent = messages.pop();
+    Ok(cpb::SharedReply {
+        page: Some(pb::ListMessagesResponse { messages, authors, has_more, parent }),
+        ..Default::default()
+    })
+}
+
+/// A page of the channel's threads. A search is counted for the guest here,
+/// where the threads are, under their id here.
+async fn home_threads(app: &App, sdb: &ServerDb, call: cpb::GuestThreads) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    pace_elsewhere(app, &guest)?;
+    let channel = load_channel(&conn, &sdb.id, &row.channel_id).await?.ok_or(Error::NotFound(GONE))?;
+    let query = super::threads::search_text(&call.query, &user.id)?;
+    let req = pb::ListThreadsRequest {
+        archived: call.archived,
+        limit: call.limit,
+        after_thread_id: call.after_thread_id,
+        ..Default::default()
+    };
+    let mut page = super::threads::page(&conn, &sdb.id, &channel, &query, &req).await?;
+    super::polls::mark_mine(&conn, &user.id, &mut page.threads).await?;
+    let home = this_server(&conn, &sdb.id).await?;
+    decorate(&conn, Some(&home), &mut page.threads).await?;
+    home_emojis(&conn, &sdb.id, &mut page.threads).await?;
+    if user.id.contains('@') {
+        let public_url = &app.settings().public_url;
+        page.threads.iter_mut().for_each(|m| plain_message(m, public_url));
+        page.authors = page.authors.iter().map(|a| plain_user(a, public_url)).collect();
+    }
+    Ok(cpb::SharedReply { threads: Some(page), ..Default::default() })
+}
+
+async fn home_follow(app: &App, sdb: &ServerDb, call: cpb::GuestFollow) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    pace_elsewhere(app, &guest)?;
+    let actor = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    // Following changes only what reaches them, so it's no event and no audit entry.
+    sdb.write(&actor, async |conn, _events| {
+        let (row, user, server) = connection(conn, &guest).await?;
+        if blocked(conn, &row.channel_id, &user.id).await? {
+            return Ok(Err(KEPT_OUT.to_string()));
+        }
+        super::threads::find_in(conn, &sdb.id, &row.channel_id, &call.thread_id).await?;
+        remember(conn, &user, &server).await?;
+        super::threads::set_follow(conn, &call.thread_id, &user.id, call.follow).await?;
+        Ok(Ok(()))
+    })
+    .await?
+    .map_err(Error::denied)?;
+    Ok(cpb::SharedReply::default())
+}
+
+async fn home_followed(sdb: &ServerDb, call: cpb::GuestFollowed) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    let thread_ids = super::threads::followed(&conn, &user.id, |channel| channel == row.channel_id).await?;
+    Ok(cpb::SharedReply { thread_ids, ..Default::default() })
+}
+
 async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
     let guest = delete.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
@@ -2426,6 +2747,13 @@ async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -
                 .await?
                 .filter(|m| m.channel_id == row.channel_id)
                 .ok_or(Error::NotFound("message"))?;
+            // A thread others replied in goes with its message only by the home's moderators.
+            if message.thread_id.is_empty()
+                && super::threads::load(conn, &message.id).await?.is_some()
+                && super::threads::others_replied(conn, &message.id, &message.author_id).await?
+            {
+                return Err(Error::denied("others replied in its thread; only this channel's home can delete it now"));
+            }
             if message.author_id != user.id {
                 // A guest's moderators delete their own server's people's messages.
                 let theirs = guest.moderator
@@ -2570,6 +2898,14 @@ async fn drop_guest(
     conn.execute("DELETE FROM channel_guests WHERE id = ?1", [row.id.as_str()]).await?;
     conn.execute(
         "DELETE FROM channel_blocks WHERE channel_id = ?1 AND guest_server_id = ?2",
+        (row.channel_id.as_str(), row.server.id.as_str()),
+    )
+    .await?;
+    // What its people followed here goes with it; their replies stay, as their messages do.
+    conn.execute(
+        "DELETE FROM thread_follows
+         WHERE thread_id IN (SELECT id FROM threads WHERE channel_id = ?1)
+           AND user_id IN (SELECT id FROM users WHERE guest_of = ?2)",
         (row.channel_id.as_str(), row.server.id.as_str()),
     )
     .await?;
@@ -2730,6 +3066,7 @@ async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> 
                 }
                 Payload::MessageDeleted(d) => d.channel_id = channel_id.clone(),
                 Payload::PollUpdated(p) => p.channel_id = channel_id.clone(),
+                Payload::ThreadUpdated(t) => t.channel_id = channel_id.clone(),
                 _ => return None,
             }
             // Not in this server's log: it's shown, not kept.
@@ -2938,26 +3275,18 @@ fn in_channel(m: &pb::Message) -> bool {
     m.thread_id.is_empty() || m.also_in_channel
 }
 
-/// A message without its thread: threads stay with the home server, so a
-/// channel shared after threads were started doesn't hand guests who
-/// replied in them, and a reply also sent to the channel reads as a message.
-fn no_threads(m: &mut pb::Message) {
-    m.thread = None;
-    m.thread_id.clear();
-    m.also_in_channel = false;
-}
-
 /// The channel a message event is about, for the messages guests are shown:
 /// ones people wrote, not join messages or AutoMod alerts.
 fn message_channel(payload: &Payload) -> Option<&str> {
     match payload {
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) })
-            if m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m) =>
+            if m.kind == pb::MessageKind::Unspecified as i32 =>
         {
             Some(&m.channel_id)
         }
         Payload::MessageDeleted(d) => Some(&d.channel_id),
+        Payload::ThreadUpdated(t) => Some(&t.channel_id),
         // Checked by [`for_guests`]: only polls in messages shown in the channel.
         Payload::PollUpdated(p) => Some(&p.channel_id),
         _ => None,
@@ -2991,7 +3320,6 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
     ) = event.payload.as_mut()
     {
         no_pings(m);
-        no_threads(m);
     }
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
@@ -3004,6 +3332,7 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
             let conn = sdb.read()?;
             let home = this_server(&conn, &sdb.id).await?;
             decorate(&conn, Some(&home), std::slice::from_mut(m)).await?;
+            super::threads::attach(&conn, std::slice::from_mut(m)).await?;
             home_emojis(&conn, &sdb.id, std::slice::from_mut(m)).await
         }
         .await;
@@ -4040,8 +4369,13 @@ mod tests {
                 seal: "theirs".into(),
                 ..Default::default()
             }),
-            thread_id: "elsewhere".into(),
+            thread_id: new_id(),
             also_in_channel: true,
+            thread: Some(pb::ThreadSummary {
+                reply_count: -4,
+                participant_ids: (0..9).map(|_| new_id()).collect(),
+                ..Default::default()
+            }),
             attachments: vec![pb::Attachment::default()],
             embeds: vec![pb::Embed {
                 title: "a\nlink".into(),
@@ -4079,7 +4413,14 @@ mod tests {
         let m = created.message.as_ref().unwrap();
         assert_eq!(m.author_id, format!("{there}@night-owls.example"));
         assert!(!m.mentions_everyone && m.attachments.is_empty());
-        assert!(m.thread_id.is_empty() && !m.also_in_channel, "threads stay at home for now");
+        assert!(!m.thread_id.is_empty() && m.also_in_channel);
+        let summary = m.thread.as_ref().unwrap();
+        assert_eq!(summary.reply_count, 0);
+        assert_eq!(summary.participant_ids.len(), 5);
+        assert!(summary.participant_ids.iter().all(|id| id.ends_with("@night-owls.example")));
+        let mut odd = written(there.clone());
+        odd.thread_id = "elsewhere".into();
+        assert!(arrived(events(odd), origin, OWN, "abcd", &proxied).is_err(), "a thread is a message's id");
         // Pictures are that instance's own, through this one's proxy.
         let emoji = &m.emojis[..];
         assert_eq!(emoji.len(), 1, "only pictures on the instance itself");
@@ -4246,7 +4587,7 @@ mod tests {
             ..Default::default()
         };
         let page = returned(&list, page, origin, OWN, "abcd", &proxied).unwrap().page.unwrap();
-        assert!(page.parent.is_none(), "threads stay at home for now");
+        assert!(page.parent.is_none(), "only a thread's page has a parent");
         let authors = page.authors;
         assert_eq!(authors, vec![pb::User { id: here, ..Default::default() }], "no more people than messages");
         // An answer to another call keeps none of it.

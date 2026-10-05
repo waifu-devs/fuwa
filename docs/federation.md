@@ -271,6 +271,14 @@ On "Other instances" in Instance settings (`GetFederation`,
   too old for them shows their names. The home's emoji go out with each
   message that uses them, and to the picker with `GuestEmojis` (at most
   1000), which counts toward the home's pace for that server like a send.
+- **Threads** cross as on one instance (docs/shared-channels.md), with
+  `GuestReply`, `GuestThread`, `GuestThreads`, `GuestFollow` and
+  `GuestFollowed`: new calls, so a home too old for them refuses a reply
+  instead of putting it in the channel. A summary from the other instance
+  is clipped (no negative counts, five people at most) and the people it
+  names are read like authors; `ThreadUpdated` goes to the guest's
+  instance with message events. A search's text goes to the home's
+  instance, which counts it for the guest under their name there.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.

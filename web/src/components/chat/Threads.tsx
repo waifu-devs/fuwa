@@ -275,7 +275,8 @@ export function ThreadPanel({
   );
   const followed = useFuwa((s) => !!s.instances[instanceKey]?.followed[serverId]?.[threadId]);
   const access = useAccess(instanceKey, serverId);
-  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  // Only the channel's home locks its threads.
+  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) && !(channel.shared && !channel.shared.home);
   const list = useRef<MessageListHandle>(null);
   const locked = !!parent?.thread?.locked;
   const archived = isArchived(parent?.thread, useArchiveHours(instanceKey, serverId));

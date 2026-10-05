@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use super::{Api, Seat, users};
+use super::{Api, Seat, shared, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -29,7 +29,7 @@ const MINUTE_MS: i64 = 60_000;
 /// Longest search, in characters.
 const MAX_QUERY: usize = 100;
 /// Most followed threads ListFollowedThreads returns.
-const MAX_FOLLOWED: i64 = 500;
+pub(super) const MAX_FOLLOWED: i64 = 500;
 
 fn summary_row(r: &turso::Row) -> turso::Result<(String, pb::ThreadSummary)> {
     let participants = r.get::<String>(3)?;
@@ -159,9 +159,6 @@ pub(super) async fn check_reply(
     channel: &pb::Channel,
     thread_id: &str,
 ) -> Result<pb::Message> {
-    if channel.shared.is_some() {
-        return Err(Error::invalid("threads aren't in channels shared between servers yet"));
-    }
     let parent = super::messages::load_message(conn, server_id, thread_id)
         .await?
         .filter(|m| m.channel_id == channel.id)
@@ -266,13 +263,161 @@ async fn find(
     thread_id: &str,
 ) -> Result<(pb::Channel, pb::Message, pb::ThreadSummary)> {
     access.require_in(channel_id, Permission::ViewChannels)?;
+    find_in(conn, server_id, channel_id, thread_id).await
+}
+
+/// The thread under `thread_id` in the channel, whoever asks: the message
+/// it's under is one people wrote there, not a reply itself.
+pub(super) async fn find_in(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> Result<(pb::Channel, pb::Message, pb::ThreadSummary)> {
     let channel = load_channel(conn, server_id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
     let parent = super::messages::load_message(conn, server_id, thread_id)
         .await?
-        .filter(|m| m.channel_id == channel.id && m.thread_id.is_empty())
+        .filter(|m| {
+            m.channel_id == channel.id && m.thread_id.is_empty() && m.kind == pb::MessageKind::Unspecified as i32
+        })
         .ok_or(Error::NotFound("thread"))?;
     let summary = load(conn, thread_id).await?.ok_or(Error::NotFound("thread"))?;
     Ok((channel, parent, summary))
+}
+
+/// A search's text as threads are searched by, checked and counted for
+/// `searcher` (an account here, or a guest's id at a channel's home).
+pub(super) fn search_text(query: &str, searcher: &str) -> Result<String> {
+    let query = query.trim().to_lowercase();
+    if query.chars().count() > MAX_QUERY {
+        return Err(Error::invalid(format!("searches are at most {MAX_QUERY} characters")));
+    }
+    if !query.is_empty() {
+        take_search(searcher, now_ms())?;
+    }
+    Ok(query)
+}
+
+/// A page of a channel's threads, as [`Api::list_threads_impl`] describes,
+/// with `query` already from [`search_text`].
+pub(super) async fn page(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel: &pb::Channel,
+    query: &str,
+    req: &pb::ListThreadsRequest,
+) -> Result<pb::ListThreadsResponse> {
+    let hours = store::load_server(conn).await?.thread_archive_hours;
+    if req.archived && hours == 0 {
+        return Ok(pb::ListThreadsResponse::default());
+    }
+    let cutoff = if hours == 0 { 0 } else { now_ms() - i64::from(hours) * 3_600_000 };
+    let limit = if req.limit <= 0 { 25 } else { req.limit.min(MAX_PAGE) } as usize;
+    let after = if req.after_thread_id.is_empty() {
+        None
+    } else {
+        query_one(
+            conn,
+            "SELECT last_reply_id FROM threads WHERE id = ?1 AND channel_id = ?2",
+            (req.after_thread_id.as_str(), channel.id.as_str()),
+            |r| r.get::<String>(0),
+        )
+        .await?
+    };
+    let (age, cursor) = match (req.archived, &after) {
+        (false, Some(_)) => ("last_reply_at >= ?2 AND last_reply_id < ?3", after.as_deref().unwrap_or_default()),
+        (false, None) => ("last_reply_at >= ?2 AND ?3 = ''", ""),
+        (true, Some(_)) => ("last_reply_at < ?2 AND last_reply_id < ?3", after.as_deref().unwrap_or_default()),
+        (true, None) => ("last_reply_at < ?2 AND ?3 = ''", ""),
+    };
+    // A search reads through a bounded number of threads; a page without one stops at the limit.
+    let scan = if query.is_empty() { limit as i64 + 1 } else { MAX_SEARCHED };
+    let candidates = query_all(
+        conn,
+        &format!(
+            "SELECT {SUMMARY_COLUMNS} FROM threads WHERE channel_id = ?1 AND {age} ORDER BY last_reply_id DESC LIMIT ?4"
+        ),
+        (channel.id.as_str(), cutoff, cursor, scan),
+        summary_row,
+    )
+    .await?;
+    let mut threads = Vec::new();
+    let mut has_more = false;
+    let mut budget = MAX_SEARCH_READ;
+    let searched_all = (candidates.len() as i64) < scan;
+    // The last thread looked at, where the next page carries on.
+    let mut looked_at = String::new();
+    for (id, summary) in candidates {
+        if threads.len() == limit {
+            has_more = true;
+            break;
+        }
+        let Some(mut parent) = super::messages::load_message(conn, server_id, &id).await? else {
+            looked_at = id;
+            continue;
+        };
+        if !query.is_empty() && !parent.content.to_lowercase().contains(query) {
+            // A search reads a bounded number of replies in all; past that it
+            // stops and says there's more, so a busy channel never answers
+            // "nothing found" without having looked everywhere.
+            if budget <= 0 {
+                has_more = true;
+                break;
+            }
+            let replies = query_all(
+                conn,
+                "SELECT content FROM messages WHERE thread_id = ?1 ORDER BY id DESC LIMIT ?2",
+                (id.as_str(), budget.min(MAX_SEARCHED_REPLIES)),
+                |r| r.get::<String>(0),
+            )
+            .await?;
+            budget -= replies.len().max(1) as i64;
+            if !replies.iter().any(|c| c.to_lowercase().contains(query)) {
+                looked_at = id;
+                continue;
+            }
+        }
+        looked_at = id;
+        parent.thread = Some(summary);
+        threads.push(parent);
+    }
+    // A search that read its whole share of threads may have more past them.
+    if !query.is_empty() && !searched_all {
+        has_more = true;
+    }
+    let mut ids = threads.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>();
+    ids.extend(threads.iter().flat_map(|m| m.thread.iter().flat_map(|t| t.participant_ids.iter().map(String::as_str))));
+    let authors = users(conn, &ids).await?;
+    let next_after_thread_id = if has_more { looked_at } else { String::new() };
+    Ok(pb::ListThreadsResponse { threads, authors, has_more, next_after_thread_id })
+}
+
+/// The threads someone follows in the channels they can see, latest reply first.
+pub(super) async fn followed(
+    conn: &turso::Connection,
+    user_id: &str,
+    can_see: impl Fn(&str) -> bool,
+) -> Result<Vec<String>> {
+    let rows = query_all(
+        conn,
+        "SELECT t.id, t.channel_id FROM thread_follows f JOIN threads t ON t.id = f.thread_id
+         WHERE f.user_id = ?1 AND f.follow = 1 ORDER BY t.last_reply_id DESC LIMIT ?2",
+        (user_id, MAX_FOLLOWED),
+        |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?)),
+    )
+    .await?;
+    Ok(rows.into_iter().filter(|(_, channel)| can_see(channel)).map(|(id, _)| id).collect())
+}
+
+/// Follows or unfollows a thread for someone, by hand, inside a write.
+pub(super) async fn set_follow(conn: &turso::Connection, thread_id: &str, user_id: &str, follow: bool) -> Result<()> {
+    conn.execute(
+        "INSERT INTO thread_follows (thread_id, user_id, follow) VALUES (?1, ?2, ?3)
+         ON CONFLICT (thread_id, user_id) DO UPDATE SET follow = excluded.follow",
+        (thread_id, user_id, follow),
+    )
+    .await?;
+    Ok(())
 }
 
 impl Api {
@@ -283,103 +428,16 @@ impl Api {
     ) -> Result<pb::ListThreadsResponse> {
         let Seat { sdb, access, .. } = self.membership(account, &req.server_id).await?;
         access.require_in(&req.channel_id, Permission::ViewChannels)?;
-        let query = req.query.trim().to_lowercase();
-        if query.chars().count() > MAX_QUERY {
-            return Err(Error::invalid(format!("searches are at most {MAX_QUERY} characters")));
-        }
-        if !query.is_empty() {
-            take_search(&account.id, now_ms())?;
-        }
         let conn = sdb.read()?;
         let channel = load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-        if channel.shared.is_some() {
-            return Ok(pb::ListThreadsResponse::default());
+        // Shown from another server: its home keeps the threads and counts the search.
+        if let Some(link) = shared::link_of(&conn, &channel.id).await? {
+            let guest = shared::guest_of(&self.app, &conn, &sdb.id, account, &access, &link).await?;
+            drop(conn);
+            return shared::guest_threads(&self.app, &sdb.id, &link, guest, &req).await;
         }
-        let hours = store::load_server(&conn).await?.thread_archive_hours;
-        if req.archived && hours == 0 {
-            return Ok(pb::ListThreadsResponse::default());
-        }
-        let cutoff = if hours == 0 { 0 } else { now_ms() - i64::from(hours) * 3_600_000 };
-        let limit = if req.limit <= 0 { 25 } else { req.limit.min(MAX_PAGE) } as usize;
-        let after = if req.after_thread_id.is_empty() {
-            None
-        } else {
-            query_one(
-                &conn,
-                "SELECT last_reply_id FROM threads WHERE id = ?1 AND channel_id = ?2",
-                (req.after_thread_id.as_str(), channel.id.as_str()),
-                |r| r.get::<String>(0),
-            )
-            .await?
-        };
-        let (age, cursor) = match (req.archived, &after) {
-            (false, Some(_)) => ("last_reply_at >= ?2 AND last_reply_id < ?3", after.as_deref().unwrap_or_default()),
-            (false, None) => ("last_reply_at >= ?2 AND ?3 = ''", ""),
-            (true, Some(_)) => ("last_reply_at < ?2 AND last_reply_id < ?3", after.as_deref().unwrap_or_default()),
-            (true, None) => ("last_reply_at < ?2 AND ?3 = ''", ""),
-        };
-        // A search reads through a bounded number of threads; a page without one stops at the limit.
-        let scan = if query.is_empty() { limit as i64 + 1 } else { MAX_SEARCHED };
-        let candidates = query_all(
-            &conn,
-            &format!(
-                "SELECT {SUMMARY_COLUMNS} FROM threads WHERE channel_id = ?1 AND {age} ORDER BY last_reply_id DESC LIMIT ?4"
-            ),
-            (channel.id.as_str(), cutoff, cursor, scan),
-            summary_row,
-        )
-        .await?;
-        let mut threads = Vec::new();
-        let mut has_more = false;
-        let mut budget = MAX_SEARCH_READ;
-        let searched_all = (candidates.len() as i64) < scan;
-        // The last thread looked at, where the next page carries on.
-        let mut looked_at = String::new();
-        for (id, summary) in candidates {
-            if threads.len() == limit {
-                has_more = true;
-                break;
-            }
-            let Some(mut parent) = super::messages::load_message(&conn, &sdb.id, &id).await? else {
-                looked_at = id;
-                continue;
-            };
-            if !query.is_empty() && !parent.content.to_lowercase().contains(&query) {
-                // A search reads a bounded number of replies in all; past that it
-                // stops and says there's more, so a busy channel never answers
-                // "nothing found" without having looked everywhere.
-                if budget <= 0 {
-                    has_more = true;
-                    break;
-                }
-                let replies = query_all(
-                    &conn,
-                    "SELECT content FROM messages WHERE thread_id = ?1 ORDER BY id DESC LIMIT ?2",
-                    (id.as_str(), budget.min(MAX_SEARCHED_REPLIES)),
-                    |r| r.get::<String>(0),
-                )
-                .await?;
-                budget -= replies.len().max(1) as i64;
-                if !replies.iter().any(|c| c.to_lowercase().contains(&query)) {
-                    looked_at = id;
-                    continue;
-                }
-            }
-            looked_at = id;
-            parent.thread = Some(summary);
-            threads.push(parent);
-        }
-        // A search that read its whole share of threads may have more past them.
-        if !query.is_empty() && !searched_all {
-            has_more = true;
-        }
-        let mut ids = threads.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>();
-        ids.extend(
-            threads.iter().flat_map(|m| m.thread.iter().flat_map(|t| t.participant_ids.iter().map(String::as_str))),
-        );
-        let authors = users(&conn, &ids).await?;
-        let next_after_thread_id = if has_more { looked_at } else { String::new() };
-        Ok(pb::ListThreadsResponse { threads, authors, has_more, next_after_thread_id })
+        let query = search_text(&req.query, &account.id)?;
+        page(&conn, &sdb.id, &channel, &query, &req).await
     }
 
     pub(super) async fn update_thread_impl(
@@ -390,6 +448,9 @@ impl Api {
         let Seat { sdb, access, .. } = self.membership(account, &req.server_id).await?;
         access.require_not_timed_out()?;
         access.require_in(&req.channel_id, Permission::ManageMessages)?;
+        if shared::link_of(&*sdb.read()?, &req.channel_id).await?.is_some() {
+            return Err(Error::FailedPrecondition("only the channel's home server can lock its threads".into()));
+        }
         let thread = sdb
             .write(&account.id, async |conn, events| {
                 let (channel, parent, summary) = find(conn, &sdb.id, &access, &req.channel_id, &req.thread_id).await?;
@@ -410,16 +471,20 @@ impl Api {
         req: pb::FollowThreadRequest,
     ) -> Result<pb::FollowThreadResponse> {
         let Seat { sdb, access, .. } = self.membership(account, &req.server_id).await?;
+        {
+            let conn = sdb.read()?;
+            if let Some(link) = shared::link_of(&conn, &req.channel_id).await? {
+                access.require_in(&req.channel_id, Permission::ViewChannels)?;
+                let guest = shared::guest_of(&self.app, &conn, &sdb.id, account, &access, &link).await?;
+                drop(conn);
+                shared::guest_follow(&self.app, &sdb.id, &link, guest, &req.thread_id, req.follow).await?;
+                return Ok(pb::FollowThreadResponse {});
+            }
+        }
         // Following changes only what reaches you, so it's no event and no audit entry.
         sdb.write(&account.id, async |conn, _events| {
             find(conn, &sdb.id, &access, &req.channel_id, &req.thread_id).await?;
-            conn.execute(
-                "INSERT INTO thread_follows (thread_id, user_id, follow) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (thread_id, user_id) DO UPDATE SET follow = excluded.follow",
-                (req.thread_id.as_str(), account.id.as_str(), req.follow),
-            )
-            .await?;
-            Ok(())
+            set_follow(conn, &req.thread_id, &account.id, req.follow).await
         })
         .await?;
         Ok(pb::FollowThreadResponse {})
@@ -432,15 +497,24 @@ impl Api {
     ) -> Result<pb::ListFollowedThreadsResponse> {
         let Seat { sdb, access, .. } = self.membership(account, &req.server_id).await?;
         let conn = sdb.read()?;
-        let rows = query_all(
-            &conn,
-            "SELECT t.id, t.channel_id FROM thread_follows f JOIN threads t ON t.id = f.thread_id
-             WHERE f.user_id = ?1 AND f.follow = 1 ORDER BY t.last_reply_id DESC LIMIT ?2",
-            (account.id.as_str(), MAX_FOLLOWED),
-            |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?)),
-        )
-        .await?;
-        let thread_ids = rows.into_iter().filter(|(_, channel)| access.can_see(channel)).map(|(id, _)| id).collect();
+        let mut thread_ids = followed(&conn, &account.id, |channel| access.can_see(channel)).await?;
+        // And the ones in channels shown here from other servers, from their
+        // homes, all at once; one that doesn't answer adds none.
+        let mut asks = Vec::new();
+        for link in shared::links_in(&conn).await? {
+            if !access.can_see(link.channel_id()) {
+                continue;
+            }
+            // One link they can't reach now adds none rather than failing the rest.
+            let Ok(guest) = shared::guest_of(&self.app, &conn, &sdb.id, account, &access, &link).await else {
+                continue;
+            };
+            asks.push(shared::guest_followed(&self.app, &sdb.id, link, guest));
+        }
+        drop(conn);
+        for ids in futures::future::join_all(asks).await {
+            thread_ids.extend(ids.unwrap_or_default());
+        }
         Ok(pb::ListFollowedThreadsResponse { thread_ids })
     }
 }

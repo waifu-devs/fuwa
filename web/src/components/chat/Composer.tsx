@@ -156,7 +156,8 @@ export function Composer({
   const access = useAccess(instanceKey, serverId);
   // Polls are counted where a channel lives: in a shared one, once this instance takes them there.
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
-  const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && (!channel.shared || pollsShared);
+  // Polls stay out of threads in shared channels.
+  const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && (!channel.shared || (pollsShared && !thread));
   const [polling, setPolling] = useState(false);
   const catalog = useCatalog(instanceKey, serverId, channel);
   const staged = useStaged(channelId);

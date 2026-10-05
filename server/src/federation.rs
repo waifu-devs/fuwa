@@ -1152,6 +1152,9 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     // Files go as tickets the home fetches them with, until it answers.
     let tickets = match call.call.as_mut() {
         Some(cpb::shared_call::Call::Send(send)) => crate::shared_files::tickets_for(app, send, &origin)?,
+        Some(cpb::shared_call::Call::Reply(cpb::GuestReply { send: Some(send), .. })) => {
+            crate::shared_files::tickets_for(app, send, &origin)?
+        }
         _ => Vec::new(),
     };
     let started = Instant::now();

@@ -791,6 +791,14 @@ message SharedCall {
     GuestPollVoters voters = 22;
     // To the home: its custom emoji, for the guest's picker.
     GuestEmojis emojis = 23;
+    // To the home: threads in the channel. New calls rather than fields on
+    // the old ones, so a home that predates them refuses them out loud
+    // instead of putting a reply in the channel.
+    GuestReply reply = 24;
+    GuestThread thread = 25;
+    GuestThreads threads = 26;
+    GuestFollow follow = 27;
+    GuestFollowed followed = 28;
   }
   // Set only by the instance that received the call from another instance
   // (whatever the other instance sent there): that instance's origin and
@@ -816,6 +824,10 @@ message SharedReply {
   fuwa.v1.Poll poll = 9;
   // For GuestEmojis.
   repeated fuwa.v1.Emoji emojis = 10;
+  // For GuestThreads.
+  fuwa.v1.ListThreadsResponse threads = 11;
+  // For GuestFollowed: the threads the guest follows in the channel.
+  repeated string thread_ids = 12;
 }
 
 message AdminShares {}
@@ -931,6 +943,48 @@ message GuestEdit {
 
 // The home server's custom emoji, for a guest's picker in the channel.
 message GuestEmojis {
+  Guest guest = 1;
+}
+
+// A guest's reply in the thread under a message in the channel, starting
+// the thread if there's none yet: a GuestSend (files, emoji and all) with
+// where it goes.
+message GuestReply {
+  GuestSend send = 1;
+  // The message the thread is under.
+  string thread_id = 2;
+  bool also_in_channel = 3;
+  // Whether the guest's own server lets them start threads there; the home
+  // also needs its own grant.
+  bool may_start = 4;
+}
+
+// A page of the replies in a thread in the channel.
+message GuestThread {
+  Guest guest = 1;
+  string thread_id = 2;
+  int32 limit = 3;
+  string before_id = 4;
+  string after_id = 5;
+}
+
+// A page of the channel's threads, as fuwa.v1.ListThreadsRequest.
+message GuestThreads {
+  Guest guest = 1;
+  string query = 2;
+  bool archived = 3;
+  int32 limit = 4;
+  string after_thread_id = 5;
+}
+
+message GuestFollow {
+  Guest guest = 1;
+  string thread_id = 2;
+  bool follow = 3;
+}
+
+// The threads in the channel the guest follows.
+message GuestFollowed {
   Guest guest = 1;
 }
 

@@ -5,6 +5,7 @@ import { Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { focusChannel } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import { CHANNEL_ICON } from "@/components/ChannelSidebar";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
@@ -49,6 +50,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   useEffect(() => () => setTitle("fuwa"), []);
 
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
+  const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
   // Search results take the side panel's place while they're open.
   const searching = useSearch((s) => s.open && s.instanceKey === instanceKey && s.serverId === serverId);
 
@@ -142,7 +144,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           </AnimatePresence>
           <SearchBar instanceKey={instanceKey} serverId={serverId} />
           <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
-          {!channel.shared && (
+          {(!channel.shared || threadsShared) && (
             <ThreadsButton
               open={panel?.kind === "threads"}
               active={!!panel}
