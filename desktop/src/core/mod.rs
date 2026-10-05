@@ -209,6 +209,8 @@ pub struct Core {
     pub games: Arc<presence::Games>,
     /// Listening for games, while that's on.
     games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Whether you've stepped away, which goes out with this app's presence.
+    pub idle: Arc<presence::Idle>,
 }
 
 /// Messages per page, as the web app reads them.
@@ -257,8 +259,16 @@ impl Core {
             voice: voice::Voice::default(),
             games,
             games_listener: Mutex::new(None),
+            idle: presence::Idle::new(),
         });
         core.listen_for_games(game_activity);
+        let idle = core.idle.clone();
+        core.runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(presence::people::IDLE_CHECK).await;
+                idle.check();
+            }
+        });
         for saved in config::load_instances(&core.paths, &core.secrets) {
             core.add_instance(&saved.url, saved.token);
         }
@@ -632,6 +642,7 @@ impl Core {
             i.connection = store::Connection::SignedOut;
             i.problem = Some("Your session ended. Sign in again.".into());
             i.dms = dms::DmState::default();
+            i.people = None;
         });
         self.shared.notice(Notice::SignedOut { instance: key.to_owned() });
     }

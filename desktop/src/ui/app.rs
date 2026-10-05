@@ -323,6 +323,10 @@ pub struct FuwaApp {
     pub gifs: crate::ui::gifs::Gifs,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
+    /// The activity link the open card asks about following (`ui::presence`).
+    pub profile_leaving: Option<String>,
+    /// Draws the open card again in a second, while it shows a running timer.
+    pub profile_tick: Option<gpui_kit::Task<()>>,
     /// The rules the rules dialog shows, once they arrive.
     pub rules: Option<Vec<String>>,
     /// The welcome screen the welcome dialog shows, once it arrives.
@@ -553,6 +557,8 @@ impl FuwaApp {
             emoji_born: None,
             gifs,
             profile: None,
+            profile_leaving: None,
+            profile_tick: None,
             rules: None,
             _subscriptions: subscriptions,
         };
@@ -1276,6 +1282,7 @@ impl FuwaApp {
         };
         self.menu = None;
         self.profile = None;
+        self.profile_leaving = None;
         self.rules = None;
         match &dialog {
             Dialog::Profile { key, user_id, .. } => {
@@ -1415,6 +1422,7 @@ impl FuwaApp {
         }
         self.polls.editor = None;
         self.polls.voters = None;
+        self.profile_leaving = None;
         cx.notify();
     }
 
@@ -1826,6 +1834,10 @@ impl FuwaApp {
             .key_context("Fuwa")
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::on_key))
+            // Any input means you're here (`core::presence::people`).
+            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.core.idle.seen()))
+            .on_mouse_move(cx.listener(|this, _, _, _| this.core.idle.seen()))
+            .on_scroll_wheel(cx.listener(|this, _, _, _| this.core.idle.seen()))
             .on_action(cx.listener(Self::close_overlay))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
             .on_action(cx.listener(|this, _: &ComposerEmoji, window, cx| this.open_emoji(window, cx)))
