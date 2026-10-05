@@ -1,6 +1,5 @@
 {
   "language.title": "Idioma",
-  "language.hint": "Para fuwa en este dispositivo. Lo que escribe la gente se queda como lo escribió.",
   "language.matchBrowser": "Como mi navegador",
   "language.matchBrowserNote": "Ahora mismo es {language}",
   "language.coverage": "{percent} traducido",
