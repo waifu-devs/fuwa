@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::calls;
 use crate::core::dms::DmState;
+use crate::core::threads;
 use crate::pb::{self, event::Payload};
 
 /// How an instance's connection is doing.
@@ -81,6 +82,12 @@ pub struct InstanceState {
     /// Your status (online, idle, do not disturb, invisible) and what you share,
     /// once read. It follows the account, so every app shows the same.
     pub presence: Option<pb::PresenceSettings>,
+    /// The messages threads opened here are under, by id, with their summaries.
+    pub thread_parents: HashMap<String, pb::Message>,
+    /// Per server, once loaded: the threads you follow, by the id of the message each is under.
+    pub followed: HashMap<String, HashSet<String>>,
+    /// Per thread you follow: replies from others that came while it wasn't open.
+    pub thread_unread: HashMap<String, u32>,
 }
 
 impl InstanceState {
@@ -108,6 +115,9 @@ impl InstanceState {
             voice: HashMap::new(),
             shared: HashMap::new(),
             presence: None,
+            thread_parents: HashMap::new(),
+            followed: HashMap::new(),
+            thread_unread: HashMap::new(),
         }
     }
 
@@ -186,6 +196,8 @@ pub struct Focus {
     pub instance: String,
     /// A channel id, or a conversation id for direct messages.
     pub channel: String,
+    /// The thread open beside the channel, by the id of the message it's under.
+    pub thread: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -203,6 +215,10 @@ impl Store {
 
     pub fn focus_channel(&self, key: &str) -> Option<&str> {
         self.focus.as_ref().filter(|f| f.instance == key).map(|f| f.channel.as_str())
+    }
+
+    pub fn focus_thread(&self, key: &str) -> Option<&str> {
+        self.focus.as_ref().filter(|f| f.instance == key).and_then(|f| f.thread.as_deref())
     }
 }
 
@@ -235,7 +251,14 @@ pub fn sort_roles(roles: &mut [pb::Role]) {
 /// Inserts or replaces a message, keeping the list sorted by id (which is by time).
 pub fn upsert_message(items: &mut Vec<pb::Message>, message: pb::Message) {
     match items.binary_search_by(|m| m.id.as_str().cmp(&message.id)) {
-        Ok(at) => items[at] = message,
+        Ok(at) => {
+            // An edit doesn't always say how the thread under it stands; keep what we know.
+            let mut message = message;
+            if message.thread.is_none() {
+                message.thread = items[at].thread.take();
+            }
+            items[at] = message;
+        }
         Err(at) => items.insert(at, message),
     }
 }
@@ -286,6 +309,8 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.emojis.remove(server_id);
     i.shared.remove(server_id);
     i.synced.remove(server_id);
+    i.followed.remove(server_id);
+    threads::forget_threads_in(i, &channels.iter().map(String::as_str).collect());
     for id in channels {
         i.messages.remove(&id);
         i.pending.remove(&id);
@@ -297,10 +322,12 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
 pub fn set_channels(i: &mut InstanceState, server_id: &str, mut channels: Vec<pb::Channel>) {
     let kept: HashSet<&str> = channels.iter().map(|c| c.id.as_str()).collect();
     if let Some(before) = i.channels.get(server_id) {
-        for c in before.iter().filter(|c| !kept.contains(c.id.as_str())) {
-            i.messages.remove(&c.id);
-            i.unread.remove(&c.id);
+        let gone: Vec<String> = before.iter().filter(|c| !kept.contains(c.id.as_str())).map(|c| c.id.clone()).collect();
+        for id in &gone {
+            i.messages.remove(id);
+            i.unread.remove(id);
         }
+        threads::forget_threads_in(i, &gone.iter().map(String::as_str).collect());
     }
     sort_channels(&mut channels);
     i.channels.insert(server_id.to_owned(), channels);
@@ -337,12 +364,22 @@ pub enum Outcome {
     Unread {
         channel_id: String,
     },
+    /// A new reply from someone else in a thread that isn't open, sent only to the thread.
+    ThreadReply {
+        channel_id: String,
+        thread_id: String,
+    },
     /// You left the server, or were removed from it, or it was deleted.
     Gone,
 }
 
 /// Applies one event from a server's log.
-pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>) -> Outcome {
+pub fn apply_event(
+    i: &mut InstanceState,
+    event: &pb::Event,
+    focus: Option<&str>,
+    focus_thread: Option<&str>,
+) -> Outcome {
     let sid = event.server_id.as_str();
     let Some(payload) = &event.payload else { return Outcome::Nothing };
     match payload {
@@ -370,24 +407,43 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
             }
             i.messages.remove(&p.channel_id);
             i.unread.remove(&p.channel_id);
+            threads::forget_threads_in(i, &HashSet::from([p.channel_id.as_str()]));
             if let Some(list) = i.voice.get_mut(sid) {
                 list.retain(|v| v.channel_id != p.channel_id);
             }
         }
         Payload::MessageCreated(pb::MessageCreated { message: Some(message) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }) => {
-            // Thread replies live in their thread, not the channel, unless also sent to it.
-            if !message.thread_id.is_empty() && !message.also_in_channel {
-                return Outcome::Nothing;
-            }
             let created = matches!(payload, Payload::MessageCreated(_));
             add_shared_authors(&mut i.users, std::slice::from_ref(message));
+            let mine = i.me.as_ref().is_some_and(|me| me.id == message.author_id);
+            if !message.thread_id.is_empty() {
+                let mut seen = false;
+                if let Some(replies) = i.messages.get_mut(&threads::thread_key(&message.thread_id)) {
+                    seen = replies.items.iter().any(|m| m.id == message.id);
+                    upsert_message(&mut replies.items, message.clone());
+                }
+                let fresh = created && !seen && !mine && focus_thread != Some(message.thread_id.as_str());
+                if fresh && i.followed.get(sid).is_some_and(|f| f.contains(&message.thread_id)) {
+                    *i.thread_unread.entry(message.thread_id.clone()).or_default() += 1;
+                }
+                // Replies stay in their thread unless also sent to the channel.
+                if !message.also_in_channel {
+                    return if fresh {
+                        Outcome::ThreadReply {
+                            channel_id: message.channel_id.clone(),
+                            thread_id: message.thread_id.clone(),
+                        }
+                    } else {
+                        Outcome::Nothing
+                    };
+                }
+            }
             let mut known = false;
             if let Some(loaded) = i.messages.get_mut(&message.channel_id) {
                 known = loaded.items.iter().any(|m| m.id == message.id);
                 upsert_message(&mut loaded.items, message.clone());
             }
-            let mine = i.me.as_ref().is_some_and(|me| me.id == message.author_id);
             if created && !known && !mine && focus != Some(message.channel_id.as_str()) {
                 *i.unread.entry(message.channel_id.clone()).or_default() += 1;
                 return Outcome::Unread { channel_id: message.channel_id.clone() };
@@ -406,11 +462,8 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
                 .then_some(voter_answer_ids.as_slice());
             crate::core::polls::with_poll(i, channel_id, message_id, poll, mine);
         }
-        Payload::MessageDeleted(p) => {
-            if let Some(loaded) = i.messages.get_mut(&p.channel_id) {
-                loaded.items.retain(|m| m.id != p.message_id);
-            }
-        }
+        Payload::MessageDeleted(p) => delete_message(i, &p.channel_id, &p.message_id),
+        Payload::ThreadUpdated(p) => threads::with_thread_summary(i, &p.channel_id, &p.thread_id, p.thread.as_ref()),
         Payload::UserUpdated(pb::UserUpdated { user: Some(user) }) => update_user(i, user),
         Payload::MemberJoined(pb::MemberJoined { member: Some(member) })
         | Payload::MemberUpdated(pb::MemberUpdated { member: Some(member) }) => {
@@ -485,6 +538,19 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
     Outcome::Nothing
 }
 
+/// A message gone: off its channel, out of any thread holding it, and a thread under it gone too.
+pub fn delete_message(i: &mut InstanceState, channel_id: &str, message_id: &str) {
+    // Even a thread never opened here can hold an unread count.
+    threads::forget_thread(i, message_id);
+    let holding: Vec<String> =
+        i.thread_parents.values().filter(|p| p.channel_id == channel_id).map(|p| threads::thread_key(&p.id)).collect();
+    for at in holding.iter().map(String::as_str).chain([channel_id]) {
+        if let Some(loaded) = i.messages.get_mut(at) {
+            loaded.items.retain(|m| m.id != message_id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,14 +569,63 @@ mod tests {
         i.me = Some(pb::User { id: "me".into(), ..Default::default() });
         i.messages.insert("c".into(), ChannelMessages::default());
         let created = |m| event("s", Payload::MessageCreated(pb::MessageCreated { message: Some(m) }));
-        assert!(matches!(apply_event(&mut i, &created(message("02", "c", "them")), None), Outcome::Unread { .. }));
+        assert!(matches!(
+            apply_event(&mut i, &created(message("02", "c", "them")), None, None),
+            Outcome::Unread { .. }
+        ));
         // The same event again changes nothing.
-        assert_eq!(apply_event(&mut i, &created(message("02", "c", "them")), None), Outcome::Nothing);
-        apply_event(&mut i, &created(message("01", "c", "me")), None);
-        apply_event(&mut i, &created(message("03", "c", "them")), Some("c"));
+        assert_eq!(apply_event(&mut i, &created(message("02", "c", "them")), None, None), Outcome::Nothing);
+        apply_event(&mut i, &created(message("01", "c", "me")), None, None);
+        apply_event(&mut i, &created(message("03", "c", "them")), Some("c"), None);
         let ids: Vec<_> = i.messages["c"].items.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["01", "02", "03"]);
         assert_eq!(i.unread["c"], 1);
+    }
+
+    #[test]
+    fn thread_replies_stay_in_their_thread() {
+        let mut i = InstanceState::new("k", "https://k");
+        i.me = Some(pb::User { id: "me".into(), ..Default::default() });
+        i.messages.insert("c".into(), ChannelMessages::default());
+        let created = |m| event("s", Payload::MessageCreated(pb::MessageCreated { message: Some(m) }));
+        apply_event(&mut i, &created(message("01", "c", "me")), Some("c"), None);
+        i.messages.insert(threads::thread_key("01"), ChannelMessages::default());
+        let reply =
+            |id: &str, also| pb::Message { thread_id: "01".into(), also_in_channel: also, ..message(id, "c", "them") };
+        // Not followed yet: no count, but it's news for whoever it mentions.
+        let outcome = apply_event(&mut i, &created(reply("02", false)), Some("c"), None);
+        assert_eq!(outcome, Outcome::ThreadReply { channel_id: "c".into(), thread_id: "01".into() });
+        assert!(i.thread_unread.is_empty());
+        i.followed.insert("s".into(), HashSet::from(["01".to_owned()]));
+        apply_event(&mut i, &created(reply("03", false)), Some("c"), None);
+        // Open beside the channel, it doesn't count.
+        apply_event(&mut i, &created(reply("04", false)), Some("c"), Some("01"));
+        assert_eq!(i.thread_unread["01"], 1);
+        apply_event(&mut i, &created(reply("05", true)), Some("c"), Some("01"));
+        let ids = |i: &InstanceState, at: &str| i.messages[at].items.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&i, "c"), ["01", "05"]);
+        assert_eq!(ids(&i, "t:01"), ["02", "03", "04", "05"]);
+        // A summary lands on the message; an edit that leaves it out keeps it.
+        let summary = pb::ThreadSummary { reply_count: 4, ..Default::default() };
+        let updated = pb::ThreadUpdated { channel_id: "c".into(), thread_id: "01".into(), thread: Some(summary) };
+        apply_event(&mut i, &event("s", Payload::ThreadUpdated(updated)), None, None);
+        let edited = pb::Message { content: "edited".into(), ..message("01", "c", "me") };
+        apply_event(
+            &mut i,
+            &event("s", Payload::MessageUpdated(pb::MessageUpdated { message: Some(edited) })),
+            None,
+            None,
+        );
+        assert_eq!(i.messages["c"].items[0].thread.as_ref().map(|t| t.reply_count), Some(4));
+        // A reply deleted leaves its thread; the message deleted takes the thread.
+        i.thread_parents.insert("01".into(), message("01", "c", "me"));
+        let deleted = |id: &str| {
+            event("s", Payload::MessageDeleted(pb::MessageDeleted { channel_id: "c".into(), message_id: id.into() }))
+        };
+        apply_event(&mut i, &deleted("03"), None, None);
+        assert_eq!(ids(&i, "t:01"), ["02", "04", "05"]);
+        apply_event(&mut i, &deleted("01"), None, None);
+        assert!(!i.messages.contains_key("t:01") && !i.thread_unread.contains_key("01") && i.thread_parents.is_empty());
     }
 
     #[test]
@@ -522,7 +637,7 @@ mod tests {
         apply_snapshot(&mut i, server, vec![channel], vec![], vec![], vec![]);
         i.messages.insert("c".into(), ChannelMessages::default());
         let left = event("s", Payload::MemberLeft(pb::MemberLeft { user_id: "me".into(), reason: 1 }));
-        assert_eq!(apply_event(&mut i, &left, None), Outcome::Gone);
+        assert_eq!(apply_event(&mut i, &left, None, None), Outcome::Gone);
         assert!(i.servers.is_empty() && i.messages.is_empty() && !i.synced.contains("s"));
     }
 

@@ -817,6 +817,7 @@ impl FuwaApp {
             let id = toast.id;
             let open = toast.open.clone();
             let channel = toast.channel.clone();
+            let thread = toast.thread.clone();
             let item = card(&p)
                 .id(SharedString::from(format!("toast-{id}")))
                 .p(px(14.0))
@@ -831,6 +832,9 @@ impl FuwaApp {
                     if let Some(nav) = open.clone() {
                         if let (crate::ui::app::Nav::Server { key, server }, Some(channel)) = (&nav, &channel) {
                             this.open_channel(&key.clone(), &server.clone(), channel, window, cx);
+                            if let Some(thread) = thread.clone() {
+                                this.open_thread(thread, window, cx);
+                            }
                         } else {
                             this.navigate(nav, window, cx);
                         }

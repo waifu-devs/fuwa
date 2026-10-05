@@ -213,6 +213,8 @@ pub struct Toast {
     pub body: String,
     pub open: Option<Nav>,
     pub channel: Option<String>,
+    /// A thread reply's: the thread to open in that channel.
+    pub thread: Option<String>,
     pub leaving: bool,
 }
 
@@ -268,6 +270,9 @@ pub struct FuwaApp {
     pub focus: gpui_kit::FocusHandle,
     /// The message being edited in the open list (an id, or a private message's sequence).
     pub editing: Option<String>,
+    /// The message being edited is in the open thread's panel, not the channel (a reply
+    /// also sent to the channel shows in both).
+    pub edit_in_thread: bool,
     /// The message whose author (from another server) we're asking whether to keep out.
     pub keeping_out: Option<String>,
     /// Votes on their way, peeks, polls being ended, and the poll editor.
@@ -278,6 +283,7 @@ pub struct FuwaApp {
     pub files: crate::ui::attachments::Files,
     /// Searching the server on screen: the header's field and the results beside the chat.
     pub search: crate::ui::search::Search,
+    pub threads: crate::ui::threads::Threads,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
     pub time_style: crate::core::timestamps::Style,
@@ -334,6 +340,7 @@ impl FuwaApp {
         let emoji_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find an emoji"));
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let search = crate::ui::search::Search::new(window, cx);
+        let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 match event {
@@ -384,6 +391,7 @@ impl FuwaApp {
         // Keys the text fields would otherwise take: the @ list's arrows, Enter
         // and Escape, Up to edit your last message, Escape to stop editing.
         let weak = cx.entity().downgrade();
+        subscriptions.extend(thread_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 if this.intercept(&event.keystroke, window, cx) {
@@ -427,7 +435,12 @@ impl FuwaApp {
                         return;
                     }
                     match click.server {
-                        Some(server) => this.open_channel(&click.instance, &server, &click.channel, window, cx),
+                        Some(server) => {
+                            this.open_channel(&click.instance, &server, &click.channel, window, cx);
+                            if let Some(thread) = click.thread {
+                                this.open_thread(thread, window, cx);
+                            }
+                        }
                         None => this.navigate(Nav::Home { dm: Some((click.instance, click.channel)) }, window, cx),
                     }
                 });
@@ -472,11 +485,13 @@ impl FuwaApp {
             copied: None,
             focus: cx.focus_handle(),
             editing: None,
+            edit_in_thread: false,
             keeping_out: None,
             polls: Default::default(),
             voice: Default::default(),
             files: Default::default(),
             search,
+            threads,
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
@@ -546,12 +561,13 @@ impl FuwaApp {
         }
         self.ensure_loaded(cx);
         self.sync_list(cx);
+        self.sync_thread(cx);
         cx.notify();
     }
 
     fn on_notice(&mut self, notice: Notice, window: &mut Window, cx: &mut Context<Self>) {
         match notice {
-            Notice::Message { instance, server_id, channel_id, title, body, mention } => {
+            Notice::Message { instance, server_id, channel_id, title, body, mention, thread } => {
                 // Do not disturb is quiet everywhere, on every app.
                 let busy = self.core.shared.read(|s| {
                     s.instance(&instance).is_some_and(|i| i.status() == crate::pb::PresenceStatus::DoNotDisturb)
@@ -576,7 +592,7 @@ impl FuwaApp {
                     crate::ui::notify::show(
                         title,
                         body,
-                        crate::ui::notify::Clicked { instance, server: server_id, channel: channel_id },
+                        crate::ui::notify::Clicked { instance, server: server_id, channel: channel_id, thread },
                     );
                     return;
                 }
@@ -594,6 +610,9 @@ impl FuwaApp {
                     server_id.map(|_| channel_id),
                     cx,
                 );
+                if let Some(toast) = self.toasts.last_mut() {
+                    toast.thread = thread;
+                }
             }
             Notice::Removed { server } => {
                 self.toast("door-open", "You're no longer in a server".into(), server, None, None, cx);
@@ -624,7 +643,7 @@ impl FuwaApp {
     ) {
         let id = self.next_toast;
         self.next_toast += 1;
-        self.toasts.push(Toast { id, icon, title, body, open, channel, leaving: false });
+        self.toasts.push(Toast { id, icon, title, body, open, channel, thread: None, leaving: false });
         if self.toasts.len() > 4 {
             self.toasts.remove(0);
         }
@@ -754,11 +773,16 @@ impl FuwaApp {
             self.picked_roles.clear();
             self.menu = None;
         }
+        self.threads_after_move(cx);
         let focus = target.as_ref().map(|t| match t {
-            Target::Channel { key, channel, .. } | Target::Secure { key, channel, .. } => {
-                Focus { instance: key.clone(), channel: channel.clone() }
+            Target::Channel { key, channel, .. } | Target::Secure { key, channel, .. } => Focus {
+                instance: key.clone(),
+                channel: channel.clone(),
+                thread: self.threads.open.as_ref().filter(|o| &o.channel == channel).map(|o| o.id.clone()),
+            },
+            Target::Dm { key, conversation } => {
+                Focus { instance: key.clone(), channel: conversation.clone(), thread: None }
             }
-            Target::Dm { key, conversation } => Focus { instance: key.clone(), channel: conversation.clone() },
         });
         self.core.set_focus(focus);
         self.ensure_loaded(cx);
@@ -795,6 +819,19 @@ impl FuwaApp {
             Some(Target::Channel { key, server, channel }) => {
                 let loaded =
                     self.core.shared.read(|s| s.instance(&key).is_some_and(|i| i.messages.contains_key(&channel)));
+                // The threads you follow here, so their replies reach you.
+                let shared = self.core.shared.read(|s| {
+                    s.instance(&key).and_then(|i| i.channel(&server, &channel)).is_some_and(|c| c.shared.is_some())
+                });
+                if !shared && self.requested.insert(format!("{key}|{server}|followed")) {
+                    let (core, key, server) = (self.core.clone(), key.clone(), server.clone());
+                    let id = format!("{key}|{server}|followed");
+                    self.run(cx, async move { core.load_followed(&key, &server).await }, move |this, result, _| {
+                        if result.is_err() {
+                            this.requested.remove(&id);
+                        }
+                    });
+                }
                 let id = format!("{key}|{channel}");
                 if !loaded && self.requested.insert(id.clone()) {
                     let core = self.core.clone();
@@ -911,20 +948,26 @@ impl FuwaApp {
         }
     }
 
-    pub fn retry(&mut self, nonce: u64, cx: &mut Context<Self>) {
+    /// Sends again what didn't go, in the channel or with `thread` in that thread.
+    pub fn retry(&mut self, nonce: u64, thread: Option<String>, cx: &mut Context<Self>) {
         let Some(Target::Channel { key, server, channel }) = self.target() else { return };
+        let at = thread.as_deref().map_or_else(|| channel.clone(), crate::core::threads::thread_key);
         let Some((content, files)) = self.core.shared.read(|s| {
-            let p = s.instance(&key)?.pending.get(&channel)?.iter().find(|p| p.nonce == nonce)?;
+            let p = s.instance(&key)?.pending.get(&at)?.iter().find(|p| p.nonce == nonce)?;
             Some((p.content.clone(), p.attachments.clone()))
         }) else {
             return;
         };
-        self.core.dismiss_pending(&key, &channel, nonce);
+        self.core.dismiss_pending(&key, &at, nonce);
         let core = self.core.clone();
+        let target = thread.map(|thread_id| crate::core::threads::ThreadTarget { thread_id, also_to_channel: false });
         self.run(
             cx,
-            async move { core.send_message_with(&key, &server, &channel, &content, files).await },
-            |_, _, cx| cx.notify(),
+            async move { core.send_to(&key, &server, &channel, &content, files, target.as_ref()).await },
+            |this, _, cx| {
+                this.sync_thread(cx);
+                cx.notify()
+            },
         );
     }
 

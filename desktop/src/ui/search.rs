@@ -424,6 +424,11 @@ impl FuwaApp {
             .core
             .shared
             .read(|s| s.instance(&key).map(|i| search::request_for(i, &server, &query, search::today())));
+        if matches!(request, Some(Ok(Some(_)) | Err(_))) {
+            // Search and threads share the side: whichever opened last closes the other.
+            self.close_thread(cx);
+            self.threads.listing = None;
+        }
         match request {
             Some(Ok(Some(request))) => {
                 let (place, _) = self.recent_searches();
@@ -493,6 +498,26 @@ impl FuwaApp {
     /// Opens a result's channel at its message, loading older ones until it's there.
     fn open_result(&mut self, message: pb::Message, window: &mut Window, cx: &mut Context<Self>) {
         let Some((key, server)) = self.search_place() else { return };
+        // A reply only in its thread is found there.
+        if !message.thread_id.is_empty() && !message.also_in_channel {
+            self.open_channel(&key, &server, &message.channel_id, window, cx);
+            self.close_search(window, cx);
+            self.open_thread(message.thread_id.clone(), window, cx);
+            return;
+        }
+        self.jump_to_message(&key, &server, message, window, cx);
+    }
+
+    /// Opens a message's channel and scrolls to it, reading back as far as it has to; it glows a moment.
+    pub(crate) fn jump_to_message(
+        &mut self,
+        key: &str,
+        server: &str,
+        message: pb::Message,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (key, server) = (key.to_owned(), server.to_owned());
         let started = Instant::now();
         self.open_channel(&key, &server, &message.channel_id, window, cx);
         let core = self.core.clone();
@@ -1156,7 +1181,7 @@ fn group_digits(n: i64) -> String {
 }
 
 /// Rows that pulse while results are on their way.
-fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
+pub(crate) fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
     let shade = alpha(p.muted_foreground, 0.12);
     let faint = alpha(p.muted_foreground, 0.05);
     div().flex().flex_col().gap(px(8.0)).px(px(10.0)).py(px(10.0)).children((0..rows).map(move |n| {
@@ -1189,7 +1214,7 @@ fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
 }
 
 /// What the list shows when there's nothing to list.
-fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement {
+pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement {
     motion::rise(
         div()
             .flex()

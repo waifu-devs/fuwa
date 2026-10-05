@@ -37,6 +37,12 @@ impl FuwaApp {
         {
             return true;
         }
+        // Escape in a thread's reply box closes the thread, back to the channel.
+        if key.key == "escape" && self.threads.reply.read(cx).focus_handle(cx).is_focused(window) {
+            self.close_thread(cx);
+            self.composer.update(cx, |state, cx| state.focus(window, cx));
+            return true;
+        }
         if self.edit_box.read(cx).focus_handle(cx).is_focused(window) {
             if key.key == "escape" {
                 self.cancel_edit(window, cx);
@@ -182,25 +188,32 @@ impl FuwaApp {
     }
 
     pub(crate) fn start_edit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(content) = self.rows.iter().find_map(|r| match r {
+        let Some(content) = self.rows.iter().chain(self.threads.rows.iter()).find_map(|r| match r {
             Row::Msg(m) if m.id == id => Some(m.content.clone()),
             _ => None,
         }) else {
             return;
         };
         self.editing = Some(id);
+        self.edit_in_thread = false;
         self.edit_box.update(cx, |state, cx| {
             state.set_value(content, window, cx);
             state.focus(window, cx);
         });
         self.sync_list(cx);
+        self.sync_thread(cx);
         cx.notify();
     }
 
     pub(crate) fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
-        self.composer.update(cx, |state, cx| state.focus(window, cx));
+        if self.edit_in_thread && self.threads.open.is_some() {
+            self.threads.reply.update(cx, |state, cx| state.focus(window, cx));
+        } else {
+            self.composer.update(cx, |state, cx| state.focus(window, cx));
+        }
         self.sync_list(cx);
+        self.sync_thread(cx);
         cx.notify();
     }
 
@@ -208,7 +221,7 @@ impl FuwaApp {
     pub(crate) fn save_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.editing.clone() else { return };
         let text = self.edit_box.read(cx).value().trim().to_owned();
-        let before = self.rows.iter().find_map(|r| match r {
+        let before = self.rows.iter().chain(self.threads.rows.iter()).find_map(|r| match r {
             Row::Msg(m) if m.id == id => Some(m.content.clone()),
             _ => None,
         });

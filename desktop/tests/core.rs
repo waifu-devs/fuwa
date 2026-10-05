@@ -13,6 +13,7 @@ use fuwa_desktop::core::reports;
 use fuwa_desktop::core::search;
 use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
+use fuwa_desktop::core::threads;
 use fuwa_desktop::core::updates;
 use fuwa_desktop::core::vault::ItemKind;
 use fuwa_desktop::core::voice_notes;
@@ -271,7 +272,7 @@ fn two_people_talk_in_a_server_and_in_private() {
         &general,
         fuwa_desktop::core::dms::now_ms()
     )));
-    bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone() }));
+    bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone(), thread: None }));
     assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&general).copied()), None);
 
     // Alice writes with an emoji from her other server, which Bob isn't in:
@@ -465,6 +466,76 @@ fn two_people_talk_in_a_server_and_in_private() {
         .shared
         .read(|s| search::request_for(s.instance(&key).unwrap(), &server.id, "from:nobody-here cake", search::today()));
     assert_eq!(nobody, Err("No member here is called nobody-here".into()));
+
+    // Bob answers Alice's files in a thread: Alice's channel shows only the
+    // count, the reply lives in the thread. Following it counts what's new,
+    // a reply also sent to the channel shows in both, a lock keeps Bob out,
+    // and deleting the message takes the thread with it.
+    let parent = message.id.clone();
+    let reply = |core: &Arc<Core>, text: &'static str, also: bool| {
+        let (c, key, sid, cid) = (core.clone(), key.clone(), server.id.clone(), general.clone());
+        let target = threads::ThreadTarget { thread_id: parent.clone(), also_to_channel: also };
+        wait(core, async move { c.send_reply(&key, &sid, &cid, text, target).await })
+    };
+    let summary = |s: &Store| {
+        s.instance(&key)
+            .unwrap()
+            .messages
+            .get(&general)
+            .and_then(|m| m.items.iter().find(|m| m.id == parent).and_then(|m| m.thread.clone()))
+    };
+    reply(&bob, "on it", false).unwrap();
+    until(&alice, "the thread's count", |s| summary(s).is_some_and(|t| t.reply_count == 1));
+    assert!(
+        alice.shared.read(|s| !s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "on it"))
+    );
+    {
+        let (core, key, sid, cid, id) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), parent.clone());
+        wait(&alice, async move {
+            core.load_thread(&key, &sid, &cid, &id, false).await?;
+            core.follow_thread(&key, &sid, &cid, &id, true).await
+        })
+        .unwrap();
+    }
+    alice.shared.read(|s| {
+        let i = s.instance(&key).unwrap();
+        assert_eq!(i.thread_parents[&parent].content, "files!");
+        assert_eq!(i.messages[&threads::thread_key(&parent)].items[0].content, "on it");
+        assert_eq!(threads::follows(i, &server.id, &parent), Some(true));
+    });
+    reply(&bob, "everyone, look", true).unwrap();
+    until(&alice, "the reply in both places", |s| {
+        let i = s.instance(&key).unwrap();
+        let shown = |at: &str| i.messages[at].items.iter().any(|m| m.content == "everyone, look");
+        shown(&general) && shown(&threads::thread_key(&parent)) && i.thread_unread.get(&parent) == Some(&1)
+    });
+    {
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        let listed = wait(&alice, async move { core.list_threads(&key, &sid, &cid, "", false, "").await }).unwrap();
+        assert_eq!(
+            listed.threads.iter().find(|t| t.id == parent).and_then(|t| t.thread.as_ref()).unwrap().reply_count,
+            2
+        );
+    }
+    {
+        let (core, key, sid, cid, id) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), parent.clone());
+        wait(&alice, async move { core.lock_thread(&key, &sid, &cid, &id, true).await }).unwrap();
+    }
+    until(&bob, "the lock", |s| summary(s).is_some_and(|t| t.locked));
+    assert!(reply(&bob, "let me in", false).is_err());
+    {
+        let (core, key, sid, cid, id) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), parent.clone());
+        wait(&alice, async move { core.delete_message(&key, &sid, &cid, &id).await }).unwrap();
+    }
+    alice.shared.read(|s| {
+        let i = s.instance(&key).unwrap();
+        assert!(!i.thread_parents.contains_key(&parent));
+        assert!(!i.messages.contains_key(&threads::thread_key(&parent)));
+        assert!(!i.thread_unread.contains_key(&parent));
+    });
 
     // Alice asks a question; Bob votes, Alice sees the count live and who
     // voted, then ends it. Bob's own pick stays with him.
