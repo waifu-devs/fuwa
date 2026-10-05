@@ -157,7 +157,7 @@ impl ServerSettingsView {
             return;
         }
         let Some(channel) = self.text_channels().into_iter().next() else {
-            self.error = Some("Make a text channel first: webhooks post into one.".into());
+            self.error = Some(t("serversettings.webhooks.needChannel"));
             cx.notify();
             return;
         };
@@ -229,7 +229,7 @@ impl ServerSettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose a picture".into()),
+            prompt: Some(t("desktop.account.choosePicture").into()),
         });
         let (core, key) = (self.core.clone(), self.key.clone());
         cx.spawn(async move |this, cx| {
@@ -238,7 +238,7 @@ impl ServerSettingsView {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = crate::core::account::picture_type(&name) else {
                 let _ = this.update(cx, |this, cx| {
-                    this.error = Some("That isn't a picture fuwa can use (PNG, JPEG, GIF or WebP).".into());
+                    this.error = Some(t("desktop.account.notAPicture"));
                     cx.notify();
                 });
                 return;
@@ -275,7 +275,10 @@ impl ServerSettingsView {
         self.error = None;
         let (core, key) = (self.core.clone(), self.key.clone());
         let id = w.id.clone();
-        let content = format!("👋 Hello from **{}**! This webhook works.", w.name);
+        let content = format!(
+            "👋 {}",
+            t_with("serversettings.webhooks.testMessage", &[("name", Arg::Str(&format!("**{}**", w.name)))])
+        );
         self.run(cx, async move { core.test_webhook(&key, &w, &content).await }, move |this, result, cx| {
             this.hooks.busy = None;
             match result {
@@ -369,12 +372,9 @@ impl ServerSettingsView {
                             Duration::from_millis(1200),
                             |el, t| el.relative().top(px(-6.0 * (t * std::f32::consts::PI).sin())),
                         ))
-                        .child(div().font_weight(FontWeight::BOLD).child("No webhooks yet"))
+                        .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.webhooks.none")))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(p.muted_foreground)
-                                .child("Make one, copy its address, and paste it into the app that should post."),
+                            div().text_sm().text_color(p.muted_foreground).child(t("serversettings.webhooks.noneHint")),
                         ),
                     "hook-empty",
                     Duration::from_millis(80),
@@ -458,14 +458,16 @@ impl ServerSettingsView {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Let other apps post here"))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(
-                                "Each webhook is an address that posts into one channel: build results, feeds, \
-                                 alerts. Anything that posts to Discord webhooks works too.",
-                            )),
+                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.webhooks.title")))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("serversettings.webhooks.intro")),
+                            ),
                     )
                     .child(
-                        primary_button("hook-new", "New webhook", p)
+                        primary_button("hook-new", t("serversettings.webhooks.new"), p)
                             .flex_none()
                             .when(creating || self.hooks.list.is_none(), |el| el.opacity(0.6))
                             .child(if creating {
@@ -495,13 +497,21 @@ impl ServerSettingsView {
         let channel = channels.iter().find(|c| c.id == w.channel_id);
         let busy = self.hooks.busy.as_ref().filter(|(b, _)| *b == id).map(|(_, k)| *k);
         let user = as_user(w);
-        let last = w.last_used_at.as_ref().map(|t| format!(" · last {}", stamp(t.seconds * 1000))).unwrap_or_default();
-        let about = format!(
-            "{} · {} {}{last}",
-            channel.map(|c| c.name.clone()).unwrap_or_else(|| "a deleted channel".into()),
-            w.messages,
-            if w.messages == 1 { "message" } else { "messages" },
-        );
+        let place = channel.map(|c| c.name.clone()).unwrap_or_else(|| t("serversettings.invites.deletedChannel"));
+        let count = w.messages;
+        let about = match w.last_used_at.as_ref() {
+            Some(at) => t_with(
+                "serversettings.webhooks.lineUsed",
+                &[
+                    ("channel", Arg::Str(&place)),
+                    ("count", Arg::Num(count)),
+                    ("when", Arg::Str(&stamp(at.seconds * 1000))),
+                ],
+            ),
+            None => {
+                t_with("serversettings.webhooks.line", &[("channel", Arg::Str(&place)), ("count", Arg::Num(count))])
+            }
+        };
         let toggle = id.clone();
         let chevron =
             motion::follow(SharedString::from(format!("hook-chev-{id}")), if open { 1.0 } else { 0.0 }, window, cx);
@@ -697,7 +707,11 @@ impl ServerSettingsView {
                         .child(
                             primary_button(
                                 SharedString::from(format!("hook-copy-{id}")),
-                                if copied { "Copied" } else { "Copy" },
+                                if copied {
+                                    t("serversettings.webhooks.copied")
+                                } else {
+                                    t("serversettings.webhooks.copy")
+                                },
                                 p,
                             )
                             .h(px(32.0))
@@ -721,22 +735,17 @@ impl ServerSettingsView {
                             })),
                         ),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .child("Anyone with this address can post here, so share it only with the app that needs it."),
-                )
+                .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.webhooks.secret")))
         };
 
         let test = {
             let w2 = w.clone();
             let label = if sent {
-                "Posted"
+                t("serversettings.webhooks.posted")
             } else if busy == Some(Busy::Test) {
-                "Sending…"
+                t("desktop.server.webhooks.sending")
             } else {
-                "Send a test"
+                t("serversettings.webhooks.test")
             };
             soft_button(SharedString::from(format!("hook-test-{id}")), label, p)
                 .when(busy.is_some() || channels.iter().all(|c| c.id != w.channel_id), |el| el.opacity(0.6))
@@ -769,13 +778,17 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(6.0))
                         .child(div().px(px(4.0)).text_xs().font_weight(FontWeight::BOLD).child(match ask {
-                            Ask::Reset => "The old address stops working.",
-                            Ask::Delete => "Its messages stay.",
+                            Ask::Reset => t("serversettings.webhooks.resetAsk"),
+                            Ask::Delete => t("serversettings.webhooks.deleteAsk"),
                         }))
                         .child(
                             danger_button(
                                 SharedString::from(format!("hook-yes-{id}")),
-                                if ask == Ask::Reset { "New address" } else { "Delete" },
+                                if ask == Ask::Reset {
+                                    t("serversettings.webhooks.newAddress")
+                                } else {
+                                    t("serversettings.shared.delete")
+                                },
                                 p,
                             )
                             .h(px(32.0))
@@ -802,19 +815,23 @@ impl ServerSettingsView {
                     .flex()
                     .gap(px(4.0))
                     .child(
-                        soft_button(SharedString::from(format!("hook-reset-{id}")), "New address", p)
-                            .bg(gpui_kit::transparent_black())
-                            .child(if resetting {
-                                spinner(format!("hook-reset-spin-{id}"), 14.0, window)
-                            } else {
-                                icon("refresh-cw").size(px(14.0)).into_any_element()
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if this.hooks.busy.is_none() {
-                                    this.hooks.asking = Some((reset_id.clone(), Ask::Reset));
-                                    cx.notify();
-                                }
-                            })),
+                        soft_button(
+                            SharedString::from(format!("hook-reset-{id}")),
+                            t("serversettings.webhooks.newAddress"),
+                            p,
+                        )
+                        .bg(gpui_kit::transparent_black())
+                        .child(if resetting {
+                            spinner(format!("hook-reset-spin-{id}"), 14.0, window)
+                        } else {
+                            icon("refresh-cw").size(px(14.0)).into_any_element()
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.hooks.busy.is_none() {
+                                this.hooks.asking = Some((reset_id.clone(), Ask::Reset));
+                                cx.notify();
+                            }
+                        })),
                     )
                     .child(
                         div()
@@ -831,7 +848,7 @@ impl ServerSettingsView {
                             .text_color(p.destructive)
                             .hover(move |s| s.bg(red))
                             .child(icon("trash").size(px(14.0)))
-                            .child("Delete")
+                            .child(t("serversettings.shared.delete"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.hooks.asking = Some((delete_id.clone(), Ask::Delete));
                                 cx.notify();
@@ -857,11 +874,11 @@ impl ServerSettingsView {
                             .flex()
                             .flex_col()
                             .gap(px(12.0))
-                            .child(labeled("Name", Input::new(&self.hooks.name), p))
-                            .child(labeled("Posts in", picks, p)),
+                            .child(labeled(&t("serversettings.overview.name"), Input::new(&self.hooks.name), p))
+                            .child(labeled(&t("serversettings.webhooks.postsIn"), picks, p)),
                     ),
                 )
-                .child(labeled("Address", address, p))
+                .child(labeled(&t("serversettings.webhooks.address"), address, p))
                 .child(
                     div().flex().flex_wrap().items_center().gap(px(8.0)).child(test).child(actions).child(
                         div()
@@ -872,11 +889,18 @@ impl ServerSettingsView {
                             .text_xs()
                             .text_color(p.muted_foreground)
                             .child(avatar(creator, 16.0, p))
-                            .child(format!(
-                                "Made by {} {}",
-                                creator.map(user_name).unwrap_or_else(|| "someone".into()),
-                                w.created_at.as_ref().map(|t| stamp(t.seconds * 1000)).unwrap_or_default()
-                            )),
+                            .child({
+                                let when = w.created_at.as_ref().map(|at| stamp(at.seconds * 1000)).unwrap_or_default();
+                                match creator {
+                                    Some(u) => t_with(
+                                        "serversettings.webhooks.madeBy",
+                                        &[("name", Arg::Str(&user_name(u))), ("when", Arg::Str(&when))],
+                                    ),
+                                    None => {
+                                        t_with("serversettings.webhooks.madeBySomeone", &[("when", Arg::Str(&when))])
+                                    }
+                                }
+                            }),
                     ),
                 ),
             SharedString::from(format!("hook-body-{id}")),
@@ -910,7 +934,7 @@ impl ServerSettingsView {
                         cx.notify();
                     }))
                     .child(icon("terminal").size(px(16.0)).text_color(p.primary))
-                    .child(div().flex_1().child("How apps post"))
+                    .child(div().flex_1().child(t("serversettings.webhooks.howTo")))
                     .child(
                         icon(if open { "chevron-up" } else { "chevron-down" })
                             .size(px(16.0))
@@ -927,11 +951,17 @@ impl ServerSettingsView {
                         .pb(px(12.0))
                         .text_sm()
                         .text_color(p.muted_foreground)
-                        .child(
-                            "Send a JSON POST to the address. content is Markdown; username and avatar_url change \
-                             who it says it's from for that message; embeds work as on Discord. Add ?wait=true to \
-                             get the message back.",
-                        )
+                        .child(t_with(
+                            "serversettings.webhooks.howToPost",
+                            &[
+                                ("post", Arg::Str("POST")),
+                                ("content", Arg::Str("content")),
+                                ("username", Arg::Str("username")),
+                                ("avatarUrl", Arg::Str("avatar_url")),
+                                ("embeds", Arg::Str("embeds")),
+                                ("wait", Arg::Str("?wait=true")),
+                            ],
+                        ))
                         .child(
                             div()
                                 .p(px(12.0))
@@ -942,7 +972,7 @@ impl ServerSettingsView {
                                 .text_color(p.foreground)
                                 .child(code),
                         )
-                        .child("Each webhook posts at most 30 messages a minute, and never pings @everyone, @here or roles."),
+                        .child(t_with("serversettings.webhooks.limits", &[("count", Arg::Num(30))])),
                     "hook-how-body",
                     Duration::ZERO,
                     6.0,

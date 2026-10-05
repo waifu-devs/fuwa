@@ -20,6 +20,7 @@ use gpui_kit::{
 use crate::core::Core;
 use crate::core::api::Problem;
 use crate::core::dms::now_ms;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::moderation::{Action, timed_out_until};
 use crate::core::server_admin::{People, ServerPatch};
 use crate::core::store::user_name;
@@ -80,21 +81,21 @@ enum Page {
 }
 
 impl Page {
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Page::Overview => "Overview",
-            Page::Welcome => "Welcome & onboarding",
-            Page::Invites => "Invites",
-            Page::Roles => "Roles",
-            Page::Channels => "Channels",
-            Page::Emoji => "Emoji",
-            Page::Integrations => "Integrations",
-            Page::Shared => "Shared channels",
-            Page::Recordings => "Recordings",
-            Page::Members => "Members",
-            Page::Bans => "Bans",
-            Page::AutoMod => "AutoMod",
-            Page::AuditLog => "Audit log",
+            Page::Overview => t("serversettings.nav.overview"),
+            Page::Welcome => t("serversettings.nav.welcome"),
+            Page::Invites => t("serversettings.nav.invites"),
+            Page::Roles => t("serversettings.nav.roles"),
+            Page::Channels => t("serversettings.nav.channels"),
+            Page::Emoji => t("serversettings.nav.emoji"),
+            Page::Integrations => t("serversettings.nav.integrations"),
+            Page::Shared => t("serversettings.nav.shared"),
+            Page::Recordings => t("serversettings.nav.recordings"),
+            Page::Members => t("serversettings.nav.members"),
+            Page::Bans => t("serversettings.nav.bans"),
+            Page::AutoMod => t("serversettings.nav.automod"),
+            Page::AuditLog => t("serversettings.nav.auditLog"),
         }
     }
 
@@ -116,29 +117,21 @@ impl Page {
         }
     }
 
-    fn about(self) -> &'static str {
+    fn about(self) -> String {
         match self {
-            Page::Overview => "Its name, picture and a few words, and how it notifies people by default.",
-            Page::Invites => "The links that let people in. Revoke one and it stops working at once.",
-            Page::Roles => "Who can do what. Members take the color of their highest role.",
-            Page::Channels => "Order, categories, topics, slow mode, and who can see and use each.",
-            Page::Emoji => "The server's own emoji. Everyone here can use them as :name:.",
-            Page::Welcome => {
-                "The banner, the welcome screen and the first steps new members take, previewed as you go."
-            }
-            Page::Integrations => {
-                "Agents, accounts programs drive, and webhooks, addresses other apps post messages to."
-            }
-            Page::Shared => {
-                "Channels shown in another server, or from one. Messages stay with the server the channel comes from."
-            }
-            Page::Recordings => "What recordings on the server keep: sound, or cameras and shared screens too.",
-            Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
-            Page::Bans => "Who's kept out, and why.",
-            Page::AutoMod => {
-                "Rules that catch messages as they're sent: blocked words, mention spam, links and a smart filter."
-            }
-            Page::AuditLog => "Every change people made here with their permissions.",
+            Page::Overview => t("desktop.server.overviewAbout"),
+            Page::Invites => t("desktop.server.invitesAbout"),
+            Page::Roles => t("desktop.server.rolesAbout"),
+            Page::Channels => t("serversettings.nav.channelsAbout"),
+            Page::Emoji => t("serversettings.nav.emojiAbout"),
+            Page::Welcome => t("serversettings.nav.welcomeAbout"),
+            Page::Integrations => t("serversettings.nav.integrationsAbout"),
+            Page::Shared => t("serversettings.nav.sharedAbout"),
+            Page::Recordings => t("serversettings.nav.recordingsAbout"),
+            Page::Members => t("desktop.server.membersAbout"),
+            Page::Bans => t("serversettings.nav.bansAbout"),
+            Page::AutoMod => t("serversettings.nav.automodAbout"),
+            Page::AuditLog => t("desktop.server.auditLogAbout"),
         }
     }
 }
@@ -210,16 +203,18 @@ pub fn can_open(access: &crate::core::permissions::Access) -> bool {
 }
 
 /// What the audit log can be narrowed to, as chips.
-const FILTERS: [(A, &str); 8] = [
-    (A::Unspecified, "Anything"),
-    (A::MemberTimeOut, "Time-outs"),
-    (A::MemberKick, "Kicks"),
-    (A::MemberBan, "Bans"),
-    (A::MemberUnban, "Unbans"),
-    (A::MessageDelete, "Deleted messages"),
-    (A::ServerUpdate, "Server settings"),
-    (A::InviteCreate, "New invites"),
-];
+fn filters() -> [(A, String); 8] {
+    [
+        (A::Unspecified, t("serversettings.audit.kind.anything")),
+        (A::MemberTimeOut, t("serversettings.audit.kind.timeOut")),
+        (A::MemberKick, t("serversettings.audit.kind.kick")),
+        (A::MemberBan, t("serversettings.audit.kind.ban")),
+        (A::MemberUnban, t("serversettings.audit.kind.unban")),
+        (A::MessageDelete, t("serversettings.audit.kind.messageDelete")),
+        (A::ServerUpdate, t("serversettings.audit.kind.serverUpdate")),
+        (A::InviteCreate, t("serversettings.audit.kind.inviteCreate")),
+    ]
+}
 
 pub struct ServerSettingsView {
     core: Arc<Core>,
@@ -263,10 +258,11 @@ impl EventEmitter<ServerSettingsEvent> for ServerSettingsView {}
 
 impl ServerSettingsView {
     pub fn new(core: Arc<Core>, key: String, server: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("My cozy server"));
-        let description =
-            cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8).placeholder("What's this server about?"));
-        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find someone"));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.namePlaceholder")));
+        let description = cx.new(|cx| {
+            TextareaState::new(window, cx).auto_grow(3, 8).placeholder(t("desktop.server.descriptionPlaceholder"))
+        });
+        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.shared.findSomeone")));
         // The page reads the instance as it draws, so it draws again when that changes.
         let mut changes = core.changes();
         cx.spawn_in(window, async move |this, cx| {
@@ -465,7 +461,7 @@ impl ServerSettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose a picture".into()),
+            prompt: Some(t("desktop.account.choosePicture").into()),
         });
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
         cx.spawn(async move |this, cx| {
@@ -474,7 +470,7 @@ impl ServerSettingsView {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = crate::core::account::picture_type(&name) else {
                 let _ = this.update(cx, |this, cx| {
-                    this.error = Some("That isn't a picture fuwa can use (PNG, JPEG, GIF or WebP).".into());
+                    this.error = Some(t("desktop.account.notAPicture"));
                     cx.notify();
                 });
                 return;
@@ -549,7 +545,11 @@ impl ServerSettingsView {
                     .opacity(if uploading { 1.0 } else { 0.0 })
                     .group_hover("icon", |s| s.opacity(1.0))
                     .child(icon(if uploading { "loader-circle" } else { "camera" }).size(px(20.0)))
-                    .child(if uploading { "Uploading…" } else { "Change" }),
+                    .child(if uploading {
+                        t("serversettings.emoji.uploading")
+                    } else {
+                        t("workspace.picture.changeShort")
+                    }),
             )
             .on_click(cx.listener(|this, _, _, cx| this.pick_icon(cx)));
 
@@ -563,7 +563,7 @@ impl ServerSettingsView {
                 .cloned()
                 .collect()
         });
-        let mut joins: Vec<(String, String)> = vec![(String::new(), "Off".into())];
+        let mut joins: Vec<(String, String)> = vec![(String::new(), t("serversettings.shared.off"))];
         joins.extend(channels.iter().map(|c| (c.id.clone(), format!("#{}", c.name))));
 
         div()
@@ -577,8 +577,8 @@ impl ServerSettingsView {
                         .flex()
                         .flex_col()
                         .gap(px(14.0))
-                        .child(labeled("Server name", Input::new(&self.name).large(), p))
-                        .child(labeled("Description", Textarea::new(&self.description), p)),
+                        .child(labeled(&t("serversettings.nav.serverName"), Input::new(&self.name).large(), p))
+                        .child(labeled(&t("serversettings.nav.description"), Textarea::new(&self.description), p)),
                 ),
             )
             .child(
@@ -597,39 +597,39 @@ impl ServerSettingsView {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.success)
                                 .child(icon("check").size(px(16.0)))
-                                .child("Saved"),
+                                .child(t("desktop.account.saved")),
                             "saved",
                             Duration::ZERO,
                             6.0,
                         ))
                     })
                     .child(
-                        primary_button("server-save", if self.busy { "Saving…" } else { "Save changes" }, p)
-                            .when(!dirty || name.is_empty(), |el| el.opacity(0.5))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !dirty || this.busy {
-                                    return;
-                                }
-                                let name = this.name.read(cx).value().trim().to_owned();
-                                if name.is_empty() {
-                                    this.error = Some("Give it a name.".into());
-                                    cx.notify();
-                                    return;
-                                }
-                                let about = this.description.read(cx).value().trim().to_owned();
-                                this.save(
-                                    ServerPatch {
-                                        name: Some(name),
-                                        description: Some(about),
-                                        ..ServerPatch::default()
-                                    },
-                                    cx,
-                                );
-                            })),
+                        primary_button(
+                            "server-save",
+                            if self.busy { t("settings.controls.saving") } else { t("settings.controls.save") },
+                            p,
+                        )
+                        .when(!dirty || name.is_empty(), |el| el.opacity(0.5))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !dirty || this.busy {
+                                return;
+                            }
+                            let name = this.name.read(cx).value().trim().to_owned();
+                            if name.is_empty() {
+                                this.error = Some(t("desktop.server.needsName"));
+                                cx.notify();
+                                return;
+                            }
+                            let about = this.description.read(cx).value().trim().to_owned();
+                            this.save(
+                                ServerPatch { name: Some(name), description: Some(about), ..ServerPatch::default() },
+                                cx,
+                            );
+                        })),
                     ),
             )
             .child(labeled(
-                "Default notifications",
+                &t("serversettings.nav.defaultNotifications"),
                 div()
                     .flex()
                     .flex_col()
@@ -637,8 +637,8 @@ impl ServerSettingsView {
                     .child(chips(
                         "notify",
                         &[
-                            (pb::NotificationLevel::All as i64, "All messages".to_owned()),
-                            (pb::NotificationLevel::Mentions as i64, "Only @mentions".to_owned()),
+                            (pb::NotificationLevel::All as i64, t("common.notify.all")),
+                            (pb::NotificationLevel::Mentions as i64, t("common.notify.mentions")),
                         ],
                         level as i64,
                         p,
@@ -648,16 +648,11 @@ impl ServerSettingsView {
                             this.save(ServerPatch { default_notifications: Some(level), ..ServerPatch::default() }, cx);
                         },
                     ))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child("For people who haven't picked their own. Big servers usually pick only @mentions."),
-                    ),
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.notificationsHint"))),
                 p,
             ))
             .child(labeled(
-                "Join messages",
+                &t("serversettings.nav.joinMessages"),
                 div()
                     .flex()
                     .flex_col()
@@ -665,9 +660,7 @@ impl ServerSettingsView {
                     .child(text_chips("joins", &joins, &server.system_channel_id, p, cx, |this, id, cx| {
                         this.save(ServerPatch { system_channel_id: Some(id), ..ServerPatch::default() }, cx);
                     }))
-                    .child(
-                        div().text_xs().text_color(p.muted_foreground).child("Where fuwa says hi when someone joins."),
-                    ),
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.joinMessagesHint"))),
                 p,
             ))
             .into_any_element()
@@ -683,8 +676,9 @@ impl ServerSettingsView {
                 i.and_then(|i| i.channels.get(&self.server).cloned()).unwrap_or_default(),
             )
         });
-        let make = primary_button("invite-make", "Make an invite", p).child(icon("plus").size(px(16.0))).on_click(
-            cx.listener(|this, _, _, cx| {
+        let make = primary_button("invite-make", t("desktop.server.makeInvite"), p)
+            .child(icon("plus").size(px(16.0)))
+            .on_click(cx.listener(|this, _, _, cx| {
                 let (core, key, sid) = (this.core.clone(), this.key.clone(), this.server.clone());
                 this.run(cx, async move { core.create_invite(&key, &sid).await }, |this, result, cx| {
                     match result {
@@ -693,13 +687,12 @@ impl ServerSettingsView {
                     }
                     cx.notify();
                 });
-            }),
-        );
+            }));
         let mut list = div().flex().flex_col().gap(px(8.0));
         match &self.invites {
             None => list = list.child(shimmer_rows(3, p)),
             Some((invites, _)) if invites.is_empty() => {
-                list = list.child(empty("link", "No invites yet", "Make one and send it to someone.", p))
+                list = list.child(empty("link", &t("desktop.server.noInvites"), &t("desktop.server.noInvitesHint"), p))
             }
             Some((invites, people)) => {
                 let now = now_ms();
@@ -708,14 +701,17 @@ impl ServerSettingsView {
                     let inviter = people.get(&invite.inviter_id);
                     let channel = channels.iter().find(|c| c.id == invite.channel_id).map(|c| format!("#{}", c.name));
                     let uses = if invite.max_uses > 0 {
-                        format!("{} of {} used", invite.uses, invite.max_uses)
+                        t_with(
+                            "desktop.server.usesOf",
+                            &[("uses", Arg::Num(invite.uses as i64)), ("max", Arg::Num(invite.max_uses as i64))],
+                        )
                     } else {
-                        format!("{} {}", invite.uses, if invite.uses == 1 { "use" } else { "uses" })
+                        t_with("workspace.invite.uses.count", &[("count", Arg::Num(invite.uses as i64))])
                     };
                     let expires = match invite.expires_at.as_ref().map(|t| t.seconds * 1000) {
-                        None => "Never expires".to_owned(),
-                        Some(ms) if ms <= now => "Expired".to_owned(),
-                        Some(ms) => format!("Expires {}", stamp(ms)),
+                        None => t("serversettings.invites.neverExpires"),
+                        Some(ms) if ms <= now => t("desktop.server.expired"),
+                        Some(ms) => t_with("serversettings.invites.expires", &[("time", Arg::Str(&stamp(ms)))]),
                     };
                     let copied = self
                         .copied
@@ -759,7 +755,7 @@ impl ServerSettingsView {
                                             .text_xs()
                                             .text_color(p.muted_foreground)
                                             .child(avatar(inviter, 16.0, p))
-                                            .child(inviter.map(user_name).unwrap_or_else(|| "Someone".into()))
+                                            .child(inviter.map(user_name).unwrap_or_else(|| t("common.someone")))
                                             .when_some(channel, |el, c| el.child("·").child(c))
                                             .child("·")
                                             .child(uses)
@@ -862,7 +858,12 @@ impl ServerSettingsView {
         });
         let mut list = div().flex().flex_col().gap(px(6.0));
         if rows.is_empty() {
-            list = list.child(empty("search", "Nobody by that name", "Try part of their username.", p));
+            list = list.child(empty(
+                "search",
+                &t("dms-calls.friends.page.noMatchTitle"),
+                &t("desktop.server.noMemberHint"),
+                p,
+            ));
         }
         for (n, (m, allowed, roles, owner)) in rows.into_iter().enumerate() {
             let Some(user) = m.user.clone() else { continue };
@@ -912,11 +913,14 @@ impl ServerSettingsView {
                                         ))
                                     })
                                     .when(m.pending, |el| {
-                                        el.child(pill("Hasn't agreed yet", p.muted_foreground.into()))
+                                        el.child(pill(&t("desktop.server.notAgreed"), p.muted_foreground.into()))
                                     })
                                     .when_some(until, |el, until| {
                                         el.child(pill(
-                                            &format!("Timed out · {}", crate::ui::moderate::left(until - now)),
+                                            &t_with(
+                                                "desktop.server.timedOutFor",
+                                                &[("time", Arg::Str(&crate::ui::moderate::left(until - now)))],
+                                            ),
                                             amber,
                                         ))
                                     }),
@@ -930,7 +934,12 @@ impl ServerSettingsView {
                                     .text_xs()
                                     .text_color(p.muted_foreground)
                                     .child(format!("@{}", user.username))
-                                    .when(joined > 0, |el| el.child("·").child(format!("joined {}", stamp(joined))))
+                                    .when(joined > 0, |el| {
+                                        el.child("·").child(t_with(
+                                            "desktop.server.joined",
+                                            &[("date", Arg::Str(&stamp(joined)))],
+                                        ))
+                                    })
                                     .children(roles.into_iter().map(|(role, color)| {
                                         let dot = color
                                             .map(|c| Hsla::from(gpui_kit::rgb(c)))
@@ -970,13 +979,14 @@ impl ServerSettingsView {
         match &self.bans {
             None => list = list.child(shimmer_rows(3, p)),
             Some((bans, _)) if bans.is_empty() => {
-                list = list.child(empty("shield-check", "Nobody's banned", "Bans you make show up here.", p))
+                list =
+                    list.child(empty("shield-check", &t("desktop.server.noBans"), &t("desktop.server.noBansHint"), p))
             }
             Some((bans, people)) => {
                 for (n, ban) in bans.iter().enumerate() {
                     let user = ban.user.clone();
                     let uid = user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-                    let by = people.get(&ban.banned_by_id).map(user_name).unwrap_or_else(|| "Someone".into());
+                    let by = people.get(&ban.banned_by_id).map(user_name).unwrap_or_else(|| t("common.someone"));
                     let at = ban.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
                     list = list.child(motion::rise(
                         row(p)
@@ -994,42 +1004,42 @@ impl ServerSettingsView {
                                             .child(user.as_ref().map(user_name).unwrap_or_default()),
                                     )
                                     .child(div().text_sm().child(if ban.reason.is_empty() {
-                                        "No reason given".to_owned()
+                                        t("serversettings.bans.noReason")
                                     } else {
                                         ban.reason.clone()
                                     }))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(p.muted_foreground)
-                                            .child(format!("Banned by {by} · {}", stamp(at))),
-                                    ),
+                                    .child(div().text_xs().text_color(p.muted_foreground).child(t_with(
+                                        "serversettings.bans.bannedBy",
+                                        &[("name", Arg::Str(&by)), ("date", Arg::Str(&stamp(at)))],
+                                    ))),
                             )
                             .child(
-                                soft_button(SharedString::from(format!("unban-{uid}")), "Unban", p)
-                                    .child(icon("undo").size(px(14.0)))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        let (core, key, sid, uid) =
-                                            (this.core.clone(), this.key.clone(), this.server.clone(), uid.clone());
-                                        let gone = uid.clone();
-                                        this.run(
-                                            cx,
-                                            async move { core.unban(&key, &sid, &uid).await },
-                                            move |this, result, cx| {
-                                                match result {
-                                                    Ok(()) => {
-                                                        if let Some((list, _)) = &mut this.bans {
-                                                            list.retain(|b| {
-                                                                b.user.as_ref().is_none_or(|u| u.id != gone)
-                                                            });
-                                                        }
+                                soft_button(
+                                    SharedString::from(format!("unban-{uid}")),
+                                    t("serversettings.bans.unban"),
+                                    p,
+                                )
+                                .child(icon("undo").size(px(14.0)))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let (core, key, sid, uid) =
+                                        (this.core.clone(), this.key.clone(), this.server.clone(), uid.clone());
+                                    let gone = uid.clone();
+                                    this.run(
+                                        cx,
+                                        async move { core.unban(&key, &sid, &uid).await },
+                                        move |this, result, cx| {
+                                            match result {
+                                                Ok(()) => {
+                                                    if let Some((list, _)) = &mut this.bans {
+                                                        list.retain(|b| b.user.as_ref().is_none_or(|u| u.id != gone));
                                                     }
-                                                    Err(err) => this.error = Some(err.message),
                                                 }
-                                                cx.notify();
-                                            },
-                                        );
-                                    })),
+                                                Err(err) => this.error = Some(err.message),
+                                            }
+                                            cx.notify();
+                                        },
+                                    );
+                                })),
                             ),
                         SharedString::from(format!("ban-in-{n}")),
                         Duration::from_millis(30 * n.min(12) as u64),
@@ -1042,7 +1052,7 @@ impl ServerSettingsView {
     }
 
     fn audit_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let filters: Vec<(i64, String)> = FILTERS.iter().map(|(a, l)| (*a as i64, (*l).to_owned())).collect();
+        let filters: Vec<(i64, String)> = filters().into_iter().map(|(a, l)| (a as i64, l)).collect();
         let picked = self.audit_action as i64;
         let channels = self
             .core
@@ -1054,11 +1064,11 @@ impl ServerSettingsView {
             Some(entries) if entries.is_empty() => {
                 list = list.child(empty(
                     "scroll-text",
-                    "Nothing here yet",
-                    if self.audit_action == A::Unspecified {
-                        "Changes to settings, channels and members show up here."
+                    &t("serversettings.audit.empty"),
+                    &if self.audit_action == A::Unspecified {
+                        t("serversettings.audit.emptyHint")
                     } else {
-                        "Nothing matches this filter."
+                        t("desktop.server.audit.noMatch")
                     },
                     p,
                 ))
@@ -1083,8 +1093,16 @@ impl ServerSettingsView {
             .when(more, |el| {
                 el.child(
                     div().flex().justify_center().child(
-                        soft_button("audit-more", if self.audit_loading { "Loading…" } else { "Show older" }, p)
-                            .on_click(cx.listener(|this, _, _, cx| this.load_audit(true, cx))),
+                        soft_button(
+                            "audit-more",
+                            if self.audit_loading {
+                                t("desktop.server.loading")
+                            } else {
+                                t("serversettings.audit.older")
+                            },
+                            p,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.load_audit(true, cx))),
                     ),
                 )
             })
@@ -1192,7 +1210,7 @@ impl ServerSettingsView {
                     div()
                         .flex()
                         .gap(px(4.0))
-                        .child(div().text_color(p.muted_foreground).child("Reason:"))
+                        .child(div().text_color(p.muted_foreground).child(t("serversettings.audit.reason")))
                         .child(entry.reason.clone()),
                 );
             }
@@ -1201,12 +1219,11 @@ impl ServerSettingsView {
                 let label = field_label(&change.field);
                 let before = value(&change.field, &change.before, entry, &self.audit_people, channels);
                 let after = value(&change.field, &change.after, entry, &self.audit_people, channels);
-                let line = div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(div().text_color(p.muted_foreground).child(format!("{label}:")));
+                let line = div().flex().flex_wrap().items_center().gap(px(6.0)).child(
+                    div()
+                        .text_color(p.muted_foreground)
+                        .child(t_with("desktop.server.audit.field", &[("field", Arg::Str(&label))])),
+                );
                 let line = match one_side {
                     Some(after_side) => line.child(chip_text(
                         if after_side { after } else { before },
@@ -1288,7 +1305,9 @@ impl Render for ServerSettingsView {
         );
         let mut y = 46.0;
         let mut at_y = 0.0;
-        for (group, list) in [("SERVER SETTINGS", &SETTINGS[..]), ("MODERATION", &MODERATION[..])] {
+        for (group, list) in
+            [(t("serversettings.nav.subtitle"), &SETTINGS[..]), (t("instancesettings.nav.moderation"), &MODERATION[..])]
+        {
             let shown: Vec<Page> = list.iter().copied().filter(|pg| allowed.contains(pg)).collect();
             if shown.is_empty() {
                 continue;
@@ -1301,7 +1320,7 @@ impl Render for ServerSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group),
+                    .child(group.to_uppercase()),
             );
             y += if y > 46.0 { 44.0 } else { 30.0 };
             for pg in shown {
@@ -1312,7 +1331,7 @@ impl Render for ServerSettingsView {
                 let hover = alpha(p.primary, 0.08);
                 menu = menu.child(
                     div()
-                        .id(SharedString::from(format!("smenu-{}", pg.label())))
+                        .id(SharedString::from(format!("smenu-{pg:?}")))
                         .h(px(38.0))
                         .mb(px(2.0))
                         .px(px(10.0))
@@ -1423,7 +1442,7 @@ impl Render for ServerSettingsView {
                         .pb(px(40.0))
                         .child(motion::rise(
                             content,
-                            SharedString::from(format!("spage-{}", page.label())),
+                            SharedString::from(format!("spage-{page:?}")),
                             Duration::ZERO,
                             14.0,
                         )),
@@ -1508,6 +1527,18 @@ pub(crate) fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
         .child(text.to_owned())
 }
 
+/// Marks a placeholder's value so `marked` draws it in bold.
+pub(crate) fn strong(text: &str) -> String {
+    format!("\u{E000}{text}\u{E001}")
+}
+
+/// A translated sentence whose `strong` values are drawn in bold.
+pub(crate) fn marked(text: &str, p: &Palette) -> gpui_kit::StyledText {
+    let parts: Vec<(&str, bool)> =
+        text.split(['\u{E000}', '\u{E001}']).enumerate().map(|(k, part)| (part, k % 2 == 1)).collect();
+    crate::ui::instance_settings::emphasized(&parts, p)
+}
+
 fn chip_text(text: String, fg: Hsla, bg: Hsla) -> gpui_kit::Div {
     div().px(px(6.0)).rounded(px(6.0)).bg(bg).text_color(fg).child(text)
 }
@@ -1543,19 +1574,21 @@ pub(crate) fn save_bar<V: 'static>(
                 spread_radius: px(-10.0),
                 inset: false,
             }])
-            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(if n == 1 {
-                "1 change not saved".to_owned()
-            } else {
-                format!("{n} changes not saved")
-            }))
             .child(
-                soft_button(SharedString::from(format!("{id}-discard")), "Discard", p)
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t_with("desktop.server.unsaved", &[("count", Arg::Num(n as i64))])),
+            )
+            .child(
+                soft_button(SharedString::from(format!("{id}-discard")), t("settings.controls.discard"), p)
                     .on_click(cx.listener(move |this, _, window, cx| discard(this, window, cx))),
             )
             .child(
                 primary_button(
                     SharedString::from(format!("{id}-save")),
-                    if saving { "Saving…" } else { "Save changes" },
+                    if saving { t("settings.controls.saving") } else { t("settings.controls.save") },
                     p,
                 )
                 .when(saving, |el| el.opacity(0.6))
@@ -1750,62 +1783,69 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
 
 fn field_label(field: &str) -> String {
     match field {
-        "name" => "Name",
-        "description" => "Description",
-        "icon_url" => "Icon",
-        "discoverable" => "Shown in Browse",
-        "default_notifications" => "Default notifications",
-        "system_channel_id" => "Join messages",
-        "topic" => "Topic",
-        "parent_id" => "Category",
-        "position" => "Position",
-        "slowmode_seconds" => "Slow mode",
-        "nickname" => "Nickname",
-        "role" => "Role",
-        "timed_out_until" => "Timed out until",
-        "owner_id" => "Owner",
-        "color" => "Color",
-        "permissions" => "Permissions",
-        "hoist" => "Shown apart",
-        "mentionable" => "Anyone can mention it",
-        "max_uses" => "How many people",
-        "expires_at" => "Expires",
-        "uses" => "People it let in",
-        "min_account_age_seconds" => "Minimum account age",
-        "applications" => "Apply to join",
-        "linked_only" => "waifu.dev accounts only",
-        "rules" => "Rules",
-        "avatar_url" => "Picture",
-        "channel_id" => "Posts in",
-        "token" => "Address",
-        "questions" => "Questions",
-        "enabled" => "On",
-        "channels" => "Channels",
-        "keywords" => "Words",
-        "allowed" => "Allowed",
-        "mention_limit" => "Ping limit",
-        "actions" => "Actions",
-        "record_video" => "Recordings keep",
-        other => other,
+        "name" => t("serversettings.overview.name"),
+        "description" => t("serversettings.nav.description"),
+        "icon_url" => t("serversettings.audit.field.icon"),
+        "discoverable" => t("serversettings.audit.field.discoverable"),
+        "default_notifications" => t("serversettings.nav.defaultNotifications"),
+        "system_channel_id" => t("serversettings.nav.joinMessages"),
+        "topic" => t("serversettings.channels.topic"),
+        "parent_id" => t("serversettings.channels.category"),
+        "position" => t("serversettings.audit.field.position"),
+        "slowmode_seconds" => t("serversettings.nav.slowmode"),
+        "nickname" => t("workspace.moderate.nickname"),
+        "role" => t("serversettings.audit.field.role"),
+        "timed_out_until" => t("serversettings.audit.field.timedOutUntil"),
+        "owner_id" => t("serversettings.shared.owner"),
+        "color" => t("serversettings.audit.field.color"),
+        "permissions" => t("serversettings.shared.permissions"),
+        "hoist" => t("serversettings.audit.field.hoist"),
+        "mentionable" => t("serversettings.audit.field.mentionable"),
+        "max_uses" => t("serversettings.audit.field.maxUses"),
+        "expires_at" => t("serversettings.audit.field.expires"),
+        "uses" => t("serversettings.audit.field.uses"),
+        "min_account_age_seconds" => t("serversettings.nav.accountAge"),
+        "applications" => t("serversettings.nav.applyToJoin"),
+        "linked_only" => t("serversettings.nav.linkedOnly"),
+        "rules" => t("serversettings.nav.rules"),
+        "avatar_url" => t("serversettings.audit.field.picture"),
+        "channel_id" => t("serversettings.audit.field.postsIn"),
+        "token" => t("serversettings.audit.field.address"),
+        "questions" => t("serversettings.audit.field.questions"),
+        "enabled" => t("serversettings.audit.field.enabled"),
+        "channels" => t("serversettings.nav.channels"),
+        "keywords" => t("serversettings.audit.field.keywords"),
+        "allowed" => t("serversettings.audit.field.allowed"),
+        "mention_limit" => t("serversettings.audit.field.mentionLimit"),
+        "actions" => t("serversettings.audit.field.actions"),
+        "record_video" => t("serversettings.audit.field.recordVideo"),
+        other => other.to_owned(),
     }
-    .to_owned()
 }
 
 /// A value from the log, in words.
 fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel]) -> String {
-    let yes_no = |raw: &str| if raw == "true" { "Yes" } else { "No" }.to_owned();
+    let yes_no = |raw: &str| {
+        if raw == "true" { t("serversettings.audit.value.yes") } else { t("serversettings.audit.value.no") }
+    };
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     match field {
         "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" => yes_no(raw),
-        "record_video" => if raw == "true" { "Sound and video" } else { "Sound only" }.into(),
+        "record_video" => {
+            if raw == "true" {
+                t("serversettings.audit.value.soundVideo")
+            } else {
+                t("serversettings.audit.value.soundOnly")
+            }
+        }
         "role" => match raw {
-            "1" => "Member".into(),
-            "2" => "Admin".into(),
-            "3" => "Owner".into(),
-            "" => "None".into(),
+            "1" => t("serversettings.audit.rank.member"),
+            "2" => t("serversettings.audit.rank.admin"),
+            "3" => t("serversettings.shared.owner"),
+            "" => t("serversettings.audit.value.none"),
             _ => entry.role_name.clone(),
         },
-        "color" if raw.is_empty() => "None".into(),
+        "color" if raw.is_empty() => t("serversettings.audit.value.none"),
         "permissions" => {
             let names: Vec<String> = raw
                 .split(',')
@@ -1813,46 +1853,55 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
                 .filter_map(|n| P::try_from(n).ok())
                 .map(|p| words(&format!("{p:?}")))
                 .collect();
-            if names.is_empty() { "None".into() } else { names.join(", ") }
+            if names.is_empty() { t("serversettings.audit.value.none") } else { names.join(", ") }
         }
         "default_notifications" => {
             match raw.parse::<i32>().ok().and_then(|n| pb::NotificationLevel::try_from(n).ok()) {
-                Some(pb::NotificationLevel::Mentions) => "Only @mentions".into(),
-                Some(pb::NotificationLevel::All) => "All messages".into(),
-                _ => "Each person's own".into(),
+                Some(pb::NotificationLevel::Mentions) => t("common.notify.mentions"),
+                Some(pb::NotificationLevel::All) => t("common.notify.all"),
+                _ => t("serversettings.audit.value.eachOwn"),
             }
         }
-        "avatar_url" | "icon_url" => if raw.is_empty() { "None" } else { "A picture" }.into(),
-        "token" => "Replaced".into(),
+        "avatar_url" | "icon_url" => {
+            if raw.is_empty() {
+                t("serversettings.audit.value.none")
+            } else {
+                t("serversettings.audit.value.aPicture")
+            }
+        }
+        "token" => t("serversettings.audit.value.replaced"),
         "system_channel_id" | "parent_id" | "channel_id" => {
             if raw.is_empty() {
-                return "None".into();
+                return t("serversettings.audit.value.none");
             }
             match channels.iter().find(|c| c.id == raw) {
                 Some(c) if field == "parent_id" => c.name.clone(),
                 Some(c) => format!("#{}", c.name),
-                None => "A deleted channel".into(),
+                None => t("serversettings.audit.value.deletedChannel"),
             }
         }
         "slowmode_seconds" => match raw.parse::<i64>().unwrap_or(0) {
-            0 => "Off".into(),
+            0 => t("serversettings.shared.off"),
             s => duration(s),
         },
         "timed_out_until" => match raw.parse::<i64>() {
-            Ok(until) if until > 0 => format!("{} ({})", stamp(until), duration((until - at).max(0) / 1000)),
-            _ => "Not timed out".into(),
+            Ok(until) if until > 0 => t_with(
+                "serversettings.audit.value.until",
+                &[("time", Arg::Str(&stamp(until))), ("duration", Arg::Str(&duration((until - at).max(0) / 1000)))],
+            ),
+            _ => t("serversettings.audit.value.notTimedOut"),
         },
-        "owner_id" => people.get(raw).map(user_name).unwrap_or_else(|| "Someone".into()),
-        "max_uses" if raw == "0" => "No limit".into(),
+        "owner_id" => people.get(raw).map(user_name).unwrap_or_else(|| t("common.someone")),
+        "max_uses" if raw == "0" => t("settings.controls.noLimit"),
         "expires_at" => match raw.parse::<i64>() {
             Ok(ms) if ms > 0 => stamp(ms),
-            _ => "Never".into(),
+            _ => t("serversettings.shared.never"),
         },
         "min_account_age_seconds" => match raw.parse::<i64>().unwrap_or(0) {
-            0 => "Any age".into(),
+            0 => t("serversettings.access.age.any"),
             s => duration(s),
         },
-        _ if raw.is_empty() => "Nothing".into(),
+        _ if raw.is_empty() => t("serversettings.audit.value.nothing"),
         _ => raw.to_owned(),
     }
 }
@@ -1885,11 +1934,15 @@ fn plain(text: &str) -> String {
 
 /// What an entry says happened, in Markdown, names in bold.
 pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel]) -> String {
-    let who = |id: &str| format!("**{}**", plain(&people.get(id).map(user_name).unwrap_or_else(|| "Someone".into())));
+    let who =
+        |id: &str| format!("**{}**", plain(&people.get(id).map(user_name).unwrap_or_else(|| t("common.someone"))));
     let actor = who(&entry.actor_id);
     let target = who(&entry.target_id);
     let change = |field: &str| entry.changes.iter().find(|c| c.field == field);
-    let shared_server = || change("server").map(|c| c.after.clone()).unwrap_or_else(|| "another server".into());
+    let shared_server = || {
+        let name = change("server").map(|c| c.after.clone()).unwrap_or_else(|| t("serversettings.audit.anotherServer"));
+        format!("**{}**", plain(&name))
+    };
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     let named_channel = |name: &str| format!("**#{}**", plain(name));
     let channel = match channels.iter().find(|c| c.id == entry.target_id) {
@@ -1897,162 +1950,313 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         Some(c) => named_channel(&c.name),
         None => named_channel(&entry.channel_name),
     };
-    let role = format!("**{}**", plain(if entry.role_name.is_empty() { "a role" } else { &entry.role_name }));
+    let a_role = t("serversettings.audit.aRole");
+    let role = format!("**{}**", plain(if entry.role_name.is_empty() { &a_role } else { &entry.role_name }));
     let only = |field: &str| entry.changes.len() == 1 && change(field).is_some();
     let name_of = |side_after: bool| {
         change("name").map(|c| plain(if side_after { &c.after } else { &c.before })).unwrap_or_default()
     };
+    let (before, after) = (format!("**{}**", name_of(false)), format!("**{}**", name_of(true)));
+    let (emoji_before, emoji_after) = (format!("**:{}:**", name_of(false)), format!("**:{}:**", name_of(true)));
+    // Where it happened, by the name the log kept.
+    let place = named_channel(&entry.channel_name);
+    let automod = format!("**{}**", t("serversettings.nav.automod"));
+    let span = |until: i64| duration(((until - at) / 1000).max(1));
     match entry.action() {
         A::ServerUpdate => {
             if only("record_video") {
                 if change("record_video").is_some_and(|c| c.after == "true") {
-                    format!("{actor} turned on recording cameras and screens")
+                    t_with("serversettings.audit.s.recordVideoOn", &[("actor", Arg::Str(&actor))])
                 } else {
-                    format!("{actor} made recordings sound only")
+                    t_with("serversettings.audit.s.recordSoundOnly", &[("actor", Arg::Str(&actor))])
                 }
             } else if only("applications") {
                 if change("applications").is_some_and(|c| c.after == "true") {
-                    format!("{actor} made people apply to join")
+                    t_with("serversettings.audit.s.applyOn", &[("actor", Arg::Str(&actor))])
                 } else {
-                    format!("{actor} let people join without applying")
+                    t_with("serversettings.audit.s.applyOff", &[("actor", Arg::Str(&actor))])
                 }
             } else if only("discoverable") {
                 if change("discoverable").is_some_and(|c| c.after == "true") {
-                    format!("{actor} listed the server in Browse")
+                    t_with("serversettings.audit.s.listed", &[("actor", Arg::Str(&actor))])
                 } else {
-                    format!("{actor} made the server invite only")
+                    t_with("serversettings.audit.s.inviteOnly", &[("actor", Arg::Str(&actor))])
                 }
             } else if only("name") {
-                format!("{actor} renamed the server to **{}**", name_of(true))
+                t_with("desktop.server.audit.renamedServer", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))])
             } else {
-                format!("{actor} changed the server's settings")
+                t_with("serversettings.audit.s.serverUpdate", &[("actor", Arg::Str(&actor))])
             }
         }
-        A::ChannelCreate => format!("{actor} created {channel}"),
+        A::ChannelCreate => t_with(
+            "serversettings.audit.s.channelCreate",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&channel))],
+        ),
         A::ChannelUpdate => match change("slowmode_seconds").filter(|_| entry.changes.len() == 1) {
-            Some(c) if c.after == "0" => format!("{actor} turned off slow mode in {channel}"),
-            Some(c) => format!("{actor} set slow mode in {channel} to {}", duration(c.after.parse().unwrap_or(0))),
-            None => format!("{actor} changed {channel}"),
+            Some(c) if c.after == "0" => t_with(
+                "serversettings.audit.s.slowOff",
+                &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&channel))],
+            ),
+            Some(c) => t_with(
+                "serversettings.audit.s.slowSet",
+                &[
+                    ("actor", Arg::Str(&actor)),
+                    ("channel", Arg::Str(&channel)),
+                    ("duration", Arg::Str(&duration(c.after.parse().unwrap_or(0)))),
+                ],
+            ),
+            None => t_with(
+                "serversettings.audit.s.channelUpdate",
+                &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&channel))],
+            ),
         },
-        A::ChannelDelete => format!("{actor} deleted {}", named_channel(&entry.channel_name)),
-        A::ChannelsReorder => format!("{actor} rearranged the channels"),
-        A::MemberUpdate => format!("{actor} changed {target}'s nickname"),
+        A::ChannelDelete => t_with(
+            "serversettings.audit.s.channelDelete",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],
+        ),
+        A::ChannelsReorder => t_with("serversettings.audit.s.channelsReorder", &[("actor", Arg::Str(&actor))]),
+        A::MemberUpdate => {
+            t_with("serversettings.audit.s.nickname", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
         A::MemberRolesUpdate => match change("role") {
-            Some(c) if !c.after.is_empty() => format!("{actor} gave {target} {role}"),
-            _ => format!("{actor} took {role} from {target}"),
+            Some(c) if !c.after.is_empty() => t_with(
+                "serversettings.audit.s.roleGive",
+                &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("role", Arg::Str(&role))],
+            ),
+            _ => t_with(
+                "serversettings.audit.s.roleTake",
+                &[("actor", Arg::Str(&actor)), ("role", Arg::Str(&role)), ("target", Arg::Str(&target))],
+            ),
         },
-        A::RoleCreate => format!("{actor} created the role {role}"),
+        A::RoleCreate => {
+            t_with("serversettings.audit.s.roleCreate", &[("actor", Arg::Str(&actor)), ("role", Arg::Str(&role))])
+        }
         A::RoleUpdate => {
             if only("name") {
-                format!("{actor} renamed **{}** to **{}**", name_of(false), name_of(true))
+                t_with(
+                    "serversettings.audit.s.renamed",
+                    &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
+                )
             } else if only("permissions") {
-                format!("{actor} changed what {role} can do")
+                t_with(
+                    "serversettings.audit.s.rolePermissions",
+                    &[("actor", Arg::Str(&actor)), ("role", Arg::Str(&role))],
+                )
             } else {
-                format!("{actor} changed {role}")
+                t_with("serversettings.audit.s.roleUpdate", &[("actor", Arg::Str(&actor)), ("role", Arg::Str(&role))])
             }
         }
-        A::RoleDelete => format!("{actor} deleted the role {role}"),
-        A::RolesReorder => format!("{actor} rearranged the roles"),
-        A::ChannelPermissionsUpdate => format!("{actor} changed who can do what in {channel}"),
+        A::RoleDelete => {
+            t_with("serversettings.audit.s.roleDelete", &[("actor", Arg::Str(&actor)), ("role", Arg::Str(&role))])
+        }
+        A::RolesReorder => t_with("serversettings.audit.s.rolesReorder", &[("actor", Arg::Str(&actor))]),
+        A::ChannelPermissionsUpdate => t_with(
+            "serversettings.audit.s.channelPermissions",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&channel))],
+        ),
         A::MemberTimeOut => match change("timed_out_until").and_then(|c| c.after.parse::<i64>().ok()) {
-            Some(until) if until > 0 => {
-                format!("{actor} timed out {target} for {}", duration(((until - at) / 1000).max(1)))
-            }
-            _ => format!("{actor} ended {target}'s time-out"),
+            Some(until) if until > 0 => t_with(
+                "serversettings.audit.s.timeOut",
+                &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("duration", Arg::Str(&span(until)))],
+            ),
+            _ => t_with(
+                "serversettings.audit.s.timeOutEnd",
+                &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))],
+            ),
         },
-        A::MemberKick => format!("{actor} kicked {target}"),
+        A::MemberKick => {
+            t_with("serversettings.audit.s.kick", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
         A::MemberBan => {
             let deleted: i64 = change("deleted_messages").and_then(|c| c.after.parse().ok()).unwrap_or(0);
             match deleted {
-                0 => format!("{actor} banned {target}"),
-                1 => format!("{actor} banned {target} and deleted 1 message"),
-                n => format!("{actor} banned {target} and deleted {n} messages"),
+                0 => {
+                    t_with("serversettings.audit.s.ban", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+                }
+                n => t_with(
+                    "serversettings.audit.s.banDeleted",
+                    &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("count", Arg::Num(n))],
+                ),
             }
         }
-        A::MemberUnban => format!("{actor} unbanned {target}"),
-        A::MessageDelete => {
-            format!("{actor} deleted a message by {target} in {}", named_channel(&entry.channel_name))
+        A::MemberUnban => {
+            t_with("serversettings.audit.s.unban", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
         }
-        A::MessagePin => format!("{actor} pinned a message by {target} in {}", named_channel(&entry.channel_name)),
-        A::MessageUnpin => {
-            format!("{actor} unpinned a message by {target} in {}", named_channel(&entry.channel_name))
+        A::MessageDelete => t_with(
+            "serversettings.audit.s.messageDelete",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::MessagePin => t_with(
+            "serversettings.audit.s.messagePin",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::MessageUnpin => t_with(
+            "serversettings.audit.s.messageUnpin",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::OwnershipTransfer => {
+            t_with("serversettings.audit.s.ownership", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
         }
-        A::OwnershipTransfer => format!("{actor} handed the server to {target}"),
-        A::InviteCreate if !entry.channel_name.is_empty() => {
-            format!("{actor} made an invite to {}", named_channel(&entry.channel_name))
-        }
-        A::InviteCreate => format!("{actor} made an invite"),
-        A::InviteDelete if !entry.channel_name.is_empty() => {
-            format!("{actor} revoked an invite to {}", named_channel(&entry.channel_name))
-        }
-        A::InviteDelete => format!("{actor} revoked an invite"),
-        A::ApplicationApprove => format!("{actor} let {target} in"),
-        A::ApplicationReject => format!("{actor} turned down {target}'s application"),
+        A::InviteCreate if !entry.channel_name.is_empty() => t_with(
+            "serversettings.audit.s.inviteCreateIn",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],
+        ),
+        A::InviteCreate => t_with("serversettings.audit.s.inviteCreate", &[("actor", Arg::Str(&actor))]),
+        A::InviteDelete if !entry.channel_name.is_empty() => t_with(
+            "serversettings.audit.s.inviteDeleteIn",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],
+        ),
+        A::InviteDelete => t_with("serversettings.audit.s.inviteDelete", &[("actor", Arg::Str(&actor))]),
+        A::ApplicationApprove => t_with(
+            "serversettings.audit.s.applicationApprove",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))],
+        ),
+        A::ApplicationReject => t_with(
+            "serversettings.audit.s.applicationReject",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))],
+        ),
         A::JoinFormUpdate => match (change("rules").is_some(), change("questions").is_some()) {
-            (true, false) => format!("{actor} changed the rules"),
-            (false, true) => format!("{actor} changed the questions"),
-            _ => format!("{actor} changed the rules and questions"),
+            (true, false) => t_with("serversettings.audit.s.rulesChanged", &[("actor", Arg::Str(&actor))]),
+            (false, true) => t_with("serversettings.audit.s.questionsChanged", &[("actor", Arg::Str(&actor))]),
+            _ => t_with("serversettings.audit.s.joinFormChanged", &[("actor", Arg::Str(&actor))]),
         },
         A::WelcomeScreenUpdate => match change("enabled").filter(|_| entry.changes.len() == 1) {
-            Some(c) if c.after == "true" => format!("{actor} turned on the welcome screen"),
-            Some(_) => format!("{actor} turned off the welcome screen"),
-            None => format!("{actor} changed the welcome screen"),
+            Some(c) if c.after == "true" => t_with("serversettings.audit.s.welcomeOn", &[("actor", Arg::Str(&actor))]),
+            Some(_) => t_with("serversettings.audit.s.welcomeOff", &[("actor", Arg::Str(&actor))]),
+            None => t_with("serversettings.audit.s.welcomeChanged", &[("actor", Arg::Str(&actor))]),
         },
         A::OnboardingUpdate => match change("enabled").filter(|_| entry.changes.len() == 1) {
-            Some(c) if c.after == "true" => format!("{actor} turned on onboarding"),
-            Some(_) => format!("{actor} turned off onboarding"),
-            None => format!("{actor} changed the onboarding steps"),
+            Some(c) if c.after == "true" => {
+                t_with("serversettings.audit.s.onboardingOn", &[("actor", Arg::Str(&actor))])
+            }
+            Some(_) => t_with("serversettings.audit.s.onboardingOff", &[("actor", Arg::Str(&actor))]),
+            None => t_with("desktop.server.audit.onboardingChanged", &[("actor", Arg::Str(&actor))]),
         },
-        A::AutoModRuleCreate => format!("{actor} added the AutoMod rule **{}**", name_of(true)),
-        A::AutoModRuleUpdate => format!("{actor} changed the AutoMod rule **{}**", name_of(true)),
-        A::AutoModRuleDelete => format!("{actor} deleted the AutoMod rule **{}**", name_of(false)),
+        A::AutoModRuleCreate => {
+            t_with("serversettings.audit.s.automodCreate", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))])
+        }
+        A::AutoModRuleUpdate => {
+            t_with("serversettings.audit.s.automodChanged", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))])
+        }
+        A::AutoModRuleDelete => {
+            t_with("serversettings.audit.s.automodDelete", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))])
+        }
         A::AutoModTimeOut => {
-            let mut s = format!("**AutoMod** timed out {target}");
-            if let Some(until) = change("timed_out_until").and_then(|c| c.after.parse::<i64>().ok()) {
-                s.push_str(&format!(" for {}", duration(((until - at) / 1000).max(1))));
+            let until = change("timed_out_until").and_then(|c| c.after.parse::<i64>().ok());
+            match (until, entry.channel_name.is_empty()) {
+                (Some(until), false) => t_with(
+                    "serversettings.audit.s.automodTimeOutForIn",
+                    &[
+                        ("automod", Arg::Str(&automod)),
+                        ("target", Arg::Str(&target)),
+                        ("duration", Arg::Str(&span(until))),
+                        ("channel", Arg::Str(&place)),
+                    ],
+                ),
+                (Some(until), true) => t_with(
+                    "serversettings.audit.s.automodTimeOutFor",
+                    &[
+                        ("automod", Arg::Str(&automod)),
+                        ("target", Arg::Str(&target)),
+                        ("duration", Arg::Str(&span(until))),
+                    ],
+                ),
+                (None, false) => t_with(
+                    "serversettings.audit.s.automodTimeOutIn",
+                    &[("automod", Arg::Str(&automod)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+                ),
+                (None, true) => t_with(
+                    "serversettings.audit.s.automodTimeOut",
+                    &[("automod", Arg::Str(&automod)), ("target", Arg::Str(&target))],
+                ),
             }
-            if !entry.channel_name.is_empty() {
-                s.push_str(&format!(" in {}", named_channel(&entry.channel_name)));
-            }
-            s
         }
         A::AutoModMessageDelete => {
-            let mut s = format!("**AutoMod** took down a message from {target}");
-            if !entry.channel_name.is_empty() {
-                s.push_str(&format!(" in {}", named_channel(&entry.channel_name)));
+            if entry.channel_name.is_empty() {
+                t_with(
+                    "serversettings.audit.s.automodTakedown",
+                    &[("automod", Arg::Str(&automod)), ("target", Arg::Str(&target))],
+                )
+            } else {
+                t_with(
+                    "serversettings.audit.s.automodTakedownIn",
+                    &[("automod", Arg::Str(&automod)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+                )
             }
-            s
         }
-        A::EmojiCreate => format!("{actor} added the emoji **:{}:**", name_of(true)),
-        A::EmojiUpdate => format!("{actor} renamed **:{}:** to **:{}:**", name_of(false), name_of(true)),
-        A::EmojiDelete => format!("{actor} deleted the emoji **:{}:**", name_of(false)),
-        A::WebhookCreate => {
-            format!("{actor} made the webhook **{}** for {}", name_of(true), named_channel(&entry.channel_name))
+        A::EmojiCreate => t_with(
+            "serversettings.audit.s.emojiCreate",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&emoji_after))],
+        ),
+        A::EmojiUpdate => t_with(
+            "serversettings.audit.s.renamed",
+            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&emoji_before)), ("after", Arg::Str(&emoji_after))],
+        ),
+        A::EmojiDelete => t_with(
+            "serversettings.audit.s.emojiDelete",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&emoji_before))],
+        ),
+        A::WebhookCreate => t_with(
+            "serversettings.audit.s.webhookCreate",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after)), ("channel", Arg::Str(&place))],
+        ),
+        A::WebhookUpdate => {
+            t_with("desktop.server.audit.webhookUpdate", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))])
         }
-        A::WebhookUpdate => format!("{actor} changed the webhook **{}**", name_of(true)),
-        A::WebhookDelete => format!("{actor} deleted the webhook **{}**", name_of(false)),
-        A::AgentAdd => format!("{actor} added the agent {target}"),
-        A::ShareCodeCreate => format!("{actor} made a share code for {}", named_channel(&entry.channel_name)),
-        A::ShareCodeDelete => format!("{actor} deleted a share code for {}", named_channel(&entry.channel_name)),
-        A::SharedChannelRequest => {
-            format!("{actor} asked to show {} from **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        A::WebhookDelete => {
+            t_with("serversettings.audit.s.webhookDelete", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))])
         }
-        A::SharedChannelApprove => {
-            format!("{actor} shared {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        A::AgentAdd => {
+            t_with("serversettings.audit.s.agentAdd", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
         }
+        A::ShareCodeCreate => t_with(
+            "serversettings.audit.s.shareCodeCreate",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],
+        ),
+        A::ShareCodeDelete => t_with(
+            "serversettings.audit.s.shareCodeDelete",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],
+        ),
+        A::SharedChannelRequest => t_with(
+            "desktop.server.audit.sharedRequest",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place)), ("server", Arg::Str(&shared_server()))],
+        ),
+        A::SharedChannelApprove => t_with(
+            "serversettings.audit.s.sharedApprove",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place)), ("server", Arg::Str(&shared_server()))],
+        ),
         A::SharedChannelUpdate => {
-            format!("{actor} changed what the other server may do in {}", named_channel(&entry.channel_name))
+            t_with("desktop.server.audit.sharedUpdate", &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))])
         }
-        A::SharedChannelDisconnect => {
-            format!("{actor} ended sharing {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
-        }
-        A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
-        A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
-        A::ThreadLock => format!("{actor} locked {target}'s thread in {}", named_channel(&entry.channel_name)),
-        A::ThreadUnlock => format!("{actor} unlocked {target}'s thread in {}", named_channel(&entry.channel_name)),
-        A::ThreadDelete => format!("{actor} deleted {target}'s thread in {}", named_channel(&entry.channel_name)),
-        A::PollEnd => format!("{actor} ended {target}'s poll in {}", named_channel(&entry.channel_name)),
-        A::Unspecified => format!("{actor} did something"),
+        A::SharedChannelDisconnect => t_with(
+            "serversettings.audit.s.sharedDisconnectWith",
+            &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place)), ("server", Arg::Str(&shared_server()))],
+        ),
+        A::SharedChannelBlock => t_with(
+            "serversettings.audit.s.sharedBlock",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::SharedChannelUnblock => t_with(
+            "serversettings.audit.s.sharedUnblock",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::ThreadLock => t_with(
+            "serversettings.audit.s.threadLock",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::ThreadUnlock => t_with(
+            "serversettings.audit.s.threadUnlock",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::ThreadDelete => t_with(
+            "serversettings.audit.s.threadDelete",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::PollEnd => t_with(
+            "serversettings.audit.s.pollEndIn",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
+        A::Unspecified => t_with("serversettings.audit.s.unknown", &[("actor", Arg::Str(&actor))]),
     }
 }
 

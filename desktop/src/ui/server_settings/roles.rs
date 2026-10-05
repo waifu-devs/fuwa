@@ -20,6 +20,107 @@ const SWATCHES: [u32; 24] = [
     0x94a3b8, 0x64748b,
 ];
 
+/// A permission's name, as the app shows it.
+pub(super) fn permission_name(p: P) -> String {
+    match p {
+        P::Unspecified => String::new(),
+        P::Administrator => t("serversettings.permission.administrator"),
+        P::ManageServer => t("serversettings.permission.manageServer"),
+        P::ManageRoles => t("serversettings.permission.manageRoles"),
+        P::ViewAuditLog => t("serversettings.permission.viewAuditLog"),
+        P::ChangeNickname => t("serversettings.permission.changeNickname"),
+        P::ManageNicknames => t("serversettings.permission.manageNicknames"),
+        P::KickMembers => t("serversettings.permission.kickMembers"),
+        P::BanMembers => t("serversettings.permission.banMembers"),
+        P::TimeOutMembers => t("serversettings.permission.timeOutMembers"),
+        P::ManageChannels => t("serversettings.permission.manageChannels"),
+        P::ViewChannels => t("serversettings.permission.viewChannels"),
+        P::SendMessages => t("serversettings.permission.sendMessages"),
+        P::CreateThreads => t("serversettings.permission.createThreads"),
+        P::CreatePolls => t("serversettings.permission.createPolls"),
+        P::EmbedLinks => t("serversettings.permission.embedLinks"),
+        P::AttachFiles => t("serversettings.permission.attachFiles"),
+        P::MentionEveryone => t("serversettings.permission.mentionEveryone"),
+        P::ManageMessages => t("serversettings.permission.manageMessages"),
+        P::CreateInvite => t("serversettings.permission.createInvite"),
+        P::ManageEmoji => t("serversettings.permission.manageEmoji"),
+        P::ManageWebhooks => t("serversettings.permission.manageWebhooks"),
+        P::Connect => t("serversettings.permission.connect"),
+        P::Speak => t("serversettings.permission.speak"),
+        P::Video => t("serversettings.permission.video"),
+        P::Record => t("serversettings.permission.record"),
+        P::MuteMembers => t("serversettings.permission.muteMembers"),
+        P::MoveMembers => t("serversettings.permission.moveMembers"),
+    }
+}
+
+/// What a permission lets people do, server-wide.
+pub(super) fn permission_about(p: P) -> String {
+    match p {
+        P::Unspecified => String::new(),
+        P::Administrator => t("serversettings.permission.administratorAbout"),
+        P::ManageServer => t("serversettings.permission.manageServerAbout"),
+        P::ManageRoles => t("serversettings.permission.manageRolesAbout"),
+        P::ViewAuditLog => t("serversettings.permission.viewAuditLogAbout"),
+        P::ChangeNickname => t("serversettings.permission.changeNicknameAbout"),
+        P::ManageNicknames => t("serversettings.permission.manageNicknamesAbout"),
+        P::KickMembers => t("serversettings.permission.kickMembersAbout"),
+        P::BanMembers => t("serversettings.permission.banMembersAbout"),
+        P::TimeOutMembers => t("serversettings.permission.timeOutMembersAbout"),
+        P::ManageChannels => t("serversettings.permission.manageChannelsAbout"),
+        P::ViewChannels => t("serversettings.permission.viewChannelsAbout"),
+        P::SendMessages => t("serversettings.permission.sendMessagesAbout"),
+        P::CreateThreads => t("serversettings.permission.createThreadsAbout"),
+        P::CreatePolls => t("serversettings.permission.createPollsAbout"),
+        P::EmbedLinks => t("serversettings.permission.embedLinksAbout"),
+        P::AttachFiles => t("serversettings.permission.attachFilesAbout"),
+        P::MentionEveryone => t("serversettings.permission.mentionEveryoneAbout"),
+        P::ManageMessages => t("serversettings.permission.manageMessagesAbout"),
+        P::CreateInvite => t("serversettings.permission.createInviteAbout"),
+        P::ManageEmoji => t("serversettings.permission.manageEmojiAbout"),
+        P::ManageWebhooks => t("serversettings.permission.manageWebhooksAbout"),
+        P::Connect => t("serversettings.permission.connectAbout"),
+        P::Speak => t("serversettings.permission.speakAbout"),
+        P::Video => t("serversettings.permission.videoAbout"),
+        P::Record => t("serversettings.permission.recordAbout"),
+        P::MuteMembers => t("serversettings.permission.muteMembersAbout"),
+        P::MoveMembers => t("serversettings.permission.moveMembersAbout"),
+    }
+}
+
+/// What a permission lets people do in one channel, where that reads differently from server-wide.
+pub(super) fn permission_here(p: P) -> String {
+    match p {
+        P::ManageRoles => t("serversettings.permission.manageRolesChannel"),
+        P::ManageChannels => t("serversettings.permission.manageChannelsChannel"),
+        P::ViewChannels => t("serversettings.permission.viewChannelsChannel"),
+        P::CreatePolls => t("serversettings.permission.createPollsChannel"),
+        P::CreateInvite => t("serversettings.permission.createInviteChannel"),
+        P::Connect => t("serversettings.permission.connectChannel"),
+        P::Speak => t("serversettings.permission.speakChannel"),
+        P::Video => t("serversettings.permission.videoChannel"),
+        P::Record => t("serversettings.permission.recordChannel"),
+        P::MuteMembers => t("serversettings.permission.muteMembersChannel"),
+        P::MoveMembers => t("serversettings.permission.moveMembersChannel"),
+        other => permission_about(other),
+    }
+}
+
+/// A permission group's title, by the name `core::permissions` gives it.
+pub(super) fn group_name(title: &str) -> String {
+    match title {
+        "Server" => t("serversettings.permission.group.server"),
+        "Membership" => t("serversettings.permission.group.membership"),
+        "Text channels" => t("serversettings.permission.group.textChannels"),
+        "Voice channels" => t("serversettings.permission.group.voiceChannels"),
+        "Advanced" => t("serversettings.permission.group.advanced"),
+        "General" => t("serversettings.permission.group.general"),
+        "Text" => t("serversettings.permission.group.text"),
+        "Voice" => t("serversettings.permission.group.voice"),
+        other => other.to_owned(),
+    }
+}
+
 /// How tall a row in the role list is, gap included.
 const ROW: f32 = 42.0;
 
@@ -91,9 +192,9 @@ pub(super) struct Roles {
 
 impl Roles {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("new role"));
-        let perm_query = cx.new(|cx| InputState::new(window, cx).placeholder("Search permissions"));
-        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find someone"));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.roles.newRole")));
+        let perm_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.roles.search")));
+        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.shared.findSomeone")));
         let subscriptions = [&name, &perm_query, &member_query]
             .into_iter()
             .map(|input| {
@@ -222,7 +323,8 @@ impl ServerSettingsView {
         }
         self.roles.busy = Some("new".into());
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        self.run(cx, async move { core.create_role(&key, &sid, "new role").await }, |this, result, cx| {
+        let name = t("serversettings.roles.newRole");
+        self.run(cx, async move { core.create_role(&key, &sid, &name).await }, |this, result, cx| {
             this.roles.busy = None;
             match result {
                 Ok(role) => {
@@ -276,7 +378,7 @@ impl ServerSettingsView {
         let e = self.roles.edits.clone();
         let name = self.roles.name.read(cx).value().trim().to_string();
         if !everyone && name.is_empty() {
-            self.error = Some("A role needs a name.".into());
+            self.error = Some(t("desktop.server.roles.needsName"));
             cx.notify();
             return;
         }
@@ -453,7 +555,12 @@ impl ServerSettingsView {
                         .flex_1()
                         .min_w_0()
                         .child(div().text_sm().font_weight(FontWeight::BOLD).child("@everyone"))
-                        .child(div().text_xs().text_color(p.muted_foreground).child("What everybody can do")),
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.roles.everyoneHint")),
+                        ),
                 )
         };
         let can_create = snap.access.has(P::ManageRoles);
@@ -475,16 +582,20 @@ impl ServerSettingsView {
                             .min_w_0()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child("Higher roles outrank lower ones. Move them with the arrows."),
+                            .child(t("desktop.server.roles.intro")),
                     )
                     .when(can_create, |el| {
                         el.child(
-                            primary_button("role-new", if making { "Making…" } else { "New" }, p)
-                                .h(px(34.0))
-                                .px(px(12.0))
-                                .child(icon("plus").size(px(15.0)))
-                                .when(making, |el| el.opacity(0.6))
-                                .on_click(cx.listener(|this, _, _, cx| this.new_role(cx))),
+                            primary_button(
+                                "role-new",
+                                if making { t("desktop.server.roles.making") } else { t("serversettings.shared.new") },
+                                p,
+                            )
+                            .h(px(34.0))
+                            .px(px(12.0))
+                            .child(icon("plus").size(px(15.0)))
+                            .when(making, |el| el.opacity(0.6))
+                            .on_click(cx.listener(|this, _, _, cx| this.new_role(cx))),
                         )
                     }),
             )
@@ -512,7 +623,7 @@ impl ServerSettingsView {
                 .text_center()
                 .text_sm()
                 .text_color(p.muted_foreground)
-                .child("Pick a role to change it.")
+                .child(t("serversettings.roles.pick"))
                 .into_any_element(),
         };
         div()
@@ -627,17 +738,17 @@ impl ServerSettingsView {
         let e = self.roles.edits.clone();
         let color = e.color.unwrap_or(role_color(role));
         let typed = self.roles.name.read(cx).value().trim().to_string();
-        let shown = if typed.is_empty() { "new role".to_owned() } else { typed };
+        let shown = if typed.is_empty() { t("serversettings.roles.newRole") } else { typed };
         let holders = snap.members.iter().filter(|m| m.role_ids.contains(&role.id)).count();
 
         let mut tabs = div().flex().gap(px(4.0)).p(px(4.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.6));
         let options: Vec<(RoleTab, String)> = if everyone {
-            vec![(RoleTab::Permissions, "Permissions".into())]
+            vec![(RoleTab::Permissions, t("serversettings.shared.permissions"))]
         } else {
             vec![
-                (RoleTab::Display, "Display".into()),
-                (RoleTab::Permissions, "Permissions".into()),
-                (RoleTab::Members, format!("Members ({holders})")),
+                (RoleTab::Display, t("serversettings.roles.display")),
+                (RoleTab::Permissions, t("serversettings.shared.permissions")),
+                (RoleTab::Members, t_with("serversettings.roles.membersTab", &[("count", Arg::Num(holders as i64))])),
             ]
         };
         if options.len() > 1 {
@@ -646,7 +757,7 @@ impl ServerSettingsView {
                 let hover = alpha(p.foreground, 0.06);
                 tabs = tabs.child(
                     div()
-                        .id(SharedString::from(format!("role-tab-{label}")))
+                        .id(SharedString::from(format!("role-tab-{}", tab as u8)))
                         .px(px(12.0))
                         .h(px(30.0))
                         .flex()
@@ -741,7 +852,7 @@ impl ServerSettingsView {
                         .text_sm()
                         .text_color(p.muted_foreground)
                         .child(icon("lock").size(px(15.0)))
-                        .child("This role ranks at or above your highest role, so you can't change it."),
+                        .child(t("serversettings.roles.locked")),
                 )
             })
             .child(motion::rise(
@@ -823,7 +934,11 @@ impl ServerSettingsView {
         let mention_bg = color.map(|c| color_of(c).opacity(0.15)).unwrap_or(alpha(p.primary, 0.15));
         let mention_fg = color.map(color_of).unwrap_or(p.primary.into());
         let me = snap.me.clone();
-        let my_name = me.as_ref().map(user_name).unwrap_or_else(|| "You".into());
+        let my_name = me.as_ref().map(user_name).unwrap_or_else(|| t("serversettings.shared.you"));
+        // The greeting around the mention, split where the role goes.
+        let line = t_with("serversettings.roles.previewLine", &[("role", Arg::Str("\u{E000}"))]);
+        let (hey, welcome) = line.split_once('\u{E000}').unwrap_or((line.as_str(), ""));
+        let (hey, welcome) = (hey.trim_end().to_owned(), welcome.to_owned());
         let preview = div()
             .flex()
             .flex_col()
@@ -849,10 +964,10 @@ impl ServerSettingsView {
                                 .gap(px(0.0))
                                 .text_sm()
                                 .text_color(p.muted_foreground)
-                                .child("Hey")
+                                .child(hey.clone())
                                 .child(
                                     div()
-                                        .ml(px(4.0))
+                                        .when(!hey.is_empty(), |el| el.ml(px(4.0)))
                                         .px(px(4.0))
                                         .rounded(corner(6.0))
                                         .bg(mention_bg)
@@ -860,7 +975,7 @@ impl ServerSettingsView {
                                         .font_weight(FontWeight::BOLD)
                                         .child(format!("@{shown}")),
                                 )
-                                .child(", welcome aboard!"),
+                                .child(welcome),
                         ),
                 ),
             )
@@ -905,33 +1020,40 @@ impl ServerSettingsView {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.destructive)
                                 .child(icon("triangle-alert").size(px(16.0)))
-                                .child(format!("Delete {}?", role.name)),
+                                .child(t_with("serversettings.roles.deleteAsk", &[("role", Arg::Str(&role.name))])),
                         )
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(p.muted_foreground)
-                                .child("Everyone who has it loses it, and every channel forgets what it allowed."),
+                            div().text_sm().text_color(p.muted_foreground).child(t("serversettings.roles.deleteHint")),
                         )
                         .child(
                             div()
                                 .flex()
                                 .justify_end()
                                 .gap(px(8.0))
-                                .child(soft_button("role-keep", "Keep it", p).on_click(cx.listener(
-                                    |this, _, _, cx| {
+                                .child(soft_button("role-keep", t("serversettings.shared.keepIt"), p).on_click(
+                                    cx.listener(|this, _, _, cx| {
                                         this.roles.confirming = false;
                                         cx.notify();
-                                    },
-                                )))
+                                    }),
+                                ))
                                 .child(
-                                    danger_button("role-delete-yes", if busy { "Deleting…" } else { "Delete" }, p)
-                                        .child(icon("trash").size(px(15.0)))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                    danger_button(
+                                        "role-delete-yes",
+                                        if busy {
+                                            t("accountsettings.privacy.deleting")
+                                        } else {
+                                            t("serversettings.shared.delete")
+                                        },
+                                        p,
+                                    )
+                                    .child(icon("trash").size(px(15.0)))
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
                                             if !this.roles.saving {
                                                 this.delete_role(id.clone(), cx)
                                             }
-                                        })),
+                                        },
+                                    )),
                                 ),
                         ),
                     "role-confirm",
@@ -963,7 +1085,7 @@ impl ServerSettingsView {
                                 cx.notify();
                             }))
                             .child(icon("trash").size(px(15.0)))
-                            .child("Delete role"),
+                            .child(t("serversettings.roles.delete")),
                     )
                     .into_any_element(),
             )
@@ -973,47 +1095,42 @@ impl ServerSettingsView {
             .flex()
             .flex_col()
             .gap(px(20.0))
-            .child(labeled("Role name", Input::new(&self.roles.name).large().disabled(locked), p))
+            .child(labeled(&t("serversettings.roles.name"), Input::new(&self.roles.name).large().disabled(locked), p))
             .child(labeled(
-                "Color",
+                &t("serversettings.roles.color"),
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child("Members take the color of their highest role that has one."),
-                    )
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.roles.colorHint")))
                     .child(swatches),
                 p,
             ))
             .child(labeled(
-                "How it shows",
+                &t("serversettings.roles.howItShows"),
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(14.0))
                     .child(toggle(
                         "role-hoist",
-                        "List members apart",
-                        "People with this role get their own group in the member list.",
+                        &t("serversettings.roles.hoist"),
+                        &t("serversettings.roles.hoistHint"),
                         hoist,
                         cx,
                         |e, v| e.hoist = Some(v),
                     ))
                     .child(toggle(
                         "role-mentionable",
-                        "Let anyone @mention this role",
-                        "People who can mention everyone can always mention it.",
+                        &t("serversettings.roles.mentionable"),
+                        &t("serversettings.roles.mentionableHint"),
                         mentionable,
                         cx,
                         |e, v| e.mentionable = Some(v),
                     )),
                 p,
             ))
-            .child(labeled("Preview", preview, p))
+            .child(labeled(&t("settings.controls.preview"), preview, p))
             .children(delete)
     }
 
@@ -1031,13 +1148,10 @@ impl ServerSettingsView {
         let bits = e.permissions(role);
         let live = permissions::from_list(&role.permissions);
         let query = self.roles.perm_query.read(cx).value().trim().to_lowercase();
-        let mut out = div().flex().flex_col().gap(px(16.0)).child(
-            div().text_sm().text_color(p.muted_foreground).child(if everyone {
-                "What every member can do, before their roles add more. Channels can still say otherwise."
-            } else {
-                "What people with this role can do, on top of @everyone. Channels can still say otherwise."
-            }),
-        );
+        let mut out =
+            div().flex().flex_col().gap(px(16.0)).child(div().text_sm().text_color(p.muted_foreground).child(
+                if everyone { t("serversettings.roles.everyoneIntro") } else { t("serversettings.roles.roleIntro") },
+            ));
         // Clearing takes away only what you could give.
         let clearable = permissions::KNOWN
             .iter()
@@ -1050,7 +1164,7 @@ impl ServerSettingsView {
                 .gap(px(8.0))
                 .child(div().flex_1().child(Input::new(&self.roles.perm_query).prefix(icon("search").size(px(16.0)))))
                 .child(
-                    soft_button("role-clear", "Clear all", p)
+                    soft_button("role-clear", t("serversettings.roles.clearAll"), p)
                         .when(locked || clearable == 0, |el| el.opacity(0.5))
                         .when(!locked && clearable != 0, |el| {
                             el.on_click(cx.listener(move |this, _, _, cx| {
@@ -1066,8 +1180,10 @@ impl ServerSettingsView {
                 .iter()
                 .copied()
                 .filter(|perm| {
-                    let (label, about) = permissions::info(*perm);
-                    query.is_empty() || format!("{label} {about}").to_lowercase().contains(&query)
+                    query.is_empty()
+                        || format!("{} {}", permission_name(*perm), permission_about(*perm))
+                            .to_lowercase()
+                            .contains(&query)
                 })
                 .collect();
             if matching.is_empty() {
@@ -1079,10 +1195,10 @@ impl ServerSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(title.to_uppercase()),
+                    .child(group_name(title).to_uppercase()),
             );
             for (n, perm) in matching.into_iter().enumerate() {
-                let (label, about) = permissions::info(perm);
+                let (label, about) = (permission_name(perm), permission_about(perm));
                 let on = bits & bit(perm) != 0;
                 let allowed = access.may_change(bit(perm), access.server);
                 let admin = perm == P::Administrator;
@@ -1131,7 +1247,7 @@ impl ServerSettingsView {
                                                 .text_size(px(10.0))
                                                 .text_color(p.muted_foreground)
                                                 .child(icon("lock").size(px(10.0)))
-                                                .child("Not yours to give"),
+                                                .child(t("serversettings.roles.notYours")),
                                         )
                                     }),
                             )
@@ -1164,7 +1280,7 @@ impl ServerSettingsView {
                     .text_center()
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("No permission matches that."),
+                    .child(t("serversettings.roles.noMatch")),
             );
         }
         out
@@ -1186,7 +1302,7 @@ impl ServerSettingsView {
             let adding = self.roles.adding;
             out = out.child(
                 div().flex().child(
-                    soft_button("role-add-members", "Add members", p)
+                    soft_button("role-add-members", t("serversettings.roles.addMembers"), p)
                         .child(icon("user-plus").size(px(15.0)))
                         .when(adding, |el| el.bg(alpha(p.primary, 0.16)))
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -1215,12 +1331,13 @@ impl ServerSettingsView {
                 let mut list =
                     div().id("role-others").flex().flex_col().gap(px(2.0)).max_h(px(240.0)).overflow_y_scroll();
                 if others.is_empty() {
-                    list =
-                        list.child(
-                            div().py(px(12.0)).text_center().text_sm().text_color(p.muted_foreground).child(
-                                if query.is_empty() { "Everyone has this role." } else { "Nobody matches that." },
-                            ),
-                        );
+                    list = list.child(div().py(px(12.0)).text_center().text_sm().text_color(p.muted_foreground).child(
+                        if query.is_empty() {
+                            t("serversettings.roles.everyoneHas")
+                        } else {
+                            t("serversettings.shared.nobodyMatches")
+                        },
+                    ));
                 }
                 for (n, m) in others.into_iter().enumerate() {
                     let Some(user) = m.user.clone() else { continue };
@@ -1279,7 +1396,7 @@ impl ServerSettingsView {
                     .text_center()
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("Nobody has this role yet."),
+                    .child(t("serversettings.roles.nobody")),
             );
         }
         for (n, m) in holders.into_iter().enumerate() {

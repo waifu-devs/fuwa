@@ -135,8 +135,15 @@ impl ServerSettingsView {
             .flex_col()
             .gap(px(8.0))
             .child(
-                option("rec-sound", !video, true, "audio-lines", "Sound only", "A track per person, as Ogg Opus.")
-                    .on_click(pick(false)),
+                option(
+                    "rec-sound",
+                    !video,
+                    true,
+                    "audio-lines",
+                    &t("serversettings.recordings.sound"),
+                    &t("serversettings.recordings.soundHint"),
+                )
+                .on_click(pick(false)),
             )
             .child(
                 option(
@@ -144,11 +151,11 @@ impl ServerSettingsView {
                     video,
                     open,
                     "video",
-                    "Sound and video",
-                    if open {
-                        "Each person's camera and shared screen too, as WebM files next to their sound."
+                    &t("serversettings.recordings.video"),
+                    &if open {
+                        t("serversettings.recordings.videoHint")
                     } else {
-                        "This instance doesn't let servers record video"
+                        t("serversettings.recordings.videoOff")
                     },
                 )
                 .when(open, |el| el.on_click(pick(true))),
@@ -162,19 +169,13 @@ impl ServerSettingsView {
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("What recordings keep"))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(
-                        "For recordings on the server, which people with Record start in a voice channel. \
-                         Recordings on someone's own device are always sound only.",
-                    )),
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.recordings.title")))
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.recordings.hint"))),
             )
             .child(choices);
         if !open {
             setting = setting.child(motion::rise(
-                div().text_xs().text_color(p.muted_foreground).child(
-                    "This instance doesn't let servers keep video in recordings. Whoever runs it can turn it on \
-                     (Video in recordings, under Calls in its settings).",
-                ),
+                div().text_xs().text_color(p.muted_foreground).child(t("serversettings.recordings.videoOffHint")),
                 "rec-video-off",
                 Duration::ZERO,
                 4.0,
@@ -183,11 +184,9 @@ impl ServerSettingsView {
         if changed {
             setting = setting.child(motion::rise(
                 div().text_xs().text_color(amber(p)).child(if video {
-                    "Everyone in the call sees “Recording with video”. Pictures take far more room than sound, \
-                     against the same storage cap. A recording going on ends; the next, when someone presses \
-                     Record, keeps video."
+                    t("serversettings.recordings.changedVideo")
                 } else {
-                    "A recording going on ends; the next, when someone presses Record, keeps sound only."
+                    t("serversettings.recordings.changedSound")
                 }),
                 SharedString::from(format!("rec-changed-{video}")),
                 Duration::ZERO,
@@ -236,7 +235,7 @@ impl ServerSettingsView {
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.4))
-            .child(div().text_xs().text_color(p.muted_foreground).child("An hour-long recording, for one person:"))
+            .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.recordings.preview")))
             .child(list);
 
         div()

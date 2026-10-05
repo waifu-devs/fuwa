@@ -17,8 +17,13 @@ use crate::ui::banner::{accent, cover, hex, hue_of, on_accent, parse_hex, server
 use crate::ui::overlay::emoji_tile;
 
 /// The shapes a banner is shown in, as the web lists them: a name, and its width and height.
-const CROPS: [(&str, f32, f32); 3] =
-    [("Phone header", 390.0, 128.0), ("Browse card", 300.0, 80.0), ("Wide dialog", 672.0, 160.0)];
+fn crops() -> [(String, f32, f32); 3] {
+    [
+        (t("serversettings.welcome.cropPhone"), 390.0, 128.0),
+        (t("serversettings.welcome.cropBrowse"), 300.0, 80.0),
+        (t("serversettings.welcome.cropDialog"), 672.0, 160.0),
+    ]
+}
 
 /// A step being edited, with keys for it and its choices that survive moving them.
 struct Step {
@@ -191,12 +196,12 @@ impl ServerSettingsView {
                 o.next
             })
             .collect::<Vec<_>>();
-        self.field(key, "title", &step.title, "Title", window, cx);
-        self.field(key, "description", &step.description, "A line under it (optional, Markdown)", window, cx);
-        self.field(key, "hello", &step.hello, onb::HELLO, window, cx);
+        self.field(key, "title", &step.title, &t("serversettings.onboarding.title"), window, cx);
+        self.field(key, "description", &step.description, &t("serversettings.onboarding.description"), window, cx);
+        self.field(key, "hello", &step.hello, &t("join.onboarding.hello"), window, cx);
         for (k, option) in options.iter().zip(&step.options) {
-            self.field(*k, "label", &option.label, "Choice, like Art", window, cx);
-            self.field(*k, "description", &option.description, "A few words (optional)", window, cx);
+            self.field(*k, "label", &option.label, &t("serversettings.onboarding.choicePlaceholder"), window, cx);
+            self.field(*k, "description", &option.description, &t("serversettings.onboarding.choiceAbout"), window, cx);
         }
         self.onboard.steps.push(Step { key, step, options });
     }
@@ -204,8 +209,8 @@ impl ServerSettingsView {
     fn add_option(&mut self, step_key: u64, window: &mut Window, cx: &mut Context<Self>) {
         self.onboard.next += 1;
         let key = self.onboard.next;
-        self.field(key, "label", "", "Choice, like Art", window, cx);
-        self.field(key, "description", "", "A few words (optional)", window, cx);
+        self.field(key, "label", "", &t("serversettings.onboarding.choicePlaceholder"), window, cx);
+        self.field(key, "description", "", &t("serversettings.onboarding.choiceAbout"), window, cx);
         if let Some(s) = self.onboard.steps.iter_mut().find(|s| s.key == step_key)
             && s.step.options.len() < onb::MAX_OPTIONS
         {
@@ -309,7 +314,7 @@ impl ServerSettingsView {
         let onboarding =
             self.onboard.saved.as_ref().filter(|s| onboarding_changes(s, &draft) > 0).map(|_| draft.clone());
         if onboarding.as_ref().is_some_and(|o| o.enabled && o.steps.is_empty()) {
-            self.error = Some("Add a step first, or leave onboarding off.".into());
+            self.error = Some(t("desktop.server.onboarding.needsStep"));
             cx.notify();
             return;
         }
@@ -375,7 +380,7 @@ impl ServerSettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose a banner".into()),
+            prompt: Some(t("desktop.server.onboarding.chooseBanner").into()),
         });
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
         cx.spawn(async move |this, cx| {
@@ -384,7 +389,7 @@ impl ServerSettingsView {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = crate::core::account::picture_type(&name) else {
                 let _ = this.update(cx, |this, cx| {
-                    this.error = Some("That isn't a picture fuwa can use (PNG, JPEG, GIF or WebP).".into());
+                    this.error = Some(t("desktop.account.notAPicture"));
                     cx.notify();
                 });
                 return;
@@ -487,11 +492,11 @@ impl ServerSettingsView {
                 primary_button(
                     "banner-pick",
                     if uploading {
-                        "Uploading…"
+                        t("serversettings.emoji.uploading")
                     } else if url.is_empty() {
-                        "Upload a banner"
+                        t("workspace.picture.upload.banner")
                     } else {
-                        "Change"
+                        t("workspace.picture.changeShort")
                     },
                     p,
                 )
@@ -499,13 +504,15 @@ impl ServerSettingsView {
                 .on_click(cx.listener(|this, _, _, cx| this.pick_banner(cx))),
             )
             .when(!url.is_empty(), |el| {
-                el.child(soft_button("banner-remove", "Remove", p).on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(look) = this.onboard.look.as_mut() {
-                        look.0.clear();
-                        look.1 = (50, 50);
-                    }
-                    cx.notify();
-                })))
+                el.child(soft_button("banner-remove", t("system.picture.remove"), p).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        if let Some(look) = this.onboard.look.as_mut() {
+                            look.0.clear();
+                            look.1 = (50, 50);
+                        }
+                        cx.notify();
+                    },
+                )))
             });
 
         // The focal point: the whole picture, with a dot to drag where it matters.
@@ -554,23 +561,17 @@ impl ServerSettingsView {
                             ))
                         }),
                     )
-                    .child(
-                        div()
-                            .ml(px(6.0))
-                            .text_sm()
-                            .text_color(p.muted_foreground)
-                            .child(format!("{}% · {}%", focus.0, focus.1)),
-                    );
+                    .child(div().ml(px(6.0)).text_sm().text_color(p.muted_foreground).child(t_with(
+                        "desktop.server.onboarding.focus",
+                        &[("x", Arg::Num(focus.0.into())), ("y", Arg::Num(focus.1.into()))],
+                    )));
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Focal point"))
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.focalPoint")))
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(p.muted_foreground)
-                            .child("Drag the dot onto what matters. It stays in view however the banner is cut."),
+                        div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.onboarding.focusHint")),
                     )
                     .child(
                         div()
@@ -604,7 +605,7 @@ impl ServerSettingsView {
                             })),
                     )
                     .child(arrows)
-                    .child(div().flex().flex_wrap().gap(px(12.0)).children(CROPS.map(|(name, cw, ch)| {
+                    .child(div().flex().flex_wrap().gap(px(12.0)).children(crops().map(|(name, cw, ch)| {
                         // Each shape at a third of its size, cut as it will be.
                         let (w, h) = (cw * 0.4, ch * 0.4);
                         let (l, t, sw, sh) = cover(*iw, *ih, w, h, focus);
@@ -633,7 +634,7 @@ impl ServerSettingsView {
         // The accent: the server's own hue, colors from the banner, or any.
         let own = {
             let c: Hsla = hsla(hue_of(&server.id) as f32 / 360.0, 0.70, 0.58, 1.0);
-            (-1, c, "The server's own hue".to_owned())
+            (-1, c, t("serversettings.welcome.ownHue"))
         };
         let mut options = vec![own];
         for c in size.as_ref().map(|s| s.2.clone()).unwrap_or_default() {
@@ -674,23 +675,20 @@ impl ServerSettingsView {
                     }))
             },
         ));
-        let accent_part =
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Accent color"))
-                .child(div().text_sm().text_color(p.muted_foreground).child(
-                    "Tints buttons, progress and highlights on these screens. Picked from the banner, or your own.",
-                ))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(12.0))
-                        .child(swatch_row)
-                        .child(div().w(px(120.0)).child(Input::new(&self.onboard.hex))),
-                );
+        let accent_part = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.nav.accentColor")))
+            .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.accentHint")))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(swatch_row)
+                    .child(div().w(px(120.0)).child(Input::new(&self.onboard.hex))),
+            );
 
         div()
             .flex()
@@ -700,11 +698,9 @@ impl ServerSettingsView {
             .border_b_1()
             .border_color(p.border)
             .child(
-                div()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Banner and color"))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(
-                        "Across the top of the welcome, applying and onboarding screens, invites and the server's Browse card.",
-                    )),
+                div().child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.banner"))).child(
+                    div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.bannerHint")),
+                ),
             )
             .child(buttons)
             .child(focal)
@@ -759,11 +755,13 @@ impl ServerSettingsView {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Onboard new members"))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(
-                        "Right after joining, people go through these steps, then land on the welcome screen. They \
-                         can redo it from the server menu.",
-                    )),
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.enabled")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(p.muted_foreground)
+                            .child(t("serversettings.onboarding.enabledHint")),
+                    ),
             )
             .child(switch("onboarding-on".into(), enabled, false, cx, |this, on, cx| {
                 this.onboard.enabled = on;
@@ -780,9 +778,9 @@ impl ServerSettingsView {
         let mut adds = div().flex().flex_wrap().gap(px(8.0));
         if count < onb::MAX_STEPS {
             let kinds = [
-                (PICK, "list-checks", "Pick what they're into"),
-                (RULES, "scroll-text", "Agree to the rules"),
-                (SAY_HELLO, "hand", "Say hello"),
+                (PICK, "list-checks", t("serversettings.onboarding.kindPick")),
+                (RULES, "scroll-text", t("serversettings.onboarding.kindRules")),
+                (SAY_HELLO, "hand", t("serversettings.onboarding.kindHello")),
             ];
             for (kind, glyph, label) in kinds {
                 if kind == RULES && (!has_rules || has_rules_step) {
@@ -825,12 +823,14 @@ impl ServerSettingsView {
             .border_t_1()
             .border_color(p.border)
             .child(toggle)
-            .child(div().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Steps")).child(
-                div().text_sm().text_color(p.muted_foreground).child(
-                    "Up to 6, in order. Server rules show up for anyone who still has to agree, even without a \
-                         rules step.",
-                ),
-            ))
+            .child(
+                div()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.steps")))
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
+                        "desktop.server.onboarding.stepsHint",
+                        &[("max", Arg::Num(onb::MAX_STEPS as i64))],
+                    ))),
+            )
             .child(list)
             .child(adds)
             .into_any_element()
@@ -852,9 +852,9 @@ impl ServerSettingsView {
         let (key, kind) = (s.key, s.step.kind);
         let count = self.onboard.steps.len();
         let (glyph, hint) = match kind {
-            PICK => ("list-checks", "Choices that hand out roles and suggest channels."),
-            RULES => ("scroll-text", "Your rules, for people who haven't agreed yet. Never skippable."),
-            _ => ("hand", "A message box ready to send in a channel you pick."),
+            PICK => ("list-checks", t("serversettings.onboarding.kindPickHint")),
+            RULES => ("scroll-text", t("serversettings.onboarding.kindRulesHint")),
+            _ => ("hand", t("serversettings.onboarding.kindHelloHint")),
         };
         let field = |name| self.onboard.fields.get(&(key, name)).cloned();
         let head = div()
@@ -891,7 +891,7 @@ impl ServerSettingsView {
             )));
         let mut body = div().flex().flex_col().gap(px(10.0)).child(head);
         if let Some(title) = field("title") {
-            body = body.child(labeled("Title", Input::new(&title), p));
+            body = body.child(labeled(&t("serversettings.onboarding.title"), Input::new(&title), p));
         }
         if let Some(description) = field("description") {
             body = body.child(Input::new(&description));
@@ -900,8 +900,8 @@ impl ServerSettingsView {
         if kind != RULES {
             flags = flags.child(flag(
                 format!("onb-skip-{key}"),
-                "Skippable",
-                "People can go on without doing it.",
+                &t("serversettings.onboarding.skippable"),
+                &t("serversettings.onboarding.skippableHint"),
                 s.step.skippable,
                 p,
                 cx,
@@ -911,8 +911,8 @@ impl ServerSettingsView {
         if kind == PICK {
             flags = flags.child(flag(
                 format!("onb-multi-{key}"),
-                "More than one",
-                "People can pick several choices.",
+                &t("serversettings.onboarding.multiple"),
+                &t("serversettings.onboarding.multipleHint"),
                 s.step.multiple,
                 p,
                 cx,
@@ -940,8 +940,12 @@ impl ServerSettingsView {
                 body = body.child(options);
                 if s.step.options.len() < onb::MAX_OPTIONS {
                     body = body.child(
-                        soft_button(SharedString::from(format!("onb-add-option-{key}")), "Add a choice", p)
-                            .on_click(cx.listener(move |this, _, window, cx| this.add_option(key, window, cx))),
+                        soft_button(
+                            SharedString::from(format!("onb-add-option-{key}")),
+                            t("serversettings.onboarding.addChoice"),
+                            p,
+                        )
+                        .on_click(cx.listener(move |this, _, window, cx| this.add_option(key, window, cx))),
                     );
                 }
             }
@@ -961,9 +965,9 @@ impl ServerSettingsView {
                             }),
                         ));
                 }
-                body = body.child(labeled("Pick a channel", chips, p));
+                body = body.child(labeled(&t("serversettings.shared.pickChannel"), chips, p));
                 if let Some(hello) = field("hello") {
-                    body = body.child(labeled("What the box starts with", Input::new(&hello), p));
+                    body = body.child(labeled(&t("desktop.server.onboarding.helloLabel"), Input::new(&hello), p));
                 }
             }
             _ => {}
@@ -1010,15 +1014,7 @@ impl ServerSettingsView {
             .cursor_pointer()
             .on_click(cx.listener(toggle_open(Open::Emoji)))
             .child(emoji_tile(&option.emoji, look, p.primary.into(), "sparkles"));
-        let counted = |n: usize, one: &str, many: &str| {
-            if n == 0 {
-                many.to_owned()
-            } else if n == 1 {
-                format!("1 {one}")
-            } else {
-                format!("{n} {many}")
-            }
-        };
+
         let line = div()
             .flex()
             .items_center()
@@ -1034,7 +1030,10 @@ impl ServerSettingsView {
             .child(
                 soft_button(
                     SharedString::from(format!("onb-roles-{key}")),
-                    counted(option.role_ids.len(), "role", "Roles"),
+                    match option.role_ids.len() {
+                        0 => t("serversettings.nav.roles"),
+                        n => t_with("desktop.server.onboarding.roles", &[("count", Arg::Num(n as i64))]),
+                    },
                     p,
                 )
                 .on_click(cx.listener(toggle_open(Open::Roles))),
@@ -1042,7 +1041,10 @@ impl ServerSettingsView {
             .child(
                 soft_button(
                     SharedString::from(format!("onb-channels-{key}")),
-                    counted(option.channel_ids.len(), "channel", "Channels"),
+                    match option.channel_ids.len() {
+                        0 => t("serversettings.nav.channels"),
+                        n => t_with("desktop.server.onboarding.channels", &[("count", Arg::Num(n as i64))]),
+                    },
                     p,
                 )
                 .on_click(cx.listener(toggle_open(Open::Channels))),
@@ -1065,28 +1067,23 @@ impl ServerSettingsView {
                     let on = option.role_ids.contains(&role.id);
                     let strong = !onb::harmless(&role.permissions);
                     let above = !access.above(role.position);
-                    let tag = if strong {
-                        " · moderates"
+                    let shown = if strong {
+                        format!("@{} · {}", role.name, t("serversettings.onboarding.moderates"))
                     } else if above {
-                        " · above you"
+                        format!("@{} · {}", role.name, t("serversettings.onboarding.aboveYou"))
                     } else {
-                        ""
+                        format!("@{}", role.name)
                     };
                     let (id, blocked) = (role.id.clone(), (strong || above) && !on);
                     chips = chips.child(
-                        chip(
-                            SharedString::from(format!("onb-role-{key}-{}", role.id)),
-                            &format!("@{}{tag}", role.name),
-                            on,
-                            p,
-                        )
-                        .when(blocked, |el| el.opacity(0.45))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if !blocked {
-                                this.option_mut(step_key, key, |o| flip(&mut o.role_ids, &id));
-                            }
-                            cx.notify();
-                        })),
+                        chip(SharedString::from(format!("onb-role-{key}-{}", role.id)), &shown, on, p)
+                            .when(blocked, |el| el.opacity(0.45))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if !blocked {
+                                    this.option_mut(step_key, key, |o| flip(&mut o.role_ids, &id));
+                                }
+                                cx.notify();
+                            })),
                     );
                 }
                 chips.into_any_element()
@@ -1218,14 +1215,13 @@ impl ServerSettingsView {
             .gap(px(8.0))
             .p(px(16.0))
             .child(
-                div()
-                    .text_xs()
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(tint)
-                    .child(format!("STEP 1 OF {total}")),
+                div().text_xs().font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
+                    t_with("join.onboarding.stepOf", &[("step", Arg::Num(1)), ("total", Arg::Num(total as i64))])
+                        .to_uppercase(),
+                ),
             )
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(if step.title.is_empty() {
-                "Untitled step".to_owned()
+                t("desktop.server.onboarding.untitled")
             } else {
                 step.title.clone()
             }));
@@ -1238,30 +1234,31 @@ impl ServerSettingsView {
             );
         }
         for option in step.options.iter().take(4) {
-            body =
-                body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .p(px(6.0))
-                        .rounded(corner(10.0))
-                        .border_1()
-                        .border_color(p.border)
-                        .bg(p.secondary)
-                        .child(div().text_size(px(15.0)).child(
-                            if option.emoji.starts_with('<') || option.emoji.is_empty() {
-                                "✨".to_owned()
-                            } else {
-                                option.emoji.clone()
-                            },
-                        ))
-                        .child(
-                            div().truncate().text_xs().font_weight(FontWeight::BOLD).child(
-                                if option.label.is_empty() { "A choice".to_owned() } else { option.label.clone() },
-                            ),
-                        ),
-                );
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .p(px(6.0))
+                    .rounded(corner(10.0))
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.secondary)
+                    .child(div().text_size(px(15.0)).child(
+                        if option.emoji.starts_with('<') || option.emoji.is_empty() {
+                            "✨".to_owned()
+                        } else {
+                            option.emoji.clone()
+                        },
+                    ))
+                    .child(div().truncate().text_xs().font_weight(FontWeight::BOLD).child(
+                        if option.label.is_empty() {
+                            t("desktop.server.onboarding.aChoice")
+                        } else {
+                            option.label.clone()
+                        },
+                    )),
+            );
         }
         body = body.child(
             div().flex().items_center().justify_between().child(dots).child(
@@ -1273,7 +1270,10 @@ impl ServerSettingsView {
                     .text_color(on_accent(tint))
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
-                    .child(if total == 1 { "Finish →" } else { "Next →" }),
+                    .child(format!(
+                        "{} →",
+                        if total == 1 { t("join.onboarding.finish") } else { t("join.onboarding.next") }
+                    )),
             ),
         );
         Some(
@@ -1287,7 +1287,7 @@ impl ServerSettingsView {
                         .text_size(px(11.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(p.muted_foreground)
-                        .child("ONBOARDING"),
+                        .child(t("serversettings.nav.onboarding").to_uppercase()),
                 )
                 .child(
                     div()

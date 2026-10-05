@@ -19,45 +19,45 @@ const MAX_ALLOWED: usize = 100;
 const NAME_MAX: usize = 100;
 const MESSAGE_MAX: usize = 150;
 
-/// The three kinds of rule, as the page lists them: trigger, name, what it's
-/// for, its icon, its hue, and how many a server may have.
-const KINDS: [(T, &str, &str, &str, f32, usize); 4] = [
-    (
-        T::Keywords,
-        "Blocked words",
-        "Words and phrases you don't want said. Up to six lists, each with its own actions.",
-        "type",
-        0.97,
-        MAX_KEYWORD_RULES,
-    ),
-    (
-        T::MentionSpam,
-        "Mention spam",
-        "Messages that ping too many people or roles at once, the usual sign of a raid.",
-        "at-sign",
-        0.11,
-        1,
-    ),
-    (
-        T::Links,
-        "Links",
-        "Links to sites you haven't allowed. Allowing a site allows its subdomains too.",
-        "link",
-        0.55,
-        1,
-    ),
-    (
-        T::Provider,
-        "Smart filter",
-        "A moderation service reads each message and says what kind it is: hate, harassment, scams, spam and more. You pick what happens for each.",
-        "sparkles",
-        0.76,
-        1,
-    ),
+/// The kinds of rule, as the page lists them: trigger, its icon, its hue,
+/// and how many a server may have.
+const KINDS: [(T, &str, f32, usize); 4] = [
+    (T::Keywords, "type", 0.97, MAX_KEYWORD_RULES),
+    (T::MentionSpam, "at-sign", 0.11, 1),
+    (T::Links, "link", 0.55, 1),
+    (T::Provider, "sparkles", 0.76, 1),
 ];
 
+/// A kind of rule's name.
+fn kind_name(trigger: i32) -> String {
+    match T::try_from(trigger) {
+        Ok(T::Keywords) => t("serversettings.automod.kindKeywords"),
+        Ok(T::MentionSpam) => t("serversettings.automod.kindMentions"),
+        Ok(T::Links) => t("serversettings.automod.kindLinks"),
+        Ok(T::Provider) => t("serversettings.automod.kindSmart"),
+        _ => t("desktop.server.automod.rule"),
+    }
+}
+
+/// What a kind of rule is for.
+fn kind_blurb(trigger: T) -> String {
+    match trigger {
+        T::MentionSpam => t("serversettings.automod.kindMentionsHint"),
+        T::Links => t("serversettings.automod.kindLinksHint"),
+        T::Provider => t("serversettings.automod.kindSmartHint"),
+        _ => t("serversettings.automod.kindKeywordsHint"),
+    }
+}
+
 /// What a smart filter can do about one kind of message, mildest first.
-const LEVELS: [(L, &str); 4] = [(L::Off, "Off"), (L::Flag, "Flag"), (L::Block, "Block"), (L::TimeOut, "Time out")];
+fn levels() -> [(L, String); 4] {
+    [
+        (L::Off, t("serversettings.shared.off")),
+        (L::Flag, t("serversettings.automod.levelFlag")),
+        (L::Block, t("serversettings.automod.levelBlock")),
+        (L::TimeOut, t("serversettings.members.timeOut")),
+    ]
+}
 
 /// How sure a provider must be, when a label doesn't say.
 const SURE: i32 = 80;
@@ -126,15 +126,12 @@ pub(super) struct AutoMod {
 
 impl AutoMod {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Give it a name"));
-        let words = cx.new(|cx| InputState::new(window, cx).placeholder("Type a word, then Enter"));
-        let allowed = cx.new(|cx| InputState::new(window, cx).placeholder("Type a word, then Enter"));
-        let message = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("What they're told (optional): “Keep it friendly, please.”")
-        });
-        let tester = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Write something the rule should catch, or let through.")
-        });
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.automod.namePlaceholder")));
+        let words = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.automod.typeWord")));
+        let allowed = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.automod.typeWord")));
+        let message =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.automod.blockPlaceholder")));
+        let tester = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.automod.tryPlaceholder")));
         let limit = cx.new(|_| SliderState::new().min(1.0).max(50.0).step(1.0).default_value(5.0));
         let subscriptions = vec![
             cx.subscribe(&name, |this: &mut ServerSettingsView, s, e: &InputEvent, cx| {
@@ -275,21 +272,29 @@ fn set_label(r: &mut pb::AutoModRule, label: &str, level: Option<L>, threshold: 
 fn summary(r: &pb::AutoModRule, providers: &[pb::AutoModProvider]) -> String {
     if r.trigger == T::Provider as i32 {
         let chosen = providers.iter().find(|p| p.id == r.provider);
-        let name = chosen.map_or("Provider turned off on this instance", |p| p.name.as_str());
+        let name = chosen.map_or_else(|| t("serversettings.automod.providerOff"), |p| p.name.clone());
         let n = r.labels.iter().filter(|l| level_of(l.level) != L::Off).count();
-        let pictures = if chosen.is_some_and(|p| p.pictures) && r.pictures { " · with pictures" } else { "" };
-        return format!("{name} · watching {n} {}{pictures}", if n == 1 { "kind" } else { "kinds" });
+        let watching = t_with("serversettings.automod.watching", &[("count", Arg::Num(n as i64))]);
+        return if chosen.is_some_and(|p| p.pictures) && r.pictures {
+            format!("{name} · {watching} · {}", t("serversettings.automod.withPictures"))
+        } else {
+            format!("{name} · {watching}")
+        };
     }
     let what = match T::try_from(r.trigger).unwrap_or(T::Keywords) {
-        T::MentionSpam => format!("More than {} pings", r.mention_limit),
-        T::Links => format!("{} allowed {}", r.allowed.len(), if r.allowed.len() == 1 { "site" } else { "sites" }),
-        _ => format!("{} {}", r.keywords.len(), if r.keywords.len() == 1 { "word" } else { "words" }),
+        T::MentionSpam => t_with("desktop.server.automod.morePings", &[("count", Arg::Num(r.mention_limit.into()))]),
+        T::Links => t_with("serversettings.automod.allowedSitesCount", &[("count", Arg::Num(r.allowed.len() as i64))]),
+        _ => t_with("serversettings.automod.words", &[("count", Arg::Num(r.keywords.len() as i64))]),
     };
-    let doing: Vec<&str> = [(K::Block, "blocks"), (K::Alert, "alerts"), (K::TimeOut, "times out")]
-        .into_iter()
-        .filter(|(k, _)| action(r, *k).is_some())
-        .map(|(_, s)| s)
-        .collect();
+    let doing: Vec<String> = [
+        (K::Block, t("serversettings.automod.doingBlocks")),
+        (K::Alert, t("serversettings.automod.doingAlerts")),
+        (K::TimeOut, t("serversettings.automod.doingTimesOut")),
+    ]
+    .into_iter()
+    .filter(|(k, _)| action(r, *k).is_some())
+    .map(|(_, s)| s)
+    .collect();
     if doing.is_empty() { what } else { format!("{what} · {}", doing.join(", ")) }
 }
 
@@ -565,12 +570,14 @@ impl ServerSettingsView {
                         },
                     )),
             )
-            .child(div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                "AutoMod reads each message as it's sent or edited. Blocked words, mention spam and links are \
-                 caught before anyone sees them; the Smart filter answers a moment after, and takes blocked \
-                 messages down then. People who can manage the server are never caught, so try a rule with the \
-                 box under it rather than in chat.",
-            ));
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(p.muted_foreground)
+                    .child(t("desktop.server.automod.intro")),
+            );
         let mut page =
             div().flex().flex_col().gap(px(24.0)).child(motion::rise(intro, "automod-intro", Duration::ZERO, 8.0));
 
@@ -578,7 +585,8 @@ impl ServerSettingsView {
             return page.child(shimmer_rows(3, p)).into_any_element();
         };
         let keys: Vec<(String, i32)> = rules.iter().map(|r| (r.key.clone(), r.draft.trigger)).collect();
-        for (n, (trigger, label, blurb, glyph, h, max)) in KINDS.into_iter().enumerate() {
+        for (n, (trigger, glyph, h, max)) in KINDS.into_iter().enumerate() {
+            let (label, blurb) = (kind_name(trigger as i32), kind_blurb(trigger));
             let mine: Vec<&String> = keys.iter().filter(|(_, t)| *t == trigger as i32).map(|(k, _)| k).collect();
             let color = hue(h, p);
             // A smart filter needs a provider the instance turned on.
@@ -615,7 +623,11 @@ impl ServerSettingsView {
                     .when(room, |el| {
                         let first = mine.is_empty();
                         let id = SharedString::from(format!("automod-add-{n}"));
-                        let label = if first { "Set up" } else { "Another list" };
+                        let label = if first {
+                            t("serversettings.automod.setUp")
+                        } else {
+                            t("serversettings.automod.anotherList")
+                        };
                         let button = if first { primary_button(id, label, p) } else { soft_button(id, label, p) };
                         el.child(
                             button
@@ -641,10 +653,7 @@ impl ServerSettingsView {
                         .border_color(p.border)
                         .text_sm()
                         .text_color(p.muted_foreground)
-                        .child(
-                            "This instance hasn't turned on a moderation service yet. Its admins can, under Instance \
-                             settings, Moderation: TypeSafe Jev and Cloudflare Clef take a key and one switch.",
-                        ),
+                        .child(t("serversettings.automod.noProvider")),
                     "automod-no-provider",
                     Duration::ZERO,
                     6.0,
@@ -675,7 +684,7 @@ impl ServerSettingsView {
             return div().into_any_element();
         };
         let (draft, is_new, dirty) = (rule.draft.clone(), rule.saved.is_none(), rule.dirty());
-        let label = KINDS.iter().find(|k| k.0 as i32 == draft.trigger).map_or("Rule", |k| k.1);
+        let label = kind_name(draft.trigger);
         let open = self.automod.open.as_deref() == Some(key);
         let id = key.to_owned();
         let chevron =
@@ -711,7 +720,7 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .child(div().truncate().font_weight(FontWeight::BOLD).child(if draft.name.is_empty() {
-                                label.to_owned()
+                                label.clone()
                             } else {
                                 draft.name.clone()
                             }))
@@ -725,7 +734,7 @@ impl ServerSettingsView {
                     )
                     .when(dirty && !is_new, |el| {
                         el.child(motion::once(
-                            pill("UNSAVED", p.primary.into()),
+                            pill(&t("serversettings.automod.unsaved").to_uppercase(), p.primary.into()),
                             SharedString::from(format!("automod-unsaved-{id}")),
                             Duration::from_millis(260),
                             |el, t| el.opacity(t).relative().top(px(4.0 * (1.0 - t))),
@@ -761,7 +770,7 @@ impl ServerSettingsView {
             })
             .when(!draft.enabled && !open, |el| el.opacity(0.7))
             .child(head)
-            .when(open, |el| el.child(self.rule_body(&id, &draft, is_new, dirty, label, p, window, cx)));
+            .when(open, |el| el.child(self.rule_body(&id, &draft, is_new, dirty, &label, p, window, cx)));
         let card =
             match self.automod.shook.as_ref().filter(|(k, at)| k == key && at.elapsed() < Duration::from_millis(500)) {
                 Some((_, at)) => card
@@ -800,19 +809,18 @@ impl ServerSettingsView {
 
         let what: AnyElement = match trigger {
             T::MentionSpam => field(
-                "Ping limit",
-                "Each person or role counts once; @everyone and @here count as one together.",
+                &t("serversettings.automod.pingLimit"),
+                &t("serversettings.automod.pingLimitHint"),
                 div()
                     .flex()
                     .items_center()
                     .gap(px(16.0))
                     .child(div().flex_1().child(Slider::new(&self.automod.limit)))
                     .child(motion::once(
-                        div()
-                            .w(px(110.0))
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .child(format!("More than {}", draft.mention_limit)),
+                        div().w(px(110.0)).text_sm().font_weight(FontWeight::BOLD).child(t_with(
+                            "serversettings.automod.moreThan",
+                            &[("count", Arg::Num(draft.mention_limit.into()))],
+                        )),
                         SharedString::from(format!("automod-limit-{}", draft.mention_limit)),
                         Duration::from_millis(220),
                         |el, t| el.opacity(0.5 + 0.5 * t).relative().top(px(-3.0 * (1.0 - t))),
@@ -820,8 +828,8 @@ impl ServerSettingsView {
                 p,
             ),
             T::Links => field(
-                "Allowed sites",
-                "Every other link is caught. Leave it empty to catch them all.",
+                &t("serversettings.automod.allowedSites"),
+                &t("serversettings.automod.allowedSitesHint"),
                 self.word_list(id, &draft.allowed, true, MAX_ALLOWED, p, cx),
                 p,
             ),
@@ -830,14 +838,17 @@ impl ServerSettingsView {
                 .flex_col()
                 .gap(px(18.0))
                 .child(field(
-                    "Words and phrases",
-                    "Matched whole, ignoring case. A * lets a word run on: *cat catches “bobcat”, cat* catches “catapult”.",
+                    &t("serversettings.automod.wordsLabel"),
+                    &t_with(
+                        "serversettings.automod.wordsHint",
+                        &[("star", Arg::Str("*")), ("prefix", Arg::Str("*cat")), ("suffix", Arg::Str("cat*"))],
+                    ),
                     self.word_list(id, &draft.keywords, false, MAX_WORDS, p, cx),
                     p,
                 ))
                 .child(field(
-                    "Allowed anyway",
-                    "Words the list would catch that are fine, like “class” under *ass*.",
+                    &t("serversettings.automod.allowedAnyway"),
+                    &t("serversettings.automod.allowedAnywayHint"),
                     self.word_list(id, &draft.allowed, true, MAX_ALLOWED, p, cx),
                     p,
                 ))
@@ -858,7 +869,7 @@ impl ServerSettingsView {
                         .child(
                             danger_button(
                                 SharedString::from(format!("automod-del-yes-{id}")),
-                                format!("Delete {named}"),
+                                t_with("serversettings.automod.deleteNamed", &[("name", Arg::Str(&named))]),
                                 p,
                             )
                             .h(px(32.0))
@@ -866,12 +877,17 @@ impl ServerSettingsView {
                             .text_xs()
                             .on_click(cx.listener(move |this, _, _, cx| this.delete_rule(k1.clone(), cx))),
                         )
-                        .child(soft_button(SharedString::from(format!("automod-del-no-{id}")), "Keep it", p).on_click(
-                            cx.listener(|this, _, _, cx| {
+                        .child(
+                            soft_button(
+                                SharedString::from(format!("automod-del-no-{id}")),
+                                t("serversettings.shared.keepIt"),
+                                p,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
                                 this.automod.confirming = None;
                                 cx.notify();
-                            }),
-                        )),
+                            })),
+                        ),
                     SharedString::from(format!("automod-ask-{id}")),
                     -8.0,
                 )
@@ -894,7 +910,7 @@ impl ServerSettingsView {
                         move |s| s.bg(red).text_color(c)
                     })
                     .child(icon(if is_new { "x" } else { "trash" }).size(px(14.0)))
-                    .child(if is_new { "Cancel" } else { "Delete" })
+                    .child(if is_new { t("common.cancel") } else { t("serversettings.shared.delete") })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if is_new {
                             this.delete_rule(k2.clone(), cx)
@@ -924,8 +940,13 @@ impl ServerSettingsView {
                         .when_some(problem, |el, m| el.child(m)),
                 )
                 .when(dirty && !is_new, |el| {
-                    el.child(soft_button(SharedString::from(format!("automod-discard-{id}")), "Discard", p).on_click(
-                        cx.listener(move |this, _, _, cx| {
+                    el.child(
+                        soft_button(
+                            SharedString::from(format!("automod-discard-{id}")),
+                            t("settings.controls.discard"),
+                            p,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(rule) = this.rule_mut(&k3)
                                 && let Some(saved) = rule.saved.clone()
                             {
@@ -935,13 +956,13 @@ impl ServerSettingsView {
                             this.automod.filled_for = None;
                             this.automod.problem = None;
                             cx.notify();
-                        }),
-                    ))
+                        })),
+                    )
                 })
                 .child(
                     primary_button(
                         SharedString::from(format!("automod-save-{id}")),
-                        if is_new { "Create rule" } else { "Save" },
+                        if is_new { t("serversettings.automod.createRule") } else { t("serversettings.automod.save") },
                         p,
                     )
                     .when(!dirty || saving, |el| el.opacity(0.55))
@@ -968,7 +989,7 @@ impl ServerSettingsView {
                 .p(px(16.0))
                 .border_t_1()
                 .border_color(p.border)
-                .child(field("Name", "", Input::new(&self.automod.name), p))
+                .child(field(&t("serversettings.overview.name"), "", Input::new(&self.automod.name), p))
                 .map(|el| {
                     if trigger == T::Provider {
                         el.child(self.provider_picker(draft, p, cx))
@@ -1062,9 +1083,13 @@ impl ServerSettingsView {
     fn tester(&self, smart: bool, p: &Palette, window: &mut Window) -> AnyElement {
         // How long the provider took, at the end of a smart filter's answer.
         let took = |ms: i32| {
-            div().ml_auto().text_xs().text_color(p.muted_foreground).when(smart, |el| el.child(format!("{ms} ms")))
+            div()
+                .ml_auto()
+                .text_xs()
+                .text_color(p.muted_foreground)
+                .when(smart, |el| el.child(t_with("desktop.server.automod.ms", &[("ms", Arg::Num(ms.into()))])))
         };
-        let result: Option<AnyElement> = self.automod.tried.as_ref().map(|t| match t {
+        let result: Option<AnyElement> = self.automod.tried.as_ref().map(|tried| match tried {
             Tried::Checking => div()
                 .flex()
                 .items_center()
@@ -1072,27 +1097,36 @@ impl ServerSettingsView {
                 .text_sm()
                 .text_color(p.muted_foreground)
                 .child(spinner("automod-try-spin", 14.0, window))
-                .child(if smart { "Asking the provider…" } else { "Checking…" })
+                .child(if smart { t("serversettings.automod.asking") } else { t("serversettings.automod.checking") })
                 .into_any_element(),
             Tried::Failed(error, ms) => div()
                 .flex()
                 .items_start()
                 .gap(px(8.0))
-                .child(div().flex_1().min_w_0().text_xs().text_color(amber(p)).child(format!(
-                    "The provider didn't answer: {error}. Messages go through this rule unchecked until it \
-                         does; your other rules still apply."
-                )))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(amber(p))
+                        .child(t_with("serversettings.automod.noAnswer", &[("error", Arg::Str(error))])),
+                )
                 .child(took(*ms))
                 .into_any_element(),
             Tried::Through(ms) => div()
                 .flex()
                 .items_center()
-                .child(motion::rise(pill("✓ GETS THROUGH", p.success.into()), "automod-through", Duration::ZERO, 6.0))
+                .child(motion::rise(
+                    pill(&format!("✓ {}", t("serversettings.automod.getsThrough").to_uppercase()), p.success.into()),
+                    "automod-through",
+                    Duration::ZERO,
+                    6.0,
+                ))
                 .child(took(*ms))
                 .into_any_element(),
             Tried::Caught(matches, ms) => {
                 let mut row = div().flex().flex_wrap().items_center().gap(px(6.0)).child(motion::rise(
-                    pill("CAUGHT", p.destructive.into()),
+                    pill(&t("serversettings.automod.caught").to_uppercase(), p.destructive.into()),
                     "automod-caught",
                     Duration::ZERO,
                     6.0,
@@ -1131,16 +1165,11 @@ impl ServerSettingsView {
                     .text_sm()
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .child(icon("flask-conical").size(px(15.0)).text_color(p.primary))
-                    .child("Try a message"),
+                    .child(t("serversettings.automod.try")),
             )
             .child(Input::new(&self.automod.tester))
             .when(smart, |el| {
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .child("What you write here goes to the provider, the same way members' messages will."),
-                )
+                el.child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.automod.tryNote")))
             })
             .when_some(result, |el, r| el.child(r))
             .into_any_element()
@@ -1192,8 +1221,8 @@ impl ServerSettingsView {
                 "block",
                 block,
                 "ban",
-                "Block the message",
-                "It never reaches the channel. Its author sees why.",
+                &t("serversettings.automod.blockTitle"),
+                &t("serversettings.automod.blockHint"),
                 Input::new(&self.automod.message).into_any_element(),
                 p,
                 cx,
@@ -1203,8 +1232,8 @@ impl ServerSettingsView {
                 "alert",
                 alert.is_some(),
                 "bell-ring",
-                "Alert a channel",
-                "Posts what was caught, who said it and where, for your mods.",
+                &t("serversettings.automod.alertTitle"),
+                &t("serversettings.automod.alertHint"),
                 picks.into_any_element(),
                 p,
                 cx,
@@ -1223,8 +1252,8 @@ impl ServerSettingsView {
                 "timeout",
                 time_out.is_some(),
                 "timer",
-                "Time them out",
-                "They can read but not talk for a while.",
+                &t("serversettings.automod.timeOutTitle"),
+                &t("serversettings.automod.timeOutHint"),
                 times.into_any_element(),
                 p,
                 cx,
@@ -1238,7 +1267,7 @@ impl ServerSettingsView {
                     })
                 },
             ));
-        field("When it catches one", "Pick any. Without blocking, the message is still sent.", cards, p)
+        field(&t("serversettings.automod.whenCaught"), &t("serversettings.automod.whenCaughtHint"), cards, p)
     }
 
     /// Which of the instance's moderation services reads messages, and what it gets to see.
@@ -1261,27 +1290,20 @@ impl ServerSettingsView {
         let warn = amber(p);
         let note = match chosen {
             Some(x) => {
-                let gets = format!(
-                    ". It gets the text{} alone: never who wrote it, where, or this server's name, and mentions and \
-                     custom emoji are swapped for placeholders first. Your instance sends it, never anyone's app.",
-                    if x.pictures && draft.pictures { " and pictures" } else { "" }
-                );
-                div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                    crate::ui::instance_settings::emphasized(
-                        &[
-                            (&x.name, true),
-                            (" reads the messages this rule checks, at ", false),
-                            (&x.host, true),
-                            (&gets, false),
-                        ],
-                        p,
-                    ),
-                )
+                let reads = if x.pictures && draft.pictures {
+                    t_with(
+                        "serversettings.automod.providerReadsPictures",
+                        &[("provider", Arg::Str(&strong(&x.name))), ("host", Arg::Str(&strong(&x.host)))],
+                    )
+                } else {
+                    t_with(
+                        "serversettings.automod.providerReads",
+                        &[("provider", Arg::Str(&strong(&x.name))), ("host", Arg::Str(&strong(&x.host)))],
+                    )
+                };
+                div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(marked(&reads, p))
             }
-            None => div().flex_1().min_w_0().text_sm().text_color(warn).child(
-                "This instance turned that provider off, so the rule lets every message through. Pick another, or \
-                 ask the instance's admins.",
-            ),
+            None => div().flex_1().min_w_0().text_sm().text_color(warn).child(t("serversettings.automod.providerGone")),
         };
         let tint = if chosen.is_some() { violet } else { warn };
         out = out.child(motion::rise(
@@ -1303,7 +1325,7 @@ impl ServerSettingsView {
         if chosen.is_some_and(|x| x.pictures) {
             out = out.child(self.pictures(draft, p, cx));
         }
-        field("Provider", "The services this instance's admins turned on.", out, p)
+        field(&t("serversettings.automod.provider"), &t("serversettings.automod.providerHint"), out, p)
     }
 
     /// Whether the provider sees messages' pictures too, for providers that read them.
@@ -1362,11 +1384,15 @@ impl ServerSettingsView {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Check pictures too"))
-                        .child(div().text_xs().text_color(p.muted_foreground).child(
-                            "Up to 4 per message, attached or in embeds (PNG, JPEG or WebP). Your instance fetches \
-                             them and sends them along; GIFs and very large photos are skipped.",
-                        )),
+                        .child(
+                            div().text_sm().font_weight(FontWeight::BOLD).child(t("serversettings.automod.pictures")),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child(t_with("serversettings.automod.picturesHint", &[("count", Arg::Num(4))])),
+                        ),
                 )
                 .child(switch("automod-pictures-switch".into(), on, false, cx, set)),
             "automod-pictures-in",
@@ -1426,7 +1452,7 @@ impl ServerSettingsView {
             let off = level == L::Off;
             // The choice slides between the four, as on the web.
             const CELL: f32 = 70.0;
-            let at = LEVELS.iter().position(|(l, _)| *l == level).unwrap_or(0) as f32;
+            let at = levels().iter().position(|(l, _)| *l == level).unwrap_or(0) as f32;
             let x = motion::follow(
                 SharedString::from(format!("automod-level-{}-{}", draft.id, label.id)),
                 at * CELL,
@@ -1449,7 +1475,7 @@ impl ServerSettingsView {
                         .rounded(corner(9.0))
                         .bg(fill),
                 );
-            for (value, short) in LEVELS {
+            for (value, short) in levels() {
                 let on = value == level;
                 let id = label.id.clone();
                 let fg = p.foreground;
@@ -1517,15 +1543,19 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(12.0))
                         .pt(px(10.0))
-                        .child(div().flex_none().text_xs().text_color(p.muted_foreground).child("How sure"))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.automod.howSure")),
+                        )
                         .child(div().flex_1().child(Slider::new(&slider)))
                         .child(motion::once(
-                            div()
-                                .w(px(40.0))
-                                .text_right()
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .child(format!("{threshold}%")),
+                            div().w(px(40.0)).text_right().text_xs().font_weight(FontWeight::BOLD).child(t_with(
+                                "desktop.server.automod.percent",
+                                &[("value", Arg::Num(threshold.into()))],
+                            )),
                             SharedString::from(format!("automod-sure-{}-{threshold}", label.id)),
                             Duration::from_millis(220),
                             |el, t| el.opacity(0.5 + 0.5 * t).relative().top(px(-3.0 * (1.0 - t))),
@@ -1549,7 +1579,7 @@ impl ServerSettingsView {
             .gap_x(px(4.0))
             .text_xs()
             .text_color(p.muted_foreground)
-            .child("Flags post to your alert channel and let the message through. The bar is how sure the provider must be.")
+            .child(t("desktop.server.automod.eachKindHint"))
             .child(
                 div()
                     .id("automod-labels-reset")
@@ -1565,14 +1595,14 @@ impl ServerSettingsView {
                         }
                         this.try_rule(cx);
                     }))
-                    .child("Back to the defaults"),
+                    .child(t("serversettings.automod.backToDefaults")),
             );
         Some(
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child("What to do about each kind"))
+                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.automod.eachKind")))
                 .child(hint)
                 .child(list)
                 .into_any_element(),
@@ -1588,15 +1618,15 @@ impl ServerSettingsView {
         let alert = action(draft, K::Alert).map(|a| a.channel_id.clone()).unwrap_or_default();
         let mut options: Vec<(String, String)> = Vec::new();
         if !flags {
-            options.push((String::new(), "No alerts".into()));
+            options.push((String::new(), t("serversettings.automod.noAlerts")));
         }
         options.extend(self.text_channels().into_iter().map(|c| (c.id, format!("# {}", c.name))));
         let mut out = div().flex().flex_col().gap(px(18.0)).child(field(
-            "Alert channel",
-            if flags {
-                "Flagged messages are posted here for your mods; blocked ones too."
+            &t("serversettings.automod.alertChannel"),
+            &if flags {
+                t("serversettings.automod.alertFlagsHint")
             } else {
-                "Blocked messages are posted here too, if you pick one."
+                t("serversettings.automod.alertBlocksHint")
             },
             div()
                 .flex()
@@ -1606,13 +1636,18 @@ impl ServerSettingsView {
                     this.edit_rule(cx, |r| set_action(r, K::Alert, !id.is_empty(), |a| a.channel_id = id));
                 }))
                 .when(flags && alert.is_empty(), |el| {
-                    el.child(div().text_xs().text_color(amber(p)).child("Pick a channel for flags."))
+                    el.child(div().text_xs().text_color(amber(p)).child(t("desktop.server.automod.pickForFlags")))
                 }),
             p,
         ));
         if blocks {
             out = out.child(motion::rise(
-                div().child(field("What blocked people are told", "Optional.", Input::new(&self.automod.message), p)),
+                div().child(field(
+                    &t("serversettings.automod.blockedTold"),
+                    &t("desktop.server.automod.optional"),
+                    Input::new(&self.automod.message),
+                    p,
+                )),
                 "automod-smart-block",
                 Duration::ZERO,
                 6.0,
@@ -1632,7 +1667,7 @@ impl ServerSettingsView {
                 );
             }
             out = out.child(motion::rise(
-                div().child(field("Time-out length", "", times, p)),
+                div().child(field(&t("serversettings.automod.timeOutLength"), "", times, p)),
                 "automod-smart-time",
                 Duration::ZERO,
                 6.0,
@@ -1693,7 +1728,7 @@ impl ServerSettingsView {
                 ),
             );
         }
-        let sub = |title: &str| {
+        let sub = |title: String, glyph: &str| {
             div()
                 .flex()
                 .items_center()
@@ -1701,18 +1736,18 @@ impl ServerSettingsView {
                 .text_xs()
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .text_color(p.muted_foreground)
-                .child(icon(if title == "ROLES" { "shield" } else { "hash" }).size(px(12.0)))
-                .child(title.to_owned())
+                .child(icon(glyph).size(px(12.0)))
+                .child(title.to_uppercase())
         };
         field(
-            "Leave out",
-            "Roles and channels this rule never looks at.",
+            &t("serversettings.automod.leaveOut"),
+            &t("serversettings.automod.leaveOutHint"),
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
-                .when(!roles.is_empty(), |el| el.child(sub("ROLES")).child(role_chips))
-                .child(sub("CHANNELS"))
+                .when(!roles.is_empty(), |el| el.child(sub(t("serversettings.nav.roles"), "shield")).child(role_chips))
+                .child(sub(t("serversettings.nav.channels"), "hash"))
                 .child(channel_chips),
             p,
         )
