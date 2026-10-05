@@ -100,6 +100,23 @@ pub struct Item {
     /// Who passed it on to this device, when it came as shared history rather than as it was sent.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub shared_by: String,
+    /// A voice message: what's needed to fetch, open and draw it (the text is empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<VoiceFile>,
+}
+
+/// A voice message's sealed file and what was said about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoiceFile {
+    pub media_id: String,
+    #[serde(with = "bytes")]
+    pub key: Vec<u8>,
+    #[serde(with = "bytes")]
+    pub sha256: Vec<u8>,
+    pub size: i64,
+    pub duration_ms: u32,
+    #[serde(with = "bytes")]
+    pub waveform: Vec<u8>,
 }
 
 impl Item {
@@ -119,6 +136,7 @@ impl Item {
             signed: None,
             edit_signed: None,
             shared_by: String::new(),
+            voice: None,
         }
     }
 }

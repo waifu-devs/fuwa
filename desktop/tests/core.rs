@@ -14,6 +14,7 @@ use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
 use fuwa_desktop::core::updates;
 use fuwa_desktop::core::vault::ItemKind;
+use fuwa_desktop::core::voice_notes;
 use fuwa_desktop::core::{Core, Notice};
 use fuwa_desktop::pb;
 use fuwa_server::app::App;
@@ -336,6 +337,48 @@ fn two_people_talk_in_a_server_and_in_private() {
         s.instance(&key).unwrap().dms.safety.get(&conversation).is_some_and(|n| n.len() == 60)
     });
     assert_eq!(safety(&alice), safety(&bob));
+
+    // Alice records a voice message; Bob fetches it, opens it and can play it.
+    {
+        let mut encoder = opus::Encoder::new(48_000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let mut packets = Vec::new();
+        let mut buf = vec![0u8; 4000];
+        for n in 0..60 {
+            let frame: Vec<f32> = (0..960).map(|i| ((n * 960 + i) as f32 * 0.03).sin() * 0.4).collect();
+            let len = encoder.encode_float(&frame, &mut buf).unwrap();
+            packets.push(buf[..len].to_vec());
+        }
+        let clip = voice_notes::Clip {
+            ogg: Arc::new(voice_notes::write_ogg(&packets, encoder.get_lookahead().unwrap() as u16)),
+            duration_ms: 1200,
+            waveform: vec![40, 200, 255, 90],
+        };
+        let (core, key, id) = (alice.clone(), key.clone(), conversation.clone());
+        wait(&alice, async move { core.send_voice(&key, &id, &clip, 0).await }).unwrap();
+    }
+    let voiced = |s: &Store| {
+        s.instance(&key)
+            .unwrap()
+            .dms
+            .items
+            .get(&conversation)
+            .and_then(|items| items.iter().find_map(|i| i.voice.clone()))
+    };
+    until(&bob, "a voice message", |s| voiced(s).is_some());
+    let file = bob.shared.read(voiced).unwrap();
+    assert_eq!((file.duration_ms, file.waveform.clone()), (1200, vec![40, 200, 255, 90]));
+    // Opened from what the instance holds, not from what Alice's copy of the app kept.
+    voice_notes::forget_opened();
+    let sound = {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.voice_sound(&key, &file).await }).unwrap()
+    };
+    assert!((60 * 960 - 1000..=60 * 960).contains(&sound.len()));
+    // What the instance holds is sealed: none of the recording shows in it.
+    for path in walk(data.path()) {
+        let bytes = std::fs::read(path).unwrap_or_default();
+        assert!(!bytes.windows(8).any(|w| w == b"OpusHead"));
+    }
 
     // Alice asks a question; Bob votes, Alice sees the count live and who
     // voted, then ends it. Bob's own pick stays with him.

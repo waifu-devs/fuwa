@@ -300,17 +300,45 @@ async fn put(url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Proble
     send(http::Method::PUT, url, content_type, bytes).await
 }
 
-/// Sends `bytes` to an instance's own address (an upload, a webhook) and
-/// turns a refusal into a [`Problem`] with what the instance said.
-pub(crate) async fn send(method: http::Method, url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Problem> {
-    let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
+fn client() -> hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    Full<Bytes>,
+> {
     let roots = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
         Ok(roots) => roots,
         Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
     };
     let connector = roots.https_or_http().enable_http1().build();
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build::<_, Full<Bytes>>(connector);
+    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build(connector)
+}
+
+/// Fetches a file from an instance's own address, refusing one bigger than `most` bytes.
+pub(crate) async fn fetch(url: &str, most: usize) -> Result<Vec<u8>, Problem> {
+    let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
+    let request = http::Request::get(url).body(Full::new(Bytes::new())).map_err(|_| unreachable())?;
+    let fetched = async {
+        let response = client().request(request).await.map_err(|_| unreachable())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 | 410 => return Err(Problem::new(Code::NotFound, "That file isn't on the instance anymore.")),
+            _ => return Err(unreachable()),
+        }
+        let body = http_body_util::Limited::new(response.into_body(), most)
+            .collect()
+            .await
+            .map_err(|_| Problem::new(Code::ResourceExhausted, "That file is bigger than it should be."))?;
+        Ok(body.to_bytes().to_vec())
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(120), fetched)
+        .await
+        .map_err(|_| Problem::new(Code::DeadlineExceeded, "That took too long."))?
+}
+
+/// Sends `bytes` to an instance's own address (an upload, a webhook) and
+/// turns a refusal into a [`Problem`] with what the instance said.
+pub(crate) async fn send(method: http::Method, url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Problem> {
+    let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
+    let client = client();
     let request = http::Request::builder()
         .method(method)
         .uri(url)

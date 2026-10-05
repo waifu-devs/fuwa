@@ -42,6 +42,7 @@ mod sidebar;
 pub mod text;
 pub mod theme;
 mod update;
+mod voice_notes;
 mod widgets;
 
 use std::fs::File;

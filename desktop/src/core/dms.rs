@@ -35,7 +35,7 @@ use crate::core::Shared;
 use crate::core::api::{Api, Problem};
 use crate::core::calls;
 use crate::core::history::{self, Candidate, LogKind, Logged};
-use crate::core::vault::{Change, DeviceRef, Item, ItemKind, Note, Signed, Vault, sha256_hex};
+use crate::core::vault::{Change, DeviceRef, Item, ItemKind, Note, Signed, Vault, VoiceFile, sha256_hex};
 use crate::pb;
 use crate::rpc;
 
@@ -148,8 +148,26 @@ type Result<T, E = DmError> = std::result::Result<T, E>;
 /// The plaintext of a message: what only the conversation's devices see.
 #[derive(Debug, Clone)]
 pub enum Content {
-    Text { text: String, reply_to: i64 },
-    Edit { sequence: i64, text: String },
+    Text {
+        text: String,
+        reply_to: i64,
+    },
+    Edit {
+        sequence: i64,
+        text: String,
+    },
+    /// A voice message whose sealed file is already uploaded.
+    Voice(pb::DirectMessageVoice),
+}
+
+impl Content {
+    /// The uploaded files a message names, which the instance ties to it.
+    fn media_ids(&self) -> Vec<String> {
+        match self {
+            Content::Voice(v) => v.file.iter().map(|f| f.media_id.clone()).collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 fn content_of(content: &Content) -> pb::DirectMessageContent {
@@ -163,8 +181,27 @@ fn content_of(content: &Content) -> pb::DirectMessageContent {
         Content::Edit { sequence, text } => {
             Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone() })
         }
+        Content::Voice(voice) => Body::Voice(voice.clone()),
     };
     pb::DirectMessageContent { body: Some(body) }
+}
+
+/// A received voice message's file, when it's one that can be fetched and
+/// opened: an instance media id, a 32-byte key and digest, a sensible size,
+/// and sealed in one piece as voice messages are.
+fn voice_file(voice: &pb::DirectMessageVoice) -> Option<VoiceFile> {
+    let file = voice.file.as_ref()?;
+    let id_ok =
+        file.media_id.len() == 26 && file.media_id.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase());
+    let sized = file.size > 0 && file.size <= 256 * 1024 * 1024;
+    (id_ok && sized && file.chunk_bytes == 0 && file.key.len() == 32 && file.sha256.len() == 32).then(|| VoiceFile {
+        media_id: file.media_id.clone(),
+        key: file.key.clone(),
+        sha256: file.sha256.clone(),
+        size: file.size,
+        duration_ms: voice.duration_ms.min(24 * 60 * 60 * 1000),
+        waveform: voice.waveform.iter().take(crate::core::voice_notes::MAX_BARS).copied().collect(),
+    })
 }
 
 fn encode(content: &Content) -> Vec<u8> {
@@ -762,10 +799,10 @@ impl DmEngine {
         }
     }
 
-    async fn post_message(&self, room: &Room, message: Vec<u8>) -> Result<(), Problem> {
+    async fn post_message(&self, room: &Room, message: Vec<u8>, media_ids: Vec<String>) -> Result<(), Problem> {
         match room {
             Room::Dm(c) => {
-                let req = pb::PostMessageRequest { conversation_id: c.id.clone(), message, ..Default::default() };
+                let req = pb::PostMessageRequest { conversation_id: c.id.clone(), message, media_ids };
                 rpc!(self.api.dms(), post_message(req)).await?;
             }
             Room::Channel { id, server_id, .. } => {
@@ -1055,6 +1092,7 @@ impl DmEngine {
             Some(Body::Edit(edit)) => {
                 if let Some(mut target) = inner.known(change, &id, edit.sequence)?
                     && target.kind == ItemKind::Text
+                    && target.voice.is_none()
                     && target.sender_id == sender_id
                     && !target.deleted
                 {
@@ -1064,13 +1102,12 @@ impl DmEngine {
                     change.items.push((id, target));
                 }
             }
-            // Voice messages play in the web app for now; here they're a line
-            // saying one came, so the conversation still reads in order.
+            // Secure channels don't carry voice messages yet, as on the web.
+            Some(Body::Voice(_)) if self.secure.lock().contains_key(&id) => {}
             Some(Body::Voice(voice)) => {
-                let secs = voice.duration_ms / 1000;
+                let Some(file) = voice_file(&voice) else { return Ok(()) };
                 let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
-                item.content =
-                    format!("Voice message ({}:{:02}), open it in the web app to play it", secs / 60, secs % 60);
+                item.voice = Some(file);
                 item.reply_to = voice.reply_to_sequence;
                 item.signed = signed;
                 let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
@@ -1506,6 +1543,9 @@ impl DmEngine {
             let mut inner = self.inner.lock().await;
             self.catch_up(&mut inner, id, 0).await?;
             let room = self.room(id).ok_or_else(|| DmError("That conversation isn't here.".into()))?;
+            if room.server().is_some() && matches!(content, Content::Voice(_)) {
+                return Err(DmError("Voice messages can't be sent in secure channels yet.".into()));
+            }
             self.reconcile(&mut inner, &room).await?;
             let plaintext =
                 if room.server().is_some() { self.signed_content(&inner, id, &content)? } else { encode(&content) };
@@ -1514,7 +1554,7 @@ impl DmEngine {
                 let hash = sha256_hex(&ciphertext);
                 // Kept first: this device can't open what it sent, so this is how it knows what it said.
                 inner.save(Change { sent: vec![(hash.clone(), plaintext.clone())], ..Change::default() })?;
-                match self.post_message(&room, ciphertext).await {
+                match self.post_message(&room, ciphertext, content.media_ids()).await {
                     Ok(()) => break,
                     Err(err) => {
                         inner.vault.write(Change { forget_sent: vec![hash], ..Change::default() })?;

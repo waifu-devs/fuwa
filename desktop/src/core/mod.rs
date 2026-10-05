@@ -38,6 +38,7 @@ pub mod themes;
 pub mod updates;
 pub mod vault;
 pub mod voice;
+pub mod voice_notes;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -120,7 +121,7 @@ impl Shared {
             server_id: None,
             channel_id: c.id.clone(),
             title,
-            body: item.content.chars().take(160).collect(),
+            body: if item.voice.is_some() { "Voice message".into() } else { item.content.chars().take(160).collect() },
             mention: true,
         });
     }
@@ -584,6 +585,7 @@ impl Core {
         let Some(api) = self.api(key) else { return };
         let me = self.shared.read(|s| s.instance(key).and_then(|i| i.me.clone()));
         let _ = rpc!(api.auth(), sign_out(pb::SignOutRequest {})).await;
+        voice_notes::forget_opened();
         let url = api.url.clone();
         self.add_instance(&url, None);
         if let Some(me) = me {
@@ -902,7 +904,7 @@ impl Core {
         // A new message shows dimmed until it's sent; an edit changes the one already there.
         let text = match &content {
             Content::Text { text, .. } => Some(text.clone()),
-            Content::Edit { .. } => None,
+            Content::Edit { .. } | Content::Voice(_) => None,
         };
         if let Some(text) = &text {
             self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
