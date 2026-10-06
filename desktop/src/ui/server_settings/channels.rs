@@ -6,7 +6,7 @@
 
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 
-use super::roles::{dot, member_name, role_color, switch};
+use super::roles::{dot, group_name, member_name, permission_here, permission_name, role_color, switch};
 use super::*;
 use crate::core::arrange::{self, Layout};
 use crate::core::permissions::{self, Access, Bits, CHANNEL_GROUPS, bit};
@@ -101,14 +101,14 @@ pub(super) fn slug(name: &str) -> String {
 }
 
 fn slow_label(seconds: i32) -> String {
-    if seconds == 0 { "Off".into() } else { crate::ui::moderate::duration(i64::from(seconds)) }
+    if seconds == 0 { t("serversettings.shared.off") } else { crate::ui::moderate::duration(i64::from(seconds)) }
 }
 
 fn slow_short(seconds: i32) -> String {
     match seconds {
-        s if s >= 3600 => format!("{}h", s / 3600),
-        s if s >= 60 => format!("{}m", s / 60),
-        s => format!("{s}s"),
+        s if s >= 3600 => t_with("desktop.server.channels.hoursShort", &[("count", Arg::Num((s / 3600).into()))]),
+        s if s >= 60 => t_with("desktop.server.channels.minutesShort", &[("count", Arg::Num((s / 60).into()))]),
+        s => t_with("desktop.server.channels.secondsShort", &[("count", Arg::Num(s.into()))]),
     }
 }
 
@@ -166,9 +166,10 @@ pub(super) struct Channels {
 
 impl Channels {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("channel-name"));
-        let topic =
-            cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 6).placeholder("What people talk about here"));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.channels.namePlaceholder")));
+        let topic = cx.new(|cx| {
+            TextareaState::new(window, cx).auto_grow(3, 6).placeholder(t("desktop.server.channels.topicPlaceholder"))
+        });
         let slow = cx.new(|_| SliderState::new().min(0.0).max((SLOW.len() - 1) as f32).step(1.0).default_value(0.0));
         let subscriptions = vec![
             cx.subscribe(&name, |_: &mut ServerSettingsView, _, e: &InputEvent, cx| {
@@ -314,7 +315,7 @@ impl ServerSettingsView {
     fn save_channel(&mut self, channel: &pb::Channel, cx: &mut Context<Self>) {
         let patch = self.channel_patch(channel, cx);
         if patch.name.as_deref() == Some("") {
-            self.error = Some("A channel needs a name.".into());
+            self.error = Some(t("desktop.server.channels.needsName"));
             cx.notify();
             return;
         }
@@ -503,13 +504,13 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .child(div().flex_1().min_w_0().text_xs().text_color(p.muted_foreground).child(if can_arrange {
-                        "Move them with the arrows, into and out of categories."
+                        t("desktop.server.channels.intro")
                     } else {
-                        "Pick a channel to change who can see and use it."
+                        t("serversettings.channels.introPick")
                     }))
                     .when(can_arrange, |el| {
                         el.child(
-                            primary_button("channel-new", "New", p)
+                            primary_button("channel-new", t("serversettings.shared.new"), p)
                                 .h(px(34.0))
                                 .px(px(12.0))
                                 .child(icon("plus").size(px(15.0)))
@@ -542,7 +543,7 @@ impl ServerSettingsView {
                 .text_center()
                 .text_sm()
                 .text_color(p.muted_foreground)
-                .child("Pick a channel to change it.")
+                .child(t("serversettings.channels.pick"))
                 .into_any_element(),
         };
         div()
@@ -691,10 +692,10 @@ impl ServerSettingsView {
         let roles = snap.access.has_in(&channel.id, P::ManageRoles);
         let mut options = Vec::new();
         if manage {
-            options.push((Tab::Overview, "Overview"));
+            options.push((Tab::Overview, t("serversettings.nav.overview")));
         }
         if roles {
-            options.push((Tab::Permissions, "Permissions"));
+            options.push((Tab::Permissions, t("serversettings.shared.permissions")));
         }
         // Sharing takes managing the server and the channel, while the instance allows it (or it's shared already).
         let texty = matches!(kind(channel), pb::ChannelType::Text | pb::ChannelType::Announcement);
@@ -703,7 +704,7 @@ impl ServerSettingsView {
             .shared
             .read(|s| s.instance(&self.key).and_then(|i| i.node.as_ref()).is_some_and(|n| n.shared_channels));
         if texty && snap.access.has(P::ManageServer) && manage && (sharing_on || channel.shared.is_some()) {
-            options.push((Tab::Share, "Share"));
+            options.push((Tab::Share, t("serversettings.channels.share")));
         }
         let tab =
             options.iter().map(|(t, _)| *t).find(|t| *t == self.channels.tab).or(options.first().map(|(t, _)| *t));
@@ -714,7 +715,7 @@ impl ServerSettingsView {
                 let hover = alpha(p.foreground, 0.06);
                 tabs = tabs.child(
                     div()
-                        .id(SharedString::from(format!("chan-tab-{label}")))
+                        .id(SharedString::from(format!("chan-tab-{}", t as u8)))
                         .px(px(12.0))
                         .h(px(30.0))
                         .flex()
@@ -762,7 +763,7 @@ impl ServerSettingsView {
                 .text_center()
                 .text_sm()
                 .text_color(p.muted_foreground)
-                .child("You can't change this one.")
+                .child(t("serversettings.channels.cantChange"))
                 .into_any_element(),
         };
         div().flex().flex_col().child(header).child(motion::rise(
@@ -793,19 +794,28 @@ impl ServerSettingsView {
             .gap(px(6.0))
             .child(Input::new(&self.channels.name).when(!category, |el| el.prefix(icon("hash").size(px(15.0)))));
         if !will_be.is_empty() && will_be != typed.trim() {
-            name = name
-                .child(div().text_xs().text_color(p.muted_foreground).child(format!("It'll be saved as #{will_be}.")));
+            name = name.child(
+                div()
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(t_with("desktop.server.channels.savedAs", &[("name", Arg::Str(&will_be))])),
+            );
         }
-        out = out.child(labeled(if category { "Category name" } else { "Channel name" }, name, p));
+        out = out.child(labeled(
+            &if category {
+                t("serversettings.channels.categoryName")
+            } else {
+                t("serversettings.channels.channelName")
+            },
+            name,
+            p,
+        ));
 
         if texty(channel) {
             out = out.child(labeled(
-                "Topic",
+                &t("serversettings.channels.topic"),
                 div().flex().flex_col().gap(px(6.0)).child(Textarea::new(&self.channels.topic)).child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .child("Shown at the top of the channel. Markdown works."),
+                    div().text_xs().text_color(p.muted_foreground).child(t("serversettings.channels.topicHint")),
                 ),
                 p,
             ));
@@ -813,7 +823,7 @@ impl ServerSettingsView {
 
         if !category {
             let parent = self.channels.parent.clone().unwrap_or_else(|| channel.parent_id.clone());
-            let mut options = vec![(String::new(), "No category".to_owned())];
+            let mut options = vec![(String::new(), t("serversettings.channels.noCategory"))];
             options.extend(
                 snap.channels
                     .iter()
@@ -821,7 +831,7 @@ impl ServerSettingsView {
                     .map(|c| (c.id.clone(), c.name.clone())),
             );
             out = out.child(labeled(
-                "Category",
+                &t("serversettings.channels.category"),
                 text_chips("chan-parent", &options, &parent, p, cx, |this, id, cx| {
                     this.channels.parent = Some(id);
                     cx.notify();
@@ -853,7 +863,7 @@ impl ServerSettingsView {
                     },
                 ));
             out = out.child(labeled(
-                "Slow mode",
+                &t("serversettings.nav.slowmode"),
                 div()
                     .flex()
                     .flex_col()
@@ -874,16 +884,16 @@ impl ServerSettingsView {
                                     .child(slow_label(seconds)),
                             ),
                     )
-                    .child(div().text_xs().text_color(p.muted_foreground).child(
-                        "How long members wait between messages. People who can manage messages or channels here don't wait.",
-                    )),
+                    .child(
+                        div().text_xs().text_color(p.muted_foreground).child(t("serversettings.channels.slowmodeHint")),
+                    ),
                 p,
             ));
         }
 
         // Deleting, behind a confirmation.
         let id = channel.id.clone();
-        let what = if category { channel.name.clone() } else { format!("#{}", channel.name) };
+
         let saving = self.channels.saving;
         let delete = if self.channels.confirming {
             let system = snap.system_channel == channel.id;
@@ -906,33 +916,49 @@ impl ServerSettingsView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.destructive)
                             .child(icon("triangle-alert").size(px(16.0)))
-                            .child(format!("Delete {what}?")),
+                            .child(if category {
+                                t_with(
+                                    "serversettings.channels.deleteCategoryAsk",
+                                    &[("name", Arg::Str(&channel.name))],
+                                )
+                            } else {
+                                t_with("serversettings.channels.deleteChannelAsk", &[("name", Arg::Str(&channel.name))])
+                            }),
                     )
                     .child(div().text_sm().text_color(p.muted_foreground).child(if category {
-                        "Its channels stay, outside any category.".to_owned()
+                        t("serversettings.channels.deleteCategoryHint")
+                    } else if system {
+                        t("serversettings.channels.deleteSystemHint")
                     } else {
-                        format!(
-                            "Every message in it goes too, for everyone.{}",
-                            if system { " Join messages stop until you pick another channel for them." } else { "" }
-                        )
+                        t("serversettings.channels.deleteChannelHint")
                     }))
                     .child(
                         div()
                             .flex()
                             .justify_end()
                             .gap(px(8.0))
-                            .child(soft_button("chan-keep", "Keep it", p).on_click(cx.listener(|this, _, _, cx| {
-                                this.channels.confirming = false;
-                                cx.notify();
-                            })))
+                            .child(soft_button("chan-keep", t("serversettings.shared.keepIt"), p).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.channels.confirming = false;
+                                    cx.notify();
+                                }),
+                            ))
                             .child(
-                                danger_button("chan-delete-yes", if saving { "Deleting…" } else { "Delete" }, p)
-                                    .when(saving, |el| el.opacity(0.6))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if !this.channels.saving {
-                                            this.delete_channel(id.clone(), cx)
-                                        }
-                                    })),
+                                danger_button(
+                                    "chan-delete-yes",
+                                    if saving {
+                                        t("accountsettings.privacy.deleting")
+                                    } else {
+                                        t("serversettings.shared.delete")
+                                    },
+                                    p,
+                                )
+                                .when(saving, |el| el.opacity(0.6))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if !this.channels.saving {
+                                        this.delete_channel(id.clone(), cx)
+                                    }
+                                })),
                             ),
                     ),
                 "chan-confirm",
@@ -961,7 +987,11 @@ impl ServerSettingsView {
                     cx.notify();
                 }))
                 .child(icon("trash").size(px(15.0)))
-                .child(if category { "Delete category" } else { "Delete channel" })
+                .child(if category {
+                    t("serversettings.channels.deleteCategory")
+                } else {
+                    t("serversettings.channels.deleteChannel")
+                })
                 .into_any_element()
         };
         out = out.child(div().flex().child(delete));
@@ -1055,17 +1085,19 @@ impl ServerSettingsView {
                         |el, t| el.opacity(t),
                     ))
                     .child(div().flex_1().min_w_0().child(if synced {
-                        format!("Same as its category, {}.", parent.name)
+                        t_with("desktop.server.channels.synced", &[("category", Arg::Str(&parent.name))])
                     } else {
-                        format!("Its own rules, apart from {}. Its category's apply first.", parent.name)
+                        t_with("serversettings.channelPermissions.apart", &[("category", Arg::Str(&parent.name))])
                     }))
                     .when(!synced, |el| {
-                        el.child(soft_button("chan-sync", "Match the category", p).h(px(28.0)).on_click(cx.listener(
-                            move |this, _, _, cx| {
-                                this.channels.draft = Some(pb_over.clone());
-                                cx.notify();
-                            },
-                        )))
+                        el.child(
+                            soft_button("chan-sync", t("serversettings.channelPermissions.match"), p)
+                                .h(px(28.0))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.channels.draft = Some(pb_over.clone());
+                                    cx.notify();
+                                })),
+                        )
                     }),
             );
         }
@@ -1107,14 +1139,14 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(if category {
-                                "Private category"
+                                t("serversettings.channelPermissions.privateCategory")
                             } else {
-                                "Private channel"
+                                t("serversettings.channelPermissions.privateChannel")
                             }))
                             .child(div().text_sm().text_color(p.muted_foreground).child(if category {
-                                "Only the roles and people you pick see it and the channels that follow it."
+                                t("serversettings.channelPermissions.privateCategoryHint")
                             } else {
-                                "Only the roles and people you pick see it."
+                                t("serversettings.channelPermissions.privateChannelHint")
                             })),
                     )
                     .child(switch("chan-private".into(), private, !may(P::ViewChannels), cx, move |this, on, cx| {
@@ -1212,7 +1244,7 @@ impl ServerSettingsView {
                         .text_size(px(11.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(p.muted_foreground)
-                        .child("WHO CAN SEE IT"),
+                        .child(t("serversettings.channelPermissions.whoCanSee").to_uppercase()),
                 )
                 .child(chips);
             if viewers.is_empty() {
@@ -1220,7 +1252,7 @@ impl ServerSettingsView {
                     div()
                         .text_sm()
                         .text_color(p.muted_foreground)
-                        .child("Nobody but the owner and administrators, for now."),
+                        .child(t("serversettings.channelPermissions.nobodyYet")),
                 );
             }
             if open {
@@ -1258,10 +1290,11 @@ impl ServerSettingsView {
                     .text_sm()
                     .text_color(warn)
                     .child(icon("triangle-alert").size(px(16.0)))
-                    .child(div().flex_1().min_w_0().child(format!(
-                        "Saving this hides the {} from you too. Add one of your roles to keep it.",
-                        if category { "category" } else { "channel" }
-                    ))),
+                    .child(div().flex_1().min_w_0().child(if category {
+                        t("serversettings.channelPermissions.losingCategory")
+                    } else {
+                        t("serversettings.channelPermissions.losingChannel")
+                    })),
                 "chan-losing",
                 Duration::ZERO,
                 -6.0,
@@ -1279,18 +1312,29 @@ impl ServerSettingsView {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Advanced permissions"))
-                        .child(div().text_sm().text_color(p.muted_foreground).child(
-                            "Allow or deny each permission here for a role or a person. The rest follows their roles.",
-                        )),
+                        .child(
+                            div()
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .child(t("serversettings.channelPermissions.advanced")),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.channelPermissions.advancedHint")),
+                        ),
                 )
                 .child(
-                    soft_button("chan-target-add", if open { "Close" } else { "Add" }, p)
-                        .child(icon(if open { "x" } else { "plus" }).size(px(14.0)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.channels.adding = if open { None } else { Some(Adding::Target) };
-                            cx.notify();
-                        })),
+                    soft_button(
+                        "chan-target-add",
+                        if open { t("common.close") } else { t("serversettings.channelPermissions.add") },
+                        p,
+                    )
+                    .child(icon(if open { "x" } else { "plus" }).size(px(14.0)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.channels.adding = if open { None } else { Some(Adding::Target) };
+                        cx.notify();
+                    })),
                 ),
         );
         if open {
@@ -1379,10 +1423,10 @@ impl ServerSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(title.to_uppercase()),
+                    .child(group_name(title).to_uppercase()),
             );
             for perm in list.iter().copied() {
-                let (label, _) = permissions::info(perm);
+                let label = permission_name(perm);
                 let state = if current.allow & bit(perm) != 0 {
                     1
                 } else if current.deny & bit(perm) != 0 {
@@ -1402,9 +1446,7 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .child(div().text_sm().font_weight(FontWeight::BOLD).child(label))
-                            .child(
-                                div().text_xs().text_color(p.muted_foreground).child(permissions::channel_about(perm)),
-                            ),
+                            .child(div().text_xs().text_color(p.muted_foreground).child(permission_here(perm))),
                     )
                     .child(self.tri_state(&current, perm, state, !may(perm), &base, p, window, cx));
                 group = group.child(motion::rise(
@@ -1444,7 +1486,11 @@ impl ServerSettingsView {
                             cx.notify();
                         }))
                         .child(icon("trash").size(px(14.0)))
-                        .child(if category { "Remove from this category" } else { "Remove from this channel" }),
+                        .child(if category {
+                            t("serversettings.channelPermissions.removeFromCategory")
+                        } else {
+                            t("serversettings.channelPermissions.removeFromChannel")
+                        }),
                 ),
             );
         }
@@ -1493,11 +1539,14 @@ impl ServerSettingsView {
         if o.member {
             match member {
                 Some(m) => row.child(avatar(m.user.as_ref(), 20.0, p)).child(div().truncate().child(member_name(m))),
-                None => row.child(icon("user").size(px(15.0))).child(div().truncate().child("Someone who left")),
+                None => row
+                    .child(icon("user").size(px(15.0)))
+                    .child(div().truncate().child(t("serversettings.channelPermissions.someoneLeft"))),
             }
         } else {
-            row.child(dot(role.and_then(role_color), 10.0, p))
-                .child(div().truncate().child(role.map(|r| r.name.clone()).unwrap_or_else(|| "A deleted role".into())))
+            row.child(dot(role.and_then(role_color), 10.0, p)).child(div().truncate().child(
+                role.map(|r| r.name.clone()).unwrap_or_else(|| t("serversettings.channelPermissions.deletedRole")),
+            ))
         }
     }
 
@@ -1544,7 +1593,7 @@ impl ServerSettingsView {
         };
         let mut out = div().flex().flex_col().gap(px(8.0)).p(px(12.0)).rounded(corner(14.0)).bg(alpha(p.muted, 0.5));
         if roles.is_empty() && people.is_empty() {
-            out = out.child(div().text_sm().text_color(p.muted_foreground).child("Everyone's here already."));
+            out = out.child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.channels.allHere")));
         }
         if !roles.is_empty() {
             let mut row = div().flex().flex_wrap().gap(px(6.0));
@@ -1559,7 +1608,7 @@ impl ServerSettingsView {
                         .text_size(px(11.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(p.muted_foreground)
-                        .child("ROLES"),
+                        .child(t("serversettings.nav.roles").to_uppercase()),
                 )
                 .child(row);
         }
@@ -1577,7 +1626,7 @@ impl ServerSettingsView {
                         .text_size(px(11.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(p.muted_foreground)
-                        .child("PEOPLE"),
+                        .child(t("serversettings.nav.people").to_uppercase()),
                 )
                 .child(row);
         }

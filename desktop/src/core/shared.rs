@@ -140,21 +140,30 @@ pub fn foreign_server<'a>(message: &'a pb::Message, server_id: &str) -> Option<&
     message.shared.as_ref()?.server.as_ref().filter(|s| !s.id.is_empty() && s.id != server_id)
 }
 
-/// How long a share code has left, in words: "6 days", "3 hours", "a few minutes".
-pub fn code_left(ms: i64) -> String {
+/// How long a share code has left, rounded the way people say it: 6 days, 3 hours, a few minutes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeLeft {
+    Expired,
+    Days(i64),
+    Hours(i64),
+    Minutes(i64),
+    FewMinutes,
+}
+
+pub fn code_left(ms: i64) -> CodeLeft {
     if ms <= 0 {
-        return "expired".into();
+        return CodeLeft::Expired;
     }
     let hours = ms as f64 / 3_600_000.0;
     // A code made a moment ago "works for 7 days", not 6 and a bit.
     if hours >= 36.0 {
-        return format!("{} days", (hours / 24.0).round());
+        return CodeLeft::Days((hours / 24.0).round() as i64);
     }
     if hours >= 2.0 {
-        return format!("{} hours", hours.floor());
+        return CodeLeft::Hours(hours.floor() as i64);
     }
     let minutes = ms / 60_000;
-    if minutes >= 5 { format!("{minutes} minutes") } else { "a few minutes".into() }
+    if minutes >= 5 { CodeLeft::Minutes(minutes) } else { CodeLeft::FewMinutes }
 }
 
 impl Core {
@@ -407,11 +416,11 @@ mod tests {
 
     #[test]
     fn time_left_on_a_code_reads_plainly() {
-        assert_eq!(code_left(7 * 24 * 3_600_000), "7 days");
-        assert_eq!(code_left(7 * 24 * 3_600_000 - 60_000), "7 days");
-        assert_eq!(code_left(5 * 3_600_000), "5 hours");
-        assert_eq!(code_left(30 * 60_000), "30 minutes");
-        assert_eq!(code_left(60_000), "a few minutes");
-        assert_eq!(code_left(0), "expired");
+        assert_eq!(code_left(7 * 24 * 3_600_000), CodeLeft::Days(7));
+        assert_eq!(code_left(7 * 24 * 3_600_000 - 60_000), CodeLeft::Days(7));
+        assert_eq!(code_left(5 * 3_600_000), CodeLeft::Hours(5));
+        assert_eq!(code_left(30 * 60_000), CodeLeft::Minutes(30));
+        assert_eq!(code_left(60_000), CodeLeft::FewMinutes);
+        assert_eq!(code_left(0), CodeLeft::Expired);
     }
 }

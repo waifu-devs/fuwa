@@ -26,7 +26,7 @@ pub(super) struct Agents {
 
 impl Agents {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
-        let username = cx.new(|cx| InputState::new(window, cx).placeholder("An agent's username"));
+        let username = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.agents.username")));
         let subscriptions =
             vec![cx.subscribe_in(&username, window, |this: &mut ServerSettingsView, s, e: &InputEvent, window, cx| {
                 match e {
@@ -53,11 +53,13 @@ impl Agents {
 }
 
 /// Who may use the server through MCP, as the web's choices name them.
-const MCP_CHOICES: [(pb::McpAccessMode, &str); 3] = [
-    (pb::McpAccessMode::All, "Every agent"),
-    (pb::McpAccessMode::Chosen, "Only chosen"),
-    (pb::McpAccessMode::Off, "None"),
-];
+fn mcp_choices() -> [(pb::McpAccessMode, String); 3] {
+    [
+        (pb::McpAccessMode::All, t("serversettings.agents.mcpAll")),
+        (pb::McpAccessMode::Chosen, t("serversettings.agents.mcpChosen")),
+        (pb::McpAccessMode::Off, t("serversettings.agents.mcpNone")),
+    ]
+}
 
 /// What someone typed as a username: no @, no spaces, lowercase.
 fn clean(name: &str) -> String {
@@ -126,7 +128,7 @@ impl ServerSettingsView {
             mode => mode,
         };
         let width = 112.0;
-        let chosen = MCP_CHOICES.iter().position(|(m, _)| *m == current).unwrap_or(0);
+        let chosen = mcp_choices().iter().position(|(m, _)| *m == current).unwrap_or(0);
         let pill = gpui_kit::base::motion::spring(
             "mcp-choice",
             chosen as f32 * width,
@@ -151,7 +153,7 @@ impl ServerSettingsView {
                     .rounded(corner(9.0))
                     .bg(p.card),
             );
-        for (mode, label) in MCP_CHOICES {
+        for (mode, label) in mcp_choices() {
             let on = mode == current;
             let kept = access.agent_ids.clone();
             row = row.child(
@@ -192,12 +194,9 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(8.0))
                         .child(icon("plug-zap").size(px(16.0)).text_color(hsla(0.73, 0.7, 0.62, 1.0)))
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Through MCP")),
+                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("serversettings.agents.mcp"))),
                 )
-                .child(div().text_xs().text_color(p.muted_foreground).child(
-                    "AI apps such as Claude can use this server through the instance's MCP endpoint with an agent's \
-                     token. This only decides MCP: what an agent can do here is still up to its roles.",
-                ))
+                .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.agents.mcpHint")))
                 .child(row),
             "mcp-choice-in",
             Duration::ZERO,
@@ -320,12 +319,11 @@ impl ServerSettingsView {
                     )),
             )
             .child(
-                div().flex_1().min_w_0().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Agents")).child(
-                    div()
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .child("Accounts programs drive. They talk like members, with the roles you give them."),
-                ),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("settings.nav.agents")))
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.agents.intro"))),
             );
 
         let field = div()
@@ -334,7 +332,7 @@ impl ServerSettingsView {
             .gap(px(8.0))
             .child(div().flex_1().child(Input::new(&self.agents.username).prefix(icon("at-sign").size(px(15.0)))))
             .child(
-                primary_button("agent-add", "Add", p)
+                primary_button("agent-add", t("serversettings.channelPermissions.add"), p)
                     .flex_none()
                     .when(adding, |el| el.opacity(0.6))
                     .child(if adding {
@@ -361,10 +359,13 @@ impl ServerSettingsView {
         let mut section = div().flex().flex_col().gap(px(12.0)).child(header).child(field);
 
         if !yours.is_empty() {
-            let mut row =
-                div().flex().flex_wrap().items_center().gap(px(6.0)).child(
-                    div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("Yours:"),
-                );
+            let mut row = div().flex().flex_wrap().items_center().gap(px(6.0)).child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.agents.yours")),
+            );
             for (n, u) in yours.iter().enumerate() {
                 let name = u.username.clone();
                 let hover = alpha(p.primary, 0.06);
@@ -422,10 +423,7 @@ impl ServerSettingsView {
                         Duration::from_millis(1200),
                         |el, t| el.relative().top(px(-5.0 * (t * std::f32::consts::PI).sin())),
                     ))
-                    .child(div().flex_1().min_w_0().child(
-                        "No agents here yet. Add one by its username; agents are made under Settings, Agents in \
-                         the web app.",
-                    )),
+                    .child(div().flex_1().min_w_0().child(t("desktop.server.agents.none"))),
                 "agents-empty",
                 Duration::ZERO,
                 6.0,
@@ -455,7 +453,13 @@ impl ServerSettingsView {
         let confirming = self.agents.confirming.as_deref() == Some(id.as_str());
         let removing = self.agents.busy.as_deref() == Some(id.as_str());
         let shown = if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() };
-        let added = m.joined_at.as_ref().map(|t| format!(" · added {}", stamp(t.seconds * 1000))).unwrap_or_default();
+        let line = match m.joined_at.as_ref() {
+            Some(at) => t_with(
+                "serversettings.agents.line",
+                &[("username", Arg::Str(&user.username)), ("when", Arg::Str(&stamp(at.seconds * 1000)))],
+            ),
+            None => format!("@{}", user.username),
+        };
 
         let face = avatar(Some(&user), 36.0, p);
         let face = if fresh {
@@ -475,11 +479,15 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(4.0))
                     .child(
-                        danger_button(SharedString::from(format!("agent-out-yes-{yes}")), "Remove", p)
-                            .h(px(32.0))
-                            .px(px(12.0))
-                            .text_xs()
-                            .on_click(cx.listener(move |this, _, _, cx| this.remove_agent(yes.clone(), cx))),
+                        danger_button(
+                            SharedString::from(format!("agent-out-yes-{yes}")),
+                            t("serversettings.channelPermissions.remove"),
+                            p,
+                        )
+                        .h(px(32.0))
+                        .px(px(12.0))
+                        .text_xs()
+                        .on_click(cx.listener(move |this, _, _, cx| this.remove_agent(yes.clone(), cx))),
                     )
                     .child(icon_button(SharedString::from(format!("agent-out-no-{no}")), "x", p).on_click(
                         cx.listener(|this, _, _, cx| {
@@ -513,7 +521,7 @@ impl ServerSettingsView {
                 } else {
                     icon("user-minus").size(px(14.0)).into_any_element()
                 })
-                .child("Remove")
+                .child(t("serversettings.channelPermissions.remove"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if this.agents.busy.is_none() {
                         this.agents.confirming = Some(ask.clone());
@@ -598,13 +606,7 @@ impl ServerSettingsView {
                                     ))
                                 }),
                         )
-                        .child(
-                            div()
-                                .truncate()
-                                .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(format!("@{}{added}", user.username)),
-                        ),
+                        .child(div().truncate().text_xs().text_color(p.muted_foreground).child(line)),
                 )
                 .children(mcp_switch)
                 .child(end),

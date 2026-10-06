@@ -9,8 +9,9 @@ use std::collections::HashSet;
 use gpui_kit::Div;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 
+use super::roles::permission_name;
 use super::*;
-use crate::core::shared::{SHAREABLE, code_left, find_share_code, share_code_instance, waiting};
+use crate::core::shared::{CodeLeft, SHAREABLE, code_left, find_share_code, share_code_instance, waiting};
 use crate::ui::shared_marks::{glyph, server_picture, server_tag};
 
 /// What a confirm strip ends.
@@ -56,8 +57,8 @@ pub(super) struct Shared {
 
 impl Shared {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
-        let code = cx.new(|cx| InputState::new(window, cx).placeholder("Paste a share code"));
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("channel-name"));
+        let code = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.sharedChannels.paste")));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.channels.namePlaceholder")));
         let subscriptions = vec![
             cx.subscribe_in(&code, window, |this: &mut ServerSettingsView, input, e: &InputEvent, window, cx| {
                 match e {
@@ -117,17 +118,32 @@ fn capitalized(text: &str) -> String {
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
-fn ms(t: Option<&prost_types::Timestamp>) -> i64 {
-    t.map_or(0, |t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000)
+fn ms(at: Option<&prost_types::Timestamp>) -> i64 {
+    at.map_or(0, |at| at.seconds * 1000 + i64::from(at.nanos) / 1_000_000)
+}
+
+/// How long a share code still works, as the web's `codeLeft` says it.
+fn time_left(left: i64) -> String {
+    match code_left(left) {
+        CodeLeft::Expired => t("serversettings.sharedChannels.expired"),
+        CodeLeft::Days(n) => t_with("desktop.server.shared.days", &[("count", Arg::Num(n))]),
+        CodeLeft::Hours(n) => t_with("desktop.server.shared.hours", &[("count", Arg::Num(n))]),
+        CodeLeft::Minutes(n) => t_with("desktop.server.shared.minutes", &[("count", Arg::Num(n))]),
+        CodeLeft::FewMinutes => t("serversettings.sharedChannels.fewMinutes"),
+    }
 }
 
 /// What a connection is, in a line, from this server's side.
 fn connection_line(c: &pb::SharedConnection, home_name: &str, here: Option<&str>) -> String {
+    let channel = format!("#{home_name}");
     match (c.home, waiting(c)) {
-        (true, true) => format!("wants to show #{home_name} in their server"),
-        (true, false) => format!("sees #{home_name}"),
-        (false, true) => format!("Waiting for them to approve #{home_name}"),
-        (false, false) => format!("#{home_name}, here as #{}", here.unwrap_or(home_name)),
+        (true, true) => t_with("serversettings.sharedChannels.wantsToShow", &[("channel", Arg::Str(&channel))]),
+        (true, false) => t_with("serversettings.sharedChannels.sees", &[("channel", Arg::Str(&channel))]),
+        (false, true) => t_with("serversettings.sharedChannels.waitingForApproval", &[("channel", Arg::Str(&channel))]),
+        (false, false) => t_with(
+            "serversettings.sharedChannels.hereAs",
+            &[("channel", Arg::Str(&channel)), ("here", Arg::Str(&format!("#{}", here.unwrap_or(home_name))))],
+        ),
     }
 }
 
@@ -138,58 +154,69 @@ fn ask_copy(
     other: &str,
     home_name: &str,
     here: Option<&str>,
-) -> (String, String, &'static str, String) {
+) -> (String, String, String, String) {
+    let approved = || {
+        t_with(
+            "serversettings.sharedChannels.approved",
+            &[("channel", Arg::Str(home_name)), ("server", Arg::Str(other))],
+        )
+    };
+    let disconnected = || t_with("serversettings.sharedChannels.disconnected", &[("server", Arg::Str(other))]);
     match ask {
         Ask::Approve if !c.instance.is_empty() => (
-            format!("Let {other} on {} read #{home_name}?", c.instance),
-            format!(
-                "Their people will read everything said in #{home_name}, earlier messages included, and write there. \
-                 They're on another instance, so check their key fingerprint first."
+            t_with(
+                "desktop.server.shared.approveAskOn",
+                &[("server", Arg::Str(other)), ("instance", Arg::Str(&c.instance)), ("channel", Arg::Str(home_name))],
             ),
-            "Approve",
-            format!("#{home_name} is now shared with {other}"),
+            t_with("desktop.server.shared.approveHintOn", &[("channel", Arg::Str(home_name))]),
+            t("serversettings.sharedChannels.approve"),
+            approved(),
         ),
         Ask::Approve => (
-            format!("Let {other} read #{home_name}?"),
-            format!(
-                "Their people will read everything said in #{home_name}, earlier messages included, and write there."
+            t_with(
+                "desktop.server.shared.approveAsk",
+                &[("server", Arg::Str(other)), ("channel", Arg::Str(home_name))],
             ),
-            "Approve",
-            format!("#{home_name} is now shared with {other}"),
+            t_with("desktop.server.shared.approveHint", &[("channel", Arg::Str(home_name))]),
+            t("serversettings.sharedChannels.approve"),
+            approved(),
         ),
         Ask::TurnDown => (
-            format!("Turn down {other}?"),
-            format!("#{home_name} won't show up in their server. They can ask again with a new code."),
-            "Turn down",
-            format!("Turned down {other}"),
+            t_with("serversettings.sharedChannels.turnDownAsk", &[("server", Arg::Str(other))]),
+            t_with("serversettings.sharedChannels.turnDownHint", &[("channel", Arg::Str(home_name))]),
+            t("serversettings.applications.turnDown"),
+            t_with("serversettings.applications.turnedDownDone", &[("name", Arg::Str(other))]),
         ),
         Ask::Cancel => (
-            "Cancel this request?".into(),
-            format!("{other} won't see the request anymore. You can ask again with a new code."),
-            "Cancel request",
-            "Request canceled".into(),
+            t("serversettings.sharedChannels.cancelAsk"),
+            t_with("serversettings.sharedChannels.cancelHint", &[("server", Arg::Str(other))]),
+            t("serversettings.sharedChannels.cancelRequest"),
+            t("serversettings.sharedChannels.canceled"),
         ),
         Ask::Disconnect if c.home => (
-            format!("Stop sharing #{home_name} with {other}?"),
-            format!("It goes away from {other}. Everything said stays here, their people's messages included."),
-            "Disconnect",
-            format!("Disconnected from {other}"),
+            t_with(
+                "serversettings.sharedChannels.stopAsk",
+                &[("channel", Arg::Str(home_name)), ("server", Arg::Str(other))],
+            ),
+            t_with("serversettings.sharedChannels.stopHint", &[("server", Arg::Str(other))]),
+            t("serversettings.sharedChannels.disconnect"),
+            disconnected(),
         ),
         Ask::Disconnect => (
-            format!("Remove #{} from this server?", here.unwrap_or(home_name)),
-            format!("The channel goes away here. Everything said stays on {other}, your people's messages included."),
-            "Disconnect",
-            format!("Disconnected from {other}"),
+            t_with("serversettings.sharedChannels.removeAsk", &[("channel", Arg::Str(here.unwrap_or(home_name)))]),
+            t_with("serversettings.sharedChannels.removeHint", &[("server", Arg::Str(other))]),
+            t("serversettings.sharedChannels.disconnect"),
+            disconnected(),
         ),
     }
 }
 
 /// What a connection with a server on another instance says beside that instance's key.
-fn instance_note(c: &pb::SharedConnection) -> &'static str {
+fn instance_note(c: &pb::SharedConnection) -> String {
     match (c.home, waiting(c)) {
-        (true, true) => "Before approving, check their key fingerprint with their admins somewhere you trust:",
-        (false, true) => "Their key fingerprint:",
-        _ => "Messages don't cross instances yet. Their key fingerprint:",
+        (true, true) => t("serversettings.sharedChannels.checkBeforeApproving"),
+        (false, true) => t("serversettings.sharedChannels.theirFingerprint"),
+        _ => t("desktop.server.shared.notAcross"),
     }
 }
 
@@ -262,8 +289,13 @@ fn instance_line(instance: &str, fingerprint: &str, note: &str, p: &Palette) -> 
                         .flex()
                         .flex_wrap()
                         .gap(px(4.0))
-                        .child("On another instance,")
-                        .child(div().font_weight(FontWeight::BOLD).child(format!("{instance}.")))
+                        .child(marked(
+                            &t_with(
+                                "serversettings.sharedChannels.otherInstance",
+                                &[("instance", Arg::Str(&strong(instance)))],
+                            ),
+                            p,
+                        ))
                         .child(div().text_color(p.muted_foreground).child(note.to_owned())),
                 )
                 .child(div().font_family("monospace").text_xs().child(fingerprint.to_owned())),
@@ -306,7 +338,7 @@ impl ServerSettingsView {
         let text = self.shared.code.read(cx).value().to_string();
         let code = find_share_code(&text).to_owned();
         if code.is_empty() {
-            self.shared.look_error = Some("That doesn't look like a share code.".into());
+            self.shared.look_error = Some(t("desktop.server.shared.notCode"));
             cx.notify();
             return;
         }
@@ -344,7 +376,10 @@ impl ServerSettingsView {
         let name = if chosen == preview.channel_name { String::new() } else { chosen.clone() };
         let parent = self.shared.parent.clone();
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        let home = preview.home_server.as_ref().map_or("the other server".to_owned(), |s| s.name.clone());
+        let home = preview
+            .home_server
+            .as_ref()
+            .map_or_else(|| t("serversettings.sharedChannels.theOtherServer"), |s| s.name.clone());
         self.run(
             cx,
             async move { core.accept_share(&key, &sid, &code, &name, &parent).await },
@@ -352,7 +387,14 @@ impl ServerSettingsView {
                 this.shared.asking = false;
                 match result {
                     Ok(()) => {
-                        this.toast("send", format!("Asked {home}. #{chosen} shows up here once they approve."), cx);
+                        this.toast(
+                            "send",
+                            t_with(
+                                "serversettings.sharedChannels.asked",
+                                &[("server", Arg::Str(&home)), ("channel", Arg::Str(&chosen))],
+                            ),
+                            cx,
+                        );
                         this.shared.preview = None;
                         this.shared.parent.clear();
                         this.shared.clear_code = true;
@@ -447,7 +489,18 @@ impl ServerSettingsView {
             (self.core.clone(), self.key.clone(), self.server.clone(), block.channel_id.clone());
         let id = format!("{}/{user_id}", block.channel_id);
         let work = async move { core.block_from_channel(&key, &sid, &cid, &user_id, false).await };
-        self.shared_change(id, cx, work, Some(("undo", format!("{name} can see #{channel} again"))));
+        self.shared_change(
+            id,
+            cx,
+            work,
+            Some((
+                "undo",
+                t_with(
+                    "serversettings.sharedChannels.letBackInDone",
+                    &[("name", Arg::Str(&name)), ("channel", Arg::Str(&channel))],
+                ),
+            )),
+        );
     }
 
     fn make_code(&mut self, channel_id: String, elsewhere: bool, cx: &mut Context<Self>) {
@@ -508,10 +561,7 @@ impl ServerSettingsView {
                 .border_color(p.border)
                 .text_sm()
                 .text_color(p.muted_foreground)
-                .child(
-                    "Sharing channels is turned off on this instance, so nothing new can be shared. Channels already \
-                     shared keep working until either server ends them.",
-                )
+                .child(t("serversettings.sharedChannels.off"))
                 .into_any_element()
         });
         if let Some(error) = &self.shared.error {
@@ -525,13 +575,18 @@ impl ServerSettingsView {
         let codes: Vec<&pb::ShareCode> = list.codes.iter().filter(|c| ms(c.expires_at.as_ref()) > now).collect();
 
         if !requests.is_empty() {
-            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading("Waiting", requests.len(), p));
+            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading(
+                &t("serversettings.sharedChannels.waiting"),
+                requests.len(),
+                p,
+            ));
             for (n, c) in requests.iter().enumerate() {
                 section = section.child(self.connection_row(c, name_of(&c.channel_id).as_deref(), n, &url, p, cx));
             }
             page = page.child(section);
         }
-        let mut section = div().flex().flex_col().gap(px(8.0)).child(heading("Shared channels", active.len(), p));
+        let mut section =
+            div().flex().flex_col().gap(px(8.0)).child(heading(&t("serversettings.nav.shared"), active.len(), p));
         if active.is_empty() {
             section = section.child(nothing_shared(p));
         }
@@ -540,15 +595,22 @@ impl ServerSettingsView {
         }
         page = page.child(section);
         if !codes.is_empty() {
-            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading("Share codes", codes.len(), p));
+            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading(
+                &t("serversettings.sharedChannels.codes"),
+                codes.len(),
+                p,
+            ));
             for (n, code) in codes.iter().enumerate() {
                 section = section.child(self.code_row(code, now, n, p, window, cx));
             }
             page = page.child(section);
         }
         if !list.blocks.is_empty() {
-            let mut section =
-                div().flex().flex_col().gap(px(8.0)).child(heading("People kept out", list.blocks.len(), p));
+            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading(
+                &t("serversettings.sharedChannels.keptOut"),
+                list.blocks.len(),
+                p,
+            ));
             for (n, b) in list.blocks.iter().enumerate() {
                 section = section.child(self.block_row(b, name_of(&b.channel_id), can_kick, n, &url, p, window, cx));
             }
@@ -606,11 +668,15 @@ impl ServerSettingsView {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Add a channel from another server"))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(
-                                "Paste the share code its admins gave you. You'll see where it leads before anything \
-                                 changes.",
-                            )),
+                            .child(
+                                div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.sharedChannels.add")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("serversettings.sharedChannels.addHint")),
+                            ),
                     ),
             )
             .child(
@@ -626,7 +692,7 @@ impl ServerSettingsView {
                         ),
                     )
                     .child(
-                        primary_button("share-preview", "Preview", p)
+                        primary_button("share-preview", t("settings.controls.preview"), p)
                             .when(looking || !typed, |el| el.opacity(0.6))
                             .child(if looking {
                                 spinner("share-preview-spin", 15.0, window)
@@ -649,12 +715,16 @@ impl ServerSettingsView {
         let categories: Vec<&pb::Channel> =
             channels.iter().filter(|c| c.r#type == pb::ChannelType::Category as i32).collect();
         let mut picks = div().flex().flex_wrap().gap(px(6.0)).child(
-            chip("share-parent-none".into(), "No category", self.shared.parent.is_empty(), p).on_click(cx.listener(
-                |this, _, _, cx| {
-                    this.shared.parent.clear();
-                    cx.notify();
-                },
-            )),
+            chip(
+                "share-parent-none".into(),
+                &t("serversettings.channels.noCategory"),
+                self.shared.parent.is_empty(),
+                p,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.shared.parent.clear();
+                cx.notify();
+            })),
         );
         for c in categories {
             let id = c.id.clone();
@@ -674,11 +744,11 @@ impl ServerSettingsView {
             .gap(px(14.0))
             .child(preview_card(&preview, url, &code, p))
             .child(labeled(
-                "Name here",
+                &t("serversettings.sharedChannels.nameHere"),
                 Input::new(&self.shared.name).prefix(icon("hash").size(px(16.0)).text_color(p.muted_foreground)),
                 p,
             ))
-            .child(labeled("Category", picks, p))
+            .child(labeled(&t("serversettings.channels.category"), picks, p))
             .when_some(self.shared.ask_error.clone(), |el, e| {
                 el.child(div().text_sm().text_color(p.destructive).child(e))
             })
@@ -692,14 +762,16 @@ impl ServerSettingsView {
                             .flex_1()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child("Their admins approve it before it shows up here."),
+                            .child(t("serversettings.sharedChannels.approveNote")),
                     )
-                    .child(soft_button("share-not-now", "Not now", p).on_click(cx.listener(|this, _, _, cx| {
-                        this.shared.preview = None;
-                        cx.notify();
-                    })))
+                    .child(soft_button("share-not-now", t("serversettings.sharedChannels.notNow"), p).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.shared.preview = None;
+                            cx.notify();
+                        }),
+                    ))
                     .child(
-                        primary_button("share-ask", "Ask to connect", p)
+                        primary_button("share-ask", t("serversettings.sharedChannels.askToConnect"), p)
                             .when(asking || chosen.is_empty(), |el| el.opacity(0.6))
                             .child(if asking {
                                 spinner("share-ask-spin", 15.0, window)
@@ -722,11 +794,12 @@ impl ServerSettingsView {
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let other = c.server.as_ref().map_or("another server".to_owned(), |s| s.name.clone());
+        let other =
+            c.server.as_ref().map_or_else(|| t("serversettings.sharedChannels.anotherServer"), |s| s.name.clone());
         let home_name = if !c.home_channel_name.is_empty() {
             c.home_channel_name.clone()
         } else {
-            here.unwrap_or("a channel").to_owned()
+            here.map_or_else(|| t("serversettings.sharedChannels.aChannel"), str::to_owned)
         };
         let is_waiting = waiting(c);
         let busy = self.shared.busy.contains(&c.id);
@@ -751,9 +824,9 @@ impl ServerSettingsView {
             );
         let state = {
             let (text, fg, bg) = if is_waiting {
-                ("Waiting", Hsla::from(p.muted_foreground), Hsla::from(p.muted))
+                (t("serversettings.sharedChannels.waiting"), Hsla::from(p.muted_foreground), Hsla::from(p.muted))
             } else {
-                ("Connected", Hsla::from(p.primary), alpha(p.primary, 0.12))
+                (t("serversettings.sharedChannels.connected"), Hsla::from(p.primary), alpha(p.primary, 0.12))
             };
             div()
                 .flex_none()
@@ -787,22 +860,31 @@ impl ServerSettingsView {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(soft_button(SharedString::from(format!("conn-down-{id}")), "Turn down", p).on_click(
-                    cx.listener(move |this, _, _, cx| {
+                .child(
+                    soft_button(
+                        SharedString::from(format!("conn-down-{id}")),
+                        t("serversettings.applications.turnDown"),
+                        p,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.shared.confirm = Some((id2.clone(), Ask::TurnDown));
                         this.shared.confirm_error = None;
                         cx.notify();
-                    }),
-                ))
+                    })),
+                )
                 .child(
-                    primary_button(SharedString::from(format!("conn-approve-{id}")), "Approve", p)
-                        .when(busy, |el| el.opacity(0.6))
-                        .child(icon("check").size(px(15.0)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.shared.confirm = Some((id3.clone(), Ask::Approve));
-                            this.shared.confirm_error = None;
-                            cx.notify();
-                        })),
+                    primary_button(
+                        SharedString::from(format!("conn-approve-{id}")),
+                        t("serversettings.sharedChannels.approve"),
+                        p,
+                    )
+                    .when(busy, |el| el.opacity(0.6))
+                    .child(icon("check").size(px(15.0)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.shared.confirm = Some((id3.clone(), Ask::Approve));
+                        this.shared.confirm_error = None;
+                        cx.notify();
+                    })),
                 )
                 .into_any_element()
         } else {
@@ -810,7 +892,7 @@ impl ServerSettingsView {
             let id2 = id.clone();
             soft_button(
                 SharedString::from(format!("conn-end-{id}")),
-                if is_waiting { "Cancel" } else { "Disconnect" },
+                if is_waiting { t("common.cancel") } else { t("serversettings.sharedChannels.disconnect") },
                 p,
             )
             .text_color(p.destructive)
@@ -834,7 +916,7 @@ impl ServerSettingsView {
                     .child(div().font_weight(FontWeight::BOLD).truncate().child(if c.home {
                         other.clone()
                     } else {
-                        format!("From {other}")
+                        t_with("serversettings.sharedChannels.from", &[("server", Arg::Str(&other))])
                     }))
                     .child(div().text_sm().text_color(p.muted_foreground).child(connection_line(c, &home_name, here))),
             )
@@ -857,13 +939,14 @@ impl ServerSettingsView {
             })
             .child(head);
         if !c.instance.is_empty() {
-            card = card.child(instance_line(&c.instance, &c.fingerprint, instance_note(c), p));
+            card = card.child(instance_line(&c.instance, &c.fingerprint, &instance_note(c), p));
         }
         if !c.checked_by.is_empty() {
-            let (who, whose) = if c.home {
-                ("Your", ", their people's messages included.")
+            let providers = c.checked_by.join(", ");
+            let note = if c.home {
+                t_with("serversettings.sharedChannels.yourAutoMod", &[("providers", Arg::Str(&providers))])
             } else {
-                ("Their", ", your people's messages included.")
+                t_with("serversettings.sharedChannels.theirAutoMod", &[("providers", Arg::Str(&providers))])
             };
             card = card.child(
                 div()
@@ -873,10 +956,7 @@ impl ServerSettingsView {
                     .text_sm()
                     .text_color(p.muted_foreground)
                     .child(icon("eye").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
-                    .child(div().flex_1().min_w_0().child(format!(
-                        "{who} AutoMod sends what's written there to {}{whose}",
-                        c.checked_by.join(", ")
-                    ))),
+                    .child(div().flex_1().min_w_0().child(note)),
             );
         }
         if !is_waiting {
@@ -907,7 +987,11 @@ impl ServerSettingsView {
                             .child(
                                 soft_button(
                                     SharedString::from(format!("conn-keep-{id}")),
-                                    if ask == Ask::Approve { "Not yet" } else { "Keep it" },
+                                    if ask == Ask::Approve {
+                                        t("desktop.server.shared.notYet")
+                                    } else {
+                                        t("serversettings.shared.keepIt")
+                                    },
                                     p,
                                 )
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -951,14 +1035,14 @@ impl ServerSettingsView {
         let on = |perm: P| c.allowed().any(|a| a == perm);
         if !c.home {
             let mut list = div().flex().flex_wrap().gap(px(6.0)).pl(px(52.0));
-            for (n, (perm, label, glyph_name)) in SHAREABLE.iter().enumerate() {
-                list = list.child(capability(on(*perm), label, glyph_name, n, &c.id, p));
+            for (n, (perm, _, glyph_name)) in SHAREABLE.iter().enumerate() {
+                list = list.child(capability(on(*perm), &permission_name(*perm), glyph_name, n, &c.id, p));
             }
             return list.into_any_element();
         }
         // Three across where there's room, wrapping in narrower places (a channel's Share tab).
         let mut grid = div().flex().flex_wrap().gap(px(6.0)).p(px(6.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.4));
-        for (perm, label, glyph_name) in SHAREABLE {
+        for (perm, _, glyph_name) in SHAREABLE {
             let lit = on(perm);
             let saving = self.shared.busy.contains(&format!("{}/{}", c.id, perm as i32));
             let any_saving = self.shared.busy.iter().any(|b| b.starts_with(&format!("{}/", c.id)));
@@ -985,7 +1069,15 @@ impl ServerSettingsView {
                             .text_color(if lit { p.primary } else { p.muted_foreground })
                             .child(icon(glyph_name).size(px(14.0))),
                     )
-                    .child(div().flex_1().min_w_0().truncate().text_sm().font_weight(FontWeight::BOLD).child(label))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .child(permission_name(perm)),
+                    )
                     .child(if saving {
                         icon("loader-circle").size(px(16.0)).text_color(p.muted_foreground).into_any_element()
                     } else {
@@ -1067,7 +1159,7 @@ impl ServerSettingsView {
                     .text_sm()
                     .text_color(if left < 86_400_000 { p.destructive } else { p.muted_foreground })
                     .child(icon("timer").size(px(14.0)))
-                    .child(code_left(left)),
+                    .child(time_left(left)),
             )
             .child(
                 icon_button(
@@ -1106,8 +1198,8 @@ impl ServerSettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let name = b.user.as_ref().map_or("Someone".to_owned(), user_name);
-        let channel = channel.unwrap_or_else(|| "a channel".into());
+        let name = b.user.as_ref().map_or_else(|| t("common.someone"), user_name);
+        let channel = channel.unwrap_or_else(|| t("serversettings.sharedChannels.aChannel"));
         let id = format!("{}/{}", b.channel_id, b.user.as_ref().map(|u| u.id.as_str()).unwrap_or(""));
         let lifting = self.shared.busy.contains(&id);
         let b2 = b.clone();
@@ -1137,26 +1229,27 @@ impl ServerSettingsView {
                             .child(div().min_w_0().truncate().child(name.clone()))
                             .when_some(b.server.as_ref(), |el, s| el.child(server_tag(s, url, p))),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .truncate()
-                            .child(format!("Kept out of #{channel} · {}", stamp(ms(b.created_at.as_ref())))),
-                    ),
+                    .child(div().text_xs().text_color(p.muted_foreground).truncate().child(t_with(
+                        "serversettings.sharedChannels.keptOutOf",
+                        &[("channel", Arg::Str(&channel)), ("date", Arg::Str(&stamp(ms(b.created_at.as_ref()))))],
+                    ))),
             )
             .when(can_kick, |el| {
                 el.child(
-                    soft_button(SharedString::from(format!("block-lift-{id}")), "Let back in", p)
-                        .when(lifting, |el| el.opacity(0.6))
-                        .child(if lifting {
-                            spinner(format!("block-lift-spin-{id}"), 14.0, window)
-                        } else {
-                            icon("undo").size(px(14.0)).into_any_element()
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.let_back_in(&b2, name2.clone(), channel2.clone(), cx)
-                        })),
+                    soft_button(
+                        SharedString::from(format!("block-lift-{id}")),
+                        t("serversettings.sharedChannels.letBackIn"),
+                        p,
+                    )
+                    .when(lifting, |el| el.opacity(0.6))
+                    .child(if lifting {
+                        spinner(format!("block-lift-spin-{id}"), 14.0, window)
+                    } else {
+                        icon("undo").size(px(14.0)).into_any_element()
+                    })
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.let_back_in(&b2, name2.clone(), channel2.clone(), cx)),
+                    ),
                 )
             });
         motion::rise(
@@ -1196,16 +1289,13 @@ impl ServerSettingsView {
                 .shared
                 .as_ref()
                 .and_then(|s| s.home_server.as_ref())
-                .map_or("another server".into(), |s| s.name.clone());
-            let mut out =
+                .map_or_else(|| t("serversettings.sharedChannels.anotherServer"), |s| s.name.clone());
+            let mut out = div().flex().flex_col().gap(px(14.0)).child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(format!(
-                    "This channel comes from {home}, where its messages are kept. You decide which of your people see \
-                     it with this channel's permissions; they decide what your people may do there."
-                )));
+                    .text_sm()
+                    .text_color(p.muted_foreground)
+                    .child(t_with("serversettings.sharedChannels.comesFrom", &[("server", Arg::Str(&home))])),
+            );
             for (n, c) in guests.iter().enumerate() {
                 out = out.child(self.connection_row(c, Some(&channel.name), n, &url, p, cx));
             }
@@ -1240,7 +1330,7 @@ impl ServerSettingsView {
                 .items_center()
                 .gap(px(16.0))
                 .child(
-                    primary_button("share-make", "Create share code", p)
+                    primary_button("share-make", t("serversettings.sharedChannels.createCode"), p)
                         .when(making, |el| el.opacity(0.6))
                         .child(if making {
                             spinner("share-make-spin", 15.0, window)
@@ -1267,13 +1357,13 @@ impl ServerSettingsView {
                                         div()
                                             .text_sm()
                                             .font_weight(FontWeight::BOLD)
-                                            .child("For a server on another instance"),
+                                            .child(t("serversettings.sharedChannels.elsewhere")),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(p.muted_foreground)
-                                            .child("The code names this instance, so theirs can find it."),
+                                            .child(t("serversettings.sharedChannels.elsewhereHint")),
                                     ),
                             ),
                     )
@@ -1284,9 +1374,9 @@ impl ServerSettingsView {
                 .text_xs()
                 .text_color(p.muted_foreground)
                 .child(if !on {
-                    "Sharing is turned off on this instance."
+                    t("serversettings.sharedChannels.offShort")
                 } else {
-                    "A channel can be shared with one other server for now."
+                    t("serversettings.sharedChannels.onlyOne")
                 })
                 .into_any_element()
         };
@@ -1320,17 +1410,13 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .text_sm()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::EXTRA_BOLD)
-                                    .child(format!("Share #{} with another server", channel.name)),
-                            )
-                            .child(div().text_color(p.muted_foreground).child(format!(
-                                "Give a share code to the other server's admins. They'll see this server's name, #{0} \
-                                 and its topic, and what their people may do, then ask to connect. Nothing is shared \
-                                 until you approve. Once you do, their people can read everything said here, past \
-                                 messages included. Messages stay here.",
-                                channel.name
+                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t_with(
+                                "serversettings.sharedChannels.shareTitle",
+                                &[("channel", Arg::Str(&channel.name))],
+                            )))
+                            .child(div().text_color(p.muted_foreground).child(t_with(
+                                "serversettings.sharedChannels.shareHint",
+                                &[("channel", Arg::Str(&channel.name))],
                             ))),
                     ),
             )
@@ -1341,13 +1427,15 @@ impl ServerSettingsView {
 
         let mut out = div().flex().flex_col().gap(px(20.0)).child(intro);
         if !codes.is_empty() {
-            let mut section = div().flex().flex_col().gap(px(8.0)).child(heading("Codes still out", 0, p));
+            let mut section =
+                div().flex().flex_col().gap(px(8.0)).child(heading(&t("serversettings.sharedChannels.codesOut"), 0, p));
             for (n, code) in codes.iter().enumerate() {
                 section = section.child(self.code_row(code, now, n, p, window, cx));
             }
             out = out.child(section);
         }
-        let mut with = div().flex().flex_col().gap(px(8.0)).child(heading("Shared with", 0, p));
+        let mut with =
+            div().flex().flex_col().gap(px(8.0)).child(heading(&t("serversettings.sharedChannels.sharedWith"), 0, p));
         if list.is_none() {
             with = with.child(shimmer_rows(1, p));
         } else if guests.is_empty() {
@@ -1359,9 +1447,9 @@ impl ServerSettingsView {
                     .text_sm()
                     .text_color(p.muted_foreground)
                     .child(icon("clipboard-paste").size(px(16.0)))
-                    .child("No other server yet.")
+                    .child(t("serversettings.sharedChannels.noGuest"))
                     .child(icon("arrow-right").size(px(14.0)))
-                    .child("Send a code to start."),
+                    .child(t("serversettings.sharedChannels.sendCode")),
             );
         } else {
             for (n, c) in guests.iter().enumerate() {
@@ -1377,10 +1465,13 @@ impl ServerSettingsView {
         let copied =
             self.copied.as_ref().is_some_and(|(c, at)| *c == code.code && at.elapsed() < Duration::from_millis(1400));
         let value = code.code.clone();
-        let reach = if share_code_instance(&code.code).is_empty() {
-            " on this instance."
-        } else {
-            ", here or on another instance."
+        let works_for = {
+            let time = time_left(ms(code.expires_at.as_ref()) - now);
+            if share_code_instance(&code.code).is_empty() {
+                t_with("serversettings.sharedChannels.worksForHere", &[("time", Arg::Str(&time))])
+            } else {
+                t_with("serversettings.sharedChannels.worksForAnywhere", &[("time", Arg::Str(&time))])
+            }
         };
         motion::rise(
             div()
@@ -1420,10 +1511,7 @@ impl ServerSettingsView {
                         .text_xs()
                         .text_color(p.muted_foreground)
                         .child(icon("timer").size(px(12.0)))
-                        .child(format!(
-                            "Works for {}, for one server{reach}",
-                            code_left(ms(code.expires_at.as_ref()) - now)
-                        )),
+                        .child(works_for),
                 ),
             SharedString::from(format!("fresh-{}", code.code)),
             Duration::ZERO,
@@ -1459,17 +1547,21 @@ fn nothing_shared(p: &Palette) -> impl IntoElement {
             Duration::from_millis(120),
             10.0,
         ))
-        .child(div().font_weight(FontWeight::BOLD).child("Nothing shared yet"))
-        .child(div().max_w(px(380.0)).text_center().text_sm().text_color(p.muted_foreground).child(
-            "Share one of your channels from its settings (Share tab), or add another server's channel with the code \
-             its admins give you.",
-        ))
+        .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.sharedChannels.nothingYet")))
+        .child(
+            div()
+                .max_w(px(380.0))
+                .text_center()
+                .text_sm()
+                .text_color(p.muted_foreground)
+                .child(t("serversettings.sharedChannels.nothingYetHint")),
+        )
 }
 
 /// Where a code leads: whose channel it is, where what's said is kept, and what your people may do there.
 fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &Palette) -> Div {
     let home = preview.home_server.as_ref();
-    let home_name = home.map_or("the other server".to_owned(), |s| s.name.clone());
+    let home_name = home.map_or_else(|| t("serversettings.sharedChannels.theOtherServer"), |s| s.name.clone());
     let left = ms(preview.expires_at.as_ref()) - now_ms();
     let line = |glyph_name: &str, n: usize, body: Div| {
         motion::rise(
@@ -1492,23 +1584,23 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
         body = body.child(instance_line(
             &preview.instance,
             &preview.fingerprint,
-            "Before asking, check its key fingerprint with their admins somewhere you trust:",
+            &t("serversettings.sharedChannels.checkBeforeAsking"),
             p,
         ));
     }
     body = body.child(line(
         "database",
         1,
-        div().child(format!(
-            "Messages are stored only on {home_name}. Your people's messages there are kept by them too, even if you \
-             disconnect later."
-        )),
+        div().child(t_with("serversettings.sharedChannels.storedOn", &[("server", Arg::Str(&home_name))])),
     ));
     if !preview.checked_by.is_empty() {
         body = body.child(line(
             "eye",
             2,
-            div().child(format!("Their AutoMod also sends what's written there to {}.", preview.checked_by.join(", "))),
+            div().child(t_with(
+                "serversettings.sharedChannels.theirAutoModAlso",
+                &[("providers", Arg::Str(&preview.checked_by.join(", ")))],
+            )),
         ));
     }
     if preview.guest_count > 0 {
@@ -1516,25 +1608,30 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
         body = body.child(
             div()
                 .text_color(p.muted_foreground)
-                .child(format!("Already shown in {n} other {}.", if n == 1 { "server" } else { "servers" })),
+                .child(t_with("serversettings.sharedChannels.alreadyShown", &[("count", Arg::Num(i64::from(n)))])),
         );
     }
     let allowed: Vec<i32> = preview.allowed.clone();
-    let mut caps = div().flex().flex_wrap().gap(px(6.0)).child(capability(true, "Read", "eye", 0, code, p));
-    for (n, (perm, label, glyph_name)) in SHAREABLE.iter().enumerate() {
-        caps = caps.child(capability(allowed.contains(&(*perm as i32)), label, glyph_name, n + 1, code, p));
+    let mut caps = div().flex().flex_wrap().gap(px(6.0)).child(capability(
+        true,
+        &t("serversettings.sharedChannels.read"),
+        "eye",
+        0,
+        code,
+        p,
+    ));
+    for (n, (perm, _, glyph_name)) in SHAREABLE.iter().enumerate() {
+        let label = permission_name(*perm);
+        caps = caps.child(capability(allowed.contains(&(*perm as i32)), &label, glyph_name, n + 1, code, p));
     }
     body = body.child(
         div()
             .flex()
             .flex_col()
             .gap(px(6.0))
-            .child(div().font_weight(FontWeight::BOLD).child("What your people can do there"))
+            .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.sharedChannels.whatTheyCanDo")))
             .child(caps)
-            .child(div().text_xs().text_color(p.muted_foreground).child(
-                "You decide which of your people see it with roles here. Pings to @everyone or roles never reach the \
-                 other server.",
-            )),
+            .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.sharedChannels.rolesNote"))),
     );
     div()
         .rounded(corner(16.0))
@@ -1555,11 +1652,10 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
                         .flex_1()
                         .min_w_0()
                         .child(
-                            div()
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(p.muted_foreground)
-                                .child(format!("From {home_name}")),
+                            div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child(t_with(
+                                "serversettings.sharedChannels.from",
+                                &[("server", Arg::Str(&home_name))],
+                            )),
                         )
                         .child(
                             div()
@@ -1586,7 +1682,10 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
                             .text_xs()
                             .text_color(p.muted_foreground)
                             .child(icon("timer").size(px(12.0)))
-                            .child(format!("Code works for {}", code_left(left))),
+                            .child(t_with(
+                                "serversettings.sharedChannels.codeWorksFor",
+                                &[("time", Arg::Str(&time_left(left)))],
+                            )),
                     )
                 }),
         )
