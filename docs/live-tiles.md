@@ -91,13 +91,14 @@ sent when the channel goes or the agent leaves: apps drop those tiles on
 
 ### Limits
 
-Instance admins set these in the instance settings (Limits); both are
-unlimited unless set:
+Instance admins set these in the instance settings (Limits):
 
 - `live_tiles_per_channel` (`FUWA_LIMIT_LIVE_TILES_PER_CHANNEL`): app tiles
-  one channel holds at once.
-- `live_tile_updates_per_minute` (`FUWA_LIMIT_LIVE_TILE_UPDATES_PER_MINUTE`):
-  sets and ends per agent or webhook per server a minute.
+  one channel holds at once; unlimited unless set.
+- `live_tile_updates_per_minute` (`FUWA_LIVE_TILE_UPDATES_PER_MINUTE`): sets
+  and ends per agent or webhook per server a minute; 120 unless set, a
+  protective default (`unlimited` in the variable, or clearing it in the
+  settings, removes it).
 
 MCP agents get `set_live_tile`, `end_live_tile` and `list_live_tiles`
 ([mcp.md](mcp.md)); the SDK has `agent.liveTile` ([sdk.md](sdk.md)).

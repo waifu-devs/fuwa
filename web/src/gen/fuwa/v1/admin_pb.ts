@@ -446,7 +446,8 @@ export type InstanceSettings = Message<"fuwa.v1.InstanceSettings"> & {
 
   /**
    * How many times a minute one agent or webhook may set or end live tiles
-   * in a server; unset for no cap. FUWA_LIMIT_LIVE_TILE_UPDATES_PER_MINUTE.
+   * in a server. A protective default, 120 unless
+   * FUWA_LIVE_TILE_UPDATES_PER_MINUTE says otherwise; unset for no cap.
    *
    * @generated from field: optional int64 live_tile_updates_per_minute = 58;
    */

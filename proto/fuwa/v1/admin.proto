@@ -249,7 +249,8 @@ message InstanceSettings {
   // unset for no cap. FUWA_LIMIT_LIVE_TILES_PER_CHANNEL.
   optional int64 live_tiles_per_channel = 57;
   // How many times a minute one agent or webhook may set or end live tiles
-  // in a server; unset for no cap. FUWA_LIMIT_LIVE_TILE_UPDATES_PER_MINUTE.
+  // in a server. A protective default, 120 unless
+  // FUWA_LIVE_TILE_UPDATES_PER_MINUTE says otherwise; unset for no cap.
   optional int64 live_tile_updates_per_minute = 58;
   // The shortest time, in milliseconds, between two updates of one live tile
   // sent to the people who see it; changes in between are stored and the

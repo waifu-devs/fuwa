@@ -113,6 +113,9 @@ pub struct Settings {
     /// Milliseconds between two updates of one live tile going out; `None`
     /// sends every change. A protective default (docs/live-tiles.md).
     pub live_tile_publish_ms: Option<i64>,
+    /// Times a minute one agent or webhook may set or end live tiles in a
+    /// server; `None` for no limit. A protective default (docs/live-tiles.md).
+    pub live_tile_updates_per_minute: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
     /// Moderation providers servers' AutoMod can use, keys and all; only
@@ -166,6 +169,9 @@ impl Settings {
                 .shared_file_fetches_in_flight
                 .map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             live_tile_publish_ms: config.live_tile_publish_ms.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
+            live_tile_updates_per_minute: config
+                .live_tile_updates_per_minute
+                .map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
             automod_providers: config.automod_providers.clone(),
@@ -313,7 +319,7 @@ impl Settings {
             shared_remote_file_bytes_per_day: limits.shared_remote_file_bytes_per_day,
             shared_file_fetches_in_flight: self.shared_file_fetches_in_flight,
             live_tiles_per_channel: limits.live_tiles_per_channel,
-            live_tile_updates_per_minute: limits.live_tile_updates_per_minute,
+            live_tile_updates_per_minute: self.live_tile_updates_per_minute,
             live_tile_publish_ms: self.live_tile_publish_ms,
             calls: self.calls,
             call_recordings: self.call_recordings,
@@ -556,7 +562,7 @@ impl Settings {
             "streams_per_account" => Value::from(self.streams_per_account),
             "shared_file_fetches_in_flight" => Value::from(self.shared_file_fetches_in_flight),
             "live_tiles_per_channel" => Value::from(limits.live_tiles_per_channel),
-            "live_tile_updates_per_minute" => Value::from(limits.live_tile_updates_per_minute),
+            "live_tile_updates_per_minute" => Value::from(self.live_tile_updates_per_minute),
             "live_tile_publish_ms" => Value::from(self.live_tile_publish_ms),
             "shared_remote_file_bytes_per_day" => Value::from(limits.shared_remote_file_bytes_per_day),
             "ice_urls" => Value::from(self.ice_urls.clone()),
@@ -678,7 +684,16 @@ impl Settings {
             }
             "shared_remote_file_bytes_per_day" => self.limits.shared_remote_file_bytes_per_day = cap(field, value)?,
             "live_tiles_per_channel" => self.limits.live_tiles_per_channel = cap(field, value)?,
-            "live_tile_updates_per_minute" => self.limits.live_tile_updates_per_minute = cap(field, value)?,
+            "live_tile_updates_per_minute" => {
+                self.live_tile_updates_per_minute = match cap(field, value)? {
+                    Some(0) => {
+                        return Err(Error::invalid(
+                            "live_tile_updates_per_minute must be 1 or more, or unset for no limit",
+                        ));
+                    }
+                    per_minute => per_minute,
+                }
+            }
             "live_tile_publish_ms" => {
                 self.live_tile_publish_ms = match cap(field, value)? {
                     Some(0) => {

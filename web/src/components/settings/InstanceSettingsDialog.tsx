@@ -963,7 +963,7 @@ function LimitSettings({ draft, defaults, patch, resetter }: TabProps) {
         delay={0.3}
         {...resetter("live_tile_updates_per_minute")}
       >
-        <Cap label={t("instancesettings.shared.upTo")} placeholder="60" value={draft.liveTileUpdatesPerMinute} onChange={(v) => patch((d) => (d.liveTileUpdatesPerMinute = v))} />
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="120" value={draft.liveTileUpdatesPerMinute} onChange={(v) => patch((d) => (d.liveTileUpdatesPerMinute = v))} />
       </Setting>
       <Setting
         id="live-tile-publish-ms"

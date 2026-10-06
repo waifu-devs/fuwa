@@ -22,6 +22,10 @@ use crate::servers::{self as store, Payload, ServerDb, load_channel};
 /// The shortest time between two updates of one tile going out, unless the
 /// instance says otherwise (`live_tile_publish_ms`).
 pub const LIVE_TILE_PUBLISH_MS: usize = 1000;
+
+/// How many times a minute one agent or webhook may set or end tiles in a
+/// server, unless the instance says otherwise (`live_tile_updates_per_minute`).
+pub const LIVE_TILE_UPDATES_PER_MINUTE: usize = 120;
 /// How long a tile stays after its last change when its app doesn't say.
 const DEFAULT_TTL_MS: i64 = 2 * 60 * 60 * 1000;
 const MAX_TILE_ID: usize = 64;
@@ -215,7 +219,7 @@ pub(super) async fn set_tile(
     let content = checked_content(content)?;
     let ttl = ttl_ms(ttl_seconds)?;
     let settings = app.settings();
-    pace(&sdb.id, &source.id, now_ms(), settings.limits.live_tile_updates_per_minute)?;
+    pace(&sdb.id, &source.id, now_ms(), settings.live_tile_updates_per_minute)?;
     let per_channel = settings.limits.live_tiles_per_channel;
     let text = reviewed(&content);
     let tile = sdb
@@ -450,7 +454,7 @@ fn publish_update(app: &Arc<App>, key: String, event: pb::Event, gap_ms: Option<
 }
 
 /// Sets and ends per agent or webhook per server per minute (the instance's
-/// `live_tile_updates_per_minute`, unlimited unless set), kept in memory.
+/// `live_tile_updates_per_minute`, 120 unless set), kept in memory.
 static PACE: Mutex<Option<HashMap<String, (i64, i64)>>> = Mutex::new(None);
 
 pub(super) fn pace(server_id: &str, source_id: &str, now: i64, per_minute: Option<i64>) -> Result<()> {
@@ -527,7 +531,7 @@ impl LiveTileService for Api {
                 let tile_id = tile_id(&req.tile_id)?;
                 let source_id = if req.source_id.is_empty() { account.id.clone() } else { req.source_id.clone() };
                 if source_id == account.id {
-                    pace(&sdb.id, &account.id, now_ms(), self.app.settings().limits.live_tile_updates_per_minute)?;
+                    pace(&sdb.id, &account.id, now_ms(), self.app.settings().live_tile_updates_per_minute)?;
                     end_tile(&self.app, &sdb, &account.id, &req.channel_id, &source_id, &tile_id, None).await?;
                 } else {
                     access.require_in(&req.channel_id, Permission::ManageMessages)?;
