@@ -33,6 +33,7 @@ import {
   type SavedAccount,
 } from "./saved";
 import { i18n } from "@/i18n/i18n";
+import { instanceHas } from "@/lib/compat";
 import {
   addServer,
   applyEvent,
@@ -431,12 +432,12 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.retry(retryPolicy));
-        const voice = yield* listVoice(serverId);
+        const [voice, tiles] = yield* Effect.all([listVoice(serverId), listTiles(serverId)], { concurrency: "unbounded" });
         store.update((s) => {
           const current = s.instances[key];
           if (!current || !server.server) return s;
           let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
-          next = { ...next, voice: { ...next.voice, [serverId]: voice } };
+          next = { ...next, voice: { ...next.voice, [serverId]: voice }, liveTiles: { ...next.liveTiles, [serverId]: tiles } };
           const focus = s.focus?.instance === key ? s.focus.channel : null;
           const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
           for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus, thread);
@@ -464,6 +465,19 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         Effect.map((r) => r.states),
         // Instances from before calls, or a server that's mid-move: nobody, for now.
         Effect.orElseSucceed(() => []),
+      );
+    // Apps' live tiles aren't in the log either: listed with voice, on
+    // instances that have them.
+    const listTiles = (serverId: string) =>
+      Effect.suspend(() =>
+        instanceHas(store.get().instances[key]?.node?.versions, "live-tiles")
+          ? call((signal) => api.liveTiles.listLiveTiles({ serverId }, { signal })).pipe(Effect.map((r) => r.tiles))
+          : Effect.succeed([]),
+      ).pipe(Effect.orElseSucceed(() => []));
+    const relistTiles = (serverId: string) =>
+      listTiles(serverId).pipe(
+        Effect.tap((tiles) => Effect.sync(() => updateInstance(key, (i) => (i.synced[serverId] ? { ...i, liveTiles: { ...i.liveTiles, [serverId]: tiles } } : i)))),
+        Effect.asVoid,
       );
     const relistVoice = (serverId: string) =>
       listVoice(serverId).pipe(
@@ -542,6 +556,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           for (const head of res.ready.servers) {
             if (cursors.has(head.serverId)) {
               yield* FiberSet.run(snapshots, relistVoice(head.serverId));
+              yield* FiberSet.run(snapshots, relistTiles(head.serverId));
               yield* FiberSet.run(snapshots, rereadShown(head.serverId));
               const from = resumedFrom.get(head.serverId);
               if (from !== undefined && head.sequence > from) yield* FiberSet.run(snapshots, relist(head.serverId));

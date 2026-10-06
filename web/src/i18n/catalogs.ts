@@ -12,6 +12,7 @@ import englishServersettings from "../../../locales/en/serversettings.json";
 import englishSettings from "../../../locales/en/settings.json";
 import englishShell from "../../../locales/en/shell.json";
 import englishSystem from "../../../locales/en/system.json";
+import englishTiles from "../../../locales/en/tiles.json";
 import englishWorkspace from "../../../locales/en/workspace.json";
 
 /**
@@ -26,7 +27,7 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
 
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
-export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chat: englishChat, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, system: englishSystem, workspace: englishWorkspace } as const;
+export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chat: englishChat, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, system: englishSystem, tiles: englishTiles, workspace: englishWorkspace } as const;
 export type Namespaces = typeof ENGLISH;
 export const english: Catalog = flatten(ENGLISH);
 

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use super::messages::{WebhookMessage, check_webhook_message, insert_webhook_message};
-use super::{Api, PictureOwner, Seat, respond, text, users};
+use super::{Api, PictureOwner, Seat, live_tiles, respond, text, users};
 use crate::app::App;
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
@@ -212,7 +212,7 @@ impl WebhookService for Api {
                 }
                 let (avatar_url, upload) =
                     self.webhook_picture(&account, &sdb.id, &req.avatar_url, &current.avatar_url).await?;
-                let (before, after) = sdb
+                let (before, after, ended) = sdb
                     .write(&account.id, async |conn, _events| {
                         let before = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;
                         let channel_id = if req.channel_id.is_empty() { &before.channel_id } else { &req.channel_id };
@@ -222,6 +222,12 @@ impl WebhookService for Api {
                             (before.id.as_str(), name.as_str(), avatar_url.as_str(), channel.id.as_str()),
                         )
                         .await?;
+                        // Its tiles stay with the channel they were set in.
+                        let ended = if channel.id == before.channel_id {
+                            vec![]
+                        } else {
+                            live_tiles::drop_webhook_tiles(conn, &before.id).await?
+                        };
                         let after = pb::Webhook {
                             name: name.clone(),
                             avatar_url: avatar_url.clone(),
@@ -236,9 +242,12 @@ impl WebhookService for Api {
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
-                        Ok((before, after))
+                        Ok((before, after, ended))
                     })
                     .await?;
+                for (channel_id, tile_id) in ended {
+                    live_tiles::announce_end(&self.app, &sdb.id, &channel_id, &before.id, &tile_id);
+                }
                 self.keep_picture(upload.as_deref(), Some(&sdb.id)).await;
                 self.drop_picture(&before.avatar_url, &after.avatar_url, PictureOwner::Server(&sdb.id)).await;
                 Ok(pb::UpdateWebhookResponse { webhook: Some(after) })
@@ -288,18 +297,22 @@ impl WebhookService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
-                let webhook = sdb
+                let (webhook, ended) = sdb
                     .write(&account.id, async |conn, _events| {
                         let webhook = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;
                         conn.execute("DELETE FROM webhooks WHERE id = ?1", [webhook.id.as_str()]).await?;
+                        let ended = live_tiles::drop_webhook_tiles(conn, &webhook.id).await?;
                         let channel = load_channel(conn, &sdb.id, &webhook.channel_id).await?.unwrap_or_default();
                         let entry = Audit::new(pb::AuditAction::WebhookDelete, &webhook.id)
                             .channel(&channel.name)
                             .change("name", &webhook.name, "");
                         store::audit(conn, &account.id, entry).await?;
-                        Ok(webhook)
+                        Ok((webhook, ended))
                     })
                     .await?;
+                for (channel_id, tile_id) in ended {
+                    live_tiles::announce_end(&self.app, &sdb.id, &channel_id, &webhook.id, &tile_id);
+                }
                 self.drop_picture(&webhook.avatar_url, "", PictureOwner::Server(&sdb.id)).await;
                 Ok(pb::DeleteWebhookResponse {})
             }
@@ -377,6 +390,53 @@ pub async fn execute_webhook(
         insert_webhook_message(conn, &sdb.id, &current.channel_id, message.clone(), now, events).await
     })
     .await
+}
+
+/// A webhook, if `token` is its token; "not found" otherwise, so neither
+/// webhooks nor tokens can be probed.
+async fn webhook_with_token(sdb: &store::ServerDb, webhook_id: &str, token: &str) -> Result<pb::Webhook> {
+    let webhook = load_webhook(&*sdb.read()?, &sdb.id, webhook_id).await.ok().filter(|w| same_token(&w.token, token));
+    webhook.ok_or(Error::NotFound("webhook"))
+}
+
+/// Sets a live tile in the webhook's channel, under its name, if `token`
+/// is its token.
+pub async fn set_webhook_tile(
+    app: &Arc<App>,
+    server_id: &str,
+    webhook_id: &str,
+    token: &str,
+    tile_id: &str,
+    content: pb::LiveTileContent,
+    ttl_seconds: Option<i64>,
+) -> Result<pb::LiveTile> {
+    let sdb = app.servers.get(server_id).await?;
+    let webhook = webhook_with_token(&sdb, webhook_id, token).await?;
+    let source = live_tiles::Source {
+        id: webhook.id.clone(),
+        kind: pb::LiveTileSource::Webhook,
+        name: webhook.name.clone(),
+        avatar_url: webhook.avatar_url.clone(),
+        role_ids: vec![],
+        manager: false,
+    };
+    live_tiles::set_tile(app, &sdb, &source, &webhook.channel_id, tile_id, &content, ttl_seconds).await
+}
+
+/// Ends one of the webhook's live tiles, if `token` is its token.
+pub async fn end_webhook_tile(
+    app: &Arc<App>,
+    server_id: &str,
+    webhook_id: &str,
+    token: &str,
+    tile_id: &str,
+) -> Result<()> {
+    let sdb = app.servers.get(server_id).await?;
+    let webhook = webhook_with_token(&sdb, webhook_id, token).await?;
+    let tile_id = live_tiles::tile_id(tile_id)?;
+    live_tiles::pace(&sdb.id, &webhook.id, now_ms(), app.settings().live_tile_updates_per_minute)?;
+    live_tiles::end_tile(app, &sdb, &webhook.id, &webhook.channel_id, &webhook.id, &tile_id, None).await?;
+    Ok(())
 }
 
 #[cfg(test)]

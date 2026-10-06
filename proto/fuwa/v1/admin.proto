@@ -245,6 +245,18 @@ message InstanceSettings {
   repeated SignInProviderSetting sign_in_providers = 55;
   // Whether someone new gets an account by signing in with one of them.
   ProviderAccounts provider_accounts = 56;
+  // How many app live tiles one channel may hold at once (LiveTileService);
+  // unset for no cap. FUWA_LIMIT_LIVE_TILES_PER_CHANNEL.
+  optional int64 live_tiles_per_channel = 57;
+  // How many times a minute one agent or webhook may set or end live tiles
+  // in a server. A protective default, 120 unless
+  // FUWA_LIVE_TILE_UPDATES_PER_MINUTE says otherwise; unset for no cap.
+  optional int64 live_tile_updates_per_minute = 58;
+  // The shortest time, in milliseconds, between two updates of one live tile
+  // sent to the people who see it; changes in between are stored and the
+  // latest goes out when the time is up. A protective default, 1000 unless
+  // FUWA_LIVE_TILE_PUBLISH_MS says otherwise; unset sends every change.
+  optional int64 live_tile_publish_ms = 59;
 }
 
 // One sign-in provider, as an instance's admins set it up. Its redirect URI,

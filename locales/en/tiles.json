@@ -1,0 +1,61 @@
+{
+  "strip.label": "Happening now",
+  "strip.options": "Tile options",
+  "strip.hide": "Hide this one",
+  "strip.quiet": "No live tiles in this server",
+  "strip.off": "Turn live tiles off",
+  "strip.remove": "Remove for everyone",
+  "strip.removeFailed": "Couldn't remove the tile",
+  "menu.show": "Live tiles",
+  "menu.server": "Tiles for everyone here",
+  "menu.bigServer": {
+    "one": "Voice rooms start off in servers of {count} member or more",
+    "other": "Voice rooms start off in servers of {count} members or more"
+  },
+  "menu.everyone": "Everyone here sees only these kinds",
+  "menu.reset": "Back to the default",
+  "menu.failed": "Couldn't change the server's tiles",
+  "kind.voice": "Voice rooms",
+  "kind.poll": "Polls",
+  "kind.thread": "Followed threads",
+  "kind.shared": "Shared channels",
+  "kind.app": "From apps",
+  "voice.title": {
+    "one": "{count} person in {channel}",
+    "other": "{count} people in {channel}"
+  },
+  "voice.since": "Talking since {time}",
+  "voice.video": "Cameras on",
+  "voice.screen": "Sharing a screen",
+  "voice.join": "Join",
+  "poll.title": "Poll in #{channel}",
+  "poll.closesMinutes": {
+    "one": "Closes in {count} minute",
+    "other": "Closes in {count} minutes"
+  },
+  "poll.closesHours": {
+    "one": "Closes in {count} hour",
+    "other": "Closes in {count} hours"
+  },
+  "poll.noEnd": "Open until it's ended",
+  "poll.voters": {
+    "one": "{count} voted",
+    "other": "{count} voted"
+  },
+  "poll.vote": "Vote",
+  "thread.title": "A thread you follow",
+  "thread.unread": {
+    "one": "{count} new reply",
+    "other": "{count} new replies"
+  },
+  "thread.open": "Open",
+  "shared.title": "Busy in #{channel}",
+  "shared.text": {
+    "one": "{count} new message from {servers} servers",
+    "other": "{count} new messages from {servers} servers"
+  },
+  "shared.open": "Catch up",
+  "app.by": "From {app}",
+  "app.live": "Live",
+  "app.open": "Open"
+}

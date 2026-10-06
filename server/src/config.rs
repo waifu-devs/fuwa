@@ -124,6 +124,16 @@ pub struct Config {
     /// default), each instance at most half; `unlimited` for none. Admins
     /// can change it in the instance settings.
     pub shared_file_fetches_in_flight: Option<usize>,
+    /// FUWA_LIVE_TILE_PUBLISH_MS: the shortest time between two updates of
+    /// one live tile sent to the people who see it, default 1000 (a
+    /// protective default); `unlimited` sends every change. Admins can
+    /// change it in the instance settings.
+    pub live_tile_publish_ms: Option<usize>,
+    /// FUWA_LIVE_TILE_UPDATES_PER_MINUTE: how many times a minute one agent
+    /// or webhook may set or end live tiles in a server, default 120 (a
+    /// protective default); `unlimited` for none. Admins can change it in
+    /// the instance settings.
+    pub live_tile_updates_per_minute: Option<usize>,
     /// FUWA_MAX_STREAMS: live connections this part holds open at once, for
     /// everyone. Unlimited by default; see docs/capacity.md for what a box holds.
     pub max_streams: Option<usize>,
@@ -282,6 +292,9 @@ pub struct Limits {
     /// FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY: bytes of files one
     /// server on another instance may send into shared channels here a day.
     pub shared_remote_file_bytes_per_day: Option<i64>,
+    /// FUWA_LIMIT_LIVE_TILES_PER_CHANNEL: app live tiles one channel may
+    /// hold at once.
+    pub live_tiles_per_channel: Option<i64>,
 }
 
 impl Limits {
@@ -440,6 +453,7 @@ impl Config {
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
             shared_remote_file_bytes_per_day: upload_bytes("FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY")?,
+            live_tiles_per_channel: count("FUWA_LIMIT_LIVE_TILES_PER_CHANNEL")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -577,6 +591,9 @@ impl Config {
         let max_streams = count("FUWA_MAX_STREAMS", None)?;
         let shared_file_fetches_in_flight =
             count("FUWA_SHARED_FILE_FETCHES_IN_FLIGHT", Some(crate::federation::FETCHES_IN_FLIGHT))?;
+        let live_tile_publish_ms = count("FUWA_LIVE_TILE_PUBLISH_MS", Some(crate::api::LIVE_TILE_PUBLISH_MS))?;
+        let live_tile_updates_per_minute =
+            count("FUWA_LIVE_TILE_UPDATES_PER_MINUTE", Some(crate::api::LIVE_TILE_UPDATES_PER_MINUTE))?;
         let write_queue = count("FUWA_WRITE_QUEUE", Some(crate::db::WRITE_QUEUE))?;
         let sign_in_queue = count("FUWA_SIGN_IN_QUEUE", Some(crate::auth::HASH_WAITING))?;
 
@@ -644,6 +661,8 @@ impl Config {
             replica,
             streams_per_account,
             shared_file_fetches_in_flight,
+            live_tile_publish_ms,
+            live_tile_updates_per_minute,
             max_streams,
             write_queue,
             sign_in_queue,
@@ -887,6 +906,15 @@ mod tests {
         assert_eq!(config.limits.picture_upload_bytes_per_day, None);
         assert!(config.telemetry.enabled);
         assert!(config.encryption_key.is_none());
+    }
+
+    #[test]
+    fn live_tile_updates_start_capped_and_can_be_changed_or_lifted() {
+        assert_eq!(config(&[]).unwrap().live_tile_updates_per_minute, Some(120));
+        let set = |v: &str| config(&[("FUWA_LIVE_TILE_UPDATES_PER_MINUTE", v)]).map(|c| c.live_tile_updates_per_minute);
+        assert_eq!(set("30").unwrap(), Some(30));
+        assert_eq!(set("unlimited").unwrap(), None);
+        assert!(set("0").unwrap_err().contains("FUWA_LIVE_TILE_UPDATES_PER_MINUTE"));
     }
 
     #[test]

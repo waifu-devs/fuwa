@@ -6,6 +6,7 @@ import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
 import { CallService } from "@/gen/fuwa/v1/call_pb";
+import { LiveTileService } from "@/gen/fuwa/v1/live_tile_pb";
 import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { CommandService } from "@/gen/fuwa/v1/command_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
@@ -55,6 +56,7 @@ export type Api = {
   sso: Client<typeof SsoService>;
   shared: Client<typeof SharedChannelService>;
   search: Client<typeof SearchService>;
+  liveTiles: Client<typeof LiveTileService>;
 };
 
 /**
@@ -96,5 +98,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     sso: createClient(SsoService, transport),
     shared: createClient(SharedChannelService, transport),
     search: createClient(SearchService, transport),
+    liveTiles: createClient(LiveTileService, transport),
   };
 }

@@ -20,6 +20,7 @@ export {
   type CommandContext,
   type CommandInfo,
   type InteractionContext,
+  type LiveTileHandle,
   type MessageContext,
   type Outgoing,
 } from "./agent.js";
@@ -91,6 +92,7 @@ export * from "./gen/fuwa/v1/friend_pb.js";
 export * from "./gen/fuwa/v1/gif_pb.js";
 export * from "./gen/fuwa/v1/invite_pb.js";
 export * from "./gen/fuwa/v1/join_pb.js";
+export * from "./gen/fuwa/v1/live_tile_pb.js";
 export * from "./gen/fuwa/v1/media_pb.js";
 export * from "./gen/fuwa/v1/message_pb.js";
 export * from "./gen/fuwa/v1/node_pb.js";

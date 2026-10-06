@@ -94,6 +94,9 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "commands_per_minute", get: (s) => s.commandsPerMinute },
   { path: "pins_per_channel", get: (s) => s.pinsPerChannel },
   { path: "pins_per_conversation", get: (s) => s.pinsPerConversation },
+  { path: "live_tiles_per_channel", get: (s) => s.liveTilesPerChannel },
+  { path: "live_tile_updates_per_minute", get: (s) => s.liveTileUpdatesPerMinute },
+  { path: "live_tile_publish_ms", get: (s) => s.liveTilePublishMs },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -942,6 +945,36 @@ function LimitSettings({ draft, defaults, patch, resetter }: TabProps) {
           onChange={(v) => patch((d) => (d.pinsPerConversation = v))}
         />
       </Setting>
+      <Setting
+        id="live-tiles-per-channel"
+        title={t("instancesettings.limits.liveTilesPerChannel")}
+        hint={t("instancesettings.limits.liveTilesPerChannelHint")}
+        defaultLabel={count(lang, defaults.liveTilesPerChannel)}
+        delay={0.28}
+        {...resetter("live_tiles_per_channel")}
+      >
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="10" value={draft.liveTilesPerChannel} onChange={(v) => patch((d) => (d.liveTilesPerChannel = v))} />
+      </Setting>
+      <Setting
+        id="live-tile-updates-per-minute"
+        title={t("instancesettings.limits.liveTileUpdates")}
+        hint={t("instancesettings.limits.liveTileUpdatesHint")}
+        defaultLabel={perMinute(t, defaults.liveTileUpdatesPerMinute)}
+        delay={0.3}
+        {...resetter("live_tile_updates_per_minute")}
+      >
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="120" value={draft.liveTileUpdatesPerMinute} onChange={(v) => patch((d) => (d.liveTileUpdatesPerMinute = v))} />
+      </Setting>
+      <Setting
+        id="live-tile-publish-ms"
+        title={t("instancesettings.limits.liveTilePublish")}
+        hint={t("instancesettings.limits.liveTilePublishHint")}
+        defaultLabel={defaults.liveTilePublishMs === undefined ? t("instancesettings.shared.noLimit") : t("instancesettings.limits.liveTilePublishEvery", { count: Number(defaults.liveTilePublishMs) })}
+        delay={0.32}
+        {...resetter("live_tile_publish_ms")}
+      >
+        <Cap label={t("instancesettings.limits.liveTilePublishLabel")} placeholder="1000" value={draft.liveTilePublishMs} onChange={(v) => patch((d) => (d.liveTilePublishMs = v))} />
+      </Setting>
     </>
   );
 }
@@ -1132,6 +1165,15 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "pins_per_conversation":
         into.pinsPerConversation = from.pinsPerConversation;
+        break;
+      case "live_tiles_per_channel":
+        into.liveTilesPerChannel = from.liveTilesPerChannel;
+        break;
+      case "live_tile_updates_per_minute":
+        into.liveTileUpdatesPerMinute = from.liveTileUpdatesPerMinute;
+        break;
+      case "live_tile_publish_ms":
+        into.liveTilePublishMs = from.liveTilePublishMs;
         break;
       default: {
         // Settings copied above by their own pages' functions.

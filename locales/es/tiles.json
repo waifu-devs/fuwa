@@ -1,0 +1,61 @@
+{
+  "strip.label": "Ahora mismo",
+  "strip.options": "Opciones de la tarjeta",
+  "strip.hide": "Ocultar esta",
+  "strip.quiet": "Sin tarjetas en vivo en este servidor",
+  "strip.off": "Desactivar las tarjetas en vivo",
+  "strip.remove": "Quitar para todos",
+  "strip.removeFailed": "No se pudo quitar la tarjeta",
+  "menu.show": "Tarjetas en vivo",
+  "menu.server": "Tarjetas para todo el servidor",
+  "menu.bigServer": {
+    "one": "Las salas de voz empiezan apagadas en servidores de {count} miembro o más",
+    "other": "Las salas de voz empiezan apagadas en servidores de {count} miembros o más"
+  },
+  "menu.everyone": "Todos aquí ven solo estos tipos",
+  "menu.reset": "Volver a lo predeterminado",
+  "menu.failed": "No se pudieron cambiar las tarjetas del servidor",
+  "kind.voice": "Salas de voz",
+  "kind.poll": "Encuestas",
+  "kind.thread": "Hilos que sigues",
+  "kind.shared": "Canales compartidos",
+  "kind.app": "De apps",
+  "voice.title": {
+    "one": "{count} persona en {channel}",
+    "other": "{count} personas en {channel}"
+  },
+  "voice.since": "Hablando desde las {time}",
+  "voice.video": "Cámaras encendidas",
+  "voice.screen": "Compartiendo pantalla",
+  "voice.join": "Unirse",
+  "poll.title": "Encuesta en #{channel}",
+  "poll.closesMinutes": {
+    "one": "Cierra en {count} minuto",
+    "other": "Cierra en {count} minutos"
+  },
+  "poll.closesHours": {
+    "one": "Cierra en {count} hora",
+    "other": "Cierra en {count} horas"
+  },
+  "poll.noEnd": "Abierta hasta que la cierren",
+  "poll.voters": {
+    "one": "{count} votó",
+    "other": "{count} votaron"
+  },
+  "poll.vote": "Votar",
+  "thread.title": "Un hilo que sigues",
+  "thread.unread": {
+    "one": "{count} respuesta nueva",
+    "other": "{count} respuestas nuevas"
+  },
+  "thread.open": "Abrir",
+  "shared.title": "Mucho movimiento en #{channel}",
+  "shared.text": {
+    "one": "{count} mensaje nuevo de {servers} servidores",
+    "other": "{count} mensajes nuevos de {servers} servidores"
+  },
+  "shared.open": "Ponerse al día",
+  "app.by": "De {app}",
+  "app.live": "En vivo",
+  "app.open": "Abrir"
+}

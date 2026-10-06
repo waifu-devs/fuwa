@@ -107,7 +107,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.SecureChannelService"
         | "fuwa.v1.SharedChannelService"
         | "fuwa.v1.SearchService"
-        | "fuwa.v1.CommandService" => Target::Shard,
+        | "fuwa.v1.CommandService"
+        | "fuwa.v1.LiveTileService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

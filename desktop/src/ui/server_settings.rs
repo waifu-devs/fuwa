@@ -1746,6 +1746,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::MessageDelete => ("message-square-x", red),
         A::MessagePin => ("pin", sky),
         A::MessageUnpin => ("pin-off", sky),
+        A::LiveTileEnd => ("radio", sky),
         A::OwnershipTransfer => ("crown", amber),
         A::InviteCreate => ("link", green),
         A::InviteDelete => ("link-2-off", red),
@@ -2097,6 +2098,10 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::OwnershipTransfer => {
             t_with("serversettings.audit.s.ownership", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
         }
+        A::LiveTileEnd => t_with(
+            "serversettings.audit.s.liveTileEnd",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
         A::InviteCreate if !entry.channel_name.is_empty() => t_with(
             "serversettings.audit.s.inviteCreateIn",
             &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],

@@ -15,6 +15,7 @@ mod friends;
 mod gifs;
 mod invites;
 mod join;
+mod live_tiles;
 mod media;
 mod messages;
 mod node;
@@ -33,6 +34,7 @@ mod webhooks;
 
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
+pub use live_tiles::{LIVE_TILE_PUBLISH_MS, LIVE_TILE_UPDATES_PER_MINUTE};
 pub use media::PictureOwner;
 pub(crate) use polls::{close_due as close_due_polls, forget_voter as forget_poll_voter};
 pub use search::spawn_search_indexer;
@@ -42,7 +44,7 @@ pub use shared::{
     spawn_shared_fanout, undo as shared_undo,
 };
 pub use sso::note_lapses;
-pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};
+pub use webhooks::{WebhookPost, end_webhook_tile, execute_webhook, set_webhook_tile, verify_webhook};
 
 use std::sync::Arc;
 

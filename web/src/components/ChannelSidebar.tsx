@@ -22,6 +22,7 @@ import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { SharedBadge } from "@/components/chat/Shared";
 import { VoiceUsers } from "@/components/calls/VoiceUsers";
+import { LiveTiles, LiveTilesGroup, LiveTilesMenuItem } from "@/components/LiveTiles";
 import { joinCall } from "@/calls/engine";
 import { useContextMenu } from "@/components/ContextMenu";
 import { categoryMenu, channelMenu, type ChannelMenuActions } from "@/components/menus/channel";
@@ -150,6 +151,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         waiting={waiting}
         usage={usage}
         canCreate={canCreate}
+        manage={has(access, Permission.MANAGE_SERVER)}
         onInvite={setInviting}
         onSettings={setSettings}
         onCreate={() => setCreating({ parentId: "" })}
@@ -166,7 +168,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             if (compact) setNavOpen(false);
           }}
         />
-        {!synced && !channels?.length ? (
+        <LiveTilesGroup>
+          <LiveTiles instanceKey={instanceKey} serverId={serverId} />
+          {!synced && !channels?.length ? (
           <div className="flex flex-col gap-2 px-2">
             {[70, 55, 80, 45].map((w, n) => (
               <div key={n} className="shimmer h-5 rounded-md" style={{ width: `${w}%` }} />
@@ -187,7 +191,8 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               onMenuEdit={edit}
             />
           </motion.ul>
-        )}
+          )}
+        </LiveTilesGroup>
       </div>
       <CallPanel />
       <UserPanel instanceKey={instanceKey} />
@@ -236,6 +241,7 @@ function ServerMenu({
   waiting,
   usage,
   canCreate,
+  manage,
   onInvite,
   onSettings,
   onCreate,
@@ -254,6 +260,8 @@ function ServerMenu({
   waiting: number;
   usage: boolean;
   canCreate: boolean;
+  /** Manage Server: they choose which live tiles everyone here sees. */
+  manage: boolean;
   onInvite: (channelId: string) => void;
   onSettings: (settings: { tab: string }) => void;
   onCreate: () => void;
@@ -291,6 +299,7 @@ function ServerMenu({
           </DropdownMenuItem>
         )}
         <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
+        <LiveTilesMenuItem instanceKey={instanceKey} serverId={serverId} manage={manage} />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
           <IdCardIcon /> {t("workspace.sidebar.editServerProfile")}

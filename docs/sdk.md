@@ -135,6 +135,40 @@ agent.on("interaction", async (ctx) => {
 - `agent.api.commands` is the whole CommandService: `listCommands`, and
   `runCommand` and `pressButton` for apps that act for a person.
 
+### Live tiles
+
+An agent can keep a small card above a server's channel list up to date,
+such as a match's scoreboard ([live-tiles.md](live-tiles.md)):
+
+```ts
+const tile = agent.liveTile(serverId, channelId, "final");
+await tile.set({
+  title: "Cup final",
+  status: "67'",
+  live: true,
+  rows: [{ label: "Red Foxes", value: "2" }, { label: "Blue Owls", value: "1" }],
+  progress: 0.74,
+  action: "Watch",
+});
+await tile.end();
+```
+
+- `set` puts the tile up or changes it; call it as often as the score
+  changes. People get at most about one update a second per tile (the
+  instance's `live_tile_publish_ms`), always the latest.
+- It's plain text in a fixed layout: a title (40 characters), a status
+  (16), up to 4 rows of label (24) and value (8), progress 0 to 1 and a
+  button label (12) that opens the channel. No links, markup or pictures;
+  the agent's name always shows on it.
+- A tile goes two hours after its last change unless `ttlSeconds` says
+  otherwise, so a crashed program leaves nothing stale.
+- It needs Send Messages in the channel, a text or announcement channel the
+  server doesn't share, and the server showing tiles from apps; otherwise
+  `set` fails with `PermissionDeniedError`, `InvalidArgumentError` or
+  `FailedPreconditionError`. The server's AutoMod word and link rules apply.
+- `agent.api.liveTiles.listLiveTiles({ serverId })` lists every app's tiles
+  the agent can see.
+
 ### Typed events
 
 Every event kind has a handler named after its payload, with that payload's

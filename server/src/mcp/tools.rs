@@ -254,6 +254,64 @@ const TOOLS: &[Tool] = &[
         destructive: false,
     },
     Tool {
+        name: "set_live_tile",
+        title: "Set a live tile",
+        description: "Puts up, or changes, one of this agent's live tiles in a channel: a small card above the \
+                      server's channel list, such as a match's scoreboard. Plain text in a fixed layout: a title \
+                      (40 characters), a status (16), up to 4 rows of label (24) and value (8), progress 0 to 1, \
+                      and a button label (12) that opens the channel. Call it again with the same tile_id to \
+                      change it; it goes after ttl_seconds (2 hours unless set) without a change. Needs Send \
+                      Messages there, and the server must show tiles from apps.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "tile_id": { "type": "string", "description": "This agent's own id for the tile: letters, digits, - and _." },
+                "title": { "type": "string" },
+                "status": { "type": "string", "description": "A short state, like \"67'\" or \"Half time\"." },
+                "live": { "type": "boolean", "description": "Happening right now: shows a live dot." },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": { "label": { "type": "string" }, "value": { "type": "string" } },
+                        "required": ["label", "value"]
+                    }
+                },
+                "progress": { "type": "number", "description": "0 to 1, for a bar." },
+                "action": { "type": "string", "description": "The button's label; \"Open\" when left out." },
+                "ttl_seconds": { "type": "integer", "description": "How long it stays without a change." }
+            })
+        },
+        required: &["server_id", "channel_id", "tile_id", "title"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "end_live_tile",
+        title: "End a live tile",
+        description: "Takes down one of this agent's live tiles. Ending one that's already gone succeeds.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "tile_id": { "type": "string" }
+            })
+        },
+        required: &["server_id", "channel_id", "tile_id"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "list_live_tiles",
+        title: "List live tiles",
+        description: "The live tiles apps keep in a server, in channels this agent can see.",
+        properties: || json!({ "server_id": server_id() }),
+        required: &["server_id"],
+        read_only: true,
+        destructive: false,
+    },
+    Tool {
         name: "list_pins",
         title: "Read pinned messages",
         description: "A channel's pinned messages, or a thread's, the latest pin first, with their authors.",
@@ -759,6 +817,61 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             };
             call!(cx, message_service_client::MessageServiceClient.list_pins(req))
                 .map(|r| json!({ "messages": view::messages(&r.messages, &r.authors), "has_more": r.has_more }))
+        }
+        "set_live_tile" => {
+            let rows = match args.0.get("rows") {
+                None | Some(Value::Null) => vec![],
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .map(|row| {
+                        let field = |key: &str| row.get(key).and_then(Value::as_str).map(str::to_string);
+                        match (field("label"), field("value")) {
+                            (Some(label), Some(value)) => Ok(pb::LiveTileRow { label, value }),
+                            _ => Err(RpcError::invalid("each row is {\"label\": string, \"value\": string}")),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => return Err(RpcError::invalid("rows must be a list")),
+            };
+            let live = match args.0.get("live") {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(live)) => *live,
+                _ => return Err(RpcError::invalid("live must be true or false")),
+            };
+            let progress = match args.0.get("progress") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(value.as_f64().ok_or_else(|| RpcError::invalid("progress must be a number"))? as f32),
+            };
+            let req = pb::SetLiveTileRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                tile_id: args.text("tile_id")?,
+                content: Some(pb::LiveTileContent {
+                    title: args.text("title")?,
+                    status: args.optional("status")?,
+                    live,
+                    rows,
+                    progress,
+                    action: args.optional("action")?,
+                }),
+                ttl_seconds: args.number("ttl_seconds")?,
+            };
+            call!(cx, live_tile_service_client::LiveTileServiceClient.set_live_tile(req))
+                .map(|r| json!({ "tile": r.tile.as_ref().map(view::live_tile) }))
+        }
+        "end_live_tile" => {
+            let req = pb::EndLiveTileRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                tile_id: args.text("tile_id")?,
+                source_id: String::new(),
+            };
+            call!(cx, live_tile_service_client::LiveTileServiceClient.end_live_tile(req)).map(|_| json!({ "ended": true }))
+        }
+        "list_live_tiles" => {
+            let req = pb::ListLiveTilesRequest { server_id: sid()? };
+            call!(cx, live_tile_service_client::LiveTileServiceClient.list_live_tiles(req))
+                .map(|r| json!({ "tiles": r.tiles.iter().map(view::live_tile).collect::<Vec<_>>() }))
         }
         "list_events" => {
             let limit = args.number("limit")?.unwrap_or(50).clamp(1, 200) as i32;

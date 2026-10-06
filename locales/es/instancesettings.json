@@ -177,6 +177,17 @@
   "limits.pinsPerChannelHint": "Cuántos mensajes se pueden fijar en un canal y en un hilo. Desfijar uno deja sitio.",
   "limits.pinsPerConversation": "Fijados por mensaje directo",
   "limits.pinsPerConversationHint": "Cuántos mensajes se pueden fijar en una conversación de mensajes directos. La instancia solo guarda qué mensajes están fijados, nunca lo que dicen.",
+  "limits.liveTilesPerChannel": "Tarjetas en vivo por canal",
+  "limits.liveTilesPerChannelHint": "Cuántas tarjetas pueden mantener las apps (agentes y webhooks) en un canal a la vez.",
+  "limits.liveTileUpdates": "Cambios de tarjetas en vivo",
+  "limits.liveTileUpdatesHint": "Cuántas veces por minuto una app puede poner o quitar tarjetas en un servidor.",
+  "limits.liveTilePublish": "Ritmo de las tarjetas en vivo",
+  "limits.liveTilePublishHint": "El tiempo mínimo entre dos actualizaciones de una tarjeta que llegan a quienes la ven. Los cambios intermedios se guardan y el último sale cuando se cumple el tiempo, para que un marcador muy activo no inunde a todos.",
+  "limits.liveTilePublishLabel": "Milisegundos",
+  "limits.liveTilePublishEvery": {
+    "one": "Una vez cada {count} ms",
+    "other": "Una vez cada {count} ms"
+  },
   "privacy.label": "Enviar la señal de uso cada día y los informes de errores cada hora",
   "privacy.hint": "Ayuda a Waifu Devs a ver cómo se usa fuwa y a arreglar lo que falla. Solo cifras: ni nombres, ni mensajes, ni ids, ni direcciones. Si lo desactivas, las apps de esta instancia tampoco envían informes.",
   "privacy.counts": "Cuántas cuentas, servidores, canales y mensajes hay",

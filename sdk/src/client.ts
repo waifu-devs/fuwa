@@ -9,6 +9,7 @@ import { AutoModService } from "./gen/fuwa/v1/automod_pb.js";
 import { CallService } from "./gen/fuwa/v1/call_pb.js";
 import { ChannelService, SharedChannelService } from "./gen/fuwa/v1/channel_pb.js";
 import { CommandService } from "./gen/fuwa/v1/command_pb.js";
+import { LiveTileService } from "./gen/fuwa/v1/live_tile_pb.js";
 import { DirectMessageService } from "./gen/fuwa/v1/dm_pb.js";
 import { EmojiService } from "./gen/fuwa/v1/emoji_pb.js";
 import { EventService } from "./gen/fuwa/v1/event_pb.js";
@@ -89,6 +90,8 @@ export interface Fuwa {
   shared: Client<typeof SharedChannelService>;
   /** Slash commands and buttons: agents set theirs, members run and press them. */
   commands: Client<typeof CommandService>;
+  /** Live tiles: agents keep cards above a server's channel list up to date (`agent.liveTile`). */
+  liveTiles: Client<typeof LiveTileService>;
   gifs: Client<typeof GifService>;
   presence: Client<typeof PresenceService>;
   search: Client<typeof SearchService>;
@@ -210,6 +213,7 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     sso: client(SsoService),
     shared: client(SharedChannelService),
     commands: client(CommandService),
+    liveTiles: client(LiveTileService),
     gifs: client(GifService),
     presence: client(PresenceService),
     search: client(SearchService),

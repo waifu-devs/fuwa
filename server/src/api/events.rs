@@ -46,6 +46,8 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::ThreadUpdated(t) => Some(&t.channel_id),
         Payload::MessagePinned(p) => Some(&p.channel_id),
         Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) }) => Some(&i.channel_id),
+        Payload::LiveTileUpdated(pb::LiveTileUpdated { tile: Some(t) }) => Some(&t.channel_id),
+        Payload::LiveTileEnded(e) => Some(&e.channel_id),
         _ => None,
     }
 }

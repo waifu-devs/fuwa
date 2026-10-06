@@ -104,6 +104,9 @@ message UpdateServerRequest {
   // Turning it on fails with FAILED_PRECONDITION where the instance doesn't
   // let servers record video (InstanceSettings.call_recording_video).
   optional bool record_video = 16;
+  // Which kinds of live tiles show. Leaving `customized` false goes back to
+  // the default (Server.live_tiles).
+  optional LiveTileSettings live_tiles = 17;
 }
 
 message UpdateServerResponse {
@@ -332,6 +335,9 @@ enum AuditAction {
   // A moderator pinned or unpinned a message. The target is its author.
   AUDIT_ACTION_MESSAGE_PIN = 54;
   AUDIT_ACTION_MESSAGE_UNPIN = 55;
+  // An app's live tile, ended by a moderator: the app (agent or webhook) is
+  // the target, and the change names the tile.
+  AUDIT_ACTION_LIVE_TILE_END = 56;
 }
 
 // One thing someone did with a moderator's or manager's permission.

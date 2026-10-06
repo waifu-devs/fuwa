@@ -678,6 +678,39 @@ pub(super) async fn review(
     Ok(Verdict { blocked })
 }
 
+/// Whether a server's word and link rules refuse a live tile's text, and
+/// what its app is told. Only blocking counts: a tile can change every
+/// second, so it posts no alerts and times nobody out, and provider rules
+/// aren't asked. `role_ids` are the agent's roles (none for a webhook).
+pub(super) async fn tile_blocked(
+    conn: &turso::Connection,
+    role_ids: &[String],
+    manager: bool,
+    channel: &pb::Channel,
+    text: &str,
+) -> Result<Option<String>> {
+    if manager || text.trim().is_empty() {
+        return Ok(None);
+    }
+    for rule in store::load_automod(conn).await? {
+        let exempt = !rule.enabled
+            || rule.trigger == Trigger::Provider as i32
+            || rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
+            || rule.exempt_role_ids.iter().any(|id| role_ids.contains(id));
+        if exempt || automod::check(&rule, text).is_none() {
+            continue;
+        }
+        if let Some(block) = rule.actions.iter().find(|a| a.kind == Kind::Block as i32) {
+            return Ok(Some(if block.message.is_empty() {
+                "AutoMod: this server doesn't allow that tile".to_string()
+            } else {
+                format!("AutoMod: {}", block.message)
+            }));
+        }
+    }
+    Ok(None)
+}
+
 /// Does what the rules that `caught` a message say: works out what its
 /// author is told when one blocks it (returned), times them out and posts
 /// the alerts.

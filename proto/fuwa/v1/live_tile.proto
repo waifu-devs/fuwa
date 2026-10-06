@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Live tiles that apps keep up to date: small cards above a server's channel
+// list (docs/live-tiles.md). An agent sets them here; a webhook sets them
+// with an HTTP POST to
+//   <instance>/webhooks/<server id>/<webhook id>/<token>/tile
+// with a JSON body
+//   {"id": "final", "title": "Cup final", "status": "67'", "live": true,
+//    "rows": [{"label": "Red Foxes", "value": "2"}], "progress": 0.74,
+//    "action": "Watch", "ttl_seconds": 7200}
+// and ends one with a DELETE to the same address with `?id=final`. A webhook's
+// tiles go in its channel, under its name.
+//
+// Only in a server's own text and announcement channels, never secure ones or
+// ones shared with other servers, and only while the server shows app tiles
+// (Server.live_tiles). An agent needs SEND_MESSAGES in the channel. The text
+// goes through the server's AutoMod word and link rules, which can refuse it.
+// Updates aren't stored as events: they go to whoever can see the channel
+// (LiveTileUpdated, LiveTileEnded), and apps list the tiles again after a
+// reconnect.
+service LiveTileService {
+  // Sets a tile, or changes one the caller set before. Only agents.
+  rpc SetLiveTile(SetLiveTileRequest) returns (SetLiveTileResponse);
+  // Ends one of the caller's tiles; MANAGE_MESSAGES in the channel ends
+  // anyone's. Ending one that's gone already succeeds.
+  rpc EndLiveTile(EndLiveTileRequest) returns (EndLiveTileResponse);
+  // The server's tiles that haven't run out, in channels the caller can see.
+  rpc ListLiveTiles(ListLiveTilesRequest) returns (ListLiveTilesResponse);
+}
+
+message SetLiveTileRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The app's own id for the tile: 1 to 64 letters, digits, `-` and `_`.
+  string tile_id = 3;
+  LiveTileContent content = 4;
+  // How long it stays after this change if not changed again: 2 hours
+  // when unset.
+  optional int64 ttl_seconds = 5;
+}
+
+message SetLiveTileResponse {
+  LiveTile tile = 1;
+}
+
+message EndLiveTileRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string tile_id = 3;
+  // Whose tile, for a moderator ending another app's; the caller's own when empty.
+  string source_id = 4;
+}
+
+message EndLiveTileResponse {}
+
+message ListLiveTilesRequest {
+  string server_id = 1;
+}
+
+message ListLiveTilesResponse {
+  repeated LiveTile tiles = 1;
+}
