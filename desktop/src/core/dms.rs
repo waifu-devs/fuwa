@@ -111,6 +111,8 @@ pub struct DmState {
     pub calls: HashMap<String, pb::DmCall>,
     /// Per secure channel: whether earlier messages are passed on to people added later.
     pub secure_history: HashMap<String, bool>,
+    /// Per conversation, once opened: its pins (`pins`).
+    pub pins: HashMap<String, crate::core::pins::DmPinList>,
 }
 
 /// Something a person can be told about why sending didn't work.
@@ -596,11 +598,22 @@ impl DmEngine {
                 self.queue(record.conversation_id);
             }
             Payload::RecordDeleted(record) => {
+                // Its pin goes with it.
+                self.update(|s| {
+                    if let Some(list) = s.pins.get_mut(&record.conversation_id) {
+                        crate::core::pins::change_dm(list, record.sequence, None);
+                    }
+                });
                 let this = self.clone();
                 tokio::spawn(async move { this.forget_deleted(&record.conversation_id, record.sequence).await });
             }
             Payload::CallUpdated(call) => self.update(|s| calls::set_dm_call(&mut s.calls, call)),
-            // Pins aren't shown here yet (compat feature "pins").
+            Payload::PinUpdated(pb::DmPinUpdated { pin: Some(pin), pinned }) => self.update(|s| {
+                if let Some(list) = s.pins.get_mut(&pin.conversation_id) {
+                    let sequence = pin.sequence;
+                    crate::core::pins::change_dm(list, sequence, pinned.then_some(pin));
+                }
+            }),
             Payload::PinUpdated(_) => {}
         }
     }

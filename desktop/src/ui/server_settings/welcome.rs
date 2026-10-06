@@ -48,7 +48,9 @@ pub(super) struct Welcome {
 impl Welcome {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
         let description = cx.new(|cx| {
-            TextareaState::new(window, cx).auto_grow(3, 6).placeholder("What this place is about, and where to begin.")
+            TextareaState::new(window, cx)
+                .auto_grow(3, 6)
+                .placeholder(t("serversettings.welcomeScreen.wordsPlaceholder"))
         });
         let subscriptions = vec![cx.subscribe(&description, |_: &mut ServerSettingsView, _, e: &InputEvent, cx| {
             if let InputEvent::Change = e {
@@ -146,7 +148,8 @@ impl ServerSettingsView {
     ) {
         self.welcome.next += 1;
         let key = self.welcome.next;
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Why go there (optional)"));
+        let input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.welcomeScreen.notePlaceholder")));
         let note = note.to_owned();
         input.update(cx, |s, cx| s.set_value(note, window, cx));
         let changes = cx.subscribe(&input, |_: &mut Self, _, e: &InputEvent, cx| {
@@ -170,9 +173,9 @@ impl ServerSettingsView {
     /// Whether the welcome screen can be saved as it is, saying why not.
     fn check_welcome(&mut self, screen: &pb::WelcomeScreen, cx: &mut Context<Self>) -> bool {
         if screen.description.chars().count() > DESCRIPTION_MAX {
-            self.error = Some(format!("The few words are {DESCRIPTION_MAX} characters at most."));
+            self.error = Some(t_with("desktop.server.welcome.tooLong", &[("max", Arg::Num(DESCRIPTION_MAX as i64))]));
         } else if screen.enabled && screen.description.is_empty() && screen.channels.is_empty() {
-            self.error = Some("Add a few words or a channel first.".into());
+            self.error = Some(t("desktop.server.welcome.empty"));
         } else {
             return true;
         }
@@ -265,11 +268,10 @@ impl ServerSettingsView {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Show a welcome screen"))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(
-                        "New members see it once, after agreeing to any rules. Anyone can open it again from the \
-                         server menu.",
-                    )),
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.nav.welcomeEnabled")))
+                    .child(
+                        div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.welcome.enabledHint")),
+                    ),
             )
             .child(switch("welcome-on".into(), enabled, false, cx, |this, on, cx| {
                 this.welcome.enabled = on;
@@ -283,7 +285,7 @@ impl ServerSettingsView {
             .py(px(18.0))
             .border_b_1()
             .border_color(p.border)
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child("A few words"))
+            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcomeScreen.words")))
             .child(Textarea::new(&self.welcome.description))
             .child(
                 div()
@@ -292,7 +294,13 @@ impl ServerSettingsView {
                     .gap(px(12.0))
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("Markdown works on one line: **bold**, *italics*, links.")
+                    .child(t_with(
+                        "serversettings.welcomeScreen.markdown",
+                        &[
+                            ("bold", Arg::Str(&format!("**{}**", t("serversettings.welcomeScreen.bold")))),
+                            ("italics", Arg::Str(&format!("*{}*", t("serversettings.welcomeScreen.italics")))),
+                        ],
+                    ))
                     .child(
                         div()
                             .when(length > DESCRIPTION_MAX - 30, |el| el.text_color(amber(p)))
@@ -313,11 +321,14 @@ impl ServerSettingsView {
             .flex_col()
             .gap(px(12.0))
             .py(px(18.0))
-            .child(div().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Channels to start in")).child(
-                div().text_sm().text_color(p.muted_foreground).child(format!(
-                    "Up to {MAX_CHANNELS}, in this order. People only see the ones they're allowed into."
-                )),
-            ))
+            .child(
+                div()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcomeScreen.channels")))
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
+                        "desktop.server.welcome.channelsHint",
+                        &[("max", Arg::Num(MAX_CHANNELS as i64))],
+                    ))),
+            )
             .child(list);
         if count < MAX_CHANNELS && !unused.is_empty() {
             let first = unused[0].id.clone();
@@ -341,7 +352,7 @@ impl ServerSettingsView {
                     .hover(move |s| s.border_color(hover))
                     .active(|s| s.top(px(1.0)))
                     .child(icon("plus").size(px(15.0)))
-                    .child("Add a channel")
+                    .child(t("serversettings.welcomeScreen.addChannel"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.add_welcome_row(first.clone(), String::new(), "", window, cx);
                         cx.notify();
@@ -431,32 +442,29 @@ impl ServerSettingsView {
             } else {
                 welcome_emoji(&row.emoji, look, p)
             });
-        let channel_button = div()
-            .id(SharedString::from(format!("welcome-channel-{key}")))
-            .flex_none()
-            .w(px(170.0))
-            .h(px(36.0))
-            .px(px(10.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(corner(12.0))
-            .border_1()
-            .border_color(if picking == Some(Pick::Channel) { alpha(p.primary, 0.6) } else { p.border.into() })
-            .cursor_pointer()
-            .hover(move |s| s.border_color(hover))
-            .on_click(cx.listener(pick(Pick::Channel)))
-            .child(icon("hash").size(px(15.0)).text_color(p.muted_foreground))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .child(channel.map(|c| c.name.clone()).unwrap_or_else(|| "Pick a channel".into())),
-            )
-            .child(icon("chevron-down").size(px(14.0)).text_color(p.muted_foreground));
+        let channel_button =
+            div()
+                .id(SharedString::from(format!("welcome-channel-{key}")))
+                .flex_none()
+                .w(px(170.0))
+                .h(px(36.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .rounded(corner(12.0))
+                .border_1()
+                .border_color(if picking == Some(Pick::Channel) { alpha(p.primary, 0.6) } else { p.border.into() })
+                .cursor_pointer()
+                .hover(move |s| s.border_color(hover))
+                .on_click(cx.listener(pick(Pick::Channel)))
+                .child(icon("hash").size(px(15.0)).text_color(p.muted_foreground))
+                .child(
+                    div().flex_1().min_w_0().truncate().text_sm().font_weight(FontWeight::BOLD).child(
+                        channel.map(|c| c.name.clone()).unwrap_or_else(|| t("serversettings.shared.pickChannel")),
+                    ),
+                )
+                .child(icon("chevron-down").size(px(14.0)).text_color(p.muted_foreground));
 
         let line = div()
             .flex()
@@ -607,7 +615,8 @@ impl ServerSettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tint = crate::ui::banner::accent(server);
-        let hero = crate::ui::banner::banner_hero(server, "Welcome to 👋", 320.0, p, window, cx);
+        let eyebrow = format!("{} 👋", t("join.welcome.eyebrow"));
+        let hero = crate::ui::banner::banner_hero(server, &eyebrow, 320.0, p, window, cx);
         let mut body = div().flex().flex_col().gap(px(10.0));
         if !screen.description.is_empty() {
             let shown =
@@ -668,15 +677,14 @@ impl ServerSettingsView {
                             .text_size(px(11.0))
                             .font_weight(FontWeight::EXTRA_BOLD)
                             .text_color(p.muted_foreground)
-                            .child("START HERE"),
+                            .child(t("join.startHere").to_uppercase()),
                     )
                     .child(list),
             );
         }
         if screen.description.is_empty() && screen.channels.is_empty() {
-            body = body.child(
-                div().text_xs().text_color(p.muted_foreground).child("Add a few words or a channel to see it here."),
-            );
+            body = body
+                .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.welcome.previewEmpty")));
         }
         let on = screen.enabled;
         let card = div()
@@ -706,7 +714,7 @@ impl ServerSettingsView {
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
                             .text_center()
-                            .child("Off: new members go straight to the server."),
+                            .child(t("desktop.server.welcome.off")),
                         "welcome-off",
                         Duration::ZERO,
                         8.0,
@@ -724,7 +732,7 @@ impl ServerSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child("PREVIEW"),
+                    .child(t("settings.controls.preview").to_uppercase()),
             )
             .child(card)
             .into_any_element()

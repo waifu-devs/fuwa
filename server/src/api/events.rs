@@ -99,9 +99,10 @@ impl View {
     /// What the member gets for `event`: nothing if it's about a channel they
     /// can't see; when it changes what they can see, the channels that appear
     /// for them (ChannelCreated) and go (ChannelDeleted), not stored, so
-    /// sequence 0.
-    async fn pass(&mut self, event: &pb::Event) -> Vec<pb::Event> {
-        let mut out = self.pass_unscrubbed(event).await;
+    /// sequence 0. An error when what they can see couldn't be worked out
+    /// again: the stream ends rather than go on with what they could before.
+    async fn pass(&mut self, event: &pb::Event) -> Result<Vec<pb::Event>, Status> {
+        let mut out = self.pass_unscrubbed(event).await?;
         let manager = self.access.has(pb::Permission::ManageServer);
         for event in &mut out {
             if let Some(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(interaction) })) =
@@ -118,13 +119,14 @@ impl View {
                 store::scrub_sso(member, &self.account_id, manager);
             }
         }
-        out
+        Ok(out)
     }
 
-    async fn pass_unscrubbed(&mut self, event: &pb::Event) -> Vec<pb::Event> {
-        let Some(payload) = &event.payload else { return vec![event.clone()] };
+    async fn pass_unscrubbed(&mut self, event: &pb::Event) -> Result<Vec<pb::Event>, Status> {
+        let Some(payload) = &event.payload else { return Ok(vec![event.clone()]) };
         if !changes_access(payload, &self.account_id) {
-            return if shown_to(&self.account_id, &self.access, payload) { vec![event.clone()] } else { vec![] };
+            let shown = shown_to(&self.account_id, &self.access, payload);
+            return Ok(if shown { vec![event.clone()] } else { vec![] });
         }
         let before = self.access.visible();
         // Changes to channels and roles leave every member's own row alone
@@ -141,7 +143,12 @@ impl View {
         match self.load(own_row).await {
             Ok(Some(access)) => self.access = access,
             Ok(None) => {}
-            Err(_) => tracing::warn!("couldn't work out a member's permissions"),
+            Err(_) => {
+                tracing::warn!("couldn't work out a member's permissions");
+                return Err(Status::aborted(
+                    "couldn't work out what you can see; subscribe again from your last sequence",
+                ));
+            }
         }
         let after = self.access.visible();
         let own = channel_of(payload);
@@ -187,7 +194,7 @@ impl View {
         for id in gone {
             out.push(unstored(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: id.clone() })));
         }
-        out
+        Ok(out)
     }
 
     /// Works out what the member can see now, for a stream that starts live
@@ -337,7 +344,14 @@ impl EventService for Api {
                         let Some(last) = page.last() else { break };
                         sequence = last.sequence.min(head);
                         for event in page.into_iter().filter(|e| e.sequence <= head) {
-                            for event in view.pass(&event).await {
+                            let out = match view.pass(&event).await {
+                                Ok(out) => out,
+                                Err(status) => {
+                                    send(Err(status)).await;
+                                    return;
+                                }
+                            };
+                            for event in out {
                                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;
                                 }
@@ -459,7 +473,13 @@ impl EventService for Api {
                                 _ => false,
                             };
                             let out = match views.get_mut(&server_id) {
-                                Some(view) if !ends => view.pass(&event).await,
+                                Some(view) if !ends => match view.pass(&event).await {
+                                    Ok(out) => out,
+                                    Err(status) => {
+                                        send(Err(status)).await;
+                                        return;
+                                    }
+                                },
                                 _ => vec![(*event).clone()],
                             };
                             for event in out {
@@ -515,5 +535,47 @@ impl EventService for Api {
             }
             .await,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stream that can't work out again what its member can see, after an
+    /// event that may change it, ends rather than go on with what they could
+    /// see before.
+    #[tokio::test]
+    async fn a_view_that_cant_reload_ends_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = Arc::new(crate::hub::Hub::default());
+        let servers = store::Servers::open(dir.path(), None, hub, false, None, "").await.unwrap();
+        let owner = pb::User { id: new_id(), username: "owner".into(), ..Default::default() };
+        let new = store::NewServer {
+            name: "S".into(),
+            description: String::new(),
+            icon_url: String::new(),
+            discoverable: false,
+        };
+        let server = servers.create(&owner, new).await.unwrap();
+        let sdb = servers.get(&server.id).await.unwrap();
+        let (member, access) = sdb.member_access(&owner.id).await.unwrap().unwrap();
+        let mut view = View { sdb: sdb.clone(), account_id: owner.id.clone(), member, access, replaying: false };
+        let event = |payload| pb::Event {
+            server_id: server.id.clone(),
+            sequence: 1,
+            payload: Some(payload),
+            ..Default::default()
+        };
+
+        // Seen as before while their row can be read.
+        let updated = event(Payload::ServerUpdated(Default::default()));
+        assert_eq!(view.pass(&updated).await.unwrap().len(), 1);
+
+        // Their row can't be read any more.
+        let conn = crate::db::connect(sdb.db()).unwrap();
+        conn.execute("DROP TABLE members", ()).await.unwrap();
+        let ended = view.pass(&updated).await.unwrap_err();
+        assert_eq!(ended.code(), tonic::Code::Aborted);
     }
 }

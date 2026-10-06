@@ -163,16 +163,23 @@ fn header_size(b: &[u8], kind: &str) -> Option<(u32, u32, u64)> {
 /// Why a picture can't be an emoji, judged from its header alone.
 fn too_big(bytes: &[u8], kind: &str) -> Option<String> {
     let Some((w, h, frames)) = header_size(bytes, kind) else {
-        return Some("That picture couldn't be read.".into());
+        return Some(t("desktop.server.emoji.unreadable"));
     };
     if w == 0 || h == 0 {
-        return Some("That picture couldn't be read.".into());
+        return Some(t("desktop.server.emoji.unreadable"));
     }
     if w > MAX_SIDE || h > MAX_SIDE {
-        return Some(format!("{w}×{h} is too big; {MAX_SIDE} a side at most."));
+        return Some(t_with(
+            "desktop.server.emoji.tooBig",
+            &[
+                ("width", Arg::Str(&w.to_string())),
+                ("height", Arg::Str(&h.to_string())),
+                ("max", Arg::Str(&MAX_SIDE.to_string())),
+            ],
+        ));
     }
     if frames * u64::from(w) * u64::from(h) > MAX_FRAME_PIXELS {
-        return Some("That moving picture has too many frames for its size.".into());
+        return Some(t("desktop.server.emoji.tooManyFrames"));
     }
     None
 }
@@ -187,7 +194,7 @@ fn shrink(bytes: Vec<u8>, kind: &'static str, svg: SvgRenderer) -> Result<(Vec<u
         "image/jpeg" => ImageFormat::Jpeg,
         _ => ImageFormat::Webp,
     };
-    let unreadable = || "That picture couldn't be read.".to_owned();
+    let unreadable = || t("desktop.server.emoji.unreadable");
     let picture = Image::from_bytes(format, bytes.clone()).to_image_data(svg).map_err(|_| unreadable())?;
     let s = picture.size(0);
     let (sw, sh) = (i32::from(s.width).max(0) as usize, i32::from(s.height).max(0) as usize);
@@ -228,9 +235,11 @@ fn shrink(bytes: Vec<u8>, kind: &'static str, svg: SvgRenderer) -> Result<(Vec<u
 
 fn size_label(bytes: i64) -> String {
     match bytes {
-        b if b < 1024 => format!("{b} B"),
-        b if b < 1024 * 1024 => format!("{:.1} KB", b as f64 / 1024.0),
-        b => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+        b if b < 1024 => t_with("desktop.server.emoji.bytes", &[("size", Arg::Str(&b.to_string()))]),
+        b if b < 1024 * 1024 => {
+            t_with("desktop.server.emoji.kilobytes", &[("size", Arg::Str(&format!("{:.1}", b as f64 / 1024.0)))])
+        }
+        b => t_with("desktop.updates.size", &[("size", Arg::Str(&format!("{:.1}", b as f64 / (1024.0 * 1024.0))))]),
     }
 }
 
@@ -254,7 +263,7 @@ impl ServerSettingsView {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Choose pictures".into()),
+            prompt: Some(t("desktop.server.emoji.choosePictures").into()),
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
@@ -277,7 +286,7 @@ impl ServerSettingsView {
             let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let Some(kind) = picture_type(&file) else {
                 self.emojis.refused = Some(Instant::now());
-                self.error = Some("Emoji are PNG, JPEG, GIF or WebP pictures.".into());
+                self.error = Some(t("desktop.server.emoji.badType"));
                 continue;
             };
             let name = unique_emoji_name(&emoji_name_from_file(&file), &taken);
@@ -292,12 +301,15 @@ impl ServerSettingsView {
                 cx,
                 async move {
                     let unreadable =
-                        |_: std::io::Error| Problem::new(tonic::Code::NotFound, "Couldn't read that file.");
+                        |_: std::io::Error| Problem::new(tonic::Code::NotFound, t("desktop.look.cantRead"));
                     let size = tokio::fs::metadata(&path).await.map_err(unreadable)?.len();
                     if size > MAX_BYTES {
                         return Err(Problem::new(
                             tonic::Code::InvalidArgument,
-                            format!("That file is over {} MB.", MAX_BYTES / (1024 * 1024)),
+                            t_with(
+                                "desktop.server.emoji.fileTooBig",
+                                &[("size", Arg::Num((MAX_BYTES / (1024 * 1024)) as i64))],
+                            ),
                         ));
                     }
                     let bytes = tokio::fs::read(&path).await.map_err(unreadable)?;
@@ -306,7 +318,7 @@ impl ServerSettingsView {
                     }
                     tokio::task::spawn_blocking(move || shrink(bytes, kind, svg))
                         .await
-                        .map_err(|_| Problem::new(tonic::Code::Internal, "That picture couldn't be read."))?
+                        .map_err(|_| Problem::new(tonic::Code::Internal, t("desktop.server.emoji.unreadable")))?
                         .map_err(|msg| Problem::new(tonic::Code::InvalidArgument, msg))
                 },
                 move |this, result, cx| {
@@ -382,7 +394,7 @@ impl ServerSettingsView {
             return;
         }
         if !emoji_name_ok(&name) {
-            self.error = Some("Emoji names are 2 to 32 letters, digits and underscores.".into());
+            self.error = Some(t("serversettings.emoji.badName"));
             return;
         }
         self.error = None;
@@ -451,13 +463,8 @@ impl ServerSettingsView {
                             el.relative().top(px(-4.0 * wave.abs()))
                         },
                     ))
-                    .child(div().font_weight(FontWeight::BOLD).child("No emoji yet"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(p.muted_foreground)
-                            .child("Add the first and it shows up when people type a colon."),
-                    ),
+                    .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.emoji.none")))
+                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.emoji.noneHint"))),
                 "emoji-empty",
                 Duration::from_millis(80),
                 8.0,
@@ -484,7 +491,7 @@ impl ServerSettingsView {
                     .text_xs()
                     .text_color(amber)
                     .child(icon("image-plus").size(px(14.0)))
-                    .child("This server has all the emoji it can hold. Delete one to make room."),
+                    .child(t("serversettings.emoji.full")),
             );
         }
         page.into_any_element()
@@ -542,11 +549,14 @@ impl ServerSettingsView {
                         },
                     )),
             )
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Drop pictures here, or pick some"))
-            .child(div().max_w(px(400.0)).text_xs().text_color(p.muted_foreground).child(
-                "Several at once is fine. Each is shrunk to 128 pixels; GIFs keep moving. \
-                 The file name becomes the emoji's name, and you can change it.",
-            ))
+            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.emoji.drop")))
+            .child(
+                div()
+                    .max_w(px(400.0))
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.emoji.dropHint")),
+            )
             .child(
                 div()
                     .mt(px(4.0))
@@ -557,8 +567,11 @@ impl ServerSettingsView {
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
                     .child(match cap {
-                        Some(cap) => format!("{count} of {cap}"),
-                        None => format!("{count} emoji"),
+                        Some(cap) => t_with(
+                            "serversettings.emoji.countOf",
+                            &[("count", Arg::Num(count as i64)), ("cap", Arg::Num(cap))],
+                        ),
+                        None => t_with("serversettings.emoji.count", &[("count", Arg::Num(count as i64))]),
                     }),
             );
         // Shakes once when a file that isn't a picture is refused.
@@ -625,8 +638,8 @@ impl ServerSettingsView {
         };
         let status = match &pending.error {
             Some(e) => e.clone(),
-            None if pending.done.is_some() => "Added".into(),
-            None => "Uploading…".into(),
+            None if pending.done.is_some() => t("serversettings.emoji.added"),
+            None => t("serversettings.emoji.uploading"),
         };
         motion::rise(
             div()
@@ -735,12 +748,12 @@ impl ServerSettingsView {
                 })
                 .into_any_element()
         };
-        let about = format!(
-            "{} · {}{}",
-            creator.map(user_name).unwrap_or_else(|| "Someone".into()),
-            size_label(emoji.size),
-            if emoji.animated { " · moves" } else { "" }
-        );
+        let by = creator.map(user_name).unwrap_or_else(|| t("common.someone"));
+        let about = if emoji.animated {
+            format!("{by} · {} · {}", size_label(emoji.size), t("serversettings.emoji.moves"))
+        } else {
+            format!("{by} · {}", size_label(emoji.size))
+        };
         let end = if self.emojis.confirming.as_deref() == Some(id.as_str()) {
             let yes = id.clone();
             motion::slide_in(
@@ -748,15 +761,19 @@ impl ServerSettingsView {
                     .flex()
                     .gap(px(4.0))
                     .child(
-                        danger_button(SharedString::from(format!("emoji-delete-yes-{id}")), "Delete", p)
-                            .h(px(32.0))
-                            .px(px(12.0))
-                            .text_xs()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if this.emojis.busy.is_none() {
-                                    this.remove_emoji(yes.clone(), cx)
-                                }
-                            })),
+                        danger_button(
+                            SharedString::from(format!("emoji-delete-yes-{id}")),
+                            t("serversettings.shared.delete"),
+                            p,
+                        )
+                        .h(px(32.0))
+                        .px(px(12.0))
+                        .text_xs()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.emojis.busy.is_none() {
+                                this.remove_emoji(yes.clone(), cx)
+                            }
+                        })),
                     )
                     .child(icon_button(SharedString::from(format!("emoji-keep-{id}")), "x", p).on_click(cx.listener(
                         |this, _, _, cx| {
