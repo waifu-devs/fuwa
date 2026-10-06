@@ -836,6 +836,7 @@ impl FuwaApp {
                 state.set_placeholder(placeholder, window, cx);
             });
             self.draft_for = id;
+            self.load_dm_pins_here(cx);
             self.editing = None;
             self.picker = None;
             self.picker_dismissed = None;

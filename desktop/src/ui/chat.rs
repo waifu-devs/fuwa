@@ -82,7 +82,8 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
 
 /// The rows of a conversation or a secure channel (`moderate` is Some for a
 /// channel: whether you may delete others' messages there), from what this
-/// device opened.
+/// device opened. `pins` is Some in a conversation whose instance keeps pins:
+/// what's pinned there, as read so far.
 pub(crate) fn encrypted_rows(
     i: &InstanceState,
     id: &str,
@@ -90,6 +91,7 @@ pub(crate) fn encrypted_rows(
     who: &dyn Fn(&str) -> Who,
     moderate: Option<bool>,
     editing: Option<&str>,
+    pins: Option<&[pb::DmPin]>,
 ) -> Vec<Row> {
     let me = i.me.clone();
     let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
@@ -107,6 +109,10 @@ pub(crate) fn encrypted_rows(
                 m.edited = item.edited_at > 0;
                 m.can_delete = can_delete;
                 m.voice = item.voice.as_ref().map(|v| Rc::new(crate::ui::voice_notes::VoiceCard::of(v)));
+                if let Some(pins) = pins {
+                    m.can_pin = true;
+                    m.pinned = pins.iter().any(|p| p.sequence == item.seq);
+                }
                 rows.push(Row::Msg(Rc::new(m)));
             }
             ItemKind::Text => {}
@@ -317,7 +323,8 @@ impl Row {
             Row::Divider { text } => ("divider", text).hash(h),
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
-                (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h);
+                (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me, m.pinned)
+                    .hash(h);
                 m.voice.as_ref().map(|v| v.digest()).hash(h);
             }
         }
@@ -352,7 +359,10 @@ impl FuwaApp {
                     let user = person(id);
                     Who { name: user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into()), color: None, user }
                 };
-                let mut rows = encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref());
+                let pins = i.has("pins").then(|| {
+                    i.dms.pins.get(&conversation).map(|l| l.pins.as_slice()).unwrap_or_default()
+                });
+                let mut rows = encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref(), pins);
                 self.dress_voice(&mut rows);
                 rows
             }),
@@ -372,7 +382,7 @@ impl FuwaApp {
                     user: i.users.get(id).cloned(),
                 };
                 let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
-                encrypted_rows(i, &channel, start, &who, Some(manage), self.editing.as_deref())
+                encrypted_rows(i, &channel, start, &who, Some(manage), self.editing.as_deref(), None)
             }),
             None => Vec::new(),
         }
@@ -1256,6 +1266,7 @@ impl FuwaApp {
 
     fn dm_view(&mut self, key: &str, id: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
+        let pins_here = self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("pins")));
         let (other, safety, verified, blocked, joining, status) = self.core.shared.read(|s| {
             let Some(i) = s.instance(key) else { return (None, None, None, None, false, None) };
             let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
@@ -1304,6 +1315,17 @@ impl FuwaApp {
                     .child("End-to-end encrypted"),
             )
             .child(div().flex_1())
+            .when(pins_here, |el| {
+                let open = self.pins.is_some();
+                el.child(
+                    icon_button("pins-toggle", "pin", &p)
+                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_pins(window, cx))),
+                )
+            })
             .child(
                 div()
                     .id("safety")
@@ -1359,14 +1381,17 @@ impl FuwaApp {
             blocked
         }
         .map(|text| Blocked { text, action: None });
-        div()
-            .size_full()
+        let column = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
             .flex_col()
             .child(header)
             .child(self.message_list(window, cx))
-            .child(self.composer_bar(blocked, window, cx))
-            .into_any_element()
+            .child(self.composer_bar(blocked, window, cx));
+        let side = self.pins_panel(cx);
+        div().size_full().flex().child(column).children(side).into_any_element()
     }
 
     // ───────────────────────── An instance ─────────────────────────
@@ -2487,7 +2512,39 @@ fn webhook_author(w: &pb::MessageWebhook) -> pb::User {
 
 #[cfg(test)]
 mod tests {
-    use super::changed_rows;
+    use super::{Row, Who, changed_rows, encrypted_rows};
+    use crate::core::store::InstanceState;
+    use crate::pb;
+
+    #[test]
+    fn a_conversations_pinned_messages_are_marked() {
+        let mut i = InstanceState::new("k", "https://k");
+        let item = |seq: i64| {
+            serde_json::from_value(serde_json::json!({
+                "seq": seq, "kind": "text", "at": seq, "sender_id": "u", "device_id": "d", "content": "hi"
+            }))
+            .unwrap()
+        };
+        i.dms.items.insert("c".into(), vec![item(1), item(2), item(3)]);
+        let who = |_: &str| Who { name: "U".into(), color: None, user: None };
+        let start = || Row::Older { loading: false };
+        let marks = |pins: Option<&[pb::DmPin]>| {
+            encrypted_rows(&i, "c", start(), &who, None, None, pins)
+                .iter()
+                .filter_map(|r| match r {
+                    Row::Msg(m) => Some((m.id.clone(), m.pinned, m.can_pin)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let pin = pb::DmPin { conversation_id: "c".into(), sequence: 2, pinned_at: None };
+        assert_eq!(
+            marks(Some(&[pin])),
+            [("1".into(), false, true), ("2".into(), true, true), ("3".into(), false, true)]
+        );
+        // Where the instance doesn't keep pins (or in a secure channel): nothing to pin.
+        assert_eq!(marks(None), [("1".into(), false, false), ("2".into(), false, false), ("3".into(), false, false)]);
+    }
 
     #[test]
     fn only_changed_rows_are_measured_again() {

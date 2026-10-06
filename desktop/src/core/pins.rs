@@ -1,6 +1,9 @@
 //! Pinned messages in a channel or thread, as the web app's `fuwa/pins.ts`:
 //! each list read when someone opens it and read again when an event says a
 //! pin there changed. Messages themselves carry `pinned_at` while pinned.
+//!
+//! A private conversation's pins name records by their place only (never what
+//! they say, nor who pinned them): this device draws each from what it opened.
 
 use std::sync::Arc;
 
@@ -73,6 +76,72 @@ pub fn mark(i: &mut InstanceState, p: &pb::MessagePinned) {
     }
     if let Some(parent) = i.thread_parents.get_mut(&p.message_id) {
         parent.pinned_at = p.pinned_at;
+    }
+}
+
+/// A conversation's pins, the latest pin first.
+#[derive(Debug, Clone)]
+pub struct DmPinList {
+    pub status: PinStatus,
+    pub pins: Vec<pb::DmPin>,
+    pub has_more: bool,
+    /// As [`PinList::generation`].
+    pub generation: u64,
+    /// While a read is out: the pins and unpins seen since it started, to
+    /// apply again over its answer (which may predate them).
+    changes: Option<Vec<(i64, Option<pb::DmPin>)>>,
+}
+
+impl DmPinList {
+    fn new() -> Self {
+        Self { status: PinStatus::Loading, pins: Vec::new(), has_more: false, generation: 0, changes: None }
+    }
+}
+
+/// Starts a read of a conversation's pins: the generation it answers to, and
+/// (for `more`) the sequence the next page follows.
+fn begin_dm(list: &mut DmPinList, more: bool) -> (u64, Option<i64>) {
+    if more {
+        list.changes.get_or_insert_with(Vec::new);
+    } else {
+        list.status = PinStatus::Loading;
+        list.generation += 1;
+        list.changes = Some(Vec::new());
+    }
+    (list.generation, if more { list.pins.last().map(|p| p.sequence) } else { None })
+}
+
+/// Takes a read's answer, then what changed while it was out.
+fn settle_dm(list: &mut DmPinList, pins: Vec<pb::DmPin>, has_more: bool, more: bool) {
+    if more {
+        let new: Vec<_> = pins.into_iter().filter(|p| !list.pins.iter().any(|h| h.sequence == p.sequence)).collect();
+        list.pins.extend(new);
+    } else {
+        list.pins = pins;
+    }
+    for (sequence, pin) in list.changes.take().unwrap_or_default() {
+        list.pins.retain(|p| p.sequence != sequence);
+        if let Some(pin) = pin {
+            list.pins.insert(0, pin);
+        }
+    }
+    list.has_more = has_more;
+    list.status = PinStatus::Ready;
+}
+
+/// As [`still_current`], for a conversation's list.
+pub fn dm_still_current(list: &DmPinList, generation: u64, after: Option<i64>) -> bool {
+    list.generation == generation && after.is_none_or(|seq| list.pins.last().is_some_and(|p| p.sequence == seq))
+}
+
+/// A record pinned (to the top) or unpinned (gone from the list).
+pub fn change_dm(list: &mut DmPinList, sequence: i64, pin: Option<pb::DmPin>) {
+    if let Some(changes) = &mut list.changes {
+        changes.push((sequence, pin.clone()));
+    }
+    list.pins.retain(|p| p.sequence != sequence);
+    if let Some(pin) = pin {
+        list.pins.insert(0, pin);
     }
 }
 
@@ -163,6 +232,58 @@ impl Core {
                 drop(self.spawn(async move { core.load_pins(&key, &server, &channel, &thread, false).await }));
             }
         }
+    }
+
+    /// Reads a conversation's pins; `more` adds the next page.
+    pub async fn load_dm_pins(&self, key: &str, conversation: &str, more: bool) {
+        let Some(api) = self.api(key) else { return };
+        let Some((generation, after)) = self.shared.instance(key, |i| {
+            begin_dm(i.dms.pins.entry(conversation.to_owned()).or_insert_with(DmPinList::new), more)
+        }) else {
+            return;
+        };
+        if more && after.is_none() {
+            return;
+        }
+        let res = rpc!(
+            api.dms(),
+            list_record_pins(pb::ListRecordPinsRequest {
+                conversation_id: conversation.into(),
+                limit: PAGE,
+                after_sequence: after,
+            })
+        )
+        .await;
+        self.shared.instance(key, |i| {
+            let Some(list) = i.dms.pins.get_mut(conversation) else { return };
+            if !dm_still_current(list, generation, after) {
+                return;
+            }
+            match res {
+                Ok(res) => settle_dm(list, res.pins, res.has_more, more),
+                Err(_) => {
+                    list.changes = None;
+                    list.status = PinStatus::Failed;
+                }
+            }
+        });
+    }
+
+    /// Pins a private message by its place in the conversation, or unpins it.
+    pub async fn pin_dm(&self, key: &str, conversation: &str, sequence: i64, pinned: bool) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        reports::used(if pinned { "message.pin" } else { "message.unpin" });
+        let res = rpc!(
+            api.dms(),
+            pin_record(pb::PinRecordRequest { conversation_id: conversation.into(), sequence, pinned })
+        )
+        .await?;
+        self.shared.instance(key, |i| {
+            if let Some(list) = i.dms.pins.get_mut(conversation) {
+                change_dm(list, sequence, res.pin);
+            }
+        });
+        Ok(())
     }
 
     /// Pins a message in a channel or thread, or unpins it; it's marked at once.
@@ -279,5 +400,44 @@ mod tests {
         // …but not after a read from the top, nor when the list now ends elsewhere.
         assert!(!still_current(&list, 2, true, "b"));
         assert!(!still_current(&list, 3, true, "a"));
+    }
+
+    fn dm_pin(seq: i64) -> pb::DmPin {
+        pb::DmPin { conversation_id: "d".into(), sequence: seq, pinned_at: None }
+    }
+
+    #[test]
+    fn a_conversations_pins_change_in_place() {
+        let mut list = DmPinList::new();
+        list.pins = vec![dm_pin(4), dm_pin(2)];
+        // Pinned again: once, at the top.
+        change_dm(&mut list, 2, Some(dm_pin(2)));
+        assert_eq!(list.pins.iter().map(|p| p.sequence).collect::<Vec<_>>(), [2, 4]);
+        // Unpinned, or its record deleted: gone.
+        change_dm(&mut list, 4, None);
+        assert_eq!(list.pins.iter().map(|p| p.sequence).collect::<Vec<_>>(), [2]);
+        // A later page counts only where the list still ends where it asked from.
+        list.generation = 5;
+        assert!(dm_still_current(&list, 5, Some(2)));
+        assert!(!dm_still_current(&list, 5, Some(4)));
+        assert!(!dm_still_current(&list, 4, None));
+    }
+
+    #[test]
+    fn changes_during_a_read_outlast_its_older_answer() {
+        let mut list = DmPinList::new();
+        list.pins = vec![dm_pin(3), dm_pin(1)];
+        let (generation, after) = begin_dm(&mut list, false);
+        // While the read is out: 7 is pinned and 3 unpinned.
+        change_dm(&mut list, 7, Some(dm_pin(7)));
+        change_dm(&mut list, 3, None);
+        // The answer was worked out before either.
+        assert!(dm_still_current(&list, generation, after));
+        settle_dm(&mut list, vec![dm_pin(3), dm_pin(1)], false, false);
+        assert_eq!(list.pins.iter().map(|p| p.sequence).collect::<Vec<_>>(), [7, 1]);
+        // Once taken, later reads start clean.
+        begin_dm(&mut list, false);
+        settle_dm(&mut list, vec![dm_pin(1)], false, false);
+        assert_eq!(list.pins.iter().map(|p| p.sequence).collect::<Vec<_>>(), [1]);
     }
 }
