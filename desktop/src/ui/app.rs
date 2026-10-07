@@ -259,6 +259,8 @@ pub struct FuwaApp {
     /// Turning a secure channel's history sharing on or off.
     pub secure_saving: bool,
     pub hovered: Option<String>,
+    /// Categories folded away in the sidebar, by id (for this run, as on the web).
+    pub collapsed: std::collections::HashSet<String>,
     pub members_open: bool,
     /// The open server's member list, a view of its own.
     pub members_view: Option<Entity<crate::ui::members::MembersView>>,
@@ -505,6 +507,7 @@ impl FuwaApp {
             secure_reset: Default::default(),
             secure_saving: false,
             hovered: None,
+            collapsed: Default::default(),
             members_open: true,
             members_view: None,
             connect: None,
@@ -835,6 +838,10 @@ impl FuwaApp {
                 state.set_value(draft, window, cx);
                 state.set_placeholder(placeholder, window, cx);
             });
+            // A new place puts the caret in its box, as the web's composer does.
+            if id.is_some() {
+                self.composer.update(cx, |state, cx| state.focus(window, cx));
+            }
             self.draft_for = id;
             self.load_dm_pins_here(cx);
             self.editing = None;

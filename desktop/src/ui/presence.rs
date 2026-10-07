@@ -269,6 +269,18 @@ pub fn avatar_dot(status: pb::PresenceStatus, size: f32, under: gpui_kit::Rgba, 
     div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(crate::ui::menus::status_dot(status, size, true, under, p))
 }
 
+/// Someone's custom status while it lasts (the web's `shownStatus`).
+pub fn custom_status(user: &pb::User, now: i64) -> Option<String> {
+    if user.status.is_empty() {
+        return None;
+    }
+    let ends = user.status_expires_at.as_ref().map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000);
+    if ends.is_some_and(|e| e <= now) {
+        return None;
+    }
+    Some(user.status.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

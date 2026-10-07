@@ -33,8 +33,8 @@ use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
-    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, is_agent, pal,
-    primary_button, soft_button,
+    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, icon_button_in,
+    is_agent, pal, primary_button, soft_button,
 };
 
 /// Who wrote something in a conversation or a secure channel, as shown.
@@ -790,20 +790,28 @@ impl FuwaApp {
                 .flex_none()
                 .flex()
                 .items_center()
-                .gap(px(10.0))
-                .px(px(20.0))
+                .gap(px(8.0))
+                .px(px(16.0))
                 .border_b_1()
                 .border_color(p.border)
-                .child(icon("hash").size(px(20.0)).text_color(p.muted_foreground))
-                .child(div().font_weight(FontWeight::EXTRA_BOLD).child(channel.name.clone()))
+                .child(icon(crate::ui::sidebar::channel_glyph(&channel)).size(px(20.0)).text_color(p.muted_foreground))
+                .child(
+                    div()
+                        .flex_none()
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .text_size(px(16.0))
+                        .line_height(px(24.0))
+                        .child(channel.name.clone()),
+                )
                 .when_some(shared::pill_text(&channel), |el, text| {
                     el.child(crate::ui::shared_marks::pill(text, &channel.id, &p))
                 })
                 .when(!channel.topic.is_empty(), |el| {
-                    el.child(div().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
+                    el.child(div().flex_none().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
                         div()
                             .flex_1()
                             .min_w_0()
+                            .overflow_hidden()
                             .text_sm()
                             .text_color(p.muted_foreground)
                             .whitespace_nowrap()
@@ -885,8 +893,9 @@ impl FuwaApp {
         let side = self.threads.open.is_some() || self.threads.listing.is_some() || self.pins.is_some();
         div()
             .flex()
+            .flex_none()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(8.0))
             .child({
                 let muted = self.core.shared.read(|s| {
                     s.instance(key).is_some_and(|i| i.is_muted(server, channel_id, crate::core::dms::now_ms()))
@@ -894,19 +903,17 @@ impl FuwaApp {
                 let menu =
                     Menu::Channel { key: key.to_owned(), server: server.to_owned(), channel: channel_id.to_owned() };
                 let open = self.menu.as_ref() == Some(&menu);
-                icon_button("bell", if muted { "bell-off" } else { "bell" }, &p)
-                    .when(open || muted, |el| el.text_color(p.primary))
-                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                header_button("bell", if muted { "bell-off" } else { "bell" }, open || muted, &p).on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
                         cx.notify();
-                    }))
+                    },
+                ))
             })
             .when(self.pins_here(key, channel), |el| {
                 let open = self.pins.is_some();
                 el.child(
-                    icon_button("pins-toggle", "pin", &p)
-                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                    header_button("pins-toggle", "pin", open, &p)
                         .tooltip(|window, cx| {
                             gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
                         })
@@ -916,26 +923,23 @@ impl FuwaApp {
             .when(threads, |el| {
                 let open = self.threads.listing.is_some();
                 el.child(
-                    icon_button("threads-toggle", "messages-square", &p)
-                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                    header_button("threads-toggle", "messages-square", open, &p)
                         .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Threads").build(window, cx))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_threads_list(window, cx))),
                 )
             })
             .child({
                 let shown = self.members_open && !side && self.search.panel.is_none();
-                icon_button("members-toggle", "users", &p)
-                    .when(shown, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.close_thread(cx);
-                        this.threads.listing = None;
-                        this.pins = None;
-                        if this.search.panel.is_some() {
-                            this.close_search(window, cx);
-                        }
-                        this.members_open = !shown;
-                        cx.notify();
-                    }))
+                header_button("members-toggle", "users", shown, &p).on_click(cx.listener(move |this, _, window, cx| {
+                    this.close_thread(cx);
+                    this.threads.listing = None;
+                    this.pins = None;
+                    if this.search.panel.is_some() {
+                        this.close_search(window, cx);
+                    }
+                    this.members_open = !shown;
+                    cx.notify();
+                }))
             })
     }
 
@@ -1049,18 +1053,43 @@ impl FuwaApp {
         } else if recording {
             self.recording_bar(&p, cx)
         } else {
+            // The editor keeps 10px of its own on the left and 8px above and below its
+            // 24px lines; the web's box has 6px above and below and nothing at the side.
             div()
                 .flex_1()
                 .min_w_0()
-                .py(px(4.0))
-                .child(Textarea::new(&self.composer).appearance(false).context_menu(composer_menu))
+                .ml(px(-10.0))
+                .my(px(-2.0))
+                .child(
+                    Textarea::new(&self.composer)
+                        .appearance(false)
+                        .context_menu(composer_menu)
+                        .text_size(px(15.2))
+                        .line_height(px(24.0)),
+                )
                 .into_any_element()
         };
+        let hint = {
+            let (send, line) = match self.core.prefs().send_with {
+                crate::core::config::SendWith::Enter => ("Enter".to_owned(), "Shift+Enter".to_owned()),
+                crate::core::config::SendWith::ModEnter => {
+                    (format!("{}+Enter", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" }), "Enter".to_owned())
+                }
+            };
+            let commands = self.can_command().is_some();
+            crate::ui::text::hint_line(
+                &crate::core::i18n::t(if commands { "chat.composer.hintCommands" } else { "chat.composer.hint" }),
+                &[("send", &send), ("newLine", &line)],
+                &p,
+            )
+        };
+        // The web's composer: a card with the attach button first, the box,
+        // the tools, and send (or the microphone while there's nothing to send).
         div()
             .flex_none()
             .relative()
-            .px(px(20.0))
-            .pb(px(20.0))
+            .px(px(16.0))
+            .pb(px(12.0))
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
             .children(commands_list)
             .children(picks)
@@ -1074,31 +1103,38 @@ impl FuwaApp {
                     .flex()
                     .items_end()
                     .gap(px(8.0))
-                    .pl(px(16.0))
-                    .pr(px(8.0))
+                    .px(px(12.0))
                     .py(px(8.0))
-                    .rounded(corner(18.0))
+                    .rounded(crate::ui::theme::radius_2xl())
                     .bg(p.card)
                     .border_1()
-                    .border_color(mix(p.border, p.primary, ring))
-                    .shadow(vec![gpui_kit::BoxShadow {
-                        color: alpha(p.primary, 0.22 * ring),
-                        offset: gpui_kit::point(px(0.0), px(8.0)),
-                        blur_radius: px(24.0),
-                        spread_radius: px(-8.0),
-                        inset: false,
-                    }])
+                    .border_color(mix(p.border, mix(p.border, p.primary, 0.6).into(), ring))
+                    .shadow(vec![
+                        gpui_kit::BoxShadow {
+                            color: alpha(p.primary, 0.14 * ring),
+                            offset: gpui_kit::point(px(0.0), px(0.0)),
+                            blur_radius: px(0.0),
+                            spread_radius: px(4.0),
+                            inset: false,
+                        },
+                        gpui_kit::BoxShadow {
+                            color: alpha(p.primary, ring),
+                            offset: gpui_kit::point(px(0.0), px(12.0)),
+                            blur_radius: px(30.0),
+                            spread_radius: px(-18.0),
+                            inset: false,
+                        },
+                    ])
                     .map(|el| self.droppable(el, &p, cx))
-                    .child(field)
                     .when(!command && !recording && self.can_attach(), |el| el.child(self.attach_button(&p, cx)))
+                    .child(field)
                     .when(!command && !recording, |el| {
                         el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
                     })
                     .children(gif_button)
                     .when(!command && self.can_poll(), |el| {
                         el.child(
-                            icon_button("poll-open", "chart-column", &p)
-                                .size(px(36.0))
+                            crate::ui::widgets::tool_button("poll-open", "chart-column", false, &p)
                                 .tooltip(|window, cx| {
                                     gpui_kit::component::tooltip::Tooltip::new("Make a poll").build(window, cx)
                                 })
@@ -1111,15 +1147,23 @@ impl FuwaApp {
                             div()
                                 .id("send")
                                 .size(px(36.0))
+                                .mb(px(2.0))
                                 .flex_none()
-                                .rounded(corner(12.0))
+                                .rounded(crate::ui::theme::radius_xl())
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .bg(mix(p.muted, p.primary, ready))
+                                .bg(alpha(p.primary, ready))
                                 .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
+                                .shadow(vec![gpui_kit::BoxShadow {
+                                    color: alpha(p.primary, ready),
+                                    offset: gpui_kit::point(px(0.0), px(6.0)),
+                                    blur_radius: px(18.0),
+                                    spread_radius: px(-8.0),
+                                    inset: false,
+                                }])
                                 .cursor_pointer()
-                                .active(|s| s.top(px(1.0)))
+                                .active(|s| s.opacity(0.85))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     if this.commands.form.is_some() {
                                         this.run_picked_command(window, cx)
@@ -1128,10 +1172,25 @@ impl FuwaApp {
                                     }
                                 }))
                                 .child(
-                                    div().relative().left(px(-3.0 + 3.0 * ready)).child(icon("send").size(px(18.0))),
+                                    div()
+                                        .relative()
+                                        .left(px(-3.0 + 3.0 * ready))
+                                        .child(icon("send-horizontal").size(px(18.0 * (0.9 + 0.1 * ready)))),
                                 ),
                         )
                     }),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .px(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(hint),
             )
             .into_any_element()
     }
@@ -1259,7 +1318,7 @@ impl FuwaApp {
                 view
             }
         };
-        gpui_kit::AnyView::from(view).cached(gpui_kit::StyleRefinement::default().w(px(232.0)).h_full().flex_none())
+        gpui_kit::AnyView::from(view).cached(gpui_kit::StyleRefinement::default().w(px(240.0)).h_full().flex_none())
     }
 
     // ───────────────────────── A private conversation ─────────────────────────
@@ -1318,8 +1377,7 @@ impl FuwaApp {
             .when(pins_here, |el| {
                 let open = self.pins.is_some();
                 el.child(
-                    icon_button("pins-toggle", "pin", &p)
-                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                    header_button("pins-toggle", "pin", open, &p)
                         .tooltip(|window, cx| {
                             gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
                         })
@@ -1773,8 +1831,10 @@ fn open_card(
 
 fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement {
     let compact = ctx.compact;
-    let hover = alpha(p.foreground, if p.dark { 0.035 } else { 0.03 });
-    let gutter = if compact { 0.0 } else { 56.0 };
+    // The web's .message-row: the muted color at 45% on hover, 70% while its menu is open.
+    let hover = alpha(p.muted, 0.45);
+    let held = alpha(p.muted, 0.7);
+    let gutter = if compact { 0.0 } else { 40.0 };
     let content: AnyElement = if m.editing {
         edit_box(m, p, ctx).into_any_element()
     } else if let Some(card) = &m.voice {
@@ -1815,10 +1875,16 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     };
     // Apps and bots have no profile to open; agents do.
     let author = m.user.as_ref().filter(|_| matches!(m.badge, None | Some("AGENT"))).map(|u| u.id.clone());
+    let tint = crate::ui::widgets::name_tint(m.user.as_ref().map(|u| u.id.as_str()).unwrap_or(&m.name), p);
     let name = div()
         .id(SharedString::from(format!("name|{}", m.id)))
-        .font_weight(FontWeight::EXTRA_BOLD)
-        .text_color(m.color.unwrap_or(p.foreground.into()))
+        .min_w_0()
+        .overflow_hidden()
+        .text_ellipsis()
+        .whitespace_nowrap()
+        .font_weight(FontWeight::BOLD)
+        .text_size(px(16.0))
+        .text_color(m.color.unwrap_or(tint))
         .cursor_pointer()
         .hover(|s| s.underline())
         .when_some(author.clone(), |el, id| {
@@ -1827,7 +1893,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
         })
         .child(m.name.clone());
-    let time = div().text_xs().text_color(p.muted_foreground).child(when(m.at));
+    let time = div().flex_none().text_xs().text_color(p.muted_foreground).child(when(m.at));
     let mut body = div().flex_1().min_w_0().flex().flex_col();
     if m.thread.also_in.is_some() || m.thread.also_sent {
         body = body.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
@@ -1841,6 +1907,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .flex()
                 .items_baseline()
                 .gap(px(8.0))
+                .h(px(24.0))
+                .line_height(px(24.0))
                 .child(name)
                 .when_some(m.from.as_ref(), |el, from| {
                     el.child(div().self_center().child(crate::ui::shared_marks::server_tag(from, &ctx.url, p)))
@@ -1856,7 +1924,16 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             .flex()
             .items_baseline()
             .gap(px(6.0))
-            .child(div().flex_1().min_w_0().when(m.pending && m.failed.is_none(), |el| el.opacity(0.55)).child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    // The web's chat text: 15px on a 1.625 line.
+                    .text_size(px(15.0))
+                    .line_height(px(24.375))
+                    .when(m.pending && m.failed.is_none(), |el| el.opacity(0.55))
+                    .child(content),
+            )
             .when(m.edited && !m.editing, |el| {
                 el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))
             })
@@ -1941,7 +2018,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             .id(SharedString::from(format!("face|{}", m.id)))
             .w(px(gutter))
             .flex_none()
-            .pt(px(2.0))
+            .mt(px(2.0))
             .cursor_pointer()
             .when_some(author, |el, id| {
                 let ctx = ctx.clone();
@@ -1951,11 +2028,17 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             .child(avatar(m.user.as_ref(), 40.0, p))
             .into_any_element()
     } else {
+        // The web's gutter time: 10px, right-aligned, reaching 12px into the gap.
         div()
             .w(px(gutter))
             .flex_none()
-            .pt(px(3.0))
-            .text_xs()
+            .ml(px(-12.0))
+            .pl(px(12.0))
+            .pt(px(4.0))
+            .flex()
+            .justify_end()
+            .text_size(px(10.0))
+            .whitespace_nowrap()
             .text_color(p.muted_foreground)
             .opacity(0.0)
             .group_hover("msg", |s| s.opacity(1.0))
@@ -2075,8 +2158,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             })
     });
 
-    let ping = alpha(p.primary, if p.dark { 0.12 } else { 0.09 });
-    let ping_hover = alpha(p.primary, if p.dark { 0.16 } else { 0.13 });
+    // The web's .mention-me: the primary at 12% and a 3px bar inside the left edge.
+    let ping = alpha(p.primary, 0.12);
+    let ping_hover = alpha(p.primary, 0.12);
     let bar = p.primary;
     let lit = ctx.lit.as_deref().and_then(|l| l.strip_prefix("msg|")) == Some(m.id.as_str());
     let menu_of = {
@@ -2112,24 +2196,26 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .relative()
         .flex()
         .px(px(16.0))
-        .mx(px(4.0))
-        .rounded(corner(10.0))
-        .when(m.head, |el| el.mt(px(if compact { 4.0 } else { 10.0 })))
-        .py(px(if compact { 1.0 } else { 3.0 }))
+        // The web's spacing (app.css, at the density's scale): 2px around each
+        // line, and a run's first line 12px down with 4px more above it.
+        .map(|el| {
+            let d = if compact { 0.5 } else { 1.0 };
+            if m.head { el.mt(px(12.0 * d)).pt(px(4.0 * d)).pb(px(2.0 * d)) } else { el.py(px(2.0 * d)) }
+        })
         .map(|el| {
             if m.mentions_me {
-                el.bg(if lit { ping_hover } else { ping }).hover(move |s| s.bg(ping_hover))
-            } else if m.editing || lit {
+                el.bg(if lit { ping_hover } else { ping })
+            } else if lit {
+                el.bg(held)
+            } else if m.editing {
                 el.bg(hover)
             } else {
                 el.hover(move |s| s.bg(hover))
             }
         })
-        .when(m.mentions_me, |el| {
-            el.child(div().absolute().left_0().top(px(4.0)).bottom(px(4.0)).w(px(3.0)).rounded_full().bg(bar))
-        })
+        .when(m.mentions_me, |el| el.child(div().absolute().left_0().top_0().bottom_0().w(px(3.0)).bg(bar)))
         .child(left)
-        .when(compact && m.head, |el| el.gap(px(8.0)))
+        .gap(px(if compact { 8.0 } else { 12.0 }))
         .child(body)
         .when_some(actions, |el, a| el.child(a))
         .into_any_element()

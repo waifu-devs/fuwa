@@ -59,6 +59,12 @@ pub(crate) enum MenuOf {
         key: String,
         server: String,
     },
+    /// The menu under a server's name at the top of the sidebar (the web's
+    /// server dropdown), which isn't the same as right-clicking its icon.
+    ServerHeader {
+        key: String,
+        server: String,
+    },
     Dm {
         key: String,
         conversation: String,
@@ -74,6 +80,7 @@ impl MenuOf {
             MenuOf::Channel { channel, .. } => format!("row|{channel}"),
             MenuOf::Category { category, .. } => format!("cat|{category}"),
             MenuOf::Server { key, server } => format!("s|{key}|{server}"),
+            MenuOf::ServerHeader { key, server } => format!("s-head|{key}|{server}"),
             MenuOf::Dm { key, conversation } => format!("dm|{key}|{conversation}"),
         }
     }

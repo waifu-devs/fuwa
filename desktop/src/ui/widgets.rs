@@ -39,6 +39,40 @@ pub fn hue_color(id: &str, dark: bool) -> Hsla {
     hsla((h % 360) as f32 / 360.0, 0.62, if dark { 0.66 } else { 0.58 }, 1.0)
 }
 
+/// The hue that belongs to an id, as the web app's `hueOf`.
+pub fn hue_of(id: &str) -> f32 {
+    let mut h: u32 = 0;
+    for c in id.encode_utf16() {
+        h = h.wrapping_mul(31).wrapping_add(u32::from(c));
+    }
+    (h % 360) as f32
+}
+
+/// The web's `.server-gradient` behind initials: a 135° sweep from the id's
+/// hue to 40° on, under a soft light toward the top left (the web's radial
+/// highlight, drawn as a second sweep since GPUI has no radial gradients).
+pub fn hue_gradient(id: &str, radius: f32, el: Div) -> Div {
+    let h = hue_of(id);
+    let at = |deg: f32, s: f32, l: f32, a: f32| hsla((deg % 360.0) / 360.0, s, l, a);
+    el.bg(gpui_kit::linear_gradient(
+        135.0,
+        gpui_kit::linear_color_stop(at(h, 0.7, 0.55, 1.0), 0.0),
+        gpui_kit::linear_color_stop(at(h + 40.0, 0.7, 0.45, 1.0), 1.0),
+    ))
+    .child(div().absolute().inset_0().rounded(px(radius)).bg(gpui_kit::linear_gradient(
+        150.0,
+        gpui_kit::linear_color_stop(at(h, 0.9, 0.75, 0.75), 0.0),
+        gpui_kit::linear_color_stop(at(h, 0.9, 0.75, 0.0), 0.5),
+    )))
+}
+
+/// The web's `.name-tint`: someone's own hue (75% saturation, 55% light)
+/// mixed 70/30 with the text color, for names without a role color.
+pub fn name_tint(id: &str, p: &Palette) -> Hsla {
+    let hue: Rgba = hsla(hue_of(id) / 360.0, 0.75, 0.55, 1.0).into();
+    crate::ui::theme::mix(p.foreground, hue, 0.7)
+}
+
 /// "Mika Sato" → "MS", as the web app's `initials`.
 pub fn initials(name: &str) -> String {
     let words: Vec<&str> = name.split_whitespace().collect();
@@ -51,26 +85,23 @@ pub fn initials(name: &str) -> String {
 }
 
 /// Someone's picture, or their initial on their color.
-pub fn avatar(user: Option<&pb::User>, size: f32, p: &Palette) -> Div {
+pub fn avatar(user: Option<&pb::User>, size: f32, _p: &Palette) -> Div {
     let (id, name, url) = match user {
         Some(u) => (u.id.as_str(), crate::core::store::user_name(u), u.avatar_url.as_str()),
         None => ("?", "?".to_owned(), ""),
     };
     let base = div().size(px(size)).flex_none().rounded_full().overflow_hidden();
     let letter: String = initials(&name).chars().take(1).collect();
-    let color = hue_color(id, p.dark);
+    let id = id.to_owned();
     let fallback = move || {
-        div()
-            .size_full()
-            .rounded_full()
+        hue_gradient(&id, size / 2.0, div().relative().size_full().rounded_full().overflow_hidden())
             .flex()
             .items_center()
             .justify_center()
-            .bg(color)
             .text_color(gpui_kit::white())
             .font_weight(FontWeight::EXTRA_BOLD)
-            .text_size(px(size * 0.42))
-            .child(letter.clone())
+            .text_size(px(size * 0.35))
+            .child(div().relative().child(letter.clone()))
             .into_any_element()
     };
     if url.is_empty() {
@@ -90,22 +121,19 @@ pub fn avatar(user: Option<&pb::User>, size: f32, p: &Palette) -> Div {
 
 /// A server's icon: its picture, or its initials on its color. Round until
 /// it's open or hovered, then a rounded square, like Discord's.
-pub fn server_icon(server: &pb::Server, size: f32, radius: f32, p: &Palette) -> Div {
-    let color = hue_color(&server.id, p.dark);
+pub fn server_icon(server: &pb::Server, size: f32, radius: f32, _p: &Palette) -> Div {
     let text = initials(&server.name);
     let base = div().size(px(size)).flex_none().rounded(px(radius)).overflow_hidden();
+    let id = server.id.clone();
     let fallback = move || {
-        div()
-            .size_full()
-            .rounded(px(radius))
+        hue_gradient(&id, radius, div().relative().size_full().rounded(px(radius)).overflow_hidden())
             .flex()
             .items_center()
             .justify_center()
-            .bg(color)
             .text_color(gpui_kit::white())
             .font_weight(FontWeight::EXTRA_BOLD)
-            .text_size(px(size * if text.chars().count() > 1 { 0.34 } else { 0.42 }))
-            .child(text.clone())
+            .text_size(px(size / 3.0))
+            .child(div().relative().child(text.clone()))
             .into_any_element()
     };
     if server.icon_url.is_empty() {
@@ -146,12 +174,14 @@ pub fn badge(count: u32, p: &Palette) -> Div {
 /// The dot that says how a connection is doing.
 pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
     let color: Hsla = match connection {
-        Connection::Live => p.success.into(),
-        Connection::Connecting | Connection::Reconnecting => hsla(0.12, 0.9, 0.55, 1.0),
+        Connection::Live => gpui_kit::rgb(0x3ecf8e).into(),
+        Connection::Connecting | Connection::Reconnecting => gpui_kit::rgb(0xf5a524).into(),
         Connection::Offline => p.destructive.into(),
         Connection::SignedOut => p.muted_foreground.into(),
     };
-    div().size(px(10.0)).rounded_full().bg(color).border_2().border_color(p.rail)
+    // The web's .conn-dot (0.55rem) with its 2px ring in the rail's dark color.
+    let ring = crate::ui::theme::mix(p.background, gpui_kit::rgb(0x000000), 0.25);
+    div().size(px(12.8)).rounded_full().bg(color).border_2().border_color(ring)
 }
 
 /// A filled button in the primary color, with a glow on hover and a dip on press.
@@ -259,6 +289,45 @@ pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: 
         .text_color(p.muted_foreground)
         .hover(move |s| s.bg(hover).text_color(fg))
         .active(move |s| s.top(px(1.0)))
+        .child(icon(name).size(px(18.0)))
+}
+
+/// The web's round header button (`size-9 rounded-full`, a 20px icon):
+/// muted, the muted fill on hover, and the primary at 10% while what it opens is open.
+pub fn header_button(id: impl Into<ElementId>, name: &str, on: bool, p: &Palette) -> Stateful<Div> {
+    let hover = p.muted;
+    div()
+        .id(id)
+        .size(px(36.0))
+        .flex_none()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(if on { p.primary } else { p.muted_foreground })
+        .when(on, |el| el.bg(alpha(p.primary, 0.1)))
+        .when(!on, |el| el.hover(move |s| s.bg(hover)))
+        .child(icon(name).size(px(20.0)))
+}
+
+/// A composer tool (the web's `size-9 rounded-xl` with an 18px icon): muted,
+/// the icon turns primary on hover, and it sits on the primary at 10% while open.
+pub fn tool_button(id: impl Into<ElementId>, name: &str, open: bool, p: &Palette) -> Stateful<Div> {
+    let fg = p.primary;
+    div()
+        .id(id)
+        .size(px(36.0))
+        .mb(px(2.0))
+        .flex_none()
+        .rounded(crate::ui::theme::radius_xl())
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(if open { p.primary } else { p.muted_foreground })
+        .when(open, |el| el.bg(alpha(p.primary, 0.1)))
+        .hover(move |s| s.text_color(fg))
         .child(icon(name).size(px(18.0)))
 }
 

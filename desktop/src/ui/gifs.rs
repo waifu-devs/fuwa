@@ -216,9 +216,7 @@ impl FuwaApp {
         self.gifs_on(&key)?;
         let open = self.gifs.open;
         Some(
-            icon_button("gif-open", "image-play", p)
-                .size(px(36.0))
-                .when(open, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary))
+            crate::ui::widgets::tool_button("gif-open", "image-play", open, p)
                 .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("GIFs").build(window, cx))
                 .on_click(cx.listener(|this, _, window, cx| {
                     if this.gifs.open {

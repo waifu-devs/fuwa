@@ -122,6 +122,29 @@ pub enum Density {
     Compact,
 }
 
+/// The 12 or 24 hour clock for message times; `Auto` is the language's own
+/// (the web app's `clock` pref).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Clock {
+    #[default]
+    Auto,
+    #[serde(rename = "12h")]
+    H12,
+    #[serde(rename = "24h")]
+    H24,
+}
+
+/// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
+/// (Enter for a new line); the web app's `sendWith`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SendWith {
+    #[default]
+    Enter,
+    ModEnter,
+}
+
 /// The app's settings: this computer's, for every instance (like the web
 /// app's `lib/prefs.ts`). Settings of an instance or a server live on it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -181,6 +204,10 @@ pub struct Prefs {
     pub recent_gifs: std::collections::BTreeMap<String, Vec<crate::core::gifs::KeptGif>>,
     /// Shows "Copy … ID" on servers, channels, people and messages.
     pub developer_mode: bool,
+    /// The 12 or 24 hour clock for times in chat.
+    pub clock: Clock,
+    /// Which keys send a message.
+    pub send_with: SendWith,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -222,6 +249,8 @@ impl Default for Prefs {
             recent_searches: Default::default(),
             recent_gifs: Default::default(),
             developer_mode: false,
+            clock: Clock::Auto,
+            send_with: SendWith::Enter,
         }
     }
 }

@@ -559,17 +559,15 @@ impl FuwaApp {
             .map(|c| keybinds::label(&c));
         let field = div()
             .w_full()
-            .h(px(34.0))
+            .h(px(36.0))
             .flex()
             .items_center()
             .gap(px(6.0))
-            .pl(px(10.0))
-            .pr(px(6.0))
+            .px(px(12.0))
             .rounded_full()
             .border_1()
             .border_color(if focused { alpha(p.primary, 0.5) } else { p.border.into() })
             .bg(if focused { alpha(p.background, 1.0) } else { alpha(p.background, 0.6) })
-            .when(focused, |el| el.shadow_sm())
             .child(icon("search").size(px(16.0)).text_color(if focused { p.primary } else { p.muted_foreground }))
             .child(div().flex_1().min_w_0().child(Input::new(&self.search.field).appearance(false).small()))
             .when(typed, |el| {
@@ -598,11 +596,12 @@ impl FuwaApp {
                         div()
                             .flex_none()
                             .px(px(6.0))
-                            .rounded(corner(6.0))
+                            .rounded(crate::ui::theme::radius_md())
                             .border_1()
                             .border_color(p.border)
                             .bg(p.muted)
-                            .text_xs()
+                            .text_size(px(10.4))
+                            .line_height(px(15.6))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
                             .child(combo),
@@ -612,7 +611,8 @@ impl FuwaApp {
         // Gives way to the channel's name and marks when the header is short of room.
         let mut wrap = div()
             .relative()
-            .w(px(if focused || typed { 260.0 } else { 200.0 }))
+            // The web's `w-44 lg:w-56`: 224px from 1024px wide.
+            .w(px(if window.viewport_size().width >= px(1024.0) { 224.0 } else { 176.0 }))
             .min_w(px(120.0))
             .flex_shrink(1.0)
             .child(field);

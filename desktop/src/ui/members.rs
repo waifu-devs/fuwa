@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb, uniform_list,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 
 use crate::core::Core;
@@ -20,11 +20,14 @@ use crate::core::i18n::t;
 use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::theme::{alpha, corner};
+use crate::ui::theme::alpha;
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, pal};
 
-/// Rows are this tall, every one, which is what lets the list skip the rest.
-const ROW: f32 = 44.0;
+/// The web's member line: `row-y` (6px each side) around a 14px name over a 16px subtitle.
+const ROW: f32 = 48.0;
+/// A section's heading is a 16px line with 4px under it, and 16px over it after the first.
+const HEADING: f32 = 20.0;
+const SECTION_GAP: f32 = 16.0;
 /// Rows rise in like this while the list is new, not as you scroll to them.
 const ENTERING: Duration = Duration::from_millis(900);
 
@@ -58,6 +61,10 @@ struct Row {
     agent: bool,
     timed_out: bool,
     mine: bool,
+    /// Owns the server: a crown by their name.
+    owner: bool,
+    /// Their custom status, for under their name when they're doing nothing.
+    status_text: Option<String>,
     /// Their dot; None on an instance without presence.
     status: Option<pb::PresenceStatus>,
     /// What they're doing, for under their name.
@@ -71,6 +78,8 @@ pub struct MembersView {
     rows: Rc<Vec<Item>>,
     digest: u64,
     born: Instant,
+    /// Lines of two heights (headings and people), drawn only while in sight.
+    list: gpui_kit::ListState,
 }
 
 impl EventEmitter<MembersEvent> for MembersView {}
@@ -86,7 +95,8 @@ impl MembersView {
             }
         })
         .detach();
-        let mut this = Self { core, key, server, rows: Rc::default(), digest: 0, born: Instant::now() };
+        let list = gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(240.0));
+        let mut this = Self { core, key, server, rows: Rc::default(), digest: 0, born: Instant::now(), list };
         this.refresh(cx);
         this
     }
@@ -104,6 +114,7 @@ impl MembersView {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
                 Item::Member(r) => {
                     (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
+                    (r.owner, &r.status_text, &r.user.username).hash(&mut h);
                     (r.status.map(|s| s as i32), &r.activity).hash(&mut h);
                 }
             }
@@ -120,6 +131,7 @@ impl MembersView {
         }
         if digest != self.digest {
             self.digest = digest;
+            self.list.reset(rows.len());
             self.rows = Rc::new(rows);
             cx.notify();
         }
@@ -133,6 +145,7 @@ impl MembersView {
 fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<Item>, Option<i64>) {
     let mut ends: Option<i64> = None;
     let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
+    let owner = i.server(server).map(|s| s.owner_id.clone()).unwrap_or_default();
     let roles = i.roles.get(server);
     let Some(members) = i.members.get(server) else { return (Vec::new(), None) };
     let people = i.people.as_ref();
@@ -161,6 +174,8 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
             agent: is_agent(Some(&user)),
             timed_out: until.is_some(),
             mine: user.id == me,
+            owner: !owner.is_empty() && user.id == owner,
+            status_text: crate::ui::presence::custom_status(&user, now),
             user,
         })
         .map(|row| (m, row))
@@ -197,51 +212,63 @@ impl Render for MembersView {
         let p = pal(cx);
         let rows = self.rows.clone();
         let entering = self.born.elapsed() < ENTERING;
-        let count = rows.len();
-        let list = uniform_list(
-            "member-rows",
-            count,
-            cx.processor(move |_this, range: std::ops::Range<usize>, _window, cx| {
-                let p = pal(cx);
-                let now_rows = rows.clone();
-                range
-                    .filter_map(|n| now_rows.get(n).map(|row| (n, row)))
-                    .map(|(n, item)| match item {
-                        Item::Heading(name, color, members) => heading(name, *color, *members, n, &p),
-                        Item::Member(row) => member_row(row, n, entering, &p, cx).into_any_element(),
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .flex_1()
-        .px(px(8.0))
-        .pt(px(4.0))
-        .pb(px(12.0));
+        let this = cx.entity().downgrade();
+        // The web's list: 16px above and below, 8px at the sides.
+        let list = gpui_kit::list(self.list.clone(), move |n, _window, cx| {
+            let p = pal(cx);
+            let first = n == 0;
+            let last = n + 1 == rows.len();
+            let el = match rows.get(n) {
+                Some(Item::Heading(name, color, members)) => heading(name, *color, *members, n, first, &p),
+                Some(Item::Member(row)) => member_row(row, n, entering, &p, this.clone()).into_any_element(),
+                None => div().into_any_element(),
+            };
+            div()
+                .px(px(8.0))
+                .when(first, |el| el.pt(px(16.0)))
+                .when(last, |el| el.pb(px(16.0)))
+                .child(el)
+                .into_any_element()
+        })
+        .flex_1();
         div().size_full().flex().flex_col().bg(p.side_surface).border_l_1().border_color(p.border).child(list)
     }
 }
 
-/// A group's name over its people, as tall as a row so the list can skip what's out of sight.
+/// A group's name over its people: the web's 12px bold capitals, with the role's dot.
 fn heading(
     name: &str,
     color: Option<u32>,
     members: usize,
     n: usize,
+    first: bool,
     p: &crate::ui::theme::Palette,
 ) -> gpui_kit::AnyElement {
+    let text = crate::core::i18n::t_with(
+        "chat.members.heading",
+        &[
+            ("name", crate::core::i18n::Arg::Str(&name.to_uppercase())),
+            ("count", crate::core::i18n::Arg::Num(members as i64)),
+        ],
+    );
     div()
         .id(SharedString::from(format!("member-heading|{name}|{n}")))
-        .h(px(ROW))
-        .px(px(8.0))
-        .pb(px(6.0))
-        .flex()
-        .items_end()
-        .gap(px(6.0))
-        .text_size(px(11.0))
-        .font_weight(FontWeight::EXTRA_BOLD)
-        .text_color(p.muted_foreground)
-        .when_some(color, |el, c| el.child(div().mb(px(3.0)).size(px(7.0)).rounded_full().bg(rgb(c))))
-        .child(format!("{} — {members}", name.to_uppercase()))
+        .when(!first, |el| el.pt(px(SECTION_GAP)))
+        .child(
+            div()
+                .h(px(HEADING))
+                .pb(px(4.0))
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .when_some(color, |el, c| el.child(div().flex_none().size(px(8.0)).rounded_full().bg(rgb(c))))
+                .child(text),
+        )
         .into_any_element()
 }
 
@@ -250,13 +277,14 @@ fn member_row(
     n: usize,
     entering: bool,
     p: &crate::ui::theme::Palette,
-    cx: &mut Context<MembersView>,
+    this: gpui_kit::WeakEntity<MembersView>,
 ) -> impl IntoElement {
     let user = &row.user;
-    let hover = alpha(p.primary, 0.08);
+    let hover = alpha(p.muted, 0.7);
     let amber = gpui_kit::hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0);
-    let color: Hsla = row.color.map(|c| rgb(c).into()).unwrap_or(p.foreground.into());
+    let color: Hsla = row.color.map(|c| rgb(c).into()).unwrap_or(crate::ui::widgets::name_tint(&row.user.id, p));
     let uid = user.id.clone();
+    let offline = row.status == Some(pb::PresenceStatus::Offline);
     let el = div()
         .id(SharedString::from(format!("member|{}", user.id)))
         .group("member")
@@ -264,30 +292,36 @@ fn member_row(
         .px(px(8.0))
         .flex()
         .items_center()
-        .gap(px(10.0))
-        .rounded(corner(12.0))
-        .hover(move |s| s.bg(hover))
+        .gap(px(4.0))
+        .rounded(crate::ui::theme::radius_lg())
+        // Someone offline is faded, until pointed at (one hover style: GPUI takes only one).
+        .hover(move |s| if offline { s.bg(hover).opacity(1.0) } else { s.bg(hover) })
+        .when(offline, |el| el.opacity(0.45))
         .cursor_pointer()
-        .on_click(cx.listener(move |_, _, _, cx| cx.emit(MembersEvent::Open { user_id: uid.clone() })))
+        .on_click({
+            let this = this.clone();
+            move |_, _, cx| {
+                let _ = this.update(cx, |_, cx| cx.emit(MembersEvent::Open { user_id: uid.clone() }));
+            }
+        })
         .on_mouse_down(gpui_kit::MouseButton::Right, {
-            let uid = user.id.clone();
-            cx.listener(move |_, ev: &gpui_kit::MouseDownEvent, _, cx| {
+            let (uid, this) = (user.id.clone(), this.clone());
+            move |ev: &gpui_kit::MouseDownEvent, _, cx| {
                 cx.stop_propagation();
-                cx.emit(MembersEvent::Menu { user_id: uid.clone(), at: ev.position });
-            })
+                let _ = this.update(cx, |_, cx| cx.emit(MembersEvent::Menu { user_id: uid.clone(), at: ev.position }));
+            }
         })
         .on_hover({
-            let uid = user.id.clone();
-            cx.listener(move |_, on: &bool, _, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }))
-        })
-        // Someone offline is faded, until pointed at.
-        .when(row.status == Some(pb::PresenceStatus::Offline), |el| {
-            el.opacity(0.45).hover(move |s| s.bg(hover).opacity(1.0))
+            let (uid, this) = (user.id.clone(), this.clone());
+            move |on: &bool, _, cx| {
+                let _ = this.update(cx, |_, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }));
+            }
         })
         .child(
             div()
                 .relative()
                 .flex_none()
+                .mr(px(6.0))
                 .child(avatar(Some(user), 32.0, p))
                 .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
                     el.child(crate::ui::presence::avatar_dot(status, 14.0, opaque(p.side_surface), p))
@@ -304,45 +338,47 @@ fn member_row(
                         .min_w_0()
                         .flex()
                         .items_center()
-                        .gap(px(6.0))
+                        .gap(px(4.0))
                         .child(
                             div()
                                 .min_w_0()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
                                 .font_weight(FontWeight::BOLD)
+                                .text_size(px(14.0))
+                                .line_height(px(20.0))
                                 .text_color(color)
                                 .child(row.name.clone()),
                         )
+                        .when(row.owner, |el| {
+                            el.child(icon("crown").size(px(12.0)).text_color(gpui_kit::rgb(0xfbbf24)))
+                        })
+                        .when(row.timed_out, |el| el.child(icon("hourglass").size(px(12.0)).text_color(amber)))
                         .when(row.agent, |el| {
                             el.child(app_badge(SharedString::from(format!("member-badge|{}", user.id)), "AGENT", p))
                         }),
                 )
-                .when_some(row.activity.clone(), |el, line| {
-                    el.child(
-                        div()
-                            .min_w_0()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child(line),
-                    )
-                }),
-        )
-        .when(row.timed_out, |el| el.child(icon("hourglass").size(px(14.0)).text_color(amber)))
-        .when(!row.mine, |el| {
-            el.child(
-                div()
-                    .opacity(0.0)
-                    .group_hover("member", |s| s.opacity(1.0))
-                    .text_color(p.primary)
-                    .child(icon("chevron-right").size(px(14.0))),
-            )
-        });
+                // Under the name: what they're doing, else their status, else their username.
+                .child(
+                    div()
+                        .h(px(16.0))
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(match (&row.activity, &row.status_text) {
+                            (Some(line), _) => line.clone(),
+                            (None, Some(status)) => status.clone(),
+                            (None, None) => format!("@{}", row.user.username),
+                        }),
+                ),
+        );
     if entering && n < 24 {
+        // Wrapped, so the rise's opacity doesn't replace the row's own (offline people are faded).
         motion::rise(
-            el,
+            div().child(el),
             SharedString::from(format!("member-in|{}", user.id)),
             Duration::from_millis((14 * n) as u64),
             6.0,

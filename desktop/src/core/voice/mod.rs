@@ -108,12 +108,21 @@ pub struct Voice {
     view: Mutex<Option<CallView>>,
     ended: Mutex<Option<Ended>>,
     next_id: Mutex<u64>,
+    /// Mute and deafen outside a call: kept for the next one (the web's call store).
+    idle: Mutex<Selves>,
 }
 
 impl Core {
     /// The call you're in, if any.
     pub fn call(&self) -> Option<CallView> {
         self.voice.view.lock().clone()
+    }
+
+    /// Whether you're muted and deafened: in the call, or for the next one.
+    pub fn selves(&self) -> (bool, bool) {
+        let s = self.voice.view.lock().as_ref().map(|v| Selves { mute: v.self_mute, deaf: v.self_deaf });
+        let s = s.unwrap_or_else(|| *self.voice.idle.lock());
+        (s.mute, s.deaf)
     }
 
     /// Whether the call's microphone is meant to be open: for the tests.
@@ -151,7 +160,7 @@ impl Core {
         let Some(me) = me else { return };
         let selves = self.voice.view.lock().as_ref().map(|v| Selves { mute: v.self_mute, deaf: v.self_deaf });
         self.leave_voice();
-        let selves = selves.unwrap_or_default();
+        let selves = selves.unwrap_or_else(|| *self.voice.idle.lock());
         let id = {
             let mut next = self.voice.next_id.lock();
             *next += 1;
@@ -202,7 +211,8 @@ impl Core {
             active.microphone.listen(false);
             let _ = active.commands.send(Command::Leave);
         }
-        if self.voice.view.lock().take().is_some() {
+        if let Some(view) = self.voice.view.lock().take() {
+            *self.voice.idle.lock() = Selves { mute: view.self_mute, deaf: view.self_deaf };
             self.shared.update(|_| ());
         }
     }
@@ -225,6 +235,8 @@ impl Core {
         let Some((active, microphone)) =
             self.voice.active.lock().as_ref().map(|a| (a.selves.clone(), a.microphone.clone()))
         else {
+            f(&mut self.voice.idle.lock());
+            self.shared.update(|_| ());
             return;
         };
         active.send_modify(f);

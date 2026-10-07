@@ -16,10 +16,16 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
-use crate::ui::theme::{alpha, corner, mix};
-use crate::ui::widgets::{badge, conn_dot, fuwa_mark, icon, initials, pal, server_icon};
+use crate::ui::theme::corner;
+use crate::ui::widgets::{badge, conn_dot, fuwa_mark, initials, pal, server_icon};
 
-pub const RAIL: f32 = 76.0;
+pub const RAIL: f32 = 72.0;
+
+/// The web's `.server-icon`: a circle that settles into a rounded square
+/// (32% of its size) when open or pointed at.
+fn icon_radius(size: f32, square: bool) -> f32 {
+    if square { size * 0.32 } else { size / 2.0 }
+}
 
 struct RailInstance {
     key: String,
@@ -51,31 +57,31 @@ impl FuwaApp {
 
         // Home: the little cloud.
         let home_hovered = self.hovered.as_deref() == Some("home");
-        let home_radius = motion::follow("home|r", if home_active || home_hovered { 16.0 } else { 24.0 }, window, cx);
-        list = list.child(self.rail_item(
-            "home".into(),
-            home_active,
-            dm_unread > 0,
-            dm_unread,
-            Nav::Home { dm: None },
-            {
-                let bg = if home_active { p.primary } else { p.card };
-                div().size(px(48.0)).rounded(px(home_radius)).flex().items_center().justify_center().bg(bg).child(
-                    if home_active {
-                        div().child(fuwa_mark_inverted(30.0, &p)).into_any_element()
-                    } else {
-                        div().child(fuwa_mark(30.0, &p)).into_any_element()
-                    },
-                )
-            },
-            "Direct messages",
-            window,
-            cx,
-        ));
+        let home_radius = motion::follow("home|r", icon_radius(48.0, home_active || home_hovered), window, cx);
+        list = list.child(
+            self.rail_item(
+                "home".into(),
+                home_active,
+                dm_unread > 0,
+                dm_unread,
+                Nav::Home { dm: None },
+                div()
+                    .size(px(48.0))
+                    .rounded(px(home_radius))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(p.card)
+                    .child(fuwa_mark(32.0, &p)),
+                "Direct messages",
+                48.0,
+                window,
+                cx,
+            ),
+        );
 
         for (n, inst) in instances.iter().enumerate() {
-            list =
-                list.child(div().w(px(32.0)).h(px(2.0)).rounded_full().bg(alpha(p.muted_foreground, 0.25)).my(px(2.0)));
+            list = list.child(divider(&p));
             list = list.child(self.instance_chip(inst, n, window, cx));
             for (m, (server, unread)) in inst.servers.iter().enumerate() {
                 let active = matches!(&self.nav, Nav::Server { key, server: s } if *key == inst.key && *s == server.id);
@@ -83,7 +89,7 @@ impl FuwaApp {
                 let hovered = self.hovered.as_deref() == Some(id.as_str());
                 let radius = motion::follow(
                     SharedString::from(format!("{id}|r")),
-                    if active || hovered { 16.0 } else { 24.0 },
+                    icon_radius(48.0, active || hovered),
                     window,
                     cx,
                 );
@@ -92,10 +98,11 @@ impl FuwaApp {
                     id.clone(),
                     active,
                     *unread > 0,
-                    0,
+                    if active { 0 } else { *unread },
                     Nav::Server { key: inst.key.clone(), server: server.id.clone() },
                     face,
                     &server.name,
+                    48.0,
                     window,
                     cx,
                 );
@@ -108,42 +115,37 @@ impl FuwaApp {
             }
         }
 
-        // Adding an instance, then settings at the bottom.
+        // Adding a server or an instance, under a divider.
+        let add_hovered = self.hovered.as_deref() == Some("rail-add");
+        let add_radius = motion::follow("rail-add|r", icon_radius(48.0, add_hovered), window, cx);
+        let add_turn = motion::follow("rail-add|turn", if add_hovered { 90.0 } else { 0.0 }, window, cx);
         let add = div()
             .id("rail-add")
             .size(px(48.0))
-            .rounded_full()
+            .rounded(px(add_radius))
             .flex()
             .items_center()
             .justify_center()
-            .bg(p.card)
-            .text_color(p.success)
+            .bg(if add_hovered { p.primary } else { p.card })
+            .text_color(if add_hovered { p.primary_foreground } else { p.primary })
             .cursor_pointer()
-            .hover({
-                let (bg, fg) = (p.success, p.card);
-                move |s| s.bg(bg).text_color(fg).rounded(corner(16.0))
-            })
-            .active(|s| s.top(px(1.0)))
+            .on_hover(cx.listener(|this, on: &bool, _, cx| {
+                if *on {
+                    this.hovered = Some("rail-add".into());
+                } else if this.hovered.as_deref() == Some("rail-add") {
+                    this.hovered = None;
+                }
+                cx.notify();
+            }))
+            .active(|s| s.opacity(0.92))
             .on_click(cx.listener(|this, _, window, cx| this.open_connect(true, window, cx)))
-            .child(icon("plus").size(px(22.0)));
-
-        let settings = div()
-            .id("rail-settings")
-            .size(px(48.0))
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.card)
-            .text_color(p.muted_foreground)
-            .cursor_pointer()
-            .hover({
-                let (bg, fg) = (alpha(p.primary, 0.16), p.primary);
-                move |s| s.bg(bg).text_color(fg).rounded(corner(16.0))
-            })
-            .active(|s| s.top(px(1.0)))
-            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
-            .child(icon("settings").size(px(20.0)));
+            .child(
+                gpui_kit::svg()
+                    .path("icons/plus.svg")
+                    .size(px(24.0))
+                    .text_color(if add_hovered { p.primary_foreground } else { p.primary })
+                    .with_transformation(gpui_kit::Transformation::rotate(gpui_kit::radians(add_turn.to_radians()))),
+            );
 
         div()
             .w(px(RAIL))
@@ -152,8 +154,7 @@ impl FuwaApp {
             .flex()
             .flex_col()
             .bg(p.rail_surface)
-            .child(div().id("rail-scroll").flex_1().overflow_y_scroll().child(list.child(add)))
-            .child(div().flex().justify_center().py(px(12.0)).child(settings))
+            .child(div().id("rail-scroll").flex_1().overflow_y_scroll().child(list.child(divider(&p)).child(add)))
     }
 
     /// One thing on the rail, with its pill, its tooltip-ish name and its badge.
@@ -167,6 +168,7 @@ impl FuwaApp {
         nav: Nav,
         face: gpui_kit::Div,
         name: &str,
+        size: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -198,7 +200,7 @@ impl FuwaApp {
             .id(SharedString::from(id.clone()))
             .relative()
             .w(px(RAIL))
-            .h(px(48.0))
+            .h(px(size))
             .flex()
             .justify_center()
             .cursor_pointer()
@@ -219,7 +221,7 @@ impl FuwaApp {
                 div()
                     .absolute()
                     .left_0()
-                    .top(px(24.0 - pill / 2.0))
+                    .top(px(size / 2.0 - pill / 2.0))
                     .w(px(4.0))
                     .h(px(pill.max(0.0)))
                     .rounded_r(px(4.0))
@@ -227,11 +229,11 @@ impl FuwaApp {
                     .opacity((pill / 8.0).clamp(0.0, 1.0)),
             )
             .child(div().relative().child(face.overflow_hidden()))
-            .when(count > 0, |el| el.child(div().absolute().right(px(10.0)).bottom(px(-2.0)).child(badge(count, &p))))
+            .when(count > 0, |el| el.child(div().absolute().right(px(8.0)).bottom(px(-4.0)).child(badge(count, &p))))
             .when(hovered && self.context.is_none(), |el| {
                 // Drawn last and over everything, so the rail's scrolling doesn't clip it.
                 el.child(
-                    div().absolute().left(px(RAIL + 2.0)).top(px(9.0)).child(gpui_kit::deferred(
+                    div().absolute().left(px(RAIL + 2.0)).top(px(size / 2.0 - 15.0)).child(gpui_kit::deferred(
                         gpui_kit::anchored().child(motion::slide_in(
                             div()
                                 .px(px(10.0))
@@ -264,16 +266,22 @@ impl FuwaApp {
         let p = pal(cx);
         let active = matches!(&self.nav, Nav::Instance { key } if *key == inst.key);
         let id = format!("i|{}", inst.key);
+        let hovered = self.hovered.as_deref() == Some(id.as_str());
+        let radius =
+            motion::follow(SharedString::from(format!("{id}|r")), icon_radius(36.0, active || hovered), window, cx);
+        // The web's small chip: 36px on the card, the instance's initials in the muted color.
         let face = div()
-            .size(px(48.0))
+            .relative()
+            .size(px(36.0))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(corner(14.0))
-            .bg(if active { p.primary.into() } else { mix(p.card, p.primary, 0.12) })
-            .text_color(if active { p.primary_foreground } else { p.primary })
+            .rounded(px(radius))
+            .bg(p.card)
+            .text_color(p.muted_foreground)
             .font_weight(FontWeight::EXTRA_BOLD)
-            .text_size(px(15.0))
+            .text_size(px(11.2))
+            .when(inst.connection != Connection::Live, |el| el.opacity(0.7))
             .child(initials(&inst.name));
         let name = inst.name.clone();
         let item = self.rail_item(
@@ -284,14 +292,18 @@ impl FuwaApp {
             Nav::Instance { key: inst.key.clone() },
             face,
             &name,
+            40.0,
             window,
             cx,
         );
         motion::rise(
-            div()
-                .relative()
-                .child(item)
-                .child(div().absolute().right(px(12.0)).bottom(px(-1.0)).child(conn_dot(inst.connection, &p))),
+            div().relative().child(item).child(
+                div()
+                    .absolute()
+                    .left(px(RAIL / 2.0 + 18.0 - 10.8))
+                    .top(px(40.0 - 2.0 - 10.8))
+                    .child(conn_dot(inst.connection, &p)),
+            ),
             SharedString::from(format!("{id}|in-{n}")),
             Duration::from_millis(30 * n as u64),
             8.0,
@@ -299,13 +311,7 @@ impl FuwaApp {
     }
 }
 
-/// The cloud on the primary color: drawn in the page's color with a primary face.
-fn fuwa_mark_inverted(size: f32, p: &crate::ui::theme::Palette) -> impl IntoElement {
-    div()
-        .relative()
-        .size(px(size))
-        .child(
-            gpui_kit::svg().path("fuwa/mark.svg").absolute().inset_0().size(px(size)).text_color(p.primary_foreground),
-        )
-        .child(gpui_kit::svg().path("fuwa/face.svg").absolute().inset_0().size(px(size)).text_color(p.primary))
+/// A divider between groups: the web's `my-1 h-0.5 w-8` line in the border color.
+fn divider(p: &crate::ui::theme::Palette) -> impl IntoElement {
+    div().w(px(32.0)).h(px(2.0)).my(px(4.0)).flex_none().rounded_full().bg(p.border)
 }

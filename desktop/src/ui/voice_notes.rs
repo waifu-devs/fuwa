@@ -18,7 +18,7 @@ use crate::core::vault::VoiceFile;
 use crate::core::voice_notes::{self, Clip, Limits, Player, Progress, Recorder};
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::chat::Row;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha};
 use crate::ui::widgets::{icon, icon_button_in};
 
 /// Bars in a voice message's bubble.
@@ -377,13 +377,17 @@ impl FuwaApp {
         div()
             .id("voice-button")
             .size(px(36.0))
+            .mb(px(2.0))
             .flex_none()
-            .rounded(corner(12.0))
+            .rounded(crate::ui::theme::radius_xl())
             .flex()
             .items_center()
             .justify_center()
-            .bg(if recording { p.primary.into() } else { alpha(p.primary, 0.12) })
-            .text_color(if recording { p.primary_foreground } else { p.primary })
+            .when(recording, |el| el.bg(p.primary).text_color(p.primary_foreground))
+            .when(!recording, |el| {
+                let (bg, fg) = (p.muted, p.foreground);
+                el.text_color(p.muted_foreground).hover(move |s| s.bg(bg).text_color(fg))
+            })
             .cursor_pointer()
             .active(|s| s.top(px(1.0)))
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx))

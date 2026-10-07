@@ -186,6 +186,7 @@ impl FuwaApp {
                 self.category_items(key, server, category, copy_id(category, "category"))
             }
             MenuOf::Server { key, server } => self.server_items(key, server, copy_id(server, "server")),
+            MenuOf::ServerHeader { key, server } => self.server_header_items(key, server, copy_id(server, "server")),
             MenuOf::Dm { key, conversation } => {
                 let (unread, other) = self.core.shared.read(|s| {
                     let Some(i) = s.instance(key) else { return (0, String::new()) };
@@ -662,6 +663,99 @@ impl FuwaApp {
     }
 
     /// Makes an invite to the server, then shows it.
+    /// The web's server dropdown (ChannelSidebar's ServerMenu), in its order:
+    /// invite and what you manage, then rules, welcome and notifications,
+    /// then the ID and leaving.
+    fn server_header_items(&self, key: &str, server: &str, developer: Vec<Item>) -> Built {
+        let Some((access, rules, welcome, onboarding)) = self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            let sv = i.server(server)?;
+            Some((i.access(server), sv.has_rules, sv.has_welcome_screen, sv.has_onboarding))
+        }) else {
+            return Built::of(Vec::new());
+        };
+        let mut manage = Vec::new();
+        if access.has(P::CreateInvite) || access.channels.keys().any(|c| access.has_in(c, P::CreateInvite)) {
+            manage.push(self.invite_item(key, server));
+        }
+        if crate::ui::server_settings::can_open(&access) {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            manage.push(Item::act(
+                "Server settings",
+                "settings",
+                run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
+            ));
+        }
+        if access.has(P::ManageChannels) {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            manage.push(Item::act(
+                "Create channel",
+                "plus",
+                run(move |this, window, cx| {
+                    let dialog = Dialog::CreateChannel {
+                        key: k.clone(),
+                        server: s.clone(),
+                        parent: String::new(),
+                        kind: pb::ChannelType::Text,
+                    };
+                    this.open_dialog(dialog, window, cx)
+                }),
+            ));
+        }
+        let mut about = Vec::new();
+        if rules {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            about.push(Item::act(
+                "Rules",
+                "scroll-text",
+                run(move |this, window, cx| {
+                    this.open_dialog(Dialog::Rules { key: k.clone(), server: s.clone() }, window, cx)
+                }),
+            ));
+        }
+        if welcome || onboarding {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            about.push(Item::act(
+                if onboarding { "Channels & roles" } else { "Welcome screen" },
+                "party-popper",
+                run(move |this, window, cx| {
+                    if onboarding {
+                        this.open_onboarding(&k, &s, cx)
+                    } else {
+                        this.open_dialog(Dialog::Welcome { key: k.clone(), server: s.clone() }, window, cx)
+                    }
+                }),
+            ));
+        }
+        about.extend(self.notification_items(key, server, ""));
+        {
+            let menu = Menu::Server { key: key.to_owned(), server: server.to_owned() };
+            about.push(Item::act(
+                "Notification settings",
+                "bell-ring",
+                run(move |this, _, cx| {
+                    this.menu = Some(menu.clone());
+                    cx.notify();
+                }),
+            ));
+        }
+        let mut danger = Vec::new();
+        if !access.owner {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            danger.push(
+                Item::act(
+                    "Leave server",
+                    "door-open",
+                    run(move |this, window, cx| {
+                        this.open_dialog(Dialog::LeaveServer { key: k.clone(), server: s.clone() }, window, cx)
+                    }),
+                )
+                .danger(),
+            );
+        }
+        Built::of(vec![manage, about, developer, danger])
+    }
+
     fn invite_item(&self, key: &str, server: &str) -> Item {
         let (k, s) = (key.to_owned(), server.to_owned());
         Item::act(

@@ -1,6 +1,6 @@
 //! Text helpers: Markdown as the web app shows it, and times as people say them.
 
-use chrono::{DateTime, Local, TimeZone as _};
+use chrono::{DateTime, Datelike as _, Local, TimeZone as _};
 
 /// Pictures in messages show as links, as on the web, so nobody's address is
 /// fetched by just opening a channel. Code is left alone.
@@ -43,25 +43,65 @@ pub fn images_as_links(source: &str) -> String {
     out
 }
 
-/// "Today at 14:03", "Yesterday at 09:12", or the date.
+/// The clock setting (`Prefs::clock`), kept where formatting can read it: 0 auto, 1 12h, 2 24h.
+static CLOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_clock(clock: crate::core::config::Clock) {
+    use crate::core::config::Clock;
+    let n = match clock {
+        Clock::Auto => 0,
+        Clock::H12 => 1,
+        Clock::H24 => 2,
+    };
+    CLOCK.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether times read on a 12 hour clock: as set, or the language's own
+/// (English, Korean and Hindi count 12 hours, as their `Intl` formats do).
+fn twelve_hours() -> bool {
+    match CLOCK.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => {
+            let (code, _) = crate::core::i18n::current();
+            let lang = code.split(['-', '_']).next().unwrap_or("");
+            matches!(lang, "en" | "ko" | "hi") && !matches!(code.as_str(), "en-GB")
+        }
+    }
+}
+
+fn time_of(at: &DateTime<Local>) -> String {
+    if twelve_hours() { at.format("%-I:%M %p").to_string() } else { at.format("%H:%M").to_string() }
+}
+
+/// "Today at 3:04 PM", "Yesterday at 9:12 AM", or the day and time, as the web's `formatStamp`.
 pub fn when(ms: i64) -> String {
     let Some(at) = Local.timestamp_millis_opt(ms).single() else { return String::new() };
     let now = Local::now();
     let days = now.date_naive().signed_duration_since(at.date_naive()).num_days();
+    let time = time_of(&at);
+    let arg = crate::core::i18n::Arg::Str(&time);
     match days {
-        0 => format!("Today at {}", at.format("%H:%M")),
-        1 => format!("Yesterday at {}", at.format("%H:%M")),
-        _ => at.format("%Y-%m-%d %H:%M").to_string(),
+        0 => crate::core::i18n::t_with("common.time.todayAt", &[("time", arg)]),
+        1 => crate::core::i18n::t_with("common.time.yesterdayAt", &[("time", arg)]),
+        _ => {
+            let day = if at.year() == now.year() {
+                at.format("%A, %B %-d").to_string()
+            } else {
+                at.format("%B %-d, %Y").to_string()
+            };
+            let d = crate::core::i18n::Arg::Str(&day);
+            crate::core::i18n::t_with(
+                "common.time.dayTime",
+                &[("day", d), ("time", crate::core::i18n::Arg::Str(&time))],
+            )
+        }
     }
 }
 
 /// Just the time, for the side of a follow-up message.
 pub fn clock(ms: i64) -> String {
-    Local
-        .timestamp_millis_opt(ms)
-        .single()
-        .map(|at: DateTime<Local>| at.format("%H:%M").to_string())
-        .unwrap_or_default()
+    Local.timestamp_millis_opt(ms).single().map(|at: DateTime<Local>| time_of(&at)).unwrap_or_default()
 }
 
 pub fn ms_of(t: Option<&prost_types::Timestamp>) -> i64 {
@@ -102,6 +142,33 @@ pub fn markdown(
     source: impl Into<gpui_kit::SharedString>,
 ) -> gpui_kit::component::text::TextView {
     gpui_kit::component::text::TextView::markdown(id, source).on_link_click(|url, _, _, cx| open_link(url, cx))
+}
+
+/// A line from the translations with some of its placeholders filled in
+/// bold (the web's `<T values={{ x: <b>…</b> }}>`), such as the composer's hint.
+pub fn hint_line(template: &str, values: &[(&str, &str)], _p: &crate::ui::theme::Palette) -> gpui_kit::StyledText {
+    let mut text = String::new();
+    let mut bold = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        text.push_str(&rest[..open]);
+        let Some(close) = rest[open..].find('}') else { break };
+        let name = &rest[open + 1..open + close];
+        match values.iter().find(|(k, _)| *k == name) {
+            Some((_, value)) => {
+                let start = text.len();
+                text.push_str(value);
+                bold.push((
+                    start..text.len(),
+                    gpui_kit::HighlightStyle { font_weight: Some(gpui_kit::FontWeight::BOLD), ..Default::default() },
+                ));
+            }
+            None => text.push_str(&rest[open..open + close + 1]),
+        }
+        rest = &rest[open + close + 1..];
+    }
+    text.push_str(rest);
+    gpui_kit::StyledText::new(text).with_highlights(bold)
 }
 
 #[cfg(test)]

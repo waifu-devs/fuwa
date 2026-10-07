@@ -224,8 +224,7 @@ impl FuwaApp {
     }
 
     pub(crate) fn attach_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        icon_button("attach", "paperclip", p)
-            .size(px(36.0))
+        crate::ui::widgets::tool_button("attach", "paperclip", false, p)
             .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Attach files").build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx)))
             .into_any_element()

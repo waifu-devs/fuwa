@@ -122,6 +122,32 @@ pub fn corner(n: f32) -> Pixels {
     px(n * f32::from_bits(CORNERS.load(Ordering::Relaxed)))
 }
 
+/// The web's Tailwind radii (app.css `@theme`): `rounded-lg` is the theme's
+/// radius (1rem = 16px at radius 1), the others step from it.
+pub fn radius_lg() -> Pixels {
+    corner(16.0)
+}
+/// `rounded-sm`: the radius less 4px.
+pub fn radius_sm() -> Pixels {
+    px((f32::from(corner(16.0)) - 4.0).max(0.0))
+}
+/// `rounded-md`: the radius less 2px.
+pub fn radius_md() -> Pixels {
+    px((f32::from(corner(16.0)) - 2.0).max(0.0))
+}
+/// `rounded-xl`: the radius and 4px.
+pub fn radius_xl() -> Pixels {
+    px(f32::from(corner(16.0)) + 4.0)
+}
+/// `rounded-2xl`: the radius and 8px.
+pub fn radius_2xl() -> Pixels {
+    px(f32::from(corner(16.0)) + 8.0)
+}
+/// `rounded-3xl`: the radius and 16px.
+pub fn radius_3xl() -> Pixels {
+    px(f32::from(corner(16.0)) + 16.0)
+}
+
 /// The palette in use, kept as a global so views can read it.
 pub struct Current(pub Palette);
 
@@ -170,6 +196,7 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     let p = Palette::of(&theme).over(&backdrop);
     let dark = p.dark;
     CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
+    crate::ui::text::set_clock(prefs.clock);
     cx.set_global(CurrentBackdrop(backdrop));
     cx.set_global(Current(p));
     KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);

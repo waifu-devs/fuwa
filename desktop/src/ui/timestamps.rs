@@ -18,7 +18,7 @@ use crate::ui::app::FuwaApp;
 use crate::ui::chat::Row;
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, icon_button, pal, primary_button};
+use crate::ui::widgets::{card, icon, pal, primary_button};
 
 /// Where a timestamp's node points, in the Markdown handed to the text view.
 pub const SCHEME: &str = "fuwa-time:";
@@ -189,9 +189,7 @@ fn quick_picks(now_ms: i64) -> Vec<(&'static str, i64)> {
 impl FuwaApp {
     pub(crate) fn timestamp_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.time_picker.is_some();
-        icon_button("time-open", "calendar-clock", p)
-            .size(px(36.0))
-            .when(open, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary))
+        crate::ui::widgets::tool_button("time-open", "calendar-clock", open, p)
             .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Insert a timestamp").build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.time_picker.is_some() {

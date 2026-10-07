@@ -22,7 +22,7 @@ use crate::ui::chat::emoji_glyph;
 use crate::ui::emoji::{self, Catalog, Choice};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, icon_button, server_icon};
+use crate::ui::widgets::{card, icon, server_icon};
 
 /// Emoji in a row, and how tall each row (and header) is.
 const COLS: usize = 8;
@@ -129,9 +129,7 @@ impl FuwaApp {
     /// The smiley in the composer that opens the picker.
     pub(crate) fn emoji_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.emoji_open;
-        icon_button("emoji-open", "face-slightly-smiling", p)
-            .size(px(36.0))
-            .when(open, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary))
+        crate::ui::widgets::tool_button("emoji-open", "face-slightly-smiling", open, p)
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.emoji_open {
                     this.close_emoji(window, cx);

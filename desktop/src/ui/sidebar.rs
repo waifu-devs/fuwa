@@ -18,15 +18,16 @@ use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
 use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
+use crate::ui::rail::RAIL;
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
 
-pub const SIDEBAR: f32 = 248.0;
+pub const SIDEBAR: f32 = 256.0;
 /// How long a channel that was just dragged into place glows.
 const LANDED: Duration = Duration::from_millis(700);
 
 /// A channel's icon in the list.
-fn channel_glyph(c: &pb::Channel) -> &'static str {
+pub(crate) fn channel_glyph(c: &pb::Channel) -> &'static str {
     match pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text) {
         pb::ChannelType::Voice => "volume-2",
         pb::ChannelType::Announcement => "megaphone",
@@ -34,8 +35,10 @@ fn channel_glyph(c: &pb::Channel) -> &'static str {
         _ => "hash",
     }
 }
-const ROW: f32 = 36.0;
-const LABEL: f32 = 34.0;
+/// A channel row: the web's `row-y` (6px each side) around 15px text, and the 2px gap.
+const ROW: f32 = 36.5;
+/// A category's header: `mt-4` over a `py-1` 12px line.
+const LABEL: f32 = 40.0;
 
 impl FuwaApp {
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -106,93 +109,84 @@ impl FuwaApp {
         };
         let open = self.channel_in(key, server_id);
 
-        let header = div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .w_full()
-            .child({
-                // The name opens the server's settings, for people who can change any of it.
-                let settings = crate::ui::server_settings::can_open(&access);
-                let hover = alpha(p.primary, 0.1);
-                let (k, sid) = (key.to_owned(), server.id.clone());
-                div()
-                    .id("server-name")
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(30.0))
-                    .px(px(6.0))
-                    .ml(px(-6.0))
-                    .mr(px(4.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .rounded(corner(8.0))
-                    .group("server-name")
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(server.name.clone()),
-                    )
-                    .when(settings, |el| {
-                        el.cursor_pointer()
-                            .hover(move |s| s.bg(hover))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(p.muted_foreground)
-                                    .opacity(0.6)
-                                    .group_hover("server-name", |s| s.opacity(1.0))
-                                    .child(icon("chevron-down").size(px(14.0))),
-                            )
-                            .on_click(
-                                cx.listener(move |this, _, window, cx| this.open_server_settings(&k, &sid, window, cx)),
-                            )
-                    })
-            })
-            .child({
-                let menu = Menu::Server { key: key.to_owned(), server: server.id.clone() };
-                let open = self.menu.as_ref() == Some(&menu);
-                icon_button("server-bell", if server_muted { "bell-off" } else { "bell" }, &p)
-                    .size(px(28.0))
-                    .when(open || server_muted, |el| el.text_color(p.primary))
-                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+        // The web's server menu trigger: the name over "N members · instance",
+        // a chevron, and the server's menu under it.
+        let node_name = self.core.shared.read(|s| s.instance(key).map(|i| i.name()).unwrap_or_default());
+        let members = server.member_count;
+        let of = MenuOf::ServerHeader { key: key.to_owned(), server: server.id.clone() };
+        let menu_open = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
+        let turn = motion::follow(
+            SharedString::from(format!("server-chevron|{key}|{server_id}")),
+            if menu_open { 180.0 } else { 0.0 },
+            window,
+            cx,
+        );
+        let header = {
+            let hover = alpha(p.muted, 0.6);
+            let of = of.clone();
+            div()
+                .id("server-name")
+                .flex_1()
+                .min_w_0()
+                .h(px(56.0))
+                .mx(px(-16.0))
+                .px(px(16.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .cursor_pointer()
+                .when(menu_open, |el| el.bg(hover))
+                .hover(move |s| s.bg(hover))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if this.context.as_ref().is_some_and(|m| m.of.lit() == of.lit()) {
+                        this.context = None;
                         cx.notify();
-                    }))
-            })
-            .when(manage, |el| {
-                el.child(icon_button("new-channel", "plus", &p).size(px(28.0)).on_click(cx.listener({
-                    let (key, server) = (key.to_owned(), server.id.clone());
-                    move |this, _, window, cx| {
-                        let dialog = Dialog::CreateChannel {
-                            key: key.clone(),
-                            server: server.clone(),
-                            parent: String::new(),
-                            kind: pb::ChannelType::Text,
-                        };
-                        this.open_dialog(dialog, window, cx)
+                    } else {
+                        let at = gpui_kit::point(px(RAIL + 8.0), px(56.0 + 4.0));
+                        this.open_context_menu(of.clone(), at, window, cx);
                     }
-                })))
-            })
-            .child(icon_button("invite", "user-plus", &p).size(px(28.0)).on_click(cx.listener({
-                let server = server.id.clone();
-                move |this, _, window, cx| {
-                    this.open_dialog(Dialog::Invite { link: None, server: server.clone() }, window, cx)
-                }
-            })))
-            .child(icon_button("leave", "log-out", &p).size(px(28.0)).on_click(cx.listener({
-                let (key, server) = (key.to_owned(), server.id.clone());
-                move |this, _, window, cx| {
-                    this.open_dialog(Dialog::LeaveServer { key: key.clone(), server: server.clone() }, window, cx)
-                }
-            })))
-            .into_any_element();
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .text_size(px(16.0))
+                                .line_height(px(24.0))
+                                .child(server.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_size(px(12.0))
+                                .line_height(px(16.0))
+                                .text_color(p.muted_foreground)
+                                .child(format!(
+                                    "{members} {} · {node_name}",
+                                    if members == 1 { "member" } else { "members" }
+                                )),
+                        ),
+                )
+                .child(
+                    gpui_kit::svg()
+                        .path("icons/chevron-down.svg")
+                        .size(px(16.0))
+                        .flex_none()
+                        .text_color(p.foreground)
+                        .with_transformation(gpui_kit::Transformation::rotate(gpui_kit::radians(turn.to_radians()))),
+                )
+                .into_any_element()
+        };
+        let _ = (server_muted, manage);
 
         // Kept out until they sign in through the server's provider: the way
         // back in, where the channels were.
@@ -237,8 +231,8 @@ impl FuwaApp {
             groups.push((Some(cat), channels.iter().filter(|c| c.parent_id == cat.id).collect()));
         }
 
-        let mut rows = div().relative().pt(px(8.0));
-        let mut y = 8.0;
+        let mut rows = div().relative().pt(px(12.0));
+        let mut y = 12.0;
         if server.has_welcome_screen || server.has_onboarding {
             // Going through the onboarding again, or the welcome screen when there's none.
             let onboarding = server.has_onboarding;
@@ -301,39 +295,104 @@ impl FuwaApp {
                 let of =
                     MenuOf::Category { key: key.to_owned(), server: server_id.to_owned(), category: cat.id.clone() };
                 let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
-                let label = section_label(cat.name.clone(), &p)
+                let closed = self.collapsed.contains(&cat.id);
+                let turn = motion::follow(
+                    SharedString::from(format!("cat-chev|{}", cat.id)),
+                    if closed { -90.0 } else { 0.0 },
+                    window,
+                    cx,
+                );
+                let (fg, hover_fg) = (if lit { p.foreground } else { p.muted_foreground }, p.foreground);
+                let cat_id = cat.id.clone();
+                let label = div()
                     .id(SharedString::from(format!("cat|{}", cat.id)))
-                    .when(lit, |el| el.text_color(p.foreground))
+                    .group("cat")
+                    .h(px(LABEL))
+                    .pt(px(16.0))
+                    .pr(px(4.0))
+                    .flex()
+                    .items_center()
                     .on_mouse_down(MouseButton::Right, self.right_click(of.clone(), cx))
                     .on_hover(
                         cx.listener(move |this, hovered: &bool, _, _| this.set_hover_target(of.clone(), *hovered)),
                     )
-                    .h(px(LABEL))
-                    .flex()
-                    .items_end()
-                    .pr(px(4.0))
                     .when(moving(cat), |el| el.opacity(0.3))
                     .when(manage, |el| {
                         let drag = ghost(cat, list.len());
-                        el.cursor_grab().on_drag(drag, |drag, at, _, cx| {
+                        el.on_drag(drag, |drag, at, _, cx| {
                             cx.new(|_| ChannelDrag { grab: f32::from(at.y), ..drag.clone() })
                         })
-                    });
+                    })
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("cat-fold|{}", cat.id)))
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(24.0))
+                            .px(px(4.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .rounded(crate::ui::theme::radius_md())
+                            .text_size(px(12.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(fg)
+                            .cursor_pointer()
+                            .when(lit, |el| el.bg(alpha(p.muted, 0.7)))
+                            .hover(move |s| s.text_color(hover_fg))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if !this.collapsed.remove(&cat_id) {
+                                    this.collapsed.insert(cat_id.clone());
+                                }
+                                cx.notify();
+                            }))
+                            .child(
+                                gpui_kit::svg()
+                                    .path("icons/chevron-down.svg")
+                                    .size(px(12.0))
+                                    .flex_none()
+                                    .text_color(fg)
+                                    .with_transformation(gpui_kit::Transformation::rotate(gpui_kit::radians(
+                                        turn.to_radians(),
+                                    ))),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .child(cat.name.to_uppercase()),
+                            )
+                            .when(closed && !list.is_empty(), |el| {
+                                el.child(
+                                    div()
+                                        .ml(px(2.0))
+                                        .px(px(6.0))
+                                        .rounded_full()
+                                        .bg(p.muted)
+                                        .text_size(px(9.92))
+                                        .child(list.len().to_string()),
+                                )
+                            }),
+                    );
                 rows = rows.child(if manage {
                     let (key, server, parent) = (key.to_owned(), server_id.to_owned(), cat.id.clone());
+                    let hover_fg = p.foreground;
                     label
-                        .group("cat")
-                        .child(div().flex_1())
                         .child(
                             div()
                                 .id(SharedString::from(format!("cat-add|{}", cat.id)))
+                                .size(px(20.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.0))
+                                .text_color(p.muted_foreground)
                                 .opacity(0.0)
                                 .group_hover("cat", |s| s.opacity(1.0))
                                 .cursor_pointer()
-                                .hover({
-                                    let fg = p.primary;
-                                    move |s| s.text_color(fg)
-                                })
+                                .hover(move |s| s.text_color(hover_fg))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let dialog = Dialog::CreateChannel {
                                         key: key.clone(),
@@ -351,7 +410,8 @@ impl FuwaApp {
                 });
                 y += LABEL;
             }
-            for c in list {
+            let folded = cat.is_some_and(|c| self.collapsed.contains(&c.id));
+            for c in list.iter().copied().filter(|_| !folded) {
                 let active = open.as_deref() == Some(c.id.as_str());
                 if active {
                     highlight = Some(y);
@@ -416,8 +476,8 @@ impl FuwaApp {
                         .right_0()
                         .top(px(at))
                         .h(px(ROW - 2.0))
-                        .rounded(corner(10.0))
-                        .bg(alpha(p.primary, 0.16)),
+                        .rounded(crate::ui::theme::radius_lg())
+                        .bg(alpha(p.primary, 0.15)),
                 )
                 .child(rows);
         }
@@ -452,7 +512,6 @@ impl FuwaApp {
         let joined = voice
             && self.core.call().is_some_and(|v| v.instance == key && v.server_id == server && v.channel_id == c.id);
         let strong = active || unread > 0 || joined;
-        let hover = alpha(p.primary, 0.08);
         // Who's in a voice channel; they're listed under it too.
         let in_voice = if kind == pb::ChannelType::Voice {
             self.core.shared.read(|s| {
@@ -463,8 +522,42 @@ impl FuwaApp {
         };
         let of = MenuOf::Channel { key: key.to_owned(), server: server.to_owned(), channel: c.id.clone() };
         let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
+        // The web's ChannelRow: muted text that darkens on hover, bold for
+        // unread, bold in the primary color when open.
+        let hover = alpha(p.muted, 0.7);
+        let color = if active || joined {
+            p.primary
+        } else if unread > 0 || lit {
+            p.foreground
+        } else {
+            p.muted_foreground
+        };
+        let fg = p.foreground;
+        let (manage, invite) = self.core.shared.read(|s| {
+            let a = s.instance(key).map(|i| i.access(server)).unwrap_or_default();
+            (
+                a.has_in(&c.id, pb::Permission::ManageChannels) || a.has_in(&c.id, pb::Permission::ManageRoles),
+                !voice && kind != pb::ChannelType::Secure && a.has_in(&c.id, pb::Permission::CreateInvite),
+            )
+        });
+        let group = SharedString::from(format!("row-g|{}", c.id));
+        let row_action = |id: String, name: &str, show: bool, group: SharedString| {
+            div()
+                .id(SharedString::from(id))
+                .size(px(20.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.0))
+                .text_color(p.muted_foreground)
+                .when(!show, |el| el.opacity(0.0).group_hover(group, |s| s.opacity(1.0)))
+                .hover(move |s| s.text_color(fg))
+                .child(icon(name).size(px(14.0)))
+        };
         div()
             .id(SharedString::from(format!("row|{}", c.id)))
+            .group(group.clone())
             .relative()
             .when(lit, |el| el.bg(hover))
             .on_mouse_down(MouseButton::Right, self.right_click(of.clone(), cx))
@@ -474,14 +567,15 @@ impl FuwaApp {
             }))
             .h(px(ROW - 2.0))
             .mb(px(2.0))
-            .px(px(10.0))
+            .px(px(8.0))
             .flex()
             .items_center()
-            .gap(px(8.0))
-            .rounded(corner(10.0))
-            .text_color(if strong { p.foreground } else { p.muted_foreground })
+            .gap(px(6.0))
+            .rounded(crate::ui::theme::radius_lg())
+            .text_size(px(15.04))
+            .text_color(color)
             .cursor_pointer()
-            .hover(move |s| s.bg(hover))
+            .when(!active, |el| el.hover(move |s| s.bg(hover).text_color(fg)))
             .when(!voice, |el| {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
                 el.on_click(cx.listener(move |this, _, window, cx| this.open_channel(&key, &server, &id, window, cx)))
@@ -494,16 +588,20 @@ impl FuwaApp {
                     cx.notify();
                 }))
             })
-            .child(icon(glyph).size(px(17.0)).text_color(if joined {
-                p.success
-            } else if active {
-                p.primary
-            } else {
-                p.muted_foreground
-            }))
+            // The unread dot at the list's edge.
+            .when(unread > 0 && !active, |el| {
+                el.child(div().absolute().left(px(-8.0)).top(px(13.25)).w(px(4.0)).h(px(8.0)).rounded_r_full().bg(fg))
+            })
             .child(
                 div()
-                    .flex_1()
+                    .flex_none()
+                    .opacity(if active { 1.0 } else { 0.7 })
+                    .group_hover(group.clone(), |s| s.opacity(1.0))
+                    .child(icon(glyph).size(px(18.0)).text_color(if joined { p.success } else { color })),
+            )
+            .child(
+                div()
+                    .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
@@ -513,7 +611,44 @@ impl FuwaApp {
             .when_some(crate::core::shared::shared_label(c), |el, label| {
                 el.child(crate::ui::shared_marks::badge(&c.id, label.text, alpha(p.primary, 0.8)))
             })
-            .when(unread > 0 && !active, |el| el.child(badge(unread, p).border_color(p.sidebar)))
+            .child(div().flex_1())
+            .when(invite, |el| {
+                let server = server.to_owned();
+                let channel = c.id.clone();
+                let k = key.to_owned();
+                el.child(row_action(format!("row-invite|{}", c.id), "user-plus", active, group.clone()).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.invite_to_channel(&k, &server, &channel, window, cx);
+                    }),
+                ))
+            })
+            .when(manage, |el| {
+                let (k, server, channel) = (key.to_owned(), server.to_owned(), c.id.clone());
+                el.child(row_action(format!("row-edit|{}", c.id), "settings", active, group.clone()).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.open_channel_settings(&k, &server, &channel, window, cx);
+                    }),
+                ))
+            })
+            .when(unread > 0 && !active, |el| {
+                el.child(
+                    div()
+                        .h(px(20.0))
+                        .min_w(px(20.0))
+                        .px(px(6.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(p.destructive)
+                        .text_color(gpui_kit::white())
+                        .text_size(px(11.2))
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .child(if unread > 99 { "99+".to_owned() } else { unread.to_string() }),
+                )
+            })
             .when(in_voice > 0, |el| {
                 el.child(
                     div()
@@ -527,6 +662,34 @@ impl FuwaApp {
                         .child(in_voice.to_string()),
                 )
             })
+    }
+
+    /// The row's invite shortcut: an invite to its server, shown to copy.
+    fn invite_to_channel(
+        &mut self,
+        _key: &str,
+        server: &str,
+        _channel: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_dialog(Dialog::Invite { link: None, server: server.to_owned() }, window, cx);
+    }
+
+    /// The row's gear: the channel's page in server settings.
+    fn open_channel_settings(
+        &mut self,
+        key: &str,
+        server: &str,
+        channel: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_server_settings(key, server, window, cx);
+        if let Some(view) = &self.server_settings {
+            let channel = channel.to_owned();
+            view.update(cx, |view, cx| view.edit_channel(channel, false, cx));
+        }
     }
 
     fn dm_sidebar(
@@ -831,16 +994,23 @@ impl FuwaApp {
         } else if live && status != pb::PresenceStatus::Online {
             crate::ui::menus::status_label(status).to_owned()
         } else {
-            me.as_ref().map(|m| format!("@{} · {instance}", m.username)).unwrap_or(instance)
+            let _ = &instance;
+            me.as_ref()
+                .and_then(|m| {
+                    crate::ui::presence::custom_status(m, crate::core::dms::now_ms())
+                        .or_else(|| Some(format!("@{}", m.username)))
+                })
+                .unwrap_or_default()
         };
+        let (muted, deaf) = self.core.selves();
+        // The web's UserPanel: you (opening your status), then mute, deafen and settings.
         div()
-            .h(px(60.0))
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .px(px(12.0))
-            .bg(alpha(p.rail, 0.6))
+            .gap(px(2.0))
+            .p(px(8.0))
+            .bg(alpha(p.background, 0.5))
             .border_t_1()
             .border_color(p.border)
             .child({
@@ -853,17 +1023,16 @@ impl FuwaApp {
                 // An instance without presence has no status to pick.
                 let menu = key.clone().filter(|_| me.is_some() && presence).map(|key| Menu::Status { key });
                 let open = menu.is_some() && self.menu == menu;
-                let hover = alpha(p.primary, 0.08);
+                let hover = p.muted;
                 div()
                     .id("me-status")
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
+                    .gap(px(8.0))
                     .p(px(4.0))
-                    .ml(px(-4.0))
-                    .rounded(corner(12.0))
+                    .rounded(crate::ui::theme::radius_xl())
                     .when(open, |el| el.bg(hover))
                     .when_some(menu, |el, menu| {
                         el.cursor_pointer()
@@ -879,7 +1048,7 @@ impl FuwaApp {
                     .child(
                         div()
                             .relative()
-                            .child(avatar(me.as_ref(), 36.0, &p))
+                            .child(avatar(me.as_ref(), 32.0, &p))
                             .child(div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(dot)),
                     )
                     .child(
@@ -907,11 +1076,44 @@ impl FuwaApp {
                             ),
                     )
             })
+            .child(panel_toggle("me-mute", if muted { "mic-off" } else { "mic" }, muted, &p).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.core.set_self_mute(!muted);
+                    cx.notify();
+                },
+            )))
+            .child(panel_toggle("me-deafen", if deaf { "headphone-off" } else { "headphones" }, deaf, &p).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.core.set_self_deaf(!deaf);
+                    cx.notify();
+                }),
+            ))
             .child(
-                icon_button("me-settings", "settings", &p)
+                panel_toggle("me-settings", "settings", false, &p)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
     }
+}
+
+/// The web's small panel buttons (`size-8 rounded-lg`, an 18px icon): muted
+/// until hovered, red on the destructive tint while on.
+fn panel_toggle(id: &'static str, name: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let (hover_bg, hover_fg) =
+        if on { (alpha(p.destructive, 0.2), p.destructive) } else { (p.muted.into(), p.foreground) };
+    div()
+        .id(id)
+        .size(px(32.0))
+        .flex_none()
+        .rounded(crate::ui::theme::radius_lg())
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .when(on, |el| el.bg(alpha(p.destructive, 0.12)).text_color(p.destructive))
+        .when(!on, |el| el.text_color(p.muted_foreground))
+        .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+        .active(|s| s.opacity(0.85))
+        .child(icon(name).size(px(18.0)))
 }
 
 /// Soft placeholder rows while a server's channels arrive.
