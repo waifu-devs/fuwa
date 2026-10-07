@@ -503,8 +503,14 @@ impl FuwaApp {
         let hidden = f.me && self.prefs.hides_personal();
 
         // The banner: their picture, or their color shaded toward the corner, or a sweep from their id.
-        let banner =
-            crate::ui::settings_account::banner_of(user_id, banner, accent, &p).h(px(112.0)).rounded_t(radius_3xl());
+        let banner = if accent < 0 && banner.is_empty() {
+            // The web's `server-gradient` with its glow, which GPUI can't draw: painted once as an SVG.
+            div().h(px(112.0)).w_full().child(
+                gpui_kit::img(hue_banner(user_id, WIDTH - 2.0, 112.0, f32::from(radius_3xl()) - 1.0)).size_full(),
+            )
+        } else {
+            crate::ui::settings_account::banner_of(user_id, banner, accent, &p).h(px(112.0)).rounded_t(radius_3xl())
+        };
         let banner = motion::once(
             banner,
             SharedString::from(format!("profile-banner|{user_id}|{accent}")),
@@ -975,6 +981,56 @@ impl FuwaApp {
 thread_local! {
     /// Where the card's + was drawn, for its menu.
     static ROLE_ADD: RefCell<Option<Bounds<Pixels>>> = const { RefCell::new(None) };
+}
+
+/// Someone's banner without a picture or color (the web's `.server-gradient`
+/// on their hue: a 135° sweep under a soft glow at 30% 20%), as an SVG of
+/// `w`×`h` with its top corners rounded by `r`. Made once per person and size.
+fn hue_banner(user_id: &str, w: f32, h: f32, r: f32) -> std::sync::Arc<gpui_kit::Image> {
+    type Made = HashMap<String, std::sync::Arc<gpui_kit::Image>>;
+    thread_local! {
+        static MADE: RefCell<Made> = RefCell::new(HashMap::new());
+    }
+    let key = format!("{user_id}|{w}|{h}|{r}");
+    if let Some(made) = MADE.with(|m| m.borrow().get(&key).cloned()) {
+        return made;
+    }
+    let hue = crate::ui::widgets::hue_of(user_id);
+    let hex = |deg: f32, s: f32, l: f32| {
+        let c: gpui_kit::Rgba = gpui_kit::hsla((deg % 360.0) / 360.0, s, l, 1.0).into();
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        format!("#{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b))
+    };
+    // CSS's 135° line runs through the middle, as long as the box's projection on it.
+    let half = (w + h) * std::f32::consts::FRAC_1_SQRT_2 / 2.0;
+    let d = half * std::f32::consts::FRAC_1_SQRT_2;
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    // `circle at 30% 20%` reaches the farthest corner.
+    let (gx, gy) = (0.3 * w, 0.2 * h);
+    let reach = ((w - gx).powi(2) + (h - gy).powi(2)).sqrt();
+    let glow = hex(hue, 0.9, 0.75);
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {w} {h}">
+<defs>
+<linearGradient id="a" gradientUnits="userSpaceOnUse" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"><stop offset="0" stop-color="{from}"/><stop offset="1" stop-color="{to}"/></linearGradient>
+<radialGradient id="b" gradientUnits="userSpaceOnUse" cx="{gx}" cy="{gy}" r="{reach}"><stop offset="0" stop-color="{glow}" stop-opacity="0.9"/><stop offset="0.6" stop-color="{glow}" stop-opacity="0"/></radialGradient>
+</defs>
+<path id="s" d="M0 {h} V{r} A{r} {r} 0 0 1 {r} 0 H{wr} A{r} {r} 0 0 1 {w} {r} V{h} Z" fill="url(#a)"/>
+<path d="M0 {h} V{r} A{r} {r} 0 0 1 {r} 0 H{wr} A{r} {r} 0 0 1 {w} {r} V{h} Z" fill="url(#b)"/>
+</svg>"#,
+        W = w * 2.0,
+        H = h * 2.0,
+        x1 = cx - d,
+        y1 = cy - d,
+        x2 = cx + d,
+        y2 = cy + d,
+        from = hex(hue, 0.7, 0.55),
+        to = hex(hue + 40.0, 0.7, 0.45),
+        wr = w - r,
+    );
+    let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Svg, svg.into_bytes()));
+    MADE.with(|m| m.borrow_mut().insert(key, image.clone()));
+    image
 }
 
 /// A role's color as a dot (`RoleDot`, size-3), grey for one without.
