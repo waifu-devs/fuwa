@@ -239,6 +239,18 @@ pub(crate) fn tools_shown(id: &str, ctx: &RowCtx) -> bool {
 
 /// The "Delete?" a row asks before it goes: the question, yes and no.
 pub(crate) fn confirm_delete(id: &str, keep_label: String, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElement {
+    confirm_delete_as(id, &t("chat.messages.deleteAsk"), keep_label, ctx, p)
+}
+
+/// The same, asking `question` (an encrypted message's "Delete for both of you?").
+pub(crate) fn confirm_delete_as(
+    id: &str,
+    question: &str,
+    keep_label: String,
+    ctx: &Rc<RowCtx>,
+    p: &Palette,
+) -> AnyElement {
+    let question = question.to_owned();
     let (yes, no) = (ctx.this.clone(), ctx.this.clone());
     let (a, b) = (id.to_owned(), id.to_owned());
     motion::slide_in(
@@ -246,14 +258,7 @@ pub(crate) fn confirm_delete(id: &str, keep_label: String, ctx: &Rc<RowCtx>, p: 
             .flex()
             .items_center()
             .gap(px(2.0))
-            .child(
-                div()
-                    .px(px(8.0))
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.destructive)
-                    .child(t("chat.messages.deleteAsk")),
-            )
+            .child(div().px(px(8.0)).text_xs().font_weight(FontWeight::BOLD).text_color(p.destructive).child(question))
             .child(tool(format!("del-yes|{id}"), "check", t("chat.messages.delete"), true, p).on_click(
                 move |_, _, cx| {
                     let _ = yes.update(cx, |this, cx| {

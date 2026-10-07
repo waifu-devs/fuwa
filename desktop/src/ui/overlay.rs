@@ -12,7 +12,6 @@ use gpui_kit::{
 
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
-use crate::ui::text::safety_rows;
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{
     card, danger_button, error_line, icon, icon_button, labeled, pal, primary_button, soft_button,
@@ -88,6 +87,9 @@ impl FuwaApp {
         }
         if let Dialog::Secure { key, server, channel } = &dialog {
             return Some(self.render_secure(key, server, channel, window, cx));
+        }
+        if let Dialog::Safety { key, conversation } = &dialog {
+            return Some(self.render_encryption(key, conversation, window, cx));
         }
         if let Dialog::Poll { .. } = &dialog {
             return Some(self.render_poll_editor(window, cx));
@@ -178,49 +180,6 @@ impl FuwaApp {
                         })
                         .into_any_element(),
                     link.as_ref().map(|_| "Copy link"),
-                )
-            }
-            Dialog::Safety { key, conversation } => {
-                let (safety, verified, other) = self.core.shared.read(|s| {
-                    let i = s.instance(key);
-                    let me = i.and_then(|i| i.me.as_ref().map(|m| m.id.clone())).unwrap_or_default();
-                    (
-                        i.and_then(|i| i.dms.safety.get(conversation).cloned()),
-                        i.and_then(|i| i.dms.verified.get(conversation).cloned()),
-                        i.and_then(|i| i.dms.conversations.iter().find(|c| &c.id == conversation))
-                            .and_then(|c| c.users.iter().find(|u| u.id != me).map(crate::core::store::user_name)),
-                    )
-                });
-                let other = other.unwrap_or_else(|| "them".into());
-                let is_verified = verified.is_some() && verified == safety;
-                let rows = safety.as_deref().map(safety_rows).unwrap_or_default();
-                let grid = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .p(px(18.0))
-                    .rounded(corner(14.0))
-                    .bg(p.secondary)
-                    .font_family("monospace")
-                    .text_lg()
-                    .text_center()
-                    .children(rows.into_iter().enumerate().map(|(n, row)| {
-                        motion::rise(
-                            div().child(row),
-                            SharedString::from(format!("safety-{n}")),
-                            Duration::from_millis(60 * n as u64),
-                            8.0,
-                        )
-                    }))
-                    .when(safety.is_none(), |el| el.child("Still working it out…"));
-                (
-                    if is_verified { "shield-check" } else { "shield" },
-                    if is_verified { "You've verified this conversation".into() } else { format!("Verify {other}") },
-                    format!(
-                        "Compare these numbers with {other}, in person or somewhere you trust. If they match, nobody is listening in between."
-                    ),
-                    grid.into_any_element(),
-                    (!is_verified && safety.is_some()).then_some("They match"),
                 )
             }
             Dialog::CreateChannel { key, server, parent, kind } => {
@@ -386,6 +345,7 @@ impl FuwaApp {
             | Dialog::Welcome { .. }
             | Dialog::Onboarding { .. }
             | Dialog::Secure { .. }
+            | Dialog::Safety { .. }
             | Dialog::Poll { .. }
             | Dialog::PollVoters { .. }
             | Dialog::Picture { .. } => unreachable!("drawn on its own"),

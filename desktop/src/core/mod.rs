@@ -43,8 +43,10 @@ pub mod providers;
 pub mod qr;
 pub mod rail;
 pub mod reports;
+pub mod sealed_files;
 pub mod search;
 pub mod secrets;
+pub mod secure_threads;
 pub mod server_admin;
 pub mod shared;
 pub mod sounds;
@@ -1052,27 +1054,37 @@ impl Core {
 
     pub async fn send_dm(&self, key: &str, id: &str, content: Content) -> Result<(), DmError> {
         let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
-        // A new message shows dimmed until it's sent; an edit changes the one already there.
-        let text = match &content {
-            Content::Text { text, .. } => Some(text.clone()),
-            Content::Edit { .. } | Content::Voice(_) => None,
+        // A new message shows dimmed until it's sent, and stays (with why) if it can't be; an edit changes the one already there.
+        let (text, thread, in_channel) = match &content {
+            Content::Text { text, .. } => (Some(text.clone()), 0, false),
+            Content::Reply { text, thread, in_channel, files } if files.is_empty() => {
+                (Some(text.clone()), *thread, *in_channel)
+            }
+            Content::Edit { .. }
+            | Content::Voice(_)
+            | Content::Files { .. }
+            | Content::Reply { .. }
+            | Content::Lock { .. } => (None, 0, false),
         };
+        let nonce = crate::core::dms::new_nonce();
         if let Some(text) = &text {
-            self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
+            let pending = crate::core::dms::DmPending {
+                nonce,
+                text: text.clone(),
+                created_at: crate::core::dms::now_ms(),
+                failed: None,
+                thread,
+                in_channel,
+            };
+            self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(pending));
         }
         let feature = if text.is_some() { "dm.send" } else { "message.edit" };
         let result = engine.send(id, content).await;
         if result.is_ok() {
             reports::used(feature);
         }
-        if let Some(text) = text {
-            self.shared.instance(key, |i| {
-                if let Some(list) = i.dms.sending.get_mut(id)
-                    && let Some(at) = list.iter().position(|t| *t == text)
-                {
-                    list.remove(at);
-                }
-            });
+        if text.is_some() {
+            self.shared.instance(key, |i| crate::core::dms::settle_pending(&mut i.dms, id, nonce, &result));
         }
         result
     }

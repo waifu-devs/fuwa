@@ -20,8 +20,7 @@ use gpui_kit::{
 use crate::core::config::Density;
 use crate::core::i18n::{Arg, t};
 use crate::core::shared;
-use crate::core::store::{InstanceState, user_name};
-use crate::core::vault::ItemKind;
+use crate::core::store::InstanceState;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav, Target};
 use crate::ui::context_menu::{self, MenuOf};
@@ -40,144 +39,6 @@ pub(crate) struct Who {
     pub name: String,
     pub color: Option<Hsla>,
     pub user: Option<pb::User>,
-}
-
-fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg {
-    Msg {
-        id,
-        shown: timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&content))),
-        user: who.user,
-        name: who.name,
-        color: who.color,
-        content,
-        mentions_me: false,
-        editing: false,
-        can_delete: mine,
-        at,
-        edited: false,
-        head: true,
-        mine,
-        pending: false,
-        failed: None,
-        nonce: 0,
-        unreadable: false,
-        badge: None,
-        embeds: Vec::new(),
-        from: None,
-        keep_out: false,
-        keeping_out: false,
-        poll: None,
-        voice: None,
-        attachments: Vec::new(),
-        gif: None,
-        thread: ThreadBits::default(),
-        agent: None,
-        pinned: false,
-        can_pin: false,
-        owner: false,
-        sig: 0,
-    }
-}
-
-/// The rows of a conversation or a secure channel (`moderate` is Some for a
-/// channel: whether you may delete others' messages there), from what this
-/// device opened. `pins` is Some in a conversation whose instance keeps pins:
-/// what's pinned there, as read so far.
-pub(crate) fn encrypted_rows(
-    i: &InstanceState,
-    id: &str,
-    start: Row,
-    who: &dyn Fn(&str) -> Who,
-    moderate: Option<bool>,
-    editing: Option<&str>,
-    pins: Option<&[pb::DmPin]>,
-) -> Vec<Row> {
-    let me = i.me.clone();
-    let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
-    let items = i.dms.items.get(id).map(Vec::as_slice).unwrap_or_default();
-    let channel = moderate.is_some();
-    let shared = items.iter().any(|it| !it.shared_by.is_empty());
-    let mut rows = vec![start];
-    for item in items {
-        let mine = item.sender_id == me_id;
-        let can_delete = mine || moderate == Some(true);
-        match item.kind {
-            ItemKind::Text if !item.deleted => {
-                let mut m = plain_msg(item.seq.to_string(), who(&item.sender_id), item.content.clone(), item.at, mine);
-                m.editing = editing == Some(m.id.as_str());
-                m.edited = item.edited_at > 0;
-                m.can_delete = can_delete;
-                m.voice = item.voice.as_ref().map(|v| Rc::new(crate::ui::voice_notes::VoiceCard::of(v)));
-                if let Some(pins) = pins {
-                    m.can_pin = true;
-                    m.pinned = pins.iter().any(|p| p.sequence == item.seq);
-                }
-                rows.push(Row::Msg(Rc::new(m)));
-            }
-            ItemKind::Text => {}
-            // A channel says it in a line; a conversation shows the message it couldn't open.
-            ItemKind::Unreadable if !channel => {
-                let text = "This message can't be opened on this device.".to_owned();
-                let mut m = plain_msg(item.seq.to_string(), who(&item.sender_id), text, item.at, mine);
-                m.shown = String::new();
-                m.unreadable = true;
-                m.can_delete = can_delete;
-                rows.push(Row::Msg(Rc::new(m)));
-            }
-            ItemKind::Joined if !channel => rows.push(Row::Note {
-                id: item.seq.to_string(),
-                icon: "shield-check",
-                text: "This device joined the conversation. What came before stays on the devices that were here."
-                    .into(),
-            }),
-            // The devices a conversation started with aren't news.
-            ItemKind::Devices if !channel && !rows.iter().any(|r| matches!(r, Row::Msg(_))) => {}
-            ItemKind::Devices if !channel => {
-                let added = item.added.iter().filter(|d| d.user_id != me_id || d.device_id != i.dms.device_id);
-                let mut lines: Vec<String> = Vec::new();
-                for d in added {
-                    lines.push(format!("{} added a device", who(&d.user_id).name));
-                }
-                for d in &item.removed {
-                    lines.push(format!("{} removed a device", who(&d.user_id).name));
-                }
-                if !lines.is_empty() {
-                    lines.dedup();
-                    rows.push(Row::Note { id: item.seq.to_string(), icon: "laptop", text: lines.join(" · ") });
-                }
-            }
-            ItemKind::Reset | ItemKind::Setting if !channel => {}
-            _ => {
-                let name = |id: &str| who(id).name;
-                let (icon, text) = crate::ui::secure::channel_line(item, &name, &me_id, shared);
-                rows.push(Row::Note { id: item.seq.to_string(), icon, text });
-            }
-        }
-    }
-    for (n, text) in i.dms.sending.get(id).into_iter().flatten().enumerate() {
-        let who = Who { name: me.as_ref().map(user_name).unwrap_or_default(), color: None, user: me.clone() };
-        let mut m = plain_msg(format!("s{n}"), who, text.clone(), crate::core::dms::now_ms(), true);
-        m.can_delete = false;
-        m.pending = true;
-        rows.push(Row::Msg(Rc::new(m)));
-    }
-    // A divider for each day, before the first message of it.
-    let mut dated = Vec::with_capacity(rows.len() + 4);
-    let mut last_day: Option<i64> = None;
-    for row in rows {
-        if let Row::Msg(m) = &row
-            && !m.pending
-        {
-            if !last_day.is_some_and(|d| crate::ui::text::same_day(d, m.at)) {
-                dated.push(Row::Day { id: format!("day|{}", m.id), text: crate::ui::text::day(m.at) });
-            }
-            last_day = Some(m.at);
-        }
-        dated.push(row);
-    }
-    let mut rows = dated;
-    group(&mut rows);
-    rows
 }
 
 /// Why you can't write here, and what would let you.
@@ -244,6 +105,10 @@ pub enum Row {
     /// What AutoMod caught, for the moderators in its alert channel.
     AutoMod(Rc<AlertLine>),
     Msg(Rc<Msg>),
+    /// The top of a private conversation.
+    DmStart(Rc<crate::ui::dm_view::DmStart>),
+    /// A line about an encrypted conversation's devices, not something said.
+    Line(Rc<crate::ui::dm_view::SysLine>),
 }
 
 /// "Someone joined", as the web's `JoinRow`.
@@ -371,6 +236,8 @@ pub struct Msg {
     pub can_pin: bool,
     /// Its author owns the server: a crown by the name.
     pub owner: bool,
+    /// In a conversation or a secure channel: what its encryption adds.
+    pub enc: Option<Rc<crate::ui::dm_view::EncBits>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -390,6 +257,8 @@ impl Row {
             Row::Join(j) => &j.id,
             Row::AutoMod(a) => &a.id,
             Row::Msg(m) => &m.id,
+            Row::DmStart(_) => "start",
+            Row::Line(l) => &l.id,
         }
     }
 
@@ -409,11 +278,16 @@ impl Row {
                 (&a.id, &a.name, &a.channel, a.can_delete).hash(h);
                 a.color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)).hash(h);
             }
+            Row::DmStart(s) => ("dm-start", &s.name, s.user.as_ref().map(|u| (&u.username, &u.avatar_url))).hash(h),
+            Row::Line(l) => (&l.id, l.kind, &l.text, l.at).hash(h),
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
                 (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me, m.pinned)
                     .hash(h);
                 m.voice.as_ref().map(|v| v.digest()).hash(h);
+                m.thread.digest(h);
+                m.can_delete.hash(h);
+                m.enc.as_ref().map(|e| (e.deleted, e.shared, e.files.len(), e.sending.len())).hash(h);
             }
         }
     }
@@ -432,50 +306,18 @@ impl FuwaApp {
                 self.dress_voice(&mut rows);
                 rows
             }
-            Some(Target::Dm { key, conversation }) => self.core.shared.read(|s| {
-                let Some(i) = s.instance(&key) else { return Vec::new() };
-                let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
-                let users: Vec<pb::User> =
-                    i.dms.conversations.iter().find(|c| c.id == conversation).map(|c| c.users.clone()).unwrap_or_default();
-                let person = |id: &str| users.iter().find(|u| u.id == id).cloned().or_else(|| i.users.get(id).cloned());
-                let other = users.iter().find(|u| u.id != me).map(user_name).unwrap_or_else(|| "them".into());
-                let start = Row::Start {
-                    icon: "lock",
-                    title: other.clone(),
-                    body: format!(
-                        "This is the start of your private conversation with {other}. It's end-to-end encrypted: only your devices and theirs can read it."
-                    ),
-                    shared: None,
-                };
-                let who = |id: &str| {
-                    let user = person(id);
-                    Who { name: user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into()), color: None, user }
-                };
-                let pins = i.has("pins").then(|| {
-                    i.dms.pins.get(&conversation).map(|l| l.pins.as_slice()).unwrap_or_default()
-                });
-                let mut rows = encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref(), pins);
+            Some(Target::Dm { key, conversation }) => {
+                let mut rows = self
+                    .core
+                    .shared
+                    .read(|s| s.instance(&key).map(|i| self.dm_rows(i, &conversation)).unwrap_or_default());
                 self.dress_voice(&mut rows);
                 rows
-            }),
-            Some(Target::Secure { key, server, channel }) => self.core.shared.read(|s| {
-                let Some(i) = s.instance(&key) else { return Vec::new() };
-                let name = i.channel(&server, &channel).map(|c| c.name.clone()).unwrap_or_default();
-                let shares = i.dms.secure_history.get(&channel).copied().unwrap_or(false);
-                let start = Row::Start {
-                    icon: "shield-check",
-                    title: format!("Welcome to #{name}"),
-                    body: crate::ui::secure::beginning(shares),
-                    shared: None,
-                };
-                let who = |id: &str| Who {
-                    name: i.display_name(Some(&server), id),
-                    color: i.name_color(&server, id).map(|c| rgb(c).into()),
-                    user: i.users.get(id).cloned(),
-                };
-                let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
-                encrypted_rows(i, &channel, start, &who, Some(manage), self.editing.as_deref(), None)
-            }),
+            }
+            Some(Target::Secure { key, server, channel }) => self
+                .core
+                .shared
+                .read(|s| s.instance(&key).map(|i| self.secure_rows(i, &key, &server, &channel)).unwrap_or_default()),
             None => Vec::new(),
         }
     }
@@ -735,6 +577,7 @@ impl FuwaApp {
                     pinned,
                     can_pin,
                     owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
+                    enc: None,
                     sig,
                 }),
             };
@@ -782,6 +625,7 @@ impl FuwaApp {
                 pinned: false,
                 can_pin: false,
                 owner: me == owner_id,
+                enc: None,
                 sig: 0,
             })));
         }
@@ -836,7 +680,7 @@ impl FuwaApp {
                 let added = len - list.len;
                 let now = Instant::now();
                 for r in &rows[list.len.saturating_sub(1)..] {
-                    if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Join(_) | Row::AutoMod(_))
+                    if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Line(_) | Row::Join(_) | Row::AutoMod(_))
                         && !self.fresh.contains_key(&r.id())
                     {
                         self.fresh.insert(r.id(), now);
@@ -962,22 +806,30 @@ impl FuwaApp {
                 })
                 .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
         }
-        .when(!secure, |el| el.child(self.search_field(window, cx)))
-        .child(self.header_buttons(key, server, &channel, &p, cx));
+        .when(!secure, |el| el.child(self.search_field(window, cx)));
+        // A secure channel's header has its own buttons (`secure_header`).
+        let header = if secure { header } else { header.child(self.header_buttons(key, server, &channel, &p, cx)) };
 
-        let blocked = self.channel_blocked(key, server, &channel.id);
-        let blocked = if secure { self.secure_blocked(key, server, &channel.id, blocked) } else { blocked };
-        let column = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(self.message_list(window, cx))
-            .child(self.composer_bar(blocked, window, cx));
+        let body = if secure {
+            self.secure_body(key, server, &channel, window, cx)
+        } else {
+            let blocked = self.channel_blocked(key, server, &channel.id);
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.message_list(window, cx))
+                .child(self.composer_bar(blocked, window, cx))
+                .into_any_element()
+        };
+        let column = div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(body);
 
         let mut view = div().size_full().relative().flex().child(column);
+        if secure {
+            // A secure channel's threads are its own (`secure_threads.rs`).
+            return view.children(self.secure_side(window, cx)).into_any_element();
+        }
         if let Some(panel) = self.search_panel(window, cx) {
             view = view.child(panel);
         } else if let Some(panel) = self.thread_panel(window, cx) {
@@ -1062,7 +914,7 @@ impl FuwaApp {
             })
     }
 
-    fn message_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn message_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let rows = self.rows.clone();
         let ctx = self.row_ctx(None, cx);
@@ -1075,6 +927,9 @@ impl FuwaApp {
             self.msg_ui.missed = 0;
         }
         let jump = up.then(|| crate::ui::chat_rows::jump_pill(self.msg_ui.missed, &p, cx));
+        // An encrypted list notes where its start and last row land, to sit at the bottom while short.
+        let fits = matches!(rows.first(), Some(Row::DmStart(_)) | Some(Row::Start { icon: "shield-check", .. }));
+        let len = rows.len();
         div()
             .flex_1()
             .min_h_0()
@@ -1092,6 +947,9 @@ impl FuwaApp {
                     SharedString::from(format!("list|{target}")),
                     self.scroller.clone(),
                     move |ix, _window, cx| match rows.get(ix) {
+                        Some(row) if fits => {
+                            crate::ui::dm_view::placed(render_row(row, ix, &ctx, cx), ix == 0, ix + 1 == len)
+                        }
                         Some(row) => render_row(row, ix, &ctx, cx),
                         None => div().into_any_element(),
                     },
@@ -1366,130 +1224,6 @@ impl FuwaApp {
         gpui_kit::AnyView::from(view).cached(gpui_kit::StyleRefinement::default().w(px(240.0)).h_full().flex_none())
     }
 
-    // ───────────────────────── A private conversation ─────────────────────────
-
-    fn dm_view(&mut self, key: &str, id: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = pal(cx);
-        let pins_here = self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("pins")));
-        let (other, safety, verified, blocked, joining, status) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(key) else { return (None, None, None, None, false, None) };
-            let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
-            let other = i
-                .dms
-                .conversations
-                .iter()
-                .find(|c| c.id == id)
-                .and_then(|c| c.users.iter().find(|u| u.id != me).cloned());
-            (
-                other,
-                i.dms.safety.get(id).cloned(),
-                i.dms.verified.get(id).cloned(),
-                i.dms.blocked.get(id).cloned(),
-                i.dms.joining.contains(id),
-                Some(i.dms.status),
-            )
-        });
-        let name = other.as_ref().map(user_name).unwrap_or_else(|| "Someone".into());
-        let is_verified = verified.is_some() && verified == safety;
-        let changed = verified.is_some() && verified != safety;
-        let header = div()
-            .h(px(56.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(20.0))
-            .border_b_1()
-            .border_color(p.border)
-            .child(avatar(other.as_ref(), 28.0, &p))
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(name))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .px(px(10.0))
-                    .py(px(4.0))
-                    .rounded_full()
-                    .bg(alpha(p.success, 0.14))
-                    .text_color(p.success)
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .child(icon("lock").size(px(12.0)))
-                    .child("End-to-end encrypted"),
-            )
-            .child(div().flex_1())
-            .when(pins_here, |el| {
-                let open = self.pins.is_some();
-                el.child(self.pins_button("pins-toggle", open, cx))
-            })
-            .child(
-                div()
-                    .id("safety")
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .px(px(12.0))
-                    .h(px(32.0))
-                    .rounded(corner(10.0))
-                    .cursor_pointer()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(if changed {
-                        p.destructive
-                    } else if is_verified {
-                        p.success
-                    } else {
-                        p.muted_foreground
-                    })
-                    .hover({
-                        let bg = alpha(p.primary, 0.1);
-                        move |s| s.bg(bg)
-                    })
-                    .on_click(cx.listener({
-                        let (key, id) = (key.to_owned(), id.to_owned());
-                        move |this, _, window, cx| {
-                            this.open_dialog(Dialog::Safety { key: key.clone(), conversation: id.clone() }, window, cx)
-                        }
-                    }))
-                    .child(
-                        icon(if is_verified {
-                            "shield-check"
-                        } else if changed {
-                            "shield-alert"
-                        } else {
-                            "shield"
-                        })
-                        .size(px(16.0)),
-                    )
-                    .child(if is_verified {
-                        "Verified"
-                    } else if changed {
-                        "Safety number changed"
-                    } else {
-                        "Verify"
-                    }),
-            );
-        let blocked = if !status.is_some_and(|s| s.is_ready()) {
-            Some("Encrypted messages are still getting ready on this device…".to_owned())
-        } else if joining {
-            Some("Joining the conversation on this device…".to_owned())
-        } else {
-            blocked
-        }
-        .map(|text| Blocked { text, action: None });
-        let column = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(self.message_list(window, cx))
-            .child(self.composer_bar(blocked, window, cx));
-        div().size_full().flex().child(column).into_any_element()
-    }
-
     /// Polls go in a server's plain channels, never shared ones, for those who may make them,
     /// on an instance that has them.
     pub(crate) fn can_poll(&self) -> bool {
@@ -1515,7 +1249,7 @@ impl FuwaApp {
 }
 
 /// Puts follow-ups from the same person under one header.
-fn group(rows: &mut [Row]) {
+pub(crate) fn group(rows: &mut [Row]) {
     let mut last: Option<(String, i64)> = None;
     for row in rows.iter_mut() {
         match row {
@@ -1670,6 +1404,8 @@ pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -
             .child(div().flex_1().h(px(1.0)).bg(p.border))
             .into_any_element(),
         Row::Day { text, .. } => crate::ui::chat_rows::day_row(text, &p),
+        Row::DmStart(start) => crate::ui::dm_view::render_start(start, &p),
+        Row::Line(line) => crate::ui::dm_view::render_line(line, &p),
         Row::Join(j) => crate::ui::chat_rows::join_row(j, ctx, &p),
         Row::AutoMod(a) => crate::ui::chat_rows::alert_row(a, ctx, &p),
         Row::Msg(m) => message(m, &p, ctx, cx),
@@ -1814,7 +1550,10 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     let held = alpha(p.muted, 0.7);
     // A message AutoMod stopped: why, without a retry that would only be stopped again.
     let blocked = m.failed.as_deref().and_then(|f| f.strip_prefix("AutoMod: ")).map(str::to_owned);
-    let content: AnyElement = if m.editing {
+    let deleted = m.enc.as_ref().is_some_and(|e| e.deleted);
+    let content: AnyElement = if deleted {
+        crate::ui::dm_view::deleted_text(p)
+    } else if m.editing {
         edit_box(m, p, ctx).into_any_element()
     } else if let Some(card) = &m.voice {
         crate::ui::voice_notes::voice_card(&m.id, card, p, &ctx.this)
@@ -1907,7 +1646,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 el.child(app_badge(SharedString::from(format!("badge|{}", m.id)), badge, p))
             })
     };
-    let stamp: SharedString = if m.pending { t("chat.pending.sending").into() } else { when(m.at).into() };
+    // Encrypted messages say they're being encrypted while they go.
+    let sending = if m.enc.is_some() { t("dms-calls.dm.pending.encrypting") } else { t("chat.pending.sending") };
+    let stamp: SharedString = if m.pending { sending.clone().into() } else { when(m.at).into() };
     let mut body = div().flex_1().min_w_0().flex().flex_col();
     if m.head && !compact {
         body = body.child(
@@ -1930,7 +1671,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .flex_col()
         .text_size(px(crate::ui::theme::chat_font()))
         .line_height(px(crate::ui::theme::chat_font() * 1.625));
-    if m.thread.also_in.is_some() || m.thread.also_sent {
+    // An encrypted line says it under its words, as the web's `SecureAlsoSent`.
+    let also = m.thread.also_in.is_some() || m.thread.also_sent;
+    if also && m.enc.is_none() {
         text = text.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
     }
     if let Some(used) = m.agent.as_ref().and_then(|a| crate::ui::commands::used_line(&m.id, a, p)) {
@@ -1953,7 +1696,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     .text_size(px(10.5))
                     .whitespace_nowrap()
                     .text_color(p.muted_foreground)
-                    .child(if m.pending { t("chat.pending.sending") } else { clock(m.at) }),
+                    .child(if m.pending { sending.clone() } else { clock(m.at) }),
             )
             .child(author_name())
             .when_some(m.from.as_ref(), |el, from| {
@@ -1969,7 +1712,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             .child(div().flex_1().min_w_0().when(dim, |el| el.opacity(0.55)).child(content)),
     );
     // "(edited)" and the pin go on the line after the text, as on the web.
-    if (m.edited && !m.editing) || m.pinned {
+    let shared = m.enc.as_ref().is_some_and(|e| e.shared) && !deleted;
+    if (m.edited && !m.editing && !deleted) || m.pinned || shared {
         text = text.child(
             div()
                 .flex()
@@ -1984,8 +1728,15 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                             .child(t("chat.messages.edited")),
                     )
                 })
+                .when(shared, |el| el.child(div().ml(px(6.0)).child(crate::ui::dm_view::shared_pill(&m.id, p))))
                 .when(m.pinned, |el| el.child(div().ml(px(6.0)).child(crate::ui::pins::pin_mark(&m.id, p)))),
         );
+    }
+    if let Some(enc) = m.enc.as_ref().filter(|e| !e.files.is_empty()) {
+        text = text.child(crate::ui::sealed_files::files_view(&m.id, &enc.files, p, &ctx.this, &ctx.key, _cx));
+    }
+    if let Some(enc) = m.enc.as_ref().filter(|e| !e.sending.is_empty()) {
+        text = text.child(crate::ui::sealed_files::pending_files(&enc.sending, p));
     }
     if !m.attachments.is_empty() {
         text = text.child(crate::ui::attachments::attachments_view(
@@ -2003,6 +1754,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
         let starred = ctx.saved_gifs.contains(&gif.url);
         text = text.child(crate::ui::gifs::gif_in_message(&m.id, gif, starred, p, &ctx.this, &ctx.key));
+    }
+    if also && m.enc.is_some() {
+        text = text.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
     }
     if let Some(replies) = &m.thread.replies {
         text = text.child(crate::ui::threads::replies_row(&m.id, replies, p, &ctx.this));
@@ -2173,11 +1927,15 @@ fn failed_line(m: &Msg, reason: &str, blocked: Option<&str>, p: &Palette, ctx: &
             .cursor_pointer()
             .hover(|s| s.underline())
             .on_click(move |_, _, cx| {
-                let _ = this.update(cx, |this, _| {
-                    if let Some(Target::Channel { key, channel, .. }) = this.target() {
+                let _ = this.update(cx, |this, _| match this.target() {
+                    Some(Target::Channel { key, channel, .. }) => {
                         let at = thread.as_deref().map_or(channel, crate::core::threads::thread_key);
                         this.core.dismiss_pending(&key, &at, nonce);
                     }
+                    Some(Target::Dm { key, conversation: id } | Target::Secure { key, channel: id, .. }) => {
+                        this.core.dismiss_dm(&key, &id, nonce);
+                    }
+                    None => {}
                 });
             })
             .child(t("chat.pending.dismiss"))
@@ -2278,7 +2036,7 @@ fn failed_line(m: &Msg, reason: &str, blocked: Option<&str>, p: &Palette, ctx: &
 /// delete; or the question when deleting it (or keeping its author out) needs a yes.
 fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElement> {
     use crate::ui::chat_rows::{confirm_delete, tool, tools_frame, tools_shown};
-    if m.pending || m.editing || m.unreadable {
+    if m.pending || m.editing || m.unreadable || m.enc.as_ref().is_some_and(|e| e.deleted) {
         return None;
     }
     let deleting = ctx.deleting.as_deref() == Some(m.id.as_str());
@@ -2288,7 +2046,14 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
     let id = m.id.clone();
     let frame = tools_frame(&id, ctx, p);
     if deleting && m.can_delete {
-        return Some(frame.child(confirm_delete(&id, t("common.cancel"), ctx, p)).into_any_element());
+        // An encrypted message asks whom it goes for, and offers to keep it.
+        let confirm = match &m.enc {
+            Some(enc) => {
+                crate::ui::chat_rows::confirm_delete_as(&id, &enc.question, t("dms-calls.dm.row.keep"), ctx, p)
+            }
+            None => confirm_delete(&id, t("common.cancel"), ctx, p),
+        };
+        return Some(frame.child(confirm).into_any_element());
     }
     if m.keeping_out {
         let (yes, no) = (ctx.this.clone(), ctx.this.clone());
@@ -2726,39 +2491,7 @@ fn webhook_author(w: &pb::MessageWebhook) -> pb::User {
 
 #[cfg(test)]
 mod tests {
-    use super::{Row, Who, changed_rows, encrypted_rows};
-    use crate::core::store::InstanceState;
-    use crate::pb;
-
-    #[test]
-    fn a_conversations_pinned_messages_are_marked() {
-        let mut i = InstanceState::new("k", "https://k");
-        let item = |seq: i64| {
-            serde_json::from_value(serde_json::json!({
-                "seq": seq, "kind": "text", "at": seq, "sender_id": "u", "device_id": "d", "content": "hi"
-            }))
-            .unwrap()
-        };
-        i.dms.items.insert("c".into(), vec![item(1), item(2), item(3)]);
-        let who = |_: &str| Who { name: "U".into(), color: None, user: None };
-        let start = || Row::Older { loading: false };
-        let marks = |pins: Option<&[pb::DmPin]>| {
-            encrypted_rows(&i, "c", start(), &who, None, None, pins)
-                .iter()
-                .filter_map(|r| match r {
-                    Row::Msg(m) => Some((m.id.clone(), m.pinned, m.can_pin)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
-        let pin = pb::DmPin { conversation_id: "c".into(), sequence: 2, pinned_at: None };
-        assert_eq!(
-            marks(Some(&[pin])),
-            [("1".into(), false, true), ("2".into(), true, true), ("3".into(), false, true)]
-        );
-        // Where the instance doesn't keep pins (or in a secure channel): nothing to pin.
-        assert_eq!(marks(None), [("1".into(), false, false), ("2".into(), false, false), ("3".into(), false, false)]);
-    }
+    use super::changed_rows;
 
     #[test]
     fn only_changed_rows_are_measured_again() {

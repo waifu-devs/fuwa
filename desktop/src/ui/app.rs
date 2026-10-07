@@ -935,9 +935,13 @@ impl FuwaApp {
                     let i = s.instance(&key)?;
                     let me = i.me.as_ref()?.id.clone();
                     let c = i.dms.conversations.iter().find(|c| c.id == conversation)?;
-                    c.users.iter().find(|u| u.id != me).map(crate::core::store::user_name)
+                    c.users.iter().find(|u| u.id != me).map(|u| u.username.clone())
                 });
-                format!("Message {} privately", name.unwrap_or_else(|| "them".into()))
+                let name = name.unwrap_or_else(|| crate::core::i18n::t("dms-calls.dm.view.them"));
+                crate::core::i18n::t_with(
+                    "dms-calls.dm.view.placeholder",
+                    &[("name", crate::core::i18n::Arg::Str(&name))],
+                )
             }
             None => String::new(),
         }
@@ -1034,6 +1038,15 @@ impl FuwaApp {
         }
         let Some(target) = self.target() else { return };
         let text = self.composer.read(cx).value().trim().to_owned();
+        // Files picked in a conversation or secure channel go sealed, with what's typed.
+        if let Target::Dm { conversation: id, .. } | Target::Secure { channel: id, .. } = &target
+            && !crate::ui::sealed_files::picked(id).is_empty()
+        {
+            if self.send_picked(text, cx) {
+                self.composer.update(cx, |state, cx| state.set_value("", window, cx));
+            }
+            return;
+        }
         if text.is_empty() && !self.has_files() {
             return;
         }
@@ -1073,11 +1086,14 @@ impl FuwaApp {
             Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
                 self.run(
                     cx,
-                    async move { core.send_dm(&key, &conversation, Content::Text { text, reply_to: 0 }).await },
-                    |this, result, cx| {
-                        if let Err(err) = result {
-                            this.toast("circle-alert", "Couldn't send that".into(), err.0, None, None, cx);
-                        }
+                    {
+                        let conversation = conversation.clone();
+                        async move { core.send_dm(&key, &conversation, Content::Text { text, reply_to: 0 }).await }
+                    },
+                    // What went wrong is said under the box, and on the message, which can be sent again.
+                    move |_, result, cx| {
+                        crate::ui::dm_view::set_problem(&conversation, result.err().map(|e| e.0));
+                        cx.notify();
                     },
                 );
             }
@@ -1086,6 +1102,9 @@ impl FuwaApp {
 
     /// Sends again what didn't go, in the channel or with `thread` in that thread.
     pub fn retry(&mut self, nonce: u64, thread: Option<String>, cx: &mut Context<Self>) {
+        if matches!(self.target(), Some(Target::Dm { .. } | Target::Secure { .. })) {
+            return self.retry_dm(nonce, cx);
+        }
         let Some(Target::Channel { key, server, channel }) = self.target() else { return };
         let at = thread.as_deref().map_or_else(|| channel.clone(), crate::core::threads::thread_key);
         let Some((content, files)) = self.core.shared.read(|s| {
