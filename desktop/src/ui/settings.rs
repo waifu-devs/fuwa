@@ -1419,6 +1419,7 @@ pub(crate) fn toggle_row(
             let _ = entity.update(cx, |this, cx| set(this, checked, cx));
         })))
 }
+#[allow(dead_code)]
 pub(crate) fn radio(on: bool, p: &Palette) -> impl IntoElement {
     div()
         .size(px(16.0))

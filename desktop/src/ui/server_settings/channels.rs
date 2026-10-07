@@ -1,22 +1,28 @@
-//! The Channels page: every channel in order, moved a place at a time with
-//! the arrows (into and out of categories too), and the chosen one beside the
+//! The Channels page: every channel in order, dragged by its handle (into
+//! and out of categories too), and the chosen one beside the
 //! list: its name, topic, category and slow mode, and who can see and do
 //! what in it. The web's `settings/server/Channels.tsx` and
 //! `ChannelPermissions.tsx`.
 
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 
-use super::roles::{dot, group_name, member_name, permission_here, permission_name, role_color, switch};
+use super::roles::{dot, group_name, member_name, permission_here, permission_name, role_color};
+use gpui_kit::{Render, Stateful};
+
+use super::menu::Item;
+use super::pages::form_row;
 use super::*;
 use crate::core::arrange::{self, Layout};
 use crate::core::permissions::{self, Access, Bits, CHANNEL_GROUPS, bit};
 use crate::core::server_admin::ChannelPatch;
+use crate::ui::settings_controls::{Look, button};
+use crate::ui::theme::{radius_2xl, radius_lg, radius_md, radius_xl};
 
 /// Discord's slow mode stops, in seconds.
 const SLOW: [i32; 14] = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600];
 /// How tall a channel row is, and the gap over a category.
-const ROW: f32 = 36.0;
-const CATEGORY_GAP: f32 = 10.0;
+const ROW: f32 = 34.0;
+const CATEGORY_GAP: f32 = 8.0;
 const VIEW: Bits = bit(P::ViewChannels);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,13 +30,6 @@ enum Tab {
     Overview,
     Permissions,
     Share,
-}
-
-/// Where the role-or-person picker is open: under "who can see it", or beside Advanced.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Adding {
-    Viewer,
-    Target,
 }
 
 /// One role's or person's rules in a channel, as bits.
@@ -135,8 +134,9 @@ fn texty(c: &pb::Channel) -> bool {
     matches!(kind(c), pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Secure)
 }
 
+/// `text-emerald-700 dark:text-emerald-300`, the color of a channel in step with its category.
 fn emerald(p: &Palette) -> Hsla {
-    hsla(0.42, 0.65, if p.dark { 0.55 } else { 0.4 }, 1.0)
+    gpui_kit::rgb(if p.dark { 0x6ee7b7 } else { 0x047857 }).into()
 }
 
 pub(super) struct Channels {
@@ -155,13 +155,14 @@ pub(super) struct Channels {
     confirming: bool,
     /// A channel moving, until the server answers.
     moving: bool,
-    /// The one that just moved, glowing for a moment.
-    landed: Option<(String, Instant)>,
     /// Permissions not saved yet; `None` follows the channel as it is.
     draft: Option<Vec<Over>>,
     target: Option<String>,
-    adding: Option<Adding>,
     perm_saving: bool,
+    /// Whether the first loose channel was picked when the page opened.
+    started: bool,
+    /// What went wrong with the last save, said in the save bar.
+    error: Option<String>,
 }
 
 impl Channels {
@@ -203,11 +204,11 @@ impl Channels {
             saving: false,
             confirming: false,
             moving: false,
-            landed: None,
             draft: None,
             target: None,
-            adding: None,
             perm_saving: false,
+            started: false,
+            error: None,
         };
         (channels, subscriptions)
     }
@@ -261,7 +262,6 @@ impl ServerSettingsView {
             c.confirming = false;
             c.draft = None;
             c.target = None;
-            c.adding = None;
             self.error = None;
         }
         cx.notify();
@@ -315,12 +315,12 @@ impl ServerSettingsView {
     fn save_channel(&mut self, channel: &pb::Channel, cx: &mut Context<Self>) {
         let patch = self.channel_patch(channel, cx);
         if patch.name.as_deref() == Some("") {
-            self.error = Some(t("desktop.server.channels.needsName"));
+            self.channels.error = Some(t("serversettings.channels.needsName"));
             cx.notify();
             return;
         }
         self.channels.saving = true;
-        self.error = None;
+        self.channels.error = None;
         let (core, key, sid, cid) = (self.core.clone(), self.key.clone(), self.server.clone(), channel.id.clone());
         self.run(cx, async move { core.update_channel(&key, &sid, &cid, patch).await }, |this, result, cx| {
             this.channels.saving = false;
@@ -332,7 +332,7 @@ impl ServerSettingsView {
                     this.channels.filled_for = None;
                     this.flash_saved(cx);
                 }
-                Err(err) => this.error = Some(err.message),
+                Err(err) => this.channels.error = Some(err.message),
             }
             cx.notify();
         });
@@ -344,7 +344,7 @@ impl ServerSettingsView {
         c.parent = None;
         c.slowmode = None;
         c.filled_for = None;
-        self.error = None;
+        c.error = None;
         cx.notify();
     }
 
@@ -357,30 +357,6 @@ impl ServerSettingsView {
             match result {
                 Ok(()) => this.channels.selected = None,
                 Err(err) => this.error = Some(err.message),
-            }
-            cx.notify();
-        });
-        cx.notify();
-    }
-
-    fn step_channel(&mut self, layout: &Layout, id: String, by: i32, cx: &mut Context<Self>) {
-        if self.channels.moving {
-            return;
-        }
-        let Some(next) = arrange::step(layout, &id, by) else { return };
-        self.channels.moving = true;
-        self.channels.landed = Some((id, Instant::now()));
-        // Let the glow fade once it's had its moment.
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_millis(950)).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        })
-        .detach();
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        self.run(cx, async move { core.reorder_channels(&key, &sid, next).await }, |this, result, cx| {
-            this.channels.moving = false;
-            if let Err(err) = result {
-                this.error = Some(err.message);
             }
             cx.notify();
         });
@@ -429,26 +405,17 @@ impl ServerSettingsView {
         // Channels you can't see aren't yours to change.
         let visible = |id: &str| snap.access.channels.contains_key(id);
         let can_arrange = snap.access.has(P::ManageChannels);
-        let editable = |id: &str| snap.access.has_in(id, P::ManageChannels) || snap.access.has_in(id, P::ManageRoles);
 
-        // Keep a channel chosen that still exists.
-        let first = layout
-            .loose
-            .iter()
-            .chain(layout.categories.iter().flat_map(|(c, children)| std::iter::once(c).chain(children)))
-            .find(|id| visible(id) && editable(id))
-            .cloned();
-        let selected = self.channels.selected.clone().filter(|id| by_id.contains_key(id.as_str())).or(first);
-        if let Some(id) = &selected
-            && self.channels.selected.as_deref() != Some(id.as_str())
-        {
-            self.pick_channel(id.clone(), cx);
+        // As on the web: the first loose channel to begin with, and nothing once the chosen one's gone.
+        if !self.channels.started {
+            self.channels.started = true;
+            if self.channels.selected.is_none()
+                && let Some(first) = layout.loose.iter().find(|id| visible(id))
+            {
+                self.pick_channel(first.clone(), cx);
+            }
         }
-        if let Some((_, at)) = &self.channels.landed
-            && at.elapsed() > Duration::from_millis(900)
-        {
-            self.channels.landed = None;
-        }
+        let selected = self.channels.selected.clone().filter(|id| by_id.contains_key(id.as_str()));
 
         // The list: every row at its place, sliding when the order changes.
         let mut entries: Vec<(String, bool, f32)> = Vec::new();
@@ -461,9 +428,7 @@ impl ServerSettingsView {
             if !visible(cat) {
                 continue;
             }
-            if y > 0.0 {
-                y += CATEGORY_GAP;
-            }
+            y += CATEGORY_GAP;
             entries.push((cat.clone(), true, y));
             y += ROW;
             for id in children.iter().filter(|id| visible(id)) {
@@ -471,7 +436,25 @@ impl ServerSettingsView {
                 y += ROW;
             }
         }
-        let mut rows = div().relative().h(px(y));
+        let mut rows = div().relative().h(px((y - 2.0).max(0.0)));
+        // The highlight glides between rows.
+        if let Some((id, category, top)) = entries.iter().find(|(id, _, _)| selected.as_deref() == Some(id.as_str())) {
+            let nested = !category && by_id.get(id.as_str()).is_some_and(|c| self.is_nested(c, &layout));
+            let left = if can_arrange { 30.0 } else { 0.0 } + if nested { 12.0 } else { 0.0 };
+            let at = motion::follow("chan-hl-y", *top, window, cx);
+            let x = motion::follow("chan-hl-x", left, window, cx);
+            let right = if *category && snap.access.has_in(id, P::ManageChannels) { 30.0 } else { 0.0 };
+            rows = rows.child(
+                div()
+                    .absolute()
+                    .left(px(x))
+                    .right(px(right))
+                    .top(px(at))
+                    .h(px(32.0))
+                    .rounded(radius_lg())
+                    .bg(alpha(p.primary, 0.12)),
+            );
+        }
         for (n, (id, category, top)) in entries.iter().enumerate() {
             let Some(c) = by_id.get(id.as_str()) else { continue };
             let at = motion::follow(SharedString::from(format!("chan-y-{id}")), *top, window, cx);
@@ -493,27 +476,29 @@ impl ServerSettingsView {
             )));
         }
         let list = div()
-            .w(px(280.0))
+            .w(px(304.0))
             .flex_none()
             .flex()
             .flex_col()
-            .gap(px(10.0))
+            .gap(px(12.0))
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .justify_between()
                     .gap(px(8.0))
-                    .child(div().flex_1().min_w_0().text_xs().text_color(p.muted_foreground).child(if can_arrange {
-                        t("desktop.server.channels.intro")
-                    } else {
-                        t("serversettings.channels.introPick")
-                    }))
+                    .child(div().min_w_0().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(
+                        if can_arrange {
+                            t("serversettings.channels.introArrange")
+                        } else {
+                            t("serversettings.channels.introPick")
+                        },
+                    ))
                     .when(can_arrange, |el| {
                         el.child(
-                            primary_button("channel-new", t("serversettings.shared.new"), p)
-                                .h(px(34.0))
-                                .px(px(12.0))
-                                .child(icon("plus").size(px(15.0)))
+                            button("channel-new", t("serversettings.shared.new"), Some("plus"), Look::Primary, true, p)
+                                .rounded(radius_xl())
+                                .font_weight(FontWeight::BOLD)
                                 .on_click(cx.listener(|_, _, _, cx| {
                                     cx.emit(ServerSettingsEvent::CreateChannel { parent: String::new() })
                                 })),
@@ -522,8 +507,8 @@ impl ServerSettingsView {
             )
             .child(
                 div()
-                    .p(px(6.0))
-                    .rounded(corner(16.0))
+                    .p(px(8.0))
+                    .rounded(radius_2xl())
                     .border_1()
                     .border_color(p.border)
                     .bg(alpha(p.background, 0.4))
@@ -531,11 +516,10 @@ impl ServerSettingsView {
             );
 
         let editor = match selected.as_deref().and_then(|id| by_id.get(id)).map(|c| (*c).clone()) {
-            Some(channel) => motion::rise(
+            Some(channel) => motion::slide_in(
                 self.channel_editor(&channel, &snap, p, window, cx),
                 SharedString::from(format!("chan-editor-{}", channel.id)),
-                Duration::ZERO,
-                10.0,
+                16.0,
             )
             .into_any_element(),
             None => div()
@@ -549,11 +533,67 @@ impl ServerSettingsView {
         div()
             .flex()
             .items_start()
-            .gap(px(28.0))
-            .pb(px(80.0))
+            .gap(px(32.0))
             .child(list)
             .child(div().flex_1().min_w_0().child(editor))
             .into_any_element()
+    }
+
+    /// Where something dragged onto a row lands: before a channel (after it when coming from
+    /// above), into a category at its top, or a category before another's.
+    fn drop_channel(
+        &mut self,
+        layout: &Layout,
+        dragged: &ChanDrag,
+        onto: &str,
+        onto_category: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged.id == onto || self.channels.moving {
+            return;
+        }
+        let order: Vec<String> = arrange::placements(layout).into_iter().map(|p| p.channel_id).collect();
+        let below = order.iter().position(|x| *x == dragged.id) < order.iter().position(|x| x == onto);
+        let drop = if dragged.category {
+            let ids: Vec<&String> = layout.categories.iter().map(|(c, _)| c).collect();
+            let target = if onto_category {
+                onto.to_owned()
+            } else {
+                match layout.categories.iter().find(|(_, ch)| ch.iter().any(|c| c == onto)) {
+                    Some((c, _)) => c.clone(),
+                    None => return,
+                }
+            };
+            let at = ids.iter().position(|c| **c == target).unwrap_or(0);
+            let before = if below { ids.get(at + 1).map(|c| (*c).clone()) } else { Some(target) };
+            arrange::Drop::Category { id: dragged.id.clone(), before }
+        } else if onto_category {
+            let first = layout.categories.iter().find(|(c, _)| c == onto).and_then(|(_, ch)| ch.first().cloned());
+            arrange::Drop::Channel { id: dragged.id.clone(), parent: onto.to_owned(), before: first }
+        } else {
+            let (parent, list): (String, &[String]) =
+                match layout.categories.iter().find(|(_, ch)| ch.iter().any(|c| c == onto)) {
+                    Some((c, ch)) => (c.clone(), ch.as_slice()),
+                    None => (String::new(), layout.loose.as_slice()),
+                };
+            let at = list.iter().position(|c| c == onto).unwrap_or(0);
+            let before = if below { list.get(at + 1).cloned() } else { Some(onto.to_owned()) };
+            arrange::Drop::Channel { id: dragged.id.clone(), parent, before }
+        };
+        let next = arrange::moved(layout, &drop);
+        if next == *layout {
+            return;
+        }
+        self.channels.moving = true;
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(cx, async move { core.reorder_channels(&key, &sid, next).await }, |this, result, cx| {
+            this.channels.moving = false;
+            if let Err(err) = result {
+                cx.emit(ServerSettingsEvent::Toast { icon: "circle-alert", title: err.message });
+            }
+            cx.notify();
+        });
+        cx.notify();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -567,36 +607,26 @@ impl ServerSettingsView {
         snap: &Snap,
         p: &Palette,
         cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
-        let hover = alpha(p.muted, 0.7);
-        let mover = |glyph: &str, by: i32, cx: &mut Context<Self>| {
-            let enabled = arrange::step(layout, &c.id, by).is_some();
-            let (id, layout) = (c.id.clone(), layout.clone());
-            let hover = alpha(p.muted_foreground, 0.14);
+    ) -> Stateful<gpui_kit::Div> {
+        let (hover, fg) = (alpha(p.muted, 0.7), p.foreground);
+        let handle = can_arrange.then(|| {
+            let drag = ChanDrag { id: c.id.clone(), category, name: c.name.clone().into(), glyph: glyph(c) };
+            let (bg, fg) = (p.muted, p.foreground);
             div()
-                .id(SharedString::from(format!("chan-{glyph}-{}", c.id)))
-                .size(px(16.0))
+                .id(SharedString::from(format!("chan-grip-{}", c.id)))
+                .size(px(28.0))
+                .flex_none()
+                .rounded(radius_md())
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(corner(5.0))
-                .text_color(alpha(p.muted_foreground, if enabled { 0.9 } else { 0.25 }))
-                .when(enabled, |el| {
-                    el.cursor_pointer()
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| this.step_channel(&layout, id.clone(), by, cx)))
-                })
-                .child(icon(glyph).size(px(13.0)))
-        };
-        let handle = can_arrange.then(|| {
-            div().w(px(18.0)).flex().flex_col().items_center().child(mover("chevron-up", -1, cx)).child(mover(
-                "chevron-down",
-                1,
-                cx,
-            ))
+                .cursor_grab()
+                .text_color(alpha(p.muted_foreground, 0.6))
+                .hover(move |s| s.bg(bg).text_color(fg))
+                .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                .child(icon("grip-vertical").size(px(16.0)))
         });
         let private = permissions::is_private(c, &self.server);
-        let landed = self.channels.landed.as_ref().is_some_and(|(id, _)| *id == c.id);
         let id = c.id.clone();
         let mut pick = div()
             .id(SharedString::from(format!("chan-pick-{}", c.id)))
@@ -607,70 +637,74 @@ impl ServerSettingsView {
             .flex()
             .items_center()
             .gap(px(6.0))
-            .rounded(corner(10.0))
+            .rounded(radius_lg())
             .cursor_pointer()
-            .when(active, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary).font_weight(FontWeight::BOLD))
-            .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
-            .when(landed && !active, |el| el.bg(alpha(p.primary, 0.08)))
+            .when(active, |el| el.text_color(p.primary).font_weight(FontWeight::BOLD))
+            .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
             .on_click(cx.listener(move |this, _, _, cx| this.pick_channel(id.clone(), cx)))
             .child(icon(glyph(c)).size(px(if category { 14.0 } else { 16.0 })))
             .child(div().min_w_0().truncate().map(|el| {
                 if category {
-                    el.text_xs().font_weight(FontWeight::EXTRA_BOLD).child(c.name.to_uppercase())
+                    el.text_xs().font_weight(FontWeight::BOLD).child(c.name.to_uppercase())
                 } else {
                     el.text_sm().child(c.name.clone())
                 }
             }));
         if private {
             pick = pick.child(motion::once(
-                icon("lock").size(px(11.0)).text_color(p.muted_foreground),
+                div().text_color(p.muted_foreground).child(icon("lock").size(px(12.0))),
                 SharedString::from(format!("chan-lock-{}", c.id)),
                 Duration::from_millis(380),
-                |el, t| {
-                    let s = 0.4 + 0.6 * t;
-                    el.size(px(11.0 * s))
-                },
+                |el, t| el.opacity(t),
             ));
         }
-        pick = pick.child(div().flex_1());
         if !category && c.slowmode_seconds > 0 {
-            pick = pick.child(
+            pick = pick.child(div().flex_1()).child(
                 div()
                     .flex_none()
                     .flex()
                     .items_center()
                     .gap(px(2.0))
-                    .text_size(px(11.0))
+                    .text_size(px(11.2))
+                    .font_weight(FontWeight::NORMAL)
                     .text_color(p.muted_foreground)
-                    .child(icon("snail").size(px(11.0)))
+                    .child(icon("snail").size(px(12.0)))
                     .child(slow_short(c.slowmode_seconds)),
             );
         }
         let add = (category && snap.access.has_in(&c.id, P::ManageChannels)).then(|| {
             let parent = c.id.clone();
-            let fg = p.primary;
+            let (bg, fg) = (p.muted, p.foreground);
             div()
                 .id(SharedString::from(format!("chan-add-{}", c.id)))
-                .size(px(26.0))
+                .size(px(28.0))
                 .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(corner(8.0))
+                .rounded(radius_md())
                 .cursor_pointer()
                 .text_color(p.muted_foreground)
-                .hover(move |s| s.text_color(fg))
+                .hover(move |s| s.bg(bg).text_color(fg))
                 .on_click(cx.listener(move |_, _, _, cx| {
                     cx.emit(ServerSettingsEvent::CreateChannel { parent: parent.clone() })
                 }))
                 .child(icon("plus").size(px(14.0)))
         });
+        let (onto, layout) = (c.id.clone(), layout.clone());
+        let drop_hl = alpha(p.primary, 0.08);
         div()
-            .h(px(ROW - 4.0))
+            .id(SharedString::from(format!("chan-row-{}", c.id)))
+            .h(px(32.0))
             .flex()
             .items_center()
             .gap(px(2.0))
-            .when(!category, |el| el.pl(px(if self.is_nested(c, layout) { 12.0 } else { 0.0 })))
+            .rounded(radius_lg())
+            .when(!category, |el| el.pl(px(if self.is_nested(c, &layout) { 12.0 } else { 0.0 })))
+            .drag_over::<ChanDrag>(move |s, _, _, _| s.bg(drop_hl))
+            .on_drop::<ChanDrag>(
+                cx.listener(move |this, drag: &ChanDrag, _, cx| this.drop_channel(&layout, drag, &onto, category, cx)),
+            )
             .children(handle)
             .child(pick)
             .children(add)
@@ -708,39 +742,21 @@ impl ServerSettingsView {
         }
         let tab =
             options.iter().map(|(t, _)| *t).find(|t| *t == self.channels.tab).or(options.first().map(|(t, _)| *t));
-        let mut tabs = div().flex().gap(px(4.0)).p(px(4.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.6));
-        if options.len() > 1 {
-            for (t, label) in options {
-                let on = tab == Some(t);
-                let hover = alpha(p.foreground, 0.06);
-                tabs = tabs.child(
-                    div()
-                        .id(SharedString::from(format!("chan-tab-{}", t as u8)))
-                        .px(px(12.0))
-                        .h(px(30.0))
-                        .flex()
-                        .items_center()
-                        .rounded(corner(9.0))
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .when(on, |el| el.bg(p.card).text_color(p.foreground))
-                        .when(!on, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.channels.tab = t;
-                            this.channels.adding = None;
-                            cx.notify();
-                        }))
-                        .child(label),
-                );
-            }
-        }
+        let chosen = options.iter().position(|(t, _)| Some(*t) == tab).unwrap_or(0);
+        let tabs_of: Vec<Tab> = options.iter().map(|(t, _)| *t).collect();
+        let labels: Vec<String> = options.into_iter().map(|(_, l)| l).collect();
+        let tabs = (labels.len() > 1).then(|| {
+            self.seg_tabs("chan-tabs", labels, chosen, p, window, cx, move |this, n, cx| {
+                this.channels.tab = tabs_of[n];
+                cx.notify();
+            })
+        });
         let header = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(12.0))
-            .mb(px(18.0))
+            .mb(px(20.0))
             .child(
                 div()
                     .flex_1()
@@ -749,11 +765,12 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .text_lg()
+                    .line_height(px(28.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .child(icon(glyph(channel)).size(px(20.0)).text_color(p.muted_foreground))
                     .child(div().truncate().child(channel.name.clone())),
             )
-            .child(tabs);
+            .children(tabs);
         let body = match tab {
             Some(Tab::Overview) => self.channel_overview(channel, snap, p, window, cx).into_any_element(),
             Some(Tab::Permissions) => self.channel_permissions(channel, snap, p, window, cx).into_any_element(),
@@ -770,7 +787,7 @@ impl ServerSettingsView {
             div().child(body),
             SharedString::from(format!("chan-body-{}-{}", channel.id, tab.map(|t| t as u8).unwrap_or(9))),
             Duration::ZERO,
-            8.0,
+            10.0,
         ))
     }
 
@@ -786,114 +803,175 @@ impl ServerSettingsView {
         let category = kind(channel) == pb::ChannelType::Category;
         let typed = self.channels.name.read(cx).value().to_string();
         let will_be = self.typed_name(channel, cx);
-        let mut out = div().flex().flex_col().gap(px(20.0));
+        let mut out = div().flex().flex_col();
 
-        let mut name = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .child(Input::new(&self.channels.name).when(!category, |el| el.prefix(icon("hash").size(px(15.0)))));
-        if !will_be.is_empty() && will_be != typed.trim() {
-            name = name.child(
-                div()
-                    .text_xs()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("desktop.server.channels.savedAs", &[("name", Arg::Str(&will_be))])),
-            );
-        }
-        out = out.child(labeled(
+        let name_box = div()
+            .relative()
+            .child(
+                super::pages::boxed(
+                    Input::new(&self.channels.name).appearance(false),
+                    44.0,
+                    super::pages::focused(&self.channels.name, window, cx),
+                    p,
+                )
+                .when(!category, |el| el.pl(px(28.0))),
+            )
+            .when(!category, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left(px(12.0))
+                        .top(px(14.0))
+                        .text_color(p.muted_foreground)
+                        .child(icon("hash").size(px(16.0))),
+                )
+            });
+        let renamed = (!will_be.is_empty() && will_be != typed.trim())
+            .then(|| t_with("desktop.server.channels.savedAs", &[("name", Arg::Str(&will_be))]));
+        out = out.child(form_row(
             &if category {
                 t("serversettings.channels.categoryName")
             } else {
                 t("serversettings.channels.channelName")
             },
-            name,
+            renamed,
+            name_box,
+            false,
             p,
         ));
 
         if texty(channel) {
-            out = out.child(labeled(
+            out = out.child(form_row(
                 &t("serversettings.channels.topic"),
-                div().flex().flex_col().gap(px(6.0)).child(Textarea::new(&self.channels.topic)).child(
-                    div().text_xs().text_color(p.muted_foreground).child(t("serversettings.channels.topicHint")),
+                Some(t("serversettings.channels.topicHint")),
+                crate::ui::instance_home::focus_ring(
+                    div()
+                        .w_full()
+                        .min_h(px(80.0))
+                        .px(px(12.0))
+                        .py(px(8.0))
+                        .rounded(radius_xl())
+                        .border_1()
+                        .border_color(p.border)
+                        .text_sm()
+                        .child(Textarea::new(&self.channels.topic).appearance(false)),
+                    super::pages::focused(&self.channels.topic, window, cx),
+                    p,
                 ),
+                false,
                 p,
             ));
         }
 
         if !category {
             let parent = self.channels.parent.clone().unwrap_or_else(|| channel.parent_id.clone());
-            let mut options = vec![(String::new(), t("serversettings.channels.noCategory"))];
-            options.extend(
-                snap.channels
-                    .iter()
-                    .filter(|c| kind(c) == pb::ChannelType::Category)
-                    .map(|c| (c.id.clone(), c.name.clone())),
-            );
-            out = out.child(labeled(
-                &t("serversettings.channels.category"),
-                text_chips("chan-parent", &options, &parent, p, cx, |this, id, cx| {
-                    this.channels.parent = Some(id);
+            let cats: Vec<(String, String)> = snap
+                .channels
+                .iter()
+                .filter(|c| kind(c) == pb::ChannelType::Category)
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect();
+            let parent_name = cats
+                .iter()
+                .find(|(id, _)| *id == parent)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_else(|| t("serversettings.channels.noCategory"));
+            let open = self.menu_open("chan-parent");
+            let hover = alpha(p.primary, 0.4);
+            let trigger = div()
+                .id("chan-parent")
+                .w_full()
+                .h(px(44.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .rounded(radius_xl())
+                .border_1()
+                .px(px(12.0))
+                .text_sm()
+                .cursor_pointer()
+                .map(|el| {
+                    if open {
+                        el.border_color(alpha(p.primary, 0.6))
+                    } else {
+                        el.border_color(p.border).hover(move |s| s.border_color(hover))
+                    }
+                })
+                .child(icon("folder").size(px(16.0)).text_color(p.muted_foreground))
+                .child(div().flex_1().truncate().font_weight(FontWeight::BOLD).child(parent_name));
+            let mut items = vec![
+                Item::action(t("serversettings.channels.noCategory"), None, |this, _, cx| {
+                    this.channels.parent = Some(String::new());
                     cx.notify();
-                }),
-                p,
-            ));
+                })
+                .radio(parent.is_empty()),
+            ];
+            for (id, name) in cats {
+                let on = id == parent;
+                items.push(
+                    Item::action(name, None, move |this, _, cx| {
+                        this.channels.parent = Some(id.clone());
+                        cx.notify();
+                    })
+                    .radio(on),
+                );
+            }
+            let menu = self.dropdown("chan-parent".into(), trigger, items, false, 256.0, 48.0, p, cx);
+            out =
+                out.child(form_row(&t("serversettings.channels.category"), None, div().w_full().child(menu), false, p));
         }
 
         if texty(channel) {
             let seconds = self.channels.slowmode.unwrap_or(channel.slowmode_seconds);
             let on = seconds > 0;
-            // The snail crawls once each time it changes, quicker as it gets slower.
+            // The snail creeps while slow mode is on, faster the slower it is.
+            let speed = 2400 - 120 * slow_index(seconds).min(12) as u64;
             let snail = div()
                 .size(px(40.0))
                 .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(corner(12.0))
+                .rounded(radius_xl())
                 .bg(if on { alpha(p.primary, 0.15) } else { p.muted.into() })
                 .text_color(if on { p.primary } else { p.muted_foreground })
-                .child(motion::once(
-                    icon("snail").size(px(20.0)),
-                    SharedString::from(format!("chan-snail-{seconds}")),
-                    Duration::from_millis(if on { 700 } else { 1 }),
-                    move |el, t| {
-                        let x = (t * std::f32::consts::PI).sin() * if on { 4.0 } else { 0.0 };
-                        el.ml(px(x))
-                    },
-                ));
-            out = out.child(labeled(
+                .child(if on {
+                    motion::ambient(
+                        div().child(icon("snail").size(px(20.0))),
+                        SharedString::from(format!("chan-snail-{speed}")),
+                        Duration::from_millis(speed),
+                        window,
+                        |el, t| el.relative().left(px(3.0 * (t * std::f32::consts::PI).sin())),
+                    )
+                } else {
+                    icon("snail").size(px(20.0)).into_any_element()
+                });
+            out = out.child(form_row(
                 &t("serversettings.nav.slowmode"),
+                Some(t("serversettings.channels.slowmodeHint")),
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(6.0))
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(snail)
+                    .child(div().flex_1().min_w_0().px(px(8.0)).child(Slider::new(&self.channels.slow)))
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(14.0))
-                            .child(snail)
-                            .child(div().flex_1().child(Slider::new(&self.channels.slow)))
-                            .child(
-                                div()
-                                    .w(px(90.0))
-                                    .text_right()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(slow_label(seconds)),
-                            ),
-                    )
-                    .child(
-                        div().text_xs().text_color(p.muted_foreground).child(t("serversettings.channels.slowmodeHint")),
+                            .min_w(px(80.0))
+                            .flex_none()
+                            .text_right()
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .whitespace_nowrap()
+                            .child(slow_label(seconds)),
                     ),
+                true,
                 p,
             ));
         }
 
         // Deleting, behind a confirmation.
         let id = channel.id.clone();
-
         let saving = self.channels.saving;
         let delete = if self.channels.confirming {
             let system = snap.system_channel == channel.id;
@@ -902,9 +980,9 @@ impl ServerSettingsView {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
+                    .gap(px(12.0))
                     .p(px(16.0))
-                    .rounded(corner(16.0))
+                    .rounded(radius_2xl())
                     .border_1()
                     .border_color(alpha(p.destructive, 0.4))
                     .bg(alpha(p.destructive, 0.05))
@@ -925,7 +1003,7 @@ impl ServerSettingsView {
                                 t_with("serversettings.channels.deleteChannelAsk", &[("name", Arg::Str(&channel.name))])
                             }),
                     )
-                    .child(div().text_sm().text_color(p.muted_foreground).child(if category {
+                    .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(if category {
                         t("serversettings.channels.deleteCategoryHint")
                     } else if system {
                         t("serversettings.channels.deleteSystemHint")
@@ -937,22 +1015,25 @@ impl ServerSettingsView {
                             .flex()
                             .justify_end()
                             .gap(px(8.0))
-                            .child(soft_button("chan-keep", t("serversettings.shared.keepIt"), p).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.channels.confirming = false;
-                                    cx.notify();
-                                }),
-                            ))
                             .child(
-                                danger_button(
+                                button("chan-keep", t("serversettings.shared.keepIt"), None, Look::Ghost, false, p)
+                                    .rounded(radius_xl())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.channels.confirming = false;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                button(
                                     "chan-delete-yes",
-                                    if saving {
-                                        t("accountsettings.privacy.deleting")
-                                    } else {
-                                        t("serversettings.shared.delete")
-                                    },
+                                    t("serversettings.shared.delete"),
+                                    if saving { None } else { Some("trash") },
+                                    Look::Destructive,
+                                    false,
                                     p,
                                 )
+                                .rounded(radius_xl())
+                                .font_weight(FontWeight::BOLD)
                                 .when(saving, |el| el.opacity(0.6))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if !this.channels.saving {
@@ -967,34 +1048,27 @@ impl ServerSettingsView {
             )
             .into_any_element()
         } else {
-            let fg = p.destructive;
-            let hover = alpha(p.destructive, 0.1);
-            div()
-                .id("chan-delete")
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .h(px(36.0))
-                .px(px(12.0))
-                .rounded(corner(10.0))
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .text_color(fg)
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.channels.confirming = true;
-                    cx.notify();
-                }))
-                .child(icon("trash").size(px(15.0)))
-                .child(if category {
+            let red = alpha(p.destructive, 0.1);
+            super::pages::hover_button(
+                "chan-delete",
+                if category {
                     t("serversettings.channels.deleteCategory")
                 } else {
                     t("serversettings.channels.deleteChannel")
-                })
-                .into_any_element()
+                },
+                Some("trash"),
+                false,
+                p,
+                move |s| s.bg(red),
+            )
+            .text_color(p.destructive)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.channels.confirming = true;
+                cx.notify();
+            }))
+            .into_any_element()
         };
-        out = out.child(div().flex().child(delete));
+        out = out.child(div().py(px(20.0)).flex().child(delete));
 
         let patch = self.channel_patch(channel, cx);
         let n =
@@ -1004,10 +1078,11 @@ impl ServerSettingsView {
                 .count();
         if n > 0 {
             let c = channel.clone();
-            self.bar = Some(save_bar(
+            self.bar = Some(bar_with_error(
                 "chan-save-bar",
                 n,
                 self.channels.saving,
+                self.channels.error.as_deref(),
                 p,
                 cx,
                 |this, _, cx| this.discard_channel(cx),
@@ -1060,7 +1135,7 @@ impl ServerSettingsView {
             !you.channels.contains_key(&channel.id)
         });
 
-        let mut out = div().flex().flex_col().gap(px(18.0));
+        let mut out = div().flex().flex_col().gap(px(20.0));
 
         // Same as its category, or its own rules.
         if let Some(parent) = &parent {
@@ -1074,9 +1149,9 @@ impl ServerSettingsView {
                     .gap(px(8.0))
                     .px(px(12.0))
                     .py(px(8.0))
-                    .rounded(corner(12.0))
+                    .rounded(radius_xl())
                     .text_sm()
-                    .bg(if synced { green.opacity(0.12) } else { alpha(p.muted, 0.6) })
+                    .bg(if synced { Hsla::from(gpui_kit::rgb(0x10b981)).opacity(0.1) } else { alpha(p.muted, 0.6) })
                     .when(synced, |el| el.text_color(green))
                     .child(motion::once(
                         icon(if synced { "link" } else { "unlink" }).size(px(16.0)),
@@ -1084,19 +1159,33 @@ impl ServerSettingsView {
                         Duration::from_millis(320),
                         |el, t| el.opacity(t),
                     ))
-                    .child(div().flex_1().min_w_0().child(if synced {
-                        t_with("desktop.server.channels.synced", &[("category", Arg::Str(&parent.name))])
-                    } else {
-                        t_with("serversettings.channelPermissions.apart", &[("category", Arg::Str(&parent.name))])
-                    }))
+                    .child(div().flex_1().min_w_0().line_height(px(20.0)).child(marked(
+                        &t_with(
+                            if synced {
+                                "serversettings.channelPermissions.synced"
+                            } else {
+                                "serversettings.channelPermissions.apart"
+                            },
+                            &[("category", Arg::Str(&strong(&parent.name)))],
+                        ),
+                        p,
+                    )))
                     .when(!synced, |el| {
                         el.child(
-                            soft_button("chan-sync", t("serversettings.channelPermissions.match"), p)
-                                .h(px(28.0))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.channels.draft = Some(pb_over.clone());
-                                    cx.notify();
-                                })),
+                            button(
+                                "chan-sync",
+                                t("serversettings.channelPermissions.match"),
+                                None,
+                                Look::Ghost,
+                                true,
+                                p,
+                            )
+                            .h(px(28.0))
+                            .rounded(radius_lg())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.channels.draft = Some(pb_over.clone());
+                                cx.notify();
+                            })),
                         )
                     }),
             );
@@ -1109,7 +1198,7 @@ impl ServerSettingsView {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(corner(12.0))
+            .rounded(radius_xl())
             .bg(if private { alpha(p.primary, 0.15) } else { p.muted.into() })
             .text_color(if private { p.primary } else { p.muted_foreground })
             .child(motion::once(
@@ -1124,7 +1213,7 @@ impl ServerSettingsView {
             .flex()
             .flex_col()
             .p(px(16.0))
-            .rounded(corner(16.0))
+            .rounded(radius_2xl())
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.background, 0.4))
@@ -1149,17 +1238,25 @@ impl ServerSettingsView {
                                 t("serversettings.channelPermissions.privateChannelHint")
                             })),
                     )
-                    .child(switch("chan-private".into(), private, !may(P::ViewChannels), cx, move |this, on, cx| {
-                        this.put_over(&base_for_switch, &eid, false, |o| {
-                            if on {
-                                o.allow &= !VIEW;
-                                o.deny |= VIEW;
-                            } else {
-                                o.deny &= !VIEW;
-                            }
-                        });
-                        cx.notify();
-                    })),
+                    .child(crate::ui::settings_controls::switch(
+                        "chan-private",
+                        private,
+                        !may(P::ViewChannels),
+                        p,
+                        window,
+                        cx,
+                        move |this: &mut Self, on, cx| {
+                            this.put_over(&base_for_switch, &eid, false, |o| {
+                                if on {
+                                    o.allow &= !VIEW;
+                                    o.deny |= VIEW;
+                                } else {
+                                    o.deny &= !VIEW;
+                                }
+                            });
+                            cx.notify();
+                        },
+                    )),
             );
         if private {
             let mut chips = div().flex().flex_wrap().gap(px(6.0));
@@ -1207,29 +1304,43 @@ impl ServerSettingsView {
                     -4.0,
                 ));
             }
-            let open = self.channels.adding == Some(Adding::Viewer);
-            if may(P::ViewChannels) {
-                let fg = p.primary;
-                chips = chips.child(
-                    div()
-                        .id("chan-viewer-add")
-                        .size(px(30.0))
-                        .rounded_full()
-                        .border_1()
-                        .border_dashed()
-                        .border_color(if open { p.primary } else { p.border })
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_pointer()
-                        .text_color(if open { p.primary } else { p.muted_foreground })
-                        .hover(move |s| s.text_color(fg).border_color(fg))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.channels.adding = if open { None } else { Some(Adding::Viewer) };
-                            cx.notify();
-                        }))
-                        .child(icon(if open { "x" } else { "plus" }).size(px(14.0))),
-                );
+            let viewer_roles: Vec<pb::Role> = snap
+                .roles
+                .iter()
+                .filter(|r| r.id != everyone_id && find(&r.id).is_none_or(|o| o.allow & VIEW == 0))
+                .cloned()
+                .collect();
+            let viewer_people: Vec<pb::Member> = snap
+                .members
+                .iter()
+                .filter(|m| m.user.as_ref().is_some_and(|u| find(&u.id).is_none_or(|o| o.allow & VIEW == 0)))
+                .cloned()
+                .collect();
+            if may(P::ViewChannels) && (!viewer_roles.is_empty() || !viewer_people.is_empty()) {
+                let open = self.menu_open("chan-viewer-add");
+                let (hover, fg) = (alpha(p.primary, 0.5), p.primary);
+                let trigger = div()
+                    .id("chan-viewer-add")
+                    .size(px(32.0))
+                    .rounded_full()
+                    .border_1()
+                    .border_dashed()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .map(|el| {
+                        if open {
+                            el.border_color(p.border).text_color(p.primary)
+                        } else {
+                            el.border_color(p.border)
+                                .text_color(p.muted_foreground)
+                                .hover(move |s| s.border_color(hover).text_color(fg))
+                        }
+                    })
+                    .child(icon("plus").size(px(16.0)));
+                let items = self.add_items(&viewer_roles, &viewer_people, true, &base, p);
+                chips = chips.child(self.dropdown("chan-viewer-add".into(), trigger, items, true, 240.0, 36.0, p, cx));
             }
             let mut who = div()
                 .mt(px(14.0))
@@ -1255,21 +1366,6 @@ impl ServerSettingsView {
                         .child(t("serversettings.channelPermissions.nobodyYet")),
                 );
             }
-            if open {
-                let roles: Vec<pb::Role> = snap
-                    .roles
-                    .iter()
-                    .filter(|r| r.id != everyone_id && find(&r.id).is_none_or(|o| o.allow & VIEW == 0))
-                    .cloned()
-                    .collect();
-                let people: Vec<pb::Member> = snap
-                    .members
-                    .iter()
-                    .filter(|m| m.user.as_ref().is_some_and(|u| find(&u.id).is_none_or(|o| o.allow & VIEW == 0)))
-                    .cloned()
-                    .collect();
-                who = who.child(self.add_picker("chan-pick-viewer", &roles, &people, true, &base, p, cx));
-            }
             private_card = private_card.child(motion::rise(who, "chan-who", Duration::ZERO, -6.0));
         }
         out = out.child(private_card);
@@ -1283,7 +1379,7 @@ impl ServerSettingsView {
                     .gap(px(8.0))
                     .px(px(12.0))
                     .py(px(8.0))
-                    .rounded(corner(12.0))
+                    .rounded(radius_xl())
                     .border_1()
                     .border_color(warn.opacity(0.4))
                     .bg(warn.opacity(0.1))
@@ -1302,52 +1398,49 @@ impl ServerSettingsView {
         }
 
         // Advanced: every channel permission, per role or person.
-        let open = self.channels.adding == Some(Adding::Target);
+        let target_roles: Vec<pb::Role> =
+            snap.roles.iter().filter(|r| r.id != everyone_id && find(&r.id).is_none()).cloned().collect();
+        let target_people: Vec<pb::Member> =
+            snap.members.iter().filter(|m| m.user.as_ref().is_some_and(|u| find(&u.id).is_none())).cloned().collect();
+        let add_target = (!target_roles.is_empty() || !target_people.is_empty()).then(|| {
+            let trigger = button(
+                "chan-target-add",
+                t("serversettings.channelPermissions.add"),
+                Some("plus"),
+                Look::Outline,
+                true,
+                p,
+            )
+            .rounded(radius_xl())
+            .font_weight(FontWeight::BOLD);
+            let items = self.add_items(&target_roles, &target_people, false, &base, p);
+            self.dropdown("chan-target-add".into(), trigger, items, true, 240.0, 36.0, p, cx)
+        });
         let mut advanced = div().flex().flex_col().gap(px(12.0)).child(
             div()
                 .flex()
                 .items_center()
-                .gap(px(12.0))
+                .justify_between()
+                .gap(px(8.0))
                 .child(
                     div()
-                        .flex_1()
                         .min_w_0()
                         .child(
                             div()
                                 .font_weight(FontWeight::EXTRA_BOLD)
+                                .line_height(px(24.0))
                                 .child(t("serversettings.channelPermissions.advanced")),
                         )
                         .child(
                             div()
                                 .text_sm()
+                                .line_height(px(20.0))
                                 .text_color(p.muted_foreground)
                                 .child(t("serversettings.channelPermissions.advancedHint")),
                         ),
                 )
-                .child(
-                    soft_button(
-                        "chan-target-add",
-                        if open { t("common.close") } else { t("serversettings.channelPermissions.add") },
-                        p,
-                    )
-                    .child(icon(if open { "x" } else { "plus" }).size(px(14.0)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.channels.adding = if open { None } else { Some(Adding::Target) };
-                        cx.notify();
-                    })),
-                ),
+                .children(add_target),
         );
-        if open {
-            let roles: Vec<pb::Role> =
-                snap.roles.iter().filter(|r| r.id != everyone_id && find(&r.id).is_none()).cloned().collect();
-            let people: Vec<pb::Member> = snap
-                .members
-                .iter()
-                .filter(|m| m.user.as_ref().is_some_and(|u| find(&u.id).is_none()))
-                .cloned()
-                .collect();
-            advanced = advanced.child(self.add_picker("chan-pick-target", &roles, &people, false, &base, p, cx));
-        }
 
         let selected = self
             .channels
@@ -1355,7 +1448,7 @@ impl ServerSettingsView {
             .clone()
             .filter(|id| *id == everyone_id || targets.iter().any(|o| o.target_id == *id))
             .unwrap_or_else(|| everyone_id.clone());
-        let mut side = div().w(px(190.0)).flex_none().flex().flex_col().gap(px(2.0));
+        let mut side = div().w(px(192.0)).flex_none().flex().flex_col().gap(px(2.0));
         for o in std::iter::once(&everyone).chain(targets.iter()) {
             let on = o.target_id == selected;
             let count = permissions::to_list(o.allow).len() + permissions::to_list(o.deny).len();
@@ -1369,7 +1462,7 @@ impl ServerSettingsView {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .rounded(corner(10.0))
+                    .rounded(radius_lg())
                     .cursor_pointer()
                     .text_sm()
                     .when(on, |el| el.bg(alpha(p.primary, 0.12)).font_weight(FontWeight::BOLD))
@@ -1405,7 +1498,7 @@ impl ServerSettingsView {
             .flex_1()
             .min_w_0()
             .p(px(12.0))
-            .rounded(corner(16.0))
+            .rounded(radius_2xl())
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.background, 0.4))
@@ -1473,7 +1566,7 @@ impl ServerSettingsView {
                         .gap(px(6.0))
                         .h(px(32.0))
                         .px(px(10.0))
-                        .rounded(corner(10.0))
+                        .rounded(radius_lg())
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg)
@@ -1552,85 +1645,54 @@ impl ServerSettingsView {
 
     /// Roles and people to add, as chips; picking one adds them and closes it.
     #[allow(clippy::too_many_arguments)]
-    fn add_picker(
+    /// The roles and people a menu can add (the web's `AddTarget`), letting them see it with `viewer`.
+    fn add_items(
         &self,
-        id: &'static str,
         roles: &[pb::Role],
         people: &[pb::Member],
         viewer: bool,
         base: &[Over],
         p: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let chip_of = |key: String, label: gpui_kit::Div, target: String, member: bool, cx: &mut Context<Self>| {
+    ) -> Vec<Item> {
+        let pick = |target: String, member: bool| {
             let base = base.to_vec();
-            let hover = mix(p.secondary, p.primary, 0.16);
-            div()
-                .id(SharedString::from(format!("{id}-{key}")))
-                .h(px(30.0))
-                .px(px(10.0))
-                .flex()
-                .items_center()
-                .rounded_full()
-                .bg(p.secondary)
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.put_over(&base, &target, member, |o| {
-                        if viewer {
-                            o.allow |= VIEW;
-                            o.deny &= !VIEW;
-                        }
-                    });
-                    this.channels.target = Some(target.clone());
-                    this.channels.adding = None;
-                    cx.notify();
-                }))
-                .child(label)
-        };
-        let mut out = div().flex().flex_col().gap(px(8.0)).p(px(12.0)).rounded(corner(14.0)).bg(alpha(p.muted, 0.5));
-        if roles.is_empty() && people.is_empty() {
-            out = out.child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.channels.allHere")));
-        }
-        if !roles.is_empty() {
-            let mut row = div().flex().flex_wrap().gap(px(6.0));
-            for r in roles {
-                let label =
-                    div().flex().items_center().gap(px(6.0)).child(dot(role_color(r), 10.0, p)).child(r.name.clone());
-                row = row.child(chip_of(r.id.clone(), label, r.id.clone(), false, cx));
+            move |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
+                this.put_over(&base, &target, member, |o| {
+                    if viewer {
+                        o.allow |= VIEW;
+                        o.deny &= !VIEW;
+                    }
+                });
+                this.channels.target = Some(target.clone());
+                cx.notify();
             }
-            out = out
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(t("serversettings.nav.roles").to_uppercase()),
-                )
-                .child(row);
+        };
+        let mut items = Vec::new();
+        if !roles.is_empty() {
+            items.push(Item::Label(t("serversettings.nav.roles")));
+        }
+        for r in roles {
+            items.push(Item::action(
+                r.name.clone(),
+                Some(dot(role_color(r), 12.0, p).into_any_element()),
+                pick(r.id.clone(), false),
+            ));
+        }
+        if !roles.is_empty() && !people.is_empty() {
+            items.push(Item::Separator);
         }
         if !people.is_empty() {
-            let mut row = div().flex().flex_wrap().gap(px(6.0));
-            for m in people.iter().take(30) {
-                let Some(u) = &m.user else { continue };
-                let label =
-                    div().flex().items_center().gap(px(6.0)).child(avatar(Some(u), 18.0, p)).child(member_name(m));
-                row = row.child(chip_of(u.id.clone(), label, u.id.clone(), true, cx));
-            }
-            out = out
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(t("serversettings.nav.people").to_uppercase()),
-                )
-                .child(row);
+            items.push(Item::Label(t("serversettings.nav.people")));
         }
-        motion::rise(out, SharedString::from(format!("{id}-in")), Duration::ZERO, -6.0).into_any_element()
+        for m in people.iter().take(50) {
+            let Some(u) = &m.user else { continue };
+            items.push(Item::action(
+                member_name(m),
+                Some(avatar(Some(u), 20.0, p).into_any_element()),
+                pick(u.id.clone(), true),
+            ));
+        }
+        items
     }
 
     /// Deny, follow their roles, or allow, the choice sliding between the three.
@@ -1654,7 +1716,7 @@ impl ServerSettingsView {
             cx,
         );
         let tint: Hsla = match state {
-            1 => emerald(p),
+            1 => gpui_kit::rgb(0x10b981).into(),
             -1 => p.destructive.into(),
             _ => alpha(p.muted_foreground, 0.3),
         };
@@ -1663,12 +1725,12 @@ impl ServerSettingsView {
             .flex_none()
             .flex()
             .p(px(2.0))
-            .rounded(corner(9.0))
+            .rounded(radius_lg())
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.4))
             .when(disabled, |el| el.opacity(0.5))
-            .child(div().absolute().top(px(2.0)).left(px(2.0 + at)).size(px(CELL)).rounded(corner(7.0)).bg(tint));
+            .child(div().absolute().top(px(2.0)).left(px(2.0 + at)).size(px(CELL)).rounded(radius_md()).bg(tint));
         for (value, glyph) in [(-1, "x"), (0, "slash"), (1, "check")] {
             let on = value == state;
             let (target, member) = (o.target_id.clone(), o.member);
@@ -1752,5 +1814,47 @@ mod tests {
         let wire = to_wire(&draft);
         assert_eq!(wire.len(), 2);
         assert_eq!(from_wire(&wire)[1], o("art", VIEW, 0));
+    }
+}
+
+/// A channel or category being dragged into place, and the copy of it that follows the pointer.
+#[derive(Clone)]
+pub(super) struct ChanDrag {
+    id: String,
+    category: bool,
+    name: SharedString,
+    glyph: &'static str,
+}
+
+impl Render for ChanDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = pal(cx);
+        div()
+            .w(px(240.0))
+            .h(px(32.0))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(radius_lg())
+            .bg(p.background)
+            .border_1()
+            .border_color(alpha(p.primary, 0.5))
+            .text_color(p.foreground)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.primary, 0.3),
+                offset: gpui_kit::point(px(0.0), px(10.0)),
+                blur_radius: px(24.0),
+                spread_radius: px(-6.0),
+                inset: false,
+            }])
+            .child(icon(self.glyph).size(px(16.0)).text_color(p.primary))
+            .child(div().font_weight(FontWeight::BOLD).map(|el| {
+                if self.category {
+                    el.text_xs().child(self.name.to_uppercase())
+                } else {
+                    el.text_sm().child(self.name.clone())
+                }
+            }))
     }
 }

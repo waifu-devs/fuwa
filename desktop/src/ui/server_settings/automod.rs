@@ -575,6 +575,7 @@ impl ServerSettingsView {
                     .flex_1()
                     .min_w_0()
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(t("desktop.server.automod.intro")),
             );
@@ -618,7 +619,7 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(label))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(blurb)),
+                            .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(blurb)),
                     )
                     .when(room, |el| {
                         let first = mine.is_empty();
@@ -652,6 +653,7 @@ impl ServerSettingsView {
                         .border_dashed()
                         .border_color(p.border)
                         .text_sm()
+                        .line_height(px(20.0))
                         .text_color(p.muted_foreground)
                         .child(t("serversettings.automod.noProvider")),
                     "automod-no-provider",
@@ -728,6 +730,7 @@ impl ServerSettingsView {
                                 div()
                                     .truncate()
                                     .text_xs()
+                                    .line_height(px(16.0))
                                     .text_color(p.muted_foreground)
                                     .child(summary(&draft, &self.automod.providers)),
                             ),
@@ -817,7 +820,7 @@ impl ServerSettingsView {
                     .gap(px(16.0))
                     .child(div().flex_1().child(Slider::new(&self.automod.limit)))
                     .child(motion::once(
-                        div().w(px(110.0)).text_sm().font_weight(FontWeight::BOLD).child(t_with(
+                        div().w(px(110.0)).text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(t_with(
                             "serversettings.automod.moreThan",
                             &[("count", Arg::Num(draft.mention_limit.into()))],
                         )),
@@ -875,6 +878,7 @@ impl ServerSettingsView {
                             .h(px(32.0))
                             .px(px(12.0))
                             .text_xs()
+                            .line_height(px(16.0))
                             .on_click(cx.listener(move |this, _, _, cx| this.delete_rule(k1.clone(), cx))),
                         )
                         .child(
@@ -903,6 +907,7 @@ impl ServerSettingsView {
                     .rounded(corner(12.0))
                     .cursor_pointer()
                     .text_sm()
+                    .line_height(px(20.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .hover({
@@ -936,6 +941,7 @@ impl ServerSettingsView {
                         .min_w_0()
                         .text_right()
                         .text_sm()
+                        .line_height(px(20.0))
                         .text_color(p.destructive)
                         .when_some(problem, |el, m| el.child(m)),
                 )
@@ -1036,6 +1042,7 @@ impl ServerSettingsView {
                     .bg(color.opacity(0.13))
                     .text_color(color)
                     .text_sm()
+                    .line_height(px(20.0))
                     .font_weight(FontWeight::BOLD)
                     .child(w.clone())
                     .child(
@@ -1073,7 +1080,12 @@ impl ServerSettingsView {
             .child(Input::new(if allowed { &self.automod.allowed } else { &self.automod.words }))
             .when(!words.is_empty(), |el| {
                 el.child(
-                    div().text_xs().text_right().text_color(p.muted_foreground).child(format!("{}/{max}", words.len())),
+                    div()
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .text_right()
+                        .text_color(p.muted_foreground)
+                        .child(format!("{}/{max}", words.len())),
                 )
             })
             .into_any_element()
@@ -1086,6 +1098,7 @@ impl ServerSettingsView {
             div()
                 .ml_auto()
                 .text_xs()
+                .line_height(px(16.0))
                 .text_color(p.muted_foreground)
                 .when(smart, |el| el.child(t_with("desktop.server.automod.ms", &[("ms", Arg::Num(ms.into()))])))
         };
@@ -1095,6 +1108,7 @@ impl ServerSettingsView {
                 .items_center()
                 .gap(px(6.0))
                 .text_sm()
+                .line_height(px(20.0))
                 .text_color(p.muted_foreground)
                 .child(spinner("automod-try-spin", 14.0, window))
                 .child(if smart { t("serversettings.automod.asking") } else { t("serversettings.automod.checking") })
@@ -1108,6 +1122,7 @@ impl ServerSettingsView {
                         .flex_1()
                         .min_w_0()
                         .text_xs()
+                        .line_height(px(16.0))
                         .text_color(amber(p))
                         .child(t_with("serversettings.automod.noAnswer", &[("error", Arg::Str(error))])),
                 )
@@ -1141,6 +1156,7 @@ impl ServerSettingsView {
                             .text_color(p.destructive)
                             .font_family("monospace")
                             .text_xs()
+                            .line_height(px(16.0))
                             .child(m.clone()),
                         SharedString::from(format!("automod-match-{n}-{m}")),
                         Duration::from_millis(50 * n.min(8) as u64),
@@ -1163,13 +1179,20 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(6.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .child(icon("flask-conical").size(px(15.0)).text_color(p.primary))
                     .child(t("serversettings.automod.try")),
             )
             .child(Input::new(&self.automod.tester))
             .when(smart, |el| {
-                el.child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.automod.tryNote")))
+                el.child(
+                    div()
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("desktop.server.automod.tryNote")),
+                )
             })
             .when_some(result, |el, r| el.child(r))
             .into_any_element()
@@ -1301,9 +1324,21 @@ impl ServerSettingsView {
                         &[("provider", Arg::Str(&strong(&x.name))), ("host", Arg::Str(&strong(&x.host)))],
                     )
                 };
-                div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(marked(&reads, p))
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .text_color(p.muted_foreground)
+                    .child(marked(&reads, p))
             }
-            None => div().flex_1().min_w_0().text_sm().text_color(warn).child(t("serversettings.automod.providerGone")),
+            None => div()
+                .flex_1()
+                .min_w_0()
+                .text_sm()
+                .line_height(px(20.0))
+                .text_color(warn)
+                .child(t("serversettings.automod.providerGone")),
         };
         let tint = if chosen.is_some() { violet } else { warn };
         out = out.child(motion::rise(
@@ -1385,11 +1420,16 @@ impl ServerSettingsView {
                         .flex_1()
                         .min_w_0()
                         .child(
-                            div().text_sm().font_weight(FontWeight::BOLD).child(t("serversettings.automod.pictures")),
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .font_weight(FontWeight::BOLD)
+                                .child(t("serversettings.automod.pictures")),
                         )
                         .child(
                             div()
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .text_color(p.muted_foreground)
                                 .child(t_with("serversettings.automod.picturesHint", &[("count", Arg::Num(4))])),
                         ),
@@ -1489,6 +1529,7 @@ impl ServerSettingsView {
                         .items_center()
                         .justify_center()
                         .text_xs()
+                        .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(if on && matches!(value, L::Block | L::TimeOut) {
                             gpui_kit::white()
@@ -1530,8 +1571,20 @@ impl ServerSettingsView {
                                 .flex_1()
                                 .min_w_0()
                                 .when(off, |el| el.opacity(0.6))
-                                .child(div().text_sm().font_weight(FontWeight::BOLD).child(label.name.clone()))
-                                .child(div().text_xs().text_color(p.muted_foreground).child(label.description.clone())),
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .line_height(px(20.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(label.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .line_height(px(16.0))
+                                        .text_color(p.muted_foreground)
+                                        .child(label.description.clone()),
+                                ),
                         )
                         .child(seg),
                 );
@@ -1547,15 +1600,22 @@ impl ServerSettingsView {
                             div()
                                 .flex_none()
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .text_color(p.muted_foreground)
                                 .child(t("serversettings.automod.howSure")),
                         )
                         .child(div().flex_1().child(Slider::new(&slider)))
                         .child(motion::once(
-                            div().w(px(40.0)).text_right().text_xs().font_weight(FontWeight::BOLD).child(t_with(
-                                "desktop.server.automod.percent",
-                                &[("value", Arg::Num(threshold.into()))],
-                            )),
+                            div()
+                                .w(px(40.0))
+                                .text_right()
+                                .text_xs()
+                                .line_height(px(16.0))
+                                .font_weight(FontWeight::BOLD)
+                                .child(t_with(
+                                    "desktop.server.automod.percent",
+                                    &[("value", Arg::Num(threshold.into()))],
+                                )),
                             SharedString::from(format!("automod-sure-{}-{threshold}", label.id)),
                             Duration::from_millis(220),
                             |el, t| el.opacity(0.5 + 0.5 * t).relative().top(px(-3.0 * (1.0 - t))),
@@ -1578,6 +1638,7 @@ impl ServerSettingsView {
             .flex_wrap()
             .gap_x(px(4.0))
             .text_xs()
+            .line_height(px(16.0))
             .text_color(p.muted_foreground)
             .child(t("desktop.server.automod.eachKindHint"))
             .child(
@@ -1602,7 +1663,13 @@ impl ServerSettingsView {
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.automod.eachKind")))
+                .child(
+                    div()
+                        .text_sm()
+                        .line_height(px(20.0))
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .child(t("serversettings.automod.eachKind")),
+                )
                 .child(hint)
                 .child(list)
                 .into_any_element(),
@@ -1636,7 +1703,13 @@ impl ServerSettingsView {
                     this.edit_rule(cx, |r| set_action(r, K::Alert, !id.is_empty(), |a| a.channel_id = id));
                 }))
                 .when(flags && alert.is_empty(), |el| {
-                    el.child(div().text_xs().text_color(amber(p)).child(t("desktop.server.automod.pickForFlags")))
+                    el.child(
+                        div()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(amber(p))
+                            .child(t("desktop.server.automod.pickForFlags")),
+                    )
                 }),
             p,
         ));
@@ -1734,6 +1807,7 @@ impl ServerSettingsView {
                 .items_center()
                 .gap(px(6.0))
                 .text_xs()
+                .line_height(px(16.0))
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .text_color(p.muted_foreground)
                 .child(icon(glyph).size(px(12.0)))
@@ -1770,9 +1844,13 @@ fn field(label: &str, hint: &str, control: impl IntoElement, p: &Palette) -> Any
         .gap(px(8.0))
         .child(
             div()
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(label.to_owned()))
+                .child(
+                    div().text_sm().line_height(px(20.0)).font_weight(FontWeight::EXTRA_BOLD).child(label.to_owned()),
+                )
                 .when(!hint.is_empty(), |el| {
-                    el.child(div().text_xs().text_color(p.muted_foreground).child(hint.to_owned()))
+                    el.child(
+                        div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(hint.to_owned()),
+                    )
                 }),
         )
         .child(control)
@@ -1839,8 +1917,12 @@ fn action_card(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(title.to_owned()))
-                        .child(div().text_xs().text_color(p.muted_foreground).child(hint.to_owned())),
+                        .child(
+                            div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(title.to_owned()),
+                        )
+                        .child(
+                            div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(hint.to_owned()),
+                        ),
                 )
                 .child(switch(SharedString::from(format!("automod-act-sw-{id}")), on, false, cx, set)),
         )

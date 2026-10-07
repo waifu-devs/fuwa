@@ -561,17 +561,23 @@ impl ServerSettingsView {
                             ))
                         }),
                     )
-                    .child(div().ml(px(6.0)).text_sm().text_color(p.muted_foreground).child(t_with(
-                        "desktop.server.onboarding.focus",
-                        &[("x", Arg::Num(focus.0.into())), ("y", Arg::Num(focus.1.into()))],
-                    )));
+                    .child(div().ml(px(6.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(
+                        t_with(
+                            "desktop.server.onboarding.focus",
+                            &[("x", Arg::Num(focus.0.into())), ("y", Arg::Num(focus.1.into()))],
+                        ),
+                    ));
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.focalPoint")))
                     .child(
-                        div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.onboarding.focusHint")),
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("desktop.server.onboarding.focusHint")),
                     )
                     .child(
                         div()
@@ -623,7 +629,7 @@ impl ServerSettingsView {
                                         .h(px(sh)),
                                 ),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(name))
+                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(name))
                     })))
                     .into_any_element()
             }
@@ -680,7 +686,13 @@ impl ServerSettingsView {
             .flex_col()
             .gap(px(8.0))
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.nav.accentColor")))
-            .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.accentHint")))
+            .child(
+                div()
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.welcome.accentHint")),
+            )
             .child(
                 div()
                     .flex()
@@ -699,7 +711,11 @@ impl ServerSettingsView {
             .border_color(p.border)
             .child(
                 div().child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.banner"))).child(
-                    div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.bannerHint")),
+                    div()
+                        .text_sm()
+                        .line_height(px(20.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("serversettings.welcome.bannerHint")),
                 ),
             )
             .child(buttons)
@@ -759,6 +775,7 @@ impl ServerSettingsView {
                     .child(
                         div()
                             .text_sm()
+                            .line_height(px(20.0))
                             .text_color(p.muted_foreground)
                             .child(t("serversettings.onboarding.enabledHint")),
                     ),
@@ -802,6 +819,7 @@ impl ServerSettingsView {
                         .border_color(p.border)
                         .cursor_pointer()
                         .text_sm()
+                        .line_height(px(20.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
                         .hover(move |s| s.border_color(hover))
@@ -826,7 +844,7 @@ impl ServerSettingsView {
             .child(
                 div()
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.steps")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
+                    .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(t_with(
                         "desktop.server.onboarding.stepsHint",
                         &[("max", Arg::Num(onb::MAX_STEPS as i64))],
                     ))),
@@ -872,7 +890,7 @@ impl ServerSettingsView {
                     .text_color(p.primary)
                     .child(icon(glyph).size(px(15.0))),
             )
-            .child(div().flex_1().text_sm().text_color(p.muted_foreground).child(hint))
+            .child(div().flex_1().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(hint))
             .child(
                 icon_button(SharedString::from(format!("onb-up-{key}")), "chevron-up", p)
                     .when(at == 0, |el| el.opacity(0.3))
@@ -1188,12 +1206,8 @@ impl ServerSettingsView {
     }
 
     /// The first step as a newcomer sees it, beside the welcome screen's preview.
-    pub(super) fn onboarding_preview(
-        &self,
-        server: &pb::Server,
-        p: &Palette,
-        cx: &Context<Self>,
-    ) -> Option<AnyElement> {
+    /// The first step of onboarding as new members get it (the web's `OnboardingFlow` in preview).
+    pub(super) fn onboarding_card(&self, server: &pb::Server, p: &Palette, cx: &Context<Self>) -> Option<AnyElement> {
         let draft = self.onboarding_draft(cx);
         if !draft.enabled {
             return None;
@@ -1215,7 +1229,7 @@ impl ServerSettingsView {
             .gap(px(8.0))
             .p(px(16.0))
             .child(
-                div().text_xs().font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
+                div().text_xs().line_height(px(16.0)).font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
                     t_with("join.onboarding.stepOf", &[("step", Arg::Num(1)), ("total", Arg::Num(total as i64))])
                         .to_uppercase(),
                 ),
@@ -1229,6 +1243,7 @@ impl ServerSettingsView {
             body = body.child(
                 div()
                     .text_xs()
+                    .line_height(px(16.0))
                     .text_color(p.muted_foreground)
                     .child(crate::ui::text::markdown("onb-preview-words", step.description.clone())),
             );
@@ -1251,7 +1266,7 @@ impl ServerSettingsView {
                             option.emoji.clone()
                         },
                     ))
-                    .child(div().truncate().text_xs().font_weight(FontWeight::BOLD).child(
+                    .child(div().truncate().text_xs().line_height(px(16.0)).font_weight(FontWeight::BOLD).child(
                         if option.label.is_empty() {
                             t("desktop.server.onboarding.aChoice")
                         } else {
@@ -1269,6 +1284,7 @@ impl ServerSettingsView {
                     .bg(tint)
                     .text_color(on_accent(tint))
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .child(format!(
                         "{} →",
@@ -1276,31 +1292,7 @@ impl ServerSettingsView {
                     )),
             ),
         );
-        Some(
-            div()
-                .w(px(320.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(t("serversettings.nav.onboarding").to_uppercase()),
-                )
-                .child(
-                    div()
-                        .rounded(corner(20.0))
-                        .border_1()
-                        .border_color(p.border)
-                        .bg(p.card)
-                        .shadow_lg()
-                        .overflow_hidden()
-                        .child(body),
-                )
-                .into_any_element(),
-        )
+        Some(div().p(px(8.0)).child(body).into_any_element())
     }
 }
 
@@ -1333,8 +1325,8 @@ fn flag(
         }))
         .child(
             div()
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child(title.to_owned()))
-                .child(div().text_xs().text_color(p.muted_foreground).child(about.to_owned())),
+                .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(title.to_owned()))
+                .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about.to_owned())),
         )
         .into_any_element()
 }

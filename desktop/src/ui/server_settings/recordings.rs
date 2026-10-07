@@ -5,6 +5,7 @@
 //! The web's `settings/server/Recordings.tsx`.
 
 use super::*;
+use crate::ui::settings_controls::Opt;
 
 #[derive(Default)]
 pub(super) struct Recordings {
@@ -64,7 +65,13 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    pub(super) fn recordings_page(&mut self, server: &pb::Server, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn recordings_page(
+        &mut self,
+        server: &pb::Server,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.ask_recording_video(cx);
         let keeps = server.record_video;
         let video = self.recordings.draft.unwrap_or(keeps);
@@ -86,80 +93,32 @@ impl ServerSettingsView {
             ));
         }
 
-        let option = |id: &'static str, on: bool, enabled: bool, glyph: &'static str, label: &str, hint: &str| {
-            let hover = alpha(p.primary, 0.06);
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .p(px(12.0))
-                .rounded(corner(14.0))
-                .border_1()
-                .border_color(if on { alpha(p.primary, 0.6) } else { p.border.into() })
-                .when(on, |el| el.bg(alpha(p.primary, 0.08)))
-                .when(!enabled, |el| el.opacity(0.5))
-                .when(enabled && !on, |el| el.cursor_pointer().hover(move |s| s.bg(hover)))
-                .child(crate::ui::settings::radio(on, p))
-                .child(
-                    div()
-                        .size(px(32.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(corner(10.0))
-                        .bg(alpha(p.primary, 0.1))
-                        .text_color(p.primary)
-                        .child(icon(glyph).size(px(16.0))),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(div().font_weight(FontWeight::BOLD).child(label.to_owned()))
-                        .child(div().text_sm().text_color(p.muted_foreground).child(hint.to_owned())),
-                )
-        };
-        let pick = |video: bool| {
-            cx.listener(move |this: &mut Self, _, _, cx| {
+        let form_w = if self.wide { self.column - 288.0 - 40.0 } else { self.column };
+        let mut video_opt =
+            Opt::new(t("serversettings.recordings.video"), t("serversettings.recordings.videoHint"), "video");
+        if !open {
+            video_opt.disabled = Some(t("serversettings.recordings.videoOff"));
+        }
+        let choices = crate::ui::settings_controls::choice(
+            "record-video",
+            Some(usize::from(video)),
+            vec![
+                Opt::new(t("serversettings.recordings.sound"), t("serversettings.recordings.soundHint"), "audio-lines"),
+                video_opt,
+            ],
+            form_w,
+            p,
+            window,
+            cx,
+            move |this: &mut Self, i, cx| {
+                if i == 1 && !open {
+                    return;
+                }
                 let keeps = this.server_record_video();
-                this.recordings.draft = (video != keeps).then_some(video);
+                this.recordings.draft = ((i == 1) != keeps).then_some(i == 1);
                 cx.notify();
-            })
-        };
-        let choices = div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                option(
-                    "rec-sound",
-                    !video,
-                    true,
-                    "audio-lines",
-                    &t("serversettings.recordings.sound"),
-                    &t("serversettings.recordings.soundHint"),
-                )
-                .on_click(pick(false)),
-            )
-            .child(
-                option(
-                    "rec-video",
-                    video,
-                    open,
-                    "video",
-                    &t("serversettings.recordings.video"),
-                    &if open {
-                        t("serversettings.recordings.videoHint")
-                    } else {
-                        t("serversettings.recordings.videoOff")
-                    },
-                )
-                .when(open, |el| el.on_click(pick(true))),
-            );
+            },
+        );
 
         let mut setting = div()
             .flex()
@@ -169,8 +128,19 @@ impl ServerSettingsView {
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.recordings.title")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.recordings.hint"))),
+                    .child(
+                        div()
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .line_height(px(24.0))
+                            .child(t("serversettings.recordings.title")),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("serversettings.recordings.hint")),
+                    ),
             )
             .child(choices);
         if !open {
@@ -203,7 +173,7 @@ impl ServerSettingsView {
                     .gap(px(8.0))
                     .px(px(10.0))
                     .py(px(8.0))
-                    .rounded(corner(12.0))
+                    .rounded(crate::ui::theme::radius_xl())
                     .bg(alpha(p.background, 0.7))
                     .child(
                         div()
@@ -212,7 +182,7 @@ impl ServerSettingsView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(corner(8.0))
+                            .rounded(crate::ui::theme::radius_lg())
                             .bg(alpha(p.primary, 0.1))
                             .text_color(p.primary)
                             .child(icon(glyph).size(px(16.0))),
@@ -225,26 +195,18 @@ impl ServerSettingsView {
             ));
         }
         let preview = div()
-            .w(px(240.0))
-            .flex_none()
             .flex()
             .flex_col()
             .gap(px(8.0))
             .p(px(12.0))
-            .rounded(corner(16.0))
+            .rounded(crate::ui::theme::radius_2xl())
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.4))
             .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.recordings.preview")))
             .child(list);
 
-        div()
-            .flex()
-            .items_start()
-            .gap(px(24.0))
-            .child(div().flex_1().min_w_0().child(setting))
-            .child(preview)
-            .into_any_element()
+        crate::ui::settings_controls::with_preview(setting.pb(px(20.0)), preview, self.wide, p)
     }
 
     fn server_record_video(&self) -> bool {

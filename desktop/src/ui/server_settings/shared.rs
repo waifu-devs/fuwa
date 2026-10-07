@@ -259,6 +259,7 @@ fn capability(on: bool, label: &str, glyph_name: &str, n: usize, id: &str, p: &P
             .border_color(border)
             .bg(bg)
             .text_xs()
+            .line_height(px(16.0))
             .font_weight(FontWeight::BOLD)
             .text_color(fg)
             .child(icon(if on { glyph_name } else { "x" }).size(px(14.0)))
@@ -276,6 +277,7 @@ fn instance_line(instance: &str, fingerprint: &str, note: &str, p: &Palette) -> 
         .items_start()
         .gap(px(8.0))
         .text_sm()
+        .line_height(px(20.0))
         .child(icon("globe").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
         .child(
             div()
@@ -298,7 +300,7 @@ fn instance_line(instance: &str, fingerprint: &str, note: &str, p: &Palette) -> 
                         ))
                         .child(div().text_color(p.muted_foreground).child(note.to_owned())),
                 )
-                .child(div().font_family("monospace").text_xs().child(fingerprint.to_owned())),
+                .child(div().font_family("monospace").text_xs().line_height(px(16.0)).child(fingerprint.to_owned())),
         )
 }
 
@@ -560,12 +562,15 @@ impl ServerSettingsView {
                 .border_dashed()
                 .border_color(p.border)
                 .text_sm()
+                .line_height(px(20.0))
                 .text_color(p.muted_foreground)
                 .child(t("serversettings.sharedChannels.off"))
                 .into_any_element()
         });
         if let Some(error) = &self.shared.error {
-            return page.child(div().text_sm().text_color(p.muted_foreground).child(error.clone())).into_any_element();
+            return page
+                .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(error.clone()))
+                .into_any_element();
         }
         let Some(list) = list else { return page.child(shimmer_rows(3, p)).into_any_element() };
 
@@ -674,6 +679,7 @@ impl ServerSettingsView {
                             .child(
                                 div()
                                     .text_sm()
+                                    .line_height(px(20.0))
                                     .text_color(p.muted_foreground)
                                     .child(t("serversettings.sharedChannels.addHint")),
                             ),
@@ -685,14 +691,32 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(&self.shared.code)
-                                .prefix(icon("key-round").size(px(16.0)).text_color(p.muted_foreground))
-                                .font_family("monospace"),
-                        ),
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .font_family("monospace")
+                            .child(
+                                super::pages::boxed(
+                                    Input::new(&self.shared.code).appearance(false),
+                                    44.0,
+                                    super::pages::focused(&self.shared.code, window, cx),
+                                    p,
+                                )
+                                .pl(px(28.0)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .left(px(12.0))
+                                    .top(px(14.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(icon("key-round").size(px(16.0))),
+                            ),
                     )
                     .child(
                         primary_button("share-preview", t("settings.controls.preview"), p)
+                            .h(px(44.0))
                             .when(looking || !typed, |el| el.opacity(0.6))
                             .child(if looking {
                                 spinner("share-preview-spin", 15.0, window)
@@ -704,7 +728,7 @@ impl ServerSettingsView {
             );
         if let Some(error) = &self.shared.look_error {
             card = card.child(motion::rise(
-                div().text_sm().text_color(p.destructive).child(error.clone()),
+                div().text_sm().line_height(px(20.0)).text_color(p.destructive).child(error.clone()),
                 SharedString::from(format!("share-look-error-{error}")),
                 Duration::ZERO,
                 4.0,
@@ -750,7 +774,7 @@ impl ServerSettingsView {
             ))
             .child(labeled(&t("serversettings.channels.category"), picks, p))
             .when_some(self.shared.ask_error.clone(), |el, e| {
-                el.child(div().text_sm().text_color(p.destructive).child(e))
+                el.child(div().text_sm().line_height(px(20.0)).text_color(p.destructive).child(e))
             })
             .child(
                 div()
@@ -761,6 +785,7 @@ impl ServerSettingsView {
                         div()
                             .flex_1()
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
                             .child(t("serversettings.sharedChannels.approveNote")),
                     )
@@ -839,6 +864,7 @@ impl ServerSettingsView {
                 .bg(bg)
                 .text_color(fg)
                 .text_xs()
+                .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .child(if is_waiting {
                     div().size(px(8.0)).rounded_full().bg(p.primary).into_any_element()
@@ -918,7 +944,13 @@ impl ServerSettingsView {
                     } else {
                         t_with("serversettings.sharedChannels.from", &[("server", Arg::Str(&other))])
                     }))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(connection_line(c, &home_name, here))),
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(connection_line(c, &home_name, here)),
+                    ),
             )
             .child(state)
             .child(actions);
@@ -954,6 +986,7 @@ impl ServerSettingsView {
                     .items_start()
                     .gap(px(8.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(icon("eye").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
                     .child(div().flex_1().min_w_0().child(note)),
@@ -975,9 +1008,9 @@ impl ServerSettingsView {
                     .rounded(corner(12.0))
                     .bg(alpha(if ask == Ask::Approve { p.primary } else { p.destructive }, 0.08))
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(body))
+                    .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(body))
                     .when_some(self.shared.confirm_error.clone(), |el, e| {
-                        el.child(div().text_sm().text_color(p.destructive).child(e))
+                        el.child(div().text_sm().line_height(px(20.0)).text_color(p.destructive).child(e))
                     })
                     .child(
                         div()
@@ -1075,6 +1108,7 @@ impl ServerSettingsView {
                             .min_w_0()
                             .truncate()
                             .text_sm()
+                            .line_height(px(20.0))
                             .font_weight(FontWeight::BOLD)
                             .child(permission_name(perm)),
                     )
@@ -1138,6 +1172,7 @@ impl ServerSettingsView {
                     .child(
                         div()
                             .text_sm()
+                            .line_height(px(20.0))
                             .font_weight(FontWeight::BOLD)
                             .truncate()
                             .child(format!("#{}", code.channel_name)),
@@ -1146,6 +1181,7 @@ impl ServerSettingsView {
                         div()
                             .font_family("monospace")
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
                             .truncate()
                             .child(if hide { "••••••••".to_owned() } else { code.code.clone() }),
@@ -1157,6 +1193,7 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(4.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(if left < 86_400_000 { p.destructive } else { p.muted_foreground })
                     .child(icon("timer").size(px(14.0)))
                     .child(time_left(left)),
@@ -1229,10 +1266,12 @@ impl ServerSettingsView {
                             .child(div().min_w_0().truncate().child(name.clone()))
                             .when_some(b.server.as_ref(), |el, s| el.child(server_tag(s, url, p))),
                     )
-                    .child(div().text_xs().text_color(p.muted_foreground).truncate().child(t_with(
-                        "serversettings.sharedChannels.keptOutOf",
-                        &[("channel", Arg::Str(&channel)), ("date", Arg::Str(&stamp(ms(b.created_at.as_ref()))))],
-                    ))),
+                    .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).truncate().child(
+                        t_with(
+                            "serversettings.sharedChannels.keptOutOf",
+                            &[("channel", Arg::Str(&channel)), ("date", Arg::Str(&stamp(ms(b.created_at.as_ref()))))],
+                        ),
+                    )),
             )
             .when(can_kick, |el| {
                 el.child(
@@ -1275,7 +1314,12 @@ impl ServerSettingsView {
     ) -> AnyElement {
         self.load_shared(cx);
         if let Some(error) = &self.shared.error {
-            return div().text_sm().text_color(p.muted_foreground).child(error.clone()).into_any_element();
+            return div()
+                .text_sm()
+                .line_height(px(20.0))
+                .text_color(p.muted_foreground)
+                .child(error.clone())
+                .into_any_element();
         }
         let (on, federation, url) = self.sharing();
         let list = self.shared_list();
@@ -1293,6 +1337,7 @@ impl ServerSettingsView {
             let mut out = div().flex().flex_col().gap(px(14.0)).child(
                 div()
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(t_with("serversettings.sharedChannels.comesFrom", &[("server", Arg::Str(&home))])),
             );
@@ -1356,12 +1401,14 @@ impl ServerSettingsView {
                                     .child(
                                         div()
                                             .text_sm()
+                                            .line_height(px(20.0))
                                             .font_weight(FontWeight::BOLD)
                                             .child(t("serversettings.sharedChannels.elsewhere")),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
+                                            .line_height(px(16.0))
                                             .text_color(p.muted_foreground)
                                             .child(t("serversettings.sharedChannels.elsewhereHint")),
                                     ),
@@ -1372,6 +1419,7 @@ impl ServerSettingsView {
         } else {
             div()
                 .text_xs()
+                .line_height(px(16.0))
                 .text_color(p.muted_foreground)
                 .child(if !on {
                     t("serversettings.sharedChannels.offShort")
@@ -1410,6 +1458,7 @@ impl ServerSettingsView {
                             .flex_1()
                             .min_w_0()
                             .text_sm()
+                            .line_height(px(20.0))
                             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t_with(
                                 "serversettings.sharedChannels.shareTitle",
                                 &[("channel", Arg::Str(&channel.name))],
@@ -1422,7 +1471,7 @@ impl ServerSettingsView {
             )
             .child(maker)
             .when_some(self.shared.make_error.clone(), |el, e| {
-                el.child(div().text_sm().text_color(p.destructive).child(e))
+                el.child(div().text_sm().line_height(px(20.0)).text_color(p.destructive).child(e))
             });
 
         let mut out = div().flex().flex_col().gap(px(20.0)).child(intro);
@@ -1445,6 +1494,7 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(icon("clipboard-paste").size(px(16.0)))
                     .child(t("serversettings.sharedChannels.noGuest"))
@@ -1494,6 +1544,7 @@ impl ServerSettingsView {
                                 .min_w_0()
                                 .font_family("monospace")
                                 .text_sm()
+                                .line_height(px(20.0))
                                 .font_weight(FontWeight::BOLD)
                                 .child(if hide { "••••••••".to_owned() } else { code.code.clone() }),
                         )
@@ -1509,6 +1560,7 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(4.0))
                         .text_xs()
+                        .line_height(px(16.0))
                         .text_color(p.muted_foreground)
                         .child(icon("timer").size(px(12.0)))
                         .child(works_for),
@@ -1553,6 +1605,7 @@ fn nothing_shared(p: &Palette) -> impl IntoElement {
                 .max_w(px(380.0))
                 .text_center()
                 .text_sm()
+                .line_height(px(20.0))
                 .text_color(p.muted_foreground)
                 .child(t("serversettings.sharedChannels.nothingYetHint")),
         )
@@ -1576,7 +1629,7 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
             8.0,
         )
     };
-    let mut body = div().flex().flex_col().gap(px(12.0)).p(px(16.0)).text_sm();
+    let mut body = div().flex().flex_col().gap(px(12.0)).p(px(16.0)).text_sm().line_height(px(20.0));
     if !preview.channel_topic.is_empty() {
         body = body.child(div().text_color(p.muted_foreground).child(preview.channel_topic.clone()));
     }
@@ -1631,7 +1684,13 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
             .gap(px(6.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.sharedChannels.whatTheyCanDo")))
             .child(caps)
-            .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.sharedChannels.rolesNote"))),
+            .child(
+                div()
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.sharedChannels.rolesNote")),
+            ),
     );
     div()
         .rounded(corner(16.0))
@@ -1652,10 +1711,15 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
                         .flex_1()
                         .min_w_0()
                         .child(
-                            div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child(t_with(
-                                "serversettings.sharedChannels.from",
-                                &[("server", Arg::Str(&home_name))],
-                            )),
+                            div()
+                                .text_xs()
+                                .line_height(px(16.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(p.muted_foreground)
+                                .child(t_with(
+                                    "serversettings.sharedChannels.from",
+                                    &[("server", Arg::Str(&home_name))],
+                                )),
                         )
                         .child(
                             div()
@@ -1663,6 +1727,7 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
                                 .items_center()
                                 .gap(px(4.0))
                                 .text_lg()
+                                .line_height(px(28.0))
                                 .font_weight(FontWeight::EXTRA_BOLD)
                                 .child(icon("hash").size(px(16.0)).text_color(p.muted_foreground))
                                 .child(div().min_w_0().truncate().child(preview.channel_name.clone())),
@@ -1680,6 +1745,7 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
                             .rounded_full()
                             .bg(p.muted)
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
                             .child(icon("timer").size(px(12.0)))
                             .child(t_with(

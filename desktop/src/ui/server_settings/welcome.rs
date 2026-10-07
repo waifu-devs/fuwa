@@ -360,24 +360,50 @@ impl ServerSettingsView {
             );
         }
 
-        let editor = div()
-            .flex_1()
-            .min_w_0()
+        let stage = self.welcome_stage(&drafted, &now, &channels, &look, p, window, cx);
+        let section = |id: &str, title: String, hint: String, body: AnyElement| {
+            motion::rise(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .child(
+                                div().text_lg().line_height(px(28.0)).font_weight(FontWeight::EXTRA_BOLD).child(title),
+                            )
+                            .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(hint)),
+                    )
+                    .child(body),
+                SharedString::from(format!("welcome-section-{id}")),
+                Duration::ZERO,
+                12.0,
+            )
+        };
+        div()
             .flex()
             .flex_col()
-            .child(banner_part)
-            .child(toggle)
-            .child(words)
-            .child(suggested)
-            .child(steps);
-        let preview = div()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .gap(px(18.0))
-            .child(self.welcome_preview(&drafted, &now, &channels, &look, p, window, cx))
-            .children(self.onboarding_preview(&drafted, p, cx));
-        div().flex().items_start().gap(px(28.0)).pb(px(80.0)).child(editor).child(preview).into_any_element()
+            .gap(px(32.0))
+            .child(stage)
+            .child(section(
+                "banner",
+                t("serversettings.welcome.banner"),
+                t("serversettings.welcome.bannerHint"),
+                banner_part,
+            ))
+            .child(section(
+                "welcome",
+                t("serversettings.welcome.screen"),
+                t("serversettings.welcome.screenHint"),
+                div().flex().flex_col().child(toggle).child(words).child(suggested).into_any_element(),
+            ))
+            .child(section(
+                "onboarding",
+                t("serversettings.nav.onboarding"),
+                t("serversettings.welcome.onboardingHint"),
+                steps,
+            ))
+            .into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -602,21 +628,22 @@ impl ServerSettingsView {
             .into_any_element()
     }
 
-    /// The welcome screen as new members will see it.
+    /// The welcome screen as new members will see it, `width` wide (the web's `WelcomeCard`).
     #[allow(clippy::too_many_arguments)]
-    fn welcome_preview(
+    pub(super) fn welcome_card(
         &self,
         server: &pb::Server,
         screen: &pb::WelcomeScreen,
         channels: &[pb::Channel],
         look: &crate::ui::mentions::Look,
+        width: f32,
         p: &Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tint = crate::ui::banner::accent(server);
         let eyebrow = format!("{} 👋", t("join.welcome.eyebrow"));
-        let hero = crate::ui::banner::banner_hero(server, &eyebrow, 320.0, p, window, cx);
+        let hero = crate::ui::banner::banner_hero(server, &eyebrow, width, p, window, cx);
         let mut body = div().flex().flex_col().gap(px(10.0));
         if !screen.description.is_empty() {
             let shown =
@@ -686,56 +713,8 @@ impl ServerSettingsView {
             body = body
                 .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.welcome.previewEmpty")));
         }
-        let on = screen.enabled;
-        let card = div()
-            .relative()
-            .overflow_hidden()
-            .rounded(corner(24.0))
-            .border_1()
-            .border_color(p.border)
-            .bg(p.card)
-            .shadow_lg()
-            .child(
-                div()
-                    .opacity(if on { 1.0 } else { 0.35 })
-                    .child(hero)
-                    .child(div().px(px(20.0)).pt(px(10.0)).pb(px(20.0)).child(body)),
-            )
-            .when(!on, |el| {
-                el.child(
-                    div().absolute().inset_0().flex().items_center().justify_center().p(px(24.0)).child(motion::rise(
-                        div()
-                            .p(px(12.0))
-                            .rounded(corner(16.0))
-                            .bg(p.card)
-                            .border_1()
-                            .border_color(p.border)
-                            .shadow_lg()
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .text_center()
-                            .child(t("desktop.server.welcome.off")),
-                        "welcome-off",
-                        Duration::ZERO,
-                        8.0,
-                    )),
-                )
-            });
-        div()
-            .flex_none()
-            .w(px(320.0))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(p.muted_foreground)
-                    .child(t("settings.controls.preview").to_uppercase()),
-            )
-            .child(card)
-            .into_any_element()
+        let _ = cx;
+        div().w_full().child(hero).child(div().px(px(24.0)).pt(px(12.0)).pb(px(24.0)).child(body)).into_any_element()
     }
 }
 
