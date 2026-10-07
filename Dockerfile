@@ -75,7 +75,8 @@ COPY --from=build /fuwa /fuwa
 
 FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa
 LABEL org.opencontainers.image.source="https://github.com/waifu-devs/fuwa" \
-      org.opencontainers.image.description="fuwa: a self-hostable, Discord-like chat server"
+      org.opencontainers.image.description="fuwa: a self-hostable, Discord-like chat server" \
+      org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=build /fuwa /usr/local/bin/fuwa
 ENV FUWA_DATA_PATH=/data \
     FUWA_PORT=8080

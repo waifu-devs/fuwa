@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "The fuwa server: a self-hostable, Discord-like chat server with one database per community server"
+license = "Apache-2.0"
 repository = "https://github.com/waifu-devs/fuwa"
 publish = false
 default-run = "fuwa"
