@@ -578,41 +578,39 @@ impl FuwaApp {
             .child(marked(t_with("chattools.switcher.channelsOnly", &[("mark", Arg::Str("#"))]), "#", &p))
             .child(marked(t_with("chattools.switcher.serversOnly", &[("mark", Arg::Str("*"))]), "*", &p));
         // `max-w-xl rounded-2xl border bg-popover shadow-2xl`, at most 70% of the window tall.
-        let panel = div()
-            .id("switcher")
-            .occlude()
-            .on_click(|_, _, cx| cx.stop_propagation())
-            .w_full()
-            .max_w(px(576.0))
-            .max_h(px(tall * 0.7))
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .rounded(radius_2xl())
-            .border_1()
-            .border_color(p.border)
-            .bg(p.card)
-            .text_color(p.foreground)
-            .shadow(crate::ui::overlay::shadow_2xl())
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .h(px(57.0))
-                    .px(px(16.0))
-                    .border_b_1()
-                    .border_color(p.border)
-                    .text_lg()
-                    .child(
-                        Input::new(&switcher.query)
-                            .appearance(false)
-                            .text_size(px(18.0))
-                            .prefix(div().mr(px(4.0)).child(icon("search").size(px(20.0)).text_color(p.muted_foreground))),
-                    ),
-            )
-            .child(list)
-            .child(footer);
+        let panel =
+            div()
+                .id("switcher")
+                .occlude()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .w_full()
+                .max_w(px(576.0))
+                .max_h(px(tall * 0.7))
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .rounded(radius_2xl())
+                .border_1()
+                .border_color(p.border)
+                .bg(p.card)
+                .text_color(p.foreground)
+                .shadow(crate::ui::overlay::shadow_2xl())
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .h(px(57.0))
+                        .px(px(16.0))
+                        .border_b_1()
+                        .border_color(p.border)
+                        .text_lg()
+                        .child(Input::new(&switcher.query).appearance(false).text_size(px(18.0)).prefix(
+                            div().mr(px(4.0)).child(icon("search").size(px(20.0)).text_color(p.muted_foreground)),
+                        )),
+                )
+                .child(list)
+                .child(footer);
         Some(
             div()
                 .id("switcher-scrim")
@@ -905,8 +903,20 @@ impl FuwaApp {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.shortcuts.title")))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(t("chattools.shortcuts.about"))),
+                    .child(
+                        div()
+                            .text_lg()
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("chattools.shortcuts.title")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("chattools.shortcuts.about")),
+                    ),
             )
             .child(
                 div()

@@ -10,14 +10,12 @@ use gpui_kit::{
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use crate::ui::app::{Dialog, FuwaApp};
 use crate::core::i18n::t;
+use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::text::safety_rows;
 use crate::ui::theme::{Palette, alpha, corner, radius_3xl, radius_xl};
-use crate::ui::widgets::{
-    card, error_line, icon, labeled, pal, primary_button,
-};
+use crate::ui::widgets::{card, error_line, icon, labeled, pal, primary_button};
 
 /// What a server or instance calls its identity provider, for "Continue with …".
 pub fn provider_name(name: &str) -> &str {
@@ -599,7 +597,8 @@ impl FuwaApp {
             .gap(px(8.0));
         let plain: Vec<_> = self.toasts.iter().filter(|t| t.open.is_none()).collect();
         for toast in plain.iter().skip(plain.len().saturating_sub(3)) {
-            let text = if toast.body.is_empty() { toast.title.clone() } else { format!("{} {}", toast.title, toast.body) };
+            let text =
+                if toast.body.is_empty() { toast.title.clone() } else { format!("{} {}", toast.title, toast.body) };
             let pill = div()
                 .rounded_full()
                 .bg(p.foreground)
