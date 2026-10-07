@@ -7,11 +7,13 @@
 //! a version the window watches, so the window redraws after every change.
 
 pub mod account;
+pub mod account_settings;
 pub mod accounts;
 pub mod api;
 pub mod arrange;
 pub mod attachments;
 pub mod backgrounds;
+pub mod backup;
 pub mod calls;
 pub mod commands;
 pub mod compat;
@@ -36,13 +38,16 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod profile_effects;
 pub mod providers;
+pub mod qr;
 pub mod rail;
 pub mod reports;
 pub mod search;
 pub mod secrets;
 pub mod server_admin;
 pub mod shared;
+pub mod sounds;
 pub mod sso;
 pub mod store;
 mod sync;
@@ -237,6 +242,7 @@ impl Core {
         let (notices_tx, notices) = mpsc::unbounded_channel();
         let prefs = config::load_prefs(&paths);
         i18n::set_language(prefs.language.as_deref());
+        sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
@@ -340,6 +346,7 @@ impl Core {
         if language_changed {
             i18n::set_language(prefs.language.as_deref());
         }
+        sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         reports::set_enabled(prefs.share_reports);
         self.listen_for_games(prefs.game_activity);
         self.games.set_answers(prefs.game_answers.clone());

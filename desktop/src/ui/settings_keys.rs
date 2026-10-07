@@ -16,8 +16,10 @@ use crate::core::keybinds::{self, ACTIONS, CustomKeybind, Except, Group};
 use crate::ui::keys::{combo_of, keycaps};
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
+use crate::ui::settings_controls::{Look, button};
+use crate::ui::theme::radius_xl;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{icon, soft_button};
+use crate::ui::widgets::icon;
 
 /// Which shortcut is listening for keys.
 #[derive(Clone, PartialEq, Eq)]
@@ -51,7 +53,7 @@ impl SettingsView {
     }
 
     pub(crate) fn show_keyboard(&mut self, cx: &mut Context<Self>) {
-        self.page = crate::ui::settings::Page::Keyboard;
+        self.page = crate::ui::settings::Page::Keybinds;
         cx.notify();
     }
 
@@ -129,13 +131,19 @@ impl SettingsView {
         cx.notify();
     }
 
-    pub(crate) fn keyboard_page(&mut self, prefs: &Prefs, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn keyboard_page(
+        &mut self,
+        prefs: &Prefs,
+        p: &Palette,
+        _window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let note = div()
             .flex()
             .gap(px(8.0))
             .px(px(12.0))
             .py(px(10.0))
-            .rounded(corner(12.0))
+            .rounded(radius_xl())
             .bg(alpha(p.muted, 0.6))
             .text_sm()
             .text_color(p.muted_foreground)
@@ -150,7 +158,7 @@ impl SettingsView {
                 div()
                     .px(px(12.0))
                     .py(px(12.0))
-                    .rounded(corner(12.0))
+                    .rounded(radius_xl())
                     .border_1()
                     .border_dashed()
                     .border_color(p.border)
@@ -184,7 +192,9 @@ impl SettingsView {
                             ),
                     )
                     .child(
-                        soft_button("add-keybind", t("appsettings.keybinds.add"), p)
+                        button("add-keybind", t("appsettings.keybinds.add"), Some("plus"), Look::Primary, true, p)
+                            .rounded(radius_xl())
+                            .font_weight(FontWeight::BOLD)
                             .when(adding, |el| el.opacity(0.5))
                             .when(!adding, |el| {
                                 el.on_click(cx.listener(|this, _, _, cx| {
@@ -200,14 +210,15 @@ impl SettingsView {
                     ),
             )
             .child(custom_rows);
+        let custom = self.found_mark("custom-keybinds", custom, p);
 
-        let mut page = div().flex().flex_col().gap(px(28.0)).child(note).child(custom);
+        let mut page = div().flex().flex_col().gap(px(32.0)).child(note).child(custom);
         let mut n = 0usize;
         for group in Group::ALL {
             let mut section = div().flex().flex_col().child(
                 div()
                     .mb(px(4.0))
-                    .text_size(px(11.0))
+                    .text_xs()
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(group.name().to_uppercase()),
@@ -220,15 +231,24 @@ impl SettingsView {
         }
         if !prefs.keybinds.is_empty() || !prefs.custom_keybinds.is_empty() {
             page = page.child(motion::rise(
-                div().flex().child(soft_button("reset-keys", t("desktop.keys.resetAll"), p).on_click(cx.listener(
-                    |this, _, _, cx| {
+                div().flex().child(
+                    button(
+                        "reset-keys",
+                        t("appsettings.keybinds.resetAll"),
+                        Some("rotate-ccw"),
+                        Look::Outline,
+                        false,
+                        p,
+                    )
+                    .rounded(radius_xl())
+                    .on_click(cx.listener(|this, _, _, cx| {
                         this.keys = Keys::default();
                         this.set(cx, |pr| {
                             pr.keybinds.clear();
                             pr.custom_keybinds.clear();
                         });
-                    },
-                ))),
+                    })),
+                ),
                 "reset-keys-rise",
                 Duration::ZERO,
                 8.0,
@@ -298,8 +318,14 @@ impl SettingsView {
             .border_color(alpha(p.border, 0.7))
             .child(self.shaking(row_key(&me), row))
             .when_some(self.problem_for(&row_key(&me)), |el, why| el.child(problem(why, p)));
-        motion::rise(body, SharedString::from(format!("key-row-{id}")), Duration::from_millis(30 * n as u64), 8.0)
-            .into_any_element()
+        let body = self.found_mark(setting_id(id), body, p);
+        motion::rise(
+            div().child(body),
+            SharedString::from(format!("key-row-{id}")),
+            Duration::from_millis(30 * n as u64),
+            8.0,
+        )
+        .into_any_element()
     }
 
     fn custom_row(&mut self, bind: CustomKeybind, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -372,7 +398,7 @@ impl SettingsView {
         let mut card = div()
             .px(px(12.0))
             .py(px(8.0))
-            .rounded(corner(12.0))
+            .rounded(radius_xl())
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.card, 0.6))
@@ -447,6 +473,22 @@ impl SettingsView {
     }
 }
 
+/// The search target of an action's row ("key-<action>"), kept for the app's life.
+fn setting_id(action: &str) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static IDS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut ids = IDS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    ids.entry(action.to_owned()).or_insert_with(|| Box::leak(format!("key-{action}").into_boxed_str()))
+}
+
+/// Where the Keybinds page's own rows sit for settings search (the web's `keybindSettings`).
+pub(crate) fn keybind_settings() -> Vec<(&'static str, String, &'static str)> {
+    let mut list = vec![("custom-keybinds", t("appsettings.keybinds.custom"), "add shortcut")];
+    list.extend(ACTIONS.iter().map(|a| (setting_id(a.id), a.label.to_owned(), "shortcut hotkey")));
+    list
+}
+
 fn new_custom_id() -> String {
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let (mut n, mut out) = (ms, String::new());
@@ -489,7 +531,7 @@ fn recorder(
         .flex()
         .items_center()
         .justify_center()
-        .rounded(corner(12.0))
+        .rounded(radius_xl())
         .border_1()
         .text_sm()
         .cursor_pointer()

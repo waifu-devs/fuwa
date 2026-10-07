@@ -148,6 +148,66 @@ pub fn radius_3xl() -> Pixels {
     px(f32::from(corner(16.0)) + 16.0)
 }
 
+/// Message text size, in pixels (`Prefs::chat_font_size`).
+static CHAT_FONT: AtomicU32 = AtomicU32::new(15);
+
+/// Whether names take their role's color (the Role colors setting).
+static ROLE_NAMES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn role_names() -> bool {
+    ROLE_NAMES.load(Ordering::Relaxed)
+}
+
+pub fn chat_font() -> f32 {
+    CHAT_FONT.load(Ordering::Relaxed) as f32
+}
+
+/// A color with its saturation scaled by `s` (0 grey, 1 as it is), as CSS's `saturate()`.
+fn saturate(c: Rgba, s: f32) -> Rgba {
+    let (r, g, b) = (c.r, c.g, c.b);
+    let m = |a: f32, b2: f32, c2: f32| -> [f32; 3] { [a, b2, c2] };
+    let rows = [
+        m(0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s),
+        m(0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s),
+        m(0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s),
+    ];
+    let at = |row: [f32; 3]| (row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0);
+    Rgba { r: at(rows[0]), g: at(rows[1]), b: at(rows[2]), a: c.a }
+}
+
+impl Palette {
+    /// The palette with every color's saturation scaled (the Saturation setting).
+    pub fn saturated(mut self, s: f32) -> Self {
+        if s >= 0.999 {
+            return self;
+        }
+        for c in [
+            &mut self.background,
+            &mut self.foreground,
+            &mut self.card,
+            &mut self.primary,
+            &mut self.primary_foreground,
+            &mut self.secondary,
+            &mut self.muted,
+            &mut self.muted_foreground,
+            &mut self.accent,
+            &mut self.destructive,
+            &mut self.border,
+            &mut self.rail,
+            &mut self.sidebar,
+            &mut self.glow,
+            &mut self.success,
+        ] {
+            *c = saturate(*c, s);
+        }
+        let hsla = |h: Hsla| -> Hsla { saturate(h.to_rgb(), s).into() };
+        self.chat_surface = hsla(self.chat_surface);
+        self.side_surface = hsla(self.side_surface);
+        self.rail_surface = hsla(self.rail_surface);
+        self
+    }
+}
+
 /// The palette in use, kept as a global so views can read it.
 pub struct Current(pub Palette);
 
@@ -193,8 +253,10 @@ pub fn backdrop(cx: &App) -> Backdrop {
 pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     let theme = prefs.active_theme(system_dark(appearance));
     let backdrop = prefs.active_backdrop(&theme);
-    let p = Palette::of(&theme).over(&backdrop);
+    let p = Palette::of(&theme).over(&backdrop).saturated(f32::from(prefs.saturation) / 100.0);
     let dark = p.dark;
+    CHAT_FONT.store(u32::from(prefs.chat_font_size.clamp(12, 20)), Ordering::Relaxed);
+    ROLE_NAMES.store(prefs.role_colors == crate::core::config::RoleColors::Names, Ordering::Relaxed);
     CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
     crate::ui::text::set_clock(prefs.clock);
     cx.set_global(CurrentBackdrop(backdrop));
@@ -202,7 +264,7 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
     KitTheme::update(cx, |t| {
         t.font_family = FONT.into();
-        t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.4));
+        t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.5));
         t.radius = corner(10.0);
         t.radius_lg = corner(16.0);
         let c = &mut t.colors;

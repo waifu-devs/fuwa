@@ -32,8 +32,7 @@ use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
-    app_badge, avatar, fuwa_mark, header_button, icon, icon_button, is_agent, pal,
-    primary_button, soft_button,
+    app_badge, avatar, fuwa_mark, header_button, icon, icon_button, is_agent, pal, primary_button, soft_button,
 };
 
 /// Who wrote something in a conversation or a secure channel, as shown.
@@ -1884,7 +1883,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     .whitespace_nowrap()
                     .font_weight(FontWeight::BOLD)
                     .text_size(px(16.0))
-                    .text_color(m.color.unwrap_or(tint))
+                    .text_color(m.color.filter(|_| crate::ui::theme::role_names()).unwrap_or(tint))
                     .when(author.is_some(), |el| el.cursor_pointer().hover(|s| s.underline()))
                     .when_some(author.clone(), |el, id| {
                         let ctx = ctx.clone();
@@ -1926,7 +1925,11 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         );
     }
     // Everything under the name is the web's `.chat-text`: 15px on a 1.625 line.
-    let mut text = div().flex().flex_col().text_size(px(15.0)).line_height(px(24.375));
+    let mut text = div()
+        .flex()
+        .flex_col()
+        .text_size(px(crate::ui::theme::chat_font()))
+        .line_height(px(crate::ui::theme::chat_font() * 1.625));
     if m.thread.also_in.is_some() || m.thread.also_sent {
         text = text.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
     }
@@ -1971,7 +1974,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             div()
                 .flex()
                 .items_center()
-                .h(px(24.375))
+                .h(px(crate::ui::theme::chat_font() * 1.625))
                 .when(m.edited && !m.editing, |el| {
                     el.child(
                         div()

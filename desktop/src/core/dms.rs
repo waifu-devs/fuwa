@@ -372,9 +372,9 @@ enum Opened {
 }
 
 /// The device and its vault: only touched under the engine's lock.
-struct Inner {
+pub(crate) struct Inner {
     device: Device,
-    vault: Vault,
+    pub(crate) vault: Vault,
 }
 
 impl Inner {
@@ -399,12 +399,12 @@ struct OpenedSigned {
 }
 
 pub struct DmEngine {
-    key: String,
-    api: Api,
-    me: pb::User,
+    pub(crate) key: String,
+    pub(crate) api: Api,
+    pub(crate) me: pb::User,
     shared: Shared,
     device_id: String,
-    inner: Mutex<Inner>,
+    pub(crate) inner: Mutex<Inner>,
     conversations: parking_lot::Mutex<HashMap<String, pb::Conversation>>,
     /// Secure channels in servers, by channel id: followed once opened, or once a record arrives.
     secure: parking_lot::Mutex<HashMap<String, SecureChannel>>,
@@ -483,7 +483,7 @@ impl DmEngine {
         self.stop.cancel();
     }
 
-    fn stopped(&self) -> bool {
+    pub(crate) fn stopped(&self) -> bool {
         self.stop.is_cancelled()
     }
 

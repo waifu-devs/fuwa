@@ -554,8 +554,6 @@ fn separator(p: &Palette) -> impl IntoElement {
     div().mx(px(-4.0)).my(px(4.0)).h(px(1.0)).bg(p.border)
 }
 
-/// The statuses you can pick, like the web app's menu, and what each means.
-
 // Kept for code that names a status in English; the menus use `user_menu::status_name`.
 #[allow(dead_code)]
 pub fn status_label(status: pb::PresenceStatus) -> &'static str {
