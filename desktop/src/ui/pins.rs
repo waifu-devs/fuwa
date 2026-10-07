@@ -97,7 +97,7 @@ pub fn pin_mark(id: &str, p: &Palette) -> AnyElement {
         .rounded_full()
         .bg(alpha(p.primary, 0.1))
         .text_color(p.primary)
-        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.pinned")).build(window, cx))
+        .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.pins.pinned")).build(window, cx))
         .child(motion::once(
             icon("pin").size(px(12.0)),
             SharedString::from(format!("pin-mark-in|{id}")),
@@ -435,9 +435,7 @@ impl FuwaApp {
             .text_color(if open { p.primary } else { p.muted_foreground })
             .when(open, |el| el.bg(alpha(p.primary, 0.1)))
             .when(!open, |el| el.hover(move |s| s.bg(hover)))
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.pins.button")).build(window, cx))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if id == "thread-pins" {
                     if this
@@ -718,7 +716,7 @@ impl FuwaApp {
                                 .cursor_pointer()
                                 .hover(move |s| s.border_color(danger).text_color(hover_fg))
                                 .tooltip(move |window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                                    crate::ui::overlay::Tip::new(label.clone()).build(window, cx)
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| this.unpin_listed(id.clone(), cx)))
                                 .child(icon("pin-off").size(px(12.0))),

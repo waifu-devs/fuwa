@@ -422,9 +422,7 @@ impl FuwaApp {
                         .text_color(if lit { p.primary } else { p.muted_foreground })
                         .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
                         .when(!lit, |el| el.hover(move |s| s.text_color(fg)))
-                        .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx)
-                        })
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(title.clone()).build(window, cx))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.emoji.scroll.scroll_to(gpui_kit::ListOffset { item_ix: row, offset_in_item: px(0.0) });
                             cx.notify();
@@ -588,7 +586,7 @@ impl FuwaApp {
             .hover(|s| s.bg(alpha(p.primary, 0.08)))
             .when(open, |el| el.bg(alpha(p.primary, 0.12)))
             .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t_with(
+                crate::ui::overlay::Tip::new(t_with(
                     "chattools.emoji.skinToneIs",
                     &[("tone", Arg::Str(&t(TONE_NAMES[tone as usize])))],
                 ))

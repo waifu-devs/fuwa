@@ -1043,7 +1043,7 @@ impl FuwaApp {
                 let open = self.threads.listing.is_some();
                 el.child(
                     header_button("threads-toggle", "messages-square", open, &p)
-                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Threads").build(window, cx))
+                        .tooltip(|window, cx| crate::ui::overlay::Tip::new("Threads").build(window, cx))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_threads_list(window, cx))),
                 )
             })
@@ -1216,8 +1216,7 @@ impl FuwaApp {
         let poll = (!command && self.can_poll()).then(|| {
             crate::ui::widgets::tool_button("poll-open", "chart-column", self.polls.editor.is_some(), &p)
                 .tooltip(|window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chat.composer.makePoll"))
-                        .build(window, cx)
+                    crate::ui::overlay::Tip::new(crate::core::i18n::t("chat.composer.makePoll")).build(window, cx)
                 })
                 .on_click(cx.listener(|this, _, window, cx| this.open_poll_editor(window, cx)))
         });
@@ -1897,9 +1896,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     div()
                         .id(SharedString::from(format!("crown|{}", m.id)))
                         .flex_none()
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("chat.author.owner")).build(window, cx)
-                        })
+                        .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.author.owner")).build(window, cx))
                         .child(icon("crown").size(px(14.0)).text_color(rgb(0xfbbf24))),
                 )
             })

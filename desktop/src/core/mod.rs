@@ -27,6 +27,7 @@ pub mod i18n;
 pub mod instance_admin;
 pub mod instance_manage;
 pub mod instance_servers;
+pub mod invites;
 pub mod join;
 pub mod keybinds;
 pub mod linked;

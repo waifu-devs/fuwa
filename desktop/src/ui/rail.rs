@@ -32,7 +32,7 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::context_menu::{Built, Item, MenuOf, run};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner, mix};
+use crate::ui::theme::{Palette, alpha, mix};
 use crate::ui::widgets::{badge, conn_dot, fuwa_mark, icon, initials, pal, server_icon};
 
 pub const RAIL: f32 = 72.0;
@@ -1515,17 +1515,17 @@ fn slid<E: IntoElement + gpui_kit::Styled + 'static>(
 
 /// The name beside something on the rail, drawn over everything so the rail's scrolling doesn't clip it.
 fn tooltip(id: &str, name: &str, size: f32, p: &Palette) -> impl IntoElement {
-    div().absolute().left(px(RAIL + 2.0)).top(px(size / 2.0 - 15.0)).child(gpui_kit::deferred(
+    div().absolute().left(px(RAIL - 7.0)).top(px(size / 2.0 - 14.0)).child(gpui_kit::deferred(
         gpui_kit::anchored().child(motion::slide_in(
             div()
-                .px(px(10.0))
-                .py(px(5.0))
-                .rounded(corner(8.0))
-                .bg(p.card)
-                .border_1()
-                .border_color(p.border)
-                .shadow_md()
-                .text_sm()
+                // The web's tooltip: `bg-primary rounded-md px-3 py-1.5 text-xs`, bold on the rail.
+                .px(px(12.0))
+                .py(px(6.0))
+                .rounded(crate::ui::theme::radius_md())
+                .bg(p.primary)
+                .text_color(p.primary_foreground)
+                .text_xs()
+                .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .whitespace_nowrap()
                 .child(name.to_owned()),

@@ -258,7 +258,7 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
             };
             div()
                 .id(SharedString::from(format!("poll-kind|{mid}")))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip).build(window, cx))
                 .child(pill(Some(glyph), text, p.muted_foreground, muted))
         });
     if c.closed {
@@ -1096,7 +1096,7 @@ impl FuwaApp {
                 .text_color(if picking { p.primary } else { p.muted_foreground })
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let Some(e) = this.polls.editor.as_mut() else { return };
                     let Some(at) = e.answers.iter().position(|a| a.id == id) else { return };
@@ -1126,7 +1126,7 @@ impl FuwaApp {
                     el.cursor_pointer()
                         .hover(move |s| s.bg(danger_bg).text_color(danger))
                         .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t_with(
+                            crate::ui::overlay::Tip::new(t_with(
                                 "chattools.editor.removeAnswer",
                                 &[("n", Arg::Num(n as i64 + 1))],
                             ))

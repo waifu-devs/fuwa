@@ -11,11 +11,12 @@ use gpui_kit::{
 };
 
 use crate::ui::app::{Dialog, FuwaApp};
+use crate::core::i18n::t;
 use crate::ui::motion;
 use crate::ui::text::safety_rows;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha, corner, radius_3xl, radius_xl};
 use crate::ui::widgets::{
-    card, danger_button, error_line, icon, icon_button, labeled, pal, primary_button, soft_button,
+    card, error_line, icon, labeled, pal, primary_button,
 };
 
 /// What a server or instance calls its identity provider, for "Continue with …".
@@ -56,18 +57,122 @@ pub fn host_sentence(host: &str, p: &Palette) -> gpui_kit::StyledText {
     gpui_kit::StyledText::new(text).with_highlights([(lead.len()..lead.len() + host.len(), bold)])
 }
 
-/// A dim layer over the window, fading in, that swallows clicks.
-pub fn scrim(id: impl Into<ElementId>, p: &Palette) -> Stateful<Div> {
-    let id = id.into();
+/// The web's dialog overlay (`bg-black/50`): the whole window behind, rail
+/// and sidebar included, darkened by half; it swallows clicks.
+pub fn scrim(id: impl Into<ElementId>, _p: &Palette) -> Stateful<Div> {
+    shade(id, 0.5)
+}
+
+/// A layer over the whole window darkened by `dim` (the quick switcher's is
+/// `black/45`, the shortcut sheet's `black/40`).
+pub fn shade(id: impl Into<ElementId>, dim: f32) -> Stateful<Div> {
     div()
-        .id(id)
+        .id(id.into())
         .absolute()
         .inset_0()
         .flex()
         .items_center()
         .justify_center()
-        .bg(alpha(p.rail, if p.dark { 0.72 } else { 0.55 }))
+        .bg(gpui_kit::hsla(0.0, 0.0, 0.0, dim))
         .occlude()
+}
+
+/// The web's `shadow-2xl`.
+pub fn shadow_2xl() -> Vec<gpui_kit::BoxShadow> {
+    vec![gpui_kit::BoxShadow {
+        color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.25),
+        offset: gpui_kit::point(px(0.0), px(25.0)),
+        blur_radius: px(50.0),
+        spread_radius: px(-12.0),
+        inset: false,
+    }]
+}
+
+/// The web's `DialogContent`: a card `max-w-md` (`max-w-2xl` when wide),
+/// `p-6 rounded-3xl border bg-card shadow-2xl`. Put [`dialog_close`] in it.
+pub fn dialog_card(wide: bool, p: &Palette) -> Div {
+    div()
+        .relative()
+        .w(px(if wide { 672.0 } else { 448.0 }))
+        .p(px(24.0))
+        .flex()
+        .flex_col()
+        .rounded(radius_3xl())
+        .border_1()
+        .border_color(p.border)
+        .bg(p.card)
+        .text_color(p.foreground)
+        .shadow(shadow_2xl())
+}
+
+/// The web's `DialogHeader`: the title (`text-xl font-extrabold`) and a line
+/// under it (`mt-1 text-sm text-muted-foreground`), `mb-5`, clear of the close button.
+pub fn dialog_header(title: impl IntoElement, description: Option<AnyElement>, p: &Palette) -> Div {
+    div()
+        .mb(px(20.0))
+        .pr(px(32.0))
+        .flex()
+        .flex_col()
+        .child(div().text_xl().line_height(px(28.0)).font_weight(FontWeight::EXTRA_BOLD).child(title))
+        .when_some(description, |el, d| {
+            el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(d))
+        })
+}
+
+/// The dialog's close button (`absolute top-4 right-4 size-8 rounded-full`),
+/// which turns a quarter on hover.
+pub fn dialog_close(id: impl Into<ElementId>, p: &Palette) -> Stateful<Div> {
+    let (hover, fg) = (p.muted, p.foreground);
+    div()
+        .id(id.into())
+        .absolute()
+        .top(px(16.0))
+        .right(px(16.0))
+        .size(px(32.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .cursor_pointer()
+        .text_color(p.muted_foreground)
+        .hover(move |s| s.bg(hover).text_color(fg))
+        .child(icon("x").size(px(16.0)))
+}
+
+/// A dialog over the window: the scrim fades in (200ms) and the card springs
+/// up from 40px below, as the web's dialogs do. `close` runs on a click
+/// outside the card.
+pub fn dialog_layer(
+    tag: &str,
+    panel: impl IntoElement,
+    p: &Palette,
+    close: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+) -> AnyElement {
+    motion::fade_in(
+        scrim("dialog-scrim", p).on_click(close).child(motion::rise(
+            div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
+            SharedString::from(format!("dialog-{tag}")),
+            Duration::ZERO,
+            40.0,
+        )),
+        SharedString::from(format!("dialog-fade-{tag}")),
+        Duration::from_millis(200),
+    )
+    .into_any_element()
+}
+
+/// A dialog's buttons (`h-9 rounded-xl`, the action in bold): `Ghost` for
+/// Cancel, `Primary` or `Destructive` for the action.
+pub fn dialog_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    look: crate::ui::settings_controls::Look,
+    p: &Palette,
+) -> Stateful<Div> {
+    use crate::ui::settings_controls::Look;
+    crate::ui::settings_controls::button(id, label, None, look, false, p)
+        .rounded(radius_xl())
+        .when(look != Look::Ghost, |el| el.font_weight(FontWeight::BOLD))
 }
 
 impl FuwaApp {
@@ -77,11 +182,14 @@ impl FuwaApp {
         if let Some(el) = self.render_join_dialog(&dialog, window, cx) {
             return Some(el);
         }
+        if let Some(el) = self.render_web_dialog(&dialog, window, cx) {
+            return Some(el);
+        }
         if let Dialog::Profile { key, user_id, server } = &dialog {
             return Some(self.render_profile(key, user_id, server.as_deref(), cx));
         }
         if let Dialog::Welcome { key, server } = &dialog {
-            return Some(self.render_welcome(key, server, window, cx));
+            return Some(self.render_welcome_web(key, server, window, cx));
         }
         if let Dialog::Onboarding { .. } = &dialog {
             return self.render_onboarding(window, cx);
@@ -137,49 +245,6 @@ impl FuwaApp {
                     Some(if busy { "Leaving…" } else { "Leave" }),
                 )
             }
-            Dialog::Invite { link, .. } => {
-                let streamer = self.prefs.streamer_mode;
-                let copied = self.copied.is_some_and(|at| at.elapsed() < Duration::from_secs(3));
-                let shown = match link {
-                    Some(_) if streamer => "Hidden in streamer mode".to_owned(),
-                    Some(l) => l.clone(),
-                    None => "Making an invite…".to_owned(),
-                };
-                (
-                    "user-plus",
-                    "Invite people".into(),
-                    "Anyone with this link can join. It doesn't run out.".into(),
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .px(px(14.0))
-                        .h(px(44.0))
-                        .rounded(corner(12.0))
-                        .bg(p.secondary)
-                        .border_1()
-                        .border_color(p.border)
-                        .child(div().flex_1().min_w_0().whitespace_nowrap().text_ellipsis().child(shown))
-                        .when(copied, |el| {
-                            el.child(motion::rise(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(4.0))
-                                    .text_color(p.success)
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(icon("check").size(px(14.0)))
-                                    .child("Copied"),
-                                "copied",
-                                Duration::ZERO,
-                                6.0,
-                            ))
-                        })
-                        .into_any_element(),
-                    link.as_ref().map(|_| "Copy link"),
-                )
-            }
             Dialog::Safety { key, conversation } => {
                 let (safety, verified, other) = self.core.shared.read(|s| {
                     let i = s.instance(key);
@@ -223,154 +288,6 @@ impl FuwaApp {
                     (!is_verified && safety.is_some()).then_some("They match"),
                 )
             }
-            Dialog::CreateChannel { key, server, parent, kind } => {
-                let category = *kind == crate::pb::ChannelType::Category;
-                let under = self
-                    .core
-                    .shared
-                    .read(|s| s.instance(key).and_then(|i| i.channel(server, parent)).map(|c| c.name.clone()));
-                let in_category = !parent.is_empty();
-                let tiles = crate::ui::secure::KINDS
-                    .into_iter()
-                    .filter(|(k, ..)| !(in_category && *k == crate::pb::ChannelType::Category))
-                    .enumerate()
-                    .map(|(n, (k, glyph, label, hint))| {
-                        let on = k == *kind;
-                        let tint = if k == crate::pb::ChannelType::Secure { p.success } else { p.primary };
-                        let hover = alpha(tint, 0.06);
-                        motion::rise(
-                            div()
-                                .id(SharedString::from(format!("kind-{label}")))
-                                .w(px(200.0))
-                                .flex_grow(1.0)
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .p(px(10.0))
-                                .rounded(corner(14.0))
-                                .border_1()
-                                .border_color(if on { tint } else { p.border })
-                                .bg(if on { alpha(tint, 0.1) } else { p.secondary.into() })
-                                .when(!on, |el| el.hover(move |s| s.bg(hover)))
-                                .cursor_pointer()
-                                .active(|s| s.top(px(1.0)))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    if let Some(Dialog::CreateChannel { kind, parent, .. }) = &mut this.dialog {
-                                        *kind = k;
-                                        if k == crate::pb::ChannelType::Category {
-                                            parent.clear();
-                                        }
-                                    }
-                                    let hint = crate::ui::secure::name_hint(k);
-                                    this.dialog_input.update(cx, |s, cx| s.set_placeholder(hint, window, cx));
-                                    cx.notify();
-                                }))
-                                .child(
-                                    div()
-                                        .size(px(34.0))
-                                        .flex_none()
-                                        .rounded(corner(10.0))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(if on { tint } else { p.muted })
-                                        .text_color(if on { p.primary_foreground } else { p.muted_foreground })
-                                        .child(motion::rise(
-                                            icon(glyph).size(px(18.0)),
-                                            SharedString::from(format!("kind-glyph-{label}-{on}")),
-                                            Duration::ZERO,
-                                            4.0,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .flex_col()
-                                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(label))
-                                        .child(div().text_xs().text_color(p.muted_foreground).child(hint)),
-                                ),
-                            SharedString::from(format!("kind-in-{n}")),
-                            Duration::from_millis(30 * n as u64),
-                            6.0,
-                        )
-                    });
-                let kinds = div().flex().flex_wrap().gap(px(8.0)).children(tiles);
-                (
-                    match kind {
-                        crate::pb::ChannelType::Category => "folder-plus",
-                        crate::pb::ChannelType::Secure => "shield-check",
-                        crate::pb::ChannelType::Voice => "volume-2",
-                        crate::pb::ChannelType::Announcement => "megaphone",
-                        _ => "hash",
-                    },
-                    if category { "Make a category".into() } else { "Make a channel".into() },
-                    match under {
-                        Some(name) if !category => format!("It goes in {name}."),
-                        _ if category => "Categories group channels together in the sidebar.".into(),
-                        _ => "A place to talk about one thing.".into(),
-                    },
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(14.0))
-                        .child(kinds)
-                        .child(labeled(if category { "Category name" } else { "Channel name" }, field(), &p))
-                        .into_any_element(),
-                    Some(if busy { "Making it…" } else { "Make it" }),
-                )
-            }
-            Dialog::Rules { key, server } => {
-                let name = self
-                    .core
-                    .shared
-                    .read(|s| s.instance(key).and_then(|i| i.server(server)).map(|s| s.name.clone()))
-                    .unwrap_or_default();
-                let list = match &self.rules {
-                    None => div().text_sm().text_color(p.muted_foreground).child("Getting the rules…"),
-                    Some(rules) if rules.is_empty() => {
-                        div().text_sm().text_color(p.muted_foreground).child("This server has no rules written down.")
-                    }
-                    Some(rules) => {
-                        div().flex().flex_col().gap(px(8.0)).children(rules.iter().enumerate().map(|(n, rule)| {
-                            motion::rise(
-                                div()
-                                    .flex()
-                                    .gap(px(12.0))
-                                    .p(px(12.0))
-                                    .rounded(corner(12.0))
-                                    .bg(p.secondary)
-                                    .child(
-                                        div()
-                                            .size(px(24.0))
-                                            .flex_none()
-                                            .rounded_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .bg(alpha(p.primary, 0.16))
-                                            .text_color(p.primary)
-                                            .text_xs()
-                                            .font_weight(FontWeight::EXTRA_BOLD)
-                                            .child((n + 1).to_string()),
-                                    )
-                                    .child(div().flex_1().min_w_0().text_sm().child(rule.clone())),
-                                SharedString::from(format!("rule-{n}")),
-                                Duration::from_millis(50 * n.min(10) as u64),
-                                8.0,
-                            )
-                        }))
-                    }
-                };
-                (
-                    "scroll-text",
-                    format!("{name}'s rules"),
-                    "Read them, then agree to start talking.".into(),
-                    div().id("rules").max_h(px(360.0)).overflow_y_scroll().child(list).into_any_element(),
-                    self.rules.as_ref().map(|_| if busy { "Agreeing…" } else { "I agree" }),
-                )
-            }
             Dialog::Moderate { key, server, user_id, action } => self.moderate_parts(key, server, user_id, *action, cx),
             Dialog::AllowGame { name, .. } => (
                 "gamepad-2",
@@ -380,6 +297,9 @@ impl FuwaApp {
                 Some("Allow"),
             ),
             Dialog::Profile { .. }
+            | Dialog::Invite { .. }
+            | Dialog::CreateChannel { .. }
+            | Dialog::Rules { .. }
             | Dialog::CreateServer { .. }
             | Dialog::Apply { .. }
             | Dialog::Application { .. }
@@ -398,69 +318,52 @@ impl FuwaApp {
                     ..
                 }
         );
-        let panel = card(&p)
-            .w(px(460.0))
-            .p(px(24.0))
+        use crate::ui::settings_controls::Look;
+        let tint = if danger { p.destructive } else { p.primary };
+        // The web's confirm dialogs: a small tinted tile beside the title (`size-9 rounded-xl`).
+        let title_row = div()
             .flex()
-            .flex_col()
-            .gap(px(16.0))
+            .items_center()
+            .gap(px(10.0))
             .child(
                 div()
+                    .size(px(36.0))
+                    .flex_none()
+                    .rounded(radius_xl())
                     .flex()
-                    .items_start()
-                    .gap(px(14.0))
-                    .child(
-                        div()
-                            .size(px(44.0))
-                            .flex_none()
-                            .rounded(corner(14.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(alpha(if danger { p.destructive } else { p.primary }, 0.14))
-                            .text_color(if danger { p.destructive } else { p.primary })
-                            .child(icon(glyph).size(px(22.0))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title))
-                            .child(div().text_sm().text_color(p.muted_foreground).child(body)),
-                    )
-                    .child(
-                        icon_button("dialog-close", "x", &p)
-                            .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
-                    ),
+                    .items_center()
+                    .justify_center()
+                    .bg(alpha(tint, 0.15))
+                    .text_color(tint)
+                    .child(icon(glyph).size(px(20.0))),
             )
+            .child(div().flex_1().min_w_0().child(title));
+        let panel = dialog_card(false, &p)
+            .child(dialog_header(title_row, Some(body.into_any_element()), &p))
             .child(content)
-            .when_some(error_line(self.dialog_error.as_deref(), &p), |el, e| el.child(e))
+            .when_some(error_line(self.dialog_error.as_deref(), &p), |el, e| el.child(div().mt(px(12.0)).child(e)))
             .child(
                 div()
+                    .mt(px(16.0))
                     .flex()
                     .justify_end()
-                    .gap(px(10.0))
+                    .gap(px(8.0))
                     .child(if matches!(dialog, Dialog::AllowGame { .. }) {
-                        soft_button("dialog-cancel", "Don't allow", &p)
+                        dialog_button("dialog-cancel", "Don't allow", Look::Ghost, &p)
                             .on_click(cx.listener(|this, _, _, cx| this.refuse_game(cx)))
                     } else {
-                        soft_button("dialog-cancel", "Cancel", &p)
+                        dialog_button("dialog-cancel", t("common.cancel"), Look::Ghost, &p)
                             .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
                     })
                     .when_some(action, |el, label| {
-                        let button = if danger {
-                            danger_button("dialog-ok", label, &p)
-                        } else {
-                            primary_button("dialog-ok", label, &p)
-                        }
-                        .when(busy, |el| el.opacity(0.7))
-                        .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx)));
+                        let look = if danger { Look::Destructive } else { Look::Primary };
+                        let button = dialog_button("dialog-ok", label.to_owned(), look, &p)
+                            .when(busy, |el| el.opacity(0.5))
+                            .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx)));
                         el.child(button)
                     }),
-            );
+            )
+            .child(dialog_close("dialog-close", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))));
         let tag = match &dialog {
             Dialog::CreateServer { .. } => "create",
             Dialog::JoinInvite { .. } => "join",
@@ -482,21 +385,7 @@ impl FuwaApp {
             Dialog::Apply { .. } => "apply",
             Dialog::Application { .. } => "application",
         };
-        Some(
-            motion::fade_in(
-                scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                    motion::rise(
-                        div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                        SharedString::from(format!("dialog-{tag}")),
-                        Duration::ZERO,
-                        24.0,
-                    ),
-                ),
-                SharedString::from(format!("dialog-fade-{tag}")),
-                Duration::from_millis(180),
-            )
-            .into_any_element(),
-        )
+        Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx))))
     }
 
     /// Someone's card: a band in their color, their picture over it, their
@@ -693,162 +582,53 @@ impl FuwaApp {
         .into_any_element()
     }
 
-    /// A server's welcome screen: its icon and name, a few words, and the
-    /// channels it suggests, each a card that rises after the one before.
-    fn render_welcome(
-        &mut self,
-        key: &str,
-        server_id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let p = pal(cx);
-        let (server, channels, look) = self.core.shared.read(|s| {
-            let i = s.instance(key);
-            (
-                i.and_then(|i| i.server(server_id)).cloned(),
-                i.and_then(|i| i.channels.get(server_id)).cloned().unwrap_or_default(),
-                i.map(|i| crate::ui::mentions::Look::of(i, server_id)).unwrap_or_default(),
-            )
-        });
-        let Some(server) = server else { return div().into_any_element() };
-        let tint = crate::ui::banner::accent(&server);
-        let mut body = div().flex().flex_col().gap(px(12.0));
-        match &self.welcome {
-            None => {
-                body = body.child(
-                    div()
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .child(self.dialog_error.clone().unwrap_or_else(|| "Getting the welcome screen…".into())),
-                )
-            }
-            Some(screen) => {
-                if !screen.description.trim().is_empty() {
-                    let shown = crate::ui::mentions::mention_links(
-                        &crate::ui::text::images_as_links(&screen.description),
-                        &look,
-                    );
-                    body = body.child(motion::rise(
-                        div().w_full().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                            crate::ui::text::markdown("welcome-description", shown)
-                                .markdown_extensions(crate::ui::emoji::markdown_extensions()),
-                        ),
-                        "welcome-description",
-                        Duration::from_millis(80),
-                        8.0,
-                    ));
-                }
-                let suggested: Vec<_> = screen
-                    .channels
-                    .iter()
-                    .filter_map(|w| channels.iter().find(|c| c.id == w.channel_id).map(|c| (w.clone(), c.clone())))
-                    .collect();
-                if !suggested.is_empty() {
-                    let mut list = div().w_full().flex().flex_col().gap(px(8.0)).child(section_title("START HERE", &p));
-                    for (n, (w, channel)) in suggested.into_iter().enumerate() {
-                        let hover = gpui_kit::Hsla { a: 0.08, ..tint };
-                        let border = tint;
-                        let (k, sid, cid) = (key.to_owned(), server_id.to_owned(), channel.id.clone());
-                        let lead = emoji_tile(&w.emoji, &look, tint, "hash");
-                        list = list.child(motion::rise(
-                            div()
-                                .id(SharedString::from(format!("welcome-{}", channel.id)))
-                                .flex()
-                                .items_center()
-                                .gap(px(12.0))
-                                .p(px(12.0))
-                                .rounded(corner(14.0))
-                                .border_1()
-                                .border_color(p.border)
-                                .bg(p.secondary)
-                                .cursor_pointer()
-                                .hover(move |s| s.bg(hover).border_color(border))
-                                .active(|s| s.top(px(1.0)))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.dialog = None;
-                                    this.open_channel(&k, &sid, &cid, window, cx);
-                                }))
-                                .child(lead)
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .flex_col()
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_sm()
-                                                .child(format!("#{}", channel.name)),
-                                        )
-                                        .when(!w.description.is_empty(), |el| {
-                                            el.child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(p.muted_foreground)
-                                                    .child(w.description.clone()),
-                                            )
-                                        }),
-                                )
-                                .child(icon("arrow-right").size(px(16.0)).text_color(p.muted_foreground)),
-                            SharedString::from(format!("welcome-in-{n}")),
-                            Duration::from_millis(160 + 70 * n as u64),
-                            14.0,
-                        ));
-                    }
-                    body = body.child(list);
-                }
-            }
-        }
-        body = body.child(
-            div().flex().justify_center().child(
-                div()
-                    .id("welcome-skip")
-                    .mt(px(4.0))
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.muted_foreground)
-                    .cursor_pointer()
-                    .hover({
-                        let fg = p.foreground;
-                        move |s| s.text_color(fg)
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-                    .child("I'll look around myself"),
-            ),
-        );
-        const WIDTH: f32 = 480.0;
-        let hero = crate::ui::banner::banner_hero(&server, "Welcome to 👋", WIDTH, &p, window, cx);
-        let panel = card(&p).w(px(WIDTH)).overflow_hidden().child(hero).child(
-            div()
-                .id("welcome-body")
-                .max_h(px(460.0))
-                .overflow_y_scroll()
-                .px(px(24.0))
-                .pt(px(12.0))
-                .pb(px(22.0))
-                .child(body),
-        );
-        motion::fade_in(
-            scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                motion::rise(
-                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                    "dialog-welcome",
-                    Duration::ZERO,
-                    24.0,
-                ),
-            ),
-            "dialog-fade-welcome",
-            Duration::from_millis(160),
-        )
-        .into_any_element()
-    }
-
     pub(crate) fn render_toasts(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let mut stack = div().absolute().right(px(20.0)).bottom(px(100.0)).flex().flex_col().gap(px(10.0)).w(px(340.0));
-        for toast in &self.toasts {
+        // The web's toasts: a note in a pill, over the middle of the window's foot
+        // (`bottom-28`), the last three; they spring up and drop away.
+        let mut notes = div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(px(112.0))
+            .px(px(16.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(8.0));
+        let plain: Vec<_> = self.toasts.iter().filter(|t| t.open.is_none()).collect();
+        for toast in plain.iter().skip(plain.len().saturating_sub(3)) {
+            let text = if toast.body.is_empty() { toast.title.clone() } else { format!("{} {}", toast.title, toast.body) };
+            let pill = div()
+                .rounded_full()
+                .bg(p.foreground)
+                .px(px(16.0))
+                .py(px(8.0))
+                .text_sm()
+                .line_height(px(20.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.background)
+                .shadow(crate::ui::settings_controls::shadow_xl())
+                .child(text);
+            let id = toast.id;
+            let el: AnyElement = if toast.leaving {
+                use gpui_kit::{Animation, AnimationExt as _};
+                div()
+                    .child(pill)
+                    .with_animation(
+                        SharedString::from(format!("note-out-{id}")),
+                        Animation::new(Duration::from_millis(150)),
+                        |el, t| el.opacity(1.0 - t).relative().top(px(8.0 * t)),
+                    )
+                    .into_any_element()
+            } else {
+                motion::rise(div().child(pill), SharedString::from(format!("note-in-{id}")), Duration::ZERO, 24.0)
+                    .into_any_element()
+            };
+            notes = notes.child(el);
+        }
+        for toast in self.toasts.iter().filter(|t| t.open.is_some()) {
             let id = toast.id;
             let open = toast.open.clone();
             let channel = toast.channel.clone();
@@ -906,7 +686,7 @@ impl FuwaApp {
             };
             stack = stack.child(el);
         }
-        stack
+        div().absolute().inset_0().child(notes).child(stack)
     }
 }
 
@@ -973,5 +753,31 @@ pub(crate) fn emoji_tile(
             base.text_size(px(20.0)).child(emoji.to_owned()).into_any_element()
         }
         None => base.child(icon(fallback).size(px(18.0))).into_any_element(),
+    }
+}
+
+/// The web's tooltip (`TooltipContent`): `bg-primary text-primary-foreground
+/// rounded-md px-3 py-1.5 text-xs`, no border or shadow. Use it in place of
+/// the kit's `Tooltip::new(...)`, which draws a popover card.
+pub struct Tip(SharedString);
+
+impl Tip {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        Self(text.into())
+    }
+
+    pub fn build(self, window: &mut Window, cx: &mut gpui_kit::App) -> gpui_kit::AnyView {
+        let p = pal(cx);
+        gpui_kit::component::tooltip::Tooltip::new(self.0)
+            .bg(p.primary)
+            .text_color(p.primary_foreground)
+            .border_color(gpui_kit::transparent_black())
+            .shadow(Vec::new())
+            .rounded(crate::ui::theme::radius_md())
+            .px(px(12.0))
+            .py(px(6.0))
+            .text_xs()
+            .line_height(px(16.0))
+            .build(window, cx)
     }
 }

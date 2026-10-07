@@ -614,7 +614,7 @@ impl FuwaApp {
                 .text_color(if on { p.primary } else { p.muted_foreground })
                 .when(on, |el| el.bg(alpha(p.primary, 0.1)))
                 .hover(move |s| s.bg(hover))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
                 .child(icon(glyph).size(px(16.0)))
         };
         let where_key = match (archived, locked) {
@@ -940,8 +940,7 @@ impl FuwaApp {
                     .text_color(p.muted_foreground)
                     .hover(move |s| s.bg(hover))
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chat.threads.closeList"))
-                            .build(window, cx)
+                        crate::ui::overlay::Tip::new(crate::core::i18n::t("chat.threads.closeList")).build(window, cx)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.threads.listing = None;

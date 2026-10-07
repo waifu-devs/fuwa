@@ -784,9 +784,7 @@ impl FuwaApp {
             .child(
                 icon_button("command-cancel", "x", p)
                     .size(px(28.0))
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Back to typing (Escape)").build(window, cx)
-                    })
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new("Back to typing (Escape)").build(window, cx))
                     .on_click(cx.listener(|this, _, window, cx| this.cancel_command(window, cx))),
             );
         let mut fields = div().flex().flex_wrap().gap(px(8.0));

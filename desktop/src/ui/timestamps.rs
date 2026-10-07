@@ -140,7 +140,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
                     let (bg, fg) = (alpha(p.primary, 0.15), p.primary);
                     move |s| s.bg(bg).text_color(fg)
                 })
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(full.clone()).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(full.clone()).build(window, cx))
                 .child(timestamps::format_clock(time.seconds, time.style, now_ms(), crate::ui::text::twelve_hours())),
         ))
     }
@@ -206,9 +206,7 @@ impl FuwaApp {
     pub(crate) fn timestamp_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.time_picker.is_some();
         crate::ui::widgets::tool_button("time-open", "calendar-clock", open, p)
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("chattools.timestamp.insert")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.insert")).build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.time_picker.is_some() {
                     this.close_time_picker(window, cx);
@@ -462,9 +460,7 @@ impl FuwaApp {
                     .font_family("monospace")
                     .text_xs()
                     .text_color(p.muted_foreground)
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("chattools.timestamp.sent")).build(window, cx)
-                    })
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.sent")).build(window, cx))
                     .child(picked.map(|s| timestamps::token(s, chosen)).unwrap_or_else(|| " ".into())),
             )
             .child(

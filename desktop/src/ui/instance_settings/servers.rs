@@ -649,7 +649,7 @@ impl InstanceSettingsView {
                     .min_w_0()
                     .flex()
                     .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(format!(
+                        crate::ui::overlay::Tip::new(format!(
                             "{} avatars, banners and icons",
                             count_label(Some(pictures))
                         ))

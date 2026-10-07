@@ -205,7 +205,7 @@ pub(crate) fn tool(
         .text_color(p.muted_foreground)
         .hover(move |s| s.bg(bg).text_color(fg))
         .active(|s| s.opacity(0.8))
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
         .child(icon(glyph).size(px(16.0)))
 }
 

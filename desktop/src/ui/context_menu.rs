@@ -18,8 +18,8 @@ use gpui_kit::{
 use crate::ui::app::FuwaApp;
 use crate::ui::chat::Msg;
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, pal};
+use crate::ui::theme::{Palette, alpha, radius_sm, radius_xl};
+use crate::ui::widgets::{icon, pal};
 
 /// What an item does, given the app.
 pub(crate) type Run = Rc<dyn Fn(&mut FuwaApp, &mut Window, &mut Context<FuwaApp>)>;
@@ -116,6 +116,8 @@ pub(crate) enum Kind {
     /// Shows whether it's on; a role stays open to pick another.
     Check {
         on: bool,
+        /// One of a set; drawn with a tick all the same, as the web's menus draw them.
+        #[allow(dead_code)]
         radio: bool,
         keep_open: bool,
         run: Run,
@@ -237,7 +239,10 @@ pub(crate) struct ContextMenu {
 const ROW: f32 = 32.0;
 const LINE: f32 = 9.0;
 const PAD: f32 = 6.0;
-const WIDTH: f32 = 236.0;
+/// `w-60`.
+const WIDTH: f32 = 240.0;
+/// A submenu's `w-56`.
+const SUB_WIDTH: f32 = 224.0;
 
 /// Where an item sits from the top of its card.
 fn top_of(lines: &[bool], ix: usize) -> f32 {
@@ -493,10 +498,26 @@ impl FuwaApp {
             return None;
         }
         let id = format!("{opened:?}");
-        let body = match asking.and_then(|ix| built.items.get(ix).map(|i| (ix, i))) {
-            Some((ix, item)) => self.asking_body(ix, item, &id, &p, cx),
-            None => self.items_body(&built, active, sub, &id, at, window, &p, cx),
-        };
+        // What can't be undone asks first, in a dialog of its own, as the web's menus do.
+        if let Some((ix, item)) = asking.and_then(|ix| built.items.get(ix).map(|i| (ix, i))) {
+            let (title, body, action) = item.confirm.clone().unwrap_or_default();
+            let panel = self.confirm_panel(
+                title,
+                body,
+                action,
+                &p,
+                cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
+                cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
+                cx.listener(move |this, _, window, cx| this.pick_item(ix, None, true, window, cx)),
+            );
+            return Some(crate::ui::overlay::dialog_layer(
+                &format!("confirm-{id}"),
+                panel,
+                &p,
+                cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
+            ));
+        }
+        let body = self.items_body(&built, active, sub, &id, at, window, &p, cx);
         let layer = div()
             .id("context-away")
             .absolute()
@@ -507,17 +528,17 @@ impl FuwaApp {
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)))
             .on_scroll_wheel(cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)))
             .child(
-                gpui_kit::anchored().position(at).snap_to_window_with_margin(gpui_kit::Edges::all(px(8.0))).child(
-                    div()
-                        .id("context-menu")
-                        .occlude()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                        .child(pop(
-                            card(&p).rounded(corner(14.0)).child(body),
-                            SharedString::from(format!("ctx|{id}")),
-                        )),
-                ),
+                gpui_kit::anchored()
+                    .position(at + gpui_kit::point(px(0.0), px(2.0)))
+                    .snap_to_window_with_margin(gpui_kit::Edges::all(px(8.0)))
+                    .child(
+                        div()
+                            .id("context-menu")
+                            .occlude()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                            .child(pop(menu_card(&p).child(body), SharedString::from(format!("ctx|{id}")))),
+                    ),
             );
         Some(layer.into_any_element())
     }
@@ -535,7 +556,7 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let lit = active.or(sub.map(|(ix, _)| ix));
-        let mut list = div().relative().w(px(WIDTH)).py(px(PAD)).px(px(PAD)).flex().flex_col();
+        let mut list = div().relative().w(px(WIDTH - 2.0)).py(px(PAD)).px(px(PAD)).flex().flex_col();
         // The highlight glides from item to item.
         if let Some(ix) = lit {
             let y = motion::follow(SharedString::from(format!("ctx-hl|{id}")), top_of(&built.lines, ix), window, cx);
@@ -547,8 +568,8 @@ impl FuwaApp {
                     .right(px(PAD))
                     .top(px(y))
                     .h(px(ROW))
-                    .rounded(corner(8.0))
-                    .bg(if danger { alpha(p.destructive, 0.14) } else { alpha(p.primary, 0.12) }),
+                    .rounded(radius_sm())
+                    .bg(if danger { alpha(p.destructive, 0.1) } else { p.accent.into() }),
             );
         }
         for (ix, item) in built.items.iter().enumerate() {
@@ -556,9 +577,9 @@ impl FuwaApp {
                 list = list.child(div().h(px(1.0)).my(px(4.0)).mx(px(4.0)).bg(p.border));
             }
             let is_sub = matches!(item.kind, Kind::Sub(_));
-            let row = row(item, lit == Some(ix), p).id(SharedString::from(format!("ctx-item|{ix}"))).when(
-                item.enabled(),
-                |el| {
+            let open = sub.is_some_and(|(o, _)| o == ix);
+            let row =
+                row(item, false, open, p).id(SharedString::from(format!("ctx-item|{ix}"))).when(item.enabled(), |el| {
                     el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = &mut this.context
                             && *hovered
@@ -575,8 +596,7 @@ impl FuwaApp {
                         }
                     }))
                     .on_click(cx.listener(move |this, _, window, cx| this.pick_item(ix, None, false, window, cx)))
-                },
-            );
+                });
             // Items enter one after another, the first ten.
             let delay = Duration::from_millis(12 * ix.min(10) as u64);
             list =
@@ -587,32 +607,37 @@ impl FuwaApp {
             && let Some(Kind::Sub(items)) = built.items.get(ix).map(|i| &i.kind)
         {
             let room = f32::from(window.viewport_size().width) - f32::from(at.x) - WIDTH;
-            let left = room > WIDTH + 8.0;
-            let mut col = div().w(px(WIDTH)).py(px(PAD)).px(px(PAD)).flex().flex_col();
+            let left = room > SUB_WIDTH + 12.0;
+            let mut col = div()
+                .id("ctx-sub-list")
+                .w(px(SUB_WIDTH - 2.0))
+                .max_h(px(384.0))
+                .overflow_y_scroll()
+                .py(px(PAD))
+                .px(px(PAD))
+                .flex()
+                .flex_col();
             for (n, item) in items.iter().enumerate() {
                 let on = sub_active == Some(n);
-                col = col.child(
-                    row(item, on, p)
-                        .id(SharedString::from(format!("ctx-sub|{ix}|{n}")))
-                        .when(on, |el| {
-                            el.bg(if item.danger { alpha(p.destructive, 0.14) } else { alpha(p.primary, 0.12) })
-                        })
-                        .when(item.enabled(), |el| {
-                            el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                                if let Some(menu) = &mut this.context
-                                    && *hovered
-                                {
-                                    menu.sub = Some((ix, Some(n)));
-                                    cx.notify();
-                                }
-                            }))
-                            .on_click(
-                                cx.listener(move |this, _, window, cx| this.pick_item(ix, Some(n), false, window, cx)),
-                            )
-                        }),
-                );
+                col = col.child(row(item, on, false, p).id(SharedString::from(format!("ctx-sub|{ix}|{n}"))).when(
+                    item.enabled(),
+                    |el| {
+                        el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if let Some(menu) = &mut this.context
+                                && *hovered
+                            {
+                                menu.sub = Some((ix, Some(n)));
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| this.pick_item(ix, Some(n), false, window, cx)),
+                        )
+                    },
+                ));
             }
-            let top = top_of(&built.lines, ix) - PAD;
+            // Level with its item: the card's border where the item's highlight starts.
+            let top = top_of(&built.lines, ix) - 1.0;
             list = list.child(
                 div()
                     .absolute()
@@ -621,10 +646,10 @@ impl FuwaApp {
                     // Outside the menu's own box: its clicks mustn't reach the layer that closes it.
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                    .when(left, |el| el.left(px(WIDTH - 2.0)))
-                    .when(!left, |el| el.right(px(WIDTH - 2.0)))
+                    .when(left, |el| el.left(px(WIDTH + 3.0)))
+                    .when(!left, |el| el.right(px(WIDTH + 3.0)))
                     .child(motion::slide_in(
-                        card(p).rounded(corner(14.0)).child(col),
+                        menu_card(p).child(col),
                         SharedString::from(format!("ctx-sub-in|{id}|{ix}")),
                         if left { -8.0 } else { 8.0 },
                     )),
@@ -632,126 +657,84 @@ impl FuwaApp {
         }
         list.into_any_element()
     }
-
-    /// Asking before something that can't be undone.
-    fn asking_body(&self, ix: usize, item: &Item, id: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let (title, body, action) = item.confirm.clone().unwrap_or_default();
-        let button = |name: &'static str, label: String, bg: Hsla, fg: Hsla| {
-            div()
-                .id(name)
-                .flex_1()
-                .h(px(32.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(corner(10.0))
-                .bg(bg)
-                .text_color(fg)
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.88))
-                .active(|s| s.top(px(1.0)))
-                .child(label)
-        };
-        motion::slide_in(
-            div()
-                .w(px(WIDTH + 24.0))
-                .p(px(14.0))
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .text_color(p.destructive)
-                        .child(icon(item.icon).size(px(16.0)))
-                        .child(div().font_weight(FontWeight::EXTRA_BOLD).text_color(p.foreground).child(title)),
-                )
-                .child(div().text_sm().text_color(p.muted_foreground).child(body))
-                .child(
-                    div()
-                        .mt(px(6.0))
-                        .flex()
-                        .gap(px(8.0))
-                        .child(
-                            button("ctx-cancel", "Cancel".into(), alpha(p.foreground, 0.08), p.foreground.into())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(menu) = &mut this.context {
-                                        menu.asking = None;
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(button("ctx-confirm", action, p.destructive.into(), gpui_kit::white()).on_click(
-                            cx.listener(move |this, _, window, cx| this.pick_item(ix, None, true, window, cx)),
-                        )),
-                ),
-            SharedString::from(format!("ctx-ask|{id}")),
-            8.0,
-        )
-        .into_any_element()
-    }
 }
 
-/// An item's line: its icon (or tick), label, hint and arrow.
-fn row(item: &Item, lit: bool, p: &Palette) -> gpui_kit::Div {
+/// An item's line, as the web's dropdown items draw it (`px-2 py-1.5 gap-2
+/// text-sm`, a 16px icon in the muted color): checkbox items keep the icon's
+/// place for their tick (`pl-8`), and a lit item sits on the accent.
+fn row(item: &Item, lit: bool, open: bool, p: &Palette) -> gpui_kit::Div {
     let fg: Hsla = if item.danger { p.destructive.into() } else { p.foreground.into() };
-    let glyph: AnyElement = match &item.kind {
-        Kind::Check { on, radio: true, .. } => icon(if *on { "circle-dot" } else { "circle" })
-            .size(px(15.0))
-            .text_color(if *on { p.primary } else { p.muted_foreground })
-            .into_any_element(),
-        Kind::Check { on, .. } => match item.color {
-            Some(color) => div()
-                .size(px(12.0))
-                .m(px(2.0))
-                .rounded_full()
-                .bg(color)
-                .when(!*on, |el| el.opacity(0.35))
-                .into_any_element(),
-            None => icon(if *on { "square-check" } else { "square" })
-                .size(px(15.0))
-                .text_color(if *on { p.primary } else { p.muted_foreground })
-                .into_any_element(),
-        },
-        _ => icon(item.icon)
+    let check = matches!(item.kind, Kind::Check { .. });
+    let on = matches!(item.kind, Kind::Check { on: true, .. });
+    let glyph: AnyElement = if check {
+        // The tick sits where the icon would be (`left-2 size-3.5`).
+        div()
             .size(px(16.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(on, |el| el.child(icon("check").size(px(16.0)).text_color(p.foreground)))
+            .into_any_element()
+    } else if item.icon.is_empty() {
+        div().size(px(16.0)).flex_none().into_any_element()
+    } else {
+        icon(item.icon)
+            .size(px(16.0))
+            .flex_none()
             .text_color(if item.danger { fg } else { p.muted_foreground.into() })
-            .into_any_element(),
+            .into_any_element()
     };
-    let checked = matches!(item.kind, Kind::Check { on: true, .. });
     div()
         .relative()
         .h(px(ROW))
-        .px(px(10.0))
+        .px(px(8.0))
         .flex()
         .items_center()
-        .gap(px(10.0))
-        .rounded(corner(8.0))
+        .gap(px(8.0))
+        .rounded(radius_sm())
         .text_sm()
         .text_color(fg)
-        .when(lit && !item.danger, |el| el.text_color(p.primary))
-        .when(item.disabled, |el| el.opacity(0.45))
-        .when(item.enabled(), |el| el.cursor_pointer())
-        .child(div().w(px(16.0)).flex().justify_center().child(glyph))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .when(checked, |el| el.font_weight(FontWeight::BOLD))
-                .when_some(item.color.filter(|_| matches!(item.kind, Kind::Check { .. })), |el, c| el.text_color(c))
-                .child(item.label.clone()),
-        )
+        .when(item.danger, |el| el.font_weight(FontWeight::BOLD))
+        .when(lit, |el| el.bg(if item.danger { alpha(p.destructive, 0.1) } else { p.accent.into() }))
+        .when(item.disabled, |el| el.opacity(0.5))
+        .child(glyph)
+        .when_some(item.color.filter(|_| check), |el, c| {
+            el.child(div().size(px(10.0)).flex_none().rounded_full().bg(c))
+        })
+        .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
         .when_some(item.hint.clone(), |el, hint| {
-            el.child(div().flex_none().max_w(px(96.0)).truncate().text_xs().text_color(p.muted_foreground).child(hint))
+            el.child(
+                div()
+                    .flex_none()
+                    .max_w(px(108.0))
+                    .pl(px(8.0))
+                    .truncate()
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(hint),
+            )
         })
         .when(matches!(item.kind, Kind::Sub(_)), |el| {
-            el.child(icon("chevron-right").size(px(14.0)).text_color(p.muted_foreground))
+            // The web's chevron turns down while its submenu is open.
+            el.child(
+                icon(if open { "chevron-down" } else { "chevron-right" })
+                    .size(px(16.0))
+                    .flex_none()
+                    .text_color(p.muted_foreground),
+            )
         })
+}
+
+/// The web's menu card: the popover color, a border, `rounded-xl` and `shadow-xl`.
+fn menu_card(p: &Palette) -> gpui_kit::Div {
+    div()
+        .bg(p.card)
+        .text_color(p.foreground)
+        .border_1()
+        .border_color(p.border)
+        .rounded(radius_xl())
+        .shadow(crate::ui::settings_controls::shadow_xl())
 }
 
 /// The menu springs open from a little smaller, as it fades in.
@@ -762,11 +745,9 @@ fn pop<E: IntoElement + gpui_kit::Styled + 'static>(el: E, id: SharedString) -> 
 /// Copies text, saying what was copied (never the text: in streamer mode it may be private).
 pub(crate) fn copy(this: &mut FuwaApp, text: String, what: &str, cx: &mut Context<FuwaApp>) {
     cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
-    let mut what = what.to_owned();
-    if let Some(first) = what.get(..1) {
-        what = first.to_uppercase() + &what[1..];
-    }
-    this.toast("copy", format!("{what} copied"), String::new(), None, None, cx);
+    // The web's note: "Copied text", "Copied link"…
+    let note = crate::core::i18n::t_with("common.copied", &[("what", crate::core::i18n::Arg::Str(what))]);
+    this.toast("copy", note, String::new(), None, None, cx);
 }
 
 /// What right-clicking opens, for elements drawn outside the app's own

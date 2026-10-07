@@ -652,9 +652,7 @@ impl ServerSettingsView {
                     .border_color(if on { p.foreground.into() } else { Hsla::transparent_black() })
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.85))
-                    .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
-                    })
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(name.clone()).build(window, cx))
                     .when(on, |el| {
                         el.child(
                             div()

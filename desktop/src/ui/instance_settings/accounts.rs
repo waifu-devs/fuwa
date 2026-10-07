@@ -581,7 +581,7 @@ impl InstanceSettingsView {
                     Some(c) => icon_button_in(SharedString::from(format!("account-{glyph}-{id}")), glyph, p, c),
                     None => icon_button(SharedString::from(format!("account-{glyph}-{id}")), glyph, p),
                 };
-                el.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx))
+                el.tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip).build(window, cx))
             };
             if !a.admin && !a.disabled && !agent {
                 let (acc, n) = (a.clone(), name.clone());

@@ -16,13 +16,14 @@ use gpui_kit::{
 use crate::core::onboarding::{self, GoHere, PICK, RULES, SAY_HELLO};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp};
-use crate::ui::banner::{accent, banner_hero, on_accent};
+use crate::ui::banner::{accent, on_accent};
 use crate::ui::motion;
-use crate::ui::overlay::{emoji_tile, scrim, section_title};
+use crate::ui::overlay::{emoji_tile, section_title};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, pal};
+use crate::ui::widgets::{icon, pal};
 
-const WIDTH: f32 = 540.0;
+/// The web's wide dialog (`max-w-2xl`).
+const WIDTH: f32 = 672.0;
 
 /// One run through a server's onboarding.
 pub struct Flow {
@@ -406,25 +407,28 @@ impl FuwaApp {
 
         // The banner and the buttons always show; the step scrolls in what's left.
         let room = (f32::from(window.viewport_size().height) - 460.0).max(160.0);
-        let panel = card(&p)
+        // The dialog frame every web dialog has (`rounded-3xl border bg-card shadow-2xl`).
+        let hero = crate::ui::join::banner_hero_wide(
+            &server,
+            &eyebrow,
+            Some(icon("sparkles").size(px(14.0)).into_any_element()),
+            WIDTH - 2.0,
+            &p,
+            window,
+            cx,
+        );
+        let panel = div()
             .w(px(WIDTH))
-            .overflow_hidden()
-            .child(banner_hero(&server, &eyebrow, WIDTH, &p, window, cx))
+            .rounded(crate::ui::theme::radius_3xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .text_color(p.foreground)
+            .shadow(crate::ui::overlay::shadow_2xl())
+            .child(hero)
             .child(div().id("onb-body").max_h(px(room)).overflow_y_scroll().child(body))
             .child(foot);
-        Some(
-            motion::fade_in(
-                scrim("dialog-scrim", &p).child(motion::rise(
-                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                    "onboarding",
-                    Duration::ZERO,
-                    24.0,
-                )),
-                "dialog-fade-onboarding",
-                Duration::from_millis(160),
-            )
-            .into_any_element(),
-        )
+        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}))
     }
 
     fn pick_cards(

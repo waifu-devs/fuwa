@@ -55,15 +55,6 @@ pub fn name_hint(kind: pb::ChannelType) -> &'static str {
     }
 }
 
-/// The kinds of channel someone can make, with what each is for.
-pub const KINDS: [(pb::ChannelType, &str, &str, &str); 5] = [
-    (pb::ChannelType::Text, "hash", "Text", "Messages, links, Markdown"),
-    (pb::ChannelType::Announcement, "megaphone", "Announcements", "News people follow"),
-    (pb::ChannelType::Secure, "shield-check", "Secure", "End-to-end encrypted: not even the server can read it"),
-    (pb::ChannelType::Voice, "volume-2", "Voice", "Talk, hang out, play together"),
-    (pb::ChannelType::Category, "folder", "Category", "Groups channels"),
-];
-
 /// What the top of a secure channel says about it.
 pub fn beginning(shares_history: bool) -> String {
     format!(
@@ -339,7 +330,7 @@ impl FuwaApp {
                     .hover(move |s| s.bg(alpha(green, 0.22)))
                     .active(|s| s.top(px(1.0)))
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("See who can read this channel").build(window, cx)
+                        crate::ui::overlay::Tip::new("See who can read this channel").build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx)))
                     .child(icon("lock-keyhole").size(px(14.0)))

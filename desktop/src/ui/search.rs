@@ -17,6 +17,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, StyledText, Window, div, px,
 };
 
+use crate::core::i18n::t;
 use crate::core::keybinds;
 use crate::core::search::{self, FilterKey};
 use crate::core::store::user_name;
@@ -25,8 +26,8 @@ use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::keys::fuzzy;
 use crate::ui::motion;
 use crate::ui::text::{ms_of, when};
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, card, icon, icon_button, pal};
+use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon, icon_button, pal};
 
 /// The search field and its suggestions, and the results panel while it's open.
 pub struct Search {
@@ -638,10 +639,12 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .justify_between()
+                    // A group's `py-1`, and its title's `px-2 pb-1 text-[0.7rem]`.
                     .px(px(8.0))
-                    .pt(px(6.0))
+                    .pt(px(4.0))
                     .pb(px(4.0))
-                    .text_xs()
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
                     .child(group.title.to_uppercase())
@@ -653,7 +656,7 @@ impl FuwaApp {
                                 .rounded(corner(4.0))
                                 .cursor_pointer()
                                 .hover(|s| s.text_color(p.foreground))
-                                .child("Clear")
+                                .child(t("chattools.search.clearRecent"))
                                 .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let place = clear_place.clone();
@@ -683,13 +686,16 @@ impl FuwaApp {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
+                        .group("suggestion")
                         .px(px(8.0))
                         .py(px(6.0))
-                        .rounded(corner(12.0))
+                        .rounded(radius_xl())
                         .text_sm()
+                        .line_height(px(20.0))
                         .cursor_pointer()
+                        .text_color(if lit { p.foreground.into() } else { alpha(p.foreground, 0.9) })
                         .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
-                        .hover(|s| s.bg(alpha(p.primary, 0.08)))
+                        .when(!lit, |el| el.hover(|s| s.bg(alpha(p.primary, 0.08))))
                         // Picking with the mouse mustn't take focus from the field first.
                         .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                         .on_click(
@@ -708,7 +714,7 @@ impl FuwaApp {
                                     div()
                                         .flex_none()
                                         .max_w(px(180.0))
-                                        .font_weight(FontWeight::BOLD)
+                                        .when(item.open || item.user.is_some(), |el| el.font_weight(FontWeight::BOLD))
                                         .truncate()
                                         .child(item.label.clone()),
                                 )
@@ -726,8 +732,11 @@ impl FuwaApp {
                         })
                         .when_some(forget, |el, query| {
                             el.child(
+                                // Shown on hover only, as the web's.
                                 icon_button(SharedString::from(format!("forget|{query}")), "x", &p)
-                                    .size(px(22.0))
+                                    .size(px(24.0))
+                                    .invisible()
+                                    .group_hover("suggestion", |s| s.visible())
                                     .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -740,10 +749,20 @@ impl FuwaApp {
                         }),
                 );
             }
+            list = list.child(div().h(px(4.0)).flex_none());
         }
         // Drawn after the messages below it, so it sits over them.
-        gpui_kit::deferred(div().absolute().top(px(40.0)).right(px(0.0)).w(px(320.0)).child(motion::rise(
-            card(&p).p(px(0.0)).shadow_lg().occlude().child(list),
+        gpui_kit::deferred(div().absolute().top(px(45.0)).right(px(0.0)).w(px(320.0)).child(motion::rise(
+            // `rounded-2xl border bg-popover shadow-xl`.
+            div()
+                .rounded(radius_2xl())
+                .border_1()
+                .border_color(p.border)
+                .bg(p.card)
+                .text_color(p.foreground)
+                .shadow(crate::ui::settings_controls::shadow_xl())
+                .occlude()
+                .child(list),
             "search-suggestions-in",
             Duration::ZERO,
             -6.0,
@@ -770,7 +789,7 @@ impl FuwaApp {
         let run = self.search.run;
 
         let heading: AnyElement = if panel.loading && !panel.more {
-            div().text_color(p.muted_foreground).child("Searching…").into_any_element()
+            div().text_color(p.muted_foreground).child(t("chattools.search.searching")).into_any_element()
         } else if panel.error.is_some() || panel.request.is_none() {
             div().child("Search").into_any_element()
         } else {
@@ -792,15 +811,37 @@ impl FuwaApp {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .px(px(14.0))
-            .h(px(56.0))
+            .px(px(12.0))
+            .py(px(10.0))
             .border_b_1()
             .border_color(p.border)
-            .child(div().flex_1().min_w_0().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(heading))
             .child(
-                icon_button("search-close", "x", &p)
-                    .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx))),
-            );
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_base()
+                    .line_height(px(24.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child(heading),
+            )
+            .child({
+                // `size-8 rounded-full`, muted until hovered.
+                let (bg, fg) = (p.muted, p.foreground);
+                div()
+                    .id("search-close")
+                    .size(px(32.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .text_color(p.muted_foreground)
+                    .hover(move |s| s.bg(bg).text_color(fg))
+                    .active(|s| s.opacity(0.8))
+                    .child(icon("x").size(px(16.0)))
+                    .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx)))
+            });
 
         let mut body = div()
             .id("search-results")
@@ -838,12 +879,17 @@ impl FuwaApp {
         if panel.loading && !panel.more {
             body = body.child(skeleton(5, &p));
         } else if let Some(error) = &panel.error {
-            body = body.child(empty("search-x", "Couldn't search", error, &p));
+            body = body.child(empty("search-x", &t("chattools.search.failed"), error, &p));
         } else if panel.results.is_empty() && panel.request.is_some() {
             body = body.child(if panel.cursor.is_empty() {
-                empty("search-x", "Nothing found", "Try other words, or fewer filters.", &p)
+                empty("search-x", &t("chattools.search.nothingFound"), &t("chattools.search.tryOther"), &p)
             } else {
-                empty("search-x", "Nothing in the newest messages", "Older ones haven't been searched yet.", &p)
+                empty(
+                    "search-x",
+                    &t("chattools.search.nothingNewest"),
+                    &t("chattools.search.olderNotSearched"),
+                    &p,
+                )
             });
         }
         if !(panel.loading && !panel.more) && panel.error.is_none() {
@@ -890,7 +936,7 @@ impl FuwaApp {
                             .text_color(p.muted_foreground)
                             .cursor_pointer()
                             .hover(|s| s.bg(alpha(p.primary, 0.1)).text_color(p.primary))
-                            .child("Look further back")
+                            .child(t("chattools.search.further"))
                             .on_click(cx.listener(|this, _, _, cx| this.more_results(cx))),
                     ),
                 );
@@ -900,14 +946,15 @@ impl FuwaApp {
         Some(
             motion::slide_in(
                 div()
-                    .w(px(400.0))
+                    // `surface-side w-[24rem] border-l`.
+                    .w(px(384.0))
                     .h_full()
                     .flex_none()
                     .flex()
                     .flex_col()
                     .border_l_1()
                     .border_color(p.border)
-                    .bg(p.background)
+                    .bg(p.side_surface)
                     .child(header)
                     .child(body),
                 "search-panel-in",
@@ -951,8 +998,8 @@ impl FuwaApp {
         let stamp = when(ms_of(message.created_at.as_ref()));
         let (text, hits) = readable(&message.content, &search::byte_ranges(&message.content, &result.highlights), look);
         let lit = HighlightStyle {
-            background_color: Some(alpha(p.primary, 0.28)),
-            font_weight: Some(FontWeight::BOLD),
+            // `mark.search-hit`: the primary at 26%, the text as it was.
+            background_color: Some(alpha(p.primary, 0.26)),
             ..Default::default()
         };
         let open = message.clone();
@@ -981,19 +1028,33 @@ impl FuwaApp {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
                     .child(
                         div()
                             .flex()
                             .items_baseline()
                             .gap(px(8.0))
-                            .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).truncate().child(name))
-                            .child(div().flex_none().text_xs().text_color(p.muted_foreground).child(stamp)),
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .line_height(px(20.0))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .truncate()
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(11.2))
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(stamp),
+                            ),
                     )
                     .when(!text.is_empty(), |el| {
                         el.child(
                             div()
                                 .text_sm()
+                                .line_height(px(20.0))
                                 .line_clamp(6)
                                 .child(StyledText::new(text).with_highlights(hits.into_iter().map(|r| (r, lit)))),
                         )
@@ -1042,7 +1103,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .invisible()
                     .group_hover("result", |s| s.visible())
-                    .child("Jump")
+                    .child(t("chattools.search.jump"))
                     .child(icon("arrow-right").size(px(12.0))),
             );
         if n < STAGGER_ROWS {
@@ -1215,7 +1276,7 @@ pub(crate) fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
 }
 
 /// What the list shows when there's nothing to list.
-pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement {
+pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement + use<> {
     motion::rise(
         div()
             .flex()

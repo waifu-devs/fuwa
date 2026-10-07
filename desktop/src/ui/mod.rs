@@ -17,6 +17,7 @@ mod compose;
 mod composer;
 mod connect;
 mod context_menu;
+mod dialogs;
 mod effects;
 mod embeds;
 mod emoji;

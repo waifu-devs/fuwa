@@ -671,13 +671,13 @@ impl FuwaApp {
     /// The row's invite shortcut: an invite to its server, shown to copy.
     fn invite_to_channel(
         &mut self,
-        _key: &str,
+        key: &str,
         server: &str,
-        _channel: &str,
+        channel: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_dialog(Dialog::Invite { link: None, server: server.to_owned() }, window, cx);
+        self.open_invite(key, server, channel, window, cx);
     }
 
     /// The row's gear: the channel's page in server settings.
