@@ -5,40 +5,47 @@
 //! starts from the operator's environment; what's changed here is stored on
 //! the instance, and "Back to the default" puts it back.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod accounts;
 mod announcement;
 mod calls;
 mod controls;
 mod federation;
+mod frame;
 mod general;
+mod gifs;
 mod limits;
+mod moderation;
+mod providers;
+mod release;
 mod servers;
 mod signups;
 mod sso;
 
-use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    hsla, px,
+    AnyElement, AppContext as _, Bounds, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div, px,
 };
 
 use crate::core::Core;
 use crate::core::api::Problem;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_admin::{self as admin, MAX_CUSTOM};
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::server_settings::{amber, chip, pill, save_bar, shimmer_rows, spinner, switch};
+use crate::ui::theme::Palette;
+use crate::ui::widgets::{error_line, icon, pal};
 
 /// What stands in for an address in streamer mode, as on the web.
 const HIDDEN_ADDRESS: &str = "address hidden";
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{error_line, icon, pal, soft_button};
 
 pub enum InstanceSettingsEvent {
     Close,
@@ -56,88 +63,24 @@ enum Page {
     General,
     SignUps,
     Sso,
+    Providers,
     Limits,
     Privacy,
     Calls,
     Moderation,
     Federation,
+    Gifs,
     Accounts,
     Servers,
     Announcement,
 }
 
 impl Page {
-    fn label(self) -> &'static str {
-        match self {
-            Page::General => "General",
-            Page::SignUps => "Sign-ups",
-            Page::Sso => "Single sign-on",
-            Page::Limits => "Limits",
-            Page::Privacy => "Privacy",
-            Page::Calls => "Calls",
-            Page::Moderation => "Moderation",
-            Page::Federation => "Other instances",
-            Page::Accounts => "Accounts",
-            Page::Servers => "Servers",
-            Page::Announcement => "Announcement",
-        }
-    }
-
-    fn glyph(self) -> &'static str {
-        match self {
-            Page::General => "sliders-horizontal",
-            Page::SignUps => "user-plus",
-            Page::Sso => "building",
-            Page::Limits => "gauge",
-            Page::Privacy => "shield-check",
-            Page::Calls => "audio-lines",
-            Page::Moderation => "shield-alert",
-            Page::Federation => "network",
-            Page::Accounts => "users",
-            Page::Servers => "server",
-            Page::Announcement => "megaphone",
-        }
-    }
-
-    fn about(self) -> &'static str {
-        match self {
-            Page::General => "What everyone here gets. Changes apply right away.",
-            Page::SignUps => "Who can join this instance and what they can make.",
-            Page::Sso => "Let people sign in here through your organization's identity provider.",
-            Page::Limits => "Caps every server starts with.",
-            Page::Privacy => "What this instance tells Waifu Devs.",
-            Page::Calls => "Voice channels and calls in direct messages.",
-            Page::Moderation => "Services servers' AutoMod can ask about messages.",
-            Page::Federation => "Let servers here share channels with servers on other fuwa instances.",
-            Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
-            Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
-            Page::Announcement => "A banner at the top of the app for everyone on this instance.",
-        }
-    }
-
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
         matches!(self, Page::Accounts | Page::Servers | Page::Announcement)
     }
 }
-
-/// The menu's groups and their pages, in the web's order.
-const GROUPS: [(&str, &[Page]); 2] = [
-    (
-        "INSTANCE",
-        &[
-            Page::General,
-            Page::SignUps,
-            Page::Sso,
-            Page::Limits,
-            Page::Privacy,
-            Page::Calls,
-            Page::Moderation,
-            Page::Federation,
-        ],
-    ),
-    ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
-];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
 type SetText = fn(&mut pb::InstanceSettings, String);
@@ -179,11 +122,11 @@ fn kept(text: &str) -> Vec<&str> {
 
 /// What the usage signal counts, as on the web.
 const SIGNAL: [&str; 5] = [
-    "How many accounts, servers, channels and messages",
-    "Storage used, in bytes",
-    "Which account and server options are on",
-    "fuwa version, OS and a random install id",
-    "Kinds of errors and where, and how long requests took (server and apps)",
+    "instancesettings.privacy.counts",
+    "instancesettings.privacy.storage",
+    "instancesettings.privacy.options",
+    "instancesettings.privacy.version",
+    "instancesettings.privacy.errors",
 ];
 
 /// The text boxes of one provider's card, kept by a slot that doesn't move
@@ -223,12 +166,37 @@ pub struct InstanceSettingsView {
     caps: HashMap<&'static str, Entity<InputState>>,
     /// The unit each size cap is typed in.
     units: HashMap<&'static str, usize>,
-    bar: Option<AnyElement>,
     announce: announcement::Announce,
     sso: sso::Sso,
     accounts: accounts::Accounts,
     servers: servers::Servers,
     federation: federation::Federation,
+    gifs: gifs::Gifs,
+    providers: providers::Providers,
+    /// The copy button that just copied, for its check.
+    copied: Option<String>,
+    /// The menu's search.
+    query: Entity<InputState>,
+    /// Escape cleared the search; the box empties when it next draws.
+    clear_query: bool,
+    focused_once: bool,
+    /// The setting search picked, glowing where it landed (and a count, so it glows again).
+    glow: Option<(&'static str, u32)>,
+    /// A setting to scroll to once its page is on screen.
+    scroll_to: Option<&'static str>,
+    /// Where each search target was drawn, for scrolling to it.
+    places: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
+    scroll: ScrollHandle,
+    /// The width of the page's column, which option cards share.
+    column: f32,
+    /// Someone tried to leave with unsaved changes: how many times, and when last.
+    nudge: (u32, Option<Instant>),
+    /// The placeholders set on boxes whose words change with their state.
+    placeholders: HashMap<gpui_kit::EntityId, String>,
+    /// When the screen opened, for its fade in.
+    opened: Instant,
+    /// Closing: the screen fades and grows away, then goes.
+    closing: Option<Instant>,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -256,6 +224,16 @@ impl InstanceSettingsView {
         boxes.extend(servers_subs);
         let (federation, federation_subs) = federation::Federation::new(window, cx);
         boxes.extend(federation_subs);
+        let (gifs, gifs_subs) = gifs::Gifs::new(window, cx);
+        boxes.extend(gifs_subs);
+        let (providers, providers_subs) = providers::Providers::new(window, cx);
+        boxes.extend(providers_subs);
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder(t("settings.screen.search")));
+        boxes.push(cx.subscribe_in(&query, window, |this, _, event: &InputEvent, _, cx| match event {
+            InputEvent::Change => cx.notify(),
+            InputEvent::PressEnter { .. } => this.pick_first(cx),
+            _ => {}
+        }));
         let mut view = Self {
             core,
             key,
@@ -272,12 +250,26 @@ impl InstanceSettingsView {
             areas: HashMap::new(),
             caps: HashMap::new(),
             units: HashMap::new(),
-            bar: None,
             announce,
             sso,
             accounts,
             servers,
             federation,
+            gifs,
+            providers,
+            copied: None,
+            query,
+            clear_query: false,
+            focused_once: false,
+            glow: None,
+            scroll_to: None,
+            places: Default::default(),
+            scroll: ScrollHandle::new(),
+            column: 792.0,
+            nudge: (0, None),
+            placeholders: HashMap::new(),
+            opened: Instant::now(),
+            closing: None,
             _subscriptions: Vec::new(),
             _boxes: boxes,
         };
@@ -428,12 +420,12 @@ impl InstanceSettingsView {
         let hide = self.core.prefs().streamer_mode;
         let fields = Fields {
             slot,
-            key: input(&p.api_key, "Paste it here", true, window, cx),
-            account: input(&p.account_id, "32 letters and digits", hide, window, cx),
-            name: input(&p.name, "What servers see, like Our classifier", false, window, cx),
+            key: input(&p.api_key, &t("instancesettings.moderation.paste"), true, window, cx),
+            account: input(&p.account_id, &t("instancesettings.moderation.accountIdPlaceholder"), hide, window, cx),
+            name: input(&p.name, &t("instancesettings.moderation.namePlaceholder"), false, window, cx),
             url: input(&p.url, "https://moderation.example.com/v1/check", hide, window, cx),
             header: input(&p.header, "Authorization (Bearer)", false, window, cx),
-            model: input(&p.model, "Optional, sent as model", false, window, cx),
+            model: input(&p.model, &t("instancesettings.moderation.modelOptional"), false, window, cx),
         };
         type Set = fn(&mut pb::AutoModProviderSettings, String);
         let wires: [(&Entity<InputState>, Set); 6] = [
@@ -526,6 +518,8 @@ impl InstanceSettingsView {
     /// leaving what's typed alone where it means the same.
     fn sync_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_sso(window, cx);
+        self.sync_providers(window, cx);
+        self.sync_gifs(window, cx);
         let Some(draft) = self.draft.clone() else { return };
         for (path, _, get, _) in TEXTS {
             let Some(state) = self.texts.get(path) else { continue };
@@ -537,9 +531,9 @@ impl InstanceSettingsView {
         // The saved TURN secret never comes back; an empty box keeps it.
         if let Some(state) = self.texts.get("turn_secret") {
             let saved = match (draft.turn_secret_set, draft.turn_secret_hint.as_str()) {
-                (false, _) => "No TURN secret".to_owned(),
-                (true, "") => "Saved. Type to replace it".to_owned(),
-                (true, end) => format!("Saved, ending in {end}. Type to replace it"),
+                (false, _) => t("instancesettings.calls.noSecret"),
+                (true, "") => t("instancesettings.shared.saved"),
+                (true, end) => t_with("instancesettings.shared.savedEnding", &[("hint", Arg::Str(end))]),
             };
             state.update(cx, |s, cx| s.set_placeholder(saved, window, cx));
         }
@@ -652,12 +646,24 @@ impl InstanceSettingsView {
         cx.notify();
     }
 
-    /// Esc closes a dialog over the page first; false when there was none.
+    /// Esc closes a dialog over the page first, then clears a search, then closes the screen
+    /// (unless unsaved changes hold it). It always answers for itself.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
-        match self.page {
+        let handled = match self.page {
             Page::Servers => self.escape_servers(cx),
-            _ => self.close_account_dialog(cx),
+            Page::Federation => self.close_federation_dialog(cx),
+            _ => self.close_account_menu(cx) || self.close_account_dialog(cx),
+        };
+        if handled {
+            return true;
         }
+        if !self.query.read(cx).value().is_empty() {
+            self.clear_query = true;
+            cx.notify();
+            return true;
+        }
+        self.close(cx);
+        true
     }
 
     fn open(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -669,655 +675,67 @@ impl InstanceSettingsView {
         cx.notify();
     }
 
-    fn privacy_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    /// The anonymous usage signal, and what it sends (the web's `PrivacySettings`).
+    fn privacy_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (Some(draft), Some(defaults)) =
             (self.draft.as_ref(), self.config.as_ref().and_then(|c| c.defaults.as_ref()))
         else {
             return div().into_any_element();
         };
         let on = draft.telemetry;
-        let default = if defaults.telemetry { "on" } else { "off" };
-        let mut list = div().flex().flex_col().gap(px(6.0));
+        let default = t(if defaults.telemetry { "instancesettings.shared.on" } else { "instancesettings.shared.off" });
+        // Two columns, as the web's `sm:grid-cols-2`.
+        let half = (self.column - 6.0) / 2.0;
+        let mut list = div().flex().flex_wrap().gap(px(6.0));
         for (n, line) in SIGNAL.iter().enumerate() {
-            list = list.child(motion::rise(
+            list = list.child(controls::slide_after(
                 div()
+                    .w(px(half))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
                     .text_xs()
+                    .line_height(px(16.0))
                     .text_color(p.muted_foreground)
-                    .child(icon("shield-check").size(px(14.0)).text_color(p.primary))
-                    .child(*line),
+                    .child(icon("shield-check").size(px(14.0)).flex_none().text_color(p.primary))
+                    .child(div().flex_1().min_w_0().child(t(line))),
                 SharedString::from(format!("signal-line-{n}")),
+                -8.0,
                 Duration::from_millis(100 + 50 * n as u64),
-                0.0,
             ));
         }
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(12.0))
-                    .child(
-                        div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Anonymous usage signal and reports"),
-                    )
-                    .child(self.reset_badge(&["telemetry"], default, p, cx)),
-            )
-            .child(
-                div()
-                    .id("instance-telemetry")
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .p(px(14.0))
-                    .rounded(corner(16.0))
-                    .border_1()
-                    .cursor_pointer()
-                    .map(|el| {
-                        if on {
-                            el.border_color(alpha(p.primary, 0.4)).bg(alpha(p.primary, 0.04))
-                        } else {
-                            el.border_color(p.border)
-                        }
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.patch(cx, |d| d.telemetry = !on)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child("Send the usage signal daily and error reports hourly"),
-                            )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(
-                                "Helps Waifu Devs see how fuwa is used and fix what breaks. Counts only: no names, \
-                                 messages, ids or addresses. Off, apps on this instance send no reports either.",
-                            )),
-                    )
-                    .child(switch("instance-telemetry-switch".into(), on, false, cx, |this, on, cx| {
-                        this.patch(cx, |d| d.telemetry = on)
-                    })),
-            )
-            .child(list)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(p.muted_foreground)
-                    .child("Every field it sends is listed in fuwa's README, under \"The anonymous usage signal\"."),
-            )
-            .into_any_element()
-    }
-
-    fn moderation_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(draft) = self.draft.clone() else { return div().into_any_element() };
-        let violet = hsla(0.76, 0.7, if p.dark { 0.7 } else { 0.5 }, 1.0);
-        let intro = motion::rise(
-            div()
-                .flex()
-                .items_start()
-                .gap(px(12.0))
-                .p(px(12.0))
-                .rounded(corner(16.0))
-                .border_1()
-                .border_color(violet.opacity(0.3))
-                .bg(violet.opacity(0.05))
-                .child(motion::ambient(
-                    div()
-                        .flex_none()
-                        .size(px(32.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(corner(11.0))
-                        .bg(violet.opacity(0.15))
-                        .text_color(violet)
-                        .child(icon("sparkles").size(px(16.0))),
-                    "instance-moderation-sparkle",
-                    Duration::from_millis(6400),
-                    window,
-                    |el, t| {
-                        // A little wiggle every few seconds, as on the web.
-                        let k = (t * 6400.0 / 1400.0).min(1.0);
-                        let bump = if k < 1.0 { (k * std::f32::consts::TAU).sin() } else { 0.0 };
-                        el.relative().top(px(-2.0 * bump.abs()))
-                    },
-                ))
-                .child(div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                    "Turn a service on here and every server on this instance can pick it for AutoMod's smart filter, \
-                     with one switch. Only this instance talks to it, and only about messages in servers that turned \
-                     the filter on: their text, never who wrote them, where, or the server's name. If it's slow or \
-                     down, messages go through and the servers' own rules still apply.",
-                )),
-            "instance-moderation-intro",
-            Duration::ZERO,
-            8.0,
-        );
-        // What the operator's environment turns on, which "Back to the default" returns to.
-        let on: Vec<String> = self
-            .config
-            .as_ref()
-            .and_then(|c| c.defaults.as_ref())
-            .map(|d| {
-                d.automod_providers
-                    .iter()
-                    .filter(|x| x.enabled)
-                    .map(|x| admin::known(&x.id).map_or_else(|| x.name.clone(), |k| k.name.to_owned()))
-                    .collect()
+        let fields = div()
+            .id("instance-telemetry-fields")
+            .text_xs()
+            .line_height(px(16.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.primary)
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .on_click(|_, _, cx| {
+                crate::ui::text::open_link("https://github.com/waifu-devs/fuwa#the-anonymous-usage-signal", cx)
             })
-            .unwrap_or_default();
-        let providers_default = if on.is_empty() { "all off".to_owned() } else { format!("{} on", on.join(" and ")) };
-        let customs = draft.automod_providers.iter().filter(|x| admin::is_custom(x)).count();
-        let mut cards = div().flex().flex_col().gap(px(14.0));
-        for (n, provider) in draft.automod_providers.iter().enumerate() {
-            let Some(slot) = self.fields.get(n).map(|f| f.slot) else { continue };
-            let saved = self.saved().and_then(|s| s.automod_providers.iter().find(|x| x.id == provider.id)).cloned();
-            cards = cards.child(motion::rise(
-                div().child(self.provider_card(n, slot, provider, saved.as_ref(), p, window, cx)),
-                SharedString::from(format!("instance-provider-{slot}")),
-                Duration::from_millis(40 + 50 * n.min(6) as u64),
-                10.0,
-            ));
-        }
-        let full = customs >= MAX_CUSTOM;
-        let violet_bg = violet.opacity(0.15);
-        let add = div()
-            .id("instance-add-provider")
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .p(px(16.0))
-            .rounded(corner(22.0))
-            .border_2()
-            .border_dashed()
-            .border_color(p.border)
-            .when(full, |el| el.opacity(0.5))
-            .when(!full, |el| {
-                let (hover_border, hover_bg) = (alpha(p.primary, 0.5), alpha(p.primary, 0.03));
-                el.cursor_pointer()
-                    .hover(move |s| s.border_color(hover_border).bg(hover_bg))
-                    .active(|s| s.top(px(1.0)))
-                    .on_click(cx.listener(|this, _, window, cx| this.add_custom(window, cx)))
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(40.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(corner(14.0))
-                    .bg(violet_bg)
-                    .text_color(violet)
-                    .child(icon("plus").size(px(20.0))),
-            )
-            .child(
-                div().flex_1().min_w_0().child(div().font_weight(FontWeight::EXTRA_BOLD).child("Add your own")).child(
-                    div().text_xs().text_color(p.muted_foreground).child(if full {
-                        format!("That's {MAX_CUSTOM}, the most an instance keeps.")
-                    } else {
-                        "A classifier you run, or any https address that answers the same questions as Jev and Clef. \
-                         What it gets and answers is in docs/automod.md."
-                            .to_owned()
-                    }),
-                ),
-            );
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .child(intro)
-            .child(self.daily_checks(p, window, cx))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child(div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Providers"))
-                    .child(self.reset_badge(&["automod_providers"], &providers_default, p, cx)),
-            )
-            .child(cards)
-            .child(add)
-            .into_any_element()
-    }
-
-    /// How many times a day each server's smart filter may ask, as on the web.
-    fn daily_checks(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let default = self
-            .config
-            .as_ref()
-            .and_then(|c| c.defaults.as_ref())
-            .and_then(|d| d.automod_checks_per_day)
-            .map_or_else(|| "no limit".to_owned(), |n| format!("{} a day", admin::count_label(Some(n))));
-        let hint = emphasized(
-            &[
-                (
-                    "How many messages each server's smart filter may send to its provider in a day (UTC), so one \
-                     busy server can't run up your bill. Once a server uses them, its messages ",
-                    false,
-                ),
-                ("go through the smart filter unchecked", true),
-                (
-                    " until midnight UTC, like when the provider is down: blocking every message instead would stop \
-                     a busy server talking. Its own rules still apply.",
-                    false,
-                ),
-            ],
-            p,
-        );
+            .child(t("instancesettings.privacy.fields"));
         let body = div()
             .flex()
             .flex_col()
-            .gap(px(10.0))
-            .child(div().text_sm().text_color(p.muted_foreground).child(hint))
-            .child(self.cap("automod_checks_per_day", "Up to", false, p, window, cx));
-        self.setting(
-            "automod-checks-per-day",
-            "Checks per server per day",
-            None,
-            &["automod_checks_per_day"],
-            &default,
-            1,
-            body,
-            p,
-            cx,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn provider_card(
-        &mut self,
-        n: usize,
-        slot: u64,
-        provider: &pb::AutoModProviderSettings,
-        saved: Option<&pb::AutoModProviderSettings>,
-        p: &Palette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let custom = admin::is_custom(provider);
-        let known = admin::known(&provider.id);
-        let host = if custom { admin::host_of(&provider.url) } else { known.map(|k| k.host.to_owned()) };
-        let name = match (custom, known) {
-            (true, _) if !provider.name.trim().is_empty() => provider.name.trim().to_owned(),
-            (true, _) => "Your provider".to_owned(),
-            (false, Some(k)) => k.name.to_owned(),
-            (false, None) => provider.id.clone(),
-        };
-        let shown_host = host.clone().unwrap_or_else(|| "an address you pick".to_owned());
-        let blurb = match known {
-            _ if custom => "Yours, at an https address you pick. It gets the same questions as Jev and Clef.",
-            Some(k) => k.blurb,
-            None => "",
-        };
-        let hue = known.map_or(0.8, |k| k.hue);
-        let tint = hsla(hue, 0.75, if p.dark { 0.68 } else { 0.48 }, 1.0);
-        let missing = admin::missing_for(provider, saved);
-        let enabled = provider.enabled;
-        let live = saved.is_some_and(|s| s.enabled);
-        let moved = admin::moved(provider, saved);
-        let clef = provider.id == "cloudflare-clef";
-        let Some(fields) = self.fields.get(n) else { return div().into_any_element() };
-        let (key, account, name_box, url_box, header_box, model_box) = (
-            fields.key.clone(),
-            fields.account.clone(),
-            fields.name.clone(),
-            fields.url.clone(),
-            fields.header.clone(),
-            fields.model.clone(),
-        );
-
-        let badge = motion::once(
-            div()
-                .flex_none()
-                .size(px(40.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(corner(14.0))
-                .bg(tint.opacity(0.18))
-                .text_color(tint)
-                .text_sm()
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .map(|el| match known {
-                    Some(k) if !custom => {
-                        el.child(k.name.split(' ').filter_map(|w| w.chars().next()).collect::<String>())
-                    }
-                    _ => el.child(icon("webhook").size(px(20.0))),
-                }),
-            SharedString::from(format!("instance-badge-{slot}-{enabled}")),
-            Duration::from_millis(400),
-            move |el, t| {
-                if enabled { el.relative().top(px(-4.0 * (t * std::f32::consts::PI).sin())) } else { el }
-            },
-        );
-        let green = hsla(0.42, 0.7, if p.dark { 0.55 } else { 0.38 }, 1.0);
-        let head = div()
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .p(px(12.0))
-            .pl(px(16.0))
-            .child(badge)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(name.clone()))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(p.muted_foreground)
-                                    .when(host.is_none(), |el| el.italic())
-                                    .child(shown_host.clone()),
-                            )
-                            .when(live, |el| {
-                                el.child(motion::rise(
-                                    pill("SERVERS CAN USE IT", green),
-                                    SharedString::from(format!("instance-live-{slot}")),
-                                    Duration::ZERO,
-                                    4.0,
-                                ))
-                            }),
-                    )
-                    .child(div().text_xs().text_color(p.muted_foreground).child(blurb)),
-            )
-            .child(switch(
-                SharedString::from(format!("instance-provider-on-{slot}")),
-                enabled,
-                !enabled && missing.is_some(),
-                cx,
-                move |this, on, cx| {
-                    let Some(n) = this.fields.iter().position(|f| f.slot == slot) else { return };
-                    this.patch(cx, |d| {
-                        if let Some(p) = d.automod_providers.get_mut(n) {
-                            p.enabled = on
-                        }
-                    })
-                },
-            ));
-
-        let mut body = div().flex().flex_col().gap(px(14.0)).p(px(16.0)).border_t_1().border_color(p.border).child(
-            div()
-                .flex()
-                .items_start()
-                .gap(px(10.0))
-                .p(px(12.0))
-                .rounded(corner(14.0))
-                .bg(alpha(p.muted, 0.6))
-                .text_xs()
-                .text_color(p.muted_foreground)
-                .child(icon("globe-lock").size(px(16.0)).text_color(p.primary))
-                .child(div().flex_1().min_w_0().child(emphasized(
-                    &[
-                        ("Turned on, messages that servers choose to check go from this instance to ", false),
-                        (&shown_host, true),
-                        (", which sees their text. Nothing else goes: no names, ids, servers or addresses.", false),
-                    ],
-                    p,
-                ))),
-        );
-        if custom {
-            let bad_url = !provider.url.trim().is_empty() && host.is_none();
-            body = body
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(12.0))
-                        .child(div().flex_1().child(field("Name", Input::new(&name_box))))
-                        .child(div().flex_none().w(px(380.0)).child(field("Address", Input::new(&url_box)))),
-                )
-                .when(bad_url, |el| {
-                    el.child(motion::rise(
-                        div()
-                            .text_xs()
-                            .text_color(amber(p))
-                            .child("fuwa only talks to https addresses, like https://moderation.example.com/v1/check."),
-                        SharedString::from(format!("instance-bad-url-{slot}")),
-                        Duration::ZERO,
-                        -4.0,
-                    ))
-                })
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(12.0))
-                        .child(div().flex_1().child(field("Key header", Input::new(&header_box))))
-                        .child(div().flex_1().child(field("Model", Input::new(&model_box)))),
-                );
-        }
-        let key_note = if moved && provider.api_key_set {
-            "New address: type the key again.".to_owned()
-        } else if provider.api_key_set && provider.api_key.is_empty() {
-            format!(
-                "Saved, ends in {}. Type to replace it.",
-                if provider.api_key_hint.is_empty() { "••••" } else { provider.api_key_hint.as_str() }
-            )
-        } else if custom {
-            "If it needs one. It goes as Authorization: Bearer, or in the header you name.".to_owned()
-        } else {
-            known.map_or("", |k| k.key_help).to_owned()
-        };
-        body = body.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(if clef {
-                    "API token"
-                } else {
-                    "API key"
-                }))
-                .child(div().text_xs().text_color(p.muted_foreground).child(key_note))
-                .child(Input::new(&key).prefix(icon("key-round").size(px(15.0)).text_color(p.muted_foreground)))
-                .child(div().text_size(px(11.0)).text_color(p.muted_foreground).child(
-                    "Kept on the instance, sealed with its files when it encrypts them, and never shown again.",
-                )),
-        );
-        if clef {
-            body = body.child(field("Account id", Input::new(&account)));
-        }
-        if let Some(k) = known.filter(|k| !custom && k.models.len() > 1) {
-            let picked = if provider.model.is_empty() { k.models[0].0 } else { provider.model.as_str() };
-            let mut models = div().flex().gap(px(6.0));
-            for (i, (id, label, hint)) in k.models.iter().enumerate() {
-                let on = *id == picked;
-                let value = if i == 0 { String::new() } else { (*id).to_owned() };
-                models = models.child(
-                    chip(SharedString::from(format!("instance-model-{slot}-{i}")), &format!("{label} · {hint}"), on, p)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let Some(n) = this.fields.iter().position(|f| f.slot == slot) else { return };
-                            let value = value.clone();
-                            this.patch(cx, |d| {
-                                if let Some(p) = d.automod_providers.get_mut(n) {
-                                    p.model = value
-                                }
-                            });
-                            this.tried.remove(&slot);
-                        })),
-                );
-            }
-            body = body.child(field("Model", models));
-        }
-        body = body.child(self.tester(slot, missing.as_deref(), p, window, cx));
-        if custom {
-            body = body.child(
-                div()
-                    .id(SharedString::from(format!("instance-remove-{slot}")))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .px(px(10.0))
-                    .h(px(30.0))
-                    .rounded(corner(10.0))
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.destructive)
-                    .cursor_pointer()
-                    .hover({
-                        let bg = alpha(p.destructive, 0.1);
-                        move |s| s.bg(bg)
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.remove(slot, cx)))
-                    .child(icon("trash").size(px(15.0)))
-                    .child(format!(
-                        "Remove {}",
-                        if provider.name.trim().is_empty() { "this provider" } else { provider.name.trim() }
-                    )),
-            );
-        }
-        div()
-            .rounded(corner(22.0))
-            .border_1()
-            .overflow_hidden()
-            .map(|el| {
-                if enabled {
-                    el.border_color(alpha(p.primary, 0.4)).bg(alpha(p.primary, 0.03))
-                } else if custom {
-                    el.border_dashed().border_color(p.border)
-                } else {
-                    el.border_color(p.border)
-                }
-            })
-            .child(head)
-            .child(body)
-            .into_any_element()
-    }
-
-    /// "Test connection": a sample scam sent through the provider, and what it said.
-    fn tester(
-        &self,
-        slot: u64,
-        missing: Option<&str>,
-        p: &Palette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let asking = matches!(self.tried.get(&slot), Some(Tried::Asking));
-        let ready = missing.is_none();
-        let mut button = soft_button(
-            SharedString::from(format!("instance-try-{slot}")),
-            if asking { "Asking…" } else { "Try a sample scam" },
-            p,
-        );
-        if ready && !asking {
-            button = button.on_click(cx.listener(move |this, _, window, cx| this.try_provider(slot, window, cx)));
-        } else {
-            button = button.opacity(0.5);
-        }
-        let mut out =
-            div().flex().flex_col().gap(px(8.0)).p(px(12.0)).rounded(corner(14.0)).bg(alpha(p.muted, 0.5)).child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(icon("flask-conical").size(px(15.0)).text_color(p.primary))
-                    .child(div().flex_1().text_sm().font_weight(FontWeight::EXTRA_BOLD).child("Test connection"))
-                    .when(asking, |el| el.child(spinner(format!("instance-try-spin-{slot}"), 14.0, window)))
-                    .child(button),
-            );
-        match self.tried.get(&slot) {
-            Some(Tried::Answered(answer)) if answer.ok => {
-                let green = hsla(0.42, 0.7, if p.dark { 0.55 } else { 0.38 }, 1.0);
-                let mut answered = div().flex().flex_col().gap(px(6.0)).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(green)
-                        .child(icon("check").size(px(13.0)))
-                        .child(format!("It answered in {} ms", answer.elapsed_ms)),
-                );
-                for (n, score) in answer.scores.iter().take(4).enumerate() {
-                    let probability = score.probability.clamp(0.0, 1.0);
-                    let fill: Hsla = if probability >= 0.8 { p.destructive.into() } else { alpha(p.primary, 0.6) };
-                    answered = answered.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_xs()
-                            .child(
-                                div()
-                                    .w(px(96.0))
-                                    .flex_none()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(admin::label_name(&score.label)),
-                            )
-                            .child(div().flex_1().h(px(8.0)).rounded_full().bg(p.background).overflow_hidden().child(
-                                motion::once(
-                                    div().h_full().rounded_full().bg(fill),
-                                    SharedString::from(format!("instance-score-{slot}-{n}-{}", score.label)),
-                                    Duration::from_millis(420 + 60 * n as u64),
-                                    move |el, t| {
-                                        let eased = 1.0 - (1.0 - t).powi(3);
-                                        el.w(gpui_kit::relative(probability * eased))
-                                    },
-                                ),
-                            ))
-                            .child(
-                                div()
-                                    .w(px(36.0))
-                                    .flex_none()
-                                    .text_right()
-                                    .child(format!("{}%", (probability * 100.0).round() as i32)),
-                            ),
-                    );
-                }
-                out = out.child(motion::rise(
-                    answered,
-                    SharedString::from(format!("instance-tried-ok-{slot}")),
-                    Duration::ZERO,
-                    6.0,
-                ));
-            }
-            Some(Tried::Answered(answer)) => out = out.child(failed(&answer.error, slot, p)),
-            Some(Tried::Failed(error)) => out = out.child(failed(error, slot, p)),
-            _ => {}
-        }
-        if let Some(missing) = missing {
-            out = out.child(div().text_xs().text_color(p.muted_foreground).child(missing.to_owned()));
-        }
-        out.into_any_element()
-    }
-}
-
-/// Why a provider didn't answer, as the instance put it.
-fn failed(error: &str, slot: u64, p: &Palette) -> AnyElement {
-    let mut text = error.to_owned();
-    if let Some(first) = text.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
-    motion::rise(
-        div()
-            .flex()
             .items_start()
-            .gap(px(6.0))
-            .text_xs()
-            .text_color(amber(p))
-            .child(icon("triangle-alert").size(px(13.0)).mt(px(1.0)))
-            .child(div().flex_1().min_w_0().child(text)),
-        SharedString::from(format!("instance-tried-failed-{slot}")),
-        Duration::ZERO,
-        6.0,
-    )
-    .into_any_element()
+            .gap(px(12.0))
+            .child(div().w_full().child(self.toggle(
+                "telemetry",
+                on,
+                false,
+                &t("instancesettings.privacy.label"),
+                &t("instancesettings.privacy.hint"),
+                p,
+                window,
+                cx,
+                |d, on| d.telemetry = on,
+            )))
+            .child(list)
+            .child(fields);
+        self.setting("telemetry", &t("instancesettings.nav.telemetry"), None, &["telemetry"], &default, 0, body, p, cx)
+    }
 }
 
 /// Words with some of them in bold, wrapping as one sentence.
@@ -1338,109 +756,42 @@ pub(crate) fn emphasized(parts: &[(&str, bool)], p: &Palette) -> gpui_kit::Style
     gpui_kit::StyledText::new(text).with_highlights(ranges)
 }
 
-fn field(label: &str, control: impl IntoElement) -> AnyElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
-        .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(label.to_owned()))
-        .child(control)
-        .into_any_element()
-}
-
 impl Render for InstanceSettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
-        let (name, admin) =
-            self.core.shared.read(|s| s.instance(&self.key).map(|i| (i.name(), i.admin)).unwrap_or_default());
+        let admin = self.core.shared.read(|s| s.instance(&self.key).map(|i| i.admin).unwrap_or_default());
         if !admin {
             // Signed out, or no longer an admin here.
             cx.defer_in(window, |_, _, cx| cx.emit(InstanceSettingsEvent::Close));
             return div().into_any_element();
         }
+        // As on the web, the search takes the keys when settings open.
+        if !self.focused_once {
+            self.focused_once = true;
+            self.query.update(cx, |q, cx| q.focus(window, cx));
+        }
+        if std::mem::take(&mut self.clear_query) {
+            self.query.update(cx, |q, cx| q.set_value("", window, cx));
+        }
         let page = self.page;
 
-        let mut menu = div().flex().flex_col().w(px(220.0)).child(
-            div()
-                .flex()
-                .flex_col()
-                .px(px(10.0))
-                .pb(px(14.0))
-                .child(
-                    div()
-                        .min_w_0()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(name.clone()),
-                )
-                .child(div().text_xs().text_color(p.muted_foreground).child("Instance settings")),
-        );
-        let mut at_y = 0.0;
-        let mut y = 62.0;
-        for (group, pages) in GROUPS {
-            menu = menu.child(
-                div()
-                    .h(px(30.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_end()
-                    .pb(px(8.0))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(p.muted_foreground)
-                    .child(group),
-            );
-            y += 30.0;
-            for &pg in pages {
-                let on = pg == page;
-                if on {
-                    at_y = y;
-                }
-                y += 40.0;
-                let hover = alpha(p.primary, 0.08);
-                menu = menu.child(
-                    div()
-                        .id(SharedString::from(format!("imenu-{}", pg.label())))
-                        .h(px(38.0))
-                        .mb(px(2.0))
-                        .px(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .rounded(corner(10.0))
-                        .cursor_pointer()
-                        .text_color(if on { p.foreground } else { p.muted_foreground })
-                        .when(on, |el| el.font_weight(FontWeight::BOLD))
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| this.open(pg, cx)))
-                        .child(icon(pg.glyph()).size(px(17.0)).text_color(if on {
-                            p.primary
-                        } else {
-                            p.muted_foreground
-                        }))
-                        .child(pg.label()),
-                );
-            }
-            y += 10.0;
-            menu = menu.child(div().h(px(10.0)));
-        }
-        let at = motion::follow("instance-settings-hl", at_y, window, cx);
-        let menu = div()
-            .relative()
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(px(at))
-                    .h(px(38.0))
-                    .rounded(corner(10.0))
-                    .bg(alpha(p.primary, 0.16)),
-            )
-            .child(menu);
+        // The web's layout: the menu takes 15rem and half of what's left past 67rem; the
+        // page's column is at most 60rem, less the close button's 4rem and its padding.
+        let width = f32::from(window.viewport_size().width);
+        let aside = 240.0 + ((width - 1072.0).max(0.0) / 2.0);
+        let main = (width - aside).max(320.0);
+        let inner = main.min(960.0);
+        self.column = inner - 64.0 - 80.0;
 
-        self.bar = None;
+        let groups = frame::groups(&self.name());
+        let menu = self.menu(&groups, &p, window, cx);
+        let (label, about) = groups
+            .iter()
+            .flat_map(|g| g.sections.iter())
+            .find(|s| s.page == page)
+            .map(|s| (s.label.clone(), s.about.clone()))
+            .unwrap_or_default();
+
         let body = if page.manages() {
             match page {
                 Page::Accounts => self.accounts_page(&p, window, cx),
@@ -1449,130 +800,166 @@ impl Render for InstanceSettingsView {
                 _ => div().into_any_element(),
             }
         } else if let Some(error) = &self.load_error {
-            div().text_sm().text_color(p.muted_foreground).child(error.clone()).into_any_element()
+            let mut text = error.clone();
+            if let Some(first) = text.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            div().text_sm().text_color(p.muted_foreground).child(text).into_any_element()
         } else if self.draft.is_none() {
-            shimmer_rows(3, &p).into_any_element()
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .children((0..3).map(|n| controls::shimmer(n, 112.0, &p)))
+                .into_any_element()
         } else {
             match page {
                 Page::General => self.general_page(&p, window, cx),
                 Page::SignUps => self.signups_page(&p, window, cx),
                 Page::Sso => self.sso_page(&p, window, cx),
+                Page::Providers => self.providers_page(&p, window, cx),
                 Page::Limits => self.limits_page(&p, window, cx),
                 Page::Calls => self.calls_page(&p, window, cx),
-                Page::Privacy => self.privacy_page(&p, cx),
+                Page::Privacy => self.privacy_page(&p, window, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
                 Page::Federation => self.federation_page(&p, window, cx),
+                Page::Gifs => self.gifs_page(&p, window, cx),
                 Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
             }
         };
+
+        // A setting picked from search: once it's been drawn, scroll it to the middle.
+        if let Some(id) = self.scroll_to {
+            let place = self.places.borrow().get(id).copied();
+            match place {
+                Some(b) => {
+                    let view = self.scroll.bounds();
+                    let offset = self.scroll.offset();
+                    let content_y = f32::from(b.origin.y - view.origin.y - offset.y);
+                    let target = content_y - (f32::from(view.size.height) - f32::from(b.size.height)) / 2.0;
+                    let most = f32::from(self.scroll.max_offset().y);
+                    self.scroll.set_offset(gpui_kit::point(px(0.0), px(-target.clamp(0.0, most.max(0.0)))));
+                    self.scroll_to = None;
+                }
+                None => window.request_animation_frame(),
+            }
+        }
+
+        // The save bar sits under every page, held at the foot of the window as it scrolls.
         let changed = self.changed();
-        if !changed.is_empty() {
-            self.bar = Some(save_bar(
+        let bar = (!changed.is_empty()).then(|| {
+            controls::save_bar(
                 "instance-save",
                 changed.len(),
                 self.saving,
+                self.error.as_deref(),
+                self.alarm(),
                 &p,
                 cx,
-                |this: &mut Self, window, cx| this.discard(window, cx),
                 |this: &mut Self, window, cx| this.commit(this.changed(), Vec::new(), window, cx),
-            ));
-        }
+                |this: &mut Self, window, cx| this.discard(window, cx),
+            )
+        });
         // The accounts and servers lists scroll on their own, drawing only the rows in sight.
-        let fills = page == Page::Accounts || (page == Page::Servers && self.servers_fill());
+        let fills = page == Page::Accounts;
+        let header = div()
+            .mb(px(24.0))
+            .child(div().text_2xl().line_height(px(32.0)).font_weight(FontWeight::EXTRA_BOLD).child(label))
+            .when(!about.is_empty(), |el| {
+                el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(about))
+            });
+        // Errors of pages that manage things; the settings' own show in the save bar.
+        let error = if page.manages() || bar.is_none() { error_line(self.error.as_deref(), &p) } else { None };
         let content = div()
-            .w(px(720.0))
+            .w(px(inner - 64.0))
+            .flex_none()
             .when(fills, |el| el.h_full())
+            .px(px(40.0))
+            .pt(px(64.0))
+            // The accounts list runs to the window's foot, as the web's page scrolls under it.
+            .pb(px(if fills { 0.0 } else { 16.0 }))
             .flex()
             .flex_col()
-            .gap(px(6.0))
-            .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(page.label()))
-            .child(div().text_color(p.muted_foreground).child(page.about()))
-            .child(div().h(px(18.0)))
-            .when_some(error_line(self.error.as_deref(), &p), |el, e| el.child(div().mb(px(12.0)).child(e)))
-            .child(body)
-            .child(div().h(px(if self.bar.is_some() { 90.0 } else { 0.0 })));
+            .child(motion::rise(
+                div()
+                    .flex()
+                    .flex_col()
+                    .when(fills, |el| el.flex_1().min_h_0())
+                    .child(header)
+                    .when_some(error, |el, e| el.child(div().mb(px(12.0)).child(e)))
+                    .child(div().flex().flex_col().when(fills, |el| el.flex_1().min_h_0()).child(body)),
+                SharedString::from(format!("ipage-{page:?}")),
+                Duration::ZERO,
+                14.0,
+            ))
+            .when(bar.is_some(), |el| el.child(div().h(px(92.0))));
 
         let dialog = match page {
-            Page::Servers => self.share_dialog(&p, cx),
-            _ => self.account_dialog(&p, window, cx),
+            Page::Servers => self.share_dialog(&p, window, cx),
+            Page::Federation => self.federation_dialog(&p, window, cx),
+            Page::Accounts => self.account_dialog(&p, window, cx).or_else(|| self.account_menu(&p, cx)),
+            _ => None,
         };
-        motion::fade_in(
-            div()
-                .id("instance-settings")
-                .size_full()
-                .occlude()
-                .flex()
-                .bg(p.background)
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(300.0))
-                        .h_full()
-                        .flex()
-                        .justify_end()
-                        .pt(px(56.0))
-                        .pr(px(16.0))
-                        .bg(p.sidebar)
-                        .child(motion::slide_in(menu, "instance-settings-menu", -24.0)),
-                )
-                .child(
-                    div()
-                        .id("instance-settings-body")
-                        .flex_1()
-                        .h_full()
-                        .when(!fills, |el| el.overflow_y_scroll())
-                        .pt(px(56.0))
-                        .px(px(40.0))
-                        .pb(px(40.0))
-                        .child(motion::rise(
-                            content,
-                            SharedString::from(format!("ipage-{}", page.label())),
-                            Duration::ZERO,
-                            14.0,
-                        )),
-                )
-                .when_some(self.bar.take(), |el, bar| {
-                    el.child(
-                        div().absolute().bottom(px(24.0)).left(px(300.0)).right_0().flex().justify_center().child(bar),
-                    )
-                })
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(20.0))
-                        .right(px(24.0))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(4.0))
-                        .child(
-                            div()
-                                .id("instance-settings-close")
-                                .size(px(38.0))
-                                .rounded_full()
-                                .border_2()
-                                .border_color(p.muted_foreground)
-                                .text_color(p.muted_foreground)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_pointer()
-                                .hover({
-                                    let c = p.primary;
-                                    move |s| s.border_color(c).text_color(c)
-                                })
-                                .active(|s| s.top(px(1.0)))
-                                .on_click(cx.listener(|_, _, _, cx| cx.emit(InstanceSettingsEvent::Close)))
-                                .child(icon("x").size(px(18.0))),
-                        )
-                        .child(
-                            div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"),
-                        ),
-                )
-                .when_some(dialog, |el, dialog| el.child(dialog)),
-            "instance-settings-in",
-            Duration::from_millis(160),
-        )
-        .into_any_element()
+        let column = self.column;
+        // In the flow and `size_full`, like server settings: an absolute screen inside the cached
+        // view came out short of the window's right and bottom edges.
+        let screen = div()
+            .id("instance-settings")
+            .relative()
+            .size_full()
+            .occlude()
+            .flex()
+            .bg(p.background)
+            .text_color(p.foreground)
+            .child(
+                div()
+                    .id("instance-settings-menu")
+                    .flex_none()
+                    .w(px(aside))
+                    .h_full()
+                    .flex()
+                    .justify_end()
+                    .bg(p.side_surface)
+                    .border_r_1()
+                    .border_color(p.border)
+                    .overflow_y_scroll()
+                    .child(menu),
+            )
+            .child(
+                div()
+                    .id("instance-settings-body")
+                    .flex_1()
+                    .h_full()
+                    .bg(p.chat_surface)
+                    .when(!fills, |el| el.overflow_y_scroll().track_scroll(&self.scroll))
+                    .child(content),
+            )
+            .when_some(bar, |el, bar| {
+                el.child(div().absolute().bottom(px(8.0)).left(px(aside + 40.0)).w(px(column)).child(bar))
+            })
+            .child(self.close_button(aside + inner - 64.0, &p, cx))
+            .when_some(dialog, |el, dialog| el.child(dialog));
+
+        // It comes in from a little larger, fading up, and goes the same way (the web's
+        // opacity and scale 1.04). Worked out here from the clock, not with `with_animation`:
+        // the window caches this view, so it asks for its own frames until it settles.
+        let reduce = cx.reduce_motion();
+        let (since, out) = match self.closing {
+            Some(at) => (at.elapsed(), true),
+            None => (self.opened.elapsed(), false),
+        };
+        let done = reduce || since >= frame::OPENING;
+        let t = if done { 1.0 } else { since.as_secs_f32() / frame::OPENING.as_secs_f32() };
+        let eased = 1.0 - (1.0 - t).powi(5);
+        let k = if out { 1.0 - eased } else { eased };
+        if !done {
+            let this = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                let _ = this.update(cx, |_, cx| cx.notify());
+            });
+        }
+        let h = f32::from(window.viewport_size().height);
+        let screen = if k >= 1.0 { screen } else { screen.opacity(k).top(px(-h * 0.02 * (1.0 - k))) };
+        screen.into_any_element()
     }
 }

@@ -1,34 +1,35 @@
 //! Sign-ups: who can get an account here, and what they can make.
 
+use crate::ui::instance_home::{focus_ring, has_focus};
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{AnyElement, Context, IntoElement as _, ParentElement as _, Styled as _, Window, div, px};
 
 use super::InstanceSettingsView;
-use super::controls::Opt;
+use super::controls::{Opt, input_box};
+use crate::core::i18n::t;
 use crate::core::instance_admin::{self as admin};
 use crate::pb;
 use crate::ui::theme::Palette;
-use crate::ui::widgets::icon;
 
 /// The waifu.dev sign-in provider, the default issuer.
 pub(super) const WAIFU_DEV_ISSUER: &str = "https://api.waifu.dev";
 
 /// Open, closed or off, for the three kinds of accounts (their values match).
-pub(super) fn accounts_label(v: i32) -> &'static str {
+pub(super) fn accounts_label(v: i32) -> String {
     match v {
-        1 => "open",
-        2 => "closed",
-        _ => "off",
+        1 => t("instancesettings.shared.open"),
+        2 => t("instancesettings.shared.closed"),
+        _ => t("instancesettings.shared.off"),
     }
 }
 
 /// Everyone, admins or nobody, for servers and agents (their values match).
-fn creation_label(v: i32) -> &'static str {
+fn creation_label(v: i32) -> String {
     match v {
-        1 => "everyone",
-        2 => "admins",
-        _ => "nobody",
+        1 => t("instancesettings.shared.everyone"),
+        2 => t("instancesettings.shared.admins"),
+        _ => t("instancesettings.shared.nobody"),
     }
 }
 
@@ -52,12 +53,23 @@ impl InstanceSettingsView {
             "local",
             draft.local_accounts,
             vec![
-                Opt::new(pb::LocalAccounts::Open as i32, "Open", "Anyone can sign up.", "door-open"),
-                Opt::new(pb::LocalAccounts::Closed as i32, "Closed", "Existing accounts only.", "door-closed"),
-                Opt::new(local_off, "Off", "No standalone accounts.", "lock").unless(
-                    !(draft.local_accounts == local_off || admin::linked_works(&draft) || admin::sso_works(&draft)),
-                    "Needs waifu.dev sign-in or single sign-on working first.",
+                Opt::new(
+                    pb::LocalAccounts::Open as i32,
+                    t("instancesettings.signUps.open"),
+                    t("instancesettings.signUps.localOpenHint"),
+                    "door-open",
                 ),
+                Opt::new(
+                    pb::LocalAccounts::Closed as i32,
+                    t("instancesettings.signUps.closed"),
+                    t("instancesettings.signUps.localClosedHint"),
+                    "door-closed",
+                ),
+                Opt::new(local_off, t("serversettings.shared.off"), t("instancesettings.signUps.localOffHint"), "lock")
+                    .unless(
+                        !(draft.local_accounts == local_off || admin::linked_works(&draft) || admin::sso_works(&draft)),
+                        t("instancesettings.signUps.localOffNeeds"),
+                    ),
             ],
             p,
             window,
@@ -65,37 +77,49 @@ impl InstanceSettingsView {
             |this, v, _, cx| this.patch(cx, |d| d.local_accounts = v),
         );
         let warn = draft.local_accounts == local_off && saved.local_accounts != local_off && me_local;
-        page = page.child(self.setting(
-            "local-accounts",
-            "Standalone accounts",
-            Some("A username and password kept on this instance only."),
-            &["local_accounts"],
-            accounts_label(defaults.local_accounts),
-            0,
-            div().flex().flex_col().gap(px(12.0)).child(local).when(warn, |el| {
-                el.child(self.notice(
-                    "local-off",
-                    "You sign in here with a password. Once you sign out, you'll need another way in here to get \
-                     back in.",
-                    p,
-                ))
-            }),
-            p,
-            cx,
-        ));
+        page =
+            page.child(self.setting(
+                "local-accounts",
+                &t("instancesettings.nav.localAccounts"),
+                Some(&t("instancesettings.signUps.localHint")),
+                &["local_accounts"],
+                &accounts_label(defaults.local_accounts),
+                0,
+                div().flex().flex_col().gap(px(12.0)).child(local).when(warn, |el| {
+                    el.child(self.notice("local-off", &t("instancesettings.signUps.localOffNotice"), p))
+                }),
+                p,
+                cx,
+            ));
 
         // waifu.dev accounts.
         let linked = self.choice(
             "linked",
             draft.linked_accounts,
             vec![
-                Opt::new(pb::LinkedAccounts::Open as i32, "Open", "Anyone with waifu.dev.", "flower-2"),
-                Opt::new(pb::LinkedAccounts::Closed as i32, "Closed", "Linked accounts only.", "door-closed"),
-                Opt::new(linked_off, "Off", "No waifu.dev sign-in.", "lock").unless(
+                Opt::new(
+                    pb::LinkedAccounts::Open as i32,
+                    t("instancesettings.signUps.open"),
+                    t("instancesettings.signUps.linkedOpenHint"),
+                    "flower-2",
+                ),
+                Opt::new(
+                    pb::LinkedAccounts::Closed as i32,
+                    t("instancesettings.signUps.closed"),
+                    t("instancesettings.signUps.linkedClosedHint"),
+                    "door-closed",
+                ),
+                Opt::new(
+                    linked_off,
+                    t("serversettings.shared.off"),
+                    t("instancesettings.signUps.linkedOffHint"),
+                    "lock",
+                )
+                .unless(
                     !(draft.linked_accounts == linked_off
                         || draft.local_accounts != local_off
                         || admin::sso_works(&draft)),
-                    "Needs standalone accounts on first.",
+                    t("instancesettings.signUps.linkedOffNeeds"),
                 ),
             ],
             p,
@@ -106,18 +130,13 @@ impl InstanceSettingsView {
         let no_https = draft.linked_accounts != linked_off && !admin::can_return_to(&draft.public_url);
         page = page.child(self.setting(
             "linked-accounts",
-            "waifu.dev accounts",
-            Some("People sign in with their waifu.dev account, and get an account here the first time."),
+            &t("instancesettings.nav.linkedAccounts"),
+            Some(&t("instancesettings.signUps.linkedHint")),
             &["linked_accounts"],
-            accounts_label(defaults.linked_accounts),
+            &accounts_label(defaults.linked_accounts),
             1,
             div().flex().flex_col().gap(px(12.0)).child(linked).when(no_https, |el| {
-                el.child(self.notice(
-                    "linked-https",
-                    "waifu.dev can only send people back to an https address. Set the public address under General \
-                     to turn this on.",
-                    p,
-                ))
+                el.child(self.notice("linked-https", &t("instancesettings.signUps.linkedNotice"), p))
             }),
             p,
             cx,
@@ -126,15 +145,16 @@ impl InstanceSettingsView {
         if let Some(issuer) = self.texts.get("linked_issuer") {
             page = page.child(self.setting(
                 "linked-issuer",
-                "Sign-in provider",
-                Some(
-                    "The OpenAuth issuer waifu.dev sign-ins go through. Accounts already linked stay tied to the one \
-                     they came from.",
-                ),
+                &t("instancesettings.nav.linkedIssuer"),
+                Some(&t("instancesettings.signUps.issuerHint")),
                 &["linked_issuer"],
                 &defaults.linked_issuer,
                 2,
-                Input::new(issuer).prefix(icon("flower-2").size(px(15.0)).text_color(p.muted_foreground)),
+                focus_ring(
+                    input_box(Input::new(issuer).appearance(false), Some("flower-2"), p),
+                    has_focus(issuer, window, cx),
+                    p,
+                ),
                 p,
                 cx,
             ));
@@ -144,9 +164,24 @@ impl InstanceSettingsView {
             "server-creation",
             draft.server_creation,
             vec![
-                Opt::new(pb::ServerCreation::Everyone as i32, "Everyone", "Any signed-in account.", "users"),
-                Opt::new(pb::ServerCreation::Admins as i32, "Admins", "Instance admins only.", "crown"),
-                Opt::new(pb::ServerCreation::Disabled as i32, "Nobody", "No new servers.", "ban"),
+                Opt::new(
+                    pb::ServerCreation::Everyone as i32,
+                    t("instancesettings.signUps.everyone"),
+                    t("instancesettings.signUps.serverEveryoneHint"),
+                    "users",
+                ),
+                Opt::new(
+                    pb::ServerCreation::Admins as i32,
+                    t("instancesettings.signUps.admins"),
+                    t("instancesettings.signUps.adminsHint"),
+                    "crown",
+                ),
+                Opt::new(
+                    pb::ServerCreation::Disabled as i32,
+                    t("instancesettings.signUps.nobody"),
+                    t("instancesettings.signUps.serverNobodyHint"),
+                    "ban",
+                ),
             ],
             p,
             window,
@@ -155,10 +190,10 @@ impl InstanceSettingsView {
         );
         page = page.child(self.setting(
             "server-creation",
-            "Who can create servers",
+            &t("instancesettings.nav.serverCreation"),
             None,
             &["server_creation"],
-            creation_label(defaults.server_creation),
+            &creation_label(defaults.server_creation),
             3,
             servers,
             p,
@@ -166,12 +201,12 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "servers-per-account",
-            "Servers per account",
-            Some("How many servers one account may own."),
+            &t("instancesettings.nav.serversPerAccount"),
+            Some(&t("instancesettings.signUps.serversPerAccountHint")),
             &["servers_per_account"],
             &admin::count_label(defaults.servers_per_account),
             4,
-            self.cap("servers_per_account", "Up to", false, p, window, cx),
+            self.cap("servers_per_account", &t("instancesettings.shared.upTo"), false, p, window, cx),
             p,
             cx,
         ));
@@ -180,9 +215,24 @@ impl InstanceSettingsView {
             "agent-creation",
             draft.agent_creation,
             vec![
-                Opt::new(pb::AgentCreation::Everyone as i32, "Everyone", "Any signed-in person.", "bot"),
-                Opt::new(pb::AgentCreation::Admins as i32, "Admins", "Instance admins only.", "crown"),
-                Opt::new(pb::AgentCreation::Disabled as i32, "Nobody", "No new agents.", "ban"),
+                Opt::new(
+                    pb::AgentCreation::Everyone as i32,
+                    t("instancesettings.signUps.everyone"),
+                    t("instancesettings.signUps.agentEveryoneHint"),
+                    "bot",
+                ),
+                Opt::new(
+                    pb::AgentCreation::Admins as i32,
+                    t("instancesettings.signUps.admins"),
+                    t("instancesettings.signUps.adminsHint"),
+                    "crown",
+                ),
+                Opt::new(
+                    pb::AgentCreation::Disabled as i32,
+                    t("instancesettings.signUps.nobody"),
+                    t("instancesettings.signUps.agentNobodyHint"),
+                    "ban",
+                ),
             ],
             p,
             window,
@@ -191,10 +241,10 @@ impl InstanceSettingsView {
         );
         page = page.child(self.setting(
             "agent-creation",
-            "Who can make agents",
-            Some("Agents are accounts programs drive, such as bots. Agents already made keep working."),
+            &t("instancesettings.nav.agentCreation"),
+            Some(&t("instancesettings.signUps.agentHint")),
             &["agent_creation"],
-            creation_label(defaults.agent_creation),
+            &creation_label(defaults.agent_creation),
             5,
             agents,
             p,
@@ -202,19 +252,19 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "mcp",
-            "Agents through MCP",
+            &t("instancesettings.nav.mcp"),
             None,
             &["mcp"],
-            if defaults.mcp { "on" } else { "off" },
+            &t(if defaults.mcp { "instancesettings.shared.on" } else { "instancesettings.shared.off" }),
             6,
             self.toggle(
                 "mcp",
                 draft.mcp,
                 false,
-                "Agents can use this instance as an MCP server",
-                "AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent \
-                 has. Server managers can still pick which agents may use theirs.",
+                &t("instancesettings.signUps.mcpLabel"),
+                &t("instancesettings.signUps.mcpHint"),
                 p,
+                window,
                 cx,
                 |d, on| d.mcp = on,
             ),
@@ -223,19 +273,19 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "shared-channels",
-            "Shared channels",
+            &t("serversettings.nav.shared"),
             None,
             &["shared_channels"],
-            if defaults.shared_channels { "on" } else { "off" },
+            &t(if defaults.shared_channels { "instancesettings.shared.on" } else { "instancesettings.shared.off" }),
             7,
             self.toggle(
                 "shared-channels",
                 draft.shared_channels,
                 false,
-                "Servers can share channels with each other",
-                "Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; \
-                 channels already shared stay until either side ends them.",
+                &t("instancesettings.signUps.sharedLabel"),
+                &t("instancesettings.signUps.sharedHint"),
                 p,
+                window,
                 cx,
                 |d, on| d.shared_channels = on,
             ),
@@ -244,19 +294,19 @@ impl InstanceSettingsView {
         ));
         page = page.child(self.setting(
             "profile-effects",
-            "Profile effects",
+            &t("instancesettings.nav.profileEffects"),
             None,
             &["profile_effects"],
-            if defaults.profile_effects { "on" } else { "off" },
+            &t(if defaults.profile_effects { "instancesettings.shared.on" } else { "instancesettings.shared.off" }),
             8,
             self.toggle(
                 "profile-effects",
                 draft.profile_effects,
                 false,
-                "People can put an effect on their profile card",
-                "Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, \
-                 and everyone's pick comes back when it's on again.",
+                &t("instancesettings.signUps.effectsLabel"),
+                &t("instancesettings.signUps.effectsHint"),
                 p,
+                window,
                 cx,
                 |d, on| d.profile_effects = on,
             ),
@@ -266,19 +316,19 @@ impl InstanceSettingsView {
         if self.instance_has("rich-presence") {
             page = page.child(self.setting(
                 "rich-presence",
-                "Rich presence",
+                &t("instancesettings.nav.richPresence"),
                 None,
                 &["rich_presence"],
-                if defaults.rich_presence { "on" } else { "off" },
+                &t(if defaults.rich_presence { "instancesettings.shared.on" } else { "instancesettings.shared.off" }),
                 9,
                 self.toggle(
                     "rich-presence",
                     draft.rich_presence,
                     false,
-                    "People can show what they're doing",
-                    "Games and apps people's desktop apps see, shown to people they share a server with, once each \
-                     person turns it on. Kept in memory only. Turned off, nobody's activity shows; statuses still do.",
+                    &t("instancesettings.signUps.presenceLabel"),
+                    &t("instancesettings.signUps.presenceHint"),
                     p,
+                    window,
                     cx,
                     |d, on| d.rich_presence = on,
                 ),
