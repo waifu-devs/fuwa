@@ -21,6 +21,8 @@ pub enum Action {
     Kick,
     /// Remove them for good, with their messages from this many seconds back.
     Ban(i64),
+    /// Change their nickname in the server (the text given is the new one; empty clears it).
+    Nickname,
 }
 
 impl Action {
@@ -29,6 +31,7 @@ impl Action {
             Action::TimeOut(_) => P::TimeOutMembers,
             Action::Kick => P::KickMembers,
             Action::Ban(_) => P::BanMembers,
+            Action::Nickname => P::ManageNicknames,
         }
     }
 }
@@ -65,6 +68,16 @@ impl InstanceState {
         Access { owner, rank, ..Access::default() }
     }
 
+    /// Whether you may change someone's nickname in a server (Manage
+    /// Nicknames, and ranking above them). Never your own this way.
+    pub fn can_rename(&self, server_id: &str, user_id: &str) -> bool {
+        if self.me.as_ref().is_none_or(|me| me.id == user_id) {
+            return false;
+        }
+        let mine = self.access(server_id);
+        mine.has(P::ManageNicknames) && outranks(&mine, &self.standing(server_id, user_id))
+    }
+
     /// What you may do to someone in a server: each action you hold the
     /// permission for, when you rank above them. Never to yourself.
     pub fn can_moderate(&self, server_id: &str, user_id: &str) -> Vec<P> {
@@ -87,8 +100,9 @@ pub fn timed_out_until(member: &pb::Member, now_ms: i64) -> Option<i64> {
 }
 
 impl Core {
-    /// Times out, kicks or bans someone. For a ban, how many of their
-    /// messages went with them.
+    /// Times out, kicks, bans or renames someone (`reason` is the new
+    /// nickname for a rename). For a ban, how many of their messages went
+    /// with them.
     pub async fn moderate(
         &self,
         key: &str,
@@ -140,6 +154,25 @@ impl Core {
                 .await?;
                 self.forget_member(key, server_id, user_id);
                 Ok(res.deleted_messages)
+            }
+            Action::Nickname => {
+                let res = rpc!(
+                    api.servers(),
+                    update_member(pb::UpdateMemberRequest { server_id: server, user_id: user, nickname: Some(reason) })
+                )
+                .await?;
+                if let Some(member) = res.member {
+                    self.shared.instance(key, |i| {
+                        if let Some(m) = i
+                            .members
+                            .get_mut(server_id)
+                            .and_then(|l| l.iter_mut().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id)))
+                        {
+                            m.nickname = member.nickname.clone();
+                        }
+                    });
+                }
+                Ok(0)
             }
         }
     }

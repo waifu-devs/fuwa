@@ -1715,7 +1715,6 @@ impl FuwaApp {
         reason: String,
         cx: &mut Context<Self>,
     ) {
-        use crate::core::moderation::Action;
         let name = self.core.shared.read(|s| {
             s.instance(&key).map(|i| i.display_name(Some(&server), &user_id)).unwrap_or_else(|| "Them".into())
         });
@@ -1728,22 +1727,9 @@ impl FuwaApp {
             match result {
                 Ok(deleted) => {
                     this.dialog = None;
-                    let (glyph, title) = match action {
-                        Action::TimeOut(0) => ("message-circle", format!("{name} can talk again")),
-                        Action::TimeOut(s) => {
-                            ("hourglass", format!("{name} is timed out for {}", crate::ui::moderate::duration(s)))
-                        }
-                        Action::Kick => ("door-open", format!("Kicked {name}")),
-                        Action::Ban(_) if deleted > 0 => (
-                            "gavel",
-                            format!(
-                                "Banned {name} and deleted {deleted} {}",
-                                if deleted == 1 { "message" } else { "messages" }
-                            ),
-                        ),
-                        Action::Ban(_) => ("gavel", format!("Banned {name}")),
-                    };
-                    this.toast(glyph, title, "It's in the server's audit log.".into(), None, None, cx);
+                    if let Some((glyph, title)) = crate::ui::moderate::done_toast(action, &name, deleted) {
+                        this.toast(glyph, title, String::new(), None, None, cx);
+                    }
                 }
                 Err(err) => this.dialog_error = Some(err.message),
             }
