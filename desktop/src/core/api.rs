@@ -360,7 +360,10 @@ fn broke_inside(status: &Status) -> bool {
 /// The instance couldn't be reached at all.
 fn unreachable(status: &Status) -> bool {
     let message = status.message();
-    message.contains("error trying to connect") || message.contains("tcp connect") || message.contains("dns error")
+    message.contains("error trying to connect")
+        || message.contains("tcp connect")
+        || message.contains("dns error")
+        || message.contains("Client error (Connect)")
 }
 
 /// The address of an instance as people type it ("fuwa.chat",

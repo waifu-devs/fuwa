@@ -20,6 +20,7 @@ use gpui_kit::{
 use crate::core::api::instance_key;
 use crate::core::config::SavedAccount;
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::providers::{PendingProvider, ProviderAnswer};
 use crate::core::{Core, SignIn};
 use crate::pb;
 use crate::ui::motion;
@@ -52,8 +53,16 @@ pub enum ConnectEvent {
 enum Step {
     Address,
     Account,
-    TwoFactor { ticket: String, backup: bool },
+    TwoFactor {
+        ticket: String,
+        backup: bool,
+    },
     Browser,
+    /// Someone new signing in with Google, X or Twitch: their username first.
+    NewAccount {
+        pending: PendingProvider,
+        account: pb::NewProviderAccount,
+    },
 }
 
 /// What the form is for, which decides its frame and title.
@@ -78,6 +87,10 @@ pub struct ConnectView {
     display_name: Entity<InputState>,
     code: Entity<InputState>,
     backup: Entity<InputState>,
+    /// A new account's username, after a provider sign-in.
+    new_username: Entity<InputState>,
+    /// Bring the provider's name and picture into the new account.
+    use_profile: bool,
     url: String,
     node: Option<pb::Node>,
     sign_up: bool,
@@ -104,8 +117,9 @@ impl ConnectView {
         let display_name = cx.new(|cx| InputState::new(window, cx).placeholder(t("connect.account.displayNameHint")));
         let code = cx.new(|cx| InputState::new(window, cx));
         let backup = cx.new(|cx| InputState::new(window, cx).placeholder("abcd-efgh"));
+        let new_username = cx.new(|cx| InputState::new(window, cx).placeholder(t("connect.account.usernameHint")));
         let mut subs = Vec::new();
-        for input in [&address, &username, &password, &display_name, &backup] {
+        for input in [&address, &username, &password, &display_name, &backup, &new_username] {
             subs.push(cx.subscribe_in(input, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = event {
                     this.submit(window, cx);
@@ -150,6 +164,8 @@ impl ConnectView {
             display_name,
             code,
             backup,
+            new_username,
+            use_profile: true,
             url: String::new(),
             node: None,
             sign_up: false,
@@ -185,6 +201,67 @@ impl ConnectView {
             Step::Account => self.sign_in(window, cx),
             Step::TwoFactor { ticket, backup } => self.verify(ticket, backup, window, cx),
             Step::Browser => {}
+            Step::NewAccount { pending, .. } => self.create_account(pending, window, cx),
+        }
+    }
+
+    /// Signs in with Google, X or Twitch in the browser (the web's `ProviderSignIn`).
+    fn in_provider(&mut self, id: String, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        let (core, url) = (self.core.clone(), self.url.clone());
+        self.step = Step::Browser;
+        self.browser = name;
+        let open_page = crate::ui::open_in_browser;
+        self.start(
+            async move { core.provider_sign_in(&url, &id, open_page).await },
+            window,
+            cx,
+            |this, result, window, cx| this.provider_answer(result, window, cx),
+        );
+    }
+
+    /// Someone new picked their username: make the account and sign in.
+    fn create_account(&mut self, pending: PendingProvider, window: &mut Window, cx: &mut Context<Self>) {
+        let username = self.new_username.read(cx).value().trim().to_lowercase();
+        if username.is_empty() {
+            return;
+        }
+        let (core, use_profile) = (self.core.clone(), self.use_profile);
+        self.start(
+            async move { core.finish_provider(pending, Some((username, use_profile))).await },
+            window,
+            cx,
+            |this, result, window, cx| this.provider_answer(result, window, cx),
+        );
+    }
+
+    fn provider_answer(
+        &mut self,
+        result: Result<ProviderAnswer, crate::core::api::Problem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(ProviderAnswer::Done { key }) => cx.emit(ConnectEvent::Done { key }),
+            Ok(ProviderAnswer::TwoFactor { ticket }) => {
+                self.step = Step::TwoFactor { ticket, backup: false };
+                self.code.update(cx, |s, cx| s.focus(window, cx));
+            }
+            Ok(ProviderAnswer::NewAccount { pending, account }) => {
+                let suggested = account.suggested_username.clone();
+                self.new_username.update(cx, |s, cx| {
+                    if s.value().is_empty() {
+                        s.set_value(suggested, window, cx);
+                    }
+                    s.focus(window, cx);
+                });
+                self.step = Step::NewAccount { pending, account };
+            }
+            Err(err) => {
+                if matches!(self.step, Step::Browser) {
+                    self.step = Step::Account;
+                }
+                self.fail(err.message);
+            }
         }
     }
 
@@ -232,7 +309,15 @@ impl ConnectView {
                     field.update(cx, |s, cx| s.focus(window, cx));
                 }
             }
-            Err(err) => this.fail(t_with("connect.where.notFound", &[("problem", Arg::Str(&err.message))])),
+            Err(err) => {
+                // Nothing answered there: the web's words for it.
+                let problem = if matches!(err.code, tonic::Code::Unavailable | tonic::Code::Unknown) {
+                    t("system.connection.unreachable")
+                } else {
+                    err.message
+                };
+                this.fail(t_with("connect.where.notFound", &[("problem", Arg::Str(&problem))]))
+            }
         });
     }
 
@@ -329,7 +414,7 @@ impl ConnectView {
         self.error = None;
         self.step = match self.step {
             Step::Address | Step::Account => Step::Address,
-            Step::TwoFactor { .. } | Step::Browser => Step::Account,
+            Step::TwoFactor { .. } | Step::Browser | Step::NewAccount { .. } => Step::Account,
         };
         cx.notify();
     }
@@ -384,7 +469,7 @@ impl ConnectView {
                     .child(div().relative().left(px(shake)).child(field(
                         &self.address,
                         Some("server"),
-                        false,
+                        self.error.is_some(),
                         window,
                         cx,
                         p,
@@ -426,7 +511,7 @@ impl ConnectView {
         let auth = self.node.as_ref().and_then(|n| n.auth.clone()).unwrap_or_default();
         let (can_in, can_up) = (auth.local_sign_in, auth.local_sign_up);
         let sso = auth.sso_sign_in;
-        let others = sso || auth.linked_sign_in;
+        let others = sso || auth.linked_sign_in || !auth.providers.is_empty();
         let mut body = div().flex().flex_col().gap(px(16.0)).child(self.header(cx, p));
         if plain_http(&self.url) {
             body = body.child(
@@ -769,6 +854,29 @@ impl ConnectView {
             }
             col = col.child(block);
         }
+        // Google, X, Twitch: whichever the instance's admins turned on.
+        if !auth.providers.is_empty() {
+            let mut social = div().flex().flex_col().gap(px(10.0));
+            for (n, provider) in auth.providers.iter().enumerate() {
+                let (id, name) = (provider.id.clone(), provider.name.clone());
+                let mark = provider_mark(&provider.id, 18.0, p.primary);
+                social = social.child(motion::rise(
+                    provider_button_with(
+                        SharedString::from(format!("provider-{}", provider.id)),
+                        mark,
+                        &provider.name,
+                        p,
+                    )
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.in_provider(id.clone(), name.clone(), window, cx)),
+                    ),
+                    SharedString::from(format!("provider-in-{n}")),
+                    Duration::from_millis(50 * n as u64),
+                    8.0,
+                ));
+            }
+            col = col.child(social);
+        }
         col
     }
 
@@ -944,6 +1052,145 @@ impl ConnectView {
             .into_any_element()
     }
 
+    /// Someone new after a provider sign-in: the web's `ProviderDone` new-account form.
+    fn new_account_body(
+        &mut self,
+        pending: &PendingProvider,
+        account: &pb::NewProviderAccount,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        p: &Palette,
+    ) -> AnyElement {
+        let empty = self.new_username.read(cx).value().trim().is_empty();
+        let on = self.use_profile;
+        let streamer = self.core.prefs().streamer_mode;
+        let what = if account.display_name.is_empty() {
+            t("connect.providerDone.pictureOnly")
+        } else if streamer {
+            "address hidden".to_owned()
+        } else {
+            account.display_name.clone()
+        };
+        let hover = alpha(p.muted, 0.7);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0))
+                    .text_center()
+                    .child(
+                        div()
+                            .size(px(64.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(radius_3xl())
+                            .bg(alpha(p.primary, 0.15))
+                            .text_color(p.primary)
+                            .child(icon("user-plus").size(px(28.0))),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(20.0))
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("connect.providerDone.newTitle")),
+                    )
+                    .child(div().text_size(px(14.0)).line_height(px(20.0)).text_color(p.muted_foreground).child(
+                        t_with("connect.providerDone.newNote", &[("provider", Arg::Str(&account.provider_name))]),
+                    )),
+            )
+            .child(div().flex().flex_col().gap(px(8.0)).child(label(t("connect.account.username"))).child(field(
+                &self.new_username,
+                None,
+                false,
+                window,
+                cx,
+                p,
+            )))
+            .child(
+                div()
+                    .id("use-profile")
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .p(px(12.0))
+                    .rounded(radius_2xl())
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(alpha(p.muted, 0.4))
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.use_profile = !this.use_profile;
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .size(px(36.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(radius_xl())
+                            .bg(p.foreground)
+                            .child(provider_mark(&pending.provider, 16.0, p.primary)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_size(px(14.0)).font_weight(FontWeight::BOLD).child(t_with(
+                                "connect.providerDone.useProfile",
+                                &[("provider", Arg::Str(&account.provider_name))],
+                            )))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(12.0))
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(what),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(16.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(if on { p.primary } else { p.border })
+                            .when(on, |el| {
+                                el.bg(p.primary).child(icon("check").size(px(12.0)).text_color(p.primary_foreground))
+                            }),
+                    ),
+            )
+            .when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p)))
+            .child(
+                big_button("create-account", t("connect.providerDone.create"), p)
+                    .child(if self.busy {
+                        spinner(p.primary_foreground).into_any_element()
+                    } else {
+                        icon("arrow-right").size(px(16.0)).into_any_element()
+                    })
+                    .when(empty || self.busy, |el| el.opacity(0.5))
+                    .when(!empty && !self.busy, |el| {
+                        el.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn browser_body(&mut self, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
         div()
             .flex()
@@ -980,6 +1227,7 @@ impl ConnectView {
             Step::Account => ("account", self.account_body(window, cx, p)),
             Step::TwoFactor { backup, .. } => ("two-step", self.two_factor_body(backup, window, cx, p)),
             Step::Browser => ("browser", self.browser_body(cx, p)),
+            Step::NewAccount { pending, account } => ("new", self.new_account_body(&pending, &account, window, cx, p)),
         };
         // Steps slide in from the side they come from.
         let from = if key == "where" { -24.0 } else { 24.0 };
@@ -1231,30 +1479,36 @@ fn label(text: String) -> Div {
 fn field(
     state: &Entity<InputState>,
     glyph: Option<&str>,
-    masked: bool,
+    invalid: bool,
     window: &Window,
     cx: &gpui_kit::App,
     p: &Palette,
 ) -> Div {
     let focused = state.read(cx).focus_handle(cx).is_focused(window);
     let input = gpui_kit::Styled::text_size(Input::new(state).appearance(false), px(16.0));
-    let input = gpui_kit::Styled::px(input, px(0.0));
-    let input = gpui_kit::Styled::flex_1(if masked { input.mask_toggle() } else { input });
+    let input = gpui_kit::Styled::flex_1(gpui_kit::Styled::px(input, px(0.0)));
+    // `aria-invalid`: the border and ring turn the destructive color.
+    let (edge, ring) = if invalid {
+        (p.destructive.into(), alpha(p.destructive, 0.2))
+    } else if focused {
+        (Hsla::from(p.primary), alpha(p.primary, 0.5))
+    } else {
+        (Hsla::from(p.border), alpha(p.primary, 0.0))
+    };
     div()
         .h(px(44.0))
         .w_full()
         .flex()
         .items_center()
         .gap(px(8.0))
-        .pl(px(12.0))
-        .pr(px(if masked { 4.0 } else { 12.0 }))
+        .px(px(12.0))
         .rounded(radius_xl())
         .bg(p.card)
         .border_1()
-        .border_color(if focused { p.primary } else { p.border })
+        .border_color(edge)
         .shadow(if focused {
             vec![gpui_kit::BoxShadow {
-                color: alpha(p.primary, 0.5),
+                color: ring,
                 offset: gpui_kit::point(px(0.0), px(0.0)),
                 blur_radius: px(0.0),
                 spread_radius: px(3.0),
@@ -1319,6 +1573,50 @@ fn big_button(id: &'static str, text: String, p: &Palette) -> Stateful<Div> {
         .hover(move |s| s.top(px(-2.0)).shadow(vec![glow.clone()]))
         .active(|s| s.top(px(0.0)).opacity(0.94))
         .child(text)
+}
+
+/// A provider's mark (Google, X, Twitch) in a color, or a key for one this app doesn't know.
+fn provider_mark(id: &str, size: f32, color: Rgba) -> AnyElement {
+    match id {
+        "google" | "x" | "twitch" => gpui_kit::svg()
+            .path(SharedString::from(format!("providers/{id}.svg")))
+            .size(px(size))
+            .flex_none()
+            .text_color(color)
+            .into_any_element(),
+        _ => icon("key-round").size(px(size)).text_color(color).into_any_element(),
+    }
+}
+
+/// A "Continue with …" button with any mark in front.
+fn provider_button_with(id: SharedString, mark: AnyElement, name: &str, p: &Palette) -> Stateful<Div> {
+    let glow = gpui_kit::BoxShadow {
+        color: p.primary.into(),
+        offset: gpui_kit::point(px(0.0), px(14.0)),
+        blur_radius: px(30.0),
+        spread_radius: px(-16.0),
+        inset: false,
+    };
+    div()
+        .id(id)
+        .relative()
+        .h(px(48.0))
+        .px(px(16.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(10.0))
+        .rounded(radius_xl())
+        .bg(p.foreground)
+        .text_color(p.background)
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .shadow(vec![glow])
+        .cursor_pointer()
+        .hover(|s| s.top(px(-2.0)))
+        .active(|s| s.opacity(0.94))
+        .child(mark)
+        .child(div().min_w_0().truncate().child(t_with("connect.provider.continueWith", &[("name", Arg::Str(name))])))
+        .child(icon("arrow-right").size(px(16.0)))
 }
 
 /// One "Continue with …" button: dark, the icon in the primary color, an arrow that nudges on hover.

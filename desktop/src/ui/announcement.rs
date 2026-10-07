@@ -127,7 +127,22 @@ pub fn banner(
         .py(px(8.0))
         .bg(bg)
         .text_color(fg)
-        .when(tone == Tone::Info, |el| el.border_b_1().border_color(alpha(p.primary, 0.3)))
+        .when(tone == Tone::Info, |el| {
+            // The web's three-stop sweep: 18% of the primary at the edges, 9% at 60%.
+            let (edge, middle) = (mix(p.background, p.primary, 0.18), mix(p.background, p.primary, 0.09));
+            el.border_b_1()
+                .border_color(alpha(p.primary, 0.3))
+                .child(div().absolute().top_0().bottom_0().left_0().w(gpui_kit::relative(0.6)).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(edge, 0.0),
+                    linear_color_stop(middle, 1.0),
+                )))
+                .child(div().absolute().top_0().bottom_0().right_0().w(gpui_kit::relative(0.4)).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(middle, 0.0),
+                    linear_color_stop(edge, 1.0),
+                )))
+        })
         .child(badge)
         .child(words)
         .when_some(ends, |el, (short, _)| {
@@ -144,7 +159,10 @@ pub fn banner(
                     })
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
-                    .child(format!("Until {short}")),
+                    .child(crate::core::i18n::t_with(
+                        "shell.announcement.until",
+                        &[("time", crate::core::i18n::Arg::Str(&short))],
+                    )),
             )
         });
     if tone == Tone::Critical {

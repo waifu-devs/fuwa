@@ -35,6 +35,7 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod providers;
 pub mod rail;
 pub mod reports;
 pub mod search;
