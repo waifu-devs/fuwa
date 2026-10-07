@@ -69,6 +69,11 @@ pub(crate) enum MenuOf {
         key: String,
         conversation: String,
     },
+    /// A server you applied to, waiting in the rail (`ui::join`).
+    Applied {
+        key: String,
+        server: String,
+    },
 }
 
 impl MenuOf {
@@ -82,6 +87,7 @@ impl MenuOf {
             MenuOf::Server { key, server } => format!("s|{key}|{server}"),
             MenuOf::ServerHeader { key, server } => format!("s-head|{key}|{server}"),
             MenuOf::Dm { key, conversation } => format!("dm|{key}|{conversation}"),
+            MenuOf::Applied { key, server } => format!("applied|{key}|{server}"),
         }
     }
 }

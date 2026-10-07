@@ -78,6 +78,20 @@ pub fn server_banner(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    server_banner_round(server, w, h, under, 0.0, window, cx)
+}
+
+/// [`server_banner`] with its top corners rounded by `top`, for the top of a
+/// card (GPUI doesn't clip children to a rounded parent).
+pub fn server_banner_round(
+    server: &pb::Server,
+    w: f32,
+    h: f32,
+    under: Option<Hsla>,
+    top: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let still = cx.reduce_motion();
     let mut el = div().relative().w(px(w)).h(px(h)).overflow_hidden().flex_none();
     let picture = (!server.banner_url.is_empty())
@@ -120,10 +134,10 @@ pub fn server_banner(
             };
             el.child(motion::fade_in(div().absolute().inset_0().child(moving), "banner-in", Duration::from_millis(600)))
         }
-        None => el.child(gradient(server, w, h, still, window)),
+        None => el.child(gradient(server, w, h, top, still, window)),
     };
     // Keeps a close button readable over a bright picture, and fades into the card below.
-    el.child(div().absolute().top_0().left_0().right_0().h(px(56.0)).bg(linear_gradient(
+    el.child(div().absolute().top_0().left_0().right_0().h(px(56.0)).rounded_t(px(top)).bg(linear_gradient(
         180.0,
         linear_color_stop(hsla(0.0, 0.0, 0.0, 0.35), 0.0),
         linear_color_stop(hsla(0.0, 0.0, 0.0, 0.0), 1.0),
@@ -138,47 +152,67 @@ pub fn server_banner(
     .into_any_element()
 }
 
-/// A server without a banner: its accent and hue, a soft light drifting over them.
-fn gradient(server: &pb::Server, w: f32, h: f32, still: bool, window: &Window) -> AnyElement {
+/// A server without a banner: its accent and hue, two soft lights drifting
+/// over them and a faint dot grid (the web's `Gradient` in `join/Banner.tsx`).
+fn gradient(server: &pb::Server, w: f32, h: f32, top: f32, still: bool, window: &Window) -> AnyElement {
     let a = accent(server);
-    let dark = Hsla { l: a.l * 0.85, ..a };
+    let rgb: gpui_kit::Rgba = a.into();
+    // color-mix(accent 85%, black), the accent at 45%, then the hue 50° on.
+    let dark: Hsla = gpui_kit::Rgba { r: rgb.r * 0.85, g: rgb.g * 0.85, b: rgb.b * 0.85, a: 1.0 }.into();
     let other = hsla(((hue_of(&server.id) + 50) % 360) as f32 / 360.0, 0.70, 0.60, 1.0);
-    let base = div().absolute().inset_0().bg(linear_gradient(
-        120.0,
-        linear_color_stop(dark, 0.0),
-        linear_color_stop(other, 1.0),
-    ));
-    let light = move |el: Div, t: f32| {
-        el.child(
-            div()
-                .absolute()
-                .left(px(-w * 0.1 + t * w * 0.18))
-                .top(px(-h * 0.33 + t * h * 0.12))
-                .size(px(w * 0.7 * (1.0 + 0.2 * t)))
-                .rounded_full()
-                .bg(hsla(0.0, 0.0, 1.0, 0.12)),
-        )
-        .child(
-            div()
-                .absolute()
-                .right(px(-w * 0.1 + t * w * 0.16))
-                .bottom(px(-h * 0.5 + t * h * 0.1))
-                .size(px(w * 0.8))
-                .rounded_full()
-                .bg(hsla(0.0, 0.0, 0.0, 0.12)),
-        )
+    // GPUI's gradients have two stops, so the second half is laid over the first.
+    let base = div()
+        .absolute()
+        .inset_0()
+        .child(div().absolute().inset_0().rounded_t(px(top)).bg(linear_gradient(
+            120.0,
+            linear_color_stop(dark, 0.0),
+            linear_color_stop(a, 0.45),
+        )))
+        .child(div().absolute().inset_0().rounded_t(px(top)).bg(linear_gradient(
+            120.0,
+            linear_color_stop(Hsla { a: 0.0, ..a }, 0.45),
+            linear_color_stop(other, 1.0),
+        )));
+    let lights = move |el: Div, t: f32| {
+        let (lw, lh) = (w * 0.7 * (1.0 + 0.2 * t), h * 0.7 * (1.0 + 0.2 * t));
+        let (dw, dh) = (w * 0.8 * (1.0 + 0.15 * t), h * 0.8 * (1.0 + 0.15 * t));
+        el.child(crate::ui::instance_home::soft_glow(
+            -w * 0.1 + t * w * 0.7 * 0.18 - (lw - w * 0.7) / 2.0,
+            -h / 3.0 + t * h * 0.7 * 0.12 - (lh - h * 0.7) / 2.0,
+            lw,
+            lh,
+            hsla(0.0, 0.0, 1.0, 0.25),
+            64.0,
+        ))
+        .child(crate::ui::instance_home::soft_glow(
+            w - w * 0.8 + w * 0.1 - t * w * 0.8 * 0.16 - (dw - w * 0.8) / 2.0,
+            h - h * 0.8 + h * 0.5 - t * h * 0.8 * 0.1 - (dh - h * 0.8) / 2.0,
+            dw,
+            dh,
+            hsla(0.0, 0.0, 0.0, 0.2),
+            64.0,
+        ))
     };
-    if still {
-        light(base, 0.0).into_any_element()
+    let lit = if still {
+        lights(div().absolute().inset_0(), 0.0)
     } else {
-        motion::ambient(
-            base,
+        div().absolute().inset_0().child(motion::ambient(
+            div().absolute().inset_0(),
             SharedString::from(format!("banner-glow-{}", server.id)),
             Duration::from_secs(36),
             window,
-            move |el, t| light(el, 0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
-        )
-    }
+            move |el, t| lights(el, 0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
+        ))
+    };
+    div()
+        .absolute()
+        .inset_0()
+        .overflow_hidden()
+        .child(base)
+        .child(lit)
+        .child(crate::ui::instance_home::dot_grid(0.25, gpui_kit::rgb(0x000000)))
+        .into_any_element()
 }
 
 /// The top of the welcome and onboarding screens: the banner, the server's

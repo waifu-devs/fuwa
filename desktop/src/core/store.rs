@@ -95,6 +95,8 @@ pub struct InstanceState {
     pub people: Option<HashMap<String, pb::Presence>>,
     /// Pinned messages, by `pins::pins_key`, only for lists someone opened.
     pub pins: HashMap<String, crate::core::pins::PinList>,
+    /// Servers you applied to and aren't in yet, by id (`join::Applied`), once read from disk.
+    pub applied: Option<HashMap<String, crate::core::join::Applied>>,
 }
 
 impl InstanceState {
@@ -128,6 +130,7 @@ impl InstanceState {
             friends: Default::default(),
             people: None,
             pins: HashMap::new(),
+            applied: None,
         }
     }
 

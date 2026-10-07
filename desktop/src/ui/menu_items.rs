@@ -186,6 +186,7 @@ impl FuwaApp {
                 self.category_items(key, server, category, copy_id(category, "category"))
             }
             MenuOf::Server { key, server } => self.server_items(key, server, copy_id(server, "server")),
+            MenuOf::Applied { key, server } => self.applied_items(key, server),
             MenuOf::ServerHeader { key, server } => self.server_header_items(key, server, copy_id(server, "server")),
             MenuOf::Dm { key, conversation } => {
                 let (unread, other) = self.core.shared.read(|s| {

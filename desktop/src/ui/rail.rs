@@ -115,6 +115,10 @@ impl FuwaApp {
                     10.0,
                 ));
             }
+            // Servers you applied to, waiting to be let in (`ui::join`).
+            for applied in self.applied_buttons(&inst.key, window, cx) {
+                list = list.child(applied);
+            }
         }
 
         // Adding a server or an instance, under a divider.

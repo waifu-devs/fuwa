@@ -1055,7 +1055,7 @@ impl FuwaApp {
                 cx,
             ));
         }
-        let browsing = matches!(&self.nav, Nav::Instance { key: k } if k == key);
+        let browsing = matches!(&self.nav, Nav::Instance { key: k } if k == key) && self.home.invite.is_none();
         body = body.child(link(
             "browse-link",
             "compass",
@@ -1134,7 +1134,7 @@ impl FuwaApp {
                                 .child(t("dms-calls.dm.list.emptyTitle")),
                         )
                         .child(div().mt(px(6.0)).line_height(px(19.5)).child(crate::ui::text::hint_line(
-                            &t("dms-calls.dm.list.emptyText"),
+                            &crate::ui::instance_home::template_text("dms-calls.dm.list.emptyText"),
                             &[("message", &message)],
                             &p,
                         ))),
