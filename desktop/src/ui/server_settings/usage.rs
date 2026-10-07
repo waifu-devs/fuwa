@@ -727,18 +727,22 @@ impl ServerSettingsView {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
                     .rounded(radius_xl())
                     .cursor_pointer()
                     .map(|el| {
+                        // The web's ring sits outside the row; a border inside takes its room from the padding.
                         if on {
-                            el.text_color(p.foreground)
+                            el.px(px(10.0))
+                                .py(px(6.0))
+                                .text_color(p.foreground)
                                 .bg(gpui_kit::rgba(0xf59e0b1a))
                                 .border_2()
                                 .border_color(amber_ring)
                         } else {
-                            el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg))
+                            el.px(px(12.0))
+                                .py(px(8.0))
+                                .text_color(p.muted_foreground)
+                                .hover(move |s| s.bg(hover).text_color(fg))
                         }
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -753,8 +757,17 @@ impl ServerSettingsView {
                         div()
                             .min_w_0()
                             .flex_1()
-                            .child(div().truncate().text_sm().font_weight(FontWeight::BOLD).child(name_of(m)))
-                            .child(div().truncate().text_xs().child(format!("@{}", user.username))),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_sm()
+                                    .line_height(px(20.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(name_of(m)),
+                            )
+                            .child(
+                                div().truncate().text_xs().line_height(px(16.0)).child(format!("@{}", user.username)),
+                            ),
                     ),
             );
         }

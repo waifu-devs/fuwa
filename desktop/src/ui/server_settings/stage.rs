@@ -118,6 +118,8 @@ impl ServerSettingsView {
         let overlay = div()
             .absolute()
             .inset_0()
+            // GPUI doesn't clip to rounded corners, so the shade rounds its own.
+            .map(|el| if phone { el.rounded(px(31.0)) } else { el.rounded(radius_3xl()) })
             .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
             .flex()
             .map(|el| if phone { el.items_end() } else { el.items_center().justify_center().p(px(32.0 * scale)) })
@@ -358,6 +360,7 @@ fn fake_app(server: &pb::Server, phone: bool, s: f32, p: &Palette) -> AnyElement
             .items_center()
             .gap(px(8.0 * s))
             .py(px(12.0 * s))
+            .rounded_l(radius_3xl())
             .bg(alpha(p.muted, 0.6));
         for _ in 0..4 {
             rail = rail.child(div().size(px(48.0 * s)).rounded(px(16.0 * s)).bg(shade));

@@ -12,6 +12,7 @@ use super::roles::switch;
 use super::*;
 use crate::core::server_admin::add_words;
 use crate::pb::{AutoModActionKind as K, AutoModLevel as L, AutoModTrigger as T};
+use crate::ui::theme::radius_xl;
 
 const MAX_KEYWORD_RULES: usize = 6;
 const MAX_WORDS: usize = 1000;
@@ -629,17 +630,21 @@ impl ServerSettingsView {
                         } else {
                             t("serversettings.automod.anotherList")
                         };
-                        let button = if first { primary_button(id, label, p) } else { soft_button(id, label, p) };
+                        // The web's `size="sm"`: filled for the first, ghost for another list.
+                        let look = if first { Look::Primary } else { Look::Ghost };
                         el.child(
-                            button
-                                .flex_none()
+                            crate::ui::settings_controls::button(id, "", None, look, true, p)
+                                .px(px(10.0))
+                                .rounded(radius_xl())
+                                .font_weight(FontWeight::BOLD)
                                 .group("automod-add")
                                 .child(motion::once(
-                                    icon("plus").size(px(15.0)),
+                                    icon("plus").size(px(16.0)),
                                     SharedString::from(format!("automod-add-plus-{n}")),
                                     Duration::from_millis(500),
                                     |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::FRAC_PI_2)),
                                 ))
+                                .child(label)
                                 .on_click(cx.listener(move |this, _, _, cx| this.add_rule(trigger, cx))),
                         )
                     }),

@@ -1233,18 +1233,22 @@ impl ServerSettingsView {
         div()
             .flex()
             .flex_col()
-            .child(form_row(
-                &t("serversettings.roles.name"),
-                None,
-                super::pages::boxed(
-                    Input::new(&self.roles.name).appearance(false).disabled(locked),
-                    44.0,
-                    super::pages::focused(&self.roles.name, window, cx),
+            .child(
+                form_row(
+                    &t("serversettings.roles.name"),
+                    None,
+                    super::pages::boxed(
+                        Input::new(&self.roles.name).appearance(false).disabled(locked),
+                        44.0,
+                        super::pages::focused(&self.roles.name, window, cx),
+                        p,
+                    ),
+                    false,
                     p,
-                ),
-                false,
-                p,
-            ))
+                )
+                // The first row sits right under the tabs, as the web's does.
+                .pt(px(0.0)),
+            )
             .child(form_row(
                 &t("serversettings.roles.color"),
                 Some(t("serversettings.roles.colorHint")),
