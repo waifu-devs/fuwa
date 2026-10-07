@@ -68,7 +68,7 @@ struct Row {
     /// Their dot; None on an instance without presence.
     status: Option<pb::PresenceStatus>,
     /// What they're doing, for under their name.
-    activity: Option<String>,
+    activity: Option<(String, String)>,
 }
 
 pub struct MembersView {
@@ -170,7 +170,9 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
         Some(Row {
             name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
             status: people.map(|_| crate::ui::presence::shown(presence)),
-            activity: presence.and_then(|p| p.activities.first()).map(crate::ui::presence::line),
+            activity: presence
+                .and_then(|p| p.activities.first())
+                .map(|a| (crate::ui::presence::line(a), a.name.clone())),
             color,
             agent: is_agent(Some(&user)),
             timed_out: until.is_some(),
@@ -395,9 +397,9 @@ fn member_row(
                         .text_xs()
                         .text_color(p.muted_foreground)
                         .child(match (&row.activity, &row.status_text) {
-                            (Some(line), _) => line.clone(),
-                            (None, Some(status)) => status.clone(),
-                            (None, None) => format!("@{}", row.user.username),
+                            (Some((line, name)), _) => crate::ui::presence::rich_line(line, name, p),
+                            (None, Some(status)) => gpui_kit::StyledText::new(status.clone()),
+                            (None, None) => gpui_kit::StyledText::new(format!("@{}", row.user.username)),
                         }),
                 ),
         );

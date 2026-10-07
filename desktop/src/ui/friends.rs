@@ -566,14 +566,24 @@ impl FuwaApp {
                     .items_center()
                     .gap(px(6.0))
                     .rounded(radius_xl())
-                    .bg(p.primary)
-                    .text_color(p.primary_foreground)
                     .px(px(12.0))
                     .py(px(8.0))
                     .text_sm()
                     .line_height(px(20.0))
                     .font_weight(FontWeight::BOLD)
-                    .when(!typed || sending, |el| el.opacity(0.5))
+                    // `disabled:opacity-50` fades the button as one piece over the card: the
+                    // fill shows half, the text over a half-faded fill (GPUI fades each alone).
+                    .map(|el| {
+                        if !typed || sending {
+                            el.bg(alpha(p.primary, 0.5)).text_color(crate::ui::theme::mix(
+                                p.card,
+                                p.primary_foreground,
+                                0.5,
+                            ))
+                        } else {
+                            el.bg(p.primary).text_color(p.primary_foreground)
+                        }
+                    })
                     .when(typed && !sending, |el| {
                         el.cursor_pointer().hover(|s| s.opacity(0.92)).active(|s| s.top(px(1.0)))
                     })

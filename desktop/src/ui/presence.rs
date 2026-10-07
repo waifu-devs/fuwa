@@ -44,6 +44,17 @@ pub fn line(activity: &pb::Activity) -> String {
     t_with(key, &[("name", Arg::Str(&activity.name))])
 }
 
+/// An activity's line with its name in bold (`font-bold text-foreground/85`), as the web's `ActivityLine`.
+pub fn rich_line(line: &str, name: &str, p: &Palette) -> gpui_kit::StyledText {
+    let style = gpui_kit::HighlightStyle {
+        font_weight: Some(FontWeight::BOLD),
+        color: Some(alpha(p.foreground, 0.85)),
+        ..Default::default()
+    };
+    let at = line.rfind(name).filter(|_| !name.is_empty());
+    gpui_kit::StyledText::new(line.to_owned()).with_highlights(at.map(|at| (at..at + name.len(), style)))
+}
+
 fn heading(activity: &pb::Activity) -> String {
     t(match kind(activity) {
         pb::ActivityKind::Streaming => "workspace.presence.heading.streaming",
@@ -206,6 +217,7 @@ pub fn activity_cards(
                         .px(px(12.0))
                         .py(px(6.0))
                         .text_sm()
+                        .line_height(px(20.0))
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
                         .hover(move |s| s.bg(lit))
