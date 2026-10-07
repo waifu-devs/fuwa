@@ -235,37 +235,6 @@ impl FuwaApp {
 
         let mut rows = div().relative().pt(px(12.0));
         let mut y = 12.0;
-        if server.has_welcome_screen || server.has_onboarding {
-            // Going through the onboarding again, or the welcome screen when there's none.
-            let onboarding = server.has_onboarding;
-            let (key, sid) = (key.to_owned(), server.id.clone());
-            let hover = alpha(p.primary, 0.08);
-            rows = rows.child(
-                div()
-                    .id("welcome-open")
-                    .h(px(ROW))
-                    .mx(px(8.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(corner(10.0))
-                    .text_color(p.primary)
-                    .font_weight(FontWeight::BOLD)
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if onboarding {
-                            this.open_onboarding(&key, &sid, cx)
-                        } else {
-                            this.open_dialog(Dialog::Welcome { key: key.clone(), server: sid.clone() }, window, cx)
-                        }
-                    }))
-                    .child(icon(if onboarding { "sparkles" } else { "party-popper" }).size(px(16.0)))
-                    .child(if onboarding { "Channels & roles" } else { "Welcome screen" }),
-            );
-            y += ROW;
-        }
         let mut highlight = None;
         let mut n = 0;
         // Where each row sits, for dragging channels into order (ui/arrange.rs).

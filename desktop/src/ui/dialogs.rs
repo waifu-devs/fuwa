@@ -133,17 +133,10 @@ fn chips(
 }
 
 /// A server's rules, numbered (`RulesList`), scrolling past `max_h`.
-fn rules_list(rules: &[String], max_h: f32, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub(crate) fn rules_list(rules: &[String], max_h: f32, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
     let muted = alpha(p.muted, 0.5);
-    div()
-        .id("rules-list")
-        .max_h(px(max_h))
-        .overflow_y_scroll()
-        .pr(px(4.0))
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .children(rules.iter().enumerate().map(|(n, rule)| {
+    div().id("rules-list").max_h(px(max_h)).overflow_y_scroll().pr(px(4.0)).flex().flex_col().gap(px(8.0)).children(
+        rules.iter().enumerate().map(|(n, rule)| {
             motion::rise(
                 div()
                     .flex()
@@ -168,12 +161,71 @@ fn rules_list(rules: &[String], max_h: f32, p: &Palette) -> gpui_kit::Stateful<g
                             .font_weight(FontWeight::EXTRA_BOLD)
                             .child((n + 1).to_string()),
                     )
-                    .child(div().flex_1().min_w_0().pt(px(2.0)).child(rule.clone())),
+                    // `InlineMarkdown`: a rule is a line of Markdown.
+                    .child(
+                        div().flex_1().min_w_0().pt(px(2.0)).child(
+                            gpui_kit::base::TextView::markdown(
+                                SharedString::from(format!("rule-md|{n}")),
+                                crate::ui::text::images_as_links(rule),
+                            )
+                            .markdown_extensions(crate::ui::emoji::markdown_extensions())
+                            .style(crate::ui::chat::chat_markdown(p))
+                            .on_link_click(|url, _, _, cx| crate::ui::text::open_link(url, cx))
+                            .w_full(),
+                        ),
+                    ),
                 SharedString::from(format!("rule-{n}")),
                 Duration::from_millis(45 * n.min(10) as u64),
                 0.0,
             )
-        }))
+        }),
+    )
+}
+
+/// "I've read the rules and agree to them" (`AgreeCheck`): a card that fills
+/// in and draws its tick when pressed. The caller says what a press does.
+pub(crate) fn agree_check(id: &str, checked: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let hover = alpha(p.primary, 0.4);
+    div()
+        .id(SharedString::from(id.to_owned()))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .w_full()
+        .rounded(radius_2xl())
+        .border_1()
+        .p(px(12.0))
+        .text_sm()
+        .font_weight(FontWeight::BOLD)
+        .cursor_pointer()
+        .map(|el| {
+            if checked {
+                el.border_color(alpha(p.primary, 0.6)).bg(alpha(p.primary, 0.1))
+            } else {
+                el.border_color(p.border).hover(move |s| s.border_color(hover))
+            }
+        })
+        .child(
+            div()
+                .size(px(24.0))
+                .flex_none()
+                .rounded(radius_lg())
+                .border_2()
+                .flex()
+                .items_center()
+                .justify_center()
+                .map(|el| {
+                    if checked {
+                        el.border_color(p.primary).bg(p.primary).text_color(p.primary_foreground)
+                    } else {
+                        el.border_color(alpha(p.muted_foreground, 0.4))
+                    }
+                })
+                .when(checked, |el| {
+                    el.child(motion::rise(icon("check").size(px(16.0)), "rules-tick", Duration::ZERO, 0.0))
+                }),
+        )
+        .child(div().flex_1().min_w_0().child(t("join.rules.agree")))
 }
 
 /// A suggested channel's mark: its emoji (Unicode or the server's own), or a # (a megaphone) in the accent.
@@ -270,23 +322,26 @@ impl FuwaApp {
                 self.web_dialogs.rules_nudge = None;
             }
             // A newcomer who hasn't agreed reads the rules at the end of the welcome screen.
-            Dialog::Welcome { key, server } => {
-                self.web_dialogs.rules_checked = false;
-                self.web_dialogs.rules_nudge = None;
-                let pending = self.core.shared.read(|s| {
-                    s.instance(key).is_some_and(|i| {
-                        i.access(server).pending && i.server(server).is_some_and(|sv| sv.has_rules)
-                    })
-                });
-                if pending {
-                    let (core, key, server) = (self.core.clone(), key.clone(), server.clone());
-                    self.run(cx, async move { core.server_rules(&key, &server).await }, |this, result, cx| {
-                        this.rules = Some(result.unwrap_or_default());
-                        cx.notify();
-                    });
-                }
-            }
+            Dialog::Welcome { key, server } => self.welcome_opened(key, server, cx),
             _ => {}
+        }
+    }
+
+    /// The welcome screen opened, asked for or greeting a newcomer: the rules
+    /// to agree to at its end, for someone who hasn't yet.
+    pub(crate) fn welcome_opened(&mut self, key: &str, server: &str, cx: &mut Context<Self>) {
+        self.web_dialogs.rules_checked = false;
+        self.web_dialogs.rules_nudge = None;
+        let pending = self.core.shared.read(|s| {
+            s.instance(key).is_some_and(|i| i.access(server).pending && i.server(server).is_some_and(|sv| sv.has_rules))
+        });
+        if pending {
+            self.rules = None;
+            let (core, key, server) = (self.core.clone(), key.to_owned(), server.to_owned());
+            self.run(cx, async move { core.server_rules(&key, &server).await }, |this, result, cx| {
+                this.rules = Some(result.unwrap_or_default());
+                cx.notify();
+            });
         }
     }
 
@@ -349,9 +404,7 @@ impl FuwaApp {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(
-                        div().truncate().child(t_with("workspace.invite.title", &[("server", Arg::Str(&name))])),
-                    )
+                    .child(div().truncate().child(t_with("workspace.invite.title", &[("server", Arg::Str(&name))])))
                     .when_some(channel, |el, channel| {
                         el.child(
                             div()
@@ -371,12 +424,11 @@ impl FuwaApp {
         let streamer = self.prefs.streamer_mode;
         let shown: AnyElement = match &link {
             Some(link) => motion::rise(
-                div()
-                    .truncate()
-                    .font_family("monospace")
-                    .text_sm()
-                    .line_height(px(20.0))
-                    .child(if streamer { "•".repeat(link.chars().count().min(40)) } else { link.clone() }),
+                div().truncate().font_family("monospace").text_sm().line_height(px(20.0)).child(if streamer {
+                    "•".repeat(link.chars().count().min(40))
+                } else {
+                    link.clone()
+                }),
                 SharedString::from(format!("invite-link-{}", state.invite.as_ref().map_or("", |i| i.code.as_str()))),
                 Duration::ZERO,
                 12.0,
@@ -502,39 +554,39 @@ impl FuwaApp {
             .border_color(p.border)
             .bg(alpha(p.muted, 0.3))
             .p(px(16.0))
-            .child(div().flex().flex_col().gap(px(8.0)).child(label(t("workspace.invite.expireAfter"))).child(
-                chips(
-                    "invite-age",
-                    EXPIRE_AFTER.iter().map(|(_, k)| t(k)).collect(),
-                    age,
-                    p,
-                    cx,
-                    |this: &mut FuwaApp, n, cx| {
-                        this.web_dialogs.invite.options.max_age_seconds = EXPIRE_AFTER[n].0;
-                        cx.notify();
-                    },
-                ),
-            ))
-            .child(div().flex().flex_col().gap(px(8.0)).child(label(t("workspace.invite.howMany"))).child(chips(
-                "invite-uses",
-                MAX_USES
-                    .iter()
-                    .map(|n| {
-                        if *n == 0 {
-                            t("workspace.invite.uses.none")
-                        } else {
-                            t_with("workspace.invite.uses.count", &[("count", Arg::Num(i64::from(*n)))])
-                        }
-                    })
-                    .collect(),
-                uses,
+            .child(div().flex().flex_col().gap(px(8.0)).child(label(t("workspace.invite.expireAfter"))).child(chips(
+                "invite-age",
+                EXPIRE_AFTER.iter().map(|(_, k)| t(k)).collect(),
+                age,
                 p,
                 cx,
                 |this: &mut FuwaApp, n, cx| {
-                    this.web_dialogs.invite.options.max_uses = MAX_USES[n];
+                    this.web_dialogs.invite.options.max_age_seconds = EXPIRE_AFTER[n].0;
                     cx.notify();
                 },
             )))
+            .child(
+                div().flex().flex_col().gap(px(8.0)).child(label(t("workspace.invite.howMany"))).child(chips(
+                    "invite-uses",
+                    MAX_USES
+                        .iter()
+                        .map(|n| {
+                            if *n == 0 {
+                                t("workspace.invite.uses.none")
+                            } else {
+                                t_with("workspace.invite.uses.count", &[("count", Arg::Num(i64::from(*n)))])
+                            }
+                        })
+                        .collect(),
+                    uses,
+                    p,
+                    cx,
+                    |this: &mut FuwaApp, n, cx| {
+                        this.web_dialogs.invite.options.max_uses = MAX_USES[n];
+                        cx.notify();
+                    },
+                )),
+            )
             .child(
                 div().flex().justify_end().child(
                     button(
@@ -576,23 +628,28 @@ impl FuwaApp {
         }
         state.making = true;
         state.error = None;
-        let (core, channel, options, generation) = (self.core.clone(), state.channel.clone(), state.options, state.generation);
-        self.run(cx, async move { core.make_invite(&key, &server, &channel, options).await }, move |this, result, cx| {
-            let state = &mut this.web_dialogs.invite;
-            if state.generation != generation {
-                return;
-            }
-            state.making = false;
-            match result {
-                Ok(invite) => {
-                    state.invite = Some(invite);
-                    state.editing = false;
-                    state.copied = None;
+        let (core, channel, options, generation) =
+            (self.core.clone(), state.channel.clone(), state.options, state.generation);
+        self.run(
+            cx,
+            async move { core.make_invite(&key, &server, &channel, options).await },
+            move |this, result, cx| {
+                let state = &mut this.web_dialogs.invite;
+                if state.generation != generation {
+                    return;
                 }
-                Err(err) => state.error = Some(err.message),
-            }
-            cx.notify();
-        });
+                state.making = false;
+                match result {
+                    Ok(invite) => {
+                        state.invite = Some(invite);
+                        state.editing = false;
+                        state.copied = None;
+                    }
+                    Err(err) => state.error = Some(err.message),
+                }
+                cx.notify();
+            },
+        );
         cx.notify();
     }
 
@@ -619,9 +676,19 @@ impl FuwaApp {
                 "workspace.createChannel.type.announcement",
                 "workspace.createChannel.type.announcementHint",
             ),
-            (K::Secure, "shield-check", "workspace.createChannel.type.secure", "workspace.createChannel.type.secureHint"),
+            (
+                K::Secure,
+                "shield-check",
+                "workspace.createChannel.type.secure",
+                "workspace.createChannel.type.secureHint",
+            ),
             (K::Voice, "volume-2", "workspace.createChannel.type.voice", "workspace.createChannel.type.voiceHint"),
-            (K::Category, "folder", "workspace.createChannel.type.category", "workspace.createChannel.type.categoryHint"),
+            (
+                K::Category,
+                "folder",
+                "workspace.createChannel.type.category",
+                "workspace.createChannel.type.categoryHint",
+            ),
         ];
         let category = kind == K::Category;
         let busy = self.dialog_busy;
@@ -644,15 +711,15 @@ impl FuwaApp {
                         if on {
                             // `border-primary/60`, and the glider's `bg-primary/10 ring-2 ring-primary/40`.
                             // Opaque: GPUI fills under a shadow, which would show through a see-through tint.
-                            el.border_color(alpha(p.primary, 0.6)).bg(crate::ui::theme::mix(p.card, p.primary, 0.1)).shadow(vec![
-                                gpui_kit::BoxShadow {
+                            el.border_color(alpha(p.primary, 0.6))
+                                .bg(crate::ui::theme::mix(p.card, p.primary, 0.1))
+                                .shadow(vec![gpui_kit::BoxShadow {
                                     color: alpha(p.primary, 0.4),
                                     offset: gpui_kit::point(px(0.0), px(0.0)),
                                     blur_radius: px(0.0),
                                     spread_radius: px(2.0),
                                     inset: false,
-                                },
-                            ])
+                                }])
                         } else {
                             el.border_color(p.border).hover(move |s| s.border_color(hover).left(px(2.0)))
                         }
@@ -689,13 +756,7 @@ impl FuwaApp {
                             .flex()
                             .flex_col()
                             .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(t(label)))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .line_height(px(16.0))
-                                    .text_color(p.muted_foreground)
-                                    .child(t(hint)),
-                            ),
+                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(t(hint))),
                     )
             },
         ));
@@ -755,7 +816,9 @@ impl FuwaApp {
                         // The web's input is see-through on the card.
                         .child(focus_ring(field(input, p).bg(p.card), focused, p)),
                 )
-                .when_some(self.dialog_error.clone(), |el, e| el.child(div().text_sm().text_color(p.destructive).child(e)))
+                .when_some(self.dialog_error.clone(), |el, e| {
+                    el.child(div().text_sm().text_color(p.destructive).child(e))
+                })
                 .child(submit),
         )
     }
@@ -798,34 +861,28 @@ impl FuwaApp {
             .pb(px(4.0))
             .when_some(server.as_ref(), |el, server| {
                 el.child(motion::rise(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .child(server_icon(server, 48.0, 15.4, p))
-                        .child(
-                            div()
-                                .absolute()
-                                .right(px(-6.0))
-                                .bottom(px(-6.0))
-                                .size(px(24.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(p.primary)
-                                .text_color(p.primary_foreground)
-                                .border_2()
-                                .border_color(p.card)
-                                .child(icon("scroll-text").size(px(14.0))),
-                        ),
+                    div().relative().flex_none().child(server_icon(server, 48.0, 15.4, p)).child(
+                        div()
+                            .absolute()
+                            .right(px(-6.0))
+                            .bottom(px(-6.0))
+                            .size(px(24.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(p.primary)
+                            .text_color(p.primary_foreground)
+                            .border_2()
+                            .border_color(p.card)
+                            .child(icon("scroll-text").size(px(14.0))),
+                    ),
                     "rules-icon",
                     Duration::ZERO,
                     -8.0,
                 ))
             })
-            .child(
-                div().flex_1().min_w_0().pt(px(4.0)).child(dialog_header(title, Some(note.into_any_element()), p)),
-            );
+            .child(div().flex_1().min_w_0().pt(px(4.0)).child(dialog_header(title, Some(note.into_any_element()), p)));
         let muted = alpha(p.muted, 0.5);
         let content: AnyElement = match &self.rules {
             None if self.dialog_error.is_some() => div()
@@ -837,9 +894,11 @@ impl FuwaApp {
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
-                .children([1.0, 0.8, 0.9].into_iter().map(|w| {
-                    div().h(px(48.0)).w(gpui_kit::relative(w)).rounded(radius_2xl()).bg(p.muted)
-                }))
+                .children(
+                    [1.0, 0.8, 0.9]
+                        .into_iter()
+                        .map(|w| div().h(px(48.0)).w(gpui_kit::relative(w)).rounded(radius_2xl()).bg(p.muted)),
+                )
                 .into_any_element(),
             Some(rules) if rules.is_empty() => div()
                 .rounded(radius_2xl())
@@ -881,51 +940,10 @@ impl FuwaApp {
     fn agree_and_talk(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let checked = self.web_dialogs.rules_checked;
         let busy = self.dialog_busy;
-        let hover = alpha(p.primary, 0.4);
-        let check = div()
-            .id("rules-agree")
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .w_full()
-            .rounded(radius_2xl())
-            .border_1()
-            .p(px(12.0))
-            .text_sm()
-            .font_weight(FontWeight::BOLD)
-            .cursor_pointer()
-            .map(|el| {
-                if checked {
-                    el.border_color(alpha(p.primary, 0.6)).bg(alpha(p.primary, 0.1))
-                } else {
-                    el.border_color(p.border).hover(move |s| s.border_color(hover))
-                }
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.web_dialogs.rules_checked = !this.web_dialogs.rules_checked;
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .size(px(24.0))
-                    .flex_none()
-                    .rounded(radius_lg().min(px(8.0)))
-                    .border_2()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .map(|el| {
-                        if checked {
-                            el.border_color(p.primary).bg(p.primary).text_color(p.primary_foreground)
-                        } else {
-                            el.border_color(alpha(p.muted_foreground, 0.4))
-                        }
-                    })
-                    .when(checked, |el| {
-                        el.child(motion::rise(icon("check").size(px(16.0)), "rules-tick", Duration::ZERO, 0.0))
-                    }),
-            )
-            .child(div().flex_1().min_w_0().child(t("join.rules.agree")));
+        let check = agree_check("rules-agree", checked, p).on_click(cx.listener(|this, _, _, cx| {
+            this.web_dialogs.rules_checked = !this.web_dialogs.rules_checked;
+            cx.notify();
+        }));
         let go = button(
             "dialog-ok",
             t("join.rules.agreeAndTalk"),
@@ -1107,7 +1125,9 @@ impl FuwaApp {
                                         }),
                                 )
                                 .when(pick, |el| {
-                                    el.child(icon("arrow-right").size(px(16.0)).flex_none().text_color(p.muted_foreground))
+                                    el.child(
+                                        icon("arrow-right").size(px(16.0)).flex_none().text_color(p.muted_foreground),
+                                    )
                                 }),
                             SharedString::from(format!("welcome-in-{n}")),
                             Duration::from_millis(220 + 60 * n as u64),
@@ -1152,9 +1172,11 @@ impl FuwaApp {
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .children([1.0, 0.8].into_iter().map(|w| {
-                        div().h(px(48.0)).w(gpui_kit::relative(w)).rounded(radius_2xl()).bg(p.muted)
-                    }))
+                    .children(
+                        [1.0, 0.8]
+                            .into_iter()
+                            .map(|w| div().h(px(48.0)).w(gpui_kit::relative(w)).rounded(radius_2xl()).bg(p.muted)),
+                    )
                     .into_any_element(),
                 Some(rules) => rules_list(&rules, 224.0, &p).into_any_element(),
             });

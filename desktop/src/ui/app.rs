@@ -1425,7 +1425,7 @@ impl FuwaApp {
     }
 
     /// Greets a new member of the open server with its welcome screen, once,
-    /// after any rules. People who can change it never get it unasked.
+    /// with the rules to agree to at its end when they haven't yet. People who can change it never get it unasked.
     fn maybe_welcome(&mut self, cx: &mut Context<Self>) {
         let Nav::Server { key, server } = self.nav.clone() else { return };
         let seen = format!("{key}/{server}");
@@ -1444,7 +1444,6 @@ impl FuwaApp {
                 crate::core::onboarding::due(i, &server, now_ms())?,
                 srv.has_welcome_screen
                     && !onboarded
-                    && !me.pending
                     && !i.access(&server).has(crate::pb::Permission::ManageServer)
                     && now_ms() - joined < NEW_FOR,
             ))
@@ -1477,6 +1476,7 @@ impl FuwaApp {
                 this.dialog = Some(Dialog::Welcome { key: key.clone(), server: server.clone() });
                 this.dialog_error = None;
                 this.welcome = Some(screen);
+                this.welcome_opened(&key, &server, cx);
                 cx.notify();
             }
         });
