@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.91"
 description = "End-to-end encryption for fuwa's direct messages (MLS, RFC 9420), shared by the server and every client"
+license = "Apache-2.0"
 repository = "https://github.com/waifu-devs/fuwa"
 publish = false
 

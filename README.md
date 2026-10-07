@@ -698,3 +698,8 @@ live infrastructure behind it at
 <https://railway.com/project/380ce29d-aa58-46a3-b54f-b8e571dd8702>. It's what
 [`.railway/railway.ts`](.railway/railway.ts) declares: the `fuwa` service,
 running the image every merge to master publishes, and its `fuwa-data` volume.
+
+## License
+
+fuwa is licensed under the [Apache License, Version 2.0](LICENSE): the server,
+the web and desktop apps, the SDK and every crate in this repository.
