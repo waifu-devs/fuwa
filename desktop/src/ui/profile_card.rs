@@ -849,7 +849,8 @@ impl FuwaApp {
                     .text_color(if open { primary } else { muted })
                     .cursor_pointer()
                     .hover(move |s| s.border_color(ring).text_color(primary))
-                    .child(icon("plus").size(px(14.0)))
+                    // `data-[state=open]:rotate-45`: the plus turned into a cross.
+                    .child(icon(if open { "x" } else { "plus" }).size(px(14.0)))
                     .child(
                         div().absolute().inset_0().child(
                             canvas(|bounds, _, _| ROLE_ADD.with(|c| *c.borrow_mut() = Some(bounds)), |_, _, _, _| {})
@@ -859,7 +860,10 @@ impl FuwaApp {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.people.roles_menu = match this.people.roles_menu {
                             Some(_) => None,
-                            None => ROLE_ADD.with(|c| *c.borrow()).map(|b| point(b.left(), b.bottom() + px(4.0))),
+                            // Where the web's menu settles under it.
+                            None => {
+                                ROLE_ADD.with(|c| *c.borrow()).map(|b| point(b.left() - px(7.0), b.bottom() + px(9.0)))
+                            }
                         };
                         cx.notify();
                     })),
@@ -908,6 +912,7 @@ impl FuwaApp {
                     .px(px(8.0))
                     .py(px(6.0))
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(p.muted_foreground)
                     .child(t("workspace.roles.assignable")),
@@ -926,6 +931,7 @@ impl FuwaApp {
                     .py(px(6.0))
                     .rounded(crate::ui::theme::radius_sm())
                     .text_sm()
+                    .line_height(px(20.0))
                     .cursor_pointer()
                     .when(busy, |el| el.opacity(0.5))
                     .hover(move |s| s.bg(hover))
