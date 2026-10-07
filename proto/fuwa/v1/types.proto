@@ -50,6 +50,13 @@ message Node {
   // The desktop app this instance hands out, when its release check knows
   // of one (docs/self-hosting.md, "Updating").
   DesktopApp desktop_app = 19;
+  // People may wear a decoration around their avatar (User.decoration_id,
+  // Member.decoration_id). While it's off, apps draw none and hide the
+  // pickers.
+  bool profile_decorations = 20;
+  // When the instance's profile items (ProfileItemService) last changed;
+  // unset if it never had any. Apps list them again when it moves.
+  google.protobuf.Timestamp profile_items_at = 21;
 }
 
 // fuwa's desktop app, from the latest release. Each download is passed
@@ -262,6 +269,10 @@ message User {
   // showing it once status_expires_at has passed.
   string status = 6;
   google.protobuf.Timestamp status_expires_at = 7;
+  // The decoration around their avatar: one of the instance's profile items
+  // (ProfileItemService.ListInstanceProfileItems), or empty for none. Apps
+  // that can't find it draw none, as for someone from another instance.
+  string decoration_id = 8;
 }
 
 // Everything a person shows about themselves on an instance, beyond what
@@ -277,10 +288,48 @@ message Profile {
   // When the account was made on this instance.
   google.protobuf.Timestamp created_at = 6;
   // An animated effect over the profile card, by the id of one the apps
-  // ship with (docs/profile-effects.md), such as "sakura". Empty for none.
-  // Apps that don't know an id show no effect. Empty while the instance has
-  // profile effects off.
+  // ship with (docs/profile-effects.md), such as "sakura", or of one of the
+  // instance's profile items (a ULID). Empty for none. Apps that don't know
+  // an id show no effect. Empty while the instance has profile effects off.
   string effect = 7;
+}
+
+// What a profile item is (ProfileItemService).
+enum ProfileItemKind {
+  PROFILE_ITEM_KIND_UNSPECIFIED = 0;
+  // An animated layer over the profile card (docs/profile-effects.md).
+  PROFILE_ITEM_KIND_EFFECT = 1;
+  // A picture around the avatar.
+  PROFILE_ITEM_KIND_DECORATION = 2;
+}
+
+// A profile effect or avatar decoration the instance or a server offers
+// (docs/profile-items.md).
+message ProfileItem {
+  string id = 1;
+  // The server offering it; empty for the instance's own.
+  string server_id = 2;
+  ProfileItemKind kind = 3;
+  // 1 to 40 characters.
+  string name = 4;
+  // Up to 120 characters.
+  string description = 5;
+  // An effect's spec, as JSON in the format of docs/profile-effects.md,
+  // checked by the instance, with the item's id (in lowercase), name and
+  // description. Empty for a decoration.
+  string effect = 6;
+  // A decoration's picture: an upload on this instance
+  // (MEDIA_PURPOSE_DECORATION), square and see-through in the middle,
+  // drawn centred over the avatar at 1.2 times its size. Empty for an
+  // effect.
+  string picture_url = 7;
+  // A GIF that moves.
+  bool animated = 8;
+  // Who added it.
+  string creator_id = 9;
+  // The picture's size; a server's count in its attachment usage.
+  int64 size = 10;
+  google.protobuf.Timestamp created_at = 11;
 }
 
 message Member {
@@ -307,6 +356,11 @@ message Member {
   // unset if they never have. Only the member themselves and managers
   // (MANAGE_SERVER) see it.
   google.protobuf.Timestamp onboarded_at = 10;
+  // Their profile in this server: an effect (a built-in one's id, or one of
+  // the server's profile items) and a decoration (one of the server's
+  // profile items), shown here instead of their own. Empty for their own.
+  string effect = 11;
+  string decoration_id = 12;
 }
 
 // ============================================================================
@@ -1295,6 +1349,7 @@ message Event {
     PollUpdated poll_updated = 31;
     InteractionCreated interaction_created = 32;
     MessagePinned message_pinned = 33;
+    ProfileItemsUpdated profile_items_updated = 34;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1535,6 +1590,11 @@ message ApplicationUpdated {
 // every emoji the server has now.
 message EmojisUpdated {
   repeated Emoji emojis = 1;
+}
+
+// The server's profile items changed: all of them, as they are now.
+message ProfileItemsUpdated {
+  repeated ProfileItem items = 1;
 }
 
 // The server's shared channels, requests or codes changed

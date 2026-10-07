@@ -525,5 +525,9 @@
   "providers.clientSecret": "Client secret",
   "providers.pasteSecret": "Paste the secret {name} gave you",
   "providers.missing": "It needs both a client ID and a secret before it can be saved.",
-  "providers.twitchState": "Twitch doesn't offer PKCE, so only this instance's one-time state ties Twitch's answer to the sign-in that asked for it. Keep the client secret private."
+  "providers.twitchState": "Twitch doesn't offer PKCE, so only this instance's one-time state ties Twitch's answer to the sign-in that asked for it. Keep the client secret private.",
+  "nav.profileDecorations": "Avatar decorations",
+  "nav.profileItemsAbout": "Effects and avatar decorations everyone on this instance can wear.",
+  "signUps.decorationsLabel": "People can wear a decoration around their avatar",
+  "signUps.decorationsHint": "Pictures from the instance's and servers' profile items. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
 }

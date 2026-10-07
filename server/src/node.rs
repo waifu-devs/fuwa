@@ -35,7 +35,19 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0021_presence.sql"),
     include_str!("../migrations/node/0022_federation_moves.sql"),
     include_str!("../migrations/node/0023_sign_in_providers.sql"),
+    include_str!("../migrations/node/0024_profile_items.sql"),
 ];
+
+/// Notes that the instance's profile items changed now (`Node.profile_items_at`).
+async fn items_changed(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('profile_items_at', ?1)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [now_ms().to_string()],
+    )
+    .await?;
+    Ok(())
+}
 
 /// A server being moved from one shard to another (docs/regions.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +96,9 @@ pub struct Account {
     pub two_factor: bool,
     /// Turned off by an instance admin.
     pub disabled: bool,
+    /// The decoration around their avatar: one of the instance's profile
+    /// items, or empty.
+    pub decoration_id: String,
 }
 
 impl Account {
@@ -96,6 +111,7 @@ impl Account {
             kind: self.kind as i32,
             status: self.status.clone(),
             status_expires_at: self.status_expires_at.map(timestamp),
+            decoration_id: self.decoration_id.clone(),
         }
     }
 
@@ -104,14 +120,14 @@ impl Account {
     }
 }
 
-const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at, status, status_expires_at, totp_secret IS NOT NULL, disabled_at IS NOT NULL";
+const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at, status, status_expires_at, totp_secret IS NOT NULL, disabled_at IS NOT NULL, profile_decoration";
 
 /// [`ACCOUNT_COLUMNS`] for a query that joins accounts to another table.
 fn account_columns_of(table: &str) -> String {
     ACCOUNT_COLUMNS.split(", ").map(|c| format!("{table}.{c}")).collect::<Vec<_>>().join(", ")
 }
 
-const ACCOUNT_COLUMN_COUNT: usize = 12;
+const ACCOUNT_COLUMN_COUNT: usize = 13;
 
 fn account(row: &Row) -> turso::Result<Account> {
     Ok(Account {
@@ -127,6 +143,7 @@ fn account(row: &Row) -> turso::Result<Account> {
         status_expires_at: row.get(9)?,
         two_factor: row.get(10)?,
         disabled: row.get(11)?,
+        decoration_id: row.get(12)?,
     })
 }
 
@@ -188,6 +205,8 @@ pub struct ProfileChange {
     pub status: Option<(String, Option<i64>)>,
     /// A profile effect's id; empty for none.
     pub effect: Option<String>,
+    /// One of the instance's decorations; empty for none.
+    pub decoration: Option<String>,
 }
 
 /// A device signed in to an account.
@@ -638,6 +657,7 @@ impl NodeDb {
                 status_expires_at: None,
                 two_factor: false,
                 disabled: false,
+                decoration_id: String::new(),
             })
         })
         .await;
@@ -717,6 +737,7 @@ impl NodeDb {
                 status_expires_at: None,
                 two_factor: false,
                 disabled: false,
+                decoration_id: String::new(),
             })
         })
         .await?;
@@ -892,6 +913,7 @@ impl NodeDb {
                 status_expires_at: None,
                 two_factor: false,
                 disabled: false,
+                decoration_id: String::new(),
             })
         })
         .await;
@@ -1061,7 +1083,8 @@ impl NodeDb {
                    accent_color = CASE WHEN ?7 IS NULL THEN accent_color WHEN ?7 < 0 THEN NULL ELSE ?7 END,
                    status = coalesce(?8, status),
                    status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
-                   updated_at = ?10, profile_effect = coalesce(?11, profile_effect)
+                   updated_at = ?10, profile_effect = coalesce(?11, profile_effect),
+                   profile_decoration = coalesce(?12, profile_decoration)
                  WHERE id = ?1",
                 (
                     id,
@@ -1075,6 +1098,7 @@ impl NodeDb {
                     status_expires_at,
                     now_ms(),
                     change.effect.as_deref(),
+                    change.decoration.as_deref(),
                 ),
             )
             .await?;
@@ -1978,6 +2002,60 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── Profile items ─────────────────────────
+
+    /// The instance's profile effects and decorations, oldest first.
+    pub async fn profile_items(&self) -> Result<Vec<pb::ProfileItem>> {
+        crate::profile_items::list(&*self.read()?, "").await
+    }
+
+    pub async fn profile_item(&self, id: &str) -> Result<Option<pb::ProfileItem>> {
+        crate::profile_items::get(&*self.read()?, "", id).await
+    }
+
+    /// Whether the instance offers an item of this kind with this id.
+    pub async fn has_profile_item(&self, id: &str, kind: pb::ProfileItemKind) -> Result<bool> {
+        crate::profile_items::has(&*self.read()?, id, kind).await
+    }
+
+    /// When the instance's profile items last changed, if they ever did.
+    pub async fn profile_items_at(&self) -> Result<Option<i64>> {
+        let conn = self.read()?;
+        let at = query_one(&conn, "SELECT value FROM meta WHERE key = 'profile_items_at'", (), |r| r.get::<String>(0))
+            .await?;
+        Ok(at.and_then(|at| at.parse().ok()))
+    }
+
+    pub async fn add_profile_item(&self, item: &pb::ProfileItem) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            crate::profile_items::insert(conn, item).await?;
+            items_changed(conn).await
+        })
+        .await
+    }
+
+    pub async fn save_profile_item(&self, item: &pb::ProfileItem) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            crate::profile_items::save(conn, item).await?;
+            items_changed(conn).await
+        })
+        .await
+    }
+
+    /// Deletes one of the instance's profile items and takes it off everyone
+    /// wearing it. What it was, if it was there.
+    pub async fn delete_profile_item(&self, id: &str) -> Result<Option<pb::ProfileItem>> {
+        db::write(&self.db, async |conn| {
+            let Some(item) = crate::profile_items::get(conn, "", id).await? else { return Ok(None) };
+            crate::profile_items::delete(conn, id).await?;
+            conn.execute("UPDATE accounts SET profile_effect = '' WHERE profile_effect = ?1", [id]).await?;
+            conn.execute("UPDATE accounts SET profile_decoration = '' WHERE profile_decoration = ?1", [id]).await?;
+            items_changed(conn).await?;
+            Ok(Some(item))
+        })
+        .await
+    }
+
     // ───────────────────────── Uploaded pictures ─────────────────────────
 
     /// Reserves an upload, unless the account has too many going already or
@@ -2217,14 +2295,14 @@ impl NodeDb {
         .await
     }
 
-    /// A server's files in use: its icon, banner, emoji, webhooks' pictures
-    /// and messages' attachments.
+    /// A server's files in use: its icon, banner, emoji, decorations,
+    /// webhooks' pictures and messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4, ?5, ?6) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5, ?6, ?7) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
@@ -2232,6 +2310,7 @@ impl NodeDb {
                 pb::MediaPurpose::Avatar as i64,
                 pb::MediaPurpose::Attachment as i64,
                 pb::MediaPurpose::Banner as i64,
+                pb::MediaPurpose::Decoration as i64,
             ),
             |r| r.get::<String>(0),
         )
@@ -2276,10 +2355,16 @@ impl NodeDb {
         let conn = self.read()?;
         query_all(
             &conn,
-            // Pictures in use by a server (its icon, emoji and webhooks) stay with it.
+            // Pictures in use by a server (its icon, emoji and webhooks) stay
+            // with it, and the instance's decorations with the instance.
             "SELECT id FROM media WHERE account_id = ?1
-             AND NOT ((purpose IN (?2, ?3) OR server_id IS NOT NULL) AND used_at IS NOT NULL)",
-            (account_id, pb::MediaPurpose::ServerIcon as i64, pb::MediaPurpose::Emoji as i64),
+             AND NOT ((purpose IN (?2, ?3, ?4) OR server_id IS NOT NULL) AND used_at IS NOT NULL)",
+            (
+                account_id,
+                pb::MediaPurpose::ServerIcon as i64,
+                pb::MediaPurpose::Emoji as i64,
+                pb::MediaPurpose::Decoration as i64,
+            ),
             |r| r.get::<String>(0),
         )
         .await
@@ -2384,6 +2469,7 @@ impl NodeDb {
                 status_expires_at: None,
                 two_factor: false,
                 disabled: false,
+                decoration_id: String::new(),
             })
         })
         .await;
@@ -2509,7 +2595,7 @@ impl NodeDb {
 const AGENT_SELECT: &str =
     "SELECT accounts.id, accounts.kind, accounts.username, accounts.display_name, accounts.avatar_url,
     accounts.admin, accounts.created_at, accounts.last_seen_at, accounts.status, accounts.status_expires_at,
-    accounts.totp_secret IS NOT NULL, accounts.disabled_at IS NOT NULL,
+    accounts.totp_secret IS NOT NULL, accounts.disabled_at IS NOT NULL, accounts.profile_decoration,
     coalesce(accounts.owner_id, ''), accounts.public, accounts.bio, sessions.last_active_at
     FROM accounts LEFT JOIN sessions ON sessions.account_id = accounts.id";
 

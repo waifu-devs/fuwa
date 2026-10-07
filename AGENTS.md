@@ -239,6 +239,20 @@
     Web: `lib/live-tiles.ts` (pure: which tiles, ranking),
     `lib/live-tiles-store.ts` (each person's switches, on the device) and
     `components/LiveTiles.tsx`.
+  - `profile_items.rs` and `api/profile_items.rs` (`ProfileItemService`,
+    docs/profile-items.md): profile effects and avatar decorations the
+    instance offers (node.db's `profile_items`, instance admins; worn on
+    the profile: `Profile.effect`, `User.decoration_id`, which servers'
+    `users` copies carry) and a server offers (its file's `profile_items`,
+    Manage Server; worn on the member's server profile, `members.profile_effect`
+    and `profile_decoration`, set through `UpdateMember`). Effects are specs
+    checked by `check_effect`; decorations are uploads
+    (`MEDIA_PURPOSE_DECORATION`). Profiles and members name items by id and
+    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`);
+    deleting an item takes it off its wearers in the same write. Web:
+    `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
+    `components/settings/ProfileItems.tsx` (both settings dialogs) and
+    `settings/account/DecorationPicker.tsx`.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts

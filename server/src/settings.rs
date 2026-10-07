@@ -51,6 +51,7 @@ pub const FIELDS: &[&str] = &[
     "shared_channels",
     "mcp",
     "profile_effects",
+    "profile_decorations",
     "rich_presence",
     "federation",
     "federation_blocked_hosts",
@@ -97,6 +98,8 @@ pub struct Settings {
     pub mcp: bool,
     /// People may put an effect on their profile card.
     pub profile_effects: bool,
+    /// People may wear a decoration around their avatar.
+    pub profile_decorations: bool,
     /// People may show what they're doing (docs/presence.md).
     pub rich_presence: bool,
     /// Sharing channels with other fuwa instances (docs/federation.md).
@@ -160,6 +163,7 @@ impl Settings {
             shared_channels: config.shared_channels,
             mcp: config.mcp,
             profile_effects: config.profile_effects,
+            profile_decorations: config.profile_decorations,
             rich_presence: config.rich_presence,
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
@@ -327,6 +331,7 @@ impl Settings {
             shared_channels: self.shared_channels,
             mcp: self.mcp,
             profile_effects: self.profile_effects,
+            profile_decorations: self.profile_decorations,
             rich_presence: self.rich_presence,
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
@@ -455,6 +460,7 @@ impl Settings {
             "shared_channels" => Value::from(from.shared_channels),
             "mcp" => Value::from(from.mcp),
             "profile_effects" => Value::from(from.profile_effects),
+            "profile_decorations" => Value::from(from.profile_decorations),
             "rich_presence" => Value::from(from.rich_presence),
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
@@ -555,6 +561,7 @@ impl Settings {
             "shared_channels" => Value::from(self.shared_channels),
             "mcp" => Value::from(self.mcp),
             "profile_effects" => Value::from(self.profile_effects),
+            "profile_decorations" => Value::from(self.profile_decorations),
             "rich_presence" => Value::from(self.rich_presence),
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
@@ -651,6 +658,7 @@ impl Settings {
             "shared_channels" => self.shared_channels = flag(field, value)?,
             "mcp" => self.mcp = flag(field, value)?,
             "profile_effects" => self.profile_effects = flag(field, value)?,
+            "profile_decorations" => self.profile_decorations = flag(field, value)?,
             "rich_presence" => self.rich_presence = flag(field, value)?,
             "federation" => self.federation = flag(field, value)?,
             "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,

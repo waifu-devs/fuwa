@@ -322,5 +322,10 @@
   "signIn.freshNote": "Por seguridad, cierra sesión y vuelve a entrar primero, y luego inténtalo de nuevo en menos de 10 minutos.",
   "signIn.passwordLabel": "Tu contraseña",
   "signIn.codeLabel": "Tu código de dos pasos",
-  "signIn.continueTo": "Continuar a {name}"
+  "signIn.continueTo": "Continuar a {name}",
+  "decorations.label": "Decoración del avatar",
+  "decorations.hint": "Una imagen alrededor de tu avatar, dondequiera que aparezca en esta instancia. Estas son las que ofrece.",
+  "serverProfiles.useMine": "Usar la de mi perfil",
+  "serverProfiles.effectHint": "Se reproduce en tu tarjeta en este servidor en lugar del efecto de tu perfil. El servidor puede ofrecer los suyos.",
+  "serverProfiles.decorationHint": "Se muestra alrededor de tu avatar en este servidor en lugar de la de tu perfil."
 }

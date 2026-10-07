@@ -525,5 +525,9 @@
   "providers.clientSecret": "Secreto de cliente",
   "providers.pasteSecret": "Pega el secreto que te dio {name}",
   "providers.missing": "Necesita un ID de cliente y un secreto antes de poder guardarse.",
-  "providers.twitchState": "Twitch no ofrece PKCE, así que solo el estado de un solo uso de esta instancia une la respuesta de Twitch al inicio de sesión que la pidió. Mantén privado el secreto de cliente."
+  "providers.twitchState": "Twitch no ofrece PKCE, así que solo el estado de un solo uso de esta instancia une la respuesta de Twitch al inicio de sesión que la pidió. Mantén privado el secreto de cliente.",
+  "nav.profileDecorations": "Decoraciones de avatar",
+  "nav.profileItemsAbout": "Efectos y decoraciones de avatar que todos en esta instancia pueden usar.",
+  "signUps.decorationsLabel": "Se puede usar una decoración alrededor del avatar",
+  "signUps.decorationsHint": "Imágenes de los artículos de perfil de la instancia y los servidores. Desactivado, no se muestra ninguna, y la elección de cada uno vuelve al activarlo."
 }

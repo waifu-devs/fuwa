@@ -17,6 +17,7 @@ import {
   UserPlusIcon,
   BotIcon,
   BuildingIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useReducer, useState, type ComponentProps, type ReactNode } from "react";
@@ -47,6 +48,8 @@ import { fullProvider, providerFingerprint, providerReady } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
+import { ProfileItems } from "./ProfileItems";
+import { instanceHas } from "@/lib/compat";
 import { CallSettings } from "./instance/Calls";
 import { CALL_FIELDS, callSection } from "./instance/calls-section";
 import { GifSettings } from "./instance/Gifs";
@@ -75,6 +78,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "shared_channels", get: (s) => s.sharedChannels },
   { path: "mcp", get: (s) => s.mcp },
   { path: "profile_effects", get: (s) => s.profileEffects },
+  { path: "profile_decorations", get: (s) => s.profileDecorations },
   { path: "rich_presence", get: (s) => s.richPresence },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
@@ -231,6 +235,8 @@ export function InstanceSettingsDialog({
   const { config, draft, loadError, tab, setTab, save, saved, changed, patch, commit, resetter, discard } = useInstanceSettings(instanceKey, open);
   const test = useAction(startSsoSignIn);
   const name = inst?.node?.name ?? instanceKey;
+  // Profile items (and their switch) only on instances that have them.
+  const itemsHere = instanceHas(inst?.node?.versions, "profile-items");
 
   return (
     <SettingsScreen
@@ -240,7 +246,7 @@ export function InstanceSettingsDialog({
       subtitle={t("instancesettings.nav.subtitle")}
       section={tab}
       onSectionChange={setTab}
-      groups={settingsGroups(t, name)}
+      groups={settingsGroups(t, name, itemsHere)}
       footer={<SaveBar scope="screen" count={changed.length} saving={save.pending} error={save.error} onSave={() => commit(changed, [])} onDiscard={discard} />}
     >
       <SettingsBody
@@ -278,6 +284,7 @@ function SettingsBody({
   if (tab === "accounts") return <Accounts instanceKey={instanceKey} />;
   if (tab === "servers") return <Servers instanceKey={instanceKey} onLeave={onLeave} />;
   if (tab === "announcement") return <Announcement instanceKey={instanceKey} />;
+  if (tab === "profile-items") return <ProfileItems instanceKey={instanceKey} />;
   if (loadError) return <p className="text-sm text-muted-foreground first-letter:uppercase">{loadError}</p>;
   if (!config || !draft || !config.defaults) {
     return (
@@ -296,7 +303,7 @@ function SettingsBody({
 }
 
 /** The menu: the instance's settings, then what an admin manages. */
-function settingsGroups(t: I18n["t"], name: string): SettingsGroup[] {
+function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean): SettingsGroup[] {
   return [
     {
       label: t("instancesettings.nav.instance"),
@@ -328,6 +335,7 @@ function settingsGroups(t: I18n["t"], name: string): SettingsGroup[] {
             { id: "mcp", label: t("instancesettings.nav.mcp"), keywords: "mcp claude ai model context protocol" },
             { id: "shared-channels", label: t("serversettings.nav.shared"), keywords: "share connect servers slack connect" },
             { id: "profile-effects", label: t("instancesettings.nav.profileEffects"), keywords: "sparkles petals animation card decoration" },
+            ...(itemsHere ? [{ id: "profile-decorations", label: t("instancesettings.nav.profileDecorations"), keywords: "avatar frame decoration" }] : []),
             { id: "rich-presence", label: t("instancesettings.nav.richPresence"), keywords: "activity playing game status discord presence" },
           ],
         },
@@ -385,6 +393,17 @@ function settingsGroups(t: I18n["t"], name: string): SettingsGroup[] {
           description: t("instancesettings.nav.serversAbout"),
           keywords: "communities export backup delete caps usage storage",
         },
+        ...(itemsHere
+          ? [
+              {
+                id: "profile-items",
+                label: t("serversettings.nav.profileItems"),
+                icon: SparklesIcon,
+                description: t("instancesettings.nav.profileItemsAbout"),
+                keywords: "profile effect effects decoration decorations avatar frame card sparkles",
+              },
+            ]
+          : []),
         {
           id: "announcement",
           label: t("instancesettings.nav.announcement"),
@@ -431,7 +450,7 @@ function SettingsTab({
     case "general":
       return <GeneralSettings node={inst?.node} config={config} {...props} />;
     case "sign-ups":
-      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} {...props} />;
+      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} itemsHere={instanceHas(inst?.node?.versions, "profile-items")} {...props} />;
     case "sso":
       return <SsoSettings instanceKey={instanceKey} url={inst!.url} config={config} saved={saved} changed={changed} test={test} {...props} />;
     case "limits":
@@ -502,7 +521,15 @@ function GeneralSettings({ node, config, draft, defaults, patch, resetter }: Tab
 }
 
 /** Who can make an account, and what accounts can do. */
-function SignUpSettings({ draft, saved, defaults, patch, resetter, hasPasswordHere }: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean }) {
+function SignUpSettings({
+  draft,
+  saved,
+  defaults,
+  patch,
+  resetter,
+  hasPasswordHere,
+  itemsHere,
+}: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean; itemsHere: boolean }) {
   const lang = useI18n();
   const { t } = lang;
   return (
@@ -672,6 +699,22 @@ function SignUpSettings({ draft, saved, defaults, patch, resetter, hasPasswordHe
           hint={t("instancesettings.signUps.effectsHint")}
         />
       </Setting>
+      {itemsHere && (
+        <Setting
+          id="profile-decorations"
+          title={t("instancesettings.nav.profileDecorations")}
+          defaultLabel={onOff(t, defaults.profileDecorations)}
+          delay={0.3}
+          {...resetter("profile_decorations")}
+        >
+          <Toggle
+            checked={draft.profileDecorations}
+            onChange={(on) => patch((d) => (d.profileDecorations = on))}
+            label={t("instancesettings.signUps.decorationsLabel")}
+            hint={t("instancesettings.signUps.decorationsHint")}
+          />
+        </Setting>
+      )}
       <Setting
         id="rich-presence"
         title={t("instancesettings.nav.richPresence")}
@@ -1082,6 +1125,7 @@ const COPIED = [
   { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
   { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
   { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
+  { path: "profile_decorations", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileDecorations = from.profileDecorations) },
   { path: "rich_presence", copy: (into: InstanceSettings, from: InstanceSettings) => (into.richPresence = from.richPresence) },
 ];
 

@@ -46,6 +46,8 @@ import {
   BanIcon,
   type LucideIcon,
   RadioTowerIcon,
+  SparkleIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -125,6 +127,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.MESSAGE_PIN]: { label: "serversettings.audit.kind.messagePin", icon: PinIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.MESSAGE_UNPIN]: { label: "serversettings.audit.kind.messageUnpin", icon: PinOffIcon, tint: "bg-muted text-muted-foreground" },
   [AuditAction.LIVE_TILE_END]: { label: "serversettings.audit.kind.liveTileEnd", icon: RadioTowerIcon, tint: "bg-lime-500/15 text-lime-600" },
+  [AuditAction.PROFILE_ITEM_CREATE]: { label: "serversettings.audit.kind.profileItemCreate", icon: SparklesIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.PROFILE_ITEM_UPDATE]: { label: "serversettings.audit.kind.profileItemUpdate", icon: SparkleIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.PROFILE_ITEM_DELETE]: { label: "serversettings.audit.kind.profileItemDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -169,6 +174,7 @@ const FIELD: Record<string, Key> = {
   mention_limit: "serversettings.audit.field.mentionLimit",
   server: "serversettings.invites.server",
   actions: "serversettings.audit.field.actions",
+  effect: "serversettings.audit.field.effect",
 };
 
 /** A changed field's name in the app's language. */
@@ -184,6 +190,8 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.EMOJI_DELETE]: "before",
   [AuditAction.WEBHOOK_CREATE]: "after",
   [AuditAction.WEBHOOK_DELETE]: "before",
+  [AuditAction.PROFILE_ITEM_CREATE]: "after",
+  [AuditAction.PROFILE_ITEM_DELETE]: "before",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -660,6 +668,15 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       return say("serversettings.audit.s.messageUnpin", { target, channel: named });
     case AuditAction.LIVE_TILE_END:
       return say("serversettings.audit.s.liveTileEnd", { target, channel: named });
+    case AuditAction.PROFILE_ITEM_CREATE:
+      return say("serversettings.audit.s.profileItemCreate", { name: <b>{change("name")?.after}</b> });
+    case AuditAction.PROFILE_ITEM_UPDATE: {
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1) return say("serversettings.audit.s.renamed", { before: <b>{renamed.before}</b>, after: <b>{renamed.after}</b> });
+      return say("serversettings.audit.s.profileItemUpdate", { name: <b>{renamed?.after || lang.t("serversettings.audit.aProfileItem")}</b> });
+    }
+    case AuditAction.PROFILE_ITEM_DELETE:
+      return say("serversettings.audit.s.profileItemDelete", { name: <b>{change("name")?.before}</b> });
     default:
       return say("serversettings.audit.s.unknown");
   }

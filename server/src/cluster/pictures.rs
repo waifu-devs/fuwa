@@ -518,6 +518,7 @@ pub(crate) async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<b
             &conn,
             "SELECT 1 FROM server WHERE icon_url LIKE ?1
              UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
+             UNION ALL SELECT 1 FROM profile_items WHERE picture_url LIKE ?1
              UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1
              UNION ALL SELECT 1 FROM attachments WHERE media_id = ?2 LIMIT 1",
             (link.as_str(), media_id),
@@ -566,6 +567,7 @@ async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::m
             | pb::MediaPurpose::Emoji
             | pb::MediaPurpose::Avatar
             | pb::MediaPurpose::Attachment
+            | pb::MediaPurpose::Decoration
     );
     if !row.stored || !row.used || !purpose || row.server_id.as_deref() != Some(server_id) {
         return Err(Error::FailedPrecondition("that picture isn't the server's".into()));

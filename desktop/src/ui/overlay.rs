@@ -502,8 +502,8 @@ impl FuwaApp {
     /// names, pronouns and bio, and a button to message them.
     fn render_profile(&mut self, key: &str, user_id: &str, server: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
-        let (user, nickname, me, roles, presence) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(key) else { return (None, String::new(), false, Vec::new(), None) };
+        let (user, nickname, me, roles, presence, decoration) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(key) else { return (None, String::new(), false, Vec::new(), None, None) };
             let member = server.and_then(|sid| {
                 i.members.get(sid)?.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id)).cloned()
             });
@@ -518,6 +518,7 @@ impl FuwaApp {
                     .collect(),
                 _ => Vec::new(),
             };
+            let decoration = i.decoration_url(server, member.as_ref(), i.users.get(user_id)).map(str::to_owned);
             (
                 i.users.get(user_id).cloned(),
                 member.map(|m| m.nickname).unwrap_or_default(),
@@ -525,6 +526,7 @@ impl FuwaApp {
                 roles,
                 // None on an instance without presence: no dot then.
                 i.people.as_ref().map(|people| people.get(user_id).cloned()),
+                decoration,
             )
         });
         let profile = self.profile.clone().filter(|pr| pr.user.as_ref().is_some_and(|u| u.id == user_id));
@@ -669,7 +671,11 @@ impl FuwaApp {
                         .border_4()
                         .border_color(p.card)
                         .bg(p.card)
-                        .child(crate::ui::widgets::avatar(user.as_ref(), 80.0, &p))
+                        .child(crate::ui::widgets::decorated(
+                            crate::ui::widgets::avatar(user.as_ref(), 80.0, &p),
+                            80.0,
+                            decoration.as_deref(),
+                        ))
                         .when_some(presence.as_ref(), |el, pr| {
                             let status = crate::ui::presence::shown(pr.as_ref());
                             el.child(crate::ui::presence::avatar_dot(status, 24.0, p.card, &p))

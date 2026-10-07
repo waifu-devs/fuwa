@@ -37,6 +37,7 @@ mod pins;
 mod png;
 mod polls;
 mod presence;
+mod profile_items;
 mod rail;
 mod search;
 mod secure;

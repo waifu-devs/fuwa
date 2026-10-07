@@ -54,6 +54,9 @@ enum MediaPurpose {
   MEDIA_PURPOSE_ATTACHMENT = 7;
   // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
   MEDIA_PURPOSE_GIF = 8;
+  // An avatar decoration (ProfileItemService): with a server_id, one the
+  // server offers; without, one the instance does (instance admins).
+  MEDIA_PURPOSE_DECORATION = 9;
 }
 
 // A stored file.
@@ -75,8 +78,8 @@ message CreateUploadRequest {
   // `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
   // when that's set.
   int64 size = 3;
-  // For a server's icon or banner, an emoji, a webhook's picture or an
-  // attachment (required for an attachment and a server's banner): the
+  // For a server's icon or banner, an emoji, a decoration, a webhook's
+  // picture or an attachment (required for an attachment and a server's banner): the
   // server it's for (you must be in it). The file can then only be used
   // there, and on an instance split across regions its bytes go straight to
   // the server's region rather than the home one.

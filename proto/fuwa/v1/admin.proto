@@ -257,6 +257,10 @@ message InstanceSettings {
   // latest goes out when the time is up. A protective default, 1000 unless
   // FUWA_LIVE_TILE_PUBLISH_MS says otherwise; unset sends every change.
   optional int64 live_tile_publish_ms = 59;
+  // People may wear a decoration around their avatar. Turning it off hides
+  // everyone's (their picks are kept for when it's back on).
+  // FUWA_PROFILE_DECORATIONS, on unless set.
+  bool profile_decorations = 60;
 }
 
 // One sign-in provider, as an instance's admins set it up. Its redirect URI,

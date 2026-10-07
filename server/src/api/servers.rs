@@ -566,12 +566,22 @@ impl ServerService for Api {
                 let Seat { sdb, access: me, .. } = self.membership(&account, &req.server_id).await?;
                 let target_id = if req.user_id.is_empty() { account.id.clone() } else { req.user_id.clone() };
                 let nickname = req.nickname.as_deref().map(|v| text("nickname", v, 0, 32)).transpose()?;
-                if nickname.is_some() {
-                    me.require(if target_id == account.id {
-                        Permission::ChangeNickname
-                    } else {
-                        Permission::ManageNicknames
-                    })?;
+                let effect = req.effect.as_deref().map(str::trim).map(str::to_string);
+                let decoration = req.decoration_id.as_deref().map(str::trim).map(str::to_string);
+                let theirs_too = target_id != account.id;
+                if nickname.is_some() || effect.is_some() || decoration.is_some() {
+                    me.require(if theirs_too { Permission::ManageNicknames } else { Permission::ChangeNickname })?;
+                }
+                // Moderators can take someone's server profile off, never put one on.
+                if theirs_too && [&effect, &decoration].iter().any(|v| v.as_deref().is_some_and(|v| !v.is_empty())) {
+                    return Err(Error::denied("only they can pick their server profile; you can only clear it"));
+                }
+                let settings = self.app.settings();
+                if effect.as_deref().is_some_and(|v| !v.is_empty()) && !settings.profile_effects {
+                    return Err(Error::FailedPrecondition("profile effects are off on this instance".into()));
+                }
+                if decoration.as_deref().is_some_and(|v| !v.is_empty()) && !settings.profile_decorations {
+                    return Err(Error::FailedPrecondition("decorations are off on this instance".into()));
                 }
                 let member = sdb
                     .write(&account.id, async |conn, events| {
@@ -579,19 +589,32 @@ impl ServerService for Api {
                         if target_id != account.id && !me.outranks(&theirs) {
                             return Err(Error::denied("you can only change people ranked below you"));
                         }
+                        // The server's own items, or for an effect a built-in one's id.
+                        if let Some(id) = effect.as_deref().filter(|v| !v.is_empty())
+                            && !crate::profile_items::has(conn, id, pb::ProfileItemKind::Effect).await?
+                        {
+                            super::effect_id(id).map_err(|_| Error::NotFound("profile effect"))?;
+                        }
+                        if let Some(id) = decoration.as_deref().filter(|v| !v.is_empty())
+                            && !crate::profile_items::has(conn, id, pb::ProfileItemKind::Decoration).await?
+                        {
+                            return Err(Error::NotFound("decoration"));
+                        }
                         conn.execute(
-                            "UPDATE members SET nickname = coalesce(?2, nickname) WHERE user_id = ?1",
-                            (target_id.as_str(), nickname.as_deref()),
+                            "UPDATE members SET nickname = coalesce(?2, nickname),
+                               profile_effect = coalesce(?3, profile_effect),
+                               profile_decoration = coalesce(?4, profile_decoration)
+                             WHERE user_id = ?1",
+                            (target_id.as_str(), nickname.as_deref(), effect.as_deref(), decoration.as_deref()),
                         )
                         .await?;
                         let member =
                             store::member(conn, &sdb.id, &target_id).await?.ok_or(Error::NotFound("member"))?;
                         if target_id != account.id {
-                            let entry = Audit::new(pb::AuditAction::MemberUpdate, &target_id).change(
-                                "nickname",
-                                &target.nickname,
-                                &member.nickname,
-                            );
+                            let entry = Audit::new(pb::AuditAction::MemberUpdate, &target_id)
+                                .change("nickname", &target.nickname, &member.nickname)
+                                .change("effect", &target.effect, &member.effect)
+                                .change("decoration", &target.decoration_id, &member.decoration_id);
                             if !entry.changes.is_empty() {
                                 store::audit(conn, &account.id, entry).await?;
                             }
@@ -861,9 +884,9 @@ impl ServerService for Api {
                     |r| {
                         Ok(pb::Ban {
                             user: Some(store::user_row(r)?),
-                            reason: r.get(7)?,
-                            banned_by_id: r.get(8)?,
-                            created_at: Some(timestamp(r.get(9)?)),
+                            reason: r.get(8)?,
+                            banned_by_id: r.get(9)?,
+                            created_at: Some(timestamp(r.get(10)?)),
                         })
                     },
                 )

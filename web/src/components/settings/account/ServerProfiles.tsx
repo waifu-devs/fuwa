@@ -2,14 +2,19 @@ import { ServerIcon as ServerGlyph } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
-import { setNickname } from "@/fuwa/actions";
+import { updateServerProfile, type ServerProfilePatch } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { ServerIcon } from "@/components/Icons";
 import { SwapText } from "@/components/motion";
-import { SPRING } from "@/lib/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
+import { instanceHas } from "@/lib/compat";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Row } from "@/components/settings/account/common";
+import { DecorationPicker } from "@/components/settings/account/DecorationPicker";
+import { EffectAbout, EffectPicker } from "@/components/settings/account/EffectPicker";
+import { useDecorationsOn, useEffectsOn, useOfferedEffects } from "@/components/ProfileDecoration";
+import { ITEM_DECORATION, itemsOfKind, resolveDecoration, resolveEffect } from "@/lib/profile-items";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { T, useI18n } from "@/i18n/react";
@@ -32,9 +37,13 @@ function usePickedServer(servers: Server[], target: string | null) {
   return [serverId, (id: string) => setPicked({ id, target })] as const;
 }
 
+/** What's being changed on the server profile picked; unset fields are as saved. */
+type Edits = { nickname?: string; effect?: string; decoration?: string };
+
 /**
- * A different name in each server: pick a server, give yourself a nickname
- * there, and see the card people in that server will open.
+ * A different profile in each server: pick a server, give yourself a
+ * nickname there, an effect and a decoration (the fuwa ones and that
+ * server's), and see the card people in that server will open.
  */
 export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   const { t } = useI18n();
@@ -45,33 +54,63 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   const me = inst?.me;
   const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === me?.id));
   const profile = useFuwa((s) => (me ? s.instances[instanceKey]?.profiles[me.id] : undefined));
-  const [nickname, setDraft] = useState<string | null>(null);
-  const save = useAction(setNickname);
+  const [edits, setEdits] = useState<Edits>({});
+  const save = useAction(updateServerProfile);
+  // Server profiles keep an effect and a decoration only on instances with profile items.
+  const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
+  const effectsOn = useEffectsOn(instanceKey) && itemsHere;
+  const decorationsOn = useDecorationsOn(instanceKey) && itemsHere;
+  const items = useFuwa((s) => s.instances[instanceKey]?.serverProfileItems[serverId]);
+  const offered = useOfferedEffects(items);
 
   if (!me) return null;
   if (!servers.length) return <NoServers />;
 
-  const saved = member?.nickname ?? "";
-  const value = nickname ?? saved;
-  const changed = nickname !== null && nickname.trim() !== saved ? 1 : 0;
+  const saved = { nickname: member?.nickname ?? "", effect: member?.effect ?? "", decoration: member?.decorationId ?? "" };
+  const value = edits.nickname ?? saved.nickname;
+  const effect = edits.effect ?? saved.effect;
+  const decoration = edits.decoration ?? saved.decoration;
+  const patch: ServerProfilePatch = {};
+  if (edits.nickname !== undefined && edits.nickname.trim() !== saved.nickname) patch.nickname = edits.nickname.trim();
+  if (edits.effect !== undefined && edits.effect !== saved.effect) patch.effect = edits.effect;
+  if (edits.decoration !== undefined && edits.decoration !== saved.decoration) patch.decorationId = edits.decoration;
+  const changed = Object.keys(patch).length;
   const server = servers.find((s) => s.id === serverId);
+  const decorations = itemsOfKind(items, ITEM_DECORATION);
+  const set = (next: Edits) => {
+    setEdits((e) => ({ ...e, ...next }));
+    save.setError(null);
+  };
+  const pickedEffect = resolveEffect(effect, items);
+  const pickedDecoration = resolveDecoration(decoration, items);
 
   function pick(id: string) {
     if (id === serverId) return;
     setPicked(id);
-    setDraft(null);
+    setEdits({});
     save.setError(null);
   }
 
   async function submit(e?: FormEvent) {
     e?.preventDefault();
     if (!changed) return;
-    if (await save.go(instanceKey, serverId, value.trim())) setDraft(null);
+    if (await save.go(instanceKey, serverId, patch)) setEdits({});
   }
+
+  const preview = (
+    <ProfileCard
+      editing
+      me
+      instanceKey={instanceKey}
+      user={me}
+      profile={profile}
+      member={member ? { ...member, nickname: value.trim(), effect, decorationId: decoration } : undefined}
+    />
+  );
 
   return (
     <form onSubmit={submit}>
-      <WithPreview preview={<ProfileCard editing me user={me} profile={profile} member={member ? { ...member, nickname: value.trim() } : undefined} />}>
+      <WithPreview preview={preview}>
         <div className="flex flex-col">
           <Row id="server" label={t("accountsettings.serverProfiles.server")}>
             <div role="radiogroup" aria-label={t("accountsettings.serverProfiles.server")} className="flex flex-wrap gap-2">
@@ -102,15 +141,49 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
                   value={value}
                   placeholder={displayName(me)}
                   disabled={!member}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    save.setError(null);
-                  }}
+                  onChange={(e) => set({ nickname: e.target.value })}
                   className="h-11 max-w-sm rounded-xl"
                 />
               </motion.div>
             </AnimatePresence>
           </Row>
+          {effectsOn && member && (
+            <Row
+              id="server-effect"
+              label={t("settings.nav.profileEffect")}
+              hint={pickedEffect ? <EffectAbout effect={pickedEffect} /> : t("accountsettings.serverProfiles.effectHint")}
+            >
+              <EffectPicker
+                value={effect}
+                userId={me.id}
+                accent={profile?.accentColor ?? -1}
+                offered={offered}
+                noneLabel={t("accountsettings.serverProfiles.useMine")}
+                pickedId="server-effect-picked"
+                onChange={(next) => set({ effect: next })}
+              />
+            </Row>
+          )}
+          <AnimatePresence initial={false}>
+            {decorationsOn && member && (decorations.length > 0 || decoration) && (
+              <motion.div key={`decoration-${serverId}`} {...SLIDE_IN} transition={SPRING}>
+                <Row
+                  id="server-decoration"
+                  label={t("accountsettings.decorations.label")}
+                  hint={pickedDecoration?.description || t("accountsettings.serverProfiles.decorationHint")}
+                >
+                  <DecorationPicker
+                    value={decoration}
+                    user={me}
+                    items={decorations}
+                    noneLabel={t("accountsettings.serverProfiles.useMine")}
+                    pickedId="server-decoration-picked"
+                    onChange={(next) => set({ decoration: next })}
+                  />
+                </Row>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         <SaveBar
           count={changed}
@@ -118,7 +191,7 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
           error={save.error}
           onSave={() => void submit()}
           onDiscard={() => {
-            setDraft(null);
+            setEdits({});
             save.setError(null);
           }}
         />

@@ -75,6 +75,9 @@ pub struct Config {
     pub mcp: bool,
     /// People may put an effect on their profile card. FUWA_PROFILE_EFFECTS.
     pub profile_effects: bool,
+    /// People may wear a decoration around their avatar.
+    /// FUWA_PROFILE_DECORATIONS.
+    pub profile_decorations: bool,
     /// People may show what they're doing (docs/presence.md). On unless
     /// FUWA_RICH_PRESENCE turns it off.
     pub rich_presence: bool,
@@ -513,6 +516,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_PROFILE_EFFECTS must be on or off, got {other:?}")),
         };
+        let profile_decorations = match get("FUWA_PROFILE_DECORATIONS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_PROFILE_DECORATIONS must be on or off, got {other:?}")),
+        };
         let rich_presence = match get("FUWA_RICH_PRESENCE").as_deref().map(str::trim) {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
@@ -647,6 +655,7 @@ impl Config {
             shared_channels,
             mcp,
             profile_effects,
+            profile_decorations,
             rich_presence,
             federation,
             federation_allow_private,

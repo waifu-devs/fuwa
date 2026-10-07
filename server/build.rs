@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "search",
         "command",
         "live_tile",
+        "profile_item",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);

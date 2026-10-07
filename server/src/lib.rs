@@ -29,6 +29,7 @@ pub mod outside;
 pub mod permissions;
 pub mod presence;
 pub mod probes;
+pub mod profile_items;
 pub mod recordings;
 pub mod releases;
 pub mod replica;

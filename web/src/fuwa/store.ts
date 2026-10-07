@@ -4,6 +4,7 @@ import type {
   Attachment,
   Channel,
   Emoji,
+  ProfileItem,
   Event,
   Member,
   Message,
@@ -174,6 +175,10 @@ export type InstanceState = {
   roles: Record<string, Role[]>;
   /** Per server, its own emoji, oldest first. */
   emojis: Record<string, Emoji[]>;
+  /** The instance's own profile effects and decorations, oldest first (docs/profile-items.md); empty until listed. */
+  profileItems: ProfileItem[];
+  /** Per server, the profile effects and decorations it offers its members, oldest first. */
+  serverProfileItems: Record<string, ProfileItem[]>;
   /** Everyone this instance has shown us, by id, so authors resolve even after they leave. */
   users: Record<string, User>;
   /** Per channel, only for channels someone opened; a thread's replies under `threadKey` of the message it's under. */
@@ -262,6 +267,8 @@ export function emptyInstance(key: string, url: string, account = ""): InstanceS
     members: {},
     roles: {},
     emojis: {},
+    profileItems: [],
+    serverProfileItems: {},
     users: {},
     messages: {},
     pending: {},
@@ -432,6 +439,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     members: without(i.members, serverId),
     roles: without(i.roles, serverId),
     emojis: without(i.emojis, serverId),
+    serverProfileItems: without(i.serverProfileItems, serverId),
     synced: without(i.synced, serverId),
     applications: without(i.applications, serverId),
     voice: without(i.voice, serverId),
@@ -460,6 +468,7 @@ export function applySnapshot(
   members: Member[],
   roles: Role[],
   emojis: Emoji[] = [],
+  profileItems: ProfileItem[] = [],
 ): InstanceState {
   const next = withChannels(addServer(i, server), server.id, channels);
   return {
@@ -467,6 +476,7 @@ export function applySnapshot(
     members: { ...next.members, [server.id]: sortMembers(members) },
     roles: { ...next.roles, [server.id]: sortRoles(roles) },
     emojis: { ...next.emojis, [server.id]: emojis },
+    serverProfileItems: { ...next.serverProfileItems, [server.id]: profileItems },
     users: withUsers(
       next.users,
       members.map((m) => m.user),
@@ -656,6 +666,8 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
     }
     case "emojisUpdated":
       return { ...i, emojis: { ...i.emojis, [sid]: p.value.emojis } };
+    case "profileItemsUpdated":
+      return { ...i, serverProfileItems: { ...i.serverProfileItems, [sid]: p.value.items } };
     // Only a signal: the list is read again where it's kept (see sync.ts).
     case "sharedChannelsUpdated":
       return i;

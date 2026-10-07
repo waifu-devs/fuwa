@@ -152,6 +152,14 @@ message UpdateMemberRequest {
   optional string nickname = 3;
   reserved 4;
   reserved "role";
+  // Your own profile in this server (Member.effect and decoration_id): an
+  // effect's id (a built-in one's or one of the server's profile items) and
+  // one of the server's decorations, or empty to show your own. Needs
+  // CHANGE_NICKNAME; with MANAGE_NICKNAMES, someone else's can only be
+  // cleared. Picking one is refused while the instance has effects or
+  // decorations off.
+  optional string effect = 5;
+  optional string decoration_id = 6;
 }
 
 message UpdateMemberResponse {
@@ -338,6 +346,11 @@ enum AuditAction {
   // An app's live tile, ended by a moderator: the app (agent or webhook) is
   // the target, and the change names the tile.
   AUDIT_ACTION_LIVE_TILE_END = 56;
+  // The server's profile items (ProfileItemService): the target is the
+  // item, and the change names it.
+  AUDIT_ACTION_PROFILE_ITEM_CREATE = 57;
+  AUDIT_ACTION_PROFILE_ITEM_UPDATE = 58;
+  AUDIT_ACTION_PROFILE_ITEM_DELETE = 59;
 }
 
 // One thing someone did with a moderator's or manager's permission.

@@ -15,12 +15,14 @@ import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
+import { DecorationPicker } from "@/components/settings/account/DecorationPicker";
 import { EffectAbout, EffectPicker } from "@/components/settings/account/EffectPicker";
+import { useDecorationsOn, useEffectsOn, useOfferedEffects } from "@/components/ProfileDecoration";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { type I18n, useI18n } from "@/i18n/react";
-import { builtinEffect } from "@/lib/effects/profile";
+import { ITEM_DECORATION, itemsOfKind, resolveDecoration, resolveEffect } from "@/lib/profile-items";
 import { colorCss, shownStatus } from "@/lib/format";
 import { reportUsage } from "@/lib/reports";
 import { cn } from "@/lib/utils";
@@ -73,8 +75,10 @@ type Draft = {
   bannerUrl: string;
   /** 0xRRGGBB, or -1 for the color fuwa picks from your id. */
   accent: number;
-  /** A profile effect's id, or "" for none. */
+  /** A profile effect's id (built-in, or one of the instance's), or "" for none. */
   effect: string;
+  /** One of the instance's decorations, or "" for none. */
+  decoration: string;
 };
 
 const isUrl = (value: string) => !value.trim() || /^https?:\/\/\S+$/i.test(value.trim());
@@ -102,10 +106,15 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
 
 function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string; me: User; profile: ProfileInfo | undefined; ready: boolean }) {
   const { t } = useI18n();
-  // Instances from before profile effects don't say, and can't keep one.
-  const effectsOn = useFuwa((s) => !!s.instances[instanceKey]?.node?.profileEffects);
+  // Instances from before profile effects (or decorations) don't say, and can't keep one.
+  const effectsOn = useEffectsOn(instanceKey);
+  const decorationsOn = useDecorationsOn(instanceKey);
+  const items = useFuwa((s) => s.instances[instanceKey]?.profileItems);
   const { base, draft, changed, set, keptUntil, submit, discard, save } = useProfileDraft(instanceKey, me, profile);
-  const effect = builtinEffect(draft.effect);
+  const effect = resolveEffect(draft.effect, items);
+  const offered = useOfferedEffects(items);
+  const decorations = itemsOfKind(items, ITEM_DECORATION);
+  const decoration = resolveDecoration(draft.decoration, items);
 
   const preview = (
     <ProfileCard
@@ -113,7 +122,14 @@ function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string;
       me
       instanceKey={instanceKey}
       loading={!ready}
-      user={{ ...me, displayName: draft.displayName.trim() || me.username, avatarUrl: isUrl(draft.avatarUrl) ? draft.avatarUrl.trim() : me.avatarUrl, status: draft.status.trim(), statusExpiresAt: undefined }}
+      user={{
+        ...me,
+        displayName: draft.displayName.trim() || me.username,
+        avatarUrl: isUrl(draft.avatarUrl) ? draft.avatarUrl.trim() : me.avatarUrl,
+        status: draft.status.trim(),
+        statusExpiresAt: undefined,
+        decorationId: draft.decoration,
+      }}
       profile={{
         pronouns: draft.pronouns.trim(),
         bio: draft.bio.trim(),
@@ -198,9 +214,22 @@ function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string;
               label={t("settings.nav.profileEffect")}
               hint={effect ? <EffectAbout effect={effect} /> : t("accountsettings.profile.effectHint")}
             >
-              <EffectPicker value={draft.effect} userId={me.id} accent={draft.accent} disabled={!ready} onChange={(effect) => set({ effect })} />
+              <EffectPicker value={draft.effect} userId={me.id} accent={draft.accent} offered={offered} disabled={!ready} onChange={(effect) => set({ effect })} />
             </Row>
           )}
+          <AnimatePresence initial={false}>
+            {decorationsOn && (decorations.length > 0 || draft.decoration) && (
+              <motion.div key="decoration" {...SLIDE_IN} transition={SPRING}>
+                <Row
+                  id="avatar-decoration"
+                  label={t("accountsettings.decorations.label")}
+                  hint={decoration?.description || t("accountsettings.decorations.hint")}
+                >
+                  <DecorationPicker value={draft.decoration} user={me} items={decorations} disabled={!ready} onChange={(decoration) => set({ decoration })} />
+                </Row>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <Row id="status" label={t("settings.nav.status")} htmlFor="profile-status" hint={t("accountsettings.profile.statusHint")}>
             <StatusField draft={draft} canKeep={base.clear === "keep"} keptUntil={keptUntil} set={set} />
           </Row>
@@ -256,6 +285,7 @@ function savedDraft(me: User, profile: ProfileInfo | undefined): Draft {
     bannerUrl: profile?.bannerUrl ?? "",
     accent: profile?.accentColor ?? -1,
     effect: profile?.effect ?? "",
+    decoration: me.decorationId,
   };
 }
 
@@ -280,6 +310,7 @@ function patchFor(draft: Draft, differs: (k: keyof Draft) => boolean, status: Da
   if (differs("bannerUrl")) patch.bannerUrl = draft.bannerUrl.trim();
   if (differs("accent")) patch.accentColor = draft.accent;
   if (differs("effect")) patch.effect = draft.effect;
+  if (differs("decoration")) patch.decorationId = draft.decoration;
   if (status !== undefined) {
     patch.status = draft.status.trim();
     patch.statusExpiresAt = draft.clear === "keep" ? status : clearsAt(draft.clear);
@@ -296,7 +327,7 @@ function useProfileDraft(instanceKey: string, me: User, profile: ProfileInfo | u
   const draft: Draft = { ...base, ...edits };
   const differs = (k: keyof Draft) => edits[k] !== undefined && edits[k] !== base[k];
   const statusChanged = differs("status") || (draft.status.trim() !== "" && differs("clear"));
-  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect"] as const).filter(differs).length + (statusChanged ? 1 : 0);
+  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect", "decoration"] as const).filter(differs).length + (statusChanged ? 1 : 0);
   const set = (patch: Partial<Draft>) => {
     setEdits((e) => ({ ...e, ...patch }));
     save.setError(null);
@@ -311,6 +342,7 @@ function useProfileDraft(instanceKey: string, me: User, profile: ProfileInfo | u
     const patch = patchFor(draft, differs, statusChanged ? keptUntil : undefined);
     if (!(await save.go(instanceKey, patch))) return;
     if (patch.effect) reportUsage("profile-effect/picked");
+    if (patch.decorationId) reportUsage("profile-decoration/picked");
     setEdits({});
   }
 

@@ -125,10 +125,14 @@ message UpdateProfileRequest {
   // Setting the status replaces its expiry too: unset keeps it until changed.
   optional string status = 7;
   google.protobuf.Timestamp status_expires_at = 8;
-  // A profile effect's id (lowercase letters, digits and dashes, up to 32),
-  // or empty for none. Refused while the instance has profile effects off,
-  // except clearing it.
+  // A profile effect's id: a built-in one's (lowercase letters, digits and
+  // dashes, up to 32) or one of the instance's profile items, or empty for
+  // none. Refused while the instance has profile effects off, except
+  // clearing it.
   optional string effect = 9;
+  // One of the instance's decorations (a profile item), or empty for none.
+  // Refused while the instance has decorations off, except clearing it.
+  optional string decoration_id = 10;
 }
 
 message UpdateProfileResponse {

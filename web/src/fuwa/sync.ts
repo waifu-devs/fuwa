@@ -1,7 +1,7 @@
 import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
-import { ChannelType, type Event, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, type Event, type ProfileItem, type User } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine, startDms, stopDms } from "@/e2ee/engine";
 import { loadApplied } from "@/lib/applied";
 import { adoptInstanceKeys, forgetAccount } from "./accounts";
@@ -59,6 +59,20 @@ import {
 
 /** How often the instance's public details (and its announcement) are read again. */
 const NODE_REFRESH = "60 seconds";
+
+/** A timestamp as a key to compare, "" when unset. */
+const stampKey = (at: { seconds: bigint; nanos: number } | undefined) => (at ? `${at.seconds}.${at.nanos}` : "");
+
+/**
+ * The instance's profile items (docs/profile-items.md): none on an instance
+ * from before them, and null (keep what's there) when listing fails for
+ * any other reason than being signed out.
+ */
+const listProfileItems = (api: Api) =>
+  call((signal) => api.profileItems.listInstanceProfileItems({}, { signal })).pipe(
+    Effect.map((r) => r.items as ProfileItem[] | null),
+    Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed(err.code === Code.Unimplemented ? [] : null))),
+  );
 
 /** Retry quickly at first, then every 20 seconds at most. */
 const backoff = Schedule.exponential("400 millis", 2).pipe(
@@ -332,6 +346,10 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed(null))),
     );
     patchInstance(key, { rail });
+    // The instance's own profile effects and decorations, listed again whenever the Node says they changed.
+    let itemsAt = stampKey(store.get().instances[key]?.node?.profileItemsAt);
+    const items = yield* listProfileItems(api);
+    if (items) patchInstance(key, { profileItems: items });
 
     const { servers } = yield* retrying(call((signal) => api.servers.listServers({}, { signal })));
     updateInstance(key, (i) => servers.reduce(addServer, i));
@@ -344,6 +362,12 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     // The instance's name, sign-up options and announcement change without an event.
     yield* call((signal) => api.node.getNode({}, { signal })).pipe(
       Effect.tap(({ node }) => Effect.sync(() => node && patchInstance(key, { node }))),
+      Effect.tap(({ node }) => {
+        const at = stampKey(node?.profileItemsAt);
+        if (!node || at === itemsAt) return Effect.void;
+        itemsAt = at;
+        return listProfileItems(api).pipe(Effect.tap((list) => Effect.sync(() => list && patchInstance(key, { profileItems: list }))));
+      }),
       Effect.ignore,
       Effect.repeat(Schedule.spaced(NODE_REFRESH)),
       Effect.delay(NODE_REFRESH),
@@ -416,7 +440,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
 
     const snapshot = (serverId: string) =>
       Effect.gen(function* () {
-        const [server, channels, members, roles, emojis] = yield* Effect.all(
+        const [server, channels, members, roles, emojis, profileItems] = yield* Effect.all(
           [
             call((signal) => api.servers.getServer({ serverId }, { signal })),
             call((signal) => api.channels.listChannels({ serverId }, { signal })),
@@ -429,6 +453,13 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
                 () => Effect.succeed({ emojis: [] }),
               ),
             ),
+            // Nor profile items, from before servers offered them.
+            call((signal) => api.profileItems.listServerProfileItems({ serverId }, { signal })).pipe(
+              Effect.catchIf(
+                (e) => e.code === Code.Unimplemented,
+                () => Effect.succeed({ items: [] }),
+              ),
+            ),
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.retry(retryPolicy));
@@ -436,7 +467,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         store.update((s) => {
           const current = s.instances[key];
           if (!current || !server.server) return s;
-          let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
+          let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis, profileItems.items);
           next = { ...next, voice: { ...next.voice, [serverId]: voice }, liveTiles: { ...next.liveTiles, [serverId]: tiles } };
           const focus = s.focus?.instance === key ? s.focus.channel : null;
           const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;

@@ -27,11 +27,12 @@ impl MediaService for Api {
                         | pb::MediaPurpose::Emoji
                         | pb::MediaPurpose::Background
                         | pb::MediaPurpose::Attachment
-                        | pb::MediaPurpose::Gif),
+                        | pb::MediaPurpose::Gif
+                        | pb::MediaPurpose::Decoration),
                     ) => purpose,
                     _ => {
                         return Err(Error::invalid(
-                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF or an attachment",
+                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF, a decoration or an attachment",
                         ));
                     }
                 };
@@ -63,9 +64,10 @@ impl MediaService for Api {
                                 | pb::MediaPurpose::Emoji
                                 | pb::MediaPurpose::Avatar
                                 | pb::MediaPurpose::Attachment
+                                | pb::MediaPurpose::Decoration
                         ) {
                             return Err(Error::invalid(
-                                "only icons, banners, emoji, webhook pictures and attachments are uploaded for a server",
+                                "only icons, banners, emoji, decorations, webhook pictures and attachments are uploaded for a server",
                             ));
                         }
                         let id = crate::id::parse_id("server_id", id)?;

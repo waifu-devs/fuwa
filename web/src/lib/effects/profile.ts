@@ -191,14 +191,15 @@ const paint = (value: unknown): Paint | null =>
   typeof value === "string" && (/^#[0-9a-f]{6}$/i.test(value) || PAINT_TOKENS.includes(value as never)) ? (value as Paint) : null;
 
 /**
- * A spec from anywhere (a file someone made, later), made safe to play: only
- * known shapes, motions, regions and colors, and every number held to a
- * range, so no spec can ask for thousands of particles or minute-long frames.
- * Null when there's nothing left to play.
+ * A spec from anywhere (an instance's or a server's profile item, a file
+ * someone made), made safe to play: only known shapes, motions, regions and
+ * colors, and every number held to a range, so no spec can ask for
+ * thousands of particles or minute-long frames. Null when there's nothing
+ * left to play.
  *
- * Nothing calls it yet: profiles only name built-in effects by id. When
- * custom specs ship, every spec that didn't come with the app goes through
- * this before `planEffect`, and the cap on colors stays ahead of the mapping.
+ * Every spec that didn't come with the app goes through this before
+ * `planEffect` (`lib/profile-items.ts`), and the cap on colors stays ahead
+ * of the mapping.
  */
 export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
   if (!raw || typeof raw !== "object") return null;

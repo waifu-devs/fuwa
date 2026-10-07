@@ -498,6 +498,7 @@ pub fn account_to_pb(account: &Account) -> cpb::Account {
         two_factor: account.two_factor,
         disabled: account.disabled,
         has_password: account.has_password(),
+        decoration_id: account.decoration_id.clone(),
     }
 }
 
@@ -516,6 +517,7 @@ pub fn account_from_pb(account: cpb::Account) -> Account {
         status_expires_at: millis(account.status_expires_at),
         two_factor: account.two_factor,
         disabled: account.disabled,
+        decoration_id: account.decoration_id,
     }
 }
 

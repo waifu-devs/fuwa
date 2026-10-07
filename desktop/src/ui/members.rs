@@ -21,7 +21,7 @@ use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::motion;
 use crate::ui::theme::{alpha, corner};
-use crate::ui::widgets::{app_badge, avatar, icon, is_agent, pal};
+use crate::ui::widgets::{app_badge, avatar, decorated, icon, is_agent, pal};
 
 /// Rows are this tall, every one, which is what lets the list skip the rest.
 const ROW: f32 = 44.0;
@@ -48,7 +48,7 @@ pub enum MembersEvent {
 enum Item {
     /// A role shown apart (or "Members" for everyone else), its color and how many are in it.
     Heading(String, Option<u32>, usize),
-    Member(Row),
+    Member(Box<Row>),
 }
 
 struct Row {
@@ -62,6 +62,8 @@ struct Row {
     status: Option<pb::PresenceStatus>,
     /// What they're doing, for under their name.
     activity: Option<String>,
+    /// The decoration around their avatar, its picture's link.
+    decoration: Option<SharedString>,
 }
 
 pub struct MembersView {
@@ -104,7 +106,7 @@ impl MembersView {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
                 Item::Member(r) => {
                     (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
-                    (r.status.map(|s| s as i32), &r.activity).hash(&mut h);
+                    (r.status.map(|s| s as i32), &r.activity, &r.decoration).hash(&mut h);
                 }
             }
         }
@@ -157,6 +159,7 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
             name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
             status: people.map(|_| crate::ui::presence::shown(presence)),
             activity: presence.and_then(|p| p.activities.first()).map(crate::ui::presence::line),
+            decoration: i.decoration_url(Some(server), Some(m), Some(&user)).map(|u| SharedString::from(u.to_owned())),
             color,
             agent: is_agent(Some(&user)),
             timed_out: until.is_some(),
@@ -178,16 +181,16 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
     let mut out = Vec::new();
     for (role, list) in groups.into_iter().filter(|(_, l)| !l.is_empty()) {
         out.push(Item::Heading(role.name.clone(), role.color.map(|c| c as u32), list.len()));
-        out.extend(list.into_iter().map(Item::Member));
+        out.extend(list.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     if !rest.is_empty() {
         let label = if people.is_some() { "chat.members.online" } else { "chat.members.members" };
         out.push(Item::Heading(t(label), None, rest.len()));
-        out.extend(rest.into_iter().map(Item::Member));
+        out.extend(rest.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     if !offline.is_empty() {
         out.push(Item::Heading(t("chat.members.offline"), None, offline.len()));
-        out.extend(offline.into_iter().map(Item::Member));
+        out.extend(offline.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     (out, ends)
 }
@@ -288,7 +291,7 @@ fn member_row(
             div()
                 .relative()
                 .flex_none()
-                .child(avatar(Some(user), 32.0, p))
+                .child(decorated(avatar(Some(user), 32.0, p), 32.0, row.decoration.as_deref()))
                 .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
                     el.child(crate::ui::presence::avatar_dot(status, 14.0, opaque(p.side_surface), p))
                 }),
