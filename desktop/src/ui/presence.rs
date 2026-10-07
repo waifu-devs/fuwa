@@ -4,15 +4,15 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _,
-    Styled as _, div, img, px,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, div, img, px,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::FuwaApp;
 use crate::ui::text::ms_of;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha, corner, mix, radius_2xl, radius_xl};
 use crate::ui::widgets::{icon, primary_button, soft_button};
 
 /// What someone's dot shows: offline while they aren't kept as online.
@@ -115,21 +115,27 @@ pub fn activity_cards(
         .map(|(n, a)| {
             let picture = |url: &str, size: f32, round: bool| {
                 let el = img(SharedString::from(url.to_owned())).size(px(size));
-                if round { el.rounded_full() } else { el.rounded(corner(12.0)) }
+                if round { el.rounded_full() } else { el.rounded(radius_xl()) }
             };
+            // The web's `.activity-tile`: the theme's color sweeping toward a sky blue.
+            let sky: gpui_kit::Hsla = mix(p.primary, gpui_kit::rgb(0x7dd3fc), 0.55);
             let tile = div()
                 .relative()
                 .flex_none()
                 .child(if a.large_image_url.is_empty() {
                     div()
                         .size(px(64.0))
-                        .rounded(corner(12.0))
-                        .bg(p.primary)
+                        .rounded(radius_xl())
+                        .bg(gpui_kit::linear_gradient(
+                            135.0,
+                            gpui_kit::linear_color_stop(p.primary, 0.0),
+                            gpui_kit::linear_color_stop(sky, 1.0),
+                        ))
                         .flex()
                         .items_center()
                         .justify_center()
                         .text_color(p.primary_foreground)
-                        .child(icon(kind_icon(a)).size(px(30.0)))
+                        .child(icon(kind_icon(a)).size(px(32.0)))
                         .into_any_element()
                 } else {
                     picture(&a.large_image_url, 64.0, false).into_any_element()
@@ -138,12 +144,12 @@ pub fn activity_cards(
                     el.child(
                         div()
                             .absolute()
-                            .right(px(-6.0))
-                            .bottom(px(-6.0))
+                            .right(px(-9.0))
+                            .bottom(px(-9.0))
                             .rounded_full()
                             .border_3()
-                            .border_color(p.secondary)
-                            .child(picture(&a.small_image_url, 22.0, true)),
+                            .border_color(p.muted)
+                            .child(picture(&a.small_image_url, 24.0, true)),
                     )
                 });
             let party = (a.party_max > 0).then(|| {
@@ -163,41 +169,57 @@ pub fn activity_cards(
                 .flex()
                 .flex_col()
                 .text_sm()
+                .line_height(px(19.25))
                 .child(div().truncate().font_weight(FontWeight::EXTRA_BOLD).child(a.name.clone()))
                 .when(!a.details.is_empty(), |el| el.child(div().truncate().child(a.details.clone())))
                 .when_some(state, |el, s| el.child(div().truncate().child(s)))
-                .when_some(timer(a, now_ms), |el, s| el.child(div().text_xs().text_color(p.muted_foreground).child(s)));
+                .when_some(timer(a, now_ms), |el, s| {
+                    el.child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(s))
+                });
             let mut card = div()
+                .mt(px(12.0))
                 .flex()
                 .flex_col()
-                .gap(px(8.0))
                 .p(px(12.0))
-                .rounded(corner(16.0))
-                .bg(p.secondary)
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(heading(a).to_uppercase()),
-                )
+                .rounded(radius_2xl())
+                .bg(alpha(p.muted, 0.6))
+                .child(crate::ui::profile_card::caps(&heading(a), p).mb(px(8.0)))
                 .child(div().flex().items_center().gap(px(12.0)).child(tile).child(text));
+            let mut buttons = div().mt(px(12.0)).flex().flex_col().gap(px(6.0));
             for (b, button) in a.buttons.iter().enumerate() {
                 let id = format!("activity-{n}-{b}");
                 if leaving == Some(button.url.as_str()) {
-                    card = card.child(leave_box(&id, &button.url, p, cx));
+                    buttons = buttons.child(leave_box(&id, &button.url, p, cx));
                     continue;
                 }
                 let url = button.url.clone();
-                card = card.child(
-                    soft_button(SharedString::from(id), button.label.clone(), p)
-                        .w_full()
-                        .child(icon("external-link").size(px(13.0)).text_color(p.muted_foreground))
+                let (rest, lit) = (alpha(p.background, 0.7), p.background);
+                buttons = buttons.child(
+                    div()
+                        .id(SharedString::from(id))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(6.0))
+                        .rounded(crate::ui::theme::radius_lg())
+                        .bg(rest)
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(lit))
+                        .active(|s| s.top(px(1.0)))
+                        .child(div().truncate().child(button.label.clone()))
+                        .child(div().flex_none().opacity(0.6).child(icon("external-link").size(px(14.0))))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.profile_leaving = Some(url.clone());
                             cx.notify();
                         })),
                 );
+            }
+            if !a.buttons.is_empty() {
+                card = card.child(buttons);
             }
             card.into_any_element()
         })
@@ -264,9 +286,53 @@ fn leave_box(id: &str, url: &str, p: &Palette, cx: &mut Context<FuwaApp>) -> Any
         .into_any_element()
 }
 
-/// Someone's dot on their avatar, cut out of what it sits on.
-pub fn avatar_dot(status: pb::PresenceStatus, size: f32, under: gpui_kit::Rgba, p: &Palette) -> gpui_kit::Div {
-    div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(crate::ui::menus::status_dot(status, size, true, under, p))
+/// Someone's dot on their avatar (the web's `PresenceDot`, `-right-0.5
+/// -bottom-0.5`): a `size` dot in a `ring` of `under`, the color it sits on.
+pub fn avatar_dot(
+    status: pb::PresenceStatus,
+    size: f32,
+    ring: f32,
+    under: gpui_kit::Hsla,
+    p: &Palette,
+) -> gpui_kit::Div {
+    div().absolute().right(px(-2.0 - ring)).bottom(px(-2.0 - ring)).child(ringed_dot(status, size, ring, under, p))
+}
+
+/// The web's `.presence-dot` with `ring-[n]` around it: the ring is drawn
+/// outside the dot, and an offline dot's middle stays clear, as on the web.
+pub fn ringed_dot(
+    status: pb::PresenceStatus,
+    size: f32,
+    ring: f32,
+    under: gpui_kit::Hsla,
+    p: &Palette,
+) -> gpui_kit::Div {
+    match status {
+        // The web's mask cuts the ring away with the bite: only the crescent shows.
+        pb::PresenceStatus::Idle => {
+            return div()
+                .flex_none()
+                .size(px(size + 2.0 * ring))
+                .p(px(ring))
+                .child(gpui_kit::svg().path("fuwa/idle.svg").size(px(size)).text_color(gpui_kit::rgb(0xf5a524)));
+        }
+        // Offline's inset outline takes the ring's place (one box-shadow on the web): a hollow circle.
+        pb::PresenceStatus::Offline | pb::PresenceStatus::Invisible => {
+            return div()
+                .flex_none()
+                .size(px(size + 2.0 * ring))
+                .p(px(ring))
+                .child(crate::ui::user_menu::presence_dot(status, size, 0.0, under, p));
+        }
+        _ => {}
+    }
+    div()
+        .flex_none()
+        .size(px(size + 2.0 * ring))
+        .rounded_full()
+        .border(px(ring))
+        .border_color(under)
+        .child(crate::ui::user_menu::presence_dot(status, size, 0.0, under, p))
 }
 
 /// Someone's custom status while it lasts (the web's `shownStatus`).

@@ -109,6 +109,7 @@ impl MembersView {
             None => (Vec::new(), None),
         });
         let mut h = DefaultHasher::new();
+        (crate::ui::theme::role_names(), crate::ui::theme::role_beside()).hash(&mut h);
         for item in &rows {
             match item {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
@@ -282,7 +283,13 @@ fn member_row(
     let user = &row.user;
     let hover = alpha(p.muted, 0.7);
     let amber = gpui_kit::hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0);
-    let color: Hsla = row.color.map(|c| rgb(c).into()).unwrap_or(crate::ui::widgets::name_tint(&row.user.id, p));
+    // The web's `RoleName`: the role's color on the name, or as a dot beside it, as the Role colors setting says.
+    let color: Hsla = row
+        .color
+        .filter(|_| crate::ui::theme::role_names())
+        .map(|c| rgb(c).into())
+        .unwrap_or(crate::ui::widgets::name_tint(&row.user.id, p));
+    let beside = row.color.filter(|_| crate::ui::theme::role_beside());
     let uid = user.id.clone();
     let offline = row.status == Some(pb::PresenceStatus::Offline);
     let el = div()
@@ -317,15 +324,23 @@ fn member_row(
                 let _ = this.update(cx, |_, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }));
             }
         })
+        // The card opens beside the button inside the row (the web's `px-2`), 10px off.
         .child(
             div()
-                .relative()
-                .flex_none()
-                .mr(px(6.0))
-                .child(avatar(Some(user), 32.0, p))
-                .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
-                    el.child(crate::ui::presence::avatar_dot(status, 14.0, opaque(p.side_surface), p))
-                }),
+                .absolute()
+                .left(px(8.0))
+                .right(px(8.0))
+                .top(px(6.0))
+                .bottom(px(6.0))
+                .child(crate::ui::profile_card::mark(&user.id, crate::ui::profile_card::Side::Left)),
+        )
+        .child(
+            div().relative().flex_none().mr(px(6.0)).child(avatar(Some(user), 32.0, p)).when_some(
+                row.status.filter(|s| *s != pb::PresenceStatus::Offline),
+                |el, status| {
+                    el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, opaque(p.side_surface).into(), p))
+                },
+            ),
         )
         .child(
             div()
@@ -350,6 +365,17 @@ fn member_row(
                                 .text_color(color)
                                 .child(row.name.clone()),
                         )
+                        .when_some(beside, |el, c| {
+                            el.child(
+                                div()
+                                    .flex_none()
+                                    .size(px(12.0))
+                                    .rounded_full()
+                                    .border_2()
+                                    .border_color(p.background)
+                                    .bg(rgb(c)),
+                            )
+                        })
                         .when(row.owner, |el| {
                             el.child(icon("crown").size(px(12.0)).text_color(gpui_kit::rgb(0xfbbf24)))
                         })

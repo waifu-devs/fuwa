@@ -314,6 +314,8 @@ pub struct FuwaApp {
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
     pub friends: crate::ui::friends::Friends,
+    /// Profile cards and the moderation dialog.
+    pub people: crate::ui::profile_card::People,
     /// The instance page: Browse, invites, applying and making servers (`ui::instance_home`, `ui::join`).
     pub home: crate::ui::instance_home::Home,
     pub onboarding: crate::ui::onboarding::Onboarding,
@@ -393,6 +395,7 @@ impl FuwaApp {
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
+        let people = crate::ui::profile_card::People::new(window, cx);
         let (home, home_subs) = crate::ui::instance_home::Home::new(window, cx);
         let (gifs, gif_subs) = crate::ui::gifs::Gifs::new(window, cx);
         let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
@@ -567,6 +570,7 @@ impl FuwaApp {
             search,
             threads,
             friends,
+            people,
             home,
             onboarding,
             time_picker: None,
@@ -1362,6 +1366,7 @@ impl FuwaApp {
         self.profile_leaving = None;
         self.rules = None;
         match &dialog {
+            Dialog::Profile { user_id, .. } if !self.card_opening(user_id, window) => return,
             Dialog::Profile { key, user_id, .. } => {
                 self.friends.relation = None;
                 self.load_relation(key, user_id, cx);
