@@ -87,6 +87,8 @@ pub(crate) enum MenuOf {
     },
     /// The rail's add button.
     RailAdd,
+    /// The message box (the web's composer menu).
+    Composer,
 }
 
 impl MenuOf {
@@ -104,6 +106,7 @@ impl MenuOf {
             MenuOf::LiveTile { key, server, tile } => format!("tile|{key}|{server}|{tile}"),
             MenuOf::RailFolder { key, folder } => format!("f|{key}|{folder}"),
             MenuOf::RailAdd => "rail-add".into(),
+            MenuOf::Composer => "composer".into(),
         }
     }
 }

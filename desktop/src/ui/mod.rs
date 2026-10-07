@@ -14,6 +14,7 @@ pub(crate) mod chat;
 mod chat_rows;
 mod commands;
 mod compose;
+mod composer;
 mod connect;
 mod context_menu;
 mod effects;

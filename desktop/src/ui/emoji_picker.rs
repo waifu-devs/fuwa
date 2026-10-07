@@ -9,13 +9,15 @@ use crate::ui::emoji::InColor as _;
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::Focusable as _;
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, ScrollStrategy,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, uniform_list,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::chat::emoji_glyph;
@@ -24,9 +26,12 @@ use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, icon, server_icon};
 
-/// Emoji in a row, and how tall each row (and header) is.
+/// Emoji in a row, how tall each row is, and each section's title (the web's grid).
 const COLS: usize = 8;
 const CELL: f32 = 40.0;
+const HEADER: f32 = 30.0;
+/// The grid's own height (the web's `h-72`).
+const GRID: f32 = 288.0;
 /// Recently used emoji shown, at most.
 const RECENT_ROWS: usize = 2;
 
@@ -40,8 +45,15 @@ const GROUP_ICONS: [(&str, &str); 8] = [
     ("symbols", "heart"),
     ("flags", "flag"),
 ];
-const TONES: [&str; 6] = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
-const TONE_NAMES: [&str; 6] = ["Default", "Light", "Medium-light", "Medium", "Medium-dark", "Dark"];
+const TONES: [&str; 6] = ["✋\u{fe0f}", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
+const TONE_NAMES: [&str; 6] = [
+    "chattools.emoji.tone.default",
+    "chattools.emoji.tone.light",
+    "chattools.emoji.tone.mediumLight",
+    "chattools.emoji.tone.medium",
+    "chattools.emoji.tone.mediumDark",
+    "chattools.emoji.tone.dark",
+];
 
 /// What a section's header shows next to its title.
 #[derive(Clone)]
@@ -105,6 +117,17 @@ impl PickLayout {
         start..end
     }
 
+    /// A section's title.
+    fn title_of(&self, section: &str) -> &str {
+        self.rows
+            .iter()
+            .find_map(|r| match r {
+                PickRow::Header { id, title, .. } if id == section => Some(title.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
     /// The section a row is in.
     fn section_at(&self, row: usize) -> Option<&str> {
         self.sections.iter().rev().find(|(_, top, _)| *top <= row).map(|(id, _, _)| id.as_str())
@@ -112,17 +135,36 @@ impl PickLayout {
 }
 
 /// The picker's state, kept on the app while it's open.
-#[derive(Default)]
 pub struct EmojiPicker {
     /// The emoji lit by the pointer or the arrows, in `PickLayout::flat`.
     pub active: Option<usize>,
     pub tones_open: bool,
-    pub scroll: gpui_kit::UniformListScrollHandle,
+    /// The grid's rows: titles are shorter than rows of emoji, so it's a list of its own.
+    pub scroll: gpui_kit::ListState,
     /// Recently used, as they were when it opened, so picking a few in a row
     /// doesn't shift the grid under the pointer.
     pub recent: Vec<String>,
     /// The layout and what it was made from.
     pub layout: Option<(u64, Rc<PickLayout>)>,
+}
+
+impl Default for EmojiPicker {
+    fn default() -> Self {
+        Self {
+            active: None,
+            tones_open: false,
+            scroll: gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(200.0)),
+            recent: Vec::new(),
+            layout: None,
+        }
+    }
+}
+
+impl EmojiPicker {
+    /// Back to the top (a new search starts there).
+    pub fn to_top(&self) {
+        self.scroll.scroll_to(gpui_kit::ListOffset::default());
+    }
 }
 
 impl FuwaApp {
@@ -197,7 +239,11 @@ impl FuwaApp {
         let searching = !query.trim().trim_matches(':').is_empty();
         let sections = if searching {
             let found = emoji::search(query, &catalog, tone, usize::MAX);
-            let title = if found.is_empty() { "Nothing found".to_owned() } else { format!("{} found", found.len()) };
+            let title = if found.is_empty() {
+                t("chattools.emoji.nothingFound")
+            } else {
+                t_with("chattools.emoji.found", &[("count", Arg::Num(found.len() as i64))])
+            };
             vec![("results".to_owned(), title, Mark::Icon("search"), found)]
         } else {
             let recent: Vec<Choice> = self
@@ -207,7 +253,7 @@ impl FuwaApp {
                 .filter_map(|key| Choice::recalled(key, &catalog, tone))
                 .take(COLS * RECENT_ROWS)
                 .collect();
-            let mut sections = vec![("recent".to_owned(), "Recently used".to_owned(), Mark::Icon("clock"), recent)];
+            let mut sections = vec![("recent".to_owned(), t("chattools.emoji.recent"), Mark::Icon("clock"), recent)];
             for (server, list) in &catalog.sections {
                 let s = &catalog.servers[*server];
                 let full = servers.iter().find(|x| x.id == s.id).cloned().unwrap_or_else(|| pb::Server {
@@ -223,11 +269,18 @@ impl FuwaApp {
                 let mark =
                     GROUP_ICONS.iter().find(|(id, _)| *id == group.id).map_or("face-slightly-smiling", |(_, i)| i);
                 let choices = group.emojis.iter().map(|e| Choice::standard(e, tone)).collect();
-                sections.push((group.id.clone(), group.name.clone(), Mark::Icon(mark), choices));
+                // The standard set's categories by id; the data's own English name stands in for any other.
+                let key = format!("chattools.emoji.group.{}", group.id);
+                let title =
+                    if GROUP_ICONS.iter().any(|(id, _)| *id == group.id) { t(&key) } else { group.name.clone() };
+                sections.push((group.id.clone(), title, Mark::Icon(mark), choices));
             }
             sections
         };
         let layout = Rc::new(PickLayout::build(sections, searching));
+        if self.emoji.scroll.item_count() != layout.rows.len() {
+            self.emoji.scroll.reset(layout.rows.len());
+        }
         self.emoji.layout = Some((digest, layout.clone()));
         layout
     }
@@ -287,13 +340,14 @@ impl FuwaApp {
             _ => return false,
         };
         self.emoji.active = Some(next);
-        self.emoji.scroll.scroll_to_item(layout.cell_row[next], ScrollStrategy::Nearest);
+        self.emoji.scroll.scroll_to_reveal_item(layout.cell_row[next]);
         cx.notify();
         true
     }
 
-    /// The picker itself, floating over the composer's right end.
-    pub(crate) fn emoji_panel(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    /// The picker itself, floating above the composer's emoji button (the
+    /// web's `top-end` placement: its right edge on the button's, 8px above it).
+    pub(crate) fn emoji_panel(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let query = self.emoji_query.read(cx).value().to_string();
         let tone = self.core.prefs().skin_tone;
         let layout = self.emoji_layout(&query, tone);
@@ -301,12 +355,10 @@ impl FuwaApp {
             self.emoji.active = Some(0);
         }
         let active = self.emoji.active.filter(|n| *n < layout.flat.len());
-        let top_row = {
-            let offset = self.emoji.scroll.0.borrow().base_handle.offset();
-            ((-f32::from(offset.y)) / CELL).max(0.0) as usize
-        };
+        let top_row = self.emoji.scroll.logical_scroll_top().item_ix;
         let current = layout.section_at(top_row).map(str::to_owned);
 
+        let focused = self.emoji_query.read(cx).focus_handle(cx).is_focused(window);
         let search = div()
             .p(px(8.0))
             .flex()
@@ -314,33 +366,67 @@ impl FuwaApp {
             .gap(px(6.0))
             .border_b_1()
             .border_color(p.border)
-            .child(div().flex_1().child(Input::new(&self.emoji_query).prefix(icon("search").size(px(16.0)))))
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .pl(px(10.0))
+                    .rounded(crate::ui::theme::radius_xl())
+                    // Opaque, so the focus ring (a shadow) stays outside it as on the web.
+                    .bg(crate::ui::theme::mix(p.card, p.muted, 0.6))
+                    .when(focused, |el| {
+                        el.shadow(vec![gpui_kit::BoxShadow {
+                            color: alpha(p.primary, 0.4),
+                            offset: gpui_kit::point(px(0.0), px(0.0)),
+                            blur_radius: px(0.0),
+                            spread_radius: px(2.0),
+                            inset: false,
+                        }])
+                    })
+                    .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
+                    // The web's text starts 32px in; the field keeps some padding of its own.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .ml(px(-6.0))
+                            .child(Input::new(&self.emoji_query).appearance(false).text_sm()),
+                    ),
+            )
             .child(self.tone_button(tone, p, cx));
 
         let rail = (!layout.searching).then(|| {
-            let mut rail = div().flex().px(px(6.0)).py(px(4.0)).gap(px(2.0)).border_b_1().border_color(p.border);
+            let mut rail = div().flex().px(px(8.0)).py(px(6.0)).gap(px(2.0)).border_b_1().border_color(p.border);
             for (id, row, mark) in &layout.sections {
                 let lit = current.as_deref() == Some(id.as_str());
                 let row = *row;
                 let face = match mark {
-                    Mark::Icon(name) => icon(name).size(px(15.0)).into_any_element(),
-                    Mark::Server(server) => server_icon(server, 16.0, 5.0, p).into_any_element(),
+                    Mark::Icon(name) => icon(name).size(px(16.0)).into_any_element(),
+                    Mark::Server(server) => server_icon(server, 20.0, 6.0, p).into_any_element(),
                 };
+                let title = layout.title_of(id).to_owned();
+                let fg = p.foreground;
                 rail = rail.child(
                     div()
                         .id(SharedString::from(format!("emoji-rail|{id}")))
-                        .flex_1()
-                        .h(px(28.0))
+                        .size(px(32.0))
+                        .flex_none()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(corner(8.0))
+                        .rounded(crate::ui::theme::radius_lg())
                         .cursor_pointer()
                         .text_color(if lit { p.primary } else { p.muted_foreground })
                         .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
-                        .hover(|s| s.bg(alpha(p.primary, 0.08)))
+                        .when(!lit, |el| el.hover(move |s| s.text_color(fg)))
+                        .tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.emoji.scroll.scroll_to_item(row, ScrollStrategy::Top);
+                            this.emoji.scroll.scroll_to(gpui_kit::ListOffset { item_ix: row, offset_in_item: px(0.0) });
                             cx.notify();
                         }))
                         .child(face),
@@ -351,38 +437,57 @@ impl FuwaApp {
 
         let rows_layout = layout.clone();
         let fresh = !layout.searching && self.emoji_born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
-        let grid = uniform_list(
-            "emoji-rows",
-            layout.rows.len(),
-            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+        let grid = gpui_kit::list(
+            self.emoji.scroll.clone(),
+            cx.processor(move |this, row: usize, _window, cx| {
                 let p = crate::ui::widgets::pal(cx);
-                range.map(|row| this.emoji_row(&rows_layout, row, active, fresh, &p, cx)).collect::<Vec<_>>()
+                this.emoji_row(&rows_layout, row, active, fresh, &p, cx)
             }),
         )
-        .track_scroll(&self.emoji.scroll)
-        .h(px(288.0))
-        .px(px(8.0));
+        .size_full();
+        // The web's grid keeps 8px at the sides and below; the list takes no padding of its own.
+        let grid = div().h(px(GRID)).px(px(8.0)).pb(px(8.0)).child(grid);
+        // The section in view stays named at the top as the grid scrolls (the web's sticky title).
+        let sticky = current.as_ref().and_then(|id| {
+            let (_, _, mark) = layout.sections.iter().find(|(s, _, _)| s == id)?;
+            Some(div().absolute().top_0().left_0().right_0().bg(p.card).px(px(12.0)).child(section_title(
+                layout.title_of(id),
+                mark,
+                p,
+            )))
+        });
         let grid = if layout.flat.is_empty() {
             div()
-                .h(px(288.0))
+                .h(px(GRID))
                 .flex()
                 .flex_col()
                 .items_center()
-                .justify_center()
-                .gap(px(8.0))
+                .pt(px(40.0))
+                .text_sm()
                 .text_color(p.muted_foreground)
-                .child(icon("search-x").size(px(28.0)))
-                .child(div().text_sm().child(format!("No emoji called “{}”.", query.trim().trim_matches(':'))))
+                .child(t_with("chattools.emoji.noneCalled", &[("query", Arg::Str(query.trim().trim_matches(':')))]))
                 .into_any_element()
         } else {
-            grid.into_any_element()
+            div().relative().child(grid).children(sticky).into_any_element()
         };
 
         let shown = active.and_then(|n| layout.flat.get(n));
-        let body = card(p)
+        let body = div()
             .w(px(352.0))
-            .rounded(corner(18.0))
+            .flex()
+            .flex_col()
             .overflow_hidden()
+            .rounded(crate::ui::theme::radius_2xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.25),
+                offset: gpui_kit::point(px(0.0), px(25.0)),
+                blur_radius: px(50.0),
+                spread_radius: px(-12.0),
+                inset: false,
+            }])
             .child(search)
             .when_some(rail, |el, rail| el.child(rail))
             .child(grid)
@@ -390,10 +495,10 @@ impl FuwaApp {
         div()
             .id("emoji-panel")
             .absolute()
-            .right(px(20.0))
+            .right(px(self.tool_right(crate::ui::composer::Tool::Emoji)))
             .bottom(gpui_kit::relative(1.0))
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx)))
-            .child(motion::rise(body.mb(px(-8.0)), "emoji-panel-rise", Duration::ZERO, 12.0))
+            .child(motion::rise(body.mb(px(-1.0)), "emoji-panel-rise", Duration::ZERO, 8.0))
             .into_any_element()
     }
 
@@ -410,20 +515,8 @@ impl FuwaApp {
         match &layout.rows[row] {
             PickRow::Header { id, title, mark } => div()
                 .id(SharedString::from(format!("emoji-head|{id}")))
-                .h(px(CELL))
                 .px(px(4.0))
-                .pb(px(4.0))
-                .flex()
-                .items_end()
-                .gap(px(6.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child(match mark {
-                    Mark::Icon(name) => icon(name).size(px(12.0)).into_any_element(),
-                    Mark::Server(server) => server_icon(server, 16.0, 5.0, p).into_any_element(),
-                })
-                .child(div().min_w_0().truncate().child(title.to_uppercase()))
+                .child(section_title(title, mark, p))
                 .into_any_element(),
             PickRow::Cells { .. } => {
                 let mut cells = div().id(SharedString::from(format!("emoji-row|{row}"))).h(px(CELL)).flex();
@@ -446,7 +539,7 @@ impl FuwaApp {
     ) -> AnyElement {
         let id = SharedString::from(format!("emoji|{n}|{}", choice.key));
         let pick = choice.clone();
-        let glyph = div().child(emoji_glyph(choice, 26.0));
+        let glyph = div().child(emoji_glyph(choice, 30.0));
         let glyph = if fresh {
             motion::rise(
                 glyph,
@@ -495,8 +588,11 @@ impl FuwaApp {
             .hover(|s| s.bg(alpha(p.primary, 0.08)))
             .when(open, |el| el.bg(alpha(p.primary, 0.12)))
             .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(format!("Skin tone: {}", TONE_NAMES[tone as usize]))
-                    .build(window, cx)
+                gpui_kit::component::tooltip::Tooltip::new(t_with(
+                    "chattools.emoji.skinToneIs",
+                    &[("tone", Arg::Str(&t(TONE_NAMES[tone as usize])))],
+                ))
+                .build(window, cx)
             })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.emoji.tones_open = !this.emoji.tones_open;
@@ -541,28 +637,49 @@ impl FuwaApp {
     }
 }
 
+/// A section's title: its icon (or server's picture) and name, small and spaced out.
+fn section_title(title: &str, mark: &Mark, p: &Palette) -> impl IntoElement {
+    div()
+        .h(px(HEADER))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .text_size(px(10.4))
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .text_color(p.muted_foreground)
+        .child(match mark {
+            Mark::Icon(name) => icon(name).size(px(12.0)).into_any_element(),
+            Mark::Server(server) => server_icon(server, 16.0, 6.0, p).into_any_element(),
+        })
+        .child(div().min_w_0().truncate().child(title.to_uppercase()))
+}
+
 /// The emoji you're on, big, with the name to type and where it's from.
 fn preview(shown: Option<&Choice>, p: &Palette) -> AnyElement {
-    let base = div().h(px(52.0)).px(px(12.0)).flex().items_center().gap(px(10.0)).border_t_1().border_color(p.border);
+    let base = div()
+        .h(px(48.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .border_t_1()
+        .border_color(p.border)
+        .text_sm();
     let Some(choice) = shown else {
-        return base
-            .text_sm()
-            .text_color(p.muted_foreground)
-            .child("Pick an emoji, or type to find one")
-            .into_any_element();
+        return base.text_color(p.muted_foreground).child(t("chattools.emoji.hint")).into_any_element();
     };
     let from = match (&choice.from, &choice.url) {
-        (Some(server), _) => format!("From {server}"),
-        (None, Some(_)) => "From this server".to_owned(),
+        (Some(server), _) => t_with("chattools.emoji.fromServer", &[("server", Arg::Str(server))]),
+        (None, Some(_)) => t("chattools.emoji.fromHere"),
         (None, None) => String::new(),
     };
-    base.child(emoji_glyph(choice, 30.0))
+    base.child(div().size(px(32.0)).flex_none().flex().items_center().justify_center().child(emoji_glyph(choice, 28.0)))
         .child(
             div()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .child(div().text_sm().font_weight(FontWeight::BOLD).truncate().child(format!(":{}:", choice.name)))
+                .child(div().font_weight(FontWeight::BOLD).truncate().child(format!(":{}:", choice.name)))
                 .when(!from.is_empty(), |el| {
                     el.child(div().text_xs().text_color(p.muted_foreground).truncate().child(from))
                 }),

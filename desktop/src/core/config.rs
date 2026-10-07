@@ -267,6 +267,8 @@ pub struct Prefs {
     pub rail_open: std::collections::BTreeSet<String>,
     /// The sign-in notice closed on each instance, by the way to sign in it was about.
     pub sign_in_notice_closed: std::collections::BTreeMap<String, String>,
+    /// How fast voice messages play: 1, 1.5 or 2 (the web's voice rate).
+    pub voice_rate: f32,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -315,6 +317,7 @@ impl Default for Prefs {
             live_tiles_quiet: Default::default(),
             rail_open: Default::default(),
             sign_in_notice_closed: Default::default(),
+            voice_rate: 1.0,
         }
     }
 }

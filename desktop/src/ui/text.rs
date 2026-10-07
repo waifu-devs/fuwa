@@ -85,7 +85,7 @@ pub fn set_clock(clock: crate::core::config::Clock) {
 
 /// Whether times read on a 12 hour clock: as set, or the language's own
 /// (English, Korean and Hindi count 12 hours, as their `Intl` formats do).
-fn twelve_hours() -> bool {
+pub fn twelve_hours() -> bool {
     match CLOCK.load(std::sync::atomic::Ordering::Relaxed) {
         1 => true,
         2 => false,

@@ -14,7 +14,6 @@ use std::hash::{Hash as _, Hasher};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -24,12 +23,13 @@ use gpui_kit::{
 };
 
 use crate::core::commands::{self, Choice};
+use crate::core::i18n::t;
 use crate::core::store::InstanceState;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, card, icon, icon_button};
+use crate::ui::widgets::{avatar, icon, icon_button};
 
 /// What the window keeps about commands between frames.
 #[derive(Default)]
@@ -46,6 +46,13 @@ pub struct Commands {
     /// Buttons whose press is on its way, and how many times each was pressed (for its bounce).
     pressing: HashSet<(String, String)>,
     pressed: HashMap<(String, String), u32>,
+}
+
+impl Commands {
+    /// The picked command's name, while its options are being filled in.
+    pub fn picked_name(&self) -> Option<String> {
+        self.form.as_ref().map(|f| f.choice.command.name.clone())
+    }
 }
 
 /// A picked command, in place of the composer's box.
@@ -627,29 +634,15 @@ impl FuwaApp {
     /// The "/" list floating over the composer.
     pub(crate) fn command_list_view(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (options, loading, empty) = self.command_list(cx)?;
-        let hl = alpha(p.primary, 0.14);
-        let hover = alpha(p.primary, 0.08);
-        let mut list = div().flex().flex_col().p(px(6.0)).child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .px(px(10.0))
-                .pt(px(6.0))
-                .pb(px(4.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child(icon("slash").size(px(12.0)))
-                .child("COMMANDS"),
-        );
+        let hl = alpha(p.primary, 0.12);
+        let mut list = div().flex().flex_col().child(Self::above_title("slash", &t("chattools.commands.title"), p));
         if loading {
             list = list.child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .px(px(10.0))
+                    .px(px(8.0))
                     .py(px(8.0))
                     .text_sm()
                     .text_color(p.muted_foreground)
@@ -658,16 +651,16 @@ impl FuwaApp {
                         Animation::new(Duration::from_millis(900)).repeat(),
                         |el, t| el.rotate(gpui_kit::percentage(t)),
                     ))
-                    .child("Looking for commands…"),
+                    .child(t("chattools.commands.looking")),
             );
         } else if empty {
             list = list.child(
                 div()
-                    .px(px(10.0))
+                    .px(px(8.0))
                     .py(px(8.0))
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("No agent here has commands yet."),
+                    .child(t("chattools.commands.none")),
             );
         }
         for (n, choice) in options.into_iter().enumerate() {
@@ -679,15 +672,15 @@ impl FuwaApp {
             list = list.child(
                 div()
                     .id(id)
-                    .h(px(38.0))
-                    .px(px(10.0))
+                    .h(px(36.0))
+                    .px(px(8.0))
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
-                    .rounded(corner(10.0))
+                    .gap(px(8.0))
+                    .rounded(crate::ui::theme::radius_xl())
+                    .text_sm()
                     .cursor_pointer()
                     .when(active, |el| el.bg(hl))
-                    .when(!active, |el| el.hover(move |s| s.bg(hover)))
                     .on_mouse_move(cx.listener(move |this, _, _, cx| {
                         if this.commands.active != n {
                             this.commands.active = n;
@@ -696,8 +689,8 @@ impl FuwaApp {
                     }))
                     .on_click(cx.listener(move |this, _, window, cx| this.pick_command(choice.clone(), window, cx)))
                     .child(avatar(face.as_ref(), 24.0, p))
-                    .child(div().flex_none().font_weight(FontWeight::BOLD).text_sm().child(name))
-                    .child(div().flex_1().min_w_0().truncate().text_sm().text_color(p.muted_foreground).child(about))
+                    .child(div().flex_none().font_weight(FontWeight::BOLD).child(name))
+                    .child(div().flex_1().min_w_0().truncate().text_color(p.muted_foreground).child(about))
                     .child(
                         div()
                             .flex_none()
@@ -711,15 +704,7 @@ impl FuwaApp {
                     ),
             );
         }
-        Some(
-            div()
-                .absolute()
-                .left(px(20.0))
-                .right(px(20.0))
-                .bottom(gpui_kit::relative(1.0))
-                .child(motion::rise(card(p).mb(px(-12.0)).child(list), "commands-list", Duration::ZERO, 10.0))
-                .into_any_element(),
-        )
+        Some(Self::above_composer(list, "commands-list", p))
     }
 
     /// The focused option's list, floating over the composer.
@@ -732,21 +717,12 @@ impl FuwaApp {
         let (ix, list) = self.open_picks(window, cx)?;
         let form = self.commands.form.as_ref()?;
         let lit = form.lit.min(list.len().saturating_sub(1));
-        let hl = alpha(p.primary, 0.14);
+        let hl = alpha(p.primary, 0.12);
         let hover = alpha(p.primary, 0.08);
-        let mut rows = div().flex().flex_col().p(px(6.0)).child(
-            div()
-                .px(px(10.0))
-                .pt(px(6.0))
-                .pb(px(4.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child(form.fields[ix].option.name.to_uppercase()),
-        );
+        let mut rows = div().flex().flex_col().child(Self::above_title("", &form.fields[ix].option.name, p));
         if list.is_empty() {
             rows = rows.child(
-                div().px(px(10.0)).py(px(8.0)).text_sm().text_color(p.muted_foreground).child("Nothing matches."),
+                div().px(px(8.0)).py(px(8.0)).text_sm().text_color(p.muted_foreground).child("Nothing matches."),
             );
         }
         for (n, pick) in list.into_iter().enumerate() {
@@ -755,12 +731,12 @@ impl FuwaApp {
             rows = rows.child(
                 div()
                     .id(id)
-                    .h(px(34.0))
-                    .px(px(10.0))
+                    .h(px(36.0))
+                    .px(px(8.0))
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
-                    .rounded(corner(10.0))
+                    .gap(px(8.0))
+                    .rounded(crate::ui::theme::radius_xl())
                     .cursor_pointer()
                     .when(n == lit, |el| el.bg(hl))
                     .when(n != lit, |el| el.hover(move |s| s.bg(hover)))
@@ -771,20 +747,7 @@ impl FuwaApp {
                     .child(div().text_xs().text_color(p.muted_foreground).child(hint)),
             );
         }
-        Some(
-            div()
-                .absolute()
-                .left(px(20.0))
-                .right(px(20.0))
-                .bottom(gpui_kit::relative(1.0))
-                .child(motion::rise(
-                    card(p).mb(px(-12.0)).child(rows),
-                    SharedString::from(format!("command-picks-{ix}")),
-                    Duration::ZERO,
-                    10.0,
-                ))
-                .into_any_element(),
-        )
+        Some(Self::above_composer(rows, format!("command-picks-{ix}"), p))
     }
 
     /// In place of the box once a command is picked: its options as fields.
@@ -851,7 +814,24 @@ impl FuwaApp {
                     .child(div().min_w_0().truncate().child(shown.clone()))
                     .child(icon("x").size(px(12.0)).text_color(p.muted_foreground))
                     .into_any_element(),
-                None => div().w(px(width)).child(Input::new(&field.input).small()).into_any_element(),
+                // The web's `h-8 rounded-lg border bg-background px-2 text-sm` field.
+                None => div()
+                    .w(px(width))
+                    .h(px(32.0))
+                    .flex()
+                    .items_center()
+                    .rounded(crate::ui::theme::radius_lg())
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.background)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .ml(px(-4.0))
+                            .child(Input::new(&field.input).appearance(false).text_sm()),
+                    )
+                    .into_any_element(),
             };
             fields = fields.child(
                 div()
