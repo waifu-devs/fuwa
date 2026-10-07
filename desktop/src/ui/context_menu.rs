@@ -69,6 +69,8 @@ pub(crate) enum MenuOf {
         key: String,
         conversation: String,
     },
+    /// The message box (the web's composer menu).
+    Composer,
 }
 
 impl MenuOf {
@@ -82,6 +84,7 @@ impl MenuOf {
             MenuOf::Server { key, server } => format!("s|{key}|{server}"),
             MenuOf::ServerHeader { key, server } => format!("s-head|{key}|{server}"),
             MenuOf::Dm { key, conversation } => format!("dm|{key}|{conversation}"),
+            MenuOf::Composer => "composer".into(),
         }
     }
 }

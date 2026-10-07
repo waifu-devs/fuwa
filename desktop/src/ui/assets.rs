@@ -9,6 +9,9 @@ pub struct Assets;
 const OWN: &[(&str, &[u8])] = &[
     ("fuwa/mark.svg", include_bytes!("../../assets/fuwa/mark.svg")),
     ("fuwa/face.svg", include_bytes!("../../assets/fuwa/face.svg")),
+    // Lucide's play and pause filled in, as the web's voice messages draw them (`fill-current`).
+    ("fuwa/play-filled.svg", include_bytes!("../../assets/fuwa/play-filled.svg")),
+    ("fuwa/pause-filled.svg", include_bytes!("../../assets/fuwa/pause-filled.svg")),
 ];
 
 impl AssetSource for Assets {

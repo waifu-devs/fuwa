@@ -12,6 +12,7 @@ mod call_bar;
 pub(crate) mod chat;
 mod commands;
 mod compose;
+mod composer;
 mod connect;
 mod context_menu;
 mod effects;

@@ -208,6 +208,8 @@ pub struct Prefs {
     pub clock: Clock,
     /// Which keys send a message.
     pub send_with: SendWith,
+    /// How fast voice messages play: 1, 1.5 or 2 (the web's voice rate).
+    pub voice_rate: f32,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -251,6 +253,7 @@ impl Default for Prefs {
             developer_mode: false,
             clock: Clock::Auto,
             send_with: SendWith::Enter,
+            voice_rate: 1.0,
         }
     }
 }

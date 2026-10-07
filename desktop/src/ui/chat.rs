@@ -27,7 +27,7 @@ use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav, Target};
 use crate::ui::context_menu::{self, MenuOf};
 use crate::ui::members::{MembersEvent, MembersView};
-use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
+use crate::ui::mentions::{Look, SCHEME, mention_links};
 use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
@@ -336,10 +336,14 @@ impl FuwaApp {
     /// from the last time, so a new message doesn't redo the whole channel.
     fn rows(&self, built: &mut Built) -> Vec<Row> {
         match self.target() {
-            Some(Target::Channel { key, server, channel }) => self.core.shared.read(|s| match s.instance(&key) {
-                Some(i) => self.server_rows(i, &key, &server, &channel, None, built),
-                None => Vec::new(),
-            }),
+            Some(Target::Channel { key, server, channel }) => {
+                let mut rows = self.core.shared.read(|s| match s.instance(&key) {
+                    Some(i) => self.server_rows(i, &key, &server, &channel, None, built),
+                    None => Vec::new(),
+                });
+                self.dress_voice(&mut rows);
+                rows
+            }
             Some(Target::Dm { key, conversation }) => self.core.shared.read(|s| {
                 let Some(i) = s.instance(&key) else { return Vec::new() };
                 let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
@@ -601,8 +605,9 @@ impl FuwaApp {
                     keep_out,
                     keeping_out,
                     poll: card.clone(),
-                    voice: None,
-                    attachments: m.attachments.clone(),
+                    // A voice message sent here plays from its card, like one in a conversation.
+                    voice: crate::ui::voice_notes::channel_voice(&m.attachments).0,
+                    attachments: crate::ui::voice_notes::channel_voice(&m.attachments).1,
                     gif: m.gif.clone(),
                     thread: bits.clone(),
                     agent: agent.clone(),
@@ -642,8 +647,8 @@ impl FuwaApp {
                 keep_out: false,
                 keeping_out: false,
                 poll: None,
-                voice: None,
-                attachments: p.attachments.clone(),
+                voice: crate::ui::voice_notes::channel_voice(&p.attachments).0,
+                attachments: crate::ui::voice_notes::channel_voice(&p.attachments).1,
                 gif: None,
                 thread: ThreadBits::default(),
                 agent: None,
@@ -1001,50 +1006,42 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = pal(cx);
-        let focused = self.composer.read(cx).focus_handle(cx).is_focused(window);
+        self.follow_send_with(cx);
+        // Rules to agree to, a time-out or roles that only read: a notice in the box's place.
+        if let Some(notice) = self.composer_notice(blocked.as_ref(), &p, cx) {
+            return notice;
+        }
+        // The web lights the box while anything in it has the focus, a command's fields too.
+        let focused = self.composer.read(cx).focus_handle(cx).is_focused(window) || self.commands.form.is_some();
         // A picked command takes the box's place, with its options as fields.
         let command = self.command_form_here();
-        let typed = if command { self.command_ready(cx) } else { !self.composer.read(cx).value().trim().is_empty() };
+        let gate = self.send_gate();
+        let files = self.files_state();
+        let length = self.composer.read(cx).value().chars().count();
+        let typed = !self.composer.read(cx).value().trim().is_empty();
+        let cooling = gate.as_ref().is_some_and(|g| g.cooling());
+        let can_send = if command {
+            self.command_ready(cx)
+        } else {
+            (typed || files.any)
+                && length <= crate::ui::composer::MAX_CHARS
+                && !cooling
+                && !files.uploading
+                && !files.broken
+        };
         let ring = motion::follow("composer-ring", if focused { 1.0 } else { 0.0 }, window, cx);
-        let ready = motion::follow("composer-send", if typed { 1.0 } else { 0.0 }, window, cx);
-        if let Some(blocked) = blocked {
-            return div()
-                .flex_none()
-                .px(px(20.0))
-                .pb(px(20.0))
-                .child(motion::rise(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .px(px(16.0))
-                        .py(px(10.0))
-                        .min_h(px(52.0))
-                        .rounded(corner(16.0))
-                        .bg(alpha(p.muted_foreground, 0.1))
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .child(icon("lock").size(px(16.0)))
-                        .child(div().flex_1().child(blocked.text))
-                        .when_some(blocked.action, |el, (label, dialog)| {
-                            el.child(primary_button("blocked-action", label, &p).h(px(34.0)).text_sm().on_click(
-                                cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx)),
-                            ))
-                        }),
-                    "composer-blocked",
-                    Duration::ZERO,
-                    8.0,
-                ))
-                .into_any_element();
-        }
-        let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
+        let ready = motion::follow("composer-send", if can_send { 1.0 } else { 0.0 }, window, cx);
+        // Not ready (and not counting down) sits a little smaller, as on the web.
+        let rest = motion::follow("composer-send-scale", if can_send || cooling { 1.0 } else { 0.9 }, window, cx);
+        let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, window, cx));
         let gif_panel = self.gif_panel(&p, cx);
         let time_panel = self.time_picker_panel(&p, cx);
         let tray = self.file_tray(&p, cx);
         let recording = !command && self.recording_here();
         let gif_button = (!command && !recording).then(|| self.gif_button(&p, cx)).flatten();
         // The microphone takes the send button's place while nothing's typed, as on the web.
-        let voice = (!command && (recording || (!typed && self.can_record()))).then(|| self.voice_button(&p, cx));
+        let voice = (!command && (recording || (!typed && !files.any && !cooling && self.can_record())))
+            .then(|| self.voice_button(&p, cx));
         let commands_list = if self.picker.is_none() { self.command_list_view(&p, cx) } else { None };
         let picks = self.command_picks_view(&p, window, cx);
         let form = self.command_form_view(&p, cx);
@@ -1056,35 +1053,119 @@ impl FuwaApp {
             // The editor keeps 10px of its own on the left and 8px above and below its
             // 24px lines; the web's box has 6px above and below and nothing at the side.
             div()
+                .id("composer-field")
                 .flex_1()
                 .min_w_0()
                 .ml(px(-10.0))
                 .my(px(-2.0))
-                .child(
-                    Textarea::new(&self.composer)
-                        .appearance(false)
-                        .context_menu(composer_menu)
-                        .text_size(px(15.2))
-                        .line_height(px(24.0)),
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Right,
+                    self.right_click(crate::ui::context_menu::MenuOf::Composer, cx),
                 )
+                .child(Textarea::new(&self.composer).appearance(false).text_size(px(15.2)).line_height(px(24.0)))
                 .into_any_element()
         };
-        let hint = {
-            let (send, line) = match self.core.prefs().send_with {
-                crate::core::config::SendWith::Enter => ("Enter".to_owned(), "Shift+Enter".to_owned()),
-                crate::core::config::SendWith::ModEnter => {
-                    (format!("{}+Enter", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" }), "Enter".to_owned())
-                }
-            };
-            let commands = self.can_command().is_some();
-            crate::ui::text::hint_line(
-                &crate::core::i18n::t(if commands { "chat.composer.hintCommands" } else { "chat.composer.hint" }),
-                &[("send", &send), ("newLine", &line)],
-                &p,
-            )
-        };
-        // The web's composer: a card with the attach button first, the box,
-        // the tools, and send (or the microphone while there's nothing to send).
+        let hint = self.composer_hint(&p);
+        let attach = (!command && !recording && self.can_attach()).then(|| self.attach_button(&p, cx));
+        let tools = (!command && !recording).then(|| {
+            div().flex().items_end().gap(px(8.0)).child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
+        });
+        let poll = (!command && self.can_poll()).then(|| {
+            crate::ui::widgets::tool_button("poll-open", "chart-column", self.polls.editor.is_some(), &p)
+                .tooltip(|window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chat.composer.makePoll"))
+                        .build(window, cx)
+                })
+                .on_click(cx.listener(|this, _, window, cx| this.open_poll_editor(window, cx)))
+        });
+        let show_send = command || (!recording && voice.is_none());
+        let send = show_send.then(|| {
+            div()
+                .id("send")
+                .size(px(36.0))
+                .mb(px(2.0))
+                .flex_none()
+                .rounded(crate::ui::theme::radius_xl())
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(alpha(p.primary, ready))
+                .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
+                .shadow(vec![gpui_kit::BoxShadow {
+                    color: alpha(p.primary, ready),
+                    offset: gpui_kit::point(px(0.0), px(6.0)),
+                    blur_radius: px(18.0),
+                    spread_radius: px(-8.0),
+                    inset: false,
+                }])
+                .cursor_pointer()
+                .active(|s| s.opacity(0.85))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.commands.form.is_some() {
+                        this.run_picked_command(window, cx)
+                    } else {
+                        this.send_from_button(window, cx)
+                    }
+                }))
+                .child(match &gate {
+                    Some(gate) if gate.cooling() && !command => crate::ui::composer::cooldown(gate, &p),
+                    _ if files.uploading && !command => crate::ui::composer::upload_ring(files.share, &p),
+                    _ => div()
+                        .relative()
+                        .left(px(-3.0 + 3.0 * ready))
+                        .child(icon("send-horizontal").size(px(18.0 * rest)))
+                        .into_any_element(),
+                })
+        });
+        // The web's composer: a card holding the files to send, then a row with
+        // the attach button first, the box, the tools, and send (or the
+        // microphone while there's nothing to send).
+        let row = div()
+            .flex()
+            .items_end()
+            .gap(px(8.0))
+            .children(attach)
+            .child(field)
+            .children(if command || recording { None } else { self.chars_left(length, &p) })
+            .children(tools)
+            .children(gif_button)
+            .children(poll)
+            .children(voice)
+            .children(send);
+        let card = div()
+            .id("composer-box")
+            .flex()
+            .flex_col()
+            .px(px(12.0))
+            .py(px(8.0))
+            .rounded(crate::ui::theme::radius_2xl())
+            .bg(p.card)
+            .border_1()
+            .border_color(mix(p.border, mix(p.border, p.primary, 0.6).into(), ring))
+            .shadow(vec![
+                gpui_kit::BoxShadow {
+                    color: alpha(p.primary, 0.14 * ring),
+                    offset: gpui_kit::point(px(0.0), px(0.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(4.0),
+                    inset: false,
+                },
+                gpui_kit::BoxShadow {
+                    color: alpha(p.primary, ring),
+                    offset: gpui_kit::point(px(0.0), px(12.0)),
+                    blur_radius: px(30.0),
+                    spread_radius: px(-18.0),
+                    inset: false,
+                },
+            ])
+            .map(|el| self.droppable(el, &p, cx))
+            .map(|el| self.mic_slide(el, cx))
+            .children(tray)
+            .child(row);
+        let footer = self.composer_footer(hint, gate.as_ref(), &p);
+        if let Some(gate) = &gate {
+            self.tick_gate(gate, cx);
+        }
         div()
             .flex_none()
             .relative()
@@ -1096,189 +1177,10 @@ impl FuwaApp {
             .children(emoji_panel)
             .children(gif_panel)
             .children(time_panel)
-            .children(tray)
-            .child(
-                div()
-                    .id("composer-box")
-                    .flex()
-                    .items_end()
-                    .gap(px(8.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(crate::ui::theme::radius_2xl())
-                    .bg(p.card)
-                    .border_1()
-                    .border_color(mix(p.border, mix(p.border, p.primary, 0.6).into(), ring))
-                    .shadow(vec![
-                        gpui_kit::BoxShadow {
-                            color: alpha(p.primary, 0.14 * ring),
-                            offset: gpui_kit::point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            spread_radius: px(4.0),
-                            inset: false,
-                        },
-                        gpui_kit::BoxShadow {
-                            color: alpha(p.primary, ring),
-                            offset: gpui_kit::point(px(0.0), px(12.0)),
-                            blur_radius: px(30.0),
-                            spread_radius: px(-18.0),
-                            inset: false,
-                        },
-                    ])
-                    .map(|el| self.droppable(el, &p, cx))
-                    .when(!command && !recording && self.can_attach(), |el| el.child(self.attach_button(&p, cx)))
-                    .child(field)
-                    .when(!command && !recording, |el| {
-                        el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
-                    })
-                    .children(gif_button)
-                    .when(!command && self.can_poll(), |el| {
-                        el.child(
-                            crate::ui::widgets::tool_button("poll-open", "chart-column", false, &p)
-                                .tooltip(|window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new("Make a poll").build(window, cx)
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| this.open_poll_editor(window, cx))),
-                        )
-                    })
-                    .when_some(voice, |el, voice| el.child(voice))
-                    .when(command || (!recording && (typed || !self.can_record())), |el| {
-                        el.child(
-                            div()
-                                .id("send")
-                                .size(px(36.0))
-                                .mb(px(2.0))
-                                .flex_none()
-                                .rounded(crate::ui::theme::radius_xl())
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(alpha(p.primary, ready))
-                                .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
-                                .shadow(vec![gpui_kit::BoxShadow {
-                                    color: alpha(p.primary, ready),
-                                    offset: gpui_kit::point(px(0.0), px(6.0)),
-                                    blur_radius: px(18.0),
-                                    spread_radius: px(-8.0),
-                                    inset: false,
-                                }])
-                                .cursor_pointer()
-                                .active(|s| s.opacity(0.85))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.commands.form.is_some() {
-                                        this.run_picked_command(window, cx)
-                                    } else {
-                                        this.send_from_button(window, cx)
-                                    }
-                                }))
-                                .child(
-                                    div()
-                                        .relative()
-                                        .left(px(-3.0 + 3.0 * ready))
-                                        .child(icon("send-horizontal").size(px(18.0 * (0.9 + 0.1 * ready)))),
-                                ),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .mt(px(4.0))
-                    .px(px(4.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .text_size(px(11.2))
-                    .line_height(px(16.0))
-                    .text_color(p.muted_foreground)
-                    .child(hint),
-            )
+            .child(self.shaken(card))
+            .child(footer)
+            .children(self.drop_overlay(&p, window, cx))
             .into_any_element()
-    }
-
-    /// The @ list, floating over the composer: people, roles, @everyone.
-    fn picker_list(&self, picker: crate::ui::app::Picker, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let hl = alpha(p.primary, 0.14);
-        let hover = alpha(p.primary, 0.08);
-        let mut list = div().flex().flex_col().p(px(6.0)).child(
-            div()
-                .px(px(10.0))
-                .pt(px(6.0))
-                .pb(px(4.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child(if matches!(picker.options.first(), Some(Pick::Emoji(_))) { "EMOJI" } else { "MENTION" }),
-        );
-        for (n, pick) in picker.options.iter().enumerate() {
-            let active = n == picker.active;
-            let (lead, name, sub): (AnyElement, String, String) = match pick {
-                Pick::Member { user, name } => {
-                    (avatar(Some(user), 24.0, p).into_any_element(), name.clone(), format!("@{}", user.username))
-                }
-                Pick::Role { name, color, .. } => (
-                    div()
-                        .size(px(24.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            div()
-                                .size(px(12.0))
-                                .rounded_full()
-                                .bg(color.map(|c| Hsla::from(rgb(c))).unwrap_or(p.muted_foreground.into())),
-                        )
-                        .into_any_element(),
-                    format!("@{name}"),
-                    "Role".into(),
-                ),
-                Pick::Everyone(which) => (
-                    div()
-                        .size(px(24.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(p.primary)
-                        .child(icon("at-sign").size(px(16.0)))
-                        .into_any_element(),
-                    format!("@{which}"),
-                    if *which == "everyone" { "Everyone in the channel".into() } else { "Everyone online".into() },
-                ),
-                Pick::Emoji(choice) => (
-                    emoji_glyph(choice, 22.0),
-                    format!(":{}:", choice.name),
-                    match (&choice.from, &choice.url) {
-                        (Some(server), _) => server.clone(),
-                        (None, Some(_)) => "This server".into(),
-                        (None, None) => String::new(),
-                    },
-                ),
-            };
-            let pick = pick.clone();
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("pick|{}", pick.id())))
-                    .h(px(38.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(corner(10.0))
-                    .cursor_pointer()
-                    .when(active, |el| el.bg(hl))
-                    .when(!active, |el| el.hover(move |s| s.bg(hover)))
-                    .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(pick.clone(), window, cx)))
-                    .child(lead)
-                    .child(div().font_weight(FontWeight::BOLD).text_sm().child(name))
-                    .child(div().flex_1())
-                    .child(div().text_xs().text_color(p.muted_foreground).child(sub)),
-            );
-        }
-        div().absolute().left(px(20.0)).right(px(20.0)).bottom(gpui_kit::relative(1.0)).child(motion::rise(
-            card(p).mb(px(-12.0)).child(list),
-            SharedString::from(format!("picker-{}", picker.start)),
-            Duration::ZERO,
-            10.0,
-        ))
     }
 
     fn members_panel(
@@ -1571,7 +1473,7 @@ impl FuwaApp {
 
     /// Polls go in a server's plain channels, never shared ones, for those who may make them,
     /// on an instance that has them.
-    fn can_poll(&self) -> bool {
+    pub(crate) fn can_poll(&self) -> bool {
         let Some(Target::Channel { key, server, channel }) = self.target() else { return false };
         self.core.shared.read(|s| {
             s.instance(&key).is_some_and(|i| {
@@ -2219,24 +2121,6 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .child(body)
         .when_some(actions, |el, a| el.child(a))
         .into_any_element()
-}
-
-/// The message box's right-click menu: the usual cut, copy and paste, then
-/// an emoji or a timestamp at the caret.
-fn composer_menu(
-    menu: gpui_kit::component::native_menu::NativeMenu,
-    _: &mut Window,
-    _: &mut App,
-) -> gpui_kit::component::native_menu::NativeMenu {
-    use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
-    menu.menu("Cut", Box::new(Cut))
-        .menu("Copy", Box::new(Copy))
-        .menu("Paste", Box::new(Paste))
-        .separator()
-        .menu("Select all", Box::new(SelectAll))
-        .separator()
-        .menu("Emoji", Box::new(crate::ui::app::ComposerEmoji))
-        .menu("Timestamp", Box::new(crate::ui::app::ComposerTimestamp))
 }
 
 /// Editing in place: Enter saves, Escape stops.

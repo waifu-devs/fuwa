@@ -167,7 +167,7 @@ impl Gifs {
 
 impl FuwaApp {
     /// Where a GIF would go: a server's own channel you may attach files in.
-    fn gif_place(&self) -> Option<(String, String, String)> {
+    pub(crate) fn gif_place(&self) -> Option<(String, String, String)> {
         if !self.can_attach() {
             return None;
         }
@@ -205,7 +205,7 @@ impl FuwaApp {
     }
 
     /// The provider to credit, where GIF search is on at the open place.
-    fn gifs_on(&self, key: &str) -> Option<i32> {
+    pub(crate) fn gifs_on(&self, key: &str) -> Option<i32> {
         self.gifs.settings.get(key).and_then(|(on, provider, _)| on.then_some(*provider))
     }
 

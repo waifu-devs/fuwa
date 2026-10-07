@@ -290,6 +290,8 @@ pub struct FuwaApp {
     pub voice: crate::ui::voice_notes::VoiceState,
     /// Files picked to go with the next message.
     pub files: crate::ui::attachments::Files,
+    /// The composer's countdowns, shakes and voice problems.
+    pub composing: crate::ui::composer::Composing,
     /// Searching the server on screen: the header's field and the results beside the chat.
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
@@ -361,7 +363,9 @@ pub struct FuwaApp {
 impl FuwaApp {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let prefs = core.prefs();
-        let composer = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).submit_on_enter(true));
+        // The box's right-click menu is the app's own (`compose.rs`), as on the web.
+        let composer =
+            cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).submit_on_enter(true).context_menu(false));
         let edit_box = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).submit_on_enter(true));
         let dialog_input = cx.new(|cx| InputState::new(window, cx));
         let emoji_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find an emoji"));
@@ -374,7 +378,12 @@ impl FuwaApp {
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 match event {
-                    InputEvent::PressEnter { shift: false, .. } => this.send_now(window, cx),
+                    // Enter sends unless the Chat setting says Ctrl+Enter (taken in `intercept`).
+                    InputEvent::PressEnter { shift: false, secondary: false }
+                        if this.core.prefs().send_with == crate::core::config::SendWith::Enter =>
+                    {
+                        this.send_now(window, cx)
+                    }
                     // The send button lights up once there's something to send.
                     InputEvent::Change => {
                         this.update_picker(cx);
@@ -403,7 +412,7 @@ impl FuwaApp {
                 if let InputEvent::Change = event {
                     // A new search starts at the top, on its best match.
                     this.emoji.active = None;
-                    this.emoji.scroll.scroll_to_item(0, gpui_kit::ScrollStrategy::Top);
+                    this.emoji.to_top();
                     cx.notify();
                 }
             }),
@@ -528,6 +537,7 @@ impl FuwaApp {
             polls: Default::default(),
             voice: Default::default(),
             files: Default::default(),
+            composing: Default::default(),
             search,
             threads,
             friends,
@@ -988,6 +998,9 @@ impl FuwaApp {
         let Some(target) = self.target() else { return };
         let text = self.composer.read(cx).value().trim().to_owned();
         if text.is_empty() && !self.has_files() {
+            return;
+        }
+        if self.send_held(&text, cx) {
             return;
         }
         let files = match self.take_files() {

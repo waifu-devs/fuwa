@@ -212,6 +212,7 @@ impl FuwaApp {
                 .disabled(unread == 0);
                 Built::of(vec![vec![read], copy_id(&other, "user")])
             }
+            MenuOf::Composer => self.composer_items(cx),
         }
     }
 
