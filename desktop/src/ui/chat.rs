@@ -162,6 +162,21 @@ pub(crate) fn encrypted_rows(
         m.pending = true;
         rows.push(Row::Msg(Rc::new(m)));
     }
+    // A divider for each day, before the first message of it.
+    let mut dated = Vec::with_capacity(rows.len() + 4);
+    let mut last_day: Option<i64> = None;
+    for row in rows {
+        if let Row::Msg(m) = &row
+            && !m.pending
+        {
+            if !last_day.is_some_and(|d| crate::ui::text::same_day(d, m.at)) {
+                dated.push(Row::Day { id: format!("day|{}", m.id), text: crate::ui::text::day(m.at) });
+            }
+            last_day = Some(m.at);
+        }
+        dated.push(row);
+    }
+    let mut rows = dated;
     group(&mut rows);
     rows
 }

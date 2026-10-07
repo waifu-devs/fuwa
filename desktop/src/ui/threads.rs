@@ -683,7 +683,6 @@ impl FuwaApp {
                 },
             )));
 
-
         // New replies keep the panel at the bottom, as the channel does.
         let len = self.threads.rows.len();
         if len != self.threads.drawn {
@@ -713,7 +712,9 @@ impl FuwaApp {
                     .pb(px(12.0))
                     .when(loading, |el| el.child(crate::ui::chat_rows::skeleton(2, &p)))
                     .when(!loading, |el| {
-                        el.children(rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, cx)))
+                        el.children(
+                            rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, cx)),
+                        )
                     }),
             );
 
@@ -807,19 +808,9 @@ impl FuwaApp {
                             inset: false,
                         },
                     ])
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .ml(px(-10.0))
-                            .my(px(-2.0))
-                            .child(
-                                Textarea::new(&self.threads.reply)
-                                    .appearance(false)
-                                    .text_size(px(15.2))
-                                    .line_height(px(24.0)),
-                            ),
-                    )
+                    .child(div().flex_1().min_w_0().ml(px(-10.0)).my(px(-2.0)).child(
+                        Textarea::new(&self.threads.reply).appearance(false).text_size(px(15.2)).line_height(px(24.0)),
+                    ))
                     .child(
                         div()
                             .id("thread-send")
@@ -898,7 +889,9 @@ impl FuwaApp {
             let i = s.instance(&listing.key);
             (
                 i.and_then(|i| i.server(&listing.server)).map(|s| s.thread_archive_hours).unwrap_or(0),
-                i.and_then(|i| i.channel(&listing.server, &listing.channel)).map(|c| c.name.clone()).unwrap_or_default(),
+                i.and_then(|i| i.channel(&listing.server, &listing.channel))
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default(),
             )
         });
         let archived = listing.archived;
@@ -996,7 +989,9 @@ impl FuwaApp {
                     .border_color(p.border)
                     .bg(p.card)
                     .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
-                    .child(div().flex_1().min_w_0().ml(px(-10.0)).child(Input::new(&self.threads.query).appearance(false))),
+                    .child(
+                        div().flex_1().min_w_0().ml(px(-10.0)).child(Input::new(&self.threads.query).appearance(false)),
+                    ),
             )
             .when(hours > 0, |el| {
                 el.child(
@@ -1024,7 +1019,10 @@ impl FuwaApp {
                 (true, _) => (t("chat.threads.noMatches"), t("chat.threads.tryOtherWords")),
                 (false, true) if hours >= 48 => (
                     t("chat.threads.noArchived"),
-                    t_with("chat.threads.archivedHintDays", &[("count", Arg::Num(((hours as f64) / 24.0).round() as i64))]),
+                    t_with(
+                        "chat.threads.archivedHintDays",
+                        &[("count", Arg::Num(((hours as f64) / 24.0).round() as i64))],
+                    ),
                 ),
                 (false, true) => (
                     t("chat.threads.noArchived"),
@@ -1078,7 +1076,11 @@ impl FuwaApp {
                         .text_color(p.primary)
                         .cursor_pointer()
                         .hover(move |s| s.bg(primary))
-                        .child(if listing.items.is_empty() { t("chat.threads.searchOlder") } else { t("chat.threads.showMore") })
+                        .child(if listing.items.is_empty() {
+                            t("chat.threads.searchOlder")
+                        } else {
+                            t("chat.threads.showMore")
+                        })
                         .on_click(cx.listener(|this, _, _, cx| this.fetch_threads(true, cx))),
                 ),
             );
@@ -1122,12 +1124,8 @@ impl FuwaApp {
         let summary = m.thread.clone().unwrap_or_default();
         let now = crate::core::dms::now_ms();
         // Previews show text, not Markdown's marks.
-        let plain = m
-            .content
-            .replace(['*', '_', '~', '`', '>', '#'], "")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let plain =
+            m.content.replace(['*', '_', '~', '`', '>', '#'], "").split_whitespace().collect::<Vec<_>>().join(" ");
         let preview = if plain.is_empty() {
             m.embeds.first().map(|e| e.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "…".to_owned())
         } else {
@@ -1169,7 +1167,14 @@ impl FuwaApp {
                                         .child(crate::ui::text::ago(ms_of(m.created_at.as_ref()), now)),
                                 ),
                         )
-                        .child(div().text_sm().line_height(px(20.0)).line_clamp(2).text_color(p.muted_foreground).child(preview))
+                        .child(
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .line_clamp(2)
+                                .text_color(p.muted_foreground)
+                                .child(preview),
+                        )
                         .child(
                             div()
                                 .mt(px(4.0))
@@ -1200,17 +1205,19 @@ impl FuwaApp {
                                 .when(summary.locked, |el| {
                                     el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground))
                                 })
-                                .child(div().min_w_0().truncate().text_color(p.muted_foreground).child(t_with(
-                                    "chat.threads.lastAgo",
-                                    &[("time", Arg::Str(&last))],
-                                ))),
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(p.muted_foreground)
+                                        .child(t_with("chat.threads.lastAgo", &[("time", Arg::Str(&last))])),
+                                ),
                         ),
                 ),
             SharedString::from(format!("thread-row-in|{}", m.id)),
             Duration::from_millis(25 * n.min(8) as u64),
             8.0,
         )
-
         .into_any_element()
     }
 }

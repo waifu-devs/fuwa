@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::Palette;
 
 /// Only links a browser should open: http(s).
 fn safe(url: &str) -> Option<&str> {
@@ -56,7 +56,12 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
         );
     }
     if !embed.description.is_empty() {
-        text = text.child(div().text_sm().child(markdown(format!("embed-body|{id}"), &embed.description)));
+        text = text.child(
+            div()
+                .text_size(px(13.3))
+                .line_height(px(21.6))
+                .child(markdown(format!("embed-body|{id}"), &embed.description)),
+        );
     }
     if !embed.fields.is_empty() {
         let mut fields = div().mt(px(4.0)).flex().flex_wrap().gap_y(px(8.0));
@@ -69,7 +74,7 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
                     .child(div().text_xs().font_weight(FontWeight::EXTRA_BOLD).child(field.name.clone()))
                     .child(
                         div()
-                            .text_sm()
+                            .text_size(px(12.6))
                             .text_color(p.muted_foreground)
                             .child(markdown(format!("embed-field|{id}|{n}"), &field.value)),
                     ),
@@ -81,7 +86,7 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
         img(SharedString::from(url.to_owned()))
             .size(px(64.0))
             .flex_none()
-            .rounded(corner(10.0))
+            .rounded(crate::ui::theme::radius_lg())
             .object_fit(ObjectFit::Cover)
     });
     let image = safe(&embed.image_url).map(|url| {
@@ -89,24 +94,39 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
             .w_full()
             .max_h(px(288.0))
             .mt(px(8.0))
-            .rounded(corner(10.0))
+            .rounded(crate::ui::theme::radius_lg())
             .object_fit(ObjectFit::Cover)
     });
+    // The web's card: a 4px coloured edge, `rounded-xl`, the card at 70% (drawn
+    // solid, since GPUI would draw the shadow through a see-through fill).
+    let radius = crate::ui::theme::radius_xl();
     div()
-        .max_w(px(520.0))
+        .max_w(px(512.0))
         .flex()
-        .rounded(corner(12.0))
-        .overflow_hidden()
-        .border_1()
-        .border_color(p.border)
-        .bg(alpha(p.card, 0.7))
-        .child(div().w(px(4.0)).flex_none().bg(edge))
+        .rounded(radius)
+        .bg(edge)
+        .pl(px(4.0))
+        .text_sm()
+        .line_height(px(20.0))
+        .shadow(crate::ui::polls::shadow_sm())
         .child(
             div()
                 .flex_1()
                 .min_w_0()
-                .p(px(12.0))
-                .child(div().flex().gap(px(12.0)).child(text).when_some(thumbnail, |el, t| el.child(t)))
-                .when_some(image, |el, i| el.child(i)),
+                .flex()
+                .rounded_r(radius)
+                .rounded_l(px((f32::from(radius) - 4.0).max(0.0)))
+                .border_1()
+                .border_l_0()
+                .border_color(p.border)
+                .bg(crate::ui::theme::mix(p.chat_surface.into(), p.card, 0.7))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .p(px(12.0))
+                        .child(div().flex().gap(px(12.0)).child(text).when_some(thumbnail, |el, t| el.child(t)))
+                        .when_some(image, |el, i| el.child(i)),
+                ),
         )
 }
