@@ -106,5 +106,6 @@ MCP agents get `set_live_tile`, `end_live_tile` and `list_live_tiles`
 ## Later
 
 Scheduled events (an "Events" kind), the per-person switch on the account
-so it follows you across devices, tiles in shared channels, pictures on app
-tiles, and the desktop app.
+so it follows you across devices, tiles in shared channels, and pictures on
+app tiles. The desktop app shows tiles the same way (`desktop/src/core/live_tiles.rs`,
+`desktop/src/ui/live_tiles.rs`), with its switches in its own settings file.
