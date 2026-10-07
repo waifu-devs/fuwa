@@ -1884,7 +1884,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .whitespace_nowrap()
         .font_weight(FontWeight::BOLD)
         .text_size(px(16.0))
-        .text_color(m.color.unwrap_or(tint))
+        .text_color(m.color.filter(|_| crate::ui::theme::role_names()).unwrap_or(tint))
         .cursor_pointer()
         .hover(|s| s.underline())
         .when_some(author.clone(), |el, id| {
@@ -1929,8 +1929,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     .flex_1()
                     .min_w_0()
                     // The web's chat text: 15px on a 1.625 line.
-                    .text_size(px(15.0))
-                    .line_height(px(24.375))
+                    .text_size(px(crate::ui::theme::chat_font()))
+                    .line_height(px(crate::ui::theme::chat_font() * 1.625))
                     .when(m.pending && m.failed.is_none(), |el| el.opacity(0.55))
                     .child(content),
             )

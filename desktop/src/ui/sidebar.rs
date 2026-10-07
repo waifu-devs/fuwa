@@ -1134,7 +1134,7 @@ impl FuwaApp {
                                 .child(t("dms-calls.dm.list.emptyTitle")),
                         )
                         .child(div().mt(px(6.0)).line_height(px(19.5)).child(crate::ui::text::hint_line(
-                            &t("dms-calls.dm.list.emptyText"),
+                            &t(EMPTY_TEXT),
                             &[("message", &message)],
                             &p,
                         ))),
@@ -1487,3 +1487,6 @@ fn preview(items: Option<&[crate::core::vault::Item]>, me: &str) -> String {
     }
     String::new()
 }
+
+/// Filled in by `hint_line` (the button's name in bold), not by `t_with`.
+const EMPTY_TEXT: &str = "dms-calls.dm.list.emptyText";

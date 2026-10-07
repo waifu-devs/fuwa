@@ -628,6 +628,15 @@ impl FuwaApp {
                 let busy = self.core.shared.read(|s| {
                     s.instance(&instance).is_some_and(|i| i.status() == crate::pb::PresenceStatus::DoNotDisturb)
                 });
+                // fuwa's little sounds, made on the spot (`core::sounds`).
+                if !busy && self.prefs.sounds_on() {
+                    let sound =
+                        if mention { crate::core::sounds::Sound::Mention } else { crate::core::sounds::Sound::Message };
+                    let on = if mention { self.prefs.sounds.mention } else { self.prefs.sounds.message };
+                    if on {
+                        crate::core::sounds::play(sound, self.prefs.volume, &self.prefs.output_device);
+                    }
+                }
                 if !self.prefs.notifies() || busy {
                     return;
                 }

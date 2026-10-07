@@ -1,11 +1,4 @@
-//! What the account pages keep between frames, so each page's file holds
-//! only its drawing and its calls.
-
-use gpui_kit::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Window, div};
-
-use crate::core::config::Prefs;
-use crate::ui::settings::SettingsView;
-use crate::ui::theme::Palette;
+//! What the settings pages share between frames, beside each page's own form.
 
 /// Every page's own state.
 #[derive(Default)]
@@ -16,44 +9,8 @@ pub(crate) struct PageState {
     pub effect_hover: Option<String>,
     /// The menu open on the page, by id.
     pub menu: Option<String>,
-}
-
-impl SettingsView {
-    pub(crate) fn themes_page(
-        &mut self,
-        _prefs: &Prefs,
-        p: &Palette,
-        _w: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn sign_in_page(&mut self, p: &Palette, _w: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn message_backup(
-        &mut self,
-        _key: &str,
-        p: &Palette,
-        _w: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn linked_page(&mut self, p: &Palette, _cx: &mut Context<Self>) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn agents_page(&mut self, p: &Palette, _w: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn privacy_page(&mut self, p: &Palette, _w: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        todo_page(p)
-    }
-    pub(crate) fn security_page(&mut self, p: &Palette, _w: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        todo_page(p)
-    }
-}
-
-fn todo_page(p: &Palette) -> AnyElement {
-    div().text_color(p.muted_foreground).child("…").into_any_element()
+    /// A dialog a page put up, drawn over the whole screen.
+    pub overlay: Option<gpui_kit::AnyElement>,
+    /// A theme to open in the editor (from a card's menu), and whether it's a copy.
+    pub pending_edit: Option<(crate::core::themes::Theme, bool)>,
 }

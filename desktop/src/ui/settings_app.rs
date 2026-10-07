@@ -398,7 +398,7 @@ impl SettingsView {
             ))
             .when(prefs.notifications, |el| {
                 el.child(motion::rise(
-                    div().child(
+                    div().flex().child(
                         button(
                             "notify-test",
                             t("appsettings.notifications.test"),

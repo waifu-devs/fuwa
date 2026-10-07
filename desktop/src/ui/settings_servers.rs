@@ -25,6 +25,7 @@ use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius
 use crate::ui::widgets::{icon, server_icon};
 
 /// What the two pages keep.
+#[derive(Default)]
 pub(crate) struct ServersForm {
     pub server: Option<String>,
     nickname: Option<Entity<InputState>>,
@@ -36,20 +37,6 @@ pub(crate) struct ServersForm {
     pub open: Option<String>,
     /// Channels set apart on the page even with no settings yet.
     added: std::collections::HashSet<String>,
-}
-
-impl Default for ServersForm {
-    fn default() -> Self {
-        Self {
-            server: None,
-            nickname: None,
-            filled: None,
-            saving: false,
-            error: None,
-            open: None,
-            added: Default::default(),
-        }
-    }
 }
 
 const MUTE_FOR: [Option<i64>; 6] =
@@ -224,7 +211,7 @@ impl SettingsView {
             .text_sm()
             .text_color(p.muted_foreground)
             .child(crate::ui::text::hint_line(
-                &t("accountsettings.serverProfiles.nicknameHint"),
+                &t(HINT_NICKNAME),
                 &[("server", &server_name), ("name", &user_name(&me))],
                 p,
             ))
@@ -819,3 +806,6 @@ pub(crate) fn leak_id(name: &str) -> &'static str {
     let mut ids = IDS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     ids.entry(name.to_owned()).or_insert_with(|| Box::leak(name.to_owned().into_boxed_str()))
 }
+
+/// Filled in by `hint_line` (bold names), not by `t_with`.
+const HINT_NICKNAME: &str = "accountsettings.serverProfiles.nicknameHint";

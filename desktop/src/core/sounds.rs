@@ -109,6 +109,126 @@ pub fn output_device(name: &str) -> Option<cpal::Device> {
     host.default_output_device()
 }
 
+/// The microphone by name, or the system's when there's no such device.
+pub fn input_device(name: &str) -> Option<cpal::Device> {
+    let host = cpal::default_host();
+    if !name.is_empty()
+        && let Ok(mut devices) = host.input_devices()
+        && let Some(found) = devices.find(|d| d.to_string() == name)
+    {
+        return Some(found);
+    }
+    host.default_input_device()
+}
+
+/// The devices picked in Voice & video, for calls to open: (microphone, speakers), "" for the system's.
+static PICKED: parking_lot::Mutex<(String, String)> = parking_lot::Mutex::new((String::new(), String::new()));
+
+/// Remembers the devices picked in the settings, for the next call.
+pub fn pick_devices(input: &str, output: &str) {
+    *PICKED.lock() = (input.to_owned(), output.to_owned());
+}
+
+/// The microphone and speakers calls use: the ones picked, or the system's.
+pub fn picked_input() -> Option<cpal::Device> {
+    input_device(&PICKED.lock().0)
+}
+
+pub fn picked_output() -> Option<cpal::Device> {
+    output_device(&PICKED.lock().1)
+}
+
+/// The microphones (`input`) or speakers there are, by name.
+pub fn device_names(input: bool) -> Vec<String> {
+    let host = cpal::default_host();
+    let list = if input {
+        host.input_devices().map(|d| d.collect::<Vec<_>>())
+    } else {
+        host.output_devices().map(|d| d.collect())
+    };
+    let mut names: Vec<String> =
+        list.unwrap_or_default().iter().map(|d| d.to_string()).filter(|n| !n.is_empty()).collect();
+    names.dedup();
+    names
+}
+
+/// A running mic test: the microphone's level, in dB (-100 to 0), as it comes.
+pub struct MicTest {
+    level: Arc<std::sync::atomic::AtomicI32>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    pub failed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl MicTest {
+    /// Opens the microphone named `device` ("" for the system's) on a thread of its own.
+    pub fn start(device: &str) -> Self {
+        let level = Arc::new(std::sync::atomic::AtomicI32::new(-100));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (l, s, f, name) = (level.clone(), stop.clone(), failed.clone(), device.to_owned());
+        let _ = std::thread::Builder::new().name("fuwa-mic-test".into()).spawn(move || {
+            let Some(device) = input_device(&name) else {
+                f.store(true, Ordering::Relaxed);
+                return;
+            };
+            let Ok(config) = device.default_input_config() else {
+                f.store(true, Ordering::Relaxed);
+                return;
+            };
+            let channels = usize::from(config.channels().max(1));
+            let meter = l.clone();
+            let take = move |data: &[f32]| {
+                let rms = (data.iter().map(|x| x * x).sum::<f32>() / data.len().max(1) as f32).sqrt();
+                let db = if rms > 0.0 { (20.0 * rms.log10()).clamp(-100.0, 0.0) } else { -100.0 };
+                meter.store(db.round() as i32, Ordering::Relaxed);
+            };
+            let stream = match config.sample_format() {
+                SampleFormat::F32 => device.build_input_stream::<f32, _, _>(
+                    config.config(),
+                    move |data: &[f32], _| take(&data.iter().step_by(channels).copied().collect::<Vec<_>>()),
+                    |_| {},
+                    None,
+                ),
+                SampleFormat::I16 => device.build_input_stream::<i16, _, _>(
+                    config.config(),
+                    move |data: &[i16], _| {
+                        take(&data.iter().step_by(channels).map(|s| f32::from(*s) / 32768.0).collect::<Vec<_>>())
+                    },
+                    |_| {},
+                    None,
+                ),
+                _ => {
+                    f.store(true, Ordering::Relaxed);
+                    return;
+                }
+            };
+            let Ok(stream) = stream else {
+                f.store(true, Ordering::Relaxed);
+                return;
+            };
+            if stream.play().is_err() {
+                f.store(true, Ordering::Relaxed);
+                return;
+            }
+            while !s.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            drop(stream);
+        });
+        Self { level, stop, failed }
+    }
+
+    pub fn level(&self) -> f32 {
+        self.level.load(Ordering::Relaxed) as f32
+    }
+}
+
+impl Drop for MicTest {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 fn play_now(sound: Sound, volume: f32, device: &str) {
     let Some(device) = output_device(device) else { return };
     let Ok(config) = device.default_output_config() else { return };

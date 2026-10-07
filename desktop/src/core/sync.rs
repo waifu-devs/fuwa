@@ -189,6 +189,7 @@ fn start_dms(
                     i.dms.device_id = engine.device_id().to_owned();
                 });
                 *slot.lock() = Some(engine.clone());
+                tokio::spawn(crate::core::backup::run(engine.clone()));
                 // Servers that loaded first: their secure channels' news is read now.
                 let servers: Vec<(String, Vec<pb::Channel>)> = core.shared.read(|s| {
                     s.instance(&key)

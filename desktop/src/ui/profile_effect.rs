@@ -48,6 +48,7 @@ impl EffectView {
     }
 
     /// Plays `effect` for `seed` on a card of this size; a new effect (or starting to play) starts the intro again.
+    #[allow(clippy::too_many_arguments)]
     pub fn set(
         &mut self,
         effect: &str,

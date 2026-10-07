@@ -1,33 +1,22 @@
-//! The Privacy page: the "Help fix bugs" switch for the anonymous reports
-//! (`core::reports`), what they hold in plain words, and a live look at
-//! what's waiting to go out and where it would go. Then games: whether
-//! they may show what you're playing (`core::presence`), and each one's answer.
+//! "Help fix bugs" on the Advanced page, as the web's `ShareReports`: the
+//! switch for the anonymous reports (`core::reports`), what's sent and what
+//! never is, and a live look at what's waiting to go out and where to.
 
 use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div, px,
 };
 
 use crate::core::config::Prefs;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::reports::{self, Pending};
 use crate::ui::motion;
-use crate::ui::settings::{SettingsView, section, toggle_row};
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{icon, soft_button};
-
-/// What a report holds.
-fn sent() -> [(&'static str, String); 4] {
-    [
-        ("triangle-alert", t("desktop.privacy.sentErrors")),
-        ("timer", t("desktop.privacy.sentTimings")),
-        ("mouse-pointer-click", t("desktop.privacy.sentUsage")),
-        ("info", t("desktop.privacy.sentVersion")),
-    ]
-}
+use crate::ui::settings::SettingsView;
+use crate::ui::settings_controls::toggle;
+use crate::ui::theme::{Palette, alpha, radius_lg, radius_xl};
+use crate::ui::widgets::icon;
 
 impl SettingsView {
     pub(crate) fn reports_section(
@@ -40,235 +29,166 @@ impl SettingsView {
         let on = prefs.share_reports;
         let pending = if on { reports::pending() } else { Pending::default() };
         self.pending = pending;
-        let destination = self.core.report_destination().map(|key| {
+        let target = self.core.report_destination().map(|key| {
             let name = self.core.shared.read(|s| s.instance(&key).map(|i| i.name()));
-            // Streamer mode keeps addresses off screen, and a name may be one.
-            name.filter(|_| !prefs.streamer_mode).unwrap_or_else(|| t("desktop.settings.yourInstance"))
+            name.filter(|_| !prefs.hides_personal()).unwrap_or_else(|| t("desktop.settings.yourInstance"))
         });
-
-        let mut what = div().flex().flex_col().gap(px(10.0));
-        for (n, (glyph, line)) in sent().into_iter().enumerate() {
-            what = what.child(motion::rise(
+        let list = |title: String, glyph: &'static str, tone: gpui_kit::Rgba, lines: Vec<String>, start: usize| {
+            let mut ul = div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .rounded(radius_xl())
+                .bg(alpha(p.muted, 0.5))
+                .px(px(12.0))
+                .py(px(10.0))
+                .text_sm()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .child(title.to_uppercase()),
+                );
+            for (n, line) in lines.into_iter().enumerate() {
+                ul = ul.child(motion::slide_in(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(icon(glyph).size(px(14.0)).mt(px(3.0)).text_color(tone))
+                        .child(div().flex_1().child(line)),
+                    SharedString::from(format!("report-line-{}", start + n)),
+                    -6.0,
+                ));
+            }
+            ul
+        };
+        let sent = vec![
+            t("desktop.privacy.sentErrors"),
+            t("desktop.privacy.sentTimings"),
+            t("desktop.privacy.sentUsage"),
+            t("desktop.privacy.sentVersion"),
+        ];
+        let never = vec![
+            t("appsettings.advanced.neverMessages"),
+            t("appsettings.advanced.neverNames"),
+            t("appsettings.advanced.neverAddress"),
+        ];
+        let lit = crate::ui::motion::follow("reports-lit", if on { 1.0 } else { 0.55 }, window, cx);
+        let lists = div()
+            .flex()
+            .gap(px(8.0))
+            .opacity(lit)
+            .child(list(t("appsettings.advanced.sent"), "check", p.primary, sent, 0))
+            .child(list(t("appsettings.advanced.never"), "x", p.destructive, never, 4));
+        let chip = |glyph: &'static str, label: String, count: u32| {
+            let active = count > 0;
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .rounded(radius_lg())
+                .px(px(8.0))
+                .py(px(4.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .map(|el| {
+                    if active {
+                        el.bg(alpha(p.primary, 0.12)).text_color(p.primary)
+                    } else {
+                        el.bg(p.muted).text_color(p.muted_foreground)
+                    }
+                })
+                .child(icon(glyph).size(px(14.0)))
+                .child(label)
+        };
+        let waiting = on.then(|| {
+            motion::rise(
                 div()
                     .flex()
-                    .items_start()
-                    .gap(px(10.0))
+                    .flex_col()
+                    .gap(px(8.0))
+                    .rounded(radius_xl())
+                    .border_1()
+                    .border_color(alpha(p.border, 0.6))
+                    .bg(alpha(p.background, 0.6))
+                    .px(px(12.0))
+                    .py(px(10.0))
                     .text_sm()
                     .child(
                         div()
-                            .flex_none()
-                            .size(px(24.0))
-                            .rounded(corner(8.0))
-                            .bg(alpha(p.primary, 0.12))
                             .flex()
+                            .flex_wrap()
                             .items_center()
-                            .justify_center()
-                            .child(icon(glyph).size(px(14.0)).text_color(p.primary)),
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(p.muted_foreground)
+                                    .child(t("appsettings.advanced.waiting").to_uppercase()),
+                            )
+                            .child(chip(
+                                "bug",
+                                t_with(
+                                    "appsettings.advanced.waitingErrors",
+                                    &[("count", Arg::Num(i64::from(pending.errors)))],
+                                ),
+                                pending.errors,
+                            ))
+                            .child(chip(
+                                "gauge",
+                                t_with(
+                                    "appsettings.advanced.waitingTimings",
+                                    &[("count", Arg::Num(i64::from(pending.timings)))],
+                                ),
+                                pending.timings,
+                            ))
+                            .child(chip(
+                                "mouse-pointer-click",
+                                t_with(
+                                    "appsettings.advanced.waitingUsage",
+                                    &[("count", Arg::Num(i64::from(pending.usage)))],
+                                ),
+                                pending.usage,
+                            )),
                     )
-                    .child(div().flex_1().min_w_0().pt(px(2.0)).child(line)),
-                SharedString::from(format!("sent-{n}")),
-                Duration::from_millis(60 + 40 * n as u64),
-                6.0,
-            ));
-        }
-        let what = div()
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .p(px(16.0))
-            .rounded(corner(16.0))
-            .bg(p.card)
-            .border_1()
-            .border_color(p.border)
-            .child(what)
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(10.0))
-                    .p(px(12.0))
-                    .rounded(corner(12.0))
-                    .bg(p.secondary)
-                    .text_sm()
-                    .child(icon("eye-off").size(px(16.0)).mt(px(2.0)).text_color(p.muted_foreground))
-                    .child(div().flex_1().min_w_0().child(t("desktop.privacy.never"))),
-            );
-
-        // Dims away when off, and comes back with a spring.
-        let lit = motion::follow("privacy-lit", if on { 1.0 } else { 0.0 }, window, cx);
-        let chips = div()
-            .flex()
-            .gap(px(10.0))
-            .child(chip(
-                "errors",
-                "triangle-alert",
-                pending.errors,
-                t_with("desktop.privacy.errors", &[("count", Arg::Num(i64::from(pending.errors)))]),
-                p,
-            ))
-            .child(chip(
-                "timings",
-                "timer",
-                pending.timings,
-                t_with("desktop.privacy.timings", &[("count", Arg::Num(i64::from(pending.timings)))]),
-                p,
-            ))
-            .child(chip(
-                "usage",
-                "mouse-pointer-click",
-                pending.usage,
-                t_with("desktop.privacy.usage", &[("count", Arg::Num(i64::from(pending.usage)))]),
-                p,
-            ));
-        let (dot, status) = match (&destination, on) {
-            (_, false) => (p.muted_foreground, t("desktop.privacy.off")),
-            (Some(name), true) => (p.success, t_with("desktop.privacy.goesTo", &[("instance", Arg::Str(name))])),
-            (None, true) => (p.primary, t("desktop.privacy.nowhere")),
-        };
-        let pulse = on && destination.is_some();
-        let dot = div().flex_none().mt(px(5.0)).size(px(8.0)).rounded_full().bg(dot);
-        let dot = if pulse {
-            motion::ambient(dot, "privacy-dot", Duration::from_millis(2400), window, |el, t| {
-                let glow = (t * std::f32::consts::TAU).sin() * 0.5 + 0.5;
-                el.opacity(0.55 + 0.45 * glow)
-            })
-        } else {
-            dot.into_any_element()
-        };
-        let preview = div().flex().flex_col().gap(px(12.0)).opacity(0.45 + 0.55 * lit).child(chips).child(
-            div()
-                .flex()
-                .items_start()
-                .gap(px(8.0))
-                .text_sm()
-                .text_color(p.muted_foreground)
-                .child(dot)
-                .child(div().flex_1().min_w_0().child(status)),
-        );
-
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(8.0))
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(icon("server").size(px(14.0)).mt(px(1.0)))
+                            .child(div().flex_1().child(match &target {
+                                Some(name) => t_with("desktop.privacy.goesTo", &[("instance", Arg::Str(name))]),
+                                None => t("desktop.privacy.nowhere"),
+                            })),
+                    ),
+                "reports-waiting",
+                Duration::ZERO,
+                -6.0,
+            )
+        });
         div()
             .flex()
             .flex_col()
-            .gap(px(28.0))
-            .child(toggle_row(
+            .gap(px(12.0))
+            .child(toggle(
                 "share-reports",
-                &t("appsettings.advanced.reports"),
-                &t("desktop.privacy.reportsHint"),
+                &t("appsettings.advanced.reportsToggle"),
+                Some(&t("appsettings.advanced.reportsToggleHint")),
                 on,
+                false,
                 p,
+                window,
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.share_reports = on),
             ))
-            .child(section(&t("appsettings.advanced.sent"), what, p))
-            .child(section(&t("appsettings.advanced.waiting"), preview, p))
-            .child(toggle_row(
-                "game-activity",
-                &t("desktop.privacy.gameActivity"),
-                &t("desktop.privacy.gameActivityHint"),
-                prefs.game_activity,
-                p,
-                cx,
-                |this, on, cx| this.set(cx, |pr| pr.game_activity = on),
-            ))
-            .when(!prefs.game_answers.is_empty(), |el| {
-                el.child(section(&t("desktop.privacy.games"), games(prefs, p, cx), p))
-            })
+            .child(lists)
+            .children(waiting)
             .into_any_element()
     }
-}
-
-/// Each game or app that asked, its answer, and a way to be asked again.
-fn games(prefs: &Prefs, p: &Palette, cx: &mut Context<SettingsView>) -> impl IntoElement {
-    let mut list = div().flex().flex_col().gap(px(8.0));
-    for (n, (key, allowed)) in prefs.game_answers.iter().enumerate() {
-        let name = match key.split_once(':') {
-            Some(("program", name)) => name.to_owned(),
-            Some((_, id)) => t_with("desktop.privacy.game", &[("id", Arg::Str(id))]),
-            None => key.clone(),
-        };
-        let key = key.clone();
-        list = list.child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .p(px(12.0))
-                .rounded(corner(12.0))
-                .bg(p.card)
-                .border_1()
-                .border_color(p.border)
-                .child(icon("gamepad-2").size(px(16.0)).text_color(if *allowed {
-                    p.primary
-                } else {
-                    p.muted_foreground
-                }))
-                .child(div().flex_1().min_w_0().text_sm().text_ellipsis().whitespace_nowrap().child(name))
-                .child(div().text_sm().text_color(p.muted_foreground).child(if *allowed {
-                    t("desktop.privacy.allowed")
-                } else {
-                    t("desktop.privacy.notAllowed")
-                }))
-                .child(
-                    soft_button(SharedString::from(format!("forget-game-{n}")), t("desktop.privacy.askAgain"), p)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let key = key.clone();
-                            this.set(cx, move |pr| {
-                                pr.game_answers.remove(&key);
-                            })
-                        })),
-                ),
-        );
-    }
-    list
-}
-
-/// One count waiting to go out. A new number rises into place, and the chip
-/// glows for a moment as it changes.
-fn chip(id: &'static str, glyph: &'static str, count: u32, label: String, p: &Palette) -> impl IntoElement {
-    let changed = SharedString::from(format!("pending-{id}-{count}"));
-    let glow = alpha(p.primary, 0.20);
-    div()
-        .flex_1()
-        .min_w_0()
-        .relative()
-        .overflow_hidden()
-        .flex()
-        .items_center()
-        .gap(px(12.0))
-        .p(px(14.0))
-        .rounded(corner(14.0))
-        .bg(p.card)
-        .border_1()
-        .border_color(p.border)
-        .when(count > 0, |el| {
-            el.child(div().absolute().inset_0().bg(glow).with_animation(
-                SharedString::from(format!("{changed}-glow")),
-                Animation::new(Duration::from_millis(900)).with_easing(gpui_kit::ease_out_quint()),
-                |el, t| el.opacity(1.0 - t),
-            ))
-        })
-        .child(
-            div()
-                .flex_none()
-                .size(px(32.0))
-                .rounded(corner(10.0))
-                .bg(alpha(p.primary, if count > 0 { 0.16 } else { 0.08 }))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon(glyph).size(px(16.0)).text_color(if count > 0 { p.primary } else { p.muted_foreground })),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(div().h(px(26.0)).overflow_hidden().child(motion::rise(
-                    div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(count.to_string()),
-                    changed,
-                    Duration::ZERO,
-                    14.0,
-                )))
-                .child(div().text_xs().text_color(p.muted_foreground).whitespace_nowrap().text_ellipsis().child(label)),
-        )
 }

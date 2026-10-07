@@ -28,7 +28,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::settings_account::AccountForm;
 use crate::ui::settings_controls::Sliders;
-use crate::ui::settings_look::{Look, sync_sliders};
+use crate::ui::settings_look::Look;
 use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_lg, radius_md};
 use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_button, soft_button};
 
@@ -374,11 +374,11 @@ pub(crate) fn issuer_name(issuer: &str) -> String {
     url::Url::parse(issuer).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| issuer.to_owned())
 }
 
+/// A section and the settings in it a search found.
+type Found<'a> = (&'a Section, Vec<&'a (&'static str, String, &'static str)>);
+
 /// Sections and single settings whose words hold every word typed (the web's `search`).
-fn search<'a>(
-    groups: &'a [Group],
-    query: &str,
-) -> Option<Vec<(&'a Section, Vec<&'a (&'static str, String, &'static str)>)>> {
+fn search<'a>(groups: &'a [Group], query: &str) -> Option<Vec<Found<'a>>> {
     let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_owned).collect();
     if words.is_empty() {
         return None;
@@ -432,6 +432,12 @@ pub struct SettingsView {
     focused_once: bool,
     pub(crate) state: crate::ui::settings_pages::PageState,
     pub(crate) servers: crate::ui::settings_servers::ServersForm,
+    pub(crate) data: crate::ui::settings_data::DataForm,
+    pub(crate) security: crate::ui::settings_security::SecurityForm,
+    pub(crate) agents: crate::ui::settings_agents::AgentsForm,
+    pub(crate) themes: crate::ui::settings_themes::ThemesForm,
+    pub(crate) voice: crate::ui::settings_voice::VoiceForm,
+    pub(crate) backup: crate::ui::settings_backup::BackupForm,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -442,7 +448,7 @@ const OPENING: Duration = Duration::from_millis(280);
 
 impl SettingsView {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let look = Look::new(&core.prefs(), window, cx);
+        let look = Look::new();
         // The Advanced page's counts change without the store changing: look again now and then.
         cx.spawn(async move |this, cx| {
             loop {
@@ -488,6 +494,12 @@ impl SettingsView {
             focused_once: false,
             state: Default::default(),
             servers: Default::default(),
+            data: Default::default(),
+            security: Default::default(),
+            agents: Default::default(),
+            themes: Default::default(),
+            voice: Default::default(),
+            backup: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -847,7 +859,7 @@ impl SettingsView {
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.destructive)
-                                    .child(t("desktop.session.remove")),
+                                    .child(t("desktop.settings.removeHere")),
                             )
                             .child(div().text_xs().text_color(p.muted_foreground).child(t_with(
                                 "accountsettings.session.removeHint",
@@ -1032,7 +1044,10 @@ impl SettingsView {
                     .cursor_pointer()
                     .when(!active, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
                     .active(|s| s.top(px(1.0)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.choose(page, None, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        window.blur(cx);
+                        this.choose(page, None, cx)
+                    }))
                     .child(div().flex_1().min_w_0().truncate().child(section.label.clone()))
                     .when(trailing, |el| el.child(icon(section.glyph).size(px(16.0))));
                 block = block.child(slide(row, SharedString::from(format!("menu-in-{page:?}")), n));
@@ -1057,13 +1072,7 @@ impl SettingsView {
     }
 
     /// What a search found: sections, and under each the single settings that matched.
-    fn results(
-        &mut self,
-        results: &[(&Section, Vec<&(&'static str, String, &'static str)>)],
-        query: &str,
-        p: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn results(&mut self, results: &[Found<'_>], query: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         if results.is_empty() {
             return motion::rise(
                 div()
@@ -1111,7 +1120,10 @@ impl SettingsView {
                     .text_color(if section.danger { alpha(p.destructive, 0.8) } else { p.foreground.into() })
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, _, cx| this.choose(page, None, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        window.blur(cx);
+                        this.choose(page, None, cx)
+                    }))
                     .child(icon(section.glyph).size(px(16.0)))
                     .child(div().truncate().child(section.label.clone())),
                 SharedString::from(format!("result-in-{page:?}")),
@@ -1206,7 +1218,6 @@ impl Render for SettingsView {
         }
         let p = pal(cx);
         let prefs = self.core.prefs();
-        sync_sliders(&self.look, &prefs.backdrop, window, cx);
         let behind = crate::ui::backdrop::layers(&crate::ui::theme::backdrop(cx), &p, window, cx);
 
         // The web's layout: the menu takes 15rem and half of what's left past 67rem; the
@@ -1231,6 +1242,7 @@ impl Render for SettingsView {
             .map(|s| (s.label.clone(), s.about.clone(), s.danger))
             .unwrap_or_default();
 
+        self.open_pending_edit(window, cx);
         self.held = self.holding;
         self.holding = false;
         let body = self.page_body(&prefs, &p, window, cx);
@@ -1337,7 +1349,8 @@ impl Render for SettingsView {
                     .track_scroll(&self.scroll)
                     .child(content),
             )
-            .child(close);
+            .child(close)
+            .when_some(self.state.overlay.take(), |el, overlay| el.child(overlay));
 
         // It comes in from a little larger, fading up, and goes the same way.
         use gpui_kit::{Animation, AnimationExt as _};
@@ -1416,94 +1429,4 @@ pub(crate) fn radio(on: bool, p: &Palette) -> impl IntoElement {
         .items_center()
         .justify_center()
         .when(on, |el| el.child(div().size(px(6.0)).rounded_full().bg(p.primary)))
-}
-
-/// A tiny picture of the app in a palette.
-pub(crate) fn theme_preview(pv: &Palette) -> impl IntoElement {
-    div()
-        .h(px(84.0))
-        .flex()
-        .rounded(px(10.0 * pv.radius))
-        .overflow_hidden()
-        .bg(pv.background)
-        .child(div().w(px(16.0)).h_full().bg(pv.rail))
-        .child(div().w(px(36.0)).h_full().bg(pv.sidebar))
-        .child(
-            div()
-                .flex_1()
-                .p(px(8.0))
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(div().h(px(6.0)).w(px(40.0)).rounded_full().bg(pv.primary))
-                .child(div().h(px(5.0)).w(px(56.0)).rounded_full().bg(alpha(pv.foreground, 0.4)))
-                .child(div().h(px(5.0)).w(px(30.0)).rounded_full().bg(alpha(pv.foreground, 0.25)))
-                .child(div().flex_1())
-                .child(div().h(px(12.0)).rounded(px(4.0)).bg(pv.card).border_1().border_color(pv.border)),
-        )
-}
-
-/// Choices side by side; the chosen one sits on a pill that glides between them.
-pub(crate) fn segmented(
-    id: &'static str,
-    options: Vec<(String, bool)>,
-    p: &Palette,
-    window: &mut Window,
-    cx: &mut Context<SettingsView>,
-    pick: impl Fn(&mut SettingsView, usize, &mut Context<SettingsView>) + Clone + 'static,
-) -> impl IntoElement {
-    let width = 150.0;
-    let chosen = options.iter().position(|(_, on)| *on).unwrap_or(0);
-    let mut row = div()
-        .relative()
-        .flex()
-        .p(px(4.0))
-        .rounded(corner(14.0))
-        .bg(p.secondary)
-        .w(px(width * options.len() as f32 + 8.0));
-    // The pill moves with a spring, keyed to this control.
-    let pill = gpui_kit::base::motion::spring(
-        SharedString::from(format!("seg-{id}")),
-        chosen as f32 * width,
-        gpui_kit::base::motion::Spring::new(Duration::from_millis(340)).with_damping(0.75),
-        window,
-        cx,
-    );
-    row = row.child(
-        div()
-            .absolute()
-            .top(px(4.0))
-            .left(px(4.0 + pill))
-            .w(px(width))
-            .h(px(36.0))
-            .rounded(corner(10.0))
-            .bg(p.card)
-            .shadow(vec![gpui_kit::BoxShadow {
-                color: alpha(p.primary, 0.18),
-                offset: gpui_kit::point(px(0.0), px(4.0)),
-                blur_radius: px(12.0),
-                spread_radius: px(-4.0),
-                inset: false,
-            }]),
-    );
-    for (n, (label, on)) in options.into_iter().enumerate() {
-        let pick = pick.clone();
-        row = row.child(
-            div()
-                .id(SharedString::from(format!("{id}-{n}")))
-                .relative()
-                .w(px(width))
-                .h(px(36.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .cursor_pointer()
-                .text_color(if on { p.primary } else { p.muted_foreground })
-                .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
-                .child(label),
-        );
-    }
-    row
 }

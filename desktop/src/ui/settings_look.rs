@@ -1,83 +1,36 @@
-//! The Appearance and Background pages: fuwa's themes (the five built-in
-//! ones and those made or imported here), light and dark picks that follow
-//! the system, theme files in and out, and the picture and effect behind
-//! the app. The same themes and files as the web app (`docs/themes.md`).
+//! The Appearance page, as the web's `settings/app/Appearance.tsx`: the
+//! theme cards (light and dark picks that follow the system), density,
+//! message display, text size and zoom beside a live chat preview; and
+//! theme files in and out, for the Themes page (`docs/themes.md`).
 
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription,
-    Window, div, img, px, rgb,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 use std::time::Duration;
 
 use crate::core::config::Prefs;
 use crate::core::config::{Density, Spacing};
 use crate::core::i18n::{Arg, t, t_with};
-use crate::core::themes::{self, Backdrop, Effect, Fit, Picture, Theme};
+use crate::core::themes::{self, Backdrop, Picture, Theme};
 use crate::ui::motion;
-use crate::ui::settings::{Page, SettingsView, section, segmented};
+use crate::ui::settings::{Page, SettingsView};
 use crate::ui::settings_app::pref;
 use crate::ui::settings_controls::{Badge, Opt, choice, toggle, with_preview};
-use crate::ui::theme::{Palette, alpha, corner, mix, system_dark};
-use crate::ui::widgets::{icon, icon_button};
+use crate::ui::theme::{Palette, alpha, system_dark};
+use crate::ui::widgets::icon;
 
-/// What the two pages keep between frames.
+/// What the Appearance page keeps between frames: an import going, and what it said.
 pub struct Look {
-    dim: Entity<SliderState>,
-    blur: Entity<SliderState>,
-    intensity: Entity<SliderState>,
-    speed: Entity<SliderState>,
-    panels: Entity<SliderState>,
-    /// The instance whose backgrounds are listed, and them.
-    backgrounds: Option<(String, Vec<String>)>,
-    loading: Option<String>,
     busy: bool,
     /// The last thing worth saying (an error when the flag is set).
     note: Option<(bool, String)>,
-    _subscriptions: Vec<Subscription>,
 }
 
 impl Look {
-    pub fn new(prefs: &Prefs, window: &mut Window, cx: &mut Context<SettingsView>) -> Self {
-        let b = &prefs.backdrop;
-        let slider = |(min, max): (u8, u8), step: f32, value: u8, cx: &mut Context<SettingsView>| {
-            cx.new(|_| {
-                SliderState::new().min(f32::from(min)).max(f32::from(max)).step(step).default_value(f32::from(value))
-            })
-        };
-        let dim = slider(themes::DIM, 1.0, b.dim, cx);
-        let blur = slider(themes::BLUR, 1.0, b.blur, cx);
-        let intensity = slider(themes::INTENSITY, 1.0, b.intensity, cx);
-        let speed = slider(themes::SPEED, 10.0, b.speed, cx);
-        let panels = slider(themes::PANELS, 1.0, b.panels, cx);
-        let watch = |state: &Entity<SliderState>, set: fn(&mut Backdrop, u8), cx: &mut Context<SettingsView>| {
-            cx.subscribe_in(state, window, move |this, _, event: &SliderEvent, _, cx| {
-                let SliderEvent::Change(value) = event else { return };
-                let v = value.start().round().clamp(0.0, 255.0) as u8;
-                this.set(cx, |pr| set(&mut pr.backdrop, v));
-            })
-        };
-        let subscriptions = vec![
-            watch(&dim, |b, v| b.dim = v, cx),
-            watch(&blur, |b, v| b.blur = v, cx),
-            watch(&intensity, |b, v| b.intensity = v, cx),
-            watch(&speed, |b, v| b.speed = v, cx),
-            watch(&panels, |b, v| b.panels = v, cx),
-        ];
-        Self {
-            dim,
-            blur,
-            intensity,
-            speed,
-            panels,
-            backgrounds: None,
-            loading: None,
-            busy: false,
-            note: None,
-            _subscriptions: subscriptions,
-        }
+    pub fn new() -> Self {
+        Self { busy: false, note: None }
     }
 }
 
@@ -120,7 +73,7 @@ impl SettingsView {
     }
 
     /// Asks for a theme file, reads it, uploads its picture (if it has one) and puts the theme on.
-    fn import_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn import_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.look.busy {
             return;
         }
@@ -211,9 +164,8 @@ impl SettingsView {
     }
 
     /// Saves the theme on screen as a file, with its background picture when it has one.
-    fn export_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn export_theme_file(&mut self, theme: Theme, cx: &mut Context<Self>) {
         let prefs = self.core.prefs();
-        let theme = prefs.active_theme(system_dark(window.appearance()));
         let backdrop = Some(prefs.active_backdrop(&theme)).filter(Backdrop::any);
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
         let path = cx.prompt_for_new_path(&dir, Some(&themes::file_name(&theme.name)));
@@ -235,7 +187,9 @@ impl SettingsView {
             });
             let result = rx.await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(Ok(name)) => this.say(false, t_with("desktop.look.exported", &[("theme", Arg::Str(&name))]), cx),
+                Ok(Ok(name)) => {
+                    this.toast("download", t_with("appsettings.themes.exported", &[("theme", Arg::Str(&name))]), cx)
+                }
                 Ok(Err(message)) => this.say(true, message, cx),
                 Err(_) => {}
             });
@@ -706,305 +660,17 @@ impl SettingsView {
         grid.into_any_element()
     }
 
-    // ───────────────────────── Background ─────────────────────────
-
-    fn load_backgrounds(&mut self, key: &str, cx: &mut Context<Self>) {
-        if self.look.loading.as_deref() == Some(key) {
-            return;
-        }
-        self.look.loading = Some(key.to_owned());
-        let (core, k) = (self.core.clone(), key.to_owned());
-        let rx = self.core.spawn(async move { core.backgrounds(&k).await });
-        let key = key.to_owned();
-        cx.spawn(async move |this, cx| {
-            let Ok(result) = rx.await else { return };
-            let _ = this.update(cx, |this, cx| {
-                this.look.backgrounds = Some((key, result.unwrap_or_default()));
-                cx.notify();
-            });
-        })
-        .detach();
+    /// What the last import or export said, for the Themes page.
+    pub(crate) fn look_note(&self) -> Option<(String, Vec<String>)> {
+        self.look.note.clone().map(|(_, text)| (String::new(), vec![text]))
     }
 
-    fn upload_background(&mut self, key: String, cx: &mut Context<Self>) {
-        if self.look.busy {
-            return;
-        }
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let core = self.core.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| this.say(true, t("desktop.account.notAPicture"), cx));
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.look.busy = true;
-                this.look.note = None;
-                cx.notify();
-            });
-            let rx = core.spawn({
-                let (core, key) = (core.clone(), key.clone());
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    core.upload_background(&key, Picture { content_type: kind.into(), bytes }).await
-                }
-            });
-            let result = rx.await;
-            let _ = this.update(cx, |this, cx| {
-                this.look.busy = false;
-                match result {
-                    Ok(Ok(url)) => {
-                        if let Some((k, list)) = this.look.backgrounds.as_mut()
-                            && *k == key
-                        {
-                            list.insert(0, url.clone());
-                        }
-                        this.set(cx, |pr| pr.backdrop.image = url);
-                    }
-                    Ok(Err(err)) => this.say(true, err.message, cx),
-                    Err(_) => {}
-                }
-            });
-        })
-        .detach();
+    pub(crate) fn clear_look_note(&mut self) {
+        self.look.note = None;
     }
 
-    fn delete_background(&mut self, key: String, url: String, cx: &mut Context<Self>) {
-        let (core, k, u) = (self.core.clone(), key.clone(), url.clone());
-        let rx = self.core.spawn(async move { core.delete_background(&k, &u).await });
-        cx.spawn(async move |this, cx| {
-            let Ok(result) = rx.await else { return };
-            let _ = this.update(cx, |this, cx| match result {
-                Ok(()) => {
-                    if let Some((_, list)) = this.look.backgrounds.as_mut() {
-                        list.retain(|l| *l != url);
-                    }
-                    if this.core.prefs().backdrop.image == url {
-                        this.set(cx, |pr| pr.backdrop.image.clear());
-                    }
-                    cx.notify();
-                }
-                Err(err) => this.say(true, err.message, cx),
-            });
-        })
-        .detach();
-    }
-
-    pub(crate) fn background_page(
-        &mut self,
-        prefs: &Prefs,
-        p: &Palette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let b = prefs.backdrop.clone();
-        let theme = prefs.active_theme(system_dark(window.appearance()));
-        let key = instance_in_use(self);
-        if let Some(key) = &key
-            && self.look.backgrounds.as_ref().is_none_or(|(k, _)| k != key)
-        {
-            self.load_backgrounds(key, cx);
-        }
-
-        let tile = |id: SharedString, on: bool| {
-            div()
-                .id(id)
-                .relative()
-                .w(px(136.0))
-                .h(px(86.0))
-                .rounded(corner(12.0))
-                .overflow_hidden()
-                .border_2()
-                .border_color(if on { p.primary } else { p.border })
-                .cursor_pointer()
-                .hover({
-                    let c = mix(p.border, p.primary, 0.5);
-                    move |s| s.border_color(c)
-                })
-                .active(|s| s.top(px(1.0)))
-        };
-        let mut pictures = div().flex().flex_wrap().gap(px(10.0)).child(
-            tile("bg-none".into(), b.image.is_empty())
-                .bg(p.secondary)
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(4.0))
-                .text_sm()
-                .text_color(p.muted_foreground)
-                .on_click(cx.listener(|this, _, _, cx| this.set(cx, |pr| pr.backdrop.image.clear())))
-                .child(icon("image-off").size(px(20.0)))
-                .child(t("appsettings.backdrop.noPicture")),
-        );
-        let list = match (&key, &self.look.backgrounds) {
-            (Some(key), Some((k, list))) if k == key => list.clone(),
-            _ => Vec::new(),
-        };
-        for url in list {
-            let on = b.image == url;
-            let (pick, gone, k) = (url.clone(), url.clone(), key.clone().unwrap_or_default());
-            pictures = pictures.child(
-                tile(SharedString::from(format!("bg-{url}")), on)
-                    .group("bg")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let pick = pick.clone();
-                        this.set(cx, |pr| pr.backdrop.image = pick)
-                    }))
-                    .child(img(SharedString::from(url.clone())).size_full().object_fit(ObjectFit::Cover))
-                    .child(
-                        div().absolute().top(px(4.0)).right(px(4.0)).child(
-                            icon_button(SharedString::from(format!("bg-del-{url}")), "trash", p)
-                                .size(px(26.0))
-                                .bg(alpha(p.card, 0.85))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    this.delete_background(k.clone(), gone.clone(), cx)
-                                })),
-                        ),
-                    ),
-            );
-        }
-        let pictures: AnyElement = match key {
-            Some(key) => pictures
-                .child(
-                    tile("bg-upload".into(), false)
-                        .border_dashed()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(4.0))
-                        .text_sm()
-                        .text_color(p.primary)
-                        .on_click(cx.listener(move |this, _, _, cx| this.upload_background(key.clone(), cx)))
-                        .child(icon(if self.look.busy { "loader" } else { "image-plus" }).size(px(20.0)))
-                        .child(if self.look.busy {
-                            t("serversettings.emoji.uploading")
-                        } else {
-                            t("desktop.background.uploadPicture")
-                        }),
-                )
-                .into_any_element(),
-            None => div()
-                .text_sm()
-                .text_color(p.muted_foreground)
-                .child(t("desktop.background.needInstance"))
-                .into_any_element(),
-        };
-
-        let mut effects = div().flex().flex_wrap().gap(px(8.0));
-        for effect in Effect::ALL {
-            let on = b.effect == effect;
-            effects = effects.child(
-                div()
-                    .id(SharedString::from(format!("fx-{effect:?}")))
-                    .w(px(120.0))
-                    .p(px(10.0))
-                    .rounded(corner(12.0))
-                    .border_2()
-                    .border_color(if on { p.primary } else { p.border })
-                    .bg(if on { alpha(p.primary, 0.06) } else { alpha(p.card, 0.5) })
-                    .cursor_pointer()
-                    .hover({
-                        let c = mix(p.border, p.primary, 0.5);
-                        move |s| s.border_color(c)
-                    })
-                    .active(|s| s.top(px(1.0)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |pr| pr.backdrop.effect = effect)))
-                    .child(div().text_sm().font_weight(FontWeight::BOLD).child(effect.name()))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(effect.hint())),
-            );
-        }
-        let animated = !b.effect.texture() && b.effect != Effect::None;
-        let speed = if b.speed == 0 { t("appsettings.backdrop.still") } else { format!("{}%", b.speed) };
-
-        let slider_row = |label: &str, state: &Entity<SliderState>, value: String| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(16.0))
-                .child(div().w(px(150.0)).text_sm().font_weight(FontWeight::BOLD).child(label.to_owned()))
-                .child(div().flex_1().child(Slider::new(state)))
-                .child(div().w(px(48.0)).text_sm().text_color(p.muted_foreground).child(value))
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(28.0))
-            .when(theme.backdrop.is_some(), |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .p(px(14.0))
-                        .rounded(corner(14.0))
-                        .bg(p.secondary)
-                        .text_sm()
-                        .child(icon("palette").size(px(18.0)).text_color(p.primary))
-                        .child(t_with("desktop.background.themeHasOwn", &[("theme", Arg::Str(&theme.name))])),
-                )
-            })
-            .child(section(&t("appsettings.backdrop.picture"), pictures, p))
-            .when(!b.image.is_empty(), |el| {
-                el.child(section(
-                    &t("desktop.background.fit"),
-                    segmented(
-                        "fit",
-                        vec![
-                            (t("appsettings.backdrop.fill"), b.fit == Fit::Cover),
-                            (t("desktop.background.wholePicture"), b.fit == Fit::Contain),
-                            (t("desktop.background.repeat"), b.fit == Fit::Tile),
-                        ],
-                        p,
-                        window,
-                        cx,
-                        |this, n, cx| {
-                            let fit = [Fit::Cover, Fit::Contain, Fit::Tile][n];
-                            this.set(cx, |pr| pr.backdrop.fit = fit)
-                        },
-                    ),
-                    p,
-                ))
-                .child(slider_row(&t("desktop.background.dim"), &self.look.dim, format!("{}%", b.dim)))
-                .child(slider_row(
-                    &t("appsettings.backdrop.blur"),
-                    &self.look.blur,
-                    format!("{}px", b.blur),
-                ))
-            })
-            .child(section(
-                &t("appsettings.backdrop.effect"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.0))
-                    .child(effects)
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t("desktop.background.effectNote"))),
-                p,
-            ))
-            .when(b.effect != Effect::None, |el| {
-                el.child(slider_row(
-                    &t("appsettings.backdrop.strength"),
-                    &self.look.intensity,
-                    format!("{}%", b.intensity),
-                ))
-            })
-            .when(animated, |el| el.child(slider_row(&t("appsettings.backdrop.speed"), &self.look.speed, speed)))
-            .when(b.any(), |el| {
-                el.child(slider_row(&t("desktop.background.panels"), &self.look.panels, format!("{}%", b.panels)))
-            })
-            .into_any_element()
+    pub(crate) fn delete_theme_by_id(&mut self, id: String, cx: &mut Context<Self>) {
+        self.delete_theme(id, cx);
     }
 }
 
@@ -1014,19 +680,4 @@ enum Slot {
     Only,
     Light,
     Dark,
-}
-
-/// Keeps a slider where the setting is when something else changed it.
-pub fn sync_sliders(look: &Look, b: &Backdrop, window: &mut Window, cx: &mut Context<SettingsView>) {
-    for (state, v) in [
-        (&look.dim, b.dim),
-        (&look.blur, b.blur),
-        (&look.intensity, b.intensity),
-        (&look.speed, b.speed),
-        (&look.panels, b.panels),
-    ] {
-        if (state.read(cx).value().start() - f32::from(v)).abs() > 0.5 {
-            state.update(cx, |s, cx| s.set_value(f32::from(v), window, cx));
-        }
-    }
 }

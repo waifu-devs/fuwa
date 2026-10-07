@@ -717,7 +717,15 @@ impl Particle {
             ((self.start + elapsed / self.duration.max(1.0)).fract(), Easing::EaseOut.apply(fade))
         };
         let t = self.easing.apply(progress);
-        let i = self.frames.windows(2).position(|w| t >= w[0].offset && t <= w[1].offset)?;
+        // An easing that overshoots (a pop) runs past the ends: carry on along the end segment, as CSS does.
+        let last = self.frames.len().checked_sub(2)?;
+        let i = if t < self.frames[0].offset {
+            0
+        } else if t > self.frames[last + 1].offset {
+            last
+        } else {
+            self.frames.windows(2).position(|w| t >= w[0].offset && t <= w[1].offset)?
+        };
         let (a, b) = (self.frames[i], self.frames[i + 1]);
         let k = if b.offset > a.offset { (t - a.offset) / (b.offset - a.offset) } else { 0.0 };
         let mix = |x: f32, y: f32| x + (y - x) * k;
@@ -729,7 +737,7 @@ impl Particle {
             scale: mix(a.scale, b.scale),
             scale_x: mix(a.scale_x, b.scale_x),
             flip: a.flip.zip(b.flip).map(|(x, y)| mix(x, y)),
-            opacity: mix(a.opacity, b.opacity) * fade,
+            opacity: mix(a.opacity, b.opacity).clamp(0.0, 1.0) * fade,
         })
     }
 }

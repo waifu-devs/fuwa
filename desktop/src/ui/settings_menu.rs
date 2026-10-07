@@ -23,7 +23,7 @@ type V = SettingsView;
 pub(crate) enum Item {
     Label(String),
     Separator,
-    Action { label: String, glyph: Option<&'static str>, danger: bool, run: Rc<dyn Fn(&mut V, &mut Context<V>)> },
+    Action { label: String, glyph: Option<&'static str>, danger: bool, run: crate::ui::settings_controls::Run },
 }
 
 impl Item {

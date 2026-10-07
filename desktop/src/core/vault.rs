@@ -162,6 +162,12 @@ struct Head {
     notes: HashMap<String, Note>,
     /// What this device sent, by the SHA-256 of the ciphertext, until it reads its own record back.
     sent: HashMap<String, String>,
+    /// The message backup's recovery key and its check, base64, while this device takes part in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backup: Option<(String, String)>,
+    /// Lines written since the backup last took them, as (conversation, sequence).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unbacked: Vec<(String, i64)>,
 }
 
 /// One account's vault on one instance.
@@ -296,7 +302,11 @@ impl Vault {
             self.head.sent.remove(&hash);
         }
         let mut conversations: Vec<String> = Vec::new();
+        let backing_up = self.head.backup.is_some();
         for (conversation, item) in change.items {
+            if backing_up && !self.head.unbacked.iter().any(|(c, s)| *c == conversation && *s == item.seq) {
+                self.head.unbacked.push((conversation.clone(), item.seq));
+            }
             let list = self.items(&conversation)?;
             match list.binary_search_by_key(&item.seq, |i| i.seq) {
                 Ok(at) => list[at] = item,
@@ -311,6 +321,88 @@ impl Vault {
         for conversation in conversations {
             self.write_sealed(&self.items_path(&conversation), &self.items[&conversation])?;
         }
+        self.write_sealed(&self.dir.join("vault.json"), &self.head)
+    }
+
+    /// The message backup's recovery key and key check, while this device takes part.
+    pub fn backup_key(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        let (key, check) = self.head.backup.as_ref()?;
+        Some((B64.decode(key).ok()?, B64.decode(check).ok()?))
+    }
+
+    /// Takes part in the backup with this key; with `everything`, all this device kept goes in too.
+    pub fn keep_backup(&mut self, key: &[u8], check: &[u8], everything: bool) -> std::io::Result<()> {
+        self.head.backup = Some((B64.encode(key), B64.encode(check)));
+        if everything {
+            let noted: Vec<String> = self.head.notes.keys().cloned().collect();
+            for conversation in noted {
+                let seqs: Vec<i64> = self.items(&conversation)?.iter().map(|i| i.seq).collect();
+                for seq in seqs {
+                    if !self.head.unbacked.iter().any(|(c, s)| *c == conversation && *s == seq) {
+                        self.head.unbacked.push((conversation.clone(), seq));
+                    }
+                }
+            }
+        }
+        self.save_head()
+    }
+
+    /// Stops taking part: the key and what was waiting go.
+    pub fn drop_backup(&mut self) -> std::io::Result<()> {
+        self.head.backup = None;
+        self.head.unbacked.clear();
+        self.save_head()
+    }
+
+    /// Up to `most` lines waiting for the backup, with what they say now (None if gone).
+    #[allow(clippy::type_complexity)]
+    pub fn unbacked(&mut self, most: usize) -> std::io::Result<Vec<((String, i64), Option<Item>)>> {
+        let keys: Vec<(String, i64)> = self.head.unbacked.iter().take(most).cloned().collect();
+        let mut out = Vec::with_capacity(keys.len());
+        for (conversation, seq) in keys {
+            let item = self.items(&conversation)?.iter().find(|i| i.seq == seq).cloned();
+            out.push(((conversation, seq), item));
+        }
+        Ok(out)
+    }
+
+    /// Lines the backup took.
+    pub fn mark_backed(&mut self, taken: &[(String, i64)]) -> std::io::Result<()> {
+        self.head.unbacked.retain(|k| !taken.contains(k));
+        self.save_head()
+    }
+
+    /// The line kept for a place, if any.
+    pub fn item_at(&mut self, conversation: &str, seq: i64) -> std::io::Result<Option<Item>> {
+        Ok(self.items(conversation)?.iter().find(|i| i.seq == seq).cloned())
+    }
+
+    /// Lines brought back from the backup: kept as read, and not sent back to it.
+    pub fn write_restored(&mut self, items: Vec<(String, Item)>) -> std::io::Result<()> {
+        let mut conversations: Vec<String> = Vec::new();
+        for (conversation, item) in items {
+            let note = self.head.notes.entry(conversation.clone()).or_default();
+            note.read = note.read.max(item.seq);
+            let list = self.items(&conversation)?;
+            match list.binary_search_by_key(&item.seq, |i| i.seq) {
+                Ok(at) => list[at] = item,
+                Err(at) => list.insert(at, item),
+            }
+            if !conversations.contains(&conversation) {
+                conversations.push(conversation);
+            }
+        }
+        std::fs::create_dir_all(&self.dir)?;
+        restrict(&self.dir, true)?;
+        for conversation in conversations {
+            self.write_sealed(&self.items_path(&conversation), &self.items[&conversation])?;
+        }
+        self.save_head()
+    }
+
+    fn save_head(&self) -> std::io::Result<()> {
+        std::fs::create_dir_all(&self.dir)?;
+        restrict(&self.dir, true)?;
         self.write_sealed(&self.dir.join("vault.json"), &self.head)
     }
 

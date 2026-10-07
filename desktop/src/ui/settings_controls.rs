@@ -27,14 +27,15 @@ use crate::ui::widgets::icon;
 
 type V = SettingsView;
 
+/// Something a settings page runs on the view (a reset, a menu action).
+pub(crate) type Run = Rc<dyn Fn(&mut V, &mut Context<V>)>;
+
 /// How a setting says whether it follows the default.
 pub(crate) enum Badge {
-    /// Nothing (a setting with no default, like a form field).
-    None,
     /// Follows the default, or was changed and can go back with `reset`.
     Pref { changed: bool, reset: Rc<dyn Fn(&mut Prefs)> },
     /// A setting kept somewhere else (on the instance): Reset runs `reset`.
-    Custom { changed: bool, reset: Rc<dyn Fn(&mut V, &mut Context<V>)> },
+    Custom { changed: bool, reset: Run },
 }
 
 impl Badge {
@@ -236,8 +237,7 @@ impl SettingsView {
     }
 
     fn badge(&self, id: &str, badge: Badge, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let (changed, reset): (bool, Rc<dyn Fn(&mut V, &mut Context<V>)>) = match badge {
-            Badge::None => return div().into_any_element(),
+        let (changed, reset): (bool, Run) = match badge {
             Badge::Pref { changed, reset } => (
                 changed,
                 Rc::new(move |this: &mut V, cx: &mut Context<V>| {
@@ -737,7 +737,7 @@ pub(crate) fn field(input: impl IntoElement, p: &Palette) -> Div {
         .border_1()
         .border_color(p.border)
         .bg(p.background)
-        .px(px(12.0))
+        .px(px(1.0))
         .flex()
         .items_center()
         .text_sm()
@@ -906,6 +906,9 @@ pub(crate) struct Sliders {
     _subscriptions: Vec<Subscription>,
 }
 
+/// What a slider sets as it moves.
+pub(crate) type Setter = Rc<dyn Fn(&mut V, f32, &mut Context<V>)>;
+
 /// A mark under a slider's track: a value and its label.
 pub(crate) type Mark = (f32, String);
 
@@ -917,7 +920,7 @@ impl SettingsView {
     pub(crate) fn slider(
         &mut self,
         id: &'static str,
-        (min, max, step): (f32, f32, f32),
+        range: (f32, f32, f32),
         value: f32,
         marks: Vec<Mark>,
         format: fn(f32) -> String,
@@ -927,24 +930,42 @@ impl SettingsView {
         cx: &mut Context<Self>,
         set: fn(&mut Prefs, f32),
     ) -> AnyElement {
+        let set: Setter = Rc::new(move |this: &mut V, v: f32, cx: &mut Context<V>| this.set(cx, move |pr| set(pr, v)));
+        self.slider_with(id, range, value, marks, format, on_release, p, window, cx, set)
+    }
+
+    /// A slider that sets anything (a draft, not only the app's settings).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn slider_with(
+        &mut self,
+        id: &'static str,
+        (min, max, step): (f32, f32, f32),
+        value: f32,
+        marks: Vec<Mark>,
+        format: fn(f32) -> String,
+        on_release: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        set: Setter,
+    ) -> AnyElement {
         let state = match self.sliders.states.get(id) {
             Some(state) => state.clone(),
             None => {
                 let state = cx.new(|_| SliderState::new().min(min).max(max).step(step).default_value(value));
+                let set = set.clone();
                 let sub = cx.subscribe_in(&state, window, move |this, _, event: &SliderEvent, _, cx| match event {
                     SliderEvent::Change(v) => {
                         this.sliders.held.insert(id, true);
                         if !on_release {
-                            let v = v.end();
-                            this.set(cx, move |pr| set(pr, v));
+                            set(this, v.end(), cx);
                         } else {
                             cx.notify();
                         }
                     }
                     SliderEvent::Release(v) => {
                         this.sliders.held.insert(id, false);
-                        let v = v.end();
-                        this.set(cx, move |pr| set(pr, v));
+                        set(this, v.end(), cx);
                     }
                 });
                 self.sliders._subscriptions.push(sub);
@@ -1035,7 +1056,10 @@ impl SettingsView {
                             .cursor_pointer()
                             .when(on, |el| el.font_weight(FontWeight::BOLD).text_color(p.primary))
                             .when(!on, |el| el.hover(move |s| s.text_color(fg)))
-                            .on_click(cx.listener(move |this, _, _, cx| this.set(cx, move |pr| set(pr, at))))
+                            .on_click({
+                                let set = set.clone();
+                                cx.listener(move |this, _, _, cx| set(this, at, cx))
+                            })
                             .child(label),
                     ),
                 );

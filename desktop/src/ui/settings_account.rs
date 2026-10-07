@@ -643,13 +643,9 @@ impl SettingsView {
         let pronouns = d.pronouns.trim().to_owned();
         let bio = d.bio.trim().to_owned();
         let ready = self.account.ready;
-        let banner = banner_of(
-            &me.id,
-            (is_link(&d.banner)).then(|| d.banner.trim().to_owned()).unwrap_or_default(),
-            d.accent,
-            p,
-        )
-        .h(px(112.0));
+        let banner =
+            banner_of(&me.id, if is_link(&d.banner) { d.banner.trim().to_owned() } else { String::new() }, d.accent, p)
+                .h(px(112.0));
         let hidden = self.core.prefs().hides_personal();
         let effect = (!d.effect.is_empty())
             .then(|| self.effect_layer("preview-card", &d.effect, &me.id, d.accent, (288.0, 420.0), true, cx));
@@ -1307,7 +1303,7 @@ impl SettingsView {
         for (n, (id, label, h, body)) in rows.into_iter().enumerate() {
             form = form.child(self.row(id, &label, h, At::of(n, 3), body, p));
         }
-        let ready = !current.is_empty() && len >= PASSWORD_MIN && len <= PASSWORD_MAX && again == next && !same;
+        let ready = !current.is_empty() && (PASSWORD_MIN..=PASSWORD_MAX).contains(&len) && again == next && !same;
         let busy = self.account.password_busy;
         let form = form
             .when_some(self.account.password_error.clone(), |el, e| el.child(div().pb(px(12.0)).child(warn(e, p))))
