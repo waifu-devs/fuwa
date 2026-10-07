@@ -926,9 +926,11 @@ impl FuwaApp {
         if !up {
             self.msg_ui.missed = 0;
         }
-        let jump = up.then(|| crate::ui::chat_rows::jump_pill(self.msg_ui.missed, &p, cx));
         // An encrypted list notes where its start and last row land, to sit at the bottom while short.
         let fits = matches!(rows.first(), Some(Row::DmStart(_)) | Some(Row::Start { icon: "shield-check", .. }));
+        // Its pill shows only what came in meanwhile, as the web's `EncryptedMessages` does.
+        let jump = (up && (!fits || self.msg_ui.missed > 0))
+            .then(|| crate::ui::chat_rows::jump_pill(self.msg_ui.missed, &p, cx));
         let len = rows.len();
         div()
             .flex_1()
@@ -1807,7 +1809,10 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .line_height(px(15.0))
                 .whitespace_nowrap()
                 .text_color(p.muted_foreground)
-                .when(!m.pending && ctx.hover.as_deref() == Some(m.id.as_str()), |el| el.child(clock(m.at)))
+                .when(
+                    !m.pending && ctx.hover.as_deref() == Some(crate::ui::chat_rows::hover_key(&m.id, ctx).as_str()),
+                    |el| el.child(clock(m.at)),
+                )
                 .into_any_element(),
         )
     };
@@ -1834,10 +1839,11 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     };
     let hover_of = {
         let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
+        let key = crate::ui::chat_rows::hover_key(&m.id, ctx);
         move |hovered: &bool, _: &mut Window, cx: &mut App| {
             let of =
                 MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture: None, selection: String::new() };
-            let id = msg.id.clone();
+            let id = key.clone();
             let _ = this.update(cx, |this, cx| {
                 this.set_hover_target(of, *hovered);
                 this.hover_row(&id, *hovered, false, cx);

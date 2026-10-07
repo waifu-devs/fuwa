@@ -212,7 +212,7 @@ pub(crate) fn tool(
 /// The card the tools sit in, over the message's top right corner. It keeps
 /// the row lit while the pointer is on it, as the web's does.
 pub(crate) fn tools_frame(id: &str, ctx: &Rc<RowCtx>, p: &Palette) -> Stateful<Div> {
-    let (this, row) = (ctx.this.clone(), id.to_owned());
+    let (this, row) = (ctx.this.clone(), hover_key(id, ctx));
     div()
         .id(SharedString::from(format!("tools|{id}")))
         .absolute()
@@ -234,7 +234,16 @@ pub(crate) fn tools_frame(id: &str, ctx: &Rc<RowCtx>, p: &Palette) -> Stateful<D
 
 /// Whether a row's tools show: it's hovered, or its card is, or it's asking something.
 pub(crate) fn tools_shown(id: &str, ctx: &RowCtx) -> bool {
-    ctx.hover.as_deref() == Some(id) || ctx.deleting.as_deref() == Some(id)
+    ctx.hover.as_deref() == Some(hover_key(id, ctx).as_str()) || ctx.deleting.as_deref() == Some(id)
+}
+
+/// What a hovered row is known by: a message shown both in its channel and
+/// in the thread panel beside it lights only where the pointer is.
+pub(crate) fn hover_key(id: &str, ctx: &RowCtx) -> String {
+    match &ctx.thread {
+        Some(thread) => format!("{thread}>{id}"),
+        None => id.to_owned(),
+    }
 }
 
 /// The "Delete?" a row asks before it goes: the question, yes and no.
