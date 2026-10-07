@@ -432,5 +432,7 @@ CI runs all of it when `sdk/` or `proto/` change.
 
 Releases: pushing a `v*` tag (the server's release tag) runs
 `.github/workflows/sdk-release.yml`, which publishes the SDK to npm at the
-tag's version with provenance. It needs the `NPM_TOKEN` secret in a GitHub environment named `npm`,
-limited to `v*` tags; without it the workflow says so and publishes nothing.
+tag's version with provenance. It uses npm's trusted publishing, so there's no
+npm token: the package's trusted publisher on npmjs.com names the `waifu-devs/fuwa`
+repository, the `sdk-release.yml` workflow and the `npm` environment (limited to
+`v*` tags), and the job signs in with GitHub's OIDC token.
