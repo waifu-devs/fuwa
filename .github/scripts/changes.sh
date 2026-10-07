@@ -12,7 +12,7 @@
 # runs too.
 set -euo pipefail
 
-parts=(server desktop proto docker image sdk)
+parts=(server desktop proto docker image sdk fuwafuwa)
 
 everything() {
   for part in "${parts[@]}"; do echo "$part=true"; done
@@ -42,7 +42,7 @@ top_md() { [[ $1 != */* && $1 == *.md ]]; }
 not_for_server() {
   top_md "$1" && return 0
   case $1 in
-    docs/* | desktop/* | sdk/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | desktop/* | sdk/* | agents/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     Dockerfile | .dockerignore | \
     .github/workflows/desktop.yml | .github/workflows/release.yml | .github/workflows/publish.yml | \
     .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
@@ -55,7 +55,7 @@ not_for_desktop() {
   case $1 in
     # The desktop builds its standard emoji from this one.
     web/src/lib/emoji-data.json) return 1 ;;
-    docs/* | web/* | sdk/* | e2ee-wasm/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | web/* | sdk/* | agents/* | e2ee-wasm/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     Cargo.lock | Dockerfile | .dockerignore | buf.yaml | buf.lock | \
     .github/workflows/desktop.yml | .github/workflows/release.yml | .github/workflows/publish.yml | \
     .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
@@ -86,7 +86,7 @@ for_docker() {
 not_for_image() {
   top_md "$1" && return 0
   case $1 in
-    docs/* | desktop/* | sdk/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | desktop/* | sdk/* | agents/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     buf.yaml | buf.lock | \
     .github/workflows/ci.yml | .github/workflows/desktop.yml | .github/workflows/release.yml | \
     .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
@@ -104,7 +104,15 @@ for_sdk() {
   return 1
 }
 
-server=false desktop=false proto=false docker=false image=false sdk=false
+# fuwafuwa (agents/fuwafuwa), the feedback agent: its own folder, from the SDK on npm.
+for_fuwafuwa() {
+  case $1 in
+    agents/fuwafuwa/* | .github/workflows/ci.yml | .github/scripts/*) return 0 ;;
+  esac
+  return 1
+}
+
+server=false desktop=false proto=false docker=false image=false sdk=false fuwafuwa=false
 count=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -115,7 +123,9 @@ while IFS= read -r f; do
   for_docker "$f" && docker=true
   not_for_image "$f" || image=true
   for_sdk "$f" && sdk=true
+  for_fuwafuwa "$f" && fuwafuwa=true
 done <<< "$files"
 # Nothing changed (an empty commit, or a merge that only moved history): run nothing.
 echo "changed files: $count" >&2
-printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\nsdk=%s\n' "$server" "$desktop" "$proto" "$docker" "$image" "$sdk"
+printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\nsdk=%s\nfuwafuwa=%s\n' \
+  "$server" "$desktop" "$proto" "$docker" "$image" "$sdk" "$fuwafuwa"

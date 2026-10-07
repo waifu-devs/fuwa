@@ -1,4 +1,4 @@
-import { bucket, defineRailway, image, project, ref, service, volume } from "railway/iac";
+import { bucket, defineRailway, github, image, project, ref, service, volume } from "railway/iac";
 
 /**
  * fuwa.chat, the fuwa instance Waifu Devs hosts. It has a Railway project of its own,
@@ -54,6 +54,11 @@ const MEDIA_HOST_URL = "";
  * holds while another part restarts wait up to 30 seconds.
  */
 const DRAIN = 45;
+/**
+ * Where @fuwafuwa posts the feedback it's given, as "<server id>/<channel id>" on
+ * fuwa.chat, in a server it's been added to. Empty, it isn't deployed at all.
+ */
+const FEEDBACK_CHANNEL = "01M3YTPEZBVSPZVWGFZ5AGGE6R/01M4ARF2YAS9698KE30AKZ2DG1";
 
 /**
  * How fuwa.chat runs (see "Scaling out" in the README). `null` is one `fuwa` process
@@ -145,6 +150,43 @@ export default defineRailway((ctx) => {
     FUWA_NODE_NAME: "fuwa",
   };
 
+  // @fuwafuwa (agents/fuwafuwa), the agent that takes feedback about fuwa: it posts what
+  // it's told in FEEDBACK_CHANNEL, and every TRIAGE_HOURS has Claude group what came in
+  // and files GitHub issues for it. Railway builds it from this repository (its
+  // Dockerfile) whenever master changes it, once the commit's checks pass; fuwa's image
+  // and deploys don't touch it. A client like any other: it reaches fuwa.chat at its
+  // public address and keeps nothing (the channel is its state), so it has no volume or
+  // domain. One replica: two would both answer and both triage. Set by hand as shared
+  // variables, before FEEDBACK_CHANNEL is: FUWAFUWA_TOKEN, its agent token (Settings >
+  // Agents on fuwa.chat), FUWAFUWA_GITHUB_TOKEN, a fine-grained GitHub token with Issues:
+  // read and write on waifu-devs/fuwa and nothing else, and FUWAFUWA_ANTHROPIC_API_KEY,
+  // for Claude.
+  const fuwafuwa = FEEDBACK_CHANNEL
+    ? [
+        service("fuwafuwa", {
+          source: github("waifu-devs/fuwa", {
+            branch: "master",
+            rootDirectory: "agents/fuwafuwa",
+            checkSuites: true,
+          }),
+          // Watch patterns start at the repository's root, whatever the root directory.
+          build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile", watchPatterns: ["/agents/fuwafuwa/**"] },
+          regions: { [REGION]: 1 },
+          deploy: { drainingSeconds: 10 },
+          env: {
+            FUWA_URL: `https://${DOMAIN}`,
+            FUWA_TOKEN: ctx.shared.FUWAFUWA_TOKEN,
+            FEEDBACK_CHANNEL,
+            TRIAGE_HOURS: "6",
+            ANTHROPIC_API_KEY: ctx.shared.FUWAFUWA_ANTHROPIC_API_KEY,
+            GITHUB_TOKEN: ctx.shared.FUWAFUWA_GITHUB_TOKEN,
+            GITHUB_REPO: "waifu-devs/fuwa",
+            GITHUB_LABEL: "feedback",
+          },
+        }),
+      ]
+    : [];
+
   if (!SPLIT) {
     const fuwa = service("fuwa", {
       source: fuwaImage(),
@@ -166,7 +208,7 @@ export default defineRailway((ctx) => {
       },
     });
 
-    return project("fuwa", { resources: [data, replica, fuwa] });
+    return project("fuwa", { resources: [data, replica, fuwa, ...fuwafuwa] });
   }
 
   const { gateways, shards } = SPLIT;
@@ -341,6 +383,6 @@ export default defineRailway((ctx) => {
   });
 
   return project("fuwa", {
-    resources: [data, replica, directory, ...shardParts.flat(), gateway, ...media, ...regionParts],
+    resources: [data, replica, directory, ...shardParts.flat(), gateway, ...media, ...regionParts, ...fuwafuwa],
   });
 });

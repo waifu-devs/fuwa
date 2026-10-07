@@ -178,16 +178,19 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
-      # Every service the config declares: `fuwa`, or each part of a split instance
-      # (the directory, the shards, then the gateways). --from-source pulls :latest
-      # again; a plain redeploy would rerun the old image.
+      # Every service the config runs fuwa's image on: `fuwa`, or each part of a split
+      # instance (the directory, the shards, then the gateways); fuwafuwa builds from
+      # the repository itself. --from-source pulls :latest again; a plain redeploy
+      # would rerun the old image.
       - name: Redeploy
         run: |
           services=$(node --experimental-strip-types --input-type=module -e '
             const { createRailwayContext, project } = await import("railway/iac");
             const { default: config } = await import("./.railway/railway.ts");
             const { resources } = await config(createRailwayContext({ environment: "production" }), project);
-            for (const r of resources.flat(Infinity)) if (r.type === "service") console.log(r.name);
+            for (const r of resources.flat(Infinity)) {
+              if (r.type === "service" && r.source?.image?.startsWith(`${process.env.IMAGE}:`)) console.log(r.name);
+            }
           ')
           for service in $services; do
             npx --yes @railway/cli@5.63.1 redeploy --service "$service" --from-source --yes

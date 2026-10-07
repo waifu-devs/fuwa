@@ -33,6 +33,7 @@ jobs:
       proto: ${{ steps.changes.outputs.proto }}
       docker: ${{ steps.changes.outputs.docker }}
       sdk: ${{ steps.changes.outputs.sdk }}
+      fuwafuwa: ${{ steps.changes.outputs.fuwafuwa }}
     steps:
       - uses: actions/checkout@v4
       - id: changes
@@ -237,10 +238,36 @@ jobs:
           node -e 'const f = require("@waifu-devs/fuwa"); if (typeof f.Agent !== "function") process.exit(1)'
           node --input-type=module -e 'import { Agent } from "@waifu-devs/fuwa"; if (typeof Agent !== "function") process.exit(1)'
 
+  fuwafuwa:
+    # The feedback agent (agents/fuwafuwa): it typechecks and its tests pass, and
+    # its Dockerfile builds. Railway deploys it from master once checks pass.
+    name: fuwafuwa (typecheck, tests)
+    needs: changes
+    if: needs.changes.outputs.fuwafuwa == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agents/fuwafuwa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: agents/fuwafuwa/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: agents/fuwafuwa/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm test
+      - name: The image Railway builds
+        run: docker build -t fuwafuwa .
+
   # The one check to require: it passes when every job this change needed passed.
   passed:
     name: CI passed
-    needs: [changes, server, desktop, proto, docker, sdk]
+    needs: [changes, server, desktop, proto, docker, sdk, fuwafuwa]
     if: always() && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
