@@ -74,6 +74,9 @@ impl FuwaApp {
     pub(crate) fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.dialog.clone()?;
         let p = pal(cx);
+        if let Some(el) = self.render_join_dialog(&dialog, window, cx) {
+            return Some(el);
+        }
         if let Dialog::Profile { key, user_id, server } = &dialog {
             return Some(self.render_profile(key, user_id, server.as_deref(), cx));
         }
@@ -103,13 +106,6 @@ impl FuwaApp {
             _ => String::new(),
         };
         let (glyph, title, body, content, action): (&str, String, String, AnyElement, Option<&str>) = match &dialog {
-            Dialog::CreateServer { .. } => (
-                "sparkles",
-                "Make a server".into(),
-                "A home for your people. You can change its name and picture later.".into(),
-                labeled("Server name", field(), &p).into_any_element(),
-                Some(if busy { "Making it…" } else { "Make it" }),
-            ),
             Dialog::JoinInvite { .. } => (
                 "user-plus",
                 "Join a server".into(),
@@ -384,6 +380,9 @@ impl FuwaApp {
                 Some("Allow"),
             ),
             Dialog::Profile { .. }
+            | Dialog::CreateServer { .. }
+            | Dialog::Apply { .. }
+            | Dialog::Application { .. }
             | Dialog::Welcome { .. }
             | Dialog::Onboarding { .. }
             | Dialog::Secure { .. }
@@ -480,6 +479,8 @@ impl FuwaApp {
             Dialog::Poll { .. } => "poll",
             Dialog::PollVoters { .. } => "voters",
             Dialog::Picture { .. } => "picture",
+            Dialog::Apply { .. } => "apply",
+            Dialog::Application { .. } => "application",
         };
         Some(
             motion::fade_in(

@@ -20,7 +20,7 @@ use gpui_kit::{
 use crate::core::config::Density;
 use crate::core::i18n::{Arg, t};
 use crate::core::shared;
-use crate::core::store::{Connection, InstanceState, user_name};
+use crate::core::store::{InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav, Target};
@@ -32,7 +32,7 @@ use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
-    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, is_agent, pal,
+    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, icon_button_in, is_agent, pal,
     primary_button, soft_button,
 };
 
@@ -893,7 +893,7 @@ impl FuwaApp {
             Nav::Home { dm: Some((key, id)) } => self.dm_view(&key, &id, window, cx),
             Nav::Home { dm: None } => home_splash(&p, window).into_any_element(),
             Nav::Friends { key } => self.friends_view(&key, window, cx),
-            Nav::Instance { key } => self.instance_page(&key, window, cx),
+            Nav::Instance { key } => self.instance_home(&key, window, cx),
         };
         div().flex_1().h_full().min_w_0().flex().bg(p.chat_surface).child(body)
     }
@@ -1587,123 +1587,6 @@ impl FuwaApp {
             .child(self.message_list(window, cx))
             .child(self.composer_bar(blocked, window, cx));
         div().size_full().flex().child(column).into_any_element()
-    }
-
-    // ───────────────────────── An instance ─────────────────────────
-
-    fn instance_page(&mut self, key: &str, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = pal(cx);
-        let Some((name, url, me, connection, problem, can_create)) = self.core.shared.read(|s| {
-            s.instance(key).map(|i| {
-                let creation = i.node.as_ref().map(|n| n.server_creation).unwrap_or_default();
-                let can_create = creation == pb::ServerCreation::Everyone as i32
-                    || creation == pb::ServerCreation::Unspecified as i32
-                    || (creation == pb::ServerCreation::Admins as i32 && i.admin);
-                (i.name(), i.url.clone(), i.me.clone(), i.connection, i.problem.clone(), can_create)
-            })
-        }) else {
-            return div().into_any_element();
-        };
-        let streamer = self.prefs.streamer_mode;
-        let state = match connection {
-            Connection::Live => "Connected",
-            Connection::Connecting => "Connecting…",
-            Connection::Reconnecting => "Reconnecting…",
-            Connection::Offline => "Offline",
-            Connection::SignedOut => "Signed out",
-        };
-        let signed_out = connection == Connection::SignedOut;
-        let k = key.to_owned();
-        let body = card(&p)
-            .w(px(520.0))
-            .p(px(28.0))
-            .flex()
-            .flex_col()
-            .gap(px(18.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .size(px(64.0))
-                            .rounded(corner(20.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(mix(p.card, p.primary, 0.16))
-                            .child(fuwa_mark(42.0, &p)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(name))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .text_sm()
-                                    .text_color(p.muted_foreground)
-                                    .child(conn_dot(connection, &p).border_color(p.card))
-                                    .child(state)
-                                    .when(!streamer, |el| el.child("·").child(url.clone())),
-                            ),
-                    ),
-            )
-            .when_some(me.filter(|_| !signed_out), |el, me| {
-                el.child(div().flex().items_center().gap(px(12.0)).child(avatar(Some(&me), 40.0, &p)).child(
-                    div().flex().flex_col().child(div().font_weight(FontWeight::BOLD).child(user_name(&me))).child(
-                        div().text_sm().text_color(p.muted_foreground).child(if streamer {
-                            "Signed in".to_owned()
-                        } else {
-                            format!("Signed in as @{}", me.username)
-                        }),
-                    ),
-                ))
-            })
-            .when_some(error_line(problem.as_deref().filter(|_| connection != Connection::Live), &p), |el, e| {
-                el.child(e)
-            })
-            .child(div().flex().gap(px(10.0)).flex_wrap().map(|el| {
-                if signed_out {
-                    el.child(primary_button("again", "Sign in again", &p).on_click(cx.listener({
-                        let k = k.clone();
-                        move |this, _, window, cx| this.reconnect(&k, window, cx)
-                    })))
-                } else {
-                    el.when(can_create, |el| {
-                        el.child(primary_button("create", "Make a server", &p).on_click(cx.listener({
-                            let k = k.clone();
-                            move |this, _, window, cx| {
-                                this.open_dialog(Dialog::CreateServer { key: k.clone() }, window, cx)
-                            }
-                        })))
-                    })
-                    .child(soft_button("join", "Join with an invite", &p).on_click(cx.listener(
-                        {
-                            let k = k.clone();
-                            move |this, _, window, cx| {
-                                this.open_dialog(Dialog::JoinInvite { key: k.clone() }, window, cx)
-                            }
-                        },
-                    )))
-                }
-            }));
-        div()
-            .id("instance-page")
-            .size_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .p(px(32.0))
-            .child(motion::rise(body, SharedString::from(format!("instance|{key}")), Duration::ZERO, 18.0))
-            .into_any_element()
     }
 
     /// Polls go in a server's plain channels, never shared ones, for those who may make them,

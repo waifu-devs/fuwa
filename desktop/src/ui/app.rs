@@ -184,6 +184,16 @@ pub enum Dialog {
         key: String,
         name: String,
     },
+    /// Applying to a server that lets people in by hand (`ui/join.rs`, the form in `home.apply`).
+    Apply {
+        key: String,
+        server: String,
+    },
+    /// Where your application to a server stands (`ui/join.rs`).
+    Application {
+        key: String,
+        server: String,
+    },
 }
 
 /// A small menu hanging under a bell, or over your name.
@@ -296,6 +306,8 @@ pub struct FuwaApp {
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
     pub friends: crate::ui::friends::Friends,
+    /// The instance page: Browse, invites, applying and making servers (`ui::instance_home`, `ui::join`).
+    pub home: crate::ui::instance_home::Home,
     pub onboarding: crate::ui::onboarding::Onboarding,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
@@ -371,6 +383,7 @@ impl FuwaApp {
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
+        let (home, home_subs) = crate::ui::instance_home::Home::new(window, cx);
         let (gifs, gif_subs) = crate::ui::gifs::Gifs::new(window, cx);
         let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
         let mut subscriptions = vec![
@@ -426,6 +439,7 @@ impl FuwaApp {
         let weak = cx.entity().downgrade();
         subscriptions.extend(thread_subs);
         subscriptions.extend(friend_subs);
+        subscriptions.extend(home_subs);
         subscriptions.extend(gif_subs);
         subscriptions.extend(onboarding_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
@@ -534,6 +548,7 @@ impl FuwaApp {
             search,
             threads,
             friends,
+            home,
             onboarding,
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
@@ -798,6 +813,7 @@ impl FuwaApp {
     }
 
     pub fn navigate(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
+        self.home.moved(&nav);
         if self.nav == nav {
             return;
         }
@@ -1361,15 +1377,13 @@ impl FuwaApp {
                 cx.notify();
             });
         }
+        if let Dialog::CreateServer { key } = &dialog {
+            self.reset_create_form(key, window, cx);
+        }
         self.dialog = Some(dialog);
         if matches!(
             self.dialog,
-            Some(
-                Dialog::CreateServer { .. }
-                    | Dialog::JoinInvite { .. }
-                    | Dialog::CreateChannel { .. }
-                    | Dialog::Moderate { .. }
-            )
+            Some(Dialog::JoinInvite { .. } | Dialog::CreateChannel { .. } | Dialog::Moderate { .. })
         ) {
             self.dialog_input.update(cx, |s, cx| s.focus(window, cx));
         } else {
@@ -1463,19 +1477,8 @@ impl FuwaApp {
         let value = self.dialog_input.read(cx).value().trim().to_owned();
         let core = self.core.clone();
         match dialog {
-            Dialog::CreateServer { key } => {
-                if value.is_empty() {
-                    self.dialog_error = Some("Give it a name.".into());
-                    cx.notify();
-                    return;
-                }
-                self.dialog_busy = true;
-                let rx = core.spawn({
-                    let (core, key) = (core.clone(), key.clone());
-                    async move { core.create_server(&key, &value).await }
-                });
-                self.after_dialog(rx, key, window, cx);
-            }
+            Dialog::CreateServer { .. } => self.create_server_now(window, cx),
+            Dialog::Apply { .. } | Dialog::Application { .. } => {}
             Dialog::JoinInvite { key } => {
                 self.dialog_busy = true;
                 cx.notify();
