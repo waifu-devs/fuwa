@@ -109,7 +109,8 @@ impl FuwaApp {
         let Some(server) = server else {
             return (div().into_any_element(), div().into_any_element());
         };
-        let open = self.channel_in(key, server_id);
+        // The voice channel open as its stage, or the text channel open.
+        let open = self.stage_in(key, server_id).or_else(|| self.channel_in(key, server_id));
 
         // The web's server menu trigger: the name over "N members · instance",
         // a chevron, and the server's menu under it.
@@ -267,6 +268,7 @@ impl FuwaApp {
             y += ROW;
         }
         let mut highlight = None;
+        let mut highlight_h = ROW - 2.0;
         let mut n = 0;
         // Where each row sits, for dragging channels into order (ui/arrange.rs).
         let mut slots = Vec::new();
@@ -464,6 +466,10 @@ impl FuwaApp {
                 if let Some((people, height)) = self.voice_people(key, server_id, &c.id, window, cx) {
                     rows = rows.child(people);
                     y += height;
+                    // An open voice channel's highlight takes in its people, as the web's does.
+                    if active {
+                        highlight_h = ROW - 2.0 + height;
+                    }
                 }
             }
         }
@@ -477,7 +483,7 @@ impl FuwaApp {
                         .left_0()
                         .right_0()
                         .top(px(at))
-                        .h(px(ROW - 2.0))
+                        .h(px(highlight_h))
                         .rounded(crate::ui::theme::radius_lg())
                         .bg(alpha(p.primary, 0.15)),
                 )
@@ -512,24 +518,13 @@ impl FuwaApp {
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let kind = pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text);
         let (glyph, voice) = (channel_glyph(c), kind == pb::ChannelType::Voice);
-        // The voice channel you're in reads as the one you're in.
-        let joined = voice
-            && self.core.call().is_some_and(|v| v.instance == key && v.server_id == server && v.channel_id == c.id);
-        let strong = active || unread > 0 || joined;
-        // Who's in a voice channel; they're listed under it too.
-        let in_voice = if kind == pb::ChannelType::Voice {
-            self.core.shared.read(|s| {
-                s.instance(key).map(|i| crate::core::calls::in_channel(&i.voice, server, &c.id).len()).unwrap_or(0)
-            })
-        } else {
-            0
-        };
+        let strong = active || unread > 0;
         let of = MenuOf::Channel { key: key.to_owned(), server: server.to_owned(), channel: c.id.clone() };
         let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
         // The web's ChannelRow: muted text that darkens on hover, bold for
         // unread, bold in the primary color when open.
         let hover = alpha(p.muted, 0.7);
-        let color = if active || joined {
+        let color = if active {
             p.primary
         } else if unread > 0 || lit {
             p.foreground
@@ -584,13 +579,10 @@ impl FuwaApp {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
                 el.on_click(cx.listener(move |this, _, window, cx| this.open_channel(&key, &server, &id, window, cx)))
             })
-            // A voice channel joins it, with sound (src/core/voice).
+            // A voice channel opens its stage, joining as it opens (voice_stage.rs).
             .when(voice, |el| {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
-                el.on_click(cx.listener(move |this, _, _, cx| {
-                    this.core.join_voice(&key, &server, &id);
-                    cx.notify();
-                }))
+                el.on_click(cx.listener(move |this, _, window, cx| this.open_stage(&key, &server, &id, window, cx)))
             })
             // The unread dot at the list's edge.
             .when(unread > 0 && !active, |el| {
@@ -601,7 +593,7 @@ impl FuwaApp {
                     .flex_none()
                     .opacity(if active { 1.0 } else { 0.7 })
                     .group_hover(group.clone(), |s| s.opacity(1.0))
-                    .child(icon(glyph).size(px(18.0)).text_color(if joined { p.success } else { color })),
+                    .child(icon(glyph).size(px(18.0)).text_color(color)),
             )
             .child(
                 div()
@@ -651,19 +643,6 @@ impl FuwaApp {
                         .text_size(px(11.2))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .child(if unread > 99 { "99+".to_owned() } else { unread.to_string() }),
-                )
-            })
-            .when(in_voice > 0, |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(3.0))
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(p.primary)
-                        .child(icon("users").size(px(13.0)))
-                        .child(in_voice.to_string()),
                 )
             })
     }

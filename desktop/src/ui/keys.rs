@@ -148,6 +148,10 @@ impl FuwaApp {
             }
         }
         cx.stop_propagation();
+        if action.id == "pushToTalk" {
+            self.push_to_talk(&ev.keystroke, cx);
+            return;
+        }
         self.run_shortcut(action, window, cx);
     }
 
@@ -175,6 +179,20 @@ impl FuwaApp {
             "insertTimestamp" => self.open_time_picker(window, cx),
             "searchServer" => self.focus_search(window, cx),
             "toggleMembers" => self.members_open = !self.members_open,
+            // Mute and deafen work in and out of calls, as the web's do (call_parts.rs).
+            "toggleMute" => {
+                let (mute, deaf) = self.core.selves();
+                self.core.set_self_mute(!(mute || deaf));
+            }
+            "toggleDeafen" => {
+                let (_, deaf) = self.core.selves();
+                self.core.set_self_deaf(!deaf);
+            }
+            "toggleRecording" => {
+                if let Some(call) = self.core.call() {
+                    self.core.set_recording(!call.self_record);
+                }
+            }
             "openSettings" => {
                 if self.settings.is_some() {
                     self.settings = None;

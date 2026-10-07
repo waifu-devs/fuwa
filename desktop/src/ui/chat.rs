@@ -909,6 +909,13 @@ impl FuwaApp {
         if let Some(locked) = self.sso_locked(key, server) {
             return self.sso_gate(key, &locked, &p, window, cx);
         }
+        // A voice channel opens as its stage (voice_stage.rs).
+        if let Some(stage) = self.stage_in(key, server)
+            && let Some(voice) =
+                self.core.shared.read(|s| s.instance(key).and_then(|i| i.channel(server, &stage).cloned()))
+        {
+            return self.voice_stage(key, server, &voice, window, cx);
+        }
         let channel = self
             .channel_in(key, server)
             .and_then(|id| self.core.shared.read(|s| s.instance(key).and_then(|i| i.channel(server, &id).cloned())));
@@ -1423,6 +1430,10 @@ impl FuwaApp {
                 let open = self.pins.is_some();
                 el.child(self.pins_button("pins-toggle", open, cx))
             })
+            .when_some(
+                status.is_some_and(|s| s.is_ready()).then(|| self.dm_call_button(key, id, window, cx)).flatten(),
+                |el, button| el.child(button),
+            )
             .child(
                 div()
                     .id("safety")
@@ -1485,6 +1496,7 @@ impl FuwaApp {
             .flex()
             .flex_col()
             .child(header)
+            .when_some(self.dm_call_strip(key, id, window, cx), |el, strip| el.child(strip))
             .child(self.message_list(window, cx))
             .child(self.composer_bar(blocked, window, cx));
         div().size_full().flex().child(column).into_any_element()

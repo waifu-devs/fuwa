@@ -1,6 +1,8 @@
-//! The voice channel you're in, above who you are at the bottom of the
-//! sidebar: where, how the connection is, and mute, deafen and leave. And
-//! the people in each voice channel under its row, lit up while they speak.
+//! The call you're in, above who you are at the bottom of the sidebar (the
+//! web's components/calls/CallPanel.tsx): how the connection is, where the
+//! call is and how long it's run, hanging up, and the camera and record
+//! buttons. And the people in each voice channel under its row
+//! (VoiceUsers.tsx), lit up while they speak.
 
 use std::time::Duration;
 
@@ -10,151 +12,235 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use crate::core::calls::clock;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::devices::Trouble;
 use crate::core::voice::{CallView, Status};
-use crate::ui::app::FuwaApp;
+use crate::ui::app::{FuwaApp, Nav};
+use crate::ui::call_parts::{
+    CallPop, Side, Size, amber, camera_button, green, hang_up_button, ping_color, screen_button, signal, voice_avatar,
+    voice_flags,
+};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, icon, icon_button_in, pal};
+use crate::ui::theme::{alpha, radius_lg, radius_md};
+use crate::ui::widgets::{app_badge, icon, is_agent, pal};
 
-/// How tall one person under a voice channel is.
-pub const PERSON: f32 = 28.0;
+/// How tall one person under a voice channel is: `py-1` around a 24 px avatar.
+pub const PERSON: f32 = 32.0;
 
 impl FuwaApp {
-    /// The call bar, while you're in a call; and the notice when one ended on its own.
+    /// The call panel, while you're in a call; and the notice when one ended on its own.
     pub(crate) fn call_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if let Some(ended) = self.core.take_call_ended() {
-            self.toast("phone-off", "Left the voice channel".into(), ended.message(), None, None, cx);
+            self.toast("phone-off", t("desktop.voice.left"), ended.message(), None, None, cx);
         }
-        let call = self.core.call()?;
+        self.call_notices(cx);
+        let Some(call) = self.core.call() else {
+            self.calls.ticking = None;
+            self.calls.mic_missing = false;
+            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. })) {
+                self.calls.pop = None;
+            }
+            return None;
+        };
+        self.keep_ticking(&call, cx);
+        self.apply_call_settings();
         let p = pal(cx);
-        let (channel, server) = self.core.shared.read(|s| {
-            let i = s.instance(&call.instance);
-            (
-                i.and_then(|i| i.channel(&call.server_id, &call.channel_id))
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default(),
-                i.and_then(|i| i.server(&call.server_id)).map(|s| s.name.clone()).unwrap_or_default(),
-            )
-        });
+        let (where_, dm) = self.call_place(&call);
         let (label, tint) = match call.status {
-            Status::Connected => ("Voice connected", p.success),
-            Status::Connecting => ("Connecting…", p.primary),
-            Status::Reconnecting => ("Reconnecting…", p.destructive),
+            Status::Connected => (t("dms-calls.calls.status.connected"), green().into()),
+            Status::Connecting => (t("dms-calls.calls.status.connecting"), p.muted_foreground.into()),
+            Status::Reconnecting => (t("dms-calls.calls.status.reconnecting"), gpui_kit::Hsla::from(amber())),
         };
-        let muted = call.self_mute || call.self_deaf;
-        let dot = div().size(px(8.0)).rounded_full().bg(tint);
-        let dot = if call.status == Status::Connected {
-            dot.into_any_element()
-        } else {
-            // Breathes while it's working on it.
-            motion::ambient(dot, "call-dot", Duration::from_millis(1200), window, |el, t| {
-                el.opacity(0.35 + 0.65 * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()))
+        let connected = call.status == Status::Connected;
+        let seconds = call.since.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+        let open = self.calls.pop == Some(CallPop::Connection);
+        let hover = alpha(p.muted, 0.6);
+        let status = div()
+            .id("call-status")
+            .relative()
+            .ml(px(-4.0))
+            .mr(px(-4.0))
+            .px(px(4.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(radius_md())
+            .text_sm()
+            .line_height(px(20.0))
+            .font_weight(FontWeight::EXTRA_BOLD)
+            .text_color(tint)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .active(|s| s.opacity(0.9))
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.panel.details")).build(window, cx)
             })
-        };
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_call_pop(CallPop::Connection, cx)))
+            .child(signal(&call.status, &call.quality, &p, "panel", window))
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            .when(connected, |el| {
+                el.child(
+                    div()
+                        .ml_auto()
+                        .flex_none()
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(ping_color(&call.quality, &p))
+                        .child(call.quality.ping_text()),
+                )
+            })
+            .when(open, |el| el.child(self.hang(self.connection_card(&call, window, cx), Side::Above)));
+        let fg = p.foreground;
+        let place = div()
+            .id("call-where")
+            .flex()
+            .min_w_0()
+            .items_center()
+            .gap(px(4.0))
+            .text_xs()
+            .line_height(px(16.0))
+            .text_color(p.muted_foreground)
+            .cursor_pointer()
+            .hover(move |s| s.text_color(fg))
+            .on_click(cx.listener(|this, _, window, cx| this.open_call_place(window, cx)))
+            .when(dm, |el| {
+                el.child(
+                    div()
+                        .id("call-lock")
+                        .flex_none()
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.panel.encrypted"))
+                                .build(window, cx)
+                        })
+                        .child(icon("lock-keyhole").size(px(12.0))),
+                )
+            })
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(where_))
+            .when(connected, |el| el.child(div().ml_auto().flex_none().pl(px(8.0)).child(clock(seconds))));
+        let no_mic = call.trouble.contains(&Trouble::NoMicrophone);
+        if no_mic && !self.calls.mic_missing && !call.self_mute {
+            self.core.mute_for_no_microphone();
+        }
+        self.calls.mic_missing = no_mic;
         let trouble = match (call.trouble.contains(&Trouble::NoMicrophone), call.trouble.contains(&Trouble::NoSpeakers))
         {
-            (true, true) => Some("No microphone or speakers found"),
-            (true, false) => Some("No microphone found: others can't hear you"),
-            (false, true) => Some("No speakers found: you can't hear others"),
+            (true, true) => Some(t("desktop.voice.noDevices")),
+            (true, false) => Some(t("workspace.calls.mic.notFound")),
+            (false, true) => Some(t("desktop.voice.noSpeakers")),
             (false, false) => None,
         };
-        let bar = div()
-            .flex_none()
+        let warn: gpui_kit::Rgba = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };
+        let leave = if dm { t("dms-calls.calls.dm.hangUp") } else { t("dms-calls.calls.controls.disconnect") };
+        let buttons = div()
+            .flex()
+            .gap(px(6.0))
+            .child(camera_button("panel-camera", Size::Sm, true, &p).h(px(32.0)))
+            .child(screen_button("panel-screen", Size::Sm, true, &p).h(px(32.0)))
+            .when_some(self.record_button("panel", Size::Sm, true, window, cx), |el, b| el.child(b));
+        let body = div()
             .flex()
             .flex_col()
-            .gap(px(6.0))
-            .px(px(12.0))
-            .py(px(10.0))
-            .bg(alpha(p.rail, 0.6))
-            .border_t_1()
-            .border_color(p.border)
+            .gap(px(4.0))
+            .p(px(8.0))
+            .pb(px(6.0))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(tint)
-                                    .child(dot)
-                                    .child(label),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(p.muted_foreground)
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .overflow_hidden()
-                                    .child(format!("{channel} · {server}")),
-                            ),
-                    )
-                    .child(icon_button_in("call-leave", "phone-off", &p, p.destructive).on_click(cx.listener(
+                    .child(div().flex_1().min_w_0().px(px(6.0)).flex().flex_col().child(status).child(place))
+                    .child(hang_up_button("call-leave", Size::Sm, leave, &p).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.core.leave_voice();
                             cx.notify();
                         },
                     ))),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(6.0))
-                    .child(
-                        // Deafened is muted too.
-                        toggle("call-mute", if muted { "mic-off" } else { "mic" }, muted, &p).on_click(cx.listener(
-                            |this, _, _, cx| {
-                                let muted = this.core.call().is_some_and(|c| c.self_mute || c.self_deaf);
-                                this.core.set_self_mute(!muted);
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .child(
-                        toggle(
-                            "call-deaf",
-                            if call.self_deaf { "headphone-off" } else { "headphones" },
-                            call.self_deaf,
-                            &p,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let deaf = this.core.call().is_some_and(|c| c.self_deaf);
-                            this.core.set_self_deaf(!deaf);
-                            cx.notify();
-                        })),
-                    ),
-            )
+            .child(buttons)
             .when_some(trouble, |el, text| {
-                el.child(
+                el.child(motion::rise(
                     div()
                         .flex()
-                        .items_center()
+                        .items_start()
                         .gap(px(6.0))
+                        .px(px(6.0))
                         .text_xs()
-                        .text_color(p.destructive)
-                        .child(icon("triangle-alert").size(px(13.0)))
-                        .child(text),
-                )
+                        .line_height(px(16.0))
+                        .text_color(warn)
+                        .child(div().mt(px(2.0)).flex_none().child(icon("triangle-alert").size(px(12.0))))
+                        .child(div().min_w_0().child(text)),
+                    "call-problem",
+                    Duration::ZERO,
+                    6.0,
+                ))
             });
-        let id = SharedString::from(format!("call-bar|{}|{}", call.server_id, call.channel_id));
-        Some(motion::rise(bar, id, Duration::ZERO, 12.0).into_any_element())
+        let panel = div().flex_none().border_t_1().border_color(p.border).bg(alpha(p.background, 0.6)).child(body);
+        let id = SharedString::from(format!("call-bar|{}|{}{}", call.instance, call.channel_id, call.conversation_id));
+        Some(motion::rise(panel, id, Duration::ZERO, 12.0).into_any_element())
+    }
+
+    /// Draws the window again every second while a call is connected, for its clock.
+    fn keep_ticking(&mut self, call: &CallView, cx: &mut Context<Self>) {
+        if call.status != Status::Connected {
+            self.calls.ticking = None;
+            return;
+        }
+        if self.calls.ticking.is_some() {
+            return;
+        }
+        self.calls.ticking = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Where the call is, as the panel says it ("Lounge / Waifu Devs", or
+    /// the other person), and whether it's a direct message's.
+    pub(crate) fn call_place(&self, call: &CallView) -> (String, bool) {
+        self.core.shared.read(|s| {
+            let i = s.instance(&call.instance);
+            if call.is_dm() {
+                let me = i.and_then(|i| i.me.as_ref().map(|m| m.id.clone())).unwrap_or_default();
+                let name = i
+                    .and_then(|i| i.dms.conversations.iter().find(|c| c.id == call.conversation_id))
+                    .and_then(|c| c.users.iter().find(|u| u.id != me))
+                    .map(crate::core::store::user_name)
+                    .unwrap_or_default();
+                return (name, true);
+            }
+            let channel = i
+                .and_then(|i| i.channel(&call.server_id, &call.channel_id))
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| t("dms-calls.calls.panel.voice"));
+            let server = i.and_then(|i| i.server(&call.server_id)).map(|s| s.name.clone()).unwrap_or_default();
+            let text = if server.is_empty() {
+                channel
+            } else {
+                t_with("dms-calls.calls.panel.where", &[("channel", Arg::Str(&channel)), ("server", Arg::Str(&server))])
+            };
+            (text, false)
+        })
+    }
+
+    /// Goes to the call: its voice channel, or its conversation.
+    fn open_call_place(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(call) = self.core.call() else { return };
+        if call.is_dm() {
+            self.navigate(Nav::Home { dm: Some((call.instance.clone(), call.conversation_id.clone())) }, window, cx);
+        } else {
+            self.open_stage(&call.instance, &call.server_id, &call.channel_id, window, cx);
+        }
     }
 
     /// The people in a voice channel, for under its row, and how tall they are.
     pub(crate) fn voice_people(
-        &self,
+        &mut self,
         key: &str,
         server: &str,
         channel_id: &str,
@@ -162,77 +248,79 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> Option<(AnyElement, f32)> {
         let p = pal(cx);
-        let people = self.core.shared.read(|s| {
+        let (people, me) = self.core.shared.read(|s| {
             let i = s.instance(key)?;
             let list: Vec<_> = crate::core::calls::in_channel(&i.voice, server, channel_id)
                 .into_iter()
                 .map(|v| (v.clone(), i.users.get(&v.user_id).cloned(), i.display_name(Some(server), &v.user_id)))
                 .collect();
-            Some(list)
+            Some((list, i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default()))
         })?;
         if people.is_empty() {
             return None;
         }
-        let call: Option<CallView> =
-            self.core.call().filter(|c| c.instance == key && c.server_id == server && c.channel_id == channel_id);
+        let call: Option<CallView> = self.core.call().filter(|c| c.in_channel(key, channel_id));
         let height = PERSON * people.len() as f32;
-        let rows = people.into_iter().map(|(state, user, name)| {
+        let mut rows = div().ml(px(24.0)).flex().flex_col();
+        for (n, (state, user, name)) in people.into_iter().enumerate() {
             let speaking = call.as_ref().is_some_and(|c| c.speaking.contains(&state.user_id));
-            // The ring springs on and off rather than blinking with each word.
-            let ring = motion::follow(
-                SharedString::from(format!("ring|{server}|{}", state.user_id)),
-                if speaking { 1.0 } else { 0.0 },
-                window,
-                cx,
-            );
-            let muted = state.self_mute || state.server_mute;
-            let deaf = state.self_deaf || state.server_deaf;
-            div()
+            let tag = format!("side|{server}|{}", state.user_id);
+            let from = format!("side|{}", state.user_id);
+            let pop = CallPop::Person {
+                key: key.to_owned(),
+                server: Some(server.to_owned()),
+                channel: Some(channel_id.to_owned()),
+                user: state.user_id.clone(),
+                from: from.clone(),
+            };
+            let open = self.calls.pop.as_ref() == Some(&pop);
+            let hover = alpha(p.muted, 0.7);
+            let fg = p.foreground;
+            let agent = is_agent(user.as_ref());
+            let row = div()
+                .id(SharedString::from(format!("voice-person|{channel_id}|{}", state.user_id)))
                 .h(px(PERSON))
-                .pl(px(34.0))
-                .pr(px(10.0))
+                .px(px(8.0))
                 .flex()
                 .items_center()
                 .gap(px(8.0))
+                .rounded(radius_lg())
                 .text_sm()
+                .line_height(px(20.0))
                 .text_color(if speaking { p.foreground } else { p.muted_foreground })
+                .cursor_pointer()
+                .when(open, |el| el.bg(hover))
+                .hover(move |s| s.bg(hover).text_color(fg))
+                .child(voice_avatar(user.as_ref(), &state.user_id, 24.0, 9.6, 2.0, speaking, &tag, window, cx))
                 .child(
-                    div().rounded_full().border_2().border_color(alpha(p.success, ring.clamp(0.0, 1.0))).child(avatar(
-                        user.as_ref(),
-                        18.0,
-                        &p,
-                    )),
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .when(speaking, |el| el.font_weight(FontWeight::BOLD))
+                        .child(name),
                 )
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
-                .when(muted, |el| el.child(person_icon("mic-off", state.server_mute, &p)))
-                .when(deaf, |el| el.child(person_icon("headphone-off", state.server_deaf, &p)))
-        });
-        Some((div().flex().flex_col().children(rows).into_any_element(), height))
+                .when(agent, |el| el.child(app_badge(SharedString::from(format!("agent|{tag}")), "APP", &p)))
+                .child(voice_flags(&state, &p));
+            let row = if state.user_id == me {
+                row
+            } else {
+                row.on_click(cx.listener(move |this, _, _, cx| this.toggle_call_pop(pop.clone(), cx)))
+            };
+            let mut holder = div().relative().child(row);
+            if open {
+                let card = self.person_card(key, Some(server), Some(channel_id), &state.user_id, window, cx);
+                holder = holder.child(self.hang(card, Side::Right));
+            }
+            rows = rows.child(motion::slide_in(
+                holder,
+                SharedString::from(format!("voice-in|{channel_id}|{}|{n}", state.user_id)),
+                -12.0,
+            ));
+        }
+        // The row above keeps a 2 px gap under it that, on the web, comes after the people.
+        Some((div().mt(px(-2.0)).pb(px(2.0)).child(rows).into_any_element(), height))
     }
-}
-
-/// Mute or deafen: red while on.
-fn toggle(id: &'static str, name: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let (bg, fg) =
-        if on { (alpha(p.destructive, 0.16), p.destructive) } else { (alpha(p.primary, 0.08), p.foreground) };
-    let hover = if on { alpha(p.destructive, 0.24) } else { alpha(p.primary, 0.16) };
-    div()
-        .id(id)
-        .flex_1()
-        .h(px(30.0))
-        .rounded(corner(10.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .bg(bg)
-        .text_color(fg)
-        .hover(move |s| s.bg(hover))
-        .active(|s| s.top(px(1.0)))
-        .child(icon(name).size(px(17.0)))
-}
-
-/// Muted or deafened, red when a moderator did it.
-fn person_icon(name: &str, by_moderator: bool, p: &Palette) -> impl IntoElement {
-    icon(name).size(px(13.0)).text_color(if by_moderator { p.destructive } else { p.muted_foreground })
 }

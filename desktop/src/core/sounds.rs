@@ -18,6 +18,17 @@ pub enum Sound {
     Join,
     Call,
     Ring,
+    /// A call's cues (the web's `cue`): coming in or switching on goes up, going goes down.
+    Connect,
+    Disconnect,
+    SomeoneJoined,
+    SomeoneLeft,
+    Mute,
+    Unmute,
+    Deafen,
+    Undeafen,
+    /// Someone in the call started recording: two soft, even beeps.
+    Recording,
 }
 
 #[derive(Clone, Copy)]
@@ -42,6 +53,15 @@ fn tune(sound: Sound) -> Tune {
         Sound::Ring => {
             Tune { notes: &[783.99, 987.77, 1174.66, 987.77, 1174.66], step: 0.11, length: 0.3, wave: Wave::Triangle }
         }
+        Sound::Connect => Tune { notes: &[523.25, 659.25, 783.99, 1046.5], step: 0.07, length: 0.2, wave: Wave::Sine },
+        Sound::Disconnect => Tune { notes: &[783.99, 659.25, 523.25], step: 0.08, length: 0.22, wave: Wave::Sine },
+        Sound::SomeoneJoined => Tune { notes: &[659.25, 987.77], step: 0.07, length: 0.18, wave: Wave::Sine },
+        Sound::SomeoneLeft => Tune { notes: &[987.77, 659.25], step: 0.07, length: 0.18, wave: Wave::Sine },
+        Sound::Mute => Tune { notes: &[698.46, 523.25], step: 0.05, length: 0.12, wave: Wave::Triangle },
+        Sound::Unmute => Tune { notes: &[523.25, 698.46], step: 0.05, length: 0.12, wave: Wave::Triangle },
+        Sound::Deafen => Tune { notes: &[587.33, 440.0, 349.23], step: 0.05, length: 0.14, wave: Wave::Triangle },
+        Sound::Undeafen => Tune { notes: &[349.23, 440.0, 587.33], step: 0.05, length: 0.14, wave: Wave::Triangle },
+        Sound::Recording => Tune { notes: &[880.0, 880.0], step: 0.16, length: 0.1, wave: Wave::Sine },
     }
 }
 

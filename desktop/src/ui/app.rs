@@ -373,6 +373,8 @@ pub struct FuwaApp {
     /// The quick switcher, and the shortcut sheet, when open.
     pub switcher: Option<crate::ui::keys::Switcher>,
     pub sheet_open: bool,
+    /// Calls: the open voice channel, the card open over one, calls turned down (`ui::call_parts`).
+    pub(crate) calls: crate::ui::call_parts::CallsUi,
     /// How many things that take focus were open last frame.
     covers: usize,
     /// The page's color before the theme changed, fading out over the new one.
@@ -593,6 +595,7 @@ impl FuwaApp {
             switcher: None,
             sheet_open: false,
             covers: 0,
+            calls: Default::default(),
             emoji_open: false,
             emoji_query,
             emoji: Default::default(),
@@ -801,6 +804,10 @@ impl FuwaApp {
     pub fn target(&self) -> Option<Target> {
         match &self.nav {
             Nav::Server { key, server } => {
+                // A voice channel's page has no messages of its own.
+                if self.stage_in(key, server).is_some() {
+                    return None;
+                }
                 let channel = self.channel_in(key, server)?;
                 let secure = self.core.shared.read(|s| {
                     s.instance(key)
@@ -858,6 +865,7 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) {
         self.channel_of.insert(format!("{key}|{server}"), channel.to_owned());
+        self.calls.stage = None;
         self.nav = Nav::Server { key: key.to_owned(), server: server.to_owned() };
         self.after_move(window, cx);
     }
@@ -1835,6 +1843,10 @@ impl FuwaApp {
             self.context = None;
         } else if self.menu.is_some() {
             self.menu = None;
+        } else if self.calls.pop.is_some() {
+            self.calls.pop = None;
+        } else if self.calls.recordings.is_some() {
+            self.calls.recordings = None;
         } else if self.rail.editing.is_some() {
             self.rail.editing = None;
         } else if self.dialog.is_some() {
@@ -1900,6 +1912,7 @@ impl FuwaApp {
             .key_context("Fuwa")
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::on_key))
+            .capture_key_up(cx.listener(Self::on_key_up))
             // Any input means you're here (`core::presence::people`).
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.core.idle.seen()))
             .on_mouse_move(cx.listener(|this, _, _, _| this.core.idle.seen()))
@@ -1950,6 +1963,7 @@ impl FuwaApp {
                         .child(self.render_main(window, cx)),
                 ),
         )
+        .when_some(self.render_call_pop_layer(cx), |el, layer| el.child(layer))
         .when_some(update_note, |el, note| el.child(note))
         // The connect view draws its own frame: the welcome page, or a dialog over a dimmed app.
         .when_some(self.connect.clone(), |el, connect| el.child(connect))
@@ -1977,9 +1991,11 @@ impl FuwaApp {
             )
         })
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+        .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
         .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
         .when_some(self.render_sheet(cx), |el, sheet| el.child(sheet))
         .when_some(self.render_switcher(cx), |el, switcher| el.child(switcher))
+        .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
         .child(self.render_toasts(window, cx))
         .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
             // A new theme washes in: the old page color fades away over it.

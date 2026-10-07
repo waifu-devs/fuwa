@@ -25,10 +25,14 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::quality::{Route, Sample};
+
 /// The largest packet read or framed.
 const MOST_PACKET: usize = 2000;
 /// The most people's sound a call keeps track of.
 pub const MOST_STREAMS: usize = 64;
+/// How often the connection's stats are read, as the web's quality.ts does.
+const STATS_EVERY: Duration = Duration::from_secs(2);
 /// How long reaching the media part over TCP may take.
 const TCP_CONNECT: Duration = Duration::from_secs(4);
 
@@ -59,6 +63,8 @@ pub enum Happened {
     },
     /// It came back by itself after breaking.
     Restored,
+    /// A look at how the connection is doing, every couple of seconds.
+    Stats(super::quality::Sample),
 }
 
 /// One packet from a socket: the protocol, from where, to which of ours.
@@ -85,6 +91,8 @@ pub struct Link {
     /// Whose stream each received track is.
     streams: HashMap<Mid, String>,
     sent: u64,
+    /// The worst jitter the received sound had since the last stats, in ms.
+    jitter: u32,
 }
 
 impl Drop for Link {
@@ -142,7 +150,7 @@ impl Link {
     /// A connection that sends the microphone and opens the data channel,
     /// and the offer for JoinVoice.
     pub fn offer() -> (Self, String) {
-        let mut rtc = Rtc::builder().build(Instant::now());
+        let mut rtc = Rtc::builder().set_stats_interval(Some(STATS_EVERY)).build(Instant::now());
         let mut change = rtc.sdp_api();
         let microphone = change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None);
         change.add_channel("fuwa".into());
@@ -161,6 +169,7 @@ impl Link {
             tasks: Vec::new(),
             streams: HashMap::new(),
             sent: 0,
+            jitter: 0,
         };
         (link, offer.to_sdp_string())
     }
@@ -361,6 +370,20 @@ impl Link {
                     },
                 };
                 happened.push(Happened::Heard(who, data.data.to_vec()));
+            }
+            // Jitter comes in RTP time: 48 ticks a millisecond for Opus.
+            Event::MediaIngressStats(stats) => self.jitter = self.jitter.max(stats.jitter / 48),
+            Event::PeerStats(stats) => {
+                let pair = stats.selected_candidate_pair.as_ref();
+                let ping = pair.and_then(|p| p.current_round_trip_time).or(stats.rtt);
+                let route = pair.map(|p| if p.protocol == Protocol::Tcp { Route::Tcp } else { Route::Udp });
+                let loss = stats.ingress_loss_fraction.unwrap_or(0.0).max(stats.egress_loss_fraction.unwrap_or(0.0));
+                happened.push(Happened::Stats(Sample {
+                    ping: ping.map(|d| d.as_millis().min(u128::from(u32::MAX)) as u32),
+                    loss,
+                    jitter: std::mem::take(&mut self.jitter),
+                    route,
+                }));
             }
             _ => {}
         }
