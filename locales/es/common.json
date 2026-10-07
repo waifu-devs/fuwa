@@ -54,5 +54,14 @@
   "copy.accountId": "el ID de la cuenta",
   "copy.key": "la clave",
   "copy.backupCodes": "tus códigos de respaldo",
-  "copy.password": "la contraseña"
+  "copy.password": "la contraseña",
+  "desktopApp.download": "Descargar para {system}",
+  "desktopApp.get": "Obtener la app de escritorio",
+  "desktopApp.more": "Otras descargas",
+  "desktopApp.version": "La app de escritorio de fuwa, versión {version}",
+  "desktopApp.setup": "Instalador",
+  "desktopApp.dmg": "Imagen de disco (Apple silicon)",
+  "desktopApp.appimage": "AppImage",
+  "desktopApp.deb": "Paquete de Debian o Ubuntu",
+  "desktopApp.through": "Se descarga a través de este servidor de fuwa, así que GitHub nunca te ve."
 }

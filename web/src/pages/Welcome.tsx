@@ -3,7 +3,8 @@ import { m as motion, useReducedMotion } from "motion/react";
 import { useMemo } from "react";
 import { BubbleBackground } from "@/components/animate-ui/components/backgrounds/bubble";
 import { RotatingText, RotatingTextContainer } from "@/components/animate-ui/primitives/texts/rotating";
-import { Connect } from "@/components/Connect";
+import { Connect, useHomeInstance } from "@/components/Connect";
+import { DesktopDownload } from "@/components/DesktopDownload";
 import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
 import { useI18n } from "@/i18n/react";
@@ -28,6 +29,8 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
   const { t } = useI18n();
   // The same list while the language stays, so the rotation's timer isn't restarted on every render.
   const phrases = useMemo(() => PHRASES.map((key) => t(key)), [t]);
+  // The fuwa server serving this page, which hands out the desktop app.
+  const home = useHomeInstance();
   return (
     <div className="relative isolate min-h-full overflow-x-clip overflow-y-auto">
       <BubbleBackground
@@ -89,6 +92,7 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
               </li>
             ))}
           </ul>
+          {home && <DesktopDownload node={home.node} url={home.url} align="start" />}
         </div>
 
         <motion.div

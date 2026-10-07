@@ -71,7 +71,7 @@ export function Connect({ initialUrl, onDone }: { initialUrl?: string; onDone?: 
 }
 
 /** When this page is served by a fuwa server, that server is the obvious first choice. */
-function useHomeInstance() {
+export function useHomeInstance() {
   const [home, setHome] = useState<{ url: string; node: Node } | null>(null);
   useEffect(() => {
     let cancelled = false;

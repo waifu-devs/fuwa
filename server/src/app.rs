@@ -405,6 +405,7 @@ impl App {
         pb::Node {
             regions: self.regions(),
             versions: Some(crate::compat::versions(self.releases.newer())),
+            desktop_app: self.releases.desktop_app(),
             ..node_info(&self.settings(), self.announcement())
         }
     }
@@ -601,6 +602,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         }),
         regions: vec![],
         versions: Some(crate::compat::versions(None)),
+        desktop_app: None,
     }
 }
 

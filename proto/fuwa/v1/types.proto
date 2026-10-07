@@ -47,6 +47,49 @@ message Node {
   // Which fuwa features this instance has and since when, and a newer
   // release when its check found one (docs/compatibility.md).
   Versions versions = 16;
+  // The desktop app this instance hands out, when its release check knows
+  // of one (docs/self-hosting.md, "Updating").
+  DesktopApp desktop_app = 19;
+}
+
+// fuwa's desktop app, from the latest release. Each download is passed
+// through this instance, so GitHub never learns who fetched it; the app
+// itself checks it was signed by fuwa's release key when it updates.
+message DesktopApp {
+  // Such as "0.4.2".
+  string version = 1;
+  repeated DesktopDownload downloads = 2;
+}
+
+// One of the desktop app's files, for one system.
+message DesktopDownload {
+  // Its path on this instance, such as "/updates/files/fuwa-desktop-0.4.2-x86_64-windows-setup.exe".
+  string path = 1;
+  // Its size in bytes.
+  uint64 size = 2;
+  DesktopSystem system = 3;
+  DesktopPackage package = 4;
+  // The processor it's built for, such as "x86_64" or "aarch64".
+  string arch = 5;
+}
+
+enum DesktopSystem {
+  DESKTOP_SYSTEM_UNSPECIFIED = 0;
+  DESKTOP_SYSTEM_WINDOWS = 1;
+  DESKTOP_SYSTEM_MACOS = 2;
+  DESKTOP_SYSTEM_LINUX = 3;
+}
+
+enum DesktopPackage {
+  DESKTOP_PACKAGE_UNSPECIFIED = 0;
+  // Windows' setup program.
+  DESKTOP_PACKAGE_SETUP = 1;
+  // A macOS disk image.
+  DESKTOP_PACKAGE_DMG = 2;
+  // A Linux AppImage, which runs anywhere.
+  DESKTOP_PACKAGE_APPIMAGE = 3;
+  // A Debian or Ubuntu package.
+  DESKTOP_PACKAGE_DEB = 4;
 }
 
 // What an app needs to know to work well with this instance. Nothing here
