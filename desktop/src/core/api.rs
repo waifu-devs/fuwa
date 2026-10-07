@@ -211,6 +211,7 @@ clients! {
     admin => "AdminService" pb::admin_service_client::AdminServiceClient<Transport>,
     commands => "CommandService" pb::command_service_client::CommandServiceClient<Transport>,
     gifs => "GifService" pb::gif_service_client::GifServiceClient<Transport>,
+    profile_items => "ProfileItemService" pb::profile_item_service_client::ProfileItemServiceClient<Transport>,
 }
 
 impl Api {

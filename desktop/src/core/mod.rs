@@ -33,6 +33,7 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod profile_items;
 pub mod reports;
 pub mod search;
 pub mod secrets;

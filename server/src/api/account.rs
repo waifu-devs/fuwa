@@ -567,6 +567,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             "banner_url": profile.banner_url,
             "accent_color": profile.accent_color.map(|c| format!("#{c:06x}")),
             "profile_effect": profile.effect,
+            "profile_decoration": account.decoration_id,
             "status": account.status,
             "status_expires_at": account.status_expires_at.map_or(Value::Null, time),
             "instance_admin": account.admin,

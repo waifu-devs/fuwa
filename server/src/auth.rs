@@ -15,8 +15,10 @@ use crate::error::{Error, Result};
 use crate::id::now_ms;
 use crate::node::{Account, NodeDb};
 
-/// Who a request comes from.
+/// Who a request comes from. Made once per request and dropped with it, so
+/// the account isn't boxed.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Viewer {
     Account {
         account: Account,

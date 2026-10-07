@@ -39,8 +39,8 @@ export function EmojiImage({
   return <img src={src} alt={label} onError={() => setBroken(true)} {...shared} />;
 }
 
-/** A moving picture's first frame, drawn once. */
-function FirstFrame({ src, onBroken, ...props }: { src: string; onBroken: (broken: boolean) => void } & HTMLAttributes<HTMLCanvasElement>) {
+/** A moving picture's first frame, drawn once (moving emoji and decorations under Reduce motion). */
+export function FirstFrame({ src, onBroken, ...props }: { src: string; onBroken: (broken: boolean) => void } & HTMLAttributes<HTMLCanvasElement>) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const picture = new Image();

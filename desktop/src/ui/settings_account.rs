@@ -21,7 +21,7 @@ use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::text::{ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, error_line, icon, labeled, primary_button, soft_button};
+use crate::ui::widgets::{avatar, decorated, error_line, icon, labeled, primary_button, soft_button};
 
 /// What the account pages hold while they're open.
 pub struct AccountForm {
@@ -42,6 +42,8 @@ pub struct AccountForm {
     error: Option<String>,
     password_error: Option<String>,
     password_saved: bool,
+    /// A decoration or server look being saved.
+    wearing: bool,
 }
 
 impl AccountForm {
@@ -67,6 +69,7 @@ impl AccountForm {
             error: None,
             password_error: None,
             password_saved: false,
+            wearing: false,
         }
     }
 }
@@ -192,26 +195,34 @@ impl SettingsView {
         let Some((key, me)) = self.account_ready(window, cx) else {
             return signed_out(p).into_any_element();
         };
+        let looks = self.looks(&key, p, cx);
+        let worn = self
+            .core
+            .shared
+            .read(|s| s.instance(&key).and_then(|i| i.decoration_url(None, None, Some(&me))).map(str::to_owned));
         let f = &self.account;
         let saved = f.saved.is_some_and(|at| at.elapsed() < Duration::from_secs(3));
         let picture = div()
             .flex()
             .items_center()
             .gap(px(18.0))
-            .child(div().relative().child(avatar(Some(&me), 88.0, p)).when(f.uploading, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .rounded_full()
-                        .bg(alpha(p.rail, 0.55))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(gpui_kit::white())
-                        .child(icon("loader-circle").size(px(24.0))),
-                )
-            }))
+            .child(div().relative().child(decorated(avatar(Some(&me), 88.0, p), 88.0, worn.as_deref())).when(
+                f.uploading,
+                |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .rounded_full()
+                            .bg(alpha(p.rail, 0.55))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(gpui_kit::white())
+                            .child(icon("loader-circle").size(px(24.0))),
+                    )
+                },
+            ))
             .child(
                 div()
                     .flex()
@@ -255,6 +266,7 @@ impl SettingsView {
             .gap(px(22.0))
             .when_some(self.account_picker(&key, p, cx), |el, picker| el.child(picker))
             .child(picture)
+            .children(looks)
             .child(
                 div()
                     .flex()
@@ -325,6 +337,190 @@ impl SettingsView {
                     }),
             );
         body.into_any_element()
+    }
+
+    /// The decoration you wear here, and your look in each server that
+    /// offers its own (docs/profile-items.md); nothing while the instance
+    /// has decorations off or offers none.
+    fn looks(&self, key: &str, p: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use crate::core::profile_items::Scope;
+        type ServerLook = (String, String, Vec<pb::ProfileItem>, Vec<pb::ProfileItem>, String, String);
+        let (on, mine, worn, servers) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(key) else { return (false, Vec::new(), String::new(), Vec::new()) };
+            let on = i.decorations_on();
+            let mine = i.items_of(&Scope::Instance, pb::ProfileItemKind::Decoration);
+            let worn = i.me.as_ref().map(|m| m.decoration_id.clone()).unwrap_or_default();
+            let servers: Vec<ServerLook> = i
+                .servers
+                .iter()
+                .filter_map(|server| {
+                    let scope = Scope::Server(server.id.clone());
+                    let decorations = if on { i.items_of(&scope, pb::ProfileItemKind::Decoration) } else { Vec::new() };
+                    let effects = if i.node.as_ref().is_some_and(|n| n.profile_effects) {
+                        i.items_of(&scope, pb::ProfileItemKind::Effect)
+                    } else {
+                        Vec::new()
+                    };
+                    if decorations.is_empty() && effects.is_empty() {
+                        return None;
+                    }
+                    let member = i.my_member(&server.id)?;
+                    Some((
+                        server.id.clone(),
+                        server.name.clone(),
+                        decorations,
+                        effects,
+                        member.decoration_id.clone(),
+                        member.effect.clone(),
+                    ))
+                })
+                .collect();
+            (on, mine, worn, servers)
+        });
+        let mut out = Vec::new();
+        let busy = self.account.wearing;
+        if on && (!mine.is_empty() || !worn.is_empty()) {
+            let mut row = div().flex().flex_wrap().gap(px(8.0)).child(
+                look_chip("deco-none".into(), &t("desktop.profileItems.noDecoration"), None, worn.is_empty(), p)
+                    .on_click(cx.listener(|this, _, _, cx| this.wear(None, Some(String::new()), None, cx))),
+            );
+            for item in &mine {
+                let id = item.id.clone();
+                row = row.child(
+                    look_chip(
+                        SharedString::from(format!("deco|{}", item.id)),
+                        &item.name,
+                        Some(&item.picture_url),
+                        worn == item.id,
+                        p,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.wear(None, Some(id.clone()), None, cx))),
+                );
+            }
+            out.push(
+                labeled(&t("accountsettings.decorations.label"), row.when(busy, |el| el.opacity(0.6)), p)
+                    .into_any_element(),
+            );
+        }
+        if !servers.is_empty() {
+            let mut list = div().flex().flex_col().gap(px(14.0));
+            for (sid, name, decorations, effects, deco, effect) in servers {
+                let mut lines = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .p(px(14.0))
+                    .rounded(corner(14.0))
+                    .bg(p.secondary)
+                    .child(div().font_weight(FontWeight::BOLD).child(name));
+                if !decorations.is_empty() {
+                    let mut row = div().flex().flex_wrap().gap(px(8.0)).child({
+                        let sid = sid.clone();
+                        look_chip(
+                            SharedString::from(format!("sdeco-own|{sid}")),
+                            &t("accountsettings.serverProfiles.useMine"),
+                            None,
+                            deco.is_empty(),
+                            p,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.wear(Some(sid.clone()), Some(String::new()), None, cx)
+                        }))
+                    });
+                    for item in decorations {
+                        let (sid, id) = (sid.clone(), item.id.clone());
+                        row = row.child(
+                            look_chip(
+                                SharedString::from(format!("sdeco|{sid}|{id}")),
+                                &item.name,
+                                Some(&item.picture_url),
+                                deco == item.id,
+                                p,
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.wear(Some(sid.clone()), Some(id.clone()), None, cx)
+                            })),
+                        );
+                    }
+                    lines = lines.child(
+                        div().text_xs().text_color(p.muted_foreground).child(t("accountsettings.decorations.label")),
+                    );
+                    lines = lines.child(row);
+                }
+                if !effects.is_empty() {
+                    let mut row = div().flex().flex_wrap().gap(px(8.0)).child({
+                        let sid = sid.clone();
+                        look_chip(
+                            SharedString::from(format!("seff-own|{sid}")),
+                            &t("accountsettings.serverProfiles.useMine"),
+                            None,
+                            effect.is_empty(),
+                            p,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.wear(Some(sid.clone()), None, Some(String::new()), cx)
+                        }))
+                    });
+                    for item in effects {
+                        let (sid, id) = (sid.clone(), item.id.clone());
+                        // An effect item's id names it in lowercase.
+                        let on = effect.eq_ignore_ascii_case(&item.id);
+                        row = row.child(
+                            look_chip(SharedString::from(format!("seff|{sid}|{id}")), &item.name, None, on, p)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.wear(Some(sid.clone()), None, Some(id.clone()), cx)
+                                })),
+                        );
+                    }
+                    lines = lines.child(
+                        div().text_xs().text_color(p.muted_foreground).child(t("desktop.profileItems.effectLabel")),
+                    );
+                    lines = lines.child(row);
+                }
+                list = list.child(lines);
+            }
+            out.push(
+                labeled(&t("desktop.profileItems.inServers"), list.when(busy, |el| el.opacity(0.6)), p)
+                    .into_any_element(),
+            );
+        }
+        out
+    }
+
+    /// Wears a decoration (or none) here, or in one server a decoration or effect
+    /// (empty for your own there).
+    fn wear(
+        &mut self,
+        server: Option<String>,
+        decoration: Option<String>,
+        effect: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.account.key.clone() else { return };
+        if self.account.wearing {
+            return;
+        }
+        self.account.wearing = true;
+        self.account.error = None;
+        let core = self.core.clone();
+        let rx = self.core.spawn(async move {
+            match server {
+                Some(sid) => core.set_server_look(&key, &sid, effect, decoration).await,
+                None => core.set_decoration(&key, &decoration.unwrap_or_default()).await,
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = rx.await else { return };
+            let _ = this.update(cx, |this, cx| {
+                this.account.wearing = false;
+                if let Err(err) = result {
+                    this.account.error = Some(err.message);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn save_profile(&mut self, patch: ProfilePatch, cx: &mut Context<Self>) {
@@ -681,6 +877,43 @@ pub fn device_label(agent: &str) -> (&'static str, String) {
             t_with("common.device.on", &[("browser", Arg::Str(&app)), ("os", Arg::Str(os))])
         },
     )
+}
+
+/// One choice of decoration or effect: its picture (for a decoration) and name.
+fn look_chip(
+    id: SharedString,
+    name: &str,
+    picture: Option<&str>,
+    on: bool,
+    p: &Palette,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    use gpui_kit::StyledImage as _;
+    let hover = alpha(p.primary, 0.08);
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .pl(px(if picture.is_some() { 4.0 } else { 12.0 }))
+        .pr(px(12.0))
+        .h(px(40.0))
+        .rounded_full()
+        .border_1()
+        .border_color(if on { p.primary } else { p.border })
+        .bg(if on { alpha(p.primary, 0.12) } else { p.card.into() })
+        .cursor_pointer()
+        .text_sm()
+        .font_weight(FontWeight::BOLD)
+        .when(!on, |el| el.hover(move |s| s.bg(hover)))
+        .active(|s| s.top(px(1.0)))
+        .when_some(picture.filter(|u| !u.is_empty()), |el, url| {
+            el.child(
+                gpui_kit::img(SharedString::from(url.to_owned()))
+                    .size(px(32.0))
+                    .object_fit(gpui_kit::ObjectFit::Contain),
+            )
+        })
+        .child(name.to_owned())
 }
 
 #[cfg(test)]

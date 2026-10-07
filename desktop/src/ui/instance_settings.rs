@@ -63,6 +63,7 @@ enum Page {
     Federation,
     Accounts,
     Servers,
+    ProfileItems,
     Announcement,
 }
 
@@ -79,6 +80,7 @@ impl Page {
             Page::Federation => "Other instances",
             Page::Accounts => "Accounts",
             Page::Servers => "Servers",
+            Page::ProfileItems => "Profile items",
             Page::Announcement => "Announcement",
         }
     }
@@ -95,6 +97,7 @@ impl Page {
             Page::Federation => "network",
             Page::Accounts => "users",
             Page::Servers => "server",
+            Page::ProfileItems => "sparkles",
             Page::Announcement => "megaphone",
         }
     }
@@ -111,13 +114,16 @@ impl Page {
             Page::Federation => "Let servers here share channels with servers on other fuwa instances.",
             Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
             Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
+            Page::ProfileItems => {
+                "Effects and avatar decorations everyone here can wear on their profile. Changes apply right away."
+            }
             Page::Announcement => "A banner at the top of the app for everyone on this instance.",
         }
     }
 
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
-        matches!(self, Page::Accounts | Page::Servers | Page::Announcement)
+        matches!(self, Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement)
     }
 }
 
@@ -136,7 +142,7 @@ const GROUPS: [(&str, &[Page]); 2] = [
             Page::Federation,
         ],
     ),
-    ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
+    ("MANAGE", &[Page::Accounts, Page::Servers, Page::ProfileItems, Page::Announcement]),
 ];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
@@ -229,6 +235,8 @@ pub struct InstanceSettingsView {
     accounts: accounts::Accounts,
     servers: servers::Servers,
     federation: federation::Federation,
+    /// The Profile items page, made when first opened.
+    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -278,6 +286,7 @@ impl InstanceSettingsView {
             accounts,
             servers,
             federation,
+            profile_items: None,
             _subscriptions: Vec::new(),
             _boxes: boxes,
         };
@@ -1393,6 +1402,10 @@ impl Render for InstanceSettingsView {
             );
             y += 30.0;
             for &pg in pages {
+                // Instances from before profile items have none to offer.
+                if pg == Page::ProfileItems && !self.instance_has("profile-items") {
+                    continue;
+                }
                 let on = pg == page;
                 if on {
                     at_y = y;
@@ -1446,6 +1459,23 @@ impl Render for InstanceSettingsView {
                 Page::Accounts => self.accounts_page(&p, window, cx),
                 Page::Servers => self.servers_page(&p, window, cx),
                 Page::Announcement => self.announcement_page(&p, window, cx),
+                Page::ProfileItems => {
+                    let (core, key) = (self.core.clone(), self.key.clone());
+                    self.profile_items
+                        .get_or_insert_with(|| {
+                            cx.new(|cx| {
+                                crate::ui::profile_items::ProfileItemsView::new(
+                                    core,
+                                    key,
+                                    crate::core::profile_items::Scope::Instance,
+                                    window,
+                                    cx,
+                                )
+                            })
+                        })
+                        .clone()
+                        .into_any_element()
+                }
                 _ => div().into_any_element(),
             }
         } else if let Some(error) = &self.load_error {
@@ -1462,7 +1492,7 @@ impl Render for InstanceSettingsView {
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
                 Page::Federation => self.federation_page(&p, window, cx),
-                Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
+                Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement => div().into_any_element(),
             }
         };
         let changed = self.changed();

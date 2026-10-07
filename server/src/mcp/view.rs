@@ -332,6 +332,10 @@ pub fn event(e: &pb::Event) -> Value {
         Some(Payload::EmojisUpdated(p)) => {
             ("emojis_updated", json!({ "emojis": p.emojis.iter().map(emoji).collect::<Vec<_>>() }))
         }
+        Some(Payload::ProfileItemsUpdated(p)) => (
+            "profile_items_updated",
+            json!({ "items": p.items.iter().map(|i| json!({ "id": i.id, "name": i.name })).collect::<Vec<_>>() }),
+        ),
         Some(Payload::ApplicationUpdated(_)) => ("application_updated", json!({})),
         Some(Payload::SecureRecordAdded(_)) | Some(Payload::SecureRecordDeleted(_)) => ("secure_channel", json!({})),
         Some(Payload::SharedChannelsUpdated(_)) => ("shared_channels_updated", json!({})),

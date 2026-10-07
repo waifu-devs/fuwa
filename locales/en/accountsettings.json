@@ -322,5 +322,10 @@
   "signIn.freshNote": "For your safety, sign out and back in first, then try again within 10 minutes.",
   "signIn.passwordLabel": "Your password",
   "signIn.codeLabel": "Your two-step code",
-  "signIn.continueTo": "Continue to {name}"
+  "signIn.continueTo": "Continue to {name}",
+  "decorations.label": "Avatar decoration",
+  "decorations.hint": "A picture around your avatar, wherever it shows on this instance. These are the ones it offers.",
+  "serverProfiles.useMine": "Use my profile's",
+  "serverProfiles.effectHint": "Plays on your card in this server instead of your profile's effect. The server may offer its own.",
+  "serverProfiles.decorationHint": "Shows around your avatar in this server instead of your profile's."
 }

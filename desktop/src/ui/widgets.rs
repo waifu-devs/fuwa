@@ -88,6 +88,24 @@ pub fn avatar(user: Option<&pb::User>, size: f32, p: &Palette) -> Div {
     }
 }
 
+/// An avatar with the decoration someone wears (docs/profile-items.md): its
+/// picture centred over the avatar at 1.2 times its size, catching nothing.
+/// The picture is always an upload on the instance (`InstanceState::decoration_url`).
+pub fn decorated(avatar: Div, size: f32, decoration: Option<&str>) -> Div {
+    let el = div().relative().size(px(size)).flex_none().child(avatar);
+    match decoration.filter(|url| !url.is_empty()) {
+        None => el,
+        Some(url) => el.child(
+            img(SharedString::from(url.to_owned()))
+                .absolute()
+                .left(px(-size * 0.1))
+                .top(px(-size * 0.1))
+                .size(px(size * 1.2))
+                .object_fit(ObjectFit::Contain),
+        ),
+    }
+}
+
 /// A server's icon: its picture, or its initials on its color. Round until
 /// it's open or hovered, then a rounded square, like Discord's.
 pub fn server_icon(server: &pb::Server, size: f32, radius: f32, p: &Palette) -> Div {

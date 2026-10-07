@@ -319,6 +319,7 @@ impl App {
                         | pb::MediaPurpose::Emoji
                         | pb::MediaPurpose::Avatar
                         | pb::MediaPurpose::Attachment
+                        | pb::MediaPurpose::Decoration
                 ) && row.server_id.as_deref() == Some(server_id)
             }
         };

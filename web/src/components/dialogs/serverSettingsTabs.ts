@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import { bit, has, type Access } from "@/lib/permissions";
 
 /*
@@ -22,6 +23,7 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   emoji: (a) => has(a, Permission.MANAGE_EMOJI),
+  "profile-items": (a) => has(a, Permission.MANAGE_SERVER),
   integrations: (a) => has(a, Permission.MANAGE_WEBHOOKS) || has(a, Permission.MANAGE_SERVER),
   shared: (a) => has(a, Permission.MANAGE_SERVER),
   recordings: (a) => has(a, Permission.MANAGE_SERVER),
@@ -43,7 +45,9 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
 export function useServerSettingsTabs(instanceKey: string, serverId: string): string[] {
   const access = useAccess(instanceKey, serverId);
   const admin = useFuwa((s) => !!s.instances[instanceKey]?.admin);
-  return useMemo(() => settingsTabsFor(access, admin), [access, admin]);
+  // Profile items only on instances that have them.
+  const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
+  return useMemo(() => settingsTabsFor(access, admin).filter((id) => itemsHere || id !== "profile-items"), [access, admin, itemsHere]);
 }
 
 /** The same, from access already worked out (for a right-click menu). */

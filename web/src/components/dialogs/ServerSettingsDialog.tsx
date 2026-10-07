@@ -28,6 +28,7 @@ import {
   SettingsIcon,
   ShieldIcon,
   SmilePlusIcon,
+  SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
@@ -49,6 +50,7 @@ import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
+import { ProfileItems } from "@/components/settings/ProfileItems";
 import { Webhooks } from "@/components/settings/server/Webhooks";
 import { SharedChannels } from "@/components/settings/server/SharedChannels";
 import { SharedGlyph } from "@/components/chat/Shared";
@@ -259,6 +261,13 @@ function useSettingsGroups(instanceKey: string, server: Server, can: (id: string
       keywords: "emoji emote custom sticker upload",
     },
     {
+      id: "profile-items",
+      label: t("serversettings.nav.profileItems"),
+      icon: SparklesIcon,
+      description: t("serversettings.nav.profileItemsAbout"),
+      keywords: "profile effect effects decoration decorations avatar frame card sparkles",
+    },
+    {
       id: "integrations",
       label: t("serversettings.nav.integrations"),
       icon: WebhookIcon,
@@ -346,6 +355,7 @@ const PAGES: Record<string, (p: PageProps) => ReactNode> = {
   "join-form": (p) => <JoinFormEditor instanceKey={p.instanceKey} server={p.server} onOpenAccess={() => p.setTab("access")} />,
   welcome: (p) => <WelcomeAndOnboarding instanceKey={p.instanceKey} server={p.server} />,
   emoji: (p) => <Emoji instanceKey={p.instanceKey} serverId={p.server.id} />,
+  "profile-items": (p) => <ProfileItems instanceKey={p.instanceKey} serverId={p.server.id} />,
   integrations: (p) => (
     <div className="flex flex-col gap-8">
       {has(p.access, Permission.MANAGE_SERVER) && <ServerAgents instanceKey={p.instanceKey} serverId={p.server.id} />}

@@ -6,6 +6,7 @@ use gpui_kit::{AnyElement, Context, IntoElement as _, ParentElement as _, Styled
 
 use super::InstanceSettingsView;
 use super::controls::Opt;
+use crate::core::i18n::t;
 use crate::core::instance_admin::{self as admin};
 use crate::pb;
 use crate::ui::theme::Palette;
@@ -263,6 +264,28 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        if self.instance_has("profile-items") {
+            page = page.child(self.setting(
+                "profile-decorations",
+                &t("instancesettings.nav.profileDecorations"),
+                None,
+                &["profile_decorations"],
+                if defaults.profile_decorations { "on" } else { "off" },
+                8,
+                self.toggle(
+                    "profile-decorations",
+                    draft.profile_decorations,
+                    false,
+                    &t("instancesettings.signUps.decorationsLabel"),
+                    &t("instancesettings.signUps.decorationsHint"),
+                    p,
+                    cx,
+                    |d, on| d.profile_decorations = on,
+                ),
+                p,
+                cx,
+            ));
+        }
         if self.instance_has("rich-presence") {
             page = page.child(self.setting(
                 "rich-presence",

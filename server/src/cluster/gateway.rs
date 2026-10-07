@@ -91,6 +91,8 @@ fn route(path: &str) -> Target {
         {
             Target::Directory
         }
+        // The instance's profile items are where accounts are; a server's on its shard.
+        "fuwa.v1.ProfileItemService" if method.contains("Instance") => Target::Directory,
         // Only the directory knows which server a code is for.
         "fuwa.v1.InviteService" if method == "GetInvite" => Target::Directory,
         "fuwa.v1.ServerService"
@@ -108,7 +110,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.SharedChannelService"
         | "fuwa.v1.SearchService"
         | "fuwa.v1.CommandService"
-        | "fuwa.v1.LiveTileService" => Target::Shard,
+        | "fuwa.v1.LiveTileService"
+        | "fuwa.v1.ProfileItemService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

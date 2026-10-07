@@ -71,6 +71,7 @@ enum Page {
     Roles,
     Channels,
     Emoji,
+    ProfileItems,
     Integrations,
     Shared,
     Recordings,
@@ -89,6 +90,7 @@ impl Page {
             Page::Roles => t("serversettings.nav.roles"),
             Page::Channels => t("serversettings.nav.channels"),
             Page::Emoji => t("serversettings.nav.emoji"),
+            Page::ProfileItems => t("serversettings.nav.profileItems"),
             Page::Integrations => t("serversettings.nav.integrations"),
             Page::Shared => t("serversettings.nav.shared"),
             Page::Recordings => t("serversettings.nav.recordings"),
@@ -107,6 +109,7 @@ impl Page {
             Page::Roles => "shield",
             Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
+            Page::ProfileItems => "sparkles",
             Page::Integrations => "webhook",
             Page::Shared => "link-2",
             Page::Recordings => "video",
@@ -124,6 +127,7 @@ impl Page {
             Page::Roles => t("desktop.server.rolesAbout"),
             Page::Channels => t("serversettings.nav.channelsAbout"),
             Page::Emoji => t("serversettings.nav.emojiAbout"),
+            Page::ProfileItems => t("serversettings.nav.profileItemsAbout"),
             Page::Welcome => t("serversettings.nav.welcomeAbout"),
             Page::Integrations => t("serversettings.nav.integrationsAbout"),
             Page::Shared => t("serversettings.nav.sharedAbout"),
@@ -137,13 +141,14 @@ impl Page {
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 9] = [
+const SETTINGS: [Page; 10] = [
     Page::Overview,
     Page::Welcome,
     Page::Invites,
     Page::Roles,
     Page::Channels,
     Page::Emoji,
+    Page::ProfileItems,
     Page::Integrations,
     Page::Shared,
     Page::Recordings,
@@ -174,6 +179,9 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if access.has(P::ManageEmoji) {
         out.push(Page::Emoji);
+    }
+    if access.has(P::ManageServer) {
+        out.push(Page::ProfileItems);
     }
     if access.has(P::ManageWebhooks) || access.has(P::ManageServer) {
         out.push(Page::Integrations);
@@ -249,6 +257,8 @@ pub struct ServerSettingsView {
     onboard: onboarding::Onboard,
     shared: shared::Shared,
     recordings: recordings::Recordings,
+    /// The Profile items page, made when first opened.
+    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
     _subscriptions: Vec<Subscription>,
@@ -340,6 +350,7 @@ impl ServerSettingsView {
             channels,
             shared,
             recordings: Default::default(),
+            profile_items: None,
             bar: None,
             _subscriptions: subscriptions,
         }
@@ -1191,8 +1202,12 @@ impl ServerSettingsView {
             .child(head);
         if open {
             let one_side = match action {
-                A::InviteCreate | A::AutoModRuleCreate | A::EmojiCreate | A::WebhookCreate => Some(true),
-                A::InviteDelete | A::AutoModRuleDelete | A::EmojiDelete | A::WebhookDelete => Some(false),
+                A::InviteCreate | A::AutoModRuleCreate | A::EmojiCreate | A::WebhookCreate | A::ProfileItemCreate => {
+                    Some(true)
+                }
+                A::InviteDelete | A::AutoModRuleDelete | A::EmojiDelete | A::WebhookDelete | A::ProfileItemDelete => {
+                    Some(false)
+                }
                 _ => None,
             };
             let mut more = div()
@@ -1264,6 +1279,10 @@ impl Render for ServerSettingsView {
         // Instances from before video in recordings have nothing to choose.
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
             allowed.retain(|pg| *pg != Page::Recordings);
+        }
+        // Nor anything to offer before profile items.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
+            allowed.retain(|pg| *pg != Page::ProfileItems);
         }
         // Requests waiting on this server's approval, counted on the menu once the list is read.
         let requests = self.core.shared.read(|s| {
@@ -1384,6 +1403,23 @@ impl Render for ServerSettingsView {
             Page::Roles => self.roles_page(&p, window, cx),
             Page::Channels => self.channels_page(&p, window, cx),
             Page::Emoji => self.emoji_page(&p, window, cx),
+            Page::ProfileItems => {
+                let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+                self.profile_items
+                    .get_or_insert_with(|| {
+                        cx.new(|cx| {
+                            crate::ui::profile_items::ProfileItemsView::new(
+                                core,
+                                key,
+                                crate::core::profile_items::Scope::Server(sid),
+                                window,
+                                cx,
+                            )
+                        })
+                    })
+                    .clone()
+                    .into_any_element()
+            }
             Page::Integrations => {
                 let mut both = div().flex().flex_col().gap(px(36.0));
                 if access.has(P::ManageServer) {
@@ -1778,6 +1814,9 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::ThreadUnlock => ("lock-open", green),
         A::ThreadDelete => ("message-square-x", red),
         A::PollEnd => ("check", amber),
+        A::ProfileItemCreate => ("sparkles", green),
+        A::ProfileItemUpdate => ("sparkles", sky),
+        A::ProfileItemDelete => ("trash", red),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -2261,6 +2300,29 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.pollEndIn",
             &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
         ),
+        A::ProfileItemCreate => t_with(
+            "serversettings.audit.s.profileItemCreate",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate if only("name") => t_with(
+            "serversettings.audit.s.renamed",
+            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate => {
+            let name = if change("name").is_some() {
+                after.clone()
+            } else {
+                format!("**{}**", t("serversettings.audit.aProfileItem"))
+            };
+            t_with(
+                "serversettings.audit.s.profileItemUpdate",
+                &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))],
+            )
+        }
+        A::ProfileItemDelete => t_with(
+            "serversettings.audit.s.profileItemDelete",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))],
+        ),
         A::Unspecified => t_with("serversettings.audit.s.unknown", &[("actor", Arg::Str(&actor))]),
     }
 }
@@ -2315,6 +2377,7 @@ mod tests {
                 Page::Roles,
                 Page::Channels,
                 Page::Emoji,
+                Page::ProfileItems,
                 Page::Integrations,
                 Page::Shared,
                 Page::Recordings,

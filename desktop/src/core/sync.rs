@@ -124,6 +124,8 @@ async fn follow_instance(
     // Notification settings follow the account; an older instance without them just has none.
     core.refresh_notifications(key).await;
     core.refresh_presence(key).await;
+    // The instance's profile effects and decorations; an older instance has none.
+    core.refresh_instance_items(key).await;
 
     let servers = retrying(core, key, || rpc!(api.servers(), list_servers(pb::ListServersRequest {}))).await?.servers;
     let ids: Vec<String> = servers.iter().map(|s| s.id.clone()).collect();
@@ -144,7 +146,16 @@ async fn follow_instance(
             loop {
                 tokio::time::sleep(NODE_REFRESH).await;
                 if let Ok(res) = rpc!(api.node(), get_node(pb::GetNodeRequest {})).await {
+                    let moved = core.shared.read(|s| {
+                        s.instance(&key).is_some_and(|i| {
+                            crate::core::profile_items::items_moved(i.node.as_ref(), res.node.as_ref())
+                        })
+                    });
                     core.shared.instance(&key, |i| i.node = res.node);
+                    // The instance's profile items changed: list them again.
+                    if moved {
+                        core.refresh_instance_items(&key).await;
+                    }
                 }
                 // Notification settings changed on another device don't send an event either.
                 core.refresh_notifications(&key).await;
@@ -483,10 +494,18 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             .await
             .map(|r| r.states)
             .unwrap_or_default();
-        Ok::<_, Problem>((server, channels, members, roles, emojis, voice))
+        // Nor profile items before those.
+        let items = rpc!(
+            api.profile_items(),
+            list_server_profile_items(pb::ListServerProfileItemsRequest { server_id: id.clone() })
+        )
+        .await
+        .map(|r| r.items)
+        .unwrap_or_default();
+        Ok::<_, Problem>((server, channels, members, roles, emojis, voice, items))
     };
     match retrying(&core, &key, load).await {
-        Ok((server, channels, members, roles, emojis, voice)) => {
+        Ok((server, channels, members, roles, emojis, voice, items)) => {
             let held = state.lock().held.remove(&server_id).unwrap_or_default();
             follow_secure(&core, &key, &server_id, &channels.channels);
             core.shared.update(|s| {
@@ -496,7 +515,8 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
                 let Some(server) = server.server else { return };
                 let sid = server.id.clone();
                 store::apply_snapshot(i, server, channels.channels, members.members, roles.roles, emojis);
-                i.voice.insert(sid, voice);
+                i.voice.insert(sid.clone(), voice);
+                i.server_items.insert(sid, items);
                 for event in &held {
                     store::apply_event(i, event, focus.as_deref(), focus_thread.as_deref());
                 }

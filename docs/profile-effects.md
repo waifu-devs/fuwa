@@ -41,7 +41,9 @@ Effects carry nothing about anyone, so streamer mode leaves them alone.
 `Profile.effect` holds the effect's id, such as `sakura`, or nothing.
 `UpdateProfileRequest.effect` sets it: lowercase letters, digits and dashes,
 up to 32 characters, not starting with a dash. The server checks only the
-shape, so a newer app can ship new effects without a server update. An app
+shape, so a newer app can ship new effects without a server update. It may
+also be the id of one of the instance's own effects, and a server's members
+can wear that server's on their profile there (docs/profile-items.md). An app
 that doesn't know an id shows no effect. The pick is in node.db
 (`accounts.profile_effect`) and in the account export.
 
@@ -49,8 +51,9 @@ that doesn't know an id shows no effect. The pick is in node.db
 
 Every effect is a spec: data, not code or pictures. The built-in specs are
 in `web/src/lib/effects/profile.ts` (`BUILTIN_EFFECTS`), and the desktop app
-should draw the same ones from the same data. Custom effects will be specs
-too, uploaded like theme files. That's why the format holds only shapes,
+should draw the same ones from the same data. Instances and servers offer
+their own as specs too (docs/profile-items.md), checked by the instance
+before they're stored. That's why the format holds only shapes,
 motions and colors from fixed lists, and numbers held to ranges
 (`sanitizeEffect`).
 

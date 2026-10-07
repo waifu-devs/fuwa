@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { builtinEffect, IDLE_FADE_MS, idleFadeAt, introLength, planEffect, SHAPE_PATHS, type Particle, type Shape } from "@/lib/effects/profile";
+import {
+  builtinEffect,
+  IDLE_FADE_MS,
+  idleFadeAt,
+  introLength,
+  planEffect,
+  SHAPE_PATHS,
+  type Particle,
+  type ProfileEffectSpec,
+  type Shape,
+} from "@/lib/effects/profile";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { reportError, reportTiming } from "@/lib/reports";
 import { cn } from "@/lib/utils";
@@ -104,6 +114,10 @@ function particleNode(p: Particle) {
  * With reduced motion on it shows a still instead, and while it's off screen
  * it pauses. Hovering the card replays the intro. `play` off (picker tiles
  * at rest) shows the still too. An unknown effect id shows nothing.
+ *
+ * `effect` is a built-in effect's id, or a spec already resolved (an
+ * instance's or a server's, from `lib/profile-items.ts`), which plays the
+ * same way. Keep a spec's identity stable: a new one starts it over.
  */
 export function ProfileEffect({
   effect,
@@ -114,7 +128,7 @@ export function ProfileEffect({
   replayOnHover = true,
   className,
 }: {
-  effect: string | undefined;
+  effect: string | ProfileEffectSpec | undefined;
   /** Mixed into the randomness: the person's id, so their effect is theirs. */
   seed: string;
   /** The card's own color, for effects that use it. */
@@ -125,7 +139,7 @@ export function ProfileEffect({
   replayOnHover?: boolean;
   className?: string;
 }) {
-  const spec = builtinEffect(effect);
+  const spec = typeof effect === "string" ? builtinEffect(effect) : effect;
   const calm = usePrefs(reduceMotion);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
@@ -192,7 +206,8 @@ export function ProfileEffect({
       measure && !lite && document.visibilityState === "visible"
         ? watchFrames(length, (p95) => {
             reportTiming("profile-effect/intro-frame-p95", p95);
-            if (p95 > SLOW_FRAME_MS) goLite(spec.id);
+            // Offered effects go in as one name: their ids are the instance's, not the app's.
+            if (p95 > SLOW_FRAME_MS) goLite(builtinEffect(spec.id) === spec ? spec.id : "offered");
           })
         : null;
 
