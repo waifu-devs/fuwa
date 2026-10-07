@@ -188,6 +188,9 @@ impl FuwaApp {
             MenuOf::Server { key, server } => self.server_items(key, server, copy_id(server, "server")),
             MenuOf::Applied { key, server } => self.applied_items(key, server),
             MenuOf::ServerHeader { key, server } => self.server_header_items(key, server, copy_id(server, "server")),
+            MenuOf::LiveTile { key, server, tile } => self.live_tile_items(key, server, tile),
+            MenuOf::RailFolder { key, folder } => self.rail_folder_items(key, folder),
+            MenuOf::RailAdd => self.rail_add_items(),
             MenuOf::Dm { key, conversation } => {
                 let (unread, other) = self.core.shared.read(|s| {
                     let Some(i) = s.instance(key) else { return (0, String::new()) };
@@ -660,7 +663,9 @@ impl FuwaApp {
                 .danger(),
             );
         }
-        Built::of(vec![primary, notifications, manage, developer, danger])
+        // Your folders sit with the server's own settings, before its ID and Leave (rail.rs).
+        let folder = self.rail_server_items(key, server);
+        Built::of(vec![primary, notifications, manage, folder, developer, danger])
     }
 
     /// Makes an invite to the server, then shows it.
@@ -740,6 +745,7 @@ impl FuwaApp {
                 }),
             ));
         }
+        about.extend(self.live_tile_menu_items(key, server));
         let mut danger = Vec::new();
         if !access.owner {
             let (k, s) = (key.to_owned(), server.to_owned());

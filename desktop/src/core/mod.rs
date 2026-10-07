@@ -7,6 +7,7 @@
 //! a version the window watches, so the window redraws after every change.
 
 pub mod account;
+pub mod accounts;
 pub mod api;
 pub mod arrange;
 pub mod attachments;
@@ -27,6 +28,7 @@ pub mod instance_servers;
 pub mod join;
 pub mod keybinds;
 pub mod linked;
+pub mod live_tiles;
 pub mod moderation;
 pub mod notifications;
 pub mod onboarding;
@@ -34,6 +36,8 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod providers;
+pub mod rail;
 pub mod reports;
 pub mod search;
 pub mod secrets;
@@ -213,6 +217,8 @@ pub struct Core {
     games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Whether you've stepped away, which goes out with this app's presence.
     pub idle: Arc<presence::Idle>,
+    /// The accounts kept on each instance, by its key (`accounts.rs`).
+    kept: Mutex<HashMap<String, Vec<config::SavedAccount>>>,
 }
 
 /// Messages per page, as the web app reads them.
@@ -262,6 +268,7 @@ impl Core {
             games,
             games_listener: Mutex::new(None),
             idle: presence::Idle::new(),
+            kept: Mutex::new(HashMap::new()),
         });
         core.listen_for_games(game_activity);
         let idle = core.idle.clone();
@@ -272,6 +279,7 @@ impl Core {
             }
         });
         for saved in config::load_instances(&core.paths, &core.secrets) {
+            core.kept.lock().insert(instance_key(&saved.url), saved.accounts);
             core.add_instance(&saved.url, saved.token);
         }
         // The anonymous reports go out a minute after starting, then every ten.
@@ -435,7 +443,11 @@ impl Core {
                 s.order
                     .iter()
                     .filter_map(|key| {
-                        engines.get(key).map(|e| SavedInstance { url: e.api.url.clone(), token: e.api.token() })
+                        engines.get(key).map(|e| SavedInstance {
+                            url: e.api.url.clone(),
+                            token: e.api.token(),
+                            accounts: self.kept.lock().get(key).cloned().unwrap_or_default(),
+                        })
                     })
                     .collect()
             })
@@ -490,6 +502,7 @@ impl Core {
         if let Some(engine) = self.engines.lock().remove(key) {
             engine.stop();
         }
+        self.kept.lock().remove(key);
         self.set_prefs(|p| {
             p.forget_searches(key);
             p.recent_gifs.remove(key);
@@ -621,6 +634,9 @@ impl Core {
             p.recent_gifs.remove(key);
         });
         let url = api.url.clone();
+        if let Some(me) = &me {
+            self.forget_account(key, &me.id);
+        }
         self.add_instance(&url, None);
         if let Some(me) = me {
             let _ = vault::wipe(&vault::Vault::dir_for(&self.paths.vaults, key, &me.id));
@@ -635,6 +651,9 @@ impl Core {
             if let Some(dms) = engine.dms.lock().take() {
                 dms.stop();
             }
+        }
+        if let Some(me) = &me {
+            self.forget_account(key, &me.id);
         }
         self.persist();
         if let Some(me) = me {

@@ -114,8 +114,13 @@ async fn follow_instance(
         }
         i.me = me.user.clone();
         i.admin = me.admin;
+        i.recent_sign_ins = me.recent_sign_in_methods.clone();
     });
 
+    // Whose session this is, kept to switch back to (accounts.rs).
+    if let Some(user) = &me.user {
+        core.remember_account(key, user, &token);
+    }
     // Encrypted direct messages run alongside, for as long as this does.
     if let Some(user) = me.user.clone() {
         start_dms(core, key, api, user, &token, dms);
@@ -124,6 +129,8 @@ async fn follow_instance(
     // Notification settings follow the account; an older instance without them just has none.
     core.refresh_notifications(key).await;
     core.refresh_presence(key).await;
+    // So is how you arranged your servers on the rail.
+    core.refresh_rail(key).await;
 
     let servers = retrying(core, key, || rpc!(api.servers(), list_servers(pb::ListServersRequest {}))).await?.servers;
     let ids: Vec<String> = servers.iter().map(|s| s.id.clone()).collect();
@@ -149,6 +156,7 @@ async fn follow_instance(
                 // Notification settings changed on another device don't send an event either.
                 core.refresh_notifications(&key).await;
                 core.refresh_presence(&key).await;
+                core.refresh_rail(&key).await;
             }
         })
     };
@@ -483,10 +491,12 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             .await
             .map(|r| r.states)
             .unwrap_or_default();
-        Ok::<_, Problem>((server, channels, members, roles, emojis, voice))
+        // Apps' live tiles aren't in the log either: listed with voice.
+        let tiles = core.list_live_tiles(&key, &id).await;
+        Ok::<_, Problem>((server, channels, members, roles, emojis, (voice, tiles)))
     };
     match retrying(&core, &key, load).await {
-        Ok((server, channels, members, roles, emojis, voice)) => {
+        Ok((server, channels, members, roles, emojis, (voice, tiles))) => {
             let held = state.lock().held.remove(&server_id).unwrap_or_default();
             follow_secure(&core, &key, &server_id, &channels.channels);
             core.shared.update(|s| {
@@ -496,7 +506,8 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
                 let Some(server) = server.server else { return };
                 let sid = server.id.clone();
                 store::apply_snapshot(i, server, channels.channels, members.members, roles.roles, emojis);
-                i.voice.insert(sid, voice);
+                i.voice.insert(sid.clone(), voice);
+                i.live_tiles.insert(sid, tiles);
                 for event in &held {
                     store::apply_event(i, event, focus.as_deref(), focus_thread.as_deref());
                 }
@@ -521,6 +532,13 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
 /// sequence), so any that came while the stream was away are lost: after a
 /// gap, read them again.
 async fn relist_voice(core: Arc<Core>, key: String, api: Api, server_id: String) {
+    // So are apps' live tiles.
+    let tiles = core.list_live_tiles(&key, &server_id).await;
+    core.shared.instance(&key, |i| {
+        if i.synced.contains(&server_id) {
+            i.live_tiles.insert(server_id.clone(), tiles);
+        }
+    });
     let req = pb::ListVoiceStatesRequest { server_id: server_id.clone() };
     let Ok(res) = rpc!(api.calls(), list_voice_states(req)).await else { return };
     core.shared.instance(&key, |i| {

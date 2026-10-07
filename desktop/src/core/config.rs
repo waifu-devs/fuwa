@@ -54,16 +54,40 @@ impl Paths {
 }
 
 /// An instance you added, with its session token when you're signed in.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedInstance {
     pub url: String,
-    /// Only ever read from older files, which kept it here: it's moved to the keychain.
+    /// The account in use's token. Only ever read from older files, which
+    /// kept it here: it's moved to the keychain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// Every account signed in to here, the one in use too, as cards to
+    /// switch between (the web's `fuwa/saved.ts`); their tokens are in the keychain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts: Vec<SavedAccount>,
+}
+
+/// An account kept on an instance: what the switcher shows of it, and its session.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedAccount {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    /// Its picture, only ever one on its own instance.
+    #[serde(default)]
+    pub avatar_url: String,
+    /// In the keychain, never in the file.
+    #[serde(skip)]
     pub token: Option<String>,
 }
 
 fn token_name(url: &str) -> String {
     format!("token:{url}")
+}
+
+/// Where a kept account's token is, beside the instance's own (the one in use).
+fn account_token_name(url: &str, user_id: &str) -> String {
+    format!("token:{url}#{user_id}")
 }
 
 pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
@@ -79,6 +103,11 @@ pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
             }
             None => saved.token = secrets.get(&token_name(&saved.url)),
         }
+        for account in &mut saved.accounts {
+            account.token = secrets.get(&account_token_name(&saved.url, &account.user_id));
+        }
+        // An account whose token is gone (the keychain was cleared) can't be switched to.
+        saved.accounts.retain(|a| a.token.is_some() && !a.user_id.is_empty());
     }
     if moved {
         store_instances(paths, secrets, &list);
@@ -88,16 +117,36 @@ pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
 
 pub fn store_instances(paths: &Paths, secrets: &Secrets, list: &[SavedInstance]) {
     let before: Vec<SavedInstance> = read(&paths.instances()).unwrap_or_default();
-    for gone in before.iter().filter(|b| !list.iter().any(|s| s.url == b.url)) {
-        secrets.delete(&token_name(&gone.url));
+    for old in &before {
+        let now = list.iter().find(|s| s.url == old.url);
+        if now.is_none() {
+            secrets.delete(&token_name(&old.url));
+        }
+        for gone in
+            old.accounts.iter().filter(|a| !now.is_some_and(|s| s.accounts.iter().any(|b| b.user_id == a.user_id)))
+        {
+            secrets.delete(&account_token_name(&old.url, &gone.user_id));
+        }
     }
     for saved in list {
         match &saved.token {
             Some(token) => secrets.set(&token_name(&saved.url), token),
             None => secrets.delete(&token_name(&saved.url)),
         }
+        for account in &saved.accounts {
+            if let Some(token) = &account.token {
+                secrets.set(&account_token_name(&saved.url, &account.user_id), token);
+            }
+        }
     }
-    let plain: Vec<SavedInstance> = list.iter().map(|s| SavedInstance { url: s.url.clone(), token: None }).collect();
+    let plain: Vec<SavedInstance> = list
+        .iter()
+        .map(|s| SavedInstance {
+            url: s.url.clone(),
+            token: None,
+            accounts: s.accounts.iter().map(|a| SavedAccount { token: None, ..a.clone() }).collect(),
+        })
+        .collect();
     if let Err(err) = write_json(&paths.instances(), &plain) {
         tracing::warn!("couldn't save the instance list: {err}");
     }
@@ -208,6 +257,16 @@ pub struct Prefs {
     pub clock: Clock,
     /// Which keys send a message.
     pub send_with: SendWith,
+    /// Live tiles turned off everywhere (`core::live_tiles`; the web's `fuwa:live-tiles:off`).
+    pub live_tiles_off: bool,
+    /// Live tiles someone hid, by id, newest last.
+    pub live_tiles_hidden: Vec<String>,
+    /// Servers whose live tiles are off, by id.
+    pub live_tiles_quiet: std::collections::BTreeSet<String>,
+    /// Rail folders open on this computer, as `instance/folder` (the web's `lib/rail-open.ts`).
+    pub rail_open: std::collections::BTreeSet<String>,
+    /// The sign-in notice closed on each instance, by the way to sign in it was about.
+    pub sign_in_notice_closed: std::collections::BTreeMap<String, String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -251,6 +310,11 @@ impl Default for Prefs {
             developer_mode: false,
             clock: Clock::Auto,
             send_with: SendWith::Enter,
+            live_tiles_off: false,
+            live_tiles_hidden: Vec::new(),
+            live_tiles_quiet: Default::default(),
+            rail_open: Default::default(),
+            sign_in_notice_closed: Default::default(),
         }
     }
 }
@@ -382,9 +446,30 @@ mod tests {
         let secrets = Secrets::open(&paths.config);
         assert!(load_instances(&paths, &secrets).is_empty());
         assert_eq!(load_prefs(&paths), Prefs::default());
-        let list = vec![SavedInstance { url: "https://fuwa.chat".into(), token: Some("t".into()) }];
+        let alice = SavedAccount {
+            user_id: "a".into(),
+            username: "alice".into(),
+            display_name: "Alice".into(),
+            avatar_url: String::new(),
+            token: Some("t".into()),
+        };
+        let bob =
+            SavedAccount { user_id: "b".into(), username: "bob".into(), token: Some("u".into()), ..alice.clone() };
+        let list = vec![SavedInstance {
+            url: "https://fuwa.chat".into(),
+            token: Some("t".into()),
+            accounts: vec![alice.clone(), bob.clone()],
+        }];
         store_instances(&paths, &secrets, &list);
         assert_eq!(load_instances(&paths, &secrets), list);
+        // Forgetting an account forgets its token.
+        let fewer = vec![SavedInstance { accounts: vec![alice], ..list[0].clone() }];
+        store_instances(&paths, &secrets, &fewer);
+        assert_eq!(secrets.get("token:https://fuwa.chat#b"), None);
+        assert_eq!(load_instances(&paths, &secrets), fewer);
+        let file = std::fs::read_to_string(home.path().join("config/instances.json")).unwrap();
+        assert!(!file.contains("\"u\"") && file.contains("alice"), "{file}");
+        store_instances(&paths, &secrets, &list);
         // The token isn't in the instance list's file.
         let file = std::fs::read_to_string(home.path().join("config/instances.json")).unwrap();
         assert!(!file.contains("\"t\""), "{file}");

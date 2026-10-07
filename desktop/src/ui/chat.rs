@@ -32,7 +32,7 @@ use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
-    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, icon_button_in, is_agent, pal,
+    app_badge, avatar, card, fuwa_mark, header_button, icon, icon_button, is_agent, pal,
     primary_button, soft_button,
 };
 

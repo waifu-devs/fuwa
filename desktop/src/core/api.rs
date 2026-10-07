@@ -211,6 +211,7 @@ clients! {
     admin => "AdminService" pb::admin_service_client::AdminServiceClient<Transport>,
     commands => "CommandService" pb::command_service_client::CommandServiceClient<Transport>,
     gifs => "GifService" pb::gif_service_client::GifServiceClient<Transport>,
+    live_tiles => "LiveTileService" pb::live_tile_service_client::LiveTileServiceClient<Transport>,
 }
 
 impl Api {
@@ -359,7 +360,10 @@ fn broke_inside(status: &Status) -> bool {
 /// The instance couldn't be reached at all.
 fn unreachable(status: &Status) -> bool {
     let message = status.message();
-    message.contains("error trying to connect") || message.contains("tcp connect") || message.contains("dns error")
+    message.contains("error trying to connect")
+        || message.contains("tcp connect")
+        || message.contains("dns error")
+        || message.contains("Client error (Connect)")
 }
 
 /// The address of an instance as people type it ("fuwa.chat",

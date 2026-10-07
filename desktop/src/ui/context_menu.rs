@@ -74,6 +74,19 @@ pub(crate) enum MenuOf {
         key: String,
         server: String,
     },
+    /// A live tile's "…" menu (`live_tiles.rs`), by the tile's id.
+    LiveTile {
+        key: String,
+        server: String,
+        tile: String,
+    },
+    /// A folder on the rail (`rail.rs`).
+    RailFolder {
+        key: String,
+        folder: String,
+    },
+    /// The rail's add button.
+    RailAdd,
 }
 
 impl MenuOf {
@@ -88,6 +101,9 @@ impl MenuOf {
             MenuOf::ServerHeader { key, server } => format!("s-head|{key}|{server}"),
             MenuOf::Dm { key, conversation } => format!("dm|{key}|{conversation}"),
             MenuOf::Applied { key, server } => format!("applied|{key}|{server}"),
+            MenuOf::LiveTile { key, server, tile } => format!("tile|{key}|{server}|{tile}"),
+            MenuOf::RailFolder { key, folder } => format!("f|{key}|{folder}"),
+            MenuOf::RailAdd => "rail-add".into(),
         }
     }
 }

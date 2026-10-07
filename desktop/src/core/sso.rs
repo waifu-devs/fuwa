@@ -17,14 +17,14 @@ use crate::pb;
 use crate::rpc;
 
 /// What the browser hands back, once the provider and the instance are done.
-struct Answer {
-    state: String,
-    code: String,
-    secret: String,
+pub(crate) struct Answer {
+    pub(crate) state: String,
+    pub(crate) code: String,
+    pub(crate) secret: String,
 }
 
 /// A secret to keep and the hash the instance is told.
-fn secret() -> Result<(String, String), Problem> {
+pub(crate) fn secret() -> Result<(String, String), Problem> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| Problem::new(tonic::Code::Internal, e.to_string()))?;
     let secret = vault::sha256_hex(&bytes);
@@ -33,7 +33,7 @@ fn secret() -> Result<(String, String), Problem> {
 }
 
 /// Opens the provider's page (only a real web page) and waits for the browser.
-async fn round_trip(
+pub(crate) async fn round_trip(
     callback: linked::Callback,
     authorize_url: &str,
     state: &str,
@@ -53,7 +53,7 @@ async fn round_trip(
     }
 }
 
-async fn listen() -> Result<linked::Callback, Problem> {
+pub(crate) async fn listen() -> Result<linked::Callback, Problem> {
     linked::Callback::listen().await.map_err(|e| Problem::new(tonic::Code::Internal, e.to_string()))
 }
 

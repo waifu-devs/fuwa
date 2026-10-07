@@ -269,6 +269,12 @@ pub struct FuwaApp {
     /// Turning a secure channel's history sharing on or off.
     pub secure_saving: bool,
     pub hovered: Option<String>,
+    /// A redraw is coming for live tiles' clocks (`live_tiles.rs`).
+    pub(crate) tiles_ticking: bool,
+    /// The rail's drag and folder dialog (`rail.rs`).
+    pub(crate) rail: crate::ui::rail::RailState,
+    /// "Streamer mode is on" hidden for this run (`banners.rs`).
+    pub(crate) streamer_banner_hidden: bool,
     /// Categories folded away in the sidebar, by id (for this run, as on the web).
     pub collapsed: std::collections::HashSet<String>,
     pub members_open: bool,
@@ -523,6 +529,9 @@ impl FuwaApp {
             secure_reset: Default::default(),
             secure_saving: false,
             hovered: None,
+            tiles_ticking: false,
+            rail: Default::default(),
+            streamer_banner_hidden: false,
             collapsed: Default::default(),
             members_open: true,
             members_view: None,
@@ -1795,6 +1804,8 @@ impl FuwaApp {
             self.context = None;
         } else if self.menu.is_some() {
             self.menu = None;
+        } else if self.rail.editing.is_some() {
+            self.rail.editing = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
         } else if self.server_settings.is_some() {
@@ -1887,25 +1898,35 @@ impl FuwaApp {
         let covered = self.server_settings.is_some() || self.instance_settings.is_some();
         let announcement = if covered { None } else { self.render_announcement(window, cx) };
         let update_note = if covered { None } else { self.render_update_note(window, cx) };
+        // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
+        let streamer = self.render_streamer_banner(window, cx);
+        let sign_in = if covered { None } else { self.render_sign_in_notice(window, cx) };
         base.child(
-            div().size_full().flex().flex_col().when_some(announcement, |el, banner| el.child(banner)).child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .child(self.render_rail(window, cx))
-                    .child(self.render_sidebar(window, cx))
-                    .child(self.render_main(window, cx)),
-            ),
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .when_some(streamer, |el, banner| el.child(banner))
+                .when_some(announcement, |el, banner| el.child(banner))
+                .when_some(sign_in, |el, banner| el.child(banner))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .child(self.render_rail(window, cx))
+                        .child(self.render_sidebar(window, cx))
+                        .child(self.render_main(window, cx)),
+                ),
         )
         .when_some(update_note, |el, note| el.child(note))
-        .when_some(self.connect.clone(), |el, connect| {
-            el.child(crate::ui::overlay::scrim("connect-scrim", &p).child(connect))
-        })
+        // The connect view draws its own frame: the welcome page, or a dialog over a dimmed app.
+        .when_some(self.connect.clone(), |el, connect| el.child(connect))
+        .when_some(self.render_folder_dialog(window, cx), |el, dialog| el.child(dialog))
         .when_some(
             match self.menu.clone() {
                 Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
-                Some(Menu::Status { key }) => Some(self.status_menu(&key, cx)),
+                Some(Menu::Status { key }) => Some(self.status_menu(&key, window, cx)),
                 _ => None,
             },
             |el, menu| el.child(menu),

@@ -97,6 +97,12 @@ pub struct InstanceState {
     pub pins: HashMap<String, crate::core::pins::PinList>,
     /// Servers you applied to and aren't in yet, by id (`join::Applied`), once read from disk.
     pub applied: Option<HashMap<String, crate::core::join::Applied>>,
+    /// Per server: apps' live tiles (`live_tiles.rs`), listed with voice, not in the log.
+    pub live_tiles: HashMap<String, Vec<pb::LiveTile>>,
+    /// How you arranged your servers on the rail (`rail.rs`, kept on your account); None until you do.
+    pub rail: Option<crate::core::rail::RailLayout>,
+    /// Ways to sign in added to your account lately, newest first (`GetMe`), for the sign-in notice.
+    pub recent_sign_ins: Vec<pb::SignInMethod>,
 }
 
 impl InstanceState {
@@ -131,6 +137,9 @@ impl InstanceState {
             people: None,
             pins: HashMap::new(),
             applied: None,
+            live_tiles: HashMap::new(),
+            rail: None,
+            recent_sign_ins: Vec::new(),
         }
     }
 
@@ -319,6 +328,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.members.remove(server_id);
     i.roles.remove(server_id);
     i.voice.remove(server_id);
+    i.live_tiles.remove(server_id);
     i.emojis.remove(server_id);
     i.shared.remove(server_id);
     i.synced.remove(server_id);
@@ -424,6 +434,9 @@ pub fn apply_event(
             if let Some(list) = i.voice.get_mut(sid) {
                 list.retain(|v| v.channel_id != p.channel_id);
             }
+            if let Some(list) = i.live_tiles.get_mut(sid) {
+                list.retain(|t| t.channel_id != p.channel_id);
+            }
         }
         Payload::MessageCreated(pb::MessageCreated { message: Some(message) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }) => {
@@ -506,6 +519,10 @@ pub fn apply_event(
             if let Some(list) = i.voice.get_mut(sid) {
                 list.retain(|v| v.user_id != p.user_id);
             }
+            // An agent's tiles go with it.
+            if let Some(list) = i.live_tiles.get_mut(sid) {
+                list.retain(|t| t.source_id != p.user_id);
+            }
             if let Some(list) = i.members.get_mut(sid) {
                 let before = list.len();
                 list.retain(|m| !m.user.as_ref().is_some_and(|u| u.id == p.user_id));
@@ -544,6 +561,12 @@ pub fn apply_event(
         }
         Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(state) }) => {
             calls::put(i.voice.entry(sid.to_owned()).or_default(), state.clone());
+        }
+        Payload::LiveTileUpdated(pb::LiveTileUpdated { tile: Some(tile) }) => {
+            crate::core::live_tiles::with_live_tile(i, sid, tile.clone());
+        }
+        Payload::LiveTileEnded(p) => {
+            crate::core::live_tiles::without_live_tile(i, sid, &p.channel_id, &p.source_id, &p.tile_id);
         }
         Payload::VoiceStateRemoved(p) => {
             if let Some(list) = i.voice.get_mut(sid) {
