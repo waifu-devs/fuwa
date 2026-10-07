@@ -40,6 +40,7 @@ export default defineConfig({
       "^/fuwa\\.v1\\.": { target: fuwa, changeOrigin: true },
       "^/media/": { target: fuwa, changeOrigin: true },
       "^/sso/": { target: fuwa, changeOrigin: true },
+      "^/updates/": { target: fuwa, changeOrigin: true },
     },
   },
   build: {

@@ -166,6 +166,14 @@ impl Releases {
         })
     }
 
+    /// The desktop app's installers in the latest release, for the web app's
+    /// download button. Each is fetched through `/updates/files/<name>`.
+    pub fn desktop_app(&self) -> Option<pb::DesktopApp> {
+        let latest = self.latest()?;
+        let downloads: Vec<_> = latest.files.iter().filter_map(|file| download(&latest.version, file)).collect();
+        (!downloads.is_empty()).then(|| pb::DesktopApp { version: latest.version.clone(), downloads })
+    }
+
     /// `/updates/latest.json` and `/updates/files/<name>`, for desktop apps.
     pub fn routes(self: &Arc<Self>) -> Router {
         let (manifest, files) = (self.clone(), self.clone());
@@ -453,6 +461,29 @@ fn latest(release: &GitHubRelease, version: String, sums: String, signature: Str
     }
 }
 
+/// A desktop installer, from its name (`fuwa-desktop-<version>-<arch>-<system><ending>`,
+/// as `.github/workflows/desktop.yml` names them). The bare programs aren't
+/// offered: the installers put the app where the system expects it.
+fn download(version: &str, file: &File) -> Option<pb::DesktopDownload> {
+    use pb::{DesktopPackage as Package, DesktopSystem as System};
+    let rest = file.name.strip_prefix(&format!("fuwa-desktop-{version}-"))?;
+    let (arch, rest) = rest.split_once('-')?;
+    let (system, package) = match rest {
+        "windows-setup.exe" => (System::Windows, Package::Setup),
+        "macos.dmg" => (System::Macos, Package::Dmg),
+        "linux.AppImage" => (System::Linux, Package::Appimage),
+        "linux.deb" => (System::Linux, Package::Deb),
+        _ => return None,
+    };
+    Some(pb::DesktopDownload {
+        path: format!("/updates/files/{}", file.name),
+        size: file.size,
+        system: system.into(),
+        package: package.into(),
+        arch: arch.into(),
+    })
+}
+
 /// The release's version, from a tag like v0.4.2; None for drafts,
 /// prereleases and tags of any other shape.
 fn version_of(release: &GitHubRelease) -> Option<String> {
@@ -634,6 +665,44 @@ mod tests {
         latest.version = "999.0.0".into();
         releases.set(latest);
         assert_eq!(releases.newer().unwrap().version, "999.0.0");
+    }
+
+    #[test]
+    fn installers_are_offered_by_system() {
+        let releases = Releases::new(true, std::env::temp_dir());
+        assert!(releases.desktop_app().is_none());
+        let file = |name: &str| File { name: name.into(), size: 7 };
+        releases.set(Latest {
+            version: "0.4.2".into(),
+            published_at: String::new(),
+            notes: String::new(),
+            page: String::new(),
+            sums: String::new(),
+            signature: String::new(),
+            files: vec![
+                file("fuwa-desktop-0.4.2-x86_64-linux"),
+                file("fuwa-desktop-0.4.2-x86_64-linux.deb"),
+                file("fuwa-desktop-0.4.2-x86_64-linux.AppImage"),
+                file("fuwa-desktop-0.4.2-aarch64-macos.dmg"),
+                file("fuwa-desktop-0.4.2-x86_64-windows.exe"),
+                file("fuwa-desktop-0.4.2-x86_64-windows-setup.exe"),
+            ],
+        });
+        let app = releases.desktop_app().unwrap();
+        assert_eq!(app.version, "0.4.2");
+        let found: Vec<_> = app.downloads.iter().map(|d| (d.system(), d.package(), d.arch.as_str())).collect();
+        use pb::{DesktopPackage as P, DesktopSystem as S};
+        assert_eq!(
+            found,
+            [
+                (S::Linux, P::Deb, "x86_64"),
+                (S::Linux, P::Appimage, "x86_64"),
+                (S::Macos, P::Dmg, "aarch64"),
+                (S::Windows, P::Setup, "x86_64"),
+            ]
+        );
+        assert_eq!(app.downloads[3].path, "/updates/files/fuwa-desktop-0.4.2-x86_64-windows-setup.exe");
+        assert_eq!(app.downloads[3].size, 7);
     }
 
     #[test]

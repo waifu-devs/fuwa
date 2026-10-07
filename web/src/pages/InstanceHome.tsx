@@ -8,6 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { BuildLabel } from "@/components/BuildLabel";
 import { ContinueAs } from "@/components/AccountSwitcher";
 import { Connect } from "@/components/Connect";
+import { DesktopDownload } from "@/components/DesktopDownload";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon } from "@/components/Icons";
 import { connectionLabel } from "@/components/icons-utils";
@@ -149,9 +150,12 @@ function BrowseHero({ instanceKey, onCreate }: { instanceKey: string; onCreate: 
           </h1>
           <p className="mt-2 max-w-xl text-muted-foreground">{t("workspace.home.about")}</p>
         </div>
-        <Button size="lg" onClick={onCreate} className="btn h-11 shrink-0 rounded-xl font-bold">
-          <PlusIcon /> {t("workspace.home.create")}
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <DesktopDownload node={inst.node} url={inst.url} />
+          <Button size="lg" onClick={onCreate} className="btn h-11 shrink-0 rounded-xl font-bold">
+            <PlusIcon /> {t("workspace.home.create")}
+          </Button>
+        </div>
       </div>
     </section>
   );

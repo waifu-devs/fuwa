@@ -428,6 +428,16 @@ it starts the same version again. People can turn "Download updates in the
 background" off in the app's settings (Updates); it then only says a new
 version is out.
 
+The web app offers the desktop app too, on the page a first-time visitor
+sees and on your instance's home page: a
+"Download for Windows" (or macOS, or Linux) button, with the other systems'
+installers beside it, each fetched through `/updates/files/<name>` like
+updates (`Node.desktop_app` lists them). It shows only while your instance
+knows of a release, so `FUWA_UPDATE_CHECK=off` hides it. That first download
+is checked by your instance against the release's `SHA256SUMS`, but not by
+the person's computer, so it's as trustworthy as your instance; the app's
+own updates after it are checked against the release key.
+
 Apps and instances also agree on features by date: see
 [Compatibility dates](compatibility.md). An app older than a feature your
 instance has says "Update fuwa to use ..." there, and keeps working
