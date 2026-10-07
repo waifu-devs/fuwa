@@ -4,11 +4,15 @@
 //! instance sits behind (HTTP/1.1, no trailers), which plain gRPC doesn't
 //! always. Every call carries the session's bearer token, when there is one.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
+use bytes::{Bytes, BytesMut};
 use http::{HeaderValue, Request, Uri};
+use hyper::body::{Body as HttpBody, Frame, SizeHint};
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -25,7 +29,7 @@ use crate::pb;
 /// How long a call may take before it counts as lost.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
-type Https = Client<HttpsConnector<HttpConnector>, GrpcWebCall<Body>>;
+type Https = Framed<Client<HttpsConnector<HttpConnector>, GrpcWebCall<Body>>>;
 
 /// The transport every client shares: gRPC-Web over HTTP/1.1, with or
 /// without TLS, adding the session's token to each call.
@@ -52,6 +56,91 @@ impl Service<Request<Body>> for Transport {
         }
         req.headers_mut().insert(http::header::USER_AGENT, USER_AGENT.clone());
         self.inner.call(req)
+    }
+}
+
+/// Hands tonic-web the response one whole gRPC-Web frame at a time.
+///
+/// tonic-web (0.14.6) loses the status when a message and the trailers frame
+/// after it arrive in one chunk: it keeps the trailers aside, gives the
+/// message, then ends the body without them ("missing grpc-status trailer").
+/// Proxies that buffer (Cloudflare in front of fuwa.chat) send just that, so
+/// every call through them failed. Split at frame edges, the trailers always
+/// come alone and are read as they should be.
+#[derive(Clone)]
+pub struct Framed<S>(S);
+
+impl<S, B, R> Service<Request<B>> for Framed<S>
+where
+    S: Service<Request<B>, Response = http::Response<R>>,
+    S::Future: Send + 'static,
+{
+    type Response = http::Response<Frames<R>>;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let future = self.0.call(req);
+        Box::pin(async move { Ok(future.await?.map(|body| Frames { body, pending: BytesMut::new(), done: false })) })
+    }
+}
+
+/// A response body cut into whole gRPC-Web frames (see [`Framed`]).
+pub struct Frames<B> {
+    body: B,
+    pending: BytesMut,
+    done: bool,
+}
+
+impl<B> Frames<B> {
+    /// The first whole frame waiting, if there is one.
+    fn next_frame(&mut self) -> Option<Bytes> {
+        let header: [u8; 5] = self.pending.get(..5)?.try_into().ok()?;
+        let len = 5 + u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+        (self.pending.len() >= len).then(|| self.pending.split_to(len).freeze())
+    }
+}
+
+impl<B> HttpBody for Frames<B>
+where
+    B: HttpBody<Data = Bytes> + Unpin,
+{
+    type Data = Bytes;
+    type Error = B::Error;
+
+    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, B::Error>>> {
+        let this = self.get_mut();
+        loop {
+            if let Some(frame) = this.next_frame() {
+                return Poll::Ready(Some(Ok(Frame::data(frame))));
+            }
+            if this.done {
+                // Whatever's left isn't a whole frame: tonic-web says what's wrong with it.
+                let rest = this.pending.split().freeze();
+                return Poll::Ready((!rest.is_empty()).then(|| Ok(Frame::data(rest))));
+            }
+            match ready!(Pin::new(&mut this.body).poll_frame(cx)) {
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) => this.pending.extend_from_slice(&data),
+                    // HTTP trailers (gRPC-Web never sends them, but pass them on).
+                    Err(frame) => return Poll::Ready(Some(Ok(frame))),
+                },
+                Some(Err(error)) => return Poll::Ready(Some(Err(error))),
+                None => this.done = true,
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.done && self.pending.is_empty()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::default()
     }
 }
 
@@ -135,10 +224,9 @@ impl Api {
             Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
         };
         let connector = roots.https_or_http().enable_http1().build();
-        let client: Https =
-            Client::builder(TokioExecutor::new()).pool_idle_timeout(Duration::from_secs(60)).build(connector);
+        let client = Client::builder(TokioExecutor::new()).pool_idle_timeout(Duration::from_secs(60)).build(connector);
         let token = Arc::new(RwLock::new(token));
-        let transport = Transport { inner: GrpcWebClientLayer::new().layer(client), token: token.clone() };
+        let transport = Transport { inner: GrpcWebClientLayer::new().layer(Framed(client)), token: token.clone() };
         Ok(Self { url: url.to_owned(), origin, transport, token })
     }
 
@@ -330,5 +418,102 @@ mod tests {
         assert_eq!(instance_key("https://fuwa.chat"), "fuwa.chat");
         assert_eq!(instance_key("http://localhost:8080"), "localhost:8080");
         assert_eq!(instance_key("https://example.com/a/b"), "example.com~a~b");
+    }
+
+    /// A response body that hands out the chunks it's given, then (when
+    /// `open`) waits forever, like a live stream between events.
+    struct Chunks {
+        chunks: std::collections::VecDeque<Bytes>,
+        open: bool,
+    }
+
+    impl HttpBody for Chunks {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
+            match self.chunks.pop_front() {
+                Some(chunk) => Poll::Ready(Some(Ok(Frame::data(chunk)))),
+                None if self.open => Poll::Pending,
+                None => Poll::Ready(None),
+            }
+        }
+    }
+
+    /// A gRPC-Web response through the desktop's stack, as `chunks` on the wire.
+    async fn through(chunks: Vec<Vec<u8>>, open: bool) -> http::Response<GrpcWebCall<Frames<Chunks>>> {
+        let chunks: std::collections::VecDeque<Bytes> = chunks.into_iter().map(Bytes::from).collect();
+        let server = tower::service_fn(move |_: Request<GrpcWebCall<Body>>| {
+            let body = Chunks { chunks: chunks.clone(), open };
+            async move { Ok::<_, std::convert::Infallible>(http::Response::new(body)) }
+        });
+        GrpcWebClientLayer::new().layer(Framed(server)).call(Request::new(Body::empty())).await.unwrap()
+    }
+
+    fn message(payload: &[u8]) -> Vec<u8> {
+        let mut frame = vec![0];
+        frame.extend((payload.len() as u32).to_be_bytes());
+        frame.extend(payload);
+        frame
+    }
+
+    fn status(text: &str) -> Vec<u8> {
+        let mut frame = vec![0x80];
+        frame.extend((text.len() as u32).to_be_bytes());
+        frame.extend(text.as_bytes());
+        frame
+    }
+
+    /// However the response is cut into chunks (the status alone, as an
+    /// instance reached directly sends it; everything in one, as Cloudflare
+    /// does; anywhere inside a frame), the messages and the status come out
+    /// the same.
+    #[tokio::test]
+    async fn any_chunking_reads_the_same() {
+        use http_body_util::BodyExt;
+        let messages = [message(&[8, 1]), message(&[]), message(&[8, 2, 16, 3])].concat();
+        for (end, code, text) in [
+            (status("grpc-status:0\r\n"), "0", None),
+            (status("grpc-status:5\r\ngrpc-message:nope\r\n"), "5", Some("nope")),
+        ] {
+            let wire = [messages.clone(), end].concat();
+            let mut cuts: Vec<Vec<Vec<u8>>> = vec![
+                vec![wire.clone()],
+                vec![messages.clone(), wire[messages.len()..].to_vec()],
+                wire.iter().map(|byte| vec![*byte]).collect(),
+            ];
+            for at in 1..wire.len() {
+                cuts.push(vec![wire[..at].to_vec(), wire[at..].to_vec()]);
+            }
+            for chunks in cuts {
+                let shape: Vec<usize> = chunks.iter().map(Vec::len).collect();
+                let body = through(chunks, false).await.into_body().collect().await.unwrap();
+                let trailers = body.trailers().cloned().unwrap_or_else(|| panic!("no status for chunks {shape:?}"));
+                assert_eq!(trailers.get("grpc-status").unwrap(), code, "chunks {shape:?}");
+                assert_eq!(trailers.get("grpc-message").map(|v| v.to_str().unwrap()), text, "chunks {shape:?}");
+                assert_eq!(body.to_bytes(), messages, "chunks {shape:?}");
+            }
+        }
+        // An answer that's only a status, in the headers: an empty body.
+        let body = through(vec![], false).await.into_body().collect().await.unwrap();
+        assert!(body.trailers().is_none() && body.to_bytes().is_empty());
+    }
+
+    /// A live stream's events come through as they arrive, not when it ends.
+    #[tokio::test]
+    async fn stream_events_are_not_held_back() {
+        use http_body_util::BodyExt;
+        let first = message(&[8, 1]);
+        let second = message(&[8, 2]);
+        // The second event cut in two, its end still on the way.
+        let chunks = vec![[first.clone(), second[..3].to_vec()].concat(), second[3..5].to_vec()];
+        let mut body = through(chunks, true).await.into_body();
+        let wait = Duration::from_secs(1);
+        let frame = tokio::time::timeout(wait, body.frame()).await.expect("first event held back");
+        assert_eq!(frame.unwrap().unwrap().into_data().unwrap(), first);
+        assert!(tokio::time::timeout(Duration::from_millis(50), body.frame()).await.is_err(), "half an event given");
     }
 }
