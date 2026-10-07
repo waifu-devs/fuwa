@@ -525,9 +525,8 @@ impl FuwaApp {
             let count = parent.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
             rows.push(Row::Divider {
                 text: match count {
-                    0 => "No replies yet. Start the thread!".to_owned(),
-                    1 => "1 reply".to_owned(),
-                    n => format!("{n} replies"),
+                    0 => t("chat.threads.noReplies"),
+                    n => crate::core::i18n::t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(n)))]),
                 },
             });
             if loaded.has_more {
@@ -724,6 +723,8 @@ impl FuwaApp {
             rows.push(Row::Msg(msg));
             if is_parent {
                 divider(&mut rows);
+                // The replies' days start over below it, as the thread's own list does.
+                last_day = None;
             }
         }
         for p in i.pending.get(&at).into_iter().flatten() {
@@ -1855,16 +1856,17 @@ pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -
             )
             .child(div().flex_1().min_w_0().child(div().flex_none().child(text.clone())))
             .into_any_element(),
+        // Under a thread's message (`ThreadStart`): how many replies, then a rule.
         Row::Divider { text } => div()
-            .px(px(20.0))
-            .py(px(8.0))
+            .px(px(16.0))
+            .my(px(12.0))
             .flex()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(12.0))
             .text_xs()
+            .line_height(px(16.0))
             .font_weight(FontWeight::BOLD)
             .text_color(p.muted_foreground)
-            .child(div().flex_1().h(px(1.0)).bg(p.border))
             .child(text.clone())
             .child(div().flex_1().h(px(1.0)).bg(p.border))
             .into_any_element(),
