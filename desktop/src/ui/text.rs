@@ -43,6 +43,33 @@ pub fn images_as_links(source: &str) -> String {
     out
 }
 
+/// A single newline is a line break, as the web's `remark-breaks` reads
+/// Markdown: lines that run on get Markdown's hard break (two spaces). Code
+/// blocks are left alone.
+pub fn hard_breaks(source: &str) -> String {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut out = String::with_capacity(source.len() + lines.len() * 2);
+    let mut fenced = false;
+    for (n, line) in lines.iter().enumerate() {
+        if n > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+        let trimmed = line.trim_start();
+        let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        if fence {
+            fenced = !fenced;
+            continue;
+        }
+        let next = lines.get(n + 1).map(|l| l.trim_start());
+        let runs_on = next.is_some_and(|next| !next.is_empty() && !next.starts_with("```") && !next.starts_with("~~~"));
+        if !fenced && runs_on && !line.trim().is_empty() && !line.ends_with("  ") && !line.ends_with('\\') {
+            out.push_str("  ");
+        }
+    }
+    out
+}
+
 /// The clock setting (`Prefs::clock`), kept where formatting can read it: 0 auto, 1 12h, 2 24h.
 static CLOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
@@ -97,6 +124,40 @@ pub fn when(ms: i64) -> String {
             )
         }
     }
+}
+
+/// "Today", "Yesterday", "Monday, June 3", or with the year when it's not
+/// this year: a day divider's words, as the web's `formatDay`.
+pub fn day(ms: i64) -> String {
+    let Some(at) = Local.timestamp_millis_opt(ms).single() else { return String::new() };
+    let now = Local::now();
+    match now.date_naive().signed_duration_since(at.date_naive()).num_days() {
+        0 => crate::core::i18n::t("common.time.today"),
+        1 => crate::core::i18n::t("common.time.yesterday"),
+        _ if at.year() == now.year() => at.format("%A, %B %-d").to_string(),
+        _ => at.format("%B %-d, %Y").to_string(),
+    }
+}
+
+/// Whether two moments fall on the same local day.
+pub fn same_day(a: i64, b: i64) -> bool {
+    let day = |ms: i64| Local.timestamp_millis_opt(ms).single().map(|at| at.date_naive());
+    day(a) == day(b)
+}
+
+/// "just now", "5 minutes ago", "3 days ago": how long ago, rounded down to
+/// its largest unit, as the web's `ago`.
+pub fn ago(ms: i64, now: i64) -> String {
+    let minutes = (now - ms).max(0) / 60_000;
+    let (n, unit) = match minutes {
+        0 => return crate::core::i18n::t("common.time.justNow"),
+        m if m < 60 => (m, "minute"),
+        m if m < 60 * 24 => (m / 60, "hour"),
+        m if m < 60 * 24 * 30 => (m / (60 * 24), "day"),
+        m if m < 60 * 24 * 365 => (m / (60 * 24 * 30), "month"),
+        m => (m / (60 * 24 * 365), "year"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
 }
 
 /// Just the time, for the side of a follow-up message.

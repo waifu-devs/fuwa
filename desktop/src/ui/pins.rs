@@ -19,10 +19,9 @@ use crate::core::vault::ItemKind;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
-use crate::ui::search::{empty, skeleton};
 use crate::ui::text::{images_as_links, ms_of, when};
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, icon, icon_button, pal};
+use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon, pal};
 
 /// Where an open list's pins are.
 #[derive(Clone, PartialEq, Eq)]
@@ -84,24 +83,32 @@ enum Body {
     NotOnDevice,
 }
 
-/// The small pin by a pinned message.
+/// The small pin by a pinned message (`PinMark`): tilted, on the primary at 10%.
 pub fn pin_mark(id: &str, p: &Palette) -> AnyElement {
-    motion::rise(
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .px(px(6.0))
-            .py(px(1.0))
-            .rounded_full()
-            .bg(alpha(p.primary, 0.12))
-            .text_color(p.primary)
-            .child(icon("pin").size(px(11.0))),
-        SharedString::from(format!("pin-mark|{id}")),
-        Duration::ZERO,
-        4.0,
-    )
-    .into_any_element()
+    div()
+        .id(SharedString::from(format!("pin-mark|{id}")))
+        .flex_none()
+        .relative()
+        .top(px(-1.0))
+        .flex()
+        .items_center()
+        .px(px(6.0))
+        .py(px(1.0))
+        .rounded_full()
+        .bg(alpha(p.primary, 0.1))
+        .text_color(p.primary)
+        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.pinned")).build(window, cx))
+        .child(motion::once(
+            icon("pin").size(px(12.0)),
+            SharedString::from(format!("pin-mark-in|{id}")),
+            Duration::from_millis(350),
+            |el, t| {
+                let k = 1.0 - (1.0 - t).powi(3);
+                el.size(px(12.0 * k.max(0.01)))
+                    .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 - 0.7 * (1.0 - k)))
+            },
+        ))
+        .into_any_element()
 }
 
 impl FuwaApp {
@@ -409,12 +416,88 @@ impl FuwaApp {
         })
     }
 
-    /// The open list, beside the messages.
-    pub(crate) fn pins_panel(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The pin in a header (`PinsPopover`'s button): tilted while closed,
+    /// upright on the primary at 10% while its list is open. `open` says
+    /// whether the list hangs from this button; it drops down under it.
+    pub(crate) fn pins_button(&mut self, id: &'static str, open: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let hover = p.muted;
+        let tilt = if open { 0.0 } else { 1.0 };
+        let button = div()
+            .id(id)
+            .size(px(36.0))
+            .flex_none()
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .text_color(if open { p.primary } else { p.muted_foreground })
+            .when(open, |el| el.bg(alpha(p.primary, 0.1)))
+            .when(!open, |el| el.hover(move |s| s.bg(hover)))
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if id == "thread-pins" {
+                    if this
+                        .pins
+                        .as_ref()
+                        .is_some_and(|p| matches!(&p.place, PinPlace::Channel { thread, .. } if !thread.is_empty()))
+                    {
+                        this.pins = None;
+                        cx.notify();
+                    } else {
+                        this.open_thread_pins(cx);
+                    }
+                } else {
+                    this.toggle_pins(window, cx);
+                }
+            }))
+            .child(
+                icon("pin")
+                    .size(px(20.0 * (1.0 + 0.08 * (1.0 - tilt))))
+                    .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt)),
+            );
+        let card = if open { self.pins_card(cx) } else { None };
+        div()
+            .relative()
+            .flex_none()
+            .child(button)
+            .when_some(card, |el, card| {
+                // A clear layer closes it when you click anywhere else; the list sits over everything.
+                let away = div()
+                    .id("pins-away")
+                    .absolute()
+                    .top(px(-4000.0))
+                    .left(px(-4000.0))
+                    .size(px(12000.0))
+                    .occlude()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pins = None;
+                        cx.notify();
+                    }));
+                el.child(
+                    gpui_kit::deferred(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .child(away)
+                            .child(div().absolute().top(px(42.0)).right_0().child(card)),
+                    )
+                    .with_priority(1),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The open list (`PinsPopover`'s card): what's pinned, the latest first.
+    fn pins_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.pins.as_ref()?;
         let p = pal(cx);
         let Read { list, rows, can_unpin } = self.listed(panel)?;
-        let in_thread = matches!(&panel.place, PinPlace::Channel { thread, .. } if !thread.is_empty());
         let in_dm = matches!(panel.place, PinPlace::Dm { .. });
         let status = list.map(|(s, _)| s);
         let has_more = list.is_some_and(|(_, m)| m);
@@ -424,24 +507,23 @@ impl FuwaApp {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .px(px(14.0))
-            .h(px(56.0))
+            .px(px(16.0))
+            .py(px(12.0))
             .border_b_1()
             .border_color(p.border)
-            .when(in_thread, |el| {
-                el.child(
-                    icon_button("pins-back", "arrow-left", &p)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("common.back")).build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.pins = None;
-                            cx.notify();
-                        })),
-                )
-            })
-            .child(icon("pin").size(px(16.0)).text_color(p.primary))
-            .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.pins.title")))
+            .child(
+                icon("pin")
+                    .size(px(16.0))
+                    .text_color(p.primary)
+                    .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4)),
+            )
+            .child(
+                div()
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_size(px(16.0))
+                    .line_height(px(24.0))
+                    .child(t("chattools.pins.title")),
+            )
             .when_some(count.filter(|n| *n > 0), |el, n| {
                 el.child(
                     div()
@@ -450,19 +532,7 @@ impl FuwaApp {
                         .text_color(p.muted_foreground)
                         .child(t_with("chattools.pins.count", &[("count", Arg::Num(n as i64))])),
                 )
-            })
-            .child(div().flex_1())
-            .child(icon_button("pins-close", "x", &p).on_click(cx.listener(|this, _, _, cx| {
-                // A thread's pins close with it.
-                if this
-                    .pins
-                    .take()
-                    .is_some_and(|p| matches!(&p.place, PinPlace::Channel { thread, .. } if !thread.is_empty()))
-                {
-                    this.close_thread(cx);
-                }
-                cx.notify();
-            })));
+            });
         let mut body = div()
             .id("pins-list")
             .flex_1()
@@ -471,10 +541,10 @@ impl FuwaApp {
             .track_scroll(&panel.scroll)
             .flex()
             .flex_col()
-            .py(px(8.0));
+            .p(px(8.0));
         let empty_hint = if in_dm { t("chattools.pins.emptyDm") } else { t("chattools.pins.emptyChannel") };
         match status {
-            None | Some(PinStatus::Loading) if rows.is_empty() => body = body.child(skeleton(3, &p)),
+            None | Some(PinStatus::Loading) if rows.is_empty() => body = body.child(loading(&p)),
             Some(PinStatus::Failed) if rows.is_empty() => {
                 body = body.child(
                     div()
@@ -483,18 +553,18 @@ impl FuwaApp {
                         .items_center()
                         .gap(px(8.0))
                         .px(px(24.0))
-                        .py(px(32.0))
+                        .py(px(24.0))
                         .text_sm()
                         .text_center()
                         .text_color(p.muted_foreground)
                         .child(t("chattools.pins.failed"))
                         .child(
-                            pill("pins-retry", "rotate-cw", t("chattools.pins.retry"), &p)
+                            soft_pill("pins-retry", Some("rotate-cw"), t("chattools.pins.retry"), &p)
                                 .on_click(cx.listener(|this, _, _, cx| this.load_pins(false, cx))),
                         ),
                 )
             }
-            _ if rows.is_empty() => body = body.child(empty("pin", &t("chattools.pins.empty"), &empty_hint, &p)),
+            _ if rows.is_empty() => body = body.child(empty_pins(&empty_hint, &p)),
             _ => {
                 for (n, row) in rows.into_iter().enumerate() {
                     let busy = panel.unpinning.contains(&row.id);
@@ -502,29 +572,41 @@ impl FuwaApp {
                 }
                 if has_more {
                     body = body.child(
-                        div().flex().justify_center().py(px(8.0)).child(
-                            pill("pins-more", "chevron-down", t("chattools.pins.more"), &p)
+                        div().flex().justify_center().mt(px(4.0)).mb(px(8.0)).child(
+                            soft_pill("pins-more", None, t("chattools.pins.more"), &p)
                                 .on_click(cx.listener(|this, _, _, cx| this.load_pins(true, cx))),
                         ),
                     );
                 }
             }
         }
+        let shadow = vec![gpui_kit::BoxShadow {
+            color: gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.25 },
+            offset: gpui_kit::point(px(0.0), px(25.0)),
+            blur_radius: px(50.0),
+            spread_radius: px(-12.0),
+            inset: false,
+        }];
         Some(
-            motion::slide_in(
+            motion::rise(
                 div()
-                    .w(px(if in_thread { 420.0 } else { 400.0 }))
-                    .h_full()
-                    .flex_none()
+                    .id("pins-card")
+                    .w(px(416.0))
+                    .max_h(px(512.0))
                     .flex()
                     .flex_col()
-                    .border_l_1()
+                    .rounded(radius_2xl())
+                    .border_1()
                     .border_color(p.border)
-                    .bg(p.background)
+                    .bg(p.card)
+                    .shadow(shadow)
+                    .occlude()
+                    .on_click(|_, _, cx| cx.stop_propagation())
                     .child(header)
                     .child(body),
-                "pins-panel-in",
-                24.0,
+                "pins-card-in",
+                Duration::ZERO,
+                -8.0,
             )
             .into_any_element(),
         )
@@ -546,8 +628,16 @@ impl FuwaApp {
         let body: AnyElement = match body {
             Body::Text(text) => div()
                 .text_sm()
+                .line_height(px(20.0))
                 .line_clamp(4)
-                .child(crate::ui::text::markdown(SharedString::from(format!("pin-body|{id}")), images_as_links(&text)))
+                .child(
+                    gpui_kit::base::TextView::markdown(
+                        SharedString::from(format!("pin-body|{id}")),
+                        images_as_links(&text),
+                    )
+                    .markdown_extensions(crate::ui::emoji::markdown_extensions())
+                    .style(crate::ui::chat::chat_markdown(&p)),
+                )
                 .into_any_element(),
             Body::Files => quiet(t("chattools.pins.files")).into_any_element(),
             Body::Voice => quiet(t("chattools.pins.voice")).into_any_element(),
@@ -555,7 +645,7 @@ impl FuwaApp {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(icon("lock-keyhole").size(px(13.0)))
+                .child(icon("lock-keyhole").size(px(14.0)))
                 .into_any_element(),
         };
         let row = div()
@@ -564,11 +654,9 @@ impl FuwaApp {
             .relative()
             .flex()
             .gap(px(12.0))
-            .mx(px(8.0))
-            .mb(px(4.0))
-            .px(px(10.0))
+            .px(px(8.0))
             .py(px(8.0))
-            .rounded(corner(14.0))
+            .rounded(radius_xl())
             .hover(|s| s.bg(alpha(p.muted, 0.6)))
             .when(busy, |el| el.opacity(0.5))
             .child(avatar(user.as_ref(), 32.0, &p))
@@ -578,7 +666,6 @@ impl FuwaApp {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
                     .child(
                         div()
                             .flex()
@@ -595,6 +682,7 @@ impl FuwaApp {
                     .top(px(6.0))
                     .right(px(6.0))
                     .flex()
+                    .items_center()
                     .gap(px(4.0))
                     .invisible()
                     .group_hover("pin", |s| s.visible())
@@ -613,15 +701,27 @@ impl FuwaApp {
                     })
                     .when(can_unpin && !busy, |el| {
                         let id = id.clone();
+                        let label = t("chattools.pins.unpin");
+                        let (danger, hover_fg) = (p.destructive, p.destructive);
                         el.child(
-                            icon_button(SharedString::from(format!("pin-off|{id}")), "pin-off", &p)
-                                .tooltip({
-                                    let label = t("chattools.pins.unpin");
-                                    move |window, cx| {
-                                        gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
-                                    }
+                            div()
+                                .id(SharedString::from(format!("pin-off|{id}")))
+                                .size(px(24.0))
+                                .rounded_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .border_1()
+                                .border_color(p.border)
+                                .bg(p.card)
+                                .shadow(crate::ui::polls::shadow_sm())
+                                .cursor_pointer()
+                                .hover(move |s| s.border_color(danger).text_color(hover_fg))
+                                .tooltip(move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
                                 })
-                                .on_click(cx.listener(move |this, _, _, cx| this.unpin_listed(id.clone(), cx))),
+                                .on_click(cx.listener(move |this, _, _, cx| this.unpin_listed(id.clone(), cx)))
+                                .child(icon("pin-off").size(px(12.0))),
                         )
                     }),
             );
@@ -632,6 +732,86 @@ impl FuwaApp {
             row.into_any_element()
         }
     }
+}
+
+/// The loading list: three shining rows.
+fn loading(p: &Palette) -> AnyElement {
+    let mut list = div().flex().flex_col().gap(px(12.0)).p(px(8.0));
+    for n in 0..3 {
+        let line = |w: gpui_kit::DefiniteLength| div().h(px(12.0)).w(w).rounded(px(4.0)).bg(p.muted);
+        list = list.child(
+            div()
+                .flex()
+                .gap(px(12.0))
+                .opacity(1.0 - n as f32 * 0.25)
+                .child(div().size(px(32.0)).flex_none().rounded_full().bg(p.muted))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .pt(px(4.0))
+                        .child(line(px(112.0).into()))
+                        .child(line(gpui_kit::relative(0.75))),
+                ),
+        );
+    }
+    list.into_any_element()
+}
+
+/// Nothing pinned yet: the pin dropping into its tile, and where to pin from.
+fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .px(px(24.0))
+        .py(px(32.0))
+        .text_center()
+        .child(motion::rise(
+            div()
+                .size(px(48.0))
+                .rounded(radius_2xl())
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(alpha(p.primary, 0.1))
+                .text_color(p.primary)
+                .child(icon("pin").size(px(24.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4))),
+            "pins-empty-in",
+            Duration::ZERO,
+            -14.0,
+        ))
+        .child(div().mt(px(12.0)).font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.pins.empty")))
+        .child(div().mt(px(4.0)).max_w(px(320.0)).text_sm().text_color(p.muted_foreground).child(hint.to_owned()))
+        .into_any_element()
+}
+
+/// A small muted pill for Retry and Show more.
+fn soft_pill(
+    id: &'static str,
+    glyph: Option<&'static str>,
+    label: String,
+    p: &Palette,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let hover = alpha(p.muted, 0.7);
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(12.0))
+        .py(px(4.0))
+        .rounded_full()
+        .bg(p.muted)
+        .text_xs()
+        .font_weight(FontWeight::BOLD)
+        .text_color(p.foreground)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .when_some(glyph, |el, g| el.child(icon(g).size(px(14.0))))
+        .child(label)
 }
 
 /// A small rounded button with an icon and a few words.
@@ -647,13 +827,15 @@ fn pill(
         .flex()
         .items_center()
         .gap(px(4.0))
-        .px(px(10.0))
-        .py(px(3.0))
+        .px(px(8.0))
+        .py(px(2.0))
         .rounded_full()
         .border_1()
         .border_color(p.border)
         .bg(p.card)
+        .shadow(crate::ui::polls::shadow_sm())
         .text_xs()
+        .line_height(px(16.0))
         .font_weight(FontWeight::BOLD)
         .text_color(p.foreground)
         .cursor_pointer()

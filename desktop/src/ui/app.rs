@@ -284,6 +284,8 @@ pub struct FuwaApp {
     pub edit_in_thread: bool,
     /// The message whose author (from another server) we're asking whether to keep out.
     pub keeping_out: Option<String>,
+    /// What the message list keeps between frames: a delete being asked, a copy, waves.
+    pub msg_ui: crate::ui::chat::MsgUi,
     /// Votes on their way, peeks, polls being ended, and the poll editor.
     pub polls: crate::ui::polls::PollState,
     /// Voice messages being recorded, sent and played.
@@ -525,6 +527,7 @@ impl FuwaApp {
             editing: None,
             edit_in_thread: false,
             keeping_out: None,
+            msg_ui: Default::default(),
             polls: Default::default(),
             voice: Default::default(),
             files: Default::default(),

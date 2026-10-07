@@ -1,5 +1,6 @@
 //! Mentions: finding `@username`, `@everyone`, `@here` and roles (`<@&id>`)
-//! in messages so they show as links you can click, and the @ list in the
+//! in messages so they show as chips (coloured like the role, brighter when
+//! they're about you; people's open their card), and the @ list in the
 //! composer. Like the web app's `chat/mentions.tsx` and `MentionPicker.tsx`:
 //! a role goes in as `@Name` and is sent as `<@&id>`.
 
@@ -18,6 +19,11 @@ pub struct Look {
     pub people: HashMap<String, String>,
     /// Role ids to names.
     pub roles: HashMap<String, String>,
+    /// Role ids to their colours (0xRRGGBB), for those that have one.
+    pub role_colors: HashMap<String, u32>,
+    /// Your username (lowercase) and roles, to light up mentions of you.
+    pub me: String,
+    pub my_roles: Vec<String>,
     /// Emoji ids to pictures: the server's own, and the other servers' on
     /// the instance (a message may write those too).
     pub emojis: HashMap<String, String>,
@@ -48,10 +54,20 @@ impl Look {
             .into_iter()
             .flatten()
             .map(|r| {
-                (&r.id, &r.name).hash(&mut h);
+                (&r.id, &r.name, r.color).hash(&mut h);
                 (r.id.clone(), r.name.clone())
             })
             .collect();
+        let role_colors = i
+            .roles
+            .get(server_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|r| Some((r.id.clone(), r.color? as u32)))
+            .collect();
+        let me = i.me.as_ref().map(|u| u.username.to_lowercase()).unwrap_or_default();
+        let my_roles = i.my_member(server_id).map(|m| m.role_ids.clone()).unwrap_or_default();
+        (&me, &my_roles).hash(&mut h);
         // The server's own last, so they win should two ever share an id.
         let mut emojis = HashMap::new();
         let others = i.emojis.iter().filter(|(id, _)| *id != server_id).flat_map(|(_, list)| list);
@@ -59,7 +75,7 @@ impl Look {
             (&e.id, &e.url).hash(&mut h);
             emojis.insert(e.id.clone(), e.url.clone());
         }
-        Self { people, roles, emojis, digest: h.finish() }
+        Self { people, roles, role_colors, me, my_roles, emojis, digest: h.finish() }
     }
 
     /// With the emoji a message brought along from other servers, for the
@@ -87,8 +103,9 @@ fn username_at(rest: &str) -> Option<&str> {
     (!name.is_empty() && name.len() <= 32).then_some(name)
 }
 
-/// Turns mentions into links (`[@Mika](fuwa-mention:user/mika)`), leaving
-/// code and links alone. People who aren't in the server stay plain text.
+/// Turns mentions into chips (`![@Mika](fuwa-mention:user/mika/-/0)`: the
+/// kind, who or what, a colour and whether it's you), leaving code and links
+/// alone. People who aren't in the server stay plain text.
 pub fn mention_links(source: &str, look: &Look) -> String {
     let mut out = String::with_capacity(source.len() + 16);
     let mut fenced = false;
@@ -121,8 +138,14 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                 && rest[3..end].chars().all(|c| c.is_ascii_alphanumeric())
             {
                 let id = rest[3..end].to_uppercase();
-                let name = look.roles.get(&id).map(String::as_str).unwrap_or("deleted-role");
-                out.push_str(&format!("[@{}]({SCHEME}role/{id})", escape(name)));
+                match look.roles.get(&id) {
+                    Some(name) => {
+                        let color = look.role_colors.get(&id).map_or("-".to_owned(), |c| format!("{c:06x}"));
+                        let mine = u8::from(look.my_roles.iter().any(|r| r.eq_ignore_ascii_case(&id)));
+                        out.push_str(&format!("![@{}]({SCHEME}role/{id}/{color}/{mine})", escape(name)));
+                    }
+                    None => out.push_str(&format!("![@deleted-role]({SCHEME}role/{id}/deleted/0)")),
+                }
                 i += end + 1;
                 prev = Some('>');
                 continue;
@@ -151,7 +174,7 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                         && !after[loud.len()..].chars().next().is_some_and(word)
                 });
                 if let Some(loud) = loud {
-                    out.push_str(&format!("[@{loud}]({SCHEME}everyone/{loud})"));
+                    out.push_str(&format!("![@{loud}]({SCHEME}everyone/{loud}/-/0)"));
                     i += 1 + loud.len();
                     prev = Some('x');
                     continue;
@@ -160,7 +183,8 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                     && !after[name.len()..].chars().next().is_some_and(word)
                     && let Some(shown) = look.people.get(&name.to_lowercase())
                 {
-                    out.push_str(&format!("[@{}]({SCHEME}user/{})", escape(shown), name.to_lowercase()));
+                    let mine = u8::from(name.eq_ignore_ascii_case(&look.me));
+                    out.push_str(&format!("![@{}]({SCHEME}user/{}/-/{mine})", escape(shown), name.to_lowercase()));
                     i += 1 + name.len();
                     prev = Some('x');
                     continue;
@@ -198,6 +222,183 @@ pub fn mention_links(source: &str, look: &Look) -> String {
         }
     }
     out
+}
+
+/// Whether a message is only emoji (up to 27), which draw big (the web's `onlyEmoji`).
+pub fn only_emoji(content: &str) -> bool {
+    let mut tokens = 0;
+    let mut rest = String::with_capacity(content.len());
+    let mut at = 0;
+    while at < content.len() {
+        if let Some((_, _, len)) = crate::ui::emoji::token_at(&content[at..]) {
+            tokens += 1;
+            rest.push(' ');
+            at += len;
+            continue;
+        }
+        let c = content[at..].chars().next().unwrap_or(' ');
+        rest.push(c);
+        at += c.len_utf8();
+    }
+    let pictograph = |c: char| {
+        matches!(c as u32,
+            0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF | 0x2B00..=0x2BFF | 0x2190..=0x21FF
+            | 0x25A0..=0x25FF | 0x2900..=0x297F | 0x3030 | 0x303D | 0x3297 | 0x3299 | 0xA9 | 0xAE | 0x203C | 0x2049
+            | 0x2122 | 0x2139 | 0x24C2)
+    };
+    // Joiners, variation selectors, keycaps and tags ride along with the emoji before them.
+    let joining = |c: char| matches!(c as u32, 0x200D | 0xFE0E | 0xFE0F | 0x20E3 | 0xE0020..=0xE007F);
+    let (mut count, mut joined, mut flags) = (tokens, false, 0);
+    for c in rest.chars().filter(|c| !c.is_whitespace()) {
+        if (0x1F1E6..=0x1F1FF).contains(&(c as u32)) {
+            flags += 1;
+            if flags % 2 == 1 {
+                count += 1;
+            }
+        } else if joining(c) {
+            joined = c == '\u{200D}';
+            continue;
+        } else if pictograph(c) {
+            if !joined {
+                count += 1;
+            }
+        } else {
+            return false;
+        }
+        joined = false;
+    }
+    count > 0 && count <= 27
+}
+
+/// A mention as a chip in Markdown (`Mention`): `@Name` on its colour, or
+/// the primary's; brighter, with a ring, when it's about you.
+pub struct Plugin;
+
+#[derive(Clone)]
+struct Chip {
+    kind: String,
+    target: String,
+    color: Option<u32>,
+    deleted: bool,
+    mine: bool,
+    label: String,
+}
+
+impl gpui_kit::component::text::MarkdownPlugin for Plugin {
+    fn name(&self) -> &str {
+        "fuwa-mention"
+    }
+
+    fn parse(
+        &self,
+        node: &gpui_kit::component::text::markdown_ast::Node,
+        _: &gpui_kit::component::text::MarkdownParseContext<'_>,
+    ) -> Option<gpui_kit::component::text::MarkdownNode> {
+        let gpui_kit::component::text::markdown_ast::Node::Image(image) = node else { return None };
+        let mut parts = image.url.strip_prefix(SCHEME)?.split('/');
+        let kind = parts.next()?.to_owned();
+        let target = parts.next()?.to_owned();
+        let color = parts.next().unwrap_or("-");
+        let mine = parts.next() == Some("1");
+        let chip = Chip {
+            kind,
+            target,
+            color: u32::from_str_radix(color, 16).ok(),
+            deleted: color == "deleted",
+            mine,
+            label: if color == "deleted" {
+                crate::core::i18n::t("chat.mentions.deletedRole")
+            } else {
+                image.alt.clone()
+            },
+        };
+        let text = chip.label.clone();
+        Some(gpui_kit::component::text::MarkdownNode::new("fuwa-mention", chip).text(text.clone()).markdown(text))
+    }
+
+    fn render_inline(
+        &self,
+        node: &gpui_kit::component::text::MarkdownNode,
+        _: &gpui_kit::component::text::InlineRenderContext,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::App,
+    ) -> Option<gpui_kit::component::text::InlineElement> {
+        use gpui_kit::prelude::FluentBuilder as _;
+        use gpui_kit::{InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _};
+        let chip = node.data::<Chip>()?;
+        let p = crate::ui::widgets::pal(cx);
+        let alpha = crate::ui::theme::alpha;
+        let (fg, bg, ring): (gpui_kit::Hsla, gpui_kit::Hsla, Option<gpui_kit::Hsla>) =
+            match (&chip.kind[..], chip.color) {
+                ("role", _) if chip.deleted => (p.muted_foreground.into(), p.muted.into(), None),
+                ("role", Some(c)) => {
+                    let c = gpui_kit::rgb(c);
+                    (c.into(), alpha(c, if chip.mine { 0.24 } else { 0.15 }), chip.mine.then(|| alpha(c, 0.4)))
+                }
+                ("user", _) if chip.mine => (p.primary.into(), alpha(p.primary, 0.25), Some(alpha(p.primary, 0.4))),
+                ("user", _) => (p.primary.into(), alpha(p.primary, 0.12), None),
+                _ => (p.primary.into(), alpha(p.primary, 0.15), chip.mine.then(|| alpha(p.primary, 0.4))),
+            };
+        let hover = alpha(p.primary, 0.2);
+        let user = (chip.kind == "user").then(|| chip.target.clone());
+        Some(gpui_kit::component::text::InlineElement::new(
+            gpui_kit::div()
+                .id(gpui_kit::SharedString::from(format!("mention|{}|{}", chip.kind, chip.target)))
+                .px(gpui_kit::px(4.0))
+                .rounded(crate::ui::theme::radius_md())
+                .bg(bg)
+                .text_color(fg)
+                .font_weight(gpui_kit::FontWeight::BOLD)
+                .when_some(ring, |el, ring| el.border_1().border_color(ring).px(gpui_kit::px(3.0)))
+                .when(chip.kind == "role" && !chip.deleted, |el| {
+                    let tip = crate::core::i18n::t_with(
+                        "chat.mentions.role",
+                        &[("name", crate::core::i18n::Arg::Str(chip.label.trim_start_matches('@')))],
+                    );
+                    el.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                    })
+                })
+                .when_some(user, |el, username| {
+                    el.cursor_pointer().when(!chip.mine, |el| el.hover(move |s| s.bg(hover))).on_click(
+                        move |_, window, cx| {
+                            open_mention(&username, window, cx);
+                        },
+                    )
+                })
+                .child(chip.label.clone()),
+        ))
+    }
+}
+
+thread_local! {
+    /// The window's app, so a person's chip can open their card.
+    static APP: std::cell::RefCell<Option<gpui_kit::WeakEntity<crate::ui::app::FuwaApp>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Remembers the window's app for chips to reach (set as the message list draws).
+pub fn set_app(app: gpui_kit::WeakEntity<crate::ui::app::FuwaApp>) {
+    APP.with(|a| *a.borrow_mut() = Some(app));
+}
+
+/// Opens the card of the person a chip names, in the server on screen.
+fn open_mention(username: &str, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    let Some(app) = APP.with(|a| a.borrow().clone()) else { return };
+    let _ = app.update(cx, |this, cx| {
+        let Some(crate::ui::app::Target::Channel { key, server, .. }) = this.target() else { return };
+        let found = this.core.shared.read(|s| {
+            s.instance(&key)?
+                .members
+                .get(&server)?
+                .iter()
+                .filter_map(|m| m.user.as_ref())
+                .find(|u| u.username.eq_ignore_ascii_case(username))
+                .map(|u| u.id.clone())
+        });
+        if let Some(user_id) = found {
+            this.open_dialog(crate::ui::app::Dialog::Profile { key, user_id, server: Some(server) }, window, cx);
+        }
+    });
 }
 
 /// Markdown's special characters in a name, escaped.
@@ -339,6 +540,9 @@ mod tests {
         Look {
             people: [("mika".to_owned(), "Mika Sato".to_owned())].into_iter().collect(),
             roles: [(ROLE.to_owned(), "Mods".to_owned())].into_iter().collect(),
+            role_colors: [(ROLE.to_owned(), 0x3b82f6)].into_iter().collect(),
+            me: "mika".to_owned(),
+            my_roles: Vec::new(),
             emojis: [(ROLE.to_owned(), "https://x/e.webp".to_owned())].into_iter().collect(),
             digest: 0,
         }
@@ -347,21 +551,34 @@ mod tests {
     #[test]
     fn mentions_become_links_but_code_and_links_stay() {
         let l = look();
-        assert_eq!(mention_links("hi @mika!", &l), format!("hi [@Mika Sato]({SCHEME}user/mika)!"));
-        assert_eq!(mention_links("@Everyone look", &l), format!("[@everyone]({SCHEME}everyone/everyone) look"));
-        assert_eq!(mention_links(&format!("<@&{ROLE}> pls"), &l), format!("[@Mods]({SCHEME}role/{ROLE}) pls"));
+        assert_eq!(mention_links("hi @mika!", &l), format!("hi ![@Mika Sato]({SCHEME}user/mika/-/1)!"));
+        assert_eq!(mention_links("@Everyone look", &l), format!("![@everyone]({SCHEME}everyone/everyone/-/0) look"));
+        assert_eq!(
+            mention_links(&format!("<@&{ROLE}> pls"), &l),
+            format!("![@Mods]({SCHEME}role/{ROLE}/3b82f6/0) pls")
+        );
         assert_eq!(mention_links("@stranger", &l), "@stranger");
         assert_eq!(mention_links("`@mika`", &l), "`@mika`");
         assert_eq!(mention_links("```\n@mika\n```", &l), "```\n@mika\n```");
         assert_eq!(mention_links("[@mika](https://x)", &l), "[@mika](https://x)");
         assert_eq!(mention_links("a@mika.dev", &l), "a@mika.dev");
         assert_eq!(mention_links("@mikasa", &l), "@mikasa");
-        assert_eq!(mention_links("@here.", &l), format!("[@here]({SCHEME}everyone/here)."));
+        assert_eq!(mention_links("@here.", &l), format!("![@here]({SCHEME}everyone/here/-/0)."));
         assert_eq!(
             mention_links(&format!("nice <:blob_cat:{ROLE}>!"), &l),
             "nice ![:blob\\_cat:](fuwa-emoji:https://x/e.webp)!"
         );
         assert_eq!(mention_links("<a:party:01J9AAAAAAAAAAAAAAAAAAAAAA>", &l), ":party:");
+    }
+
+    #[test]
+    fn only_emoji_messages_are_jumbo() {
+        assert!(only_emoji("🌸"));
+        assert!(only_emoji("👋 🎉"));
+        assert!(only_emoji("<:blob_cat:01J9ZZZZZZZZZZZZZZZZZZZZZZ>"));
+        assert!(!only_emoji("hi 👋"));
+        assert!(!only_emoji("123"));
+        assert!(!only_emoji(""));
     }
 
     #[test]

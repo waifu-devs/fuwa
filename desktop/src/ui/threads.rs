@@ -429,81 +429,114 @@ pub(crate) fn replies_row(
     p: &Palette,
     this: &gpui_kit::WeakEntity<FuwaApp>,
 ) -> impl IntoElement {
+    use crate::core::i18n::{Arg, t, t_with};
     let (this, open) = (this.clone(), id.to_owned());
-    let word = if r.count == 1 { "reply" } else { "replies" };
-    div()
-        .id(SharedString::from(format!("replies|{id}")))
-        .group("replies")
-        .mt(px(6.0))
-        .max_w(px(480.0))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(8.0))
-        .py(px(5.0))
-        .rounded(corner(12.0))
-        .border_1()
-        .border_color(gpui_kit::transparent_black())
-        .cursor_pointer()
-        .hover(|s| s.bg(p.card).border_color(p.border))
-        .on_click(move |_, window, cx| {
-            let open = open.clone();
-            let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
-        })
-        .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
-            div()
-                .when(n > 0, |el| el.ml(px(-6.0)))
-                .rounded_full()
-                .border_2()
-                .border_color(p.chat_surface)
-                .child(avatar(Some(u), 20.0, p))
-        })))
-        .child(
-            div()
-                .flex_none()
-                .text_sm()
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.primary)
-                .child(format!("{} {word}", r.count)),
-        )
-        .when(r.new > 0, |el| {
-            el.child(motion::rise(
+    let last = if r.archived {
+        t("chat.threads.archived")
+    } else {
+        let time = crate::ui::text::ago(r.last_at, crate::core::dms::now_ms());
+        t_with("chat.threads.lastReply", &[("time", Arg::Str(&time))])
+    };
+    let (hover_bg, hover_border) = (alpha(p.card, 0.7), p.border);
+    motion::rise(
+        div()
+            .id(SharedString::from(format!("replies|{id}")))
+            .group("replies")
+            .mt(px(4.0))
+            .ml(px(-6.0))
+            .max_w_full()
+            .flex()
+            .flex_none()
+            .self_start()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(6.0))
+            .py(px(4.0))
+            .rounded(crate::ui::theme::radius_xl())
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .text_xs()
+            .line_height(px(16.0))
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg).border_color(hover_border))
+            .active(|s| s.opacity(0.9))
+            .on_click(move |_, window, cx| {
+                let open = open.clone();
+                let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
+            })
+            // Up to three faces, overlapping, each in a ring of the page's colour.
+            .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
+                div().relative().size(px(20.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
+                    div()
+                        .absolute()
+                        .left(px(-2.0))
+                        .top(px(-2.0))
+                        .size(px(24.0))
+                        .rounded_full()
+                        .bg(p.background)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(avatar(Some(u), 20.0, p)),
+                )
+            })))
+            .child(
                 div()
                     .flex_none()
-                    .px(px(6.0))
-                    .rounded_full()
-                    .bg(p.primary)
-                    .text_color(p.primary_foreground)
-                    .text_xs()
                     .font_weight(FontWeight::BOLD)
-                    .child(format!("{} new", r.new)),
-                SharedString::from(format!("replies-new|{id}|{}", r.new)),
-                Duration::ZERO,
-                4.0,
-            ))
-        })
-        .when(r.locked, |el| el.child(icon("lock").size(px(13.0)).text_color(p.muted_foreground)))
-        .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted_foreground).child(if r.archived {
-            "Archived".to_owned()
-        } else if r.count == 0 {
-            "No replies yet".to_owned()
-        } else {
-            format!("Last reply {}", when(r.last_at))
-        }))
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(p.muted_foreground)
-                .opacity(0.0)
-                .group_hover("replies", |s| s.opacity(1.0))
-                .child("View thread")
-                .child(icon("chevron-right").size(px(14.0))),
-        )
+                    .text_color(p.primary)
+                    .child(t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(r.count)))])),
+            )
+            .when(r.new > 0, |el| {
+                el.child(motion::rise(
+                    div()
+                        .flex_none()
+                        .px(px(6.0))
+                        .rounded_full()
+                        .bg(p.primary)
+                        .text_color(p.primary_foreground)
+                        .text_size(px(10.4))
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .child(if r.new > 99 {
+                            t("chat.threads.newMany")
+                        } else {
+                            t_with("chat.threads.newCount", &[("count", Arg::Num(i64::from(r.new)))])
+                        }),
+                    SharedString::from(format!("replies-new|{id}|{}", r.new)),
+                    Duration::ZERO,
+                    4.0,
+                ))
+            })
+            .when(r.locked, |el| el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground)))
+            // The last reply, or "View thread" while hovered, in one place.
+            .child(
+                div()
+                    .relative()
+                    .min_w_0()
+                    .text_color(p.muted_foreground)
+                    .child(
+                        div()
+                            .truncate()
+                            .relative()
+                            .top(px(0.0))
+                            .group_hover("replies", |s| s.opacity(0.0).top(px(-4.0)))
+                            .child(last),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(4.0))
+                            .whitespace_nowrap()
+                            .opacity(0.0)
+                            .group_hover("replies", |s| s.opacity(1.0).top(px(0.0)))
+                            .child(t("chat.threads.view")),
+                    ),
+            ),
+        SharedString::from(format!("replies-in|{id}")),
+        Duration::ZERO,
+        4.0,
+    )
 }
 
 /// Under a reply also sent to the channel: where else it is. In the channel
@@ -516,13 +549,13 @@ pub(crate) fn also_note(
 ) -> impl IntoElement {
     let el = div()
         .id(SharedString::from(format!("also|{id}")))
-        .mb(px(2.0))
         .flex()
         .items_center()
         .gap(px(4.0))
-        .text_xs()
-        .text_color(p.muted_foreground)
-        .child(icon("corner-down-right").size(px(13.0)));
+        .text_size(px(11.2))
+        .line_height(px(18.2))
+        .font_weight(FontWeight::BOLD)
+        .text_color(p.muted_foreground);
     match thread {
         Some(thread) => {
             let (this, thread) = (this.clone(), thread.to_owned());
@@ -532,9 +565,10 @@ pub(crate) fn also_note(
                     let thread = thread.clone();
                     let _ = this.update(cx, |this, cx| this.open_thread(thread, window, cx));
                 })
-                .child("Replied in a thread")
+                .child(icon("corner-down-right").size(px(12.0)))
+                .child(crate::core::i18n::t("chat.threads.repliedInThread"))
         }
-        None => el.child("Also sent to the channel"),
+        None => el.child(crate::core::i18n::t("chat.threads.alsoSent")),
     }
 }
 
@@ -620,14 +654,8 @@ impl FuwaApp {
                 )
             })
             .when(pins_here, |el| {
-                el.child(
-                    icon_button("thread-pins", "pin", &p)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chattools.pins.button"))
-                                .build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.open_thread_pins(cx))),
-                )
+                let open = self.pins.as_ref().is_some_and(|p| p.of_thread(&open.id));
+                el.child(self.pins_button("thread-pins", open, cx))
             })
             .child(
                 icon_button("thread-jump", "arrow-up-right", &p)

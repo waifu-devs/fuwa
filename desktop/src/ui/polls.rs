@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window, div, px,
+    WeakEntity, Window, div, px, rgb,
 };
 use prost::Message as _;
 
@@ -197,6 +197,7 @@ fn pill(
         .gap(px(4.0))
         .px(px(8.0))
         .py(px(2.0))
+        .line_height(px(18.2))
         .rounded_full()
         .bg(bg)
         .text_color(fg)
@@ -210,7 +211,7 @@ fn footer_button(
     label: Option<&'static str>,
     p: &Palette,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let hover = alpha(p.muted_foreground, 0.12);
+    let hover = p.muted;
     let fg = p.foreground;
     div()
         .id(id)
@@ -219,7 +220,9 @@ fn footer_button(
         .gap(px(4.0))
         .px(px(8.0))
         .py(px(4.0))
-        .rounded(corner(8.0))
+        .line_height(px(16.0))
+        .whitespace_nowrap()
+        .rounded(crate::ui::theme::radius_lg())
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .hover(move |s| s.bg(hover).text_color(fg))
@@ -231,13 +234,13 @@ fn footer_button(
 /// The card under a poll's message.
 pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<FuwaApp>) -> AnyElement {
     let poll = &c.poll;
-    let muted = alpha(p.muted_foreground, 0.12);
+    let muted = p.muted;
     let mut pills = div()
         .flex()
         .flex_wrap()
         .items_center()
         .gap(px(6.0))
-        .text_size(px(11.0))
+        .text_size(px(11.2))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(p.muted_foreground)
         .child(pill(Some("chart-column"), "Poll", p.primary, alpha(p.primary, 0.12)))
@@ -267,8 +270,8 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
     }
     let header = div().flex().flex_col().gap(px(6.0)).child(pills).child(
         div()
-            .text_size(px(16.0))
-            .line_height(px(21.0))
+            .text_size(px(16.32))
+            .line_height(px(22.44))
             .font_weight(FontWeight::EXTRA_BOLD)
             .child(poll.question.clone()),
     );
@@ -290,11 +293,18 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         } else {
             alpha(p.foreground, 0.08)
         };
-        let bar = div().absolute().left_0().top_0().bottom_0().rounded(corner(11.0)).bg(bar_color).with_animation(
-            SharedString::from(format!("poll-bar|{mid}|{}|{}|{}", a.id, from.to_bits(), to.to_bits())),
-            Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_out_quint()),
-            move |el, t| el.w(gpui_kit::relative(from + (to - from) * t)),
-        );
+        let bar = div()
+            .absolute()
+            .left_0()
+            .top_0()
+            .bottom_0()
+            .rounded(crate::ui::theme::radius_xl())
+            .bg(bar_color)
+            .with_animation(
+                SharedString::from(format!("poll-bar|{mid}|{}|{}|{}", a.id, from.to_bits(), to.to_bits())),
+                Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_out_quint()),
+                move |el, t| el.w(gpui_kit::relative(from + (to - from) * t)),
+            );
         let mark = div()
             .size(px(18.0))
             .flex_none()
@@ -319,7 +329,7 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         let row = div()
             .id(SharedString::from(format!("poll-answer|{mid}|{id}")))
             .relative()
-            .rounded(corner(12.0))
+            .rounded(crate::ui::theme::radius_xl())
             .border_1()
             .border_color(if chosen { alpha(p.primary, 0.6) } else { p.border.into() })
             .when(dim, |el| el.opacity(0.62))
@@ -333,20 +343,35 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                     .px(px(12.0))
                     .py(px(8.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .child(mark)
                     .when_some(answer_emoji(&a.emoji, c.pictures.get(n).and_then(Option::as_ref), 18.0), |el, e| {
                         el.child(e)
                     })
-                    .child(div().flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).child(a.text.clone()))
-                    .when(winner, |el| el.child(icon("trophy").size(px(15.0)).text_color(p.primary)))
+                    .child(div().flex_1().min_w_0().font_weight(FontWeight::BOLD).child(a.text.clone()))
+                    .when(winner, |el| el.child(icon("trophy").size(px(16.0)).text_color(rgb(0xf59e0b))))
                     .when(c.results, |el| {
-                        el.child(
+                        // The web's numbers: the votes muted, then the share in a 36px column.
+                        el.child(motion::slide_in(
                             div()
                                 .flex_none()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(6.0))
                                 .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(format!("{} · {percent}%", a.votes)),
-                        )
+                                .line_height(px(16.0))
+                                .child(div().text_color(p.muted_foreground).child(a.votes.to_string()))
+                                .child(
+                                    div()
+                                        .w(px(36.0))
+                                        .flex()
+                                        .justify_end()
+                                        .font_weight(FontWeight::EXTRA_BOLD)
+                                        .child(format!("{percent}%")),
+                                ),
+                            SharedString::from(format!("poll-numbers|{mid}|{id}")),
+                            8.0,
+                        ))
                     }),
             );
         let row = if c.can_vote {
@@ -455,8 +480,10 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .flex()
         .flex_wrap()
         .items_center()
-        .gap(px(8.0))
+        .gap_x(px(12.0))
+        .gap_y(px(6.0))
         .text_xs()
+        .line_height(px(16.0))
         .text_color(p.muted_foreground)
         .child(
             div()
@@ -473,11 +500,13 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .flex()
         .flex_col()
         .gap(px(12.0))
-        .p(px(14.0))
-        .rounded(corner(16.0))
+        .p(px(16.0))
+        .rounded(crate::ui::theme::radius_2xl())
         .border_1()
         .border_color(p.border)
-        .bg(alpha(p.card, 0.7))
+        // Solid: GPUI draws a shadow under see-through fills, which the web clips away.
+        .bg(crate::ui::theme::mix(p.chat_surface.into(), p.card, 0.7))
+        .shadow(crate::ui::polls::shadow_sm())
         .child(header)
         .child(answers)
         .child(footer)
@@ -1417,6 +1446,27 @@ struct Page {
     loading: bool,
     loaded: bool,
     error: Option<String>,
+}
+
+/// Tailwind's `shadow-sm`.
+pub(crate) fn shadow_sm() -> Vec<gpui_kit::BoxShadow> {
+    let black = |a: f32| gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a };
+    vec![
+        gpui_kit::BoxShadow {
+            color: black(0.1),
+            offset: gpui_kit::point(px(0.0), px(1.0)),
+            blur_radius: px(3.0),
+            spread_radius: px(0.0),
+            inset: false,
+        },
+        gpui_kit::BoxShadow {
+            color: black(0.1),
+            offset: gpui_kit::point(px(0.0), px(1.0)),
+            blur_radius: px(2.0),
+            spread_radius: px(-1.0),
+            inset: false,
+        },
+    ]
 }
 
 #[cfg(test)]

@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::message_scroller::MessageScroller;
-use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Focusable as _, FontWeight, Hsla, InteractiveElement as _,
@@ -19,12 +18,12 @@ use gpui_kit::{
 };
 
 use crate::core::config::Density;
-use crate::core::i18n::t;
+use crate::core::i18n::{Arg, t};
 use crate::core::shared;
 use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
-use crate::ui::app::{Dialog, FuwaApp, Menu, Nav, Target};
+use crate::ui::app::{Dialog, FuwaApp, Nav, Target};
 use crate::ui::context_menu::{self, MenuOf};
 use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
@@ -33,8 +32,8 @@ use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
-    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, icon_button_in,
-    is_agent, pal, primary_button, soft_button,
+    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, header_button, icon, icon_button, is_agent, pal,
+    primary_button, soft_button,
 };
 
 /// Who wrote something in a conversation or a secure channel, as shown.
@@ -47,7 +46,7 @@ pub(crate) struct Who {
 fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg {
     Msg {
         id,
-        shown: timestamp_nodes(&images_as_links(&content)),
+        shown: timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&content))),
         user: who.user,
         name: who.name,
         color: who.color,
@@ -76,6 +75,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         agent: None,
         pinned: false,
         can_pin: false,
+        owner: false,
         sig: 0,
     }
 }
@@ -220,7 +220,66 @@ pub enum Row {
     Divider {
         text: String,
     },
+    /// A line between days: "Today", "Yesterday", "Monday, June 3".
+    Day {
+        id: String,
+        text: String,
+    },
+    /// Someone joined the server, with a wave for them.
+    Join(Rc<JoinLine>),
+    /// What AutoMod caught, for the moderators in its alert channel.
+    AutoMod(Rc<AlertLine>),
     Msg(Rc<Msg>),
+}
+
+/// "Someone joined", as the web's `JoinRow`.
+#[derive(Clone, PartialEq)]
+pub struct JoinLine {
+    pub id: String,
+    pub user: Option<pb::User>,
+    pub user_id: String,
+    pub name: String,
+    pub color: Option<Hsla>,
+    pub at: i64,
+    pub mine: bool,
+    /// You may send here, so you may wave.
+    pub can_wave: bool,
+    pub can_delete: bool,
+}
+
+/// What AutoMod caught, as the web's `AutoModAlertRow`.
+#[derive(Clone, PartialEq)]
+pub struct AlertLine {
+    pub id: String,
+    pub alert: pb::AutoModAlert,
+    pub user_id: String,
+    pub name: String,
+    pub color: Option<Hsla>,
+    /// The channel it happened in, when it's known.
+    pub channel: Option<String>,
+    pub at: i64,
+    pub can_delete: bool,
+}
+
+/// What the message list keeps between frames.
+#[derive(Default)]
+pub struct MsgUi {
+    /// The message (or join line, or alert) asking "Delete?".
+    pub deleting: Option<String>,
+    /// The message whose text was just copied, and when.
+    pub copied: Option<(String, Instant)>,
+    /// New messages that came in while the list was scrolled up.
+    pub missed: usize,
+    /// Join lines waved at this run, and the waves on their way.
+    pub waved: std::collections::HashSet<String>,
+    pub waving: std::collections::HashSet<String>,
+    /// When older messages were last asked for, so a failing load isn't asked again every frame.
+    pub older_at: Option<Instant>,
+    /// The row under the pointer, and the row whose tools' card is (it pokes out above its row).
+    pub hovered: Option<String>,
+    pub hovered_tools: Option<String>,
+    /// The bell menu's "Mute channel" list is out.
+    pub bell_sub: bool,
 }
 
 /// Where a message stands with threads.
@@ -296,6 +355,8 @@ pub struct Msg {
     pub pinned: bool,
     /// You may pin it or unpin it.
     pub can_pin: bool,
+    /// Its author owns the server: a crown by the name.
+    pub owner: bool,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -311,6 +372,9 @@ impl Row {
             Row::Start { .. } => "start",
             Row::Note { id, .. } => id,
             Row::Divider { .. } => "divider",
+            Row::Day { id, .. } => id,
+            Row::Join(j) => &j.id,
+            Row::AutoMod(a) => &a.id,
             Row::Msg(m) => &m.id,
         }
     }
@@ -318,9 +382,19 @@ impl Row {
     fn digest(&self, h: &mut DefaultHasher) {
         match self {
             Row::Older { loading } => ("older", loading).hash(h),
-            Row::Start { title, shared, .. } => ("start", title, shared).hash(h),
+            Row::Start { title, body, shared, .. } => ("start", title, body, shared).hash(h),
             Row::Note { id, text, .. } => (id, text).hash(h),
             Row::Divider { text } => ("divider", text).hash(h),
+            Row::Day { id, text } => (id, text).hash(h),
+            Row::Join(j) => {
+                (&j.id, &j.name, j.can_wave, j.can_delete).hash(h);
+                j.color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)).hash(h);
+                j.user.as_ref().map(|u| &u.username).hash(h);
+            }
+            Row::AutoMod(a) => {
+                (&a.id, &a.name, &a.channel, a.can_delete).hash(h);
+                a.color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)).hash(h);
+            }
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
                 (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me, m.pinned)
@@ -430,6 +504,8 @@ impl FuwaApp {
                 .clone()
         };
         let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+        let owner_id = i.server(&server).map(|s| s.owner_id.clone()).unwrap_or_default();
+        let can_send = i.access(&server).has_in(&channel, pb::Permission::SendMessages);
         // Pins are the home's in a shared channel, and need the instance to keep them.
         let pins_here = i.has("pins") && manage && !guest_side;
         let can_vote = !guest_side && !i.access(&server).pending;
@@ -466,10 +542,15 @@ impl FuwaApp {
             rows.push(Row::Older { loading: loaded.loading });
         } else {
             let note = here.filter(|_| !self.prefs.shared_notes_closed.contains(&format!("{key}/{channel}")));
+            let topic = here.map(|c| c.topic.trim().to_owned()).filter(|t| !t.is_empty());
+            let start = crate::core::i18n::t_with("chat.beginning.start", &[("channel", Arg::Str(&name))]);
             rows.push(Row::Start {
-                icon: "hash",
-                title: format!("Welcome to #{name}"),
-                body: format!("This is the start of #{name}."),
+                icon: "sparkles",
+                title: crate::core::i18n::t_with("chat.beginning.title", &[("channel", Arg::Str(&name))]),
+                body: match topic {
+                    Some(topic) => format!("{start} {topic}"),
+                    None => start,
+                },
                 shared: note.and_then(|c| {
                     let label = shared::shared_label(c)?;
                     let sh = c.shared.as_ref()?;
@@ -494,19 +575,43 @@ impl FuwaApp {
                 }),
             });
         }
+        let mut last_day: Option<i64> = None;
         for m in parent.into_iter().chain(&loaded.items) {
             let is_parent = parent.is_some_and(|p| std::ptr::eq(p, m));
+            // A divider for each day (not between a thread's message and its replies).
+            let at = ms_of(m.created_at.as_ref());
+            if !is_parent && !last_day.is_some_and(|d| crate::ui::text::same_day(d, at)) {
+                rows.push(Row::Day { id: format!("day|{}", m.id), text: crate::ui::text::day(at) });
+            }
+            last_day = Some(at);
             if m.kind == pb::MessageKind::MemberJoined as i32 {
-                rows.push(Row::Note {
+                let who = author(&m.author_id);
+                rows.push(Row::Join(Rc::new(JoinLine {
                     id: m.id.clone(),
-                    icon: "sparkles",
-                    text: format!("{} joined the server. Say hi!", author(&m.author_id).0),
-                });
+                    user: who.3.clone(),
+                    user_id: m.author_id.clone(),
+                    name: who.0.clone(),
+                    color: who.1,
+                    at,
+                    mine: m.author_id == me,
+                    can_wave: can_send && !i.access(&server).pending,
+                    can_delete: manage,
+                })));
                 continue;
             }
             if m.kind == pb::MessageKind::AutoModAlert as i32 {
                 if let Some(alert) = &m.auto_mod {
-                    rows.push(Row::Msg(Rc::new(auto_mod_row(i, &server, m, alert, manage))));
+                    let who = author(&m.author_id);
+                    rows.push(Row::AutoMod(Rc::new(AlertLine {
+                        id: m.id.clone(),
+                        alert: alert.clone(),
+                        user_id: m.author_id.clone(),
+                        name: who.0.clone(),
+                        color: who.1,
+                        channel: i.channel(&server, &alert.channel_id).map(|c| c.name.clone()),
+                        at,
+                        can_delete: manage,
+                    })));
                 }
                 continue;
             }
@@ -583,7 +688,10 @@ impl FuwaApp {
                     name: author_name.clone(),
                     color: *color,
                     content: m.content.clone(),
-                    shown: mention_links(&timestamp_nodes(&images_as_links(&m.content)), &look.with(&m.emojis)),
+                    shown: mention_links(
+                        &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&m.content))),
+                        &look.with(&m.emojis),
+                    ),
                     mentions_me: i.pings_me(&server, m, suppress),
                     editing,
                     can_delete,
@@ -608,6 +716,7 @@ impl FuwaApp {
                     agent: agent.clone(),
                     pinned,
                     can_pin,
+                    owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
                     sig,
                 }),
             };
@@ -624,7 +733,10 @@ impl FuwaApp {
                 name: i.display_name(Some(&server), &me),
                 color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                 content: p.content.clone(),
-                shown: mention_links(&timestamp_nodes(&images_as_links(&p.content)), &look.with(&p.emojis)),
+                shown: mention_links(
+                    &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&p.content))),
+                    &look.with(&p.emojis),
+                ),
                 mentions_me: false,
                 editing: false,
                 can_delete: false,
@@ -649,6 +761,7 @@ impl FuwaApp {
                 agent: None,
                 pinned: false,
                 can_pin: false,
+                owner: me == owner_id,
                 sig: 0,
             })));
         }
@@ -703,7 +816,9 @@ impl FuwaApp {
                 let added = len - list.len;
                 let now = Instant::now();
                 for r in &rows[list.len.saturating_sub(1)..] {
-                    if matches!(r, Row::Msg(_) | Row::Note { .. }) && !self.fresh.contains_key(&r.id()) {
+                    if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Join(_) | Row::AutoMod(_))
+                        && !self.fresh.contains_key(&r.id())
+                    {
                         self.fresh.insert(r.id(), now);
                     }
                 }
@@ -712,6 +827,12 @@ impl FuwaApp {
                     rows[..list.len.min(rows.len())].iter().map(Row::id_str).collect();
                 self.fresh.retain(|id, at| !old.contains(id.as_str()) || at.elapsed() < Duration::from_millis(900));
                 let changed = changed_rows(&list.rows, &digests, 0);
+                // New messages that came in while you read further up.
+                if self.scroller.read(cx).is_scrolled_up() {
+                    let new =
+                        rows[list.len.min(rows.len())..].iter().filter(|r| matches!(r, Row::Msg(m) if !m.mine)).count();
+                    self.msg_ui.missed += new;
+                }
                 self.scroller.update(cx, |s, cx| {
                     s.append(added, cx);
                     for range in changed {
@@ -839,17 +960,12 @@ impl FuwaApp {
         let mut view = div().size_full().relative().flex().child(column);
         if let Some(panel) = self.search_panel(window, cx) {
             view = view.child(panel);
-        } else if let Some(panel) = self.pins_panel(cx) {
-            view = view.child(panel);
         } else if let Some(panel) = self.thread_panel(window, cx) {
             view = view.child(panel);
         } else if let Some(panel) = self.threads_list_panel(window, cx) {
             view = view.child(panel);
         } else if self.members_open {
             view = view.child(self.members_panel(key, server, window, cx));
-        }
-        if let Some(Menu::Channel { key, server, channel }) = self.menu.clone() {
-            view = view.child(self.bell_menu(&key, &server, &channel, window, cx));
         }
         view.into_any_element()
     }
@@ -890,35 +1006,18 @@ impl FuwaApp {
         let channel_id = channel.id.as_str();
         // Threads aren't in shared channels yet, nor in secure ones (theirs are their own).
         let threads = channel.shared.is_none() && channel.r#type != pb::ChannelType::Secure as i32;
-        let side = self.threads.open.is_some() || self.threads.listing.is_some() || self.pins.is_some();
+        let side = self.threads.open.is_some() || self.threads.listing.is_some();
         div()
             .flex()
             .flex_none()
             .items_center()
             .gap(px(8.0))
-            .child({
-                let muted = self.core.shared.read(|s| {
-                    s.instance(key).is_some_and(|i| i.is_muted(server, channel_id, crate::core::dms::now_ms()))
-                });
-                let menu =
-                    Menu::Channel { key: key.to_owned(), server: server.to_owned(), channel: channel_id.to_owned() };
-                let open = self.menu.as_ref() == Some(&menu);
-                header_button("bell", if muted { "bell-off" } else { "bell" }, open || muted, &p).on_click(cx.listener(
-                    move |this, _, _, cx| {
-                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
-                        cx.notify();
-                    },
-                ))
-            })
+            .child(self.bell_button(key, server, channel_id, cx))
             .when(self.pins_here(key, channel), |el| {
-                let open = self.pins.is_some();
-                el.child(
-                    header_button("pins-toggle", "pin", open, &p)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_pins(window, cx))),
-                )
+                let open = self.pins.as_ref().is_some_and(
+                    |p| !matches!(&p.place, crate::ui::pins::PinPlace::Channel { thread, .. } if !thread.is_empty()),
+                );
+                el.child(self.pins_button("pins-toggle", open, cx))
             })
             .when(threads, |el| {
                 let open = self.threads.listing.is_some();
@@ -949,24 +1048,41 @@ impl FuwaApp {
         let ctx = self.row_ctx(None, cx);
         let target = self.list.target.clone().unwrap_or_default();
         let loading = rows.is_empty();
-        div().flex_1().min_h_0().relative().child(if loading {
-            crate::ui::sidebar::loading_rows(&p).into_any_element()
-        } else {
-            MessageScroller::new(
-                SharedString::from(format!("list|{target}")),
-                self.scroller.clone(),
-                move |ix, _window, cx| match rows.get(ix) {
-                    Some(row) => render_row(row, ix, &ctx, cx),
-                    None => div().into_any_element(),
-                },
-            )
-            .with_bottom_fade(p.background)
-            .with_row_style(gpui_kit::StyleRefinement::default().pb(px(0.0)).px(px(0.0)))
-            .with_list_style(gpui_kit::StyleRefinement::default().pb(px(12.0)))
-            .with_jump_button_label("Jump to the latest")
-            .size_full()
-            .into_any_element()
-        })
+        crate::ui::mentions::set_app(cx.entity().downgrade());
+        // Back to the newest messages once you've scrolled up, counting what came in meanwhile.
+        let up = !loading && self.scroller.read(cx).is_scrolled_up();
+        if !up {
+            self.msg_ui.missed = 0;
+        }
+        let jump = up.then(|| crate::ui::chat_rows::jump_pill(self.msg_ui.missed, &p, cx));
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(if loading {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .child(crate::ui::chat_rows::skeleton(6, &p))
+                    .into_any_element()
+            } else {
+                MessageScroller::new(
+                    SharedString::from(format!("list|{target}")),
+                    self.scroller.clone(),
+                    move |ix, _window, cx| match rows.get(ix) {
+                        Some(row) => render_row(row, ix, &ctx, cx),
+                        None => div().into_any_element(),
+                    },
+                )
+                .jump_button(false)
+                .with_row_style(gpui_kit::StyleRefinement::default().pb(px(0.0)).px(px(0.0)))
+                .with_list_style(gpui_kit::StyleRefinement::default().pt(px(0.0)).pb(px(12.0)))
+                .size_full()
+                .into_any_element()
+            })
+            .children(jump)
     }
 
     /// What every row of a list needs from the window; `thread` for the open thread's panel.
@@ -989,6 +1105,18 @@ impl FuwaApp {
             thread,
             lit: self.context.as_ref().map(|c| c.of.lit()),
             saved_gifs: crate::ui::gifs::saved_here(self, self.target().as_ref().map_or("", |t| t.key())),
+            hover: self.msg_ui.hovered.clone().or_else(|| self.msg_ui.hovered_tools.clone()),
+            deleting: self.msg_ui.deleting.clone(),
+            copied: self.msg_ui.copied.as_ref().map(|(id, _)| id.clone()),
+            developer: self.prefs.developer_mode,
+            waved: self.msg_ui.waved.clone(),
+            waving: self.msg_ui.waving.clone(),
+            send_keys: match self.core.prefs().send_with {
+                crate::core::config::SendWith::Enter => "Enter".to_owned(),
+                crate::core::config::SendWith::ModEnter => {
+                    format!("{}+Enter", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" })
+                }
+            },
         })
     }
 
@@ -1376,13 +1504,7 @@ impl FuwaApp {
             .child(div().flex_1())
             .when(pins_here, |el| {
                 let open = self.pins.is_some();
-                el.child(
-                    header_button("pins-toggle", "pin", open, &p)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("chattools.pins.button")).build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_pins(window, cx))),
-                )
+                el.child(self.pins_button("pins-toggle", open, cx))
             })
             .child(
                 div()
@@ -1448,8 +1570,7 @@ impl FuwaApp {
             .child(header)
             .child(self.message_list(window, cx))
             .child(self.composer_bar(blocked, window, cx));
-        let side = self.pins_panel(cx);
-        div().size_full().flex().child(column).children(side).into_any_element()
+        div().size_full().flex().child(column).into_any_element()
     }
 
     // ───────────────────────── An instance ─────────────────────────
@@ -1616,130 +1737,186 @@ fn group(rows: &mut [Row]) {
 
 /// What every row of the open list needs from the window.
 pub(crate) struct RowCtx {
-    fresh: std::collections::HashMap<String, Instant>,
-    this: WeakEntity<FuwaApp>,
-    compact: bool,
-    edit_box: gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
-    key: String,
-    server: Option<String>,
+    pub(crate) fresh: std::collections::HashMap<String, Instant>,
+    pub(crate) this: WeakEntity<FuwaApp>,
+    pub(crate) compact: bool,
+    pub(crate) edit_box: gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
+    pub(crate) key: String,
+    pub(crate) server: Option<String>,
     /// The instance's address, which pictures of other servers must come from.
-    url: String,
+    pub(crate) url: String,
     /// The message a search result opened, which glows a moment.
-    jumped: Option<(String, Instant)>,
+    pub(crate) jumped: Option<(String, Instant)>,
     /// Drawing the open thread's panel: the id of the message it's under.
-    thread: Option<String>,
+    pub(crate) thread: Option<String>,
     /// What an open right-click menu is for, lit while it's open.
-    lit: Option<String>,
+    pub(crate) lit: Option<String>,
     /// Your saved GIFs' links here, for the stars on GIFs.
-    saved_gifs: Rc<std::collections::HashSet<String>>,
+    pub(crate) saved_gifs: Rc<std::collections::HashSet<String>>,
+    /// The row under the pointer (or whose tools are), which shows its tools.
+    pub(crate) hover: Option<String>,
+    /// The row asking "Delete?".
+    pub(crate) deleting: Option<String>,
+    /// The message whose text was just copied.
+    pub(crate) copied: Option<String>,
+    /// Developer mode: a button to copy a message's id.
+    pub(crate) developer: bool,
+    /// Join lines waved at, and waves on their way.
+    pub(crate) waved: std::collections::HashSet<String>,
+    pub(crate) waving: std::collections::HashSet<String>,
+    /// How the send keys read in the edit box's hint.
+    pub(crate) send_keys: String,
 }
 
 pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
     let p = pal(cx);
-    let is_fresh = ctx.fresh.contains_key(&row.id());
-    let el: AnyElement =
-        match row {
-            Row::Older { loading } => {
-                let (this, in_thread) = (ctx.this.clone(), ctx.thread.is_some());
+    let is_fresh = ctx.fresh.contains_key(row.id_str());
+    let el: AnyElement = match row {
+        // More history above: in a channel it comes in by itself as this row shows (the web's
+        // scroll to the top), shimmering meanwhile; a thread's panel keeps its button.
+        Row::Older { loading } if ctx.thread.is_none() => {
+            if !*loading {
+                let this = ctx.this.clone();
+                cx.defer(move |cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.msg_ui.older_at.is_some_and(|at| at.elapsed() < Duration::from_secs(1)) {
+                            return;
+                        }
+                        this.msg_ui.older_at = Some(Instant::now());
+                        this.load_older(cx);
+                    });
+                });
+            }
+            crate::ui::chat_rows::skeleton(2, &p)
+        }
+        Row::Older { loading } => {
+            let this = ctx.this.clone();
+            div()
+                .flex()
+                .justify_center()
+                .py(px(16.0))
+                .child(soft_button("older", if *loading { "Loading…" } else { "Show older messages" }, &p).on_click(
+                    move |_, _, cx| {
+                        let _ = this.update(cx, |this, cx| this.load_older_replies(cx));
+                    },
+                ))
+                .into_any_element()
+        }
+        // A secure channel's start says how it's kept private, in its own colour.
+        Row::Start { icon: glyph, title, body, .. } if *glyph == "shield-check" => {
+            crate::ui::secure::start(title.clone(), body.clone(), &p).into_any_element()
+        }
+        // A channel's beginning, as the web's `Beginning`.
+        Row::Start { icon: glyph, title, body, shared } if *glyph == "sparkles" => crate::ui::chat_rows::beginning(
+            &ctx.key,
+            glyph,
+            title,
+            body,
+            shared.clone().map(|(note, title, line)| shared_note(note, title, line, &p, ctx).into_any_element()),
+            &p,
+        ),
+        Row::Start { icon: glyph, title, body, shared } => div()
+            .px(px(20.0))
+            .pt(px(32.0))
+            .pb(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
                 div()
+                    .size(px(64.0))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(alpha(p.primary, 0.14))
+                    .text_color(p.primary)
+                    .child(icon(glyph).size(px(30.0))),
+            )
+            .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title.clone()))
+            .child(div().text_color(p.muted_foreground).child(body.clone()))
+            .when_some(shared.clone(), |el, (note, title, line)| el.child(shared_note(note, title, line, &p, ctx)))
+            .into_any_element(),
+        Row::Note { icon: glyph, text, .. } => div()
+            .px(px(20.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .text_sm()
+            .text_color(p.muted_foreground)
+            .child(
+                div()
+                    .w(px(40.0))
+                    .flex_none()
                     .flex()
                     .justify_center()
-                    .py(px(16.0))
-                    .child(
-                        soft_button("older", if *loading { "Loading…" } else { "Show older messages" }, &p).on_click(
-                            move |_, _, cx| {
-                                let _ = this.update(cx, |this, cx| {
-                                    if in_thread { this.load_older_replies(cx) } else { this.load_older(cx) }
-                                });
-                            },
-                        ),
-                    )
-                    .into_any_element()
-            }
-            // A secure channel's start says how it's kept private, in its own colour.
-            Row::Start { icon: glyph, title, body, .. } if *glyph == "shield-check" => {
-                crate::ui::secure::start(title.clone(), body.clone(), &p).into_any_element()
-            }
-            Row::Start { icon: glyph, title, body, shared } => div()
-                .px(px(20.0))
-                .pt(px(32.0))
-                .pb(px(16.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .size(px(64.0))
-                        .rounded_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(alpha(p.primary, 0.14))
-                        .text_color(p.primary)
-                        .child(icon(glyph).size(px(30.0))),
-                )
-                .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title.clone()))
-                .child(div().text_color(p.muted_foreground).child(body.clone()))
-                .when_some(shared.clone(), |el, (note, title, line)| el.child(shared_note(note, title, line, &p, ctx)))
-                .into_any_element(),
-            Row::Note { icon: glyph, text, .. } => div()
-                .px(px(20.0))
-                .py(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .text_sm()
-                .text_color(p.muted_foreground)
-                .child(
-                    div()
-                        .w(px(40.0))
-                        .flex_none()
-                        .flex()
-                        .justify_center()
-                        .child(icon(glyph).size(px(16.0)).text_color(p.primary)),
-                )
-                .child(div().flex_1().min_w_0().child(div().flex_none().child(text.clone())))
-                .into_any_element(),
-            Row::Divider { text } => div()
-                .px(px(20.0))
-                .py(px(8.0))
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(p.muted_foreground)
-                .child(div().flex_1().h(px(1.0)).bg(p.border))
-                .child(text.clone())
-                .child(div().flex_1().h(px(1.0)).bg(p.border))
-                .into_any_element(),
-            Row::Msg(m) => message(m, &p, ctx, cx),
-        };
+                    .child(icon(glyph).size(px(16.0)).text_color(p.primary)),
+            )
+            .child(div().flex_1().min_w_0().child(div().flex_none().child(text.clone())))
+            .into_any_element(),
+        Row::Divider { text } => div()
+            .px(px(20.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .text_xs()
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.muted_foreground)
+            .child(div().flex_1().h(px(1.0)).bg(p.border))
+            .child(text.clone())
+            .child(div().flex_1().h(px(1.0)).bg(p.border))
+            .into_any_element(),
+        Row::Day { text, .. } => crate::ui::chat_rows::day_row(text, &p),
+        Row::Join(j) => crate::ui::chat_rows::join_row(j, ctx, &p),
+        Row::AutoMod(a) => crate::ui::chat_rows::alert_row(a, ctx, &p),
+        Row::Msg(m) => message(m, &p, ctx, cx),
+    };
+    // A message of yours the server took glows once (the web's `.landed`).
+    let el = match row {
+        Row::Msg(m) if is_fresh && m.mine && !m.pending => {
+            let glow = p.primary;
+            div()
+                .relative()
+                .child(gpui_kit::AnimationExt::with_animation(
+                    div().absolute().inset_0().bg(alpha(glow, 0.1)).border_l(px(3.0)).border_color(glow),
+                    SharedString::from(format!("landed|{}", m.id)),
+                    gpui_kit::Animation::new(Duration::from_millis(1400)),
+                    |el, t| el.opacity(1.0 - t),
+                ))
+                .child(el)
+                .into_any_element()
+        }
+        _ => el,
+    };
     let el = if is_fresh {
-        motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 14.0)
+        motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 12.0)
             .into_any_element()
     } else {
         el
     };
     match &ctx.jumped {
-        // Where a search result led: a glow that fades by itself.
+        // Where a search result led: a glow that holds a moment, then fades by itself.
         Some((id, at)) if id == row.id_str() => {
             let glow = p.primary;
-            gpui_kit::AnimationExt::with_animation(
-                div().child(el),
-                SharedString::from(format!("jumped|{id}|{at:?}")),
-                // Stays lit a moment, then fades.
-                gpui_kit::Animation::new(JUMP_GLOW).with_easing(|t: f32| t * t * t),
-                move |el, t| el.bg(alpha(glow, 0.22 * (1.0 - t))),
-            )
-            .into_any_element()
+            div()
+                .relative()
+                .child(el)
+                .child(gpui_kit::AnimationExt::with_animation(
+                    div().absolute().inset_0().bg(alpha(glow, 0.16)).border_l(px(3.0)).border_color(glow),
+                    SharedString::from(format!("jumped|{id}|{at:?}")),
+                    gpui_kit::Animation::new(JUMP_GLOW),
+                    |el, t| el.opacity(if t < 0.35 { 1.0 } else { 1.0 - (t - 0.35) / 0.65 }),
+                ))
+                .into_any_element()
         }
         _ => el,
     }
 }
 
 /// How long a message a search result opened glows.
-const JUMP_GLOW: Duration = Duration::from_millis(2400);
+const JUMP_GLOW: Duration = Duration::from_millis(2200);
 
 /// Said once at the start of a shared channel: which servers talk here and
 /// where what's said is kept. Closing it is remembered on this computer.
@@ -1834,74 +2011,104 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     // The web's .message-row: the muted color at 45% on hover, 70% while its menu is open.
     let hover = alpha(p.muted, 0.45);
     let held = alpha(p.muted, 0.7);
-    let gutter = if compact { 0.0 } else { 40.0 };
+    // A message AutoMod stopped: why, without a retry that would only be stopped again.
+    let blocked = m.failed.as_deref().and_then(|f| f.strip_prefix("AutoMod: ")).map(str::to_owned);
     let content: AnyElement = if m.editing {
         edit_box(m, p, ctx).into_any_element()
     } else if let Some(card) = &m.voice {
         crate::ui::voice_notes::voice_card(&m.id, card, p, &ctx.this)
-    } else if m.poll.is_some() && m.content.trim().is_empty() {
+    } else if m.content.trim().is_empty() {
         div().into_any_element()
     } else if m.unreadable {
         div().italic().text_color(p.muted_foreground).child(m.content.clone()).into_any_element()
     } else {
         let (this, key, server) = (ctx.this.clone(), ctx.key.clone(), ctx.server.clone());
-        TextView::markdown(SharedString::from(format!("md|{}", m.id)), m.shown.clone())
-            .markdown_extensions(crate::ui::emoji::markdown_extensions())
-            .selectable(true)
-            .style(TextViewStyle { paragraph_gap: gpui_kit::rems(0.35), ..TextViewStyle::default() })
-            .on_link_click(move |url, _, window, cx| match url.strip_prefix(SCHEME) {
-                Some(mention) => {
-                    let Some(username) = mention.strip_prefix("user/") else { return };
-                    let found = this.upgrade().and_then(|app| {
-                        let server = server.clone()?;
-                        app.read(cx).core.shared.read(|s| {
-                            s.instance(&key)?
-                                .members
-                                .get(&server)?
-                                .iter()
-                                .filter_map(|m| m.user.as_ref())
-                                .find(|u| u.username.eq_ignore_ascii_case(username))
-                                .map(|u| u.id.clone())
-                        })
-                    });
-                    if let Some(id) = found {
-                        open_card(&this, &key, server.clone(), id, window, cx);
-                    }
-                }
-                None => crate::ui::text::open_link(url, cx),
-            })
+        let jumbo = crate::ui::mentions::only_emoji(&m.content);
+        div()
             .w_full()
+            .when(m.failed.is_some(), |el| el.text_color(p.destructive))
+            .when(blocked.is_some(), |el| el.line_through())
+            // A message of nothing but emoji draws them big (`.jumbo`).
+            .when(jumbo, |el| el.text_size(px(33.75)).line_height(px(42.0)))
+            .child(
+                gpui_kit::base::TextView::markdown(SharedString::from(format!("md|{}", m.id)), m.shown.clone())
+                    .markdown_extensions(crate::ui::emoji::markdown_extensions())
+                    .selectable(true)
+                    .style(chat_markdown(p))
+                    .on_link_click(move |url, _, window, cx| match url.strip_prefix(SCHEME) {
+                        Some(mention) => {
+                            let Some(username) = mention.strip_prefix("user/") else { return };
+                            let username = username.split('/').next().unwrap_or_default();
+                            let found = this.upgrade().and_then(|app| {
+                                let server = server.clone()?;
+                                app.read(cx).core.shared.read(|s| {
+                                    s.instance(&key)?
+                                        .members
+                                        .get(&server)?
+                                        .iter()
+                                        .filter_map(|m| m.user.as_ref())
+                                        .find(|u| u.username.eq_ignore_ascii_case(username))
+                                        .map(|u| u.id.clone())
+                                })
+                            });
+                            if let Some(id) = found {
+                                open_card(&this, &key, server.clone(), id, window, cx);
+                            }
+                        }
+                        None => crate::ui::text::open_link(url, cx),
+                    })
+                    .w_full(),
+            )
             .into_any_element()
     };
     // Apps and bots have no profile to open; agents do.
     let author = m.user.as_ref().filter(|_| matches!(m.badge, None | Some("AGENT"))).map(|u| u.id.clone());
     let tint = crate::ui::widgets::name_tint(m.user.as_ref().map(|u| u.id.as_str()).unwrap_or(&m.name), p);
-    let name = div()
-        .id(SharedString::from(format!("name|{}", m.id)))
-        .min_w_0()
-        .overflow_hidden()
-        .text_ellipsis()
-        .whitespace_nowrap()
-        .font_weight(FontWeight::BOLD)
-        .text_size(px(16.0))
-        .text_color(m.color.unwrap_or(tint))
-        .cursor_pointer()
-        .hover(|s| s.underline())
-        .when_some(author.clone(), |el, id| {
-            let ctx = ctx.clone();
-            el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
-                .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
-        })
-        .child(m.name.clone());
-    let time = div().flex_none().text_xs().text_color(p.muted_foreground).child(when(m.at));
+    // The web's `AuthorName`: the name in its role's colour, a crown for the owner, the app tag.
+    let author_name = || {
+        div()
+            .flex()
+            .flex_none()
+            .min_w_0()
+            .max_w(px(if compact { 280.0 } else { 520.0 }))
+            .items_center()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .id(SharedString::from(format!("name|{}", m.id)))
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .font_weight(FontWeight::BOLD)
+                    .text_size(px(16.0))
+                    .text_color(m.color.unwrap_or(tint))
+                    .when(author.is_some(), |el| el.cursor_pointer().hover(|s| s.underline()))
+                    .when_some(author.clone(), |el, id| {
+                        let ctx = ctx.clone();
+                        el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                            .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+                    })
+                    .child(m.name.clone()),
+            )
+            .when(m.owner, |el| {
+                el.child(
+                    div()
+                        .id(SharedString::from(format!("crown|{}", m.id)))
+                        .flex_none()
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(t("chat.author.owner")).build(window, cx)
+                        })
+                        .child(icon("crown").size(px(14.0)).text_color(rgb(0xfbbf24))),
+                )
+            })
+            .when_some(m.badge, |el, badge| {
+                el.child(app_badge(SharedString::from(format!("badge|{}", m.id)), badge, p))
+            })
+    };
+    let stamp: SharedString = if m.pending { t("chat.pending.sending").into() } else { when(m.at).into() };
     let mut body = div().flex_1().min_w_0().flex().flex_col();
-    if m.thread.also_in.is_some() || m.thread.also_sent {
-        body = body.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
-    }
-    if let Some(used) = m.agent.as_ref().and_then(|a| crate::ui::commands::used_line(&m.id, a, p)) {
-        body = body.child(used);
-    }
-    if m.head {
+    if m.head && !compact {
         body = body.child(
             div()
                 .flex()
@@ -1909,55 +2116,74 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .gap(px(8.0))
                 .h(px(24.0))
                 .line_height(px(24.0))
-                .child(name)
+                .child(author_name())
                 .when_some(m.from.as_ref(), |el, from| {
                     el.child(div().self_center().child(crate::ui::shared_marks::server_tag(from, &ctx.url, p)))
                 })
-                .when_some(m.badge, |el, badge| {
-                    el.child(app_badge(SharedString::from(format!("badge|{}", m.id)), badge, p))
-                })
-                .child(time),
+                .child(div().flex_none().text_xs().text_color(p.muted_foreground).child(stamp.clone())),
         );
     }
-    body = body.child(
+    // Everything under the name is the web's `.chat-text`: 15px on a 1.625 line.
+    let mut text = div().flex().flex_col().text_size(px(15.0)).line_height(px(24.375));
+    if m.thread.also_in.is_some() || m.thread.also_sent {
+        text = text.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
+    }
+    if let Some(used) = m.agent.as_ref().and_then(|a| crate::ui::commands::used_line(&m.id, a, p)) {
+        text = text.child(used);
+    }
+    let compact_head = compact.then(|| {
+        // Compact: the time and the name in front of every message, on its line.
         div()
+            .flex_none()
             .flex()
             .items_baseline()
             .gap(px(6.0))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    // The web's chat text: 15px on a 1.625 line.
-                    .text_size(px(15.0))
-                    .line_height(px(24.375))
-                    .when(m.pending && m.failed.is_none(), |el| el.opacity(0.55))
-                    .child(content),
+                    .w(px(48.0))
+                    .mr(px(2.0))
+                    .flex_none()
+                    .flex()
+                    .justify_end()
+                    .text_size(px(10.5))
+                    .whitespace_nowrap()
+                    .text_color(p.muted_foreground)
+                    .child(if m.pending { t("chat.pending.sending") } else { clock(m.at) }),
             )
-            .when(m.edited && !m.editing, |el| {
-                el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))
+            .child(author_name())
+            .when_some(m.from.as_ref(), |el, from| {
+                el.child(div().self_center().child(crate::ui::shared_marks::server_tag(from, &ctx.url, p)))
             })
-            .when(m.pinned, |el| el.child(crate::ui::pins::pin_mark(&m.id, p))),
+    });
+    let dim = m.pending && m.failed.is_none();
+    text = text.child(
+        div()
+            .flex()
+            .items_baseline()
+            .children(compact_head)
+            .child(div().flex_1().min_w_0().when(dim, |el| el.opacity(0.55)).child(content)),
     );
-    if !m.embeds.is_empty() {
-        body = body.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p));
-    }
-    if let Some(card) = &m.poll {
-        body = body.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this));
-    }
-    if let Some(buttons) = m
-        .agent
-        .as_ref()
-        .and_then(|a| crate::ui::commands::buttons_view(&m.id, a, p, &ctx.this, &ctx.key, ctx.server.as_deref()))
-    {
-        body = body.child(buttons);
-    }
-    if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
-        let starred = ctx.saved_gifs.contains(&gif.url);
-        body = body.child(crate::ui::gifs::gif_in_message(&m.id, gif, starred, p, &ctx.this, &ctx.key));
+    // "(edited)" and the pin go on the line after the text, as on the web.
+    if (m.edited && !m.editing) || m.pinned {
+        text = text.child(
+            div()
+                .flex()
+                .items_center()
+                .h(px(24.375))
+                .when(m.edited && !m.editing, |el| {
+                    el.child(
+                        div()
+                            .id(SharedString::from(format!("edited|{}", m.id)))
+                            .text_size(px(11.2))
+                            .text_color(p.muted_foreground)
+                            .child(t("chat.messages.edited")),
+                    )
+                })
+                .when(m.pinned, |el| el.child(div().ml(px(6.0)).child(crate::ui::pins::pin_mark(&m.id, p)))),
+        );
     }
     if !m.attachments.is_empty() {
-        body = body.child(crate::ui::attachments::attachments_view(
+        text = text.child(crate::ui::attachments::attachments_view(
             &m.id,
             &m.attachments,
             &ctx.url,
@@ -1966,201 +2192,71 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             &ctx.key,
         ));
     }
+    if !m.embeds.is_empty() {
+        text = text.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p));
+    }
+    if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
+        let starred = ctx.saved_gifs.contains(&gif.url);
+        text = text.child(crate::ui::gifs::gif_in_message(&m.id, gif, starred, p, &ctx.this, &ctx.key));
+    }
     if let Some(replies) = &m.thread.replies {
-        body = body.child(crate::ui::threads::replies_row(&m.id, replies, p, &ctx.this));
+        text = text.child(crate::ui::threads::replies_row(&m.id, replies, p, &ctx.this));
+    }
+    if let Some(card) = &m.poll {
+        text = text.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this));
+    }
+    if let Some(buttons) = m
+        .agent
+        .as_ref()
+        .and_then(|a| crate::ui::commands::buttons_view(&m.id, a, p, &ctx.this, &ctx.key, ctx.server.as_deref()))
+    {
+        text = text.child(buttons);
     }
     if let Some(reason) = &m.failed {
-        let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
-        let nonce = m.nonce;
-        let (thread, thread_d) = (ctx.thread.clone(), ctx.thread.clone());
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .text_xs()
-                .text_color(p.destructive)
-                .child(format!("Couldn't send: {reason}"))
-                .child(
-                    div()
-                        .id(SharedString::from(format!("retry|{nonce}")))
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .hover(|s| s.underline())
-                        .on_click(move |_, _, cx| {
-                            let _ = retry.update(cx, |this, cx| this.retry(nonce, thread.clone(), cx));
-                        })
-                        .child("Retry"),
-                )
-                .child(
-                    div()
-                        .id(SharedString::from(format!("dismiss|{nonce}")))
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .hover(|s| s.underline())
-                        .on_click(move |_, _, cx| {
-                            let _ = dismiss.update(cx, |this, _| {
-                                if let Some(Target::Channel { key, channel, .. }) = this.target() {
-                                    let at = thread_d.as_deref().map_or(channel, crate::core::threads::thread_key);
-                                    this.core.dismiss_pending(&key, &at, nonce);
-                                }
-                            });
-                        })
-                        .child("Dismiss"),
-                ),
-        );
+        text = text.child(failed_line(m, reason, blocked.as_deref(), p, ctx));
     }
+    body = body.child(text);
 
-    let left: AnyElement = if compact {
-        div().into_any_element()
+    let left: Option<AnyElement> = if compact {
+        None
     } else if m.head {
-        div()
-            .id(SharedString::from(format!("face|{}", m.id)))
-            .w(px(gutter))
-            .flex_none()
-            .mt(px(2.0))
-            .cursor_pointer()
-            .when_some(author, |el, id| {
-                let ctx = ctx.clone();
-                el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
-                    .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
-            })
-            .child(avatar(m.user.as_ref(), 40.0, p))
-            .into_any_element()
+        Some(
+            div()
+                .id(SharedString::from(format!("face|{}", m.id)))
+                .w(px(40.0))
+                .flex_none()
+                .mt(px(2.0))
+                .when(author.is_some(), |el| el.cursor_pointer().active(|s| s.opacity(0.9)))
+                .when_some(author, |el, id| {
+                    let ctx = ctx.clone();
+                    el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                        .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+                })
+                .child(avatar(m.user.as_ref(), 40.0, p))
+                .into_any_element(),
+        )
     } else {
-        // The web's gutter time: 10px, right-aligned, reaching 12px into the gap.
-        div()
-            .w(px(gutter))
-            .flex_none()
-            .ml(px(-12.0))
-            .pl(px(12.0))
-            .pt(px(4.0))
-            .flex()
-            .justify_end()
-            .text_size(px(10.0))
-            .whitespace_nowrap()
-            .text_color(p.muted_foreground)
-            .opacity(0.0)
-            .group_hover("msg", |s| s.opacity(1.0))
-            .child(clock(m.at))
-            .into_any_element()
+        // The web's gutter time: 10px, right-aligned, reaching 12px into the gap, shown on hover.
+        Some(
+            div()
+                .w(px(40.0))
+                .flex_none()
+                .pt(px(4.0))
+                .flex()
+                .justify_end()
+                .text_size(px(10.0))
+                .line_height(px(15.0))
+                .whitespace_nowrap()
+                .text_color(p.muted_foreground)
+                .when(!m.pending && ctx.hover.as_deref() == Some(m.id.as_str()), |el| el.child(clock(m.at)))
+                .into_any_element(),
+        )
     };
 
-    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
-    let can_delete = m.can_delete && !m.pending && !m.editing;
-    let keep_out = m.keep_out && !m.editing;
-    let can_thread = m.thread.can_thread && !m.pending && !m.editing && !m.keeping_out;
-    let actions = (can_edit || can_delete || keep_out || can_thread).then(|| {
-        let id = m.id.clone();
-        div()
-            .absolute()
-            .right(px(16.0))
-            .top(px(-10.0))
-            .opacity(if m.keeping_out { 1.0 } else { 0.0 })
-            .group_hover("msg", |s| s.opacity(1.0))
-            .flex()
-            .p(px(2.0))
-            .gap(px(2.0))
-            .rounded(corner(12.0))
-            .bg(p.card)
-            .border_1()
-            .border_color(p.border)
-            .shadow(vec![gpui_kit::BoxShadow {
-                color: alpha(p.foreground, 0.08),
-                offset: gpui_kit::point(px(0.0), px(4.0)),
-                blur_radius: px(12.0),
-                spread_radius: px(-4.0),
-                inset: false,
-            }])
-            .when(can_thread, |el| {
-                let (this, id) = (ctx.this.clone(), id.clone());
-                let label = if m.thread.replies.is_some() { "Open thread" } else { "Reply in thread" };
-                el.child(
-                    icon_button(SharedString::from(format!("thread|{id}")), "message-square-reply", p)
-                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx))
-                        .on_click(move |_, window, cx| {
-                            let _ = this.update(cx, |this, cx| this.open_thread(id.clone(), window, cx));
-                        }),
-                )
-            })
-            .when(can_edit, |el| {
-                let (this, id, in_thread) = (ctx.this.clone(), id.clone(), ctx.thread.is_some());
-                el.child(icon_button(SharedString::from(format!("edit|{id}")), "pencil", p).on_click(
-                    move |_, window, cx| {
-                        let _ = this.update(cx, |this, cx| {
-                            this.start_edit(id.clone(), window, cx);
-                            this.edit_in_thread = in_thread;
-                            this.sync_list(cx);
-                            this.sync_thread(cx);
-                        });
-                    },
-                ))
-            })
-            .when(can_delete && !m.keeping_out, |el| {
-                let (this, id) = (ctx.this.clone(), id.clone());
-                el.child(icon_button_in(SharedString::from(format!("del|{id}")), "trash", p, p.destructive).on_click(
-                    move |_, _, cx| {
-                        let _ = this.update(cx, |this, cx| this.delete(id.clone(), cx));
-                    },
-                ))
-            })
-            .when(keep_out && !m.keeping_out, |el| {
-                let (this, id) = (ctx.this.clone(), id.clone());
-                el.child(
-                    icon_button_in(SharedString::from(format!("keep|{id}")), "user-x", p, p.destructive)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new("Keep out of this channel").build(window, cx)
-                        })
-                        .on_click(move |_, _, cx| {
-                            let _ = this.update(cx, |this, cx| {
-                                this.keeping_out = Some(id.clone());
-                                this.sync_list(cx);
-                                cx.notify();
-                            });
-                        }),
-                )
-            })
-            .when(m.keeping_out, |el| {
-                let (yes, no) = (ctx.this.clone(), ctx.this.clone());
-                let (id, author) = (id.clone(), m.user.as_ref().map(|u| u.id.clone()).unwrap_or_default());
-                let name = m.name.clone();
-                el.child(motion::slide_in(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .px(px(8.0))
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(p.destructive)
-                                .child(format!("Keep {name} out?")),
-                        )
-                        .child(
-                            icon_button_in(SharedString::from(format!("keep-yes|{id}")), "check", p, p.destructive)
-                                .on_click(move |_, _, cx| {
-                                    let _ = yes.update(cx, |this, cx| this.keep_out(author.clone(), name.clone(), cx));
-                                }),
-                        )
-                        .child(icon_button(SharedString::from(format!("keep-no|{id}")), "x", p).on_click(
-                            move |_, _, cx| {
-                                let _ = no.update(cx, |this, cx| {
-                                    this.keeping_out = None;
-                                    this.sync_list(cx);
-                                    cx.notify();
-                                });
-                            },
-                        )),
-                    SharedString::from(format!("keep-ask|{id}")),
-                    8.0,
-                ))
-            })
-    });
+    let tools = message_tools(m, p, ctx);
 
     // The web's .mention-me: the primary at 12% and a 3px bar inside the left edge.
     let ping = alpha(p.primary, 0.12);
-    let ping_hover = alpha(p.primary, 0.12);
     let bar = p.primary;
     let lit = ctx.lit.as_deref().and_then(|l| l.strip_prefix("msg|")) == Some(m.id.as_str());
     let menu_of = {
@@ -2182,7 +2278,11 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         move |hovered: &bool, _: &mut Window, cx: &mut App| {
             let of =
                 MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture: None, selection: String::new() };
-            let _ = this.update(cx, |this, _| this.set_hover_target(of, *hovered));
+            let id = msg.id.clone();
+            let _ = this.update(cx, |this, cx| {
+                this.set_hover_target(of, *hovered);
+                this.hover_row(&id, *hovered, false, cx);
+            });
         }
     };
     div()
@@ -2199,26 +2299,310 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         // The web's spacing (app.css, at the density's scale): 2px around each
         // line, and a run's first line 12px down with 4px more above it.
         .map(|el| {
-            let d = if compact { 0.5 } else { 1.0 };
-            if m.head { el.mt(px(12.0 * d)).pt(px(4.0 * d)).pb(px(2.0 * d)) } else { el.py(px(2.0 * d)) }
+            if compact {
+                if m.head { el.mt(px(6.0)).pt(px(2.0)).pb(px(1.0)) } else { el.py(px(1.0)) }
+            } else if m.head {
+                el.mt(px(12.0)).pt(px(4.0)).pb(px(2.0))
+            } else {
+                el.py(px(2.0))
+            }
         })
         .map(|el| {
-            if m.mentions_me {
-                el.bg(if lit { ping_hover } else { ping })
-            } else if lit {
+            if lit {
                 el.bg(held)
-            } else if m.editing {
-                el.bg(hover)
+            } else if m.mentions_me {
+                el.bg(ping).hover(move |s| s.bg(hover))
             } else {
                 el.hover(move |s| s.bg(hover))
             }
         })
         .when(m.mentions_me, |el| el.child(div().absolute().left_0().top_0().bottom_0().w(px(3.0)).bg(bar)))
-        .child(left)
-        .gap(px(if compact { 8.0 } else { 12.0 }))
+        .children(left)
+        .gap(px(12.0))
         .child(body)
-        .when_some(actions, |el, a| el.child(a))
+        .children(tools)
         .into_any_element()
+}
+
+/// The web's chat Markdown (`.markdown.chat` in app.css): code on the muted
+/// colour, tight paragraphs, quotes behind a bar in the primary, headings no
+/// bigger than the page's own.
+pub(crate) fn chat_markdown(p: &Palette) -> gpui_kit::base::TextViewStyle {
+    let code = gpui_kit::StyleRefinement::default()
+        .rounded(corner(12.0))
+        .px(px(13.125))
+        .py(px(9.84))
+        .my(px(5.25))
+        .text_size(px(13.125))
+        .line_height(px(21.0));
+    gpui_kit::base::TextViewStyle::default()
+        .with_foreground(p.foreground.into())
+        .with_muted_foreground(p.muted_foreground.into())
+        .with_link(p.primary.into())
+        .with_selection(alpha(p.primary, 0.3))
+        .with_code_background(p.muted.into())
+        // Quotes' bar (`.markdown blockquote`); tables and rules share it.
+        .with_border(p.primary.into())
+        .with_paragraph_gap(gpui_kit::rems(0.3))
+        .with_heading(|level| {
+            let size = if level <= 2 { 17.25 } else { 15.0 };
+            gpui_kit::StyleRefinement::default()
+                .text_size(px(size))
+                .line_height(px(size * 1.3))
+                .font_weight(FontWeight::EXTRA_BOLD)
+        })
+        .with_code_block(code)
+        .with_inline_code(gpui_kit::HighlightStyle { background_color: Some(p.muted.into()), ..Default::default() })
+        .with_dark(p.dark)
+}
+
+/// Under a message that didn't go: why, and what to do (`PendingRow`'s ends).
+fn failed_line(m: &Msg, reason: &str, blocked: Option<&str>, p: &Palette, ctx: &Rc<RowCtx>) -> AnyElement {
+    let nonce = m.nonce;
+    let dismiss = {
+        let (this, thread) = (ctx.this.clone(), ctx.thread.clone());
+        div()
+            .id(SharedString::from(format!("dismiss|{nonce}")))
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.muted_foreground)
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .on_click(move |_, _, cx| {
+                let _ = this.update(cx, |this, _| {
+                    if let Some(Target::Channel { key, channel, .. }) = this.target() {
+                        let at = thread.as_deref().map_or(channel, crate::core::threads::thread_key);
+                        this.core.dismiss_pending(&key, &at, nonce);
+                    }
+                });
+            })
+            .child(t("chat.pending.dismiss"))
+    };
+    let upper = |s: &str| {
+        let mut c = s.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    };
+    if let Some(why) = blocked {
+        let amber = rgb(0xf59e0b);
+        let content = m.content.clone();
+        let this = ctx.this.clone();
+        return motion::rise(
+            div()
+                .mt(px(6.0))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(crate::ui::theme::radius_xl())
+                .border_1()
+                .border_color(alpha(amber, 0.3))
+                .bg(alpha(amber, 0.1))
+                .text_xs()
+                .line_height(px(16.0))
+                .text_color(p.foreground)
+                .child(icon("shield-alert").size(px(16.0)).text_color(rgb(if p.dark { 0xfbbf24 } else { 0xd97706 })))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(px(4.0))
+                        .child(div().font_weight(FontWeight::BOLD).child(t("chat.pending.blocked")))
+                        .child(div().text_color(p.muted_foreground).child(upper(why))),
+                )
+                .child(
+                    div()
+                        .id(SharedString::from(format!("blocked-copy|{nonce}")))
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.primary)
+                        .cursor_pointer()
+                        .hover(|s| s.underline())
+                        .on_click(move |_, _, cx| {
+                            let text = content.clone();
+                            let _ = this.update(cx, |_, cx| {
+                                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
+                            });
+                        })
+                        .child(icon("copy").size(px(12.0)))
+                        .child(t("chat.messages.copyText")),
+                )
+                .child(dismiss),
+            SharedString::from(format!("blocked|{nonce}")),
+            Duration::ZERO,
+            -4.0,
+        )
+        .into_any_element();
+    }
+    let (this, thread) = (ctx.this.clone(), ctx.thread.clone());
+    div()
+        .mt(px(4.0))
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(8.0))
+        .text_xs()
+        .line_height(px(16.0))
+        .child(div().text_color(p.destructive).child(format!("{}.", upper(reason.trim_end_matches('.')))))
+        .child(
+            div()
+                .id(SharedString::from(format!("retry|{nonce}")))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.primary)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .on_click(move |_, _, cx| {
+                    let _ = this.update(cx, |this, cx| this.retry(nonce, thread.clone(), cx));
+                })
+                .child(icon("rotate-cw").size(px(12.0)))
+                .child(t("chat.pending.retry")),
+        )
+        .child(dismiss)
+        .into_any_element()
+}
+
+/// The tools over a hovered message (`MessageTools`), in the web's order:
+/// copy text, its thread, pin, copy ID (developer mode), edit, keep out,
+/// delete; or the question when deleting it (or keeping its author out) needs a yes.
+fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElement> {
+    use crate::ui::chat_rows::{confirm_delete, tool, tools_frame, tools_shown};
+    if m.pending || m.editing || m.unreadable {
+        return None;
+    }
+    let deleting = ctx.deleting.as_deref() == Some(m.id.as_str());
+    if !(tools_shown(&m.id, ctx) || m.keeping_out || deleting) {
+        return None;
+    }
+    let id = m.id.clone();
+    let frame = tools_frame(&id, ctx, p);
+    if deleting && m.can_delete {
+        return Some(frame.child(confirm_delete(&id, t("common.cancel"), ctx, p)).into_any_element());
+    }
+    if m.keeping_out {
+        let (yes, no) = (ctx.this.clone(), ctx.this.clone());
+        let (author, name) = (m.user.as_ref().map(|u| u.id.clone()).unwrap_or_default(), m.name.clone());
+        return Some(
+            frame
+                .child(motion::slide_in(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(
+                            div().px(px(8.0)).text_xs().font_weight(FontWeight::BOLD).text_color(p.destructive).child(
+                                crate::core::i18n::t_with("chat.messages.keepOutAsk", &[("name", Arg::Str(&name))]),
+                            ),
+                        )
+                        .child(tool(format!("keep-yes|{id}"), "check", t("chat.messages.keepOut"), true, p).on_click(
+                            move |_, _, cx| {
+                                let _ = yes.update(cx, |this, cx| this.keep_out(author.clone(), name.clone(), cx));
+                            },
+                        ))
+                        .child(tool(format!("keep-no|{id}"), "x", t("common.cancel"), false, p).on_click(
+                            move |_, _, cx| {
+                                let _ = no.update(cx, |this, cx| {
+                                    this.keeping_out = None;
+                                    this.sync_list(cx);
+                                    cx.notify();
+                                });
+                            },
+                        )),
+                    SharedString::from(format!("keep-ask|{id}")),
+                    8.0,
+                ))
+                .into_any_element(),
+        );
+    }
+    let mut frame = frame;
+    if !m.content.trim().is_empty() && m.voice.is_none() {
+        let copied = ctx.copied.as_deref() == Some(id.as_str());
+        let (this, mid, text) = (ctx.this.clone(), id.clone(), m.content.clone());
+        let label = if copied { t("chat.messages.copied") } else { t("chat.messages.copyText") };
+        let button = tool(format!("copy|{id}"), if copied { "check" } else { "copy" }, label, false, p)
+            .when(copied, |el| el.text_color(p.primary))
+            .on_click(move |_, _, cx| {
+                let _ = this.update(cx, |this, cx| this.copy_message_text(mid.clone(), text.clone(), cx));
+            });
+        frame = frame.child(button);
+    }
+    if m.thread.can_thread {
+        let (this, mid) = (ctx.this.clone(), id.clone());
+        let label =
+            if m.thread.replies.is_some() { t("chat.messages.openThread") } else { t("chat.messages.replyInThread") };
+        frame = frame.child(tool(format!("thread|{id}"), "message-square-reply", label, false, p).on_click(
+            move |_, window, cx| {
+                let _ = this.update(cx, |this, cx| this.open_thread(mid.clone(), window, cx));
+            },
+        ));
+    }
+    if m.can_pin {
+        let (this, mid, pinned, in_thread) = (ctx.this.clone(), id.clone(), m.pinned, ctx.thread.is_some());
+        let label = if pinned { t("chattools.pins.unpinMessage") } else { t("chattools.pins.pin") };
+        frame =
+            frame.child(tool(format!("pin|{id}"), if pinned { "pin-off" } else { "pin" }, label, false, p).on_click(
+                move |_, _, cx| {
+                    let _ = this.update(cx, |this, cx| this.toggle_pin(mid.clone(), !pinned, in_thread, cx));
+                },
+            ));
+    }
+    if ctx.developer && ctx.server.is_some() {
+        let (this, mid) = (ctx.this.clone(), id.clone());
+        frame = frame.child(
+            tool(format!("copy-id|{id}"), "fingerprint-pattern", t("chat.messages.copyId"), false, p).on_click(
+                move |_, _, cx| {
+                    let _ = this.update(cx, |this, cx| context_menu::copy(this, mid.clone(), "message ID", cx));
+                },
+            ),
+        );
+    }
+    let can_edit = m.mine && m.poll.is_none() && m.voice.is_none();
+    if can_edit {
+        let (this, mid, in_thread) = (ctx.this.clone(), id.clone(), ctx.thread.is_some());
+        frame = frame.child(tool(format!("edit|{id}"), "pencil", t("chat.messages.edit"), false, p).on_click(
+            move |_, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.start_edit(mid.clone(), window, cx);
+                    this.edit_in_thread = in_thread;
+                    this.sync_list(cx);
+                    this.sync_thread(cx);
+                });
+            },
+        ));
+    }
+    if m.keep_out {
+        let (this, mid) = (ctx.this.clone(), id.clone());
+        frame = frame.child(tool(format!("keep|{id}"), "user-x", t("chat.messages.keepOut"), true, p).on_click(
+            move |_, _, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.keeping_out = Some(mid.clone());
+                    this.sync_list(cx);
+                    cx.notify();
+                });
+            },
+        ));
+    }
+    if m.can_delete {
+        let (this, mid) = (ctx.this.clone(), id.clone());
+        frame = frame.child(tool(format!("del|{id}"), "trash", t("chat.messages.delete"), true, p).on_click(
+            move |_, _, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.msg_ui.deleting = Some(mid.clone());
+                    cx.notify();
+                });
+            },
+        ));
+    }
+    Some(
+        motion::fade_in(frame, SharedString::from(format!("tools-in|{id}")), Duration::from_millis(150))
+            .into_any_element(),
+    )
 }
 
 /// The message box's right-click menu: the usual cut, copy and paste, then
@@ -2242,7 +2626,7 @@ fn composer_menu(
 /// Editing in place: Enter saves, Escape stops.
 fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
     let (save, cancel) = (ctx.this.clone(), ctx.this.clone());
-    let link = |id: &str, label: &'static str, p: &Palette| {
+    let link = |id: &str, label: String, p: &Palette| {
         div()
             .id(SharedString::from(format!("{id}|{}", m.id)))
             .text_color(p.primary)
@@ -2251,49 +2635,80 @@ fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
             .hover(|s| s.underline())
             .child(label)
     };
-    motion::rise(
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .py(px(4.0))
-            .child(
-                div()
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(corner(12.0))
-                    .bg(p.card)
-                    .border_1()
-                    .border_color(p.primary)
-                    .shadow(vec![gpui_kit::BoxShadow {
-                        color: alpha(p.primary, 0.2),
-                        offset: gpui_kit::point(px(0.0), px(6.0)),
-                        blur_radius: px(18.0),
-                        spread_radius: px(-8.0),
+    // "Escape to {cancel} · {keys} to {save}", with cancel and save as links.
+    // Filled with its own placeholders, which are split out below.
+    let template = crate::core::i18n::t_with(
+        "chat.edit.hint",
+        &[("cancel", Arg::Str("{cancel}")), ("keys", Arg::Str("{keys}")), ("save", Arg::Str("{save}"))],
+    );
+    let mut hint =
+        div().flex().flex_wrap().items_center().text_xs().line_height(px(16.0)).text_color(p.muted_foreground);
+    let mut rest = template.as_str();
+    let (mut save, mut cancel) = (Some(save), Some(cancel));
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}').map(|c| open + c) else { break };
+        if open > 0 {
+            hint = hint.child(div().whitespace_nowrap().child(rest[..open].to_owned()));
+        }
+        hint = match &rest[open + 1..close] {
+            "cancel" => match cancel.take() {
+                Some(this) => hint.child(link("cancel", t("chat.edit.cancel"), p).on_click(move |_, window, cx| {
+                    let _ = this.update(cx, |this, cx| this.cancel_edit(window, cx));
+                })),
+                None => hint,
+            },
+            "save" => match save.take() {
+                Some(this) => hint.child(link("save", t("chat.edit.save"), p).on_click(move |_, window, cx| {
+                    let _ = this.update(cx, |this, cx| this.save_edit(window, cx));
+                })),
+                None => hint,
+            },
+            "keys" => hint.child(div().whitespace_nowrap().child(ctx.send_keys.clone())),
+            other => hint.child(other.to_owned()),
+        };
+        rest = &rest[close + 1..];
+    }
+    if !rest.is_empty() {
+        hint = hint.child(div().whitespace_nowrap().child(rest.to_owned()));
+    }
+    // The web's `.composer` box, lit as it is while focused.
+    let ring = mix(p.border, p.primary, 0.6);
+    div()
+        .mt(px(4.0))
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .w_full()
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(crate::ui::theme::radius_xl())
+                .bg(p.card)
+                .border_1()
+                .border_color(ring)
+                .shadow(vec![
+                    gpui_kit::BoxShadow {
+                        color: alpha(p.primary, 0.14),
+                        offset: gpui_kit::point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(4.0),
                         inset: false,
-                    }])
-                    .child(Textarea::new(&ctx.edit_box).appearance(false)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .text_xs()
-                    .text_color(p.muted_foreground)
-                    .child("Escape to")
-                    .child(link("cancel", "cancel", p).on_click(move |_, window, cx| {
-                        let _ = cancel.update(cx, |this, cx| this.cancel_edit(window, cx));
-                    }))
-                    .child("· Enter to")
-                    .child(link("save", "save", p).on_click(move |_, window, cx| {
-                        let _ = save.update(cx, |this, cx| this.save_edit(window, cx));
-                    })),
-            ),
-        SharedString::from(format!("editing|{}", m.id)),
-        Duration::ZERO,
-        6.0,
-    )
+                    },
+                    gpui_kit::BoxShadow {
+                        color: p.primary.into(),
+                        offset: gpui_kit::point(px(0.0), px(12.0)),
+                        blur_radius: px(30.0),
+                        spread_radius: px(-18.0),
+                        inset: false,
+                    },
+                ])
+                .child(
+                    div().mx(px(-10.0)).my(px(-8.0)).child(
+                        Textarea::new(&ctx.edit_box).appearance(false).text_size(px(15.2)).line_height(px(24.0)),
+                    ),
+                ),
+        )
+        .child(hint)
 }
 
 /// Home, with nothing open: the cloud bobbing, and what lives here.
@@ -2495,80 +2910,6 @@ fn empty_state(p: &Palette, glyph: &str, title: &str, body: &str) -> impl IntoEl
         )
         .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title.to_owned()))
         .when(!body.is_empty(), |el| el.child(div().text_color(p.muted_foreground).child(body.to_owned())))
-}
-
-/// What AutoMod caught, posted in its alert channel for moderators.
-fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::AutoModAlert, manage: bool) -> Msg {
-    let why = match pb::AutoModTrigger::try_from(alert.trigger) {
-        Ok(pb::AutoModTrigger::Keywords) => "blocked words",
-        Ok(pb::AutoModTrigger::MentionSpam) => "mention spam",
-        Ok(pb::AutoModTrigger::Links) => "a link",
-        _ => "breaking a rule",
-    };
-    let what = if alert.blocked { "Blocked" } else { "Flagged" };
-    let place = i.channel(server, &alert.channel_id).map(|c| format!(" in **#{}**", c.name)).unwrap_or_default();
-    let quote: String = alert.content.lines().map(|l| format!("> {l}\n")).collect();
-    let mut text = if alert.capped_per_day > 0 {
-        format!(
-            "The Smart filter used up today's **{}** checks, so messages go through it unchecked until midnight UTC. \
-             Your other rules still apply.\n\nRule: {}",
-            alert.capped_per_day, alert.rule_name
-        )
-    } else {
-        format!("{what} a message from **{}**{place} for {why}.\n\n{quote}", i.display_name(Some(server), &m.author_id))
-    };
-    if !alert.matched.is_empty() {
-        text.push_str(&format!(
-            "\nMatched: {}",
-            alert.matched.iter().map(|w| format!("`{w}`")).collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if alert.timed_out_seconds > 0 {
-        text.push_str(&format!("\n\nTimed out for {}.", span(i64::from(alert.timed_out_seconds))));
-    }
-    Msg {
-        id: m.id.clone(),
-        user: None,
-        name: "AutoMod".into(),
-        color: Some(rgb(0xf59e0b).into()),
-        content: text.clone(),
-        shown: text,
-        mentions_me: false,
-        editing: false,
-        can_delete: manage,
-        at: ms_of(m.created_at.as_ref()),
-        edited: false,
-        head: true,
-        mine: false,
-        pending: false,
-        failed: None,
-        nonce: 0,
-        unreadable: false,
-        badge: Some("BOT"),
-        embeds: Vec::new(),
-        from: None,
-        keep_out: false,
-        keeping_out: false,
-        poll: None,
-        voice: None,
-        attachments: Vec::new(),
-        gif: None,
-        thread: ThreadBits::default(),
-        agent: None,
-        pinned: false,
-        can_pin: false,
-        sig: 0,
-    }
-}
-
-fn span(seconds: i64) -> String {
-    let (n, unit) = match seconds {
-        s if s >= 86_400 => (s / 86_400, "day"),
-        s if s >= 3_600 => (s / 3_600, "hour"),
-        s if s >= 60 => (s / 60, "minute"),
-        s => (s, "second"),
-    };
-    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
 /// An emoji to pick: a server's own picture, or the character.
