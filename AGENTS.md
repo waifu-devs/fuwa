@@ -640,6 +640,11 @@
     redraws on any change or animation frame, so keep big parts virtual or
     in cached views, and keep work that grows with a channel's length out of
     each change (`chat.rs` reuses built messages by signature).
+  - `tools/visual/`: comparing the desktop with the web app on screen (its
+    README): a seeded instance, the web screenshotted with Playwright and the
+    desktop under Xvfb at the same 1280x800, side-by-side and difference
+    images, and a pixel probe. A change to how the desktop looks is checked
+    against the web's same screen with these.
   - `tests/core.rs`: two app cores against an in-process instance: servers,
     live messages, mentions that notify, edits, mutes kept on the instance,
     unread counts, time-outs and kicks reaching the person live, encrypted DMs both ways, and that no plaintext reaches the
