@@ -597,6 +597,12 @@ impl FuwaApp {
         if gone {
             self.navigate(Nav::Home { dm: None }, window, cx);
         }
+        // Home with nothing open is an instance's page, as the web's `/` goes to one.
+        if matches!(self.nav, Nav::Home { dm: None })
+            && let Some(first) = self.core.shared.read(|s| s.order.first().cloned())
+        {
+            self.navigate(Nav::Instance { key: first }, window, cx);
+        }
         self.maybe_welcome(cx);
         // A game asking to show what you're doing, once nothing else is open.
         if self.dialog.is_none()

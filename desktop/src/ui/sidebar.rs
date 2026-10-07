@@ -13,6 +13,7 @@ use gpui_kit::{
 
 use crate::core::dms::DmStatus;
 use crate::core::friends::{self, FriendsStatus};
+use crate::core::i18n::t;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
@@ -20,7 +21,7 @@ use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
 use crate::ui::rail::RAIL;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
+use crate::ui::widgets::{avatar, badge, conn_dot, icon, pal, server_icon};
 
 pub const SIDEBAR: f32 = 256.0;
 /// How long a channel that was just dragged into place glows.
@@ -45,8 +46,9 @@ impl FuwaApp {
         let p = pal(cx);
         let (header, body) = match self.nav.clone() {
             Nav::Server { key, server } => self.server_sidebar(&key, &server, window, cx),
-            Nav::Home { dm } => self.dm_sidebar(dm, window, cx),
-            Nav::Friends { .. } => self.dm_sidebar(None, window, cx),
+            // A conversation or Friends on an instance shows that instance's sidebar, as on the web.
+            Nav::Home { dm: Some((key, _)) } | Nav::Friends { key } => self.instance_sidebar(&key, window, cx),
+            Nav::Home { dm: None } => self.dm_sidebar(None, window, cx),
             Nav::Instance { key } => self.instance_sidebar(&key, window, cx),
         };
         let call_bar = self.call_bar(window, cx);
@@ -890,77 +892,412 @@ impl FuwaApp {
         (header, div().child(top).child(list).into_any_element())
     }
 
-    fn instance_sidebar(
-        &mut self,
-        key: &str,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> (AnyElement, AnyElement) {
+    /// The web's InstanceSidebar: what the instance is, then Friends, Browse
+    /// servers, your direct messages there and your servers there.
+    fn instance_sidebar(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> (AnyElement, AnyElement) {
         let p = pal(cx);
-        let (name, connection, servers, admin) = self.core.shared.read(|s| match s.instance(key) {
-            Some(i) => (i.name(), Some(i.connection), i.servers.clone(), i.admin),
-            None => (String::new(), None, Vec::new(), false),
-        });
+        let now = crate::core::dms::now_ms();
+        let streamer = self.prefs.streamer_mode;
+        struct Dm {
+            id: String,
+            other: Option<pb::User>,
+            line: String,
+            unread: u32,
+            calling: bool,
+        }
+        let (name, url, connection, servers, admin, friends_on, waiting, dms, dm_status) =
+            self.core.shared.read(|s| match s.instance(key) {
+                Some(i) => {
+                    let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+                    let dms: Vec<Dm> = i
+                        .dms
+                        .conversations
+                        .iter()
+                        .filter(|c| !friends::hidden(i, c))
+                        .map(|c| Dm {
+                            id: c.id.clone(),
+                            other: c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned()),
+                            line: preview(i.dms.items.get(&c.id).map(Vec::as_slice), &me),
+                            unread: i.dms.unread.get(&c.id).copied().unwrap_or(0),
+                            calling: i.dms.calls.get(&c.id).is_some_and(|call| !call.participants.is_empty()),
+                        })
+                        .collect();
+                    (
+                        i.name(),
+                        i.url.clone(),
+                        Some(i.connection),
+                        i.servers.clone(),
+                        i.admin,
+                        matches!(i.friends.status, FriendsStatus::Loading | FriendsStatus::Ready),
+                        friends::waiting_for_you(&i.friends.list, now),
+                        dms,
+                        (i.dms.status, i.dms.problem.clone()),
+                    )
+                }
+                None => {
+                    (String::new(), String::new(), None, Vec::new(), false, false, 0, Vec::new(), (DmStatus::Off, None))
+                }
+            });
+        let address = url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_owned();
         let header = div()
             .flex()
             .items_center()
             .gap(px(8.0))
             .w_full()
-            .when_some(connection, |el, c| el.child(conn_dot(c, &p).border_color(p.sidebar)))
             .child(
                 div()
                     .flex_1()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .child(name),
+                    .min_w_0()
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .text_size(px(16.0))
+                            .line_height(px(24.0))
+                            .child(name),
+                    )
+                    .when_some(connection, |el, c| {
+                        let label = crate::core::i18n::t(match c {
+                            crate::core::store::Connection::Live => "workspace.connection.live",
+                            crate::core::store::Connection::Connecting => "workspace.connection.connecting",
+                            crate::core::store::Connection::Reconnecting => "workspace.connection.reconnecting",
+                            crate::core::store::Connection::Offline => "workspace.connection.offline",
+                            crate::core::store::Connection::SignedOut => "workspace.connection.signedOut",
+                        });
+                        el.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_size(px(12.0))
+                                .line_height(px(16.0))
+                                .text_color(p.muted_foreground)
+                                .child(conn_dot(c, &p).size(px(8.8)).border_0())
+                                .child(format!("{label} · {}", if streamer { "•••••" } else { address.as_str() })),
+                        )
+                    }),
             )
             .when(admin, |el| {
                 // Instance settings, for its admins; the gear turns as you point at it.
                 let k = key.to_owned();
+                let (bg, fg) = (p.muted, p.foreground);
                 el.child(
-                    icon_button("instance-settings", "settings", &p)
-                        .size(px(28.0))
-                        .group("instance-gear")
-                        .on_click(cx.listener(move |this, _, window, cx| this.open_instance_settings(&k, window, cx))),
+                    div()
+                        .id("instance-settings")
+                        .size(px(32.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(crate::ui::theme::radius_lg())
+                        .text_color(p.muted_foreground)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(bg).text_color(fg))
+                        .on_click(cx.listener(move |this, _, window, cx| this.open_instance_settings(&k, window, cx)))
+                        .child(icon("settings").size(px(16.0))),
                 )
             })
             .into_any_element();
-        let mut list = div().pt(px(8.0)).child(section_label("Your servers here", &p));
-        for (n, server) in servers.iter().enumerate() {
-            let hover = alpha(p.primary, 0.08);
-            let nav = Nav::Server { key: key.to_owned(), server: server.id.clone() };
-            list = list.child(motion::rise(
+
+        // A link at the top: Friends or Browse servers.
+        let link =
+            |id: &str, glyph: &str, label: String, active: bool, count: usize, nav: Nav, cx: &mut Context<Self>| {
+                let (bg, fg) = (p.muted, p.foreground);
                 div()
-                    .id(SharedString::from(format!("is|{}", server.id)))
-                    .h(px(44.0))
+                    .id(SharedString::from(id.to_owned()))
                     .px(px(8.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(crate::ui::theme::radius_lg())
+                    .text_size(px(14.0))
+                    .line_height(px(20.0))
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .when(active, |el| el.bg(alpha(p.primary, 0.15)).text_color(p.primary))
+                    .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(bg).text_color(fg)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                    .child(icon(glyph).size(px(16.0)))
+                    .child(label)
+                    .when(count > 0, |el| {
+                        el.child(div().flex_1()).child(
+                            div()
+                                .h(px(20.0))
+                                .min_w(px(20.0))
+                                .px(px(6.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(p.primary)
+                                .text_color(p.primary_foreground)
+                                .text_size(px(11.2))
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .child(if count > 99 { "99+".to_owned() } else { count.to_string() }),
+                        )
+                    })
+            };
+        let mut body = div().pt(px(8.0)).flex().flex_col();
+        if friends_on {
+            let active = matches!(&self.nav, Nav::Friends { key: k } if k == key);
+            body = body.child(link(
+                "friends-link",
+                "users",
+                t("workspace.instanceSidebar.friends"),
+                active,
+                waiting,
+                Nav::Friends { key: key.to_owned() },
+                cx,
+            ));
+        }
+        let browsing = matches!(&self.nav, Nav::Instance { key: k } if k == key);
+        body = body.child(link(
+            "browse-link",
+            "compass",
+            t("workspace.instanceSidebar.browse"),
+            browsing,
+            0,
+            Nav::Instance { key: key.to_owned() },
+            cx,
+        ));
+
+        // Direct messages, private by default.
+        let label = |text: String| {
+            div()
+                .px(px(8.0))
+                .mb(px(4.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .child(text.to_uppercase())
+        };
+        let emerald = gpui_kit::rgb(0x10b981);
+        let mut section = div()
+            .mt(px(16.0))
+            .child(label(t("dms-calls.dm.list.label")).child(icon("lock-keyhole").size(px(12.0)).text_color(emerald)));
+        match dm_status {
+            (DmStatus::Failed, problem) => {
+                section = section.child(
+                    div()
+                        .mx(px(8.0))
+                        .my(px(4.0))
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .rounded(crate::ui::theme::radius_xl())
+                        .bg(alpha(gpui_kit::rgb(0xf59e0b), 0.1))
+                        .text_xs()
+                        .text_color(gpui_kit::rgb(if p.dark { 0xfcd34d } else { 0xb45309 }))
+                        .child(problem.unwrap_or_else(|| t("dms-calls.dm.unavailable"))),
+                )
+            }
+            _ if dms.is_empty() => {
+                let message = t("dms-calls.dm.list.emptyMessage");
+                section = section.child(
+                    div()
+                        .mx(px(4.0))
+                        .mt(px(4.0))
+                        .px(px(12.0))
+                        .py(px(12.0))
+                        .rounded(crate::ui::theme::radius_2xl())
+                        .border_1()
+                        .border_dashed()
+                        .border_color(p.border)
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(p.foreground)
+                                .child(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(crate::ui::theme::radius_lg())
+                                        .bg(alpha(emerald, 0.15))
+                                        .text_color(gpui_kit::rgb(if p.dark { 0x34d399 } else { 0x059669 }))
+                                        .child(icon("lock-keyhole").size(px(14.0))),
+                                )
+                                .child(t("dms-calls.dm.list.emptyTitle")),
+                        )
+                        .child(div().mt(px(6.0)).line_height(px(19.5)).child(crate::ui::text::hint_line(
+                            &t("dms-calls.dm.list.emptyText"),
+                            &[("message", &message)],
+                            &p,
+                        ))),
+                );
+            }
+            _ => {}
+        }
+        let open = match &self.nav {
+            Nav::Home { dm: Some((k, id)) } if k == key => Some(id.clone()),
+            _ => None,
+        };
+        for (n, dm) in dms.iter().enumerate() {
+            let active = open.as_deref() == Some(dm.id.as_str());
+            let who = dm.other.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| t("common.someone"));
+            let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == format!("dm|{key}|{}", dm.id));
+            let nav = Nav::Home { dm: Some((key.to_owned(), dm.id.clone())) };
+            let hover = p.muted;
+            let line = if dm.line.is_empty() || streamer { t("dms-calls.dm.encrypted") } else { dm.line.clone() };
+            section = section.child(motion::rise(
+                div()
+                    .id(SharedString::from(format!("dm|{key}|{}", dm.id)))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        self.right_click(MenuOf::Dm { key: key.to_owned(), conversation: dm.id.clone() }, cx),
+                    )
+                    .px(px(8.0))
+                    .py(px(6.0))
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .rounded(corner(12.0))
+                    .rounded(crate::ui::theme::radius_lg())
+                    .text_size(px(14.0))
                     .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
+                    .when(active, |el| el.bg(alpha(p.primary, 0.15)))
+                    .when(lit && !active, |el| el.bg(hover))
+                    .when(!active, |el| el.hover(move |s| s.bg(hover)))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
-                    .child(server_icon(server, 30.0, 10.0, &p))
-                    .child(div().flex_1().whitespace_nowrap().text_ellipsis().child(server.name.clone())),
-                SharedString::from(format!("is-in|{}", server.id)),
-                Duration::from_millis(24 * n as u64),
+                    .child(
+                        div().relative().flex_none().child(avatar(dm.other.as_ref(), 32.0, &p)).child(
+                            div()
+                                .absolute()
+                                .right(px(-2.0))
+                                .bottom(px(-2.0))
+                                .size(px(14.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(p.card)
+                                .text_color(emerald)
+                                .child(icon("lock-keyhole").size(px(10.0))),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .font_weight(FontWeight::BOLD)
+                                    .line_height(px(20.0))
+                                    .child(who),
+                            )
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_xs()
+                                    .when(dm.unread > 0, |el| {
+                                        el.font_weight(FontWeight::BOLD).text_color(alpha(p.foreground, 0.8))
+                                    })
+                                    .when(dm.unread == 0, |el| el.text_color(p.muted_foreground))
+                                    .child(line),
+                            ),
+                    )
+                    .when(dm.calling, |el| {
+                        el.child(
+                            div()
+                                .size(px(24.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(gpui_kit::rgb(0x3ba55d))
+                                .text_color(gpui_kit::white())
+                                .child(icon("phone-call").size(px(14.0))),
+                        )
+                    })
+                    .when(dm.unread > 0, |el| {
+                        el.child(
+                            div()
+                                .h(px(20.0))
+                                .min_w(px(20.0))
+                                .px(px(6.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(p.primary)
+                                .text_color(p.primary_foreground)
+                                .text_size(px(11.2))
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .child(if dm.unread > 99 { "99+".to_owned() } else { dm.unread.to_string() }),
+                        )
+                    }),
+                SharedString::from(format!("dm-in|{key}|{}", dm.id)),
+                Duration::from_millis(30 * n.min(12) as u64),
                 6.0,
             ));
         }
-        if servers.is_empty() {
-            list = list.child(
-                div()
-                    .px(px(10.0))
-                    .py(px(8.0))
-                    .text_sm()
-                    .text_color(p.muted_foreground)
-                    .child("None yet. Make one or join one with an invite."),
-            );
+        body = body.child(section);
+
+        if !servers.is_empty() {
+            body = body.child(div().mt(px(16.0)).child(label(t("workspace.instanceSidebar.yourServers"))));
         }
-        (header, list.into_any_element())
+        for (n, server) in servers.iter().enumerate() {
+            let hover = p.muted;
+            let nav = Nav::Server { key: key.to_owned(), server: server.id.clone() };
+            let group = SharedString::from(format!("is-g|{}", server.id));
+            body = body.child(motion::rise(
+                div()
+                    .id(SharedString::from(format!("is|{}", server.id)))
+                    .group(group.clone())
+                    .px(px(8.0))
+                    .py(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(crate::ui::theme::radius_lg())
+                    .text_size(px(14.0))
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                    .child(server_icon(server, 28.0, 14.0, &p).text_size(px(10.4)))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .font_weight(FontWeight::BOLD)
+                            .child(server.name.clone()),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .opacity(0.0)
+                            .group_hover(group, |s| s.opacity(1.0))
+                            .text_color(p.muted_foreground)
+                            .child(icon("hash").size(px(14.0))),
+                    ),
+                SharedString::from(format!("is-in|{}", server.id)),
+                Duration::from_millis(30 * n.min(12) as u64),
+                6.0,
+            ));
+        }
+        let _ = window;
+        (header, body.into_any_element())
     }
 
     /// Who you are, where: your picture, your name, and the way to settings.
@@ -1126,4 +1463,27 @@ pub fn loading_rows(p: &Palette) -> impl IntoElement {
             Duration::from_millis(300 + 80 * n as u64),
         )
     }))
+}
+
+/// What a conversation's last line says, for the list: read from this
+/// device's copy, never the instance (the web's DmList `preview`).
+fn preview(items: Option<&[crate::core::vault::Item]>, me: &str) -> String {
+    use crate::core::vault::ItemKind;
+    let Some(items) = items else { return String::new() };
+    for item in items.iter().rev() {
+        if item.kind != ItemKind::Text {
+            continue;
+        }
+        if item.deleted {
+            return t("dms-calls.dm.deleted");
+        }
+        let text: String = item.content.chars().filter(|c| !matches!(c, '*' | '_' | '~' | '`' | '>' | '#')).collect();
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        return if item.sender_id == me {
+            crate::core::i18n::t_with("dms-calls.dm.list.youSaid", &[("text", crate::core::i18n::Arg::Str(&text))])
+        } else {
+            text
+        };
+    }
+    String::new()
 }

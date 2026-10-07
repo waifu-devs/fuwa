@@ -360,18 +360,6 @@ pub fn app_badge(id: impl Into<ElementId>, label: &'static str, p: &Palette) -> 
         })
 }
 
-/// A small heading over a group of things in a sidebar.
-pub fn section_label(text: impl Into<SharedString>, p: &Palette) -> Div {
-    div()
-        .px(px(8.0))
-        .pt(px(16.0))
-        .pb(px(4.0))
-        .text_size(px(11.0))
-        .font_weight(FontWeight::EXTRA_BOLD)
-        .text_color(p.muted_foreground)
-        .child(text.into().to_uppercase())
-}
-
 /// A field with its label above it.
 pub fn labeled(label: &str, field: impl IntoElement, p: &Palette) -> Div {
     div()

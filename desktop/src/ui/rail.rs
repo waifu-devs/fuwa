@@ -32,6 +32,8 @@ struct RailInstance {
     name: String,
     connection: Connection,
     servers: Vec<(pb::Server, u32)>,
+    /// Unread direct messages there, counted on its chip.
+    dm_unread: u32,
 }
 
 impl FuwaApp {
@@ -46,13 +48,13 @@ impl FuwaApp {
                     name: i.name(),
                     connection: i.connection,
                     servers: i.servers.iter().map(|sv| (sv.clone(), i.server_unread(&sv.id))).collect(),
+                    dm_unread: i.dms.unread.values().sum(),
                 })
                 .collect()
         });
-        let dm_unread: u32 =
-            self.core.shared.read(|s| s.instances.values().map(|i| i.dms.unread.values().sum::<u32>()).sum());
 
-        let home_active = matches!(self.nav, Nav::Home { .. } | Nav::Friends { .. });
+        // The cloud is lit only on the page with no instance (the web's welcome).
+        let home_active = matches!(self.nav, Nav::Home { dm: None });
         let mut list = div().flex().flex_col().items_center().gap(px(8.0)).pt(px(12.0)).pb(px(12.0));
 
         // Home: the little cloud.
@@ -62,8 +64,8 @@ impl FuwaApp {
             self.rail_item(
                 "home".into(),
                 home_active,
-                dm_unread > 0,
-                dm_unread,
+                false,
+                0,
                 Nav::Home { dm: None },
                 div()
                     .size(px(48.0))
@@ -264,7 +266,11 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = pal(cx);
-        let active = matches!(&self.nav, Nav::Instance { key } if *key == inst.key);
+        // Its page, Friends and its conversations are all "here, but not in a server", as on the web.
+        let active = match &self.nav {
+            Nav::Instance { key } | Nav::Friends { key } | Nav::Home { dm: Some((key, _)) } => *key == inst.key,
+            _ => false,
+        };
         let id = format!("i|{}", inst.key);
         let hovered = self.hovered.as_deref() == Some(id.as_str());
         let radius =
@@ -297,13 +303,40 @@ impl FuwaApp {
             cx,
         );
         motion::rise(
-            div().relative().child(item).child(
-                div()
-                    .absolute()
-                    .left(px(RAIL / 2.0 + 18.0 - 10.8))
-                    .top(px(40.0 - 2.0 - 10.8))
-                    .child(conn_dot(inst.connection, &p)),
-            ),
+            div()
+                .relative()
+                .child(item)
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(RAIL / 2.0 + 18.0 - 10.8))
+                        .top(px(40.0 - 2.0 - 10.8))
+                        .child(conn_dot(inst.connection, &p)),
+                )
+                // Unread conversations there: the web's small red count at the chip's top right.
+                .when(inst.dm_unread > 0, |el| {
+                    let ring = crate::ui::theme::mix(p.background, gpui_kit::rgb(0x000000), 0.25);
+                    el.child(
+                        div()
+                            .absolute()
+                            .left(px(RAIL / 2.0 + 18.0 - 10.0))
+                            .top(px(-7.0))
+                            .h(px(22.0))
+                            .min_w(px(22.0))
+                            .px(px(7.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .border(px(3.0))
+                            .border_color(ring)
+                            .bg(p.destructive)
+                            .text_color(gpui_kit::white())
+                            .text_size(px(9.6))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(if inst.dm_unread > 99 { "99+".to_owned() } else { inst.dm_unread.to_string() }),
+                    )
+                }),
             SharedString::from(format!("{id}|in-{n}")),
             Duration::from_millis(30 * n as u64),
             8.0,
