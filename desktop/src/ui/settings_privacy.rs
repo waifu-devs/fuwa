@@ -30,7 +30,7 @@ fn sent() -> [(&'static str, String); 4] {
 }
 
 impl SettingsView {
-    pub(crate) fn privacy_page(
+    pub(crate) fn reports_section(
         &mut self,
         prefs: &Prefs,
         p: &Palette,

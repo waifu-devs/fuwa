@@ -8,15 +8,20 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription,
-    Window, div, img, px,
+    Window, div, img, px, rgb,
 };
+use std::time::Duration;
 
 use crate::core::config::Prefs;
+use crate::core::config::{Density, Spacing};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::themes::{self, Backdrop, Effect, Fit, Picture, Theme};
-use crate::ui::settings::{SettingsView, radio, section, segmented, theme_preview, toggle_row};
+use crate::ui::motion;
+use crate::ui::settings::{Page, SettingsView, section, segmented};
+use crate::ui::settings_app::pref;
+use crate::ui::settings_controls::{Badge, Opt, choice, toggle, with_preview};
 use crate::ui::theme::{Palette, alpha, corner, mix, system_dark};
-use crate::ui::widgets::{icon, icon_button, soft_button};
+use crate::ui::widgets::{icon, icon_button};
 
 /// What the two pages keep between frames.
 pub struct Look {
@@ -245,208 +250,460 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let wide = self.wide;
+        let form_w = if wide { self.column - 40.0 - 288.0 } else { self.column };
         let all = prefs.all_themes();
-        let on_screen = prefs.active_theme(system_dark(window.appearance()));
-        let pickers: AnyElement = if prefs.follow_system {
+        let follow = toggle(
+            "follow-system",
+            &t("appsettings.appearance.followSystem"),
+            Some(&t("appsettings.appearance.followSystemHint")),
+            prefs.follow_system,
+            false,
+            p,
+            window,
+            cx,
+            |this, on, cx| this.set(cx, |pr| pr.follow_system = on),
+        );
+        let grids: AnyElement = if prefs.follow_system {
             let (light, dark): (Vec<Theme>, Vec<Theme>) = all.iter().cloned().partition(|t| !t.dark());
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(18.0))
-                .child(self.theme_grid(
-                    "light",
-                    "sun",
-                    &t("desktop.look.light"),
-                    light,
-                    &prefs.light_theme,
-                    Slot::Light,
-                    p,
-                    cx,
-                ))
-                .child(self.theme_grid(
-                    "dark",
-                    "moon",
-                    &t("desktop.look.dark"),
-                    dark,
-                    &prefs.dark_theme,
-                    Slot::Dark,
-                    p,
-                    cx,
-                ))
-                .into_any_element()
-        } else {
-            self.theme_grid("all", "palette", "", all, &prefs.theme, Slot::Only, p, cx)
-        };
-        let tools = div()
-            .flex()
-            .flex_wrap()
-            .gap(px(10.0))
-            .child(
-                soft_button(
-                    "theme-import",
-                    if self.look.busy { t("appsettings.themes.importing") } else { t("desktop.look.importFile") },
-                    p,
-                )
-                .child(icon("import").size(px(16.0)))
-                .on_click(cx.listener(|this, _, window, cx| this.import_theme(window, cx))),
+            motion::rise(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .child(
+                                div()
+                                    .mb(px(8.0))
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(p.muted_foreground)
+                                    .child(t("appsettings.appearance.whenLight").to_uppercase()),
+                            )
+                            .child(self.theme_grid(
+                                "light",
+                                light,
+                                &prefs.light_theme,
+                                Slot::Light,
+                                false,
+                                form_w,
+                                p,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .child(
+                                div()
+                                    .mb(px(8.0))
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(p.muted_foreground)
+                                    .child(t("appsettings.appearance.whenDark").to_uppercase()),
+                            )
+                            .child(self.theme_grid("dark", dark, &prefs.dark_theme, Slot::Dark, false, form_w, p, cx)),
+                    ),
+                "grids-system",
+                Duration::ZERO,
+                10.0,
             )
-            .child(
-                soft_button("theme-export", t_with("desktop.look.export", &[("theme", Arg::Str(&on_screen.name))]), p)
-                    .child(icon("download").size(px(16.0)))
-                    .on_click(cx.listener(|this, _, window, cx| this.export_theme(window, cx))),
-            );
-        let note = self.look.note.clone().map(|(error, text)| {
-            div()
-                .flex()
-                .items_start()
-                .gap(px(8.0))
-                .text_sm()
-                .text_color(if error { p.destructive } else { p.muted_foreground })
-                .child(icon(if error { "circle-alert" } else { "sparkles" }).size(px(16.0)).mt(px(2.0)))
-                .child(div().flex_1().child(text))
-        });
-        let sizes = [
-            (0.9, t("desktop.look.small")),
-            (1.0, t("desktop.look.normal")),
-            (1.15, t("desktop.look.large")),
-            (1.3, t("desktop.look.larger")),
-        ];
-        let scales = sizes.iter().map(|(v, _)| *v).collect::<Vec<_>>();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(28.0))
-            .child(toggle_row(
-                "follow-system",
-                &t("desktop.look.followSystem"),
-                &t("desktop.look.followSystemHint"),
-                prefs.follow_system,
-                p,
-                cx,
-                |this, on, cx| this.set(cx, |pr| pr.follow_system = on),
-            ))
-            .child(section(
-                &t("appsettings.appearance.theme"),
-                div().flex().flex_col().gap(px(14.0)).child(pickers).child(tools).children(note),
-                p,
-            ))
-            .child(section(
-                &t("desktop.look.textSize"),
-                segmented(
-                    "size",
-                    sizes.into_iter().map(|(v, l)| (l, (prefs.text_scale - v).abs() < 0.01)).collect(),
-                    p,
-                    window,
-                    cx,
-                    move |this, n, cx| {
-                        let v = scales[n];
-                        this.set(cx, |pr| pr.text_scale = v);
-                    },
-                ),
-                p,
-            ))
-            .child(section(
-                &t("desktop.look.density"),
-                segmented(
-                    "density",
-                    vec![
-                        (t("appsettings.appearance.cozy"), prefs.density == crate::core::config::Density::Cozy),
-                        (t("appsettings.appearance.compact"), prefs.density == crate::core::config::Density::Compact),
-                    ],
-                    p,
-                    window,
-                    cx,
-                    |this, n, cx| {
-                        use crate::core::config::Density;
-                        this.set(cx, |pr| pr.density = if n == 0 { Density::Cozy } else { Density::Compact })
-                    },
-                ),
-                p,
-            ))
             .into_any_element()
+        } else {
+            motion::rise(
+                div().child(self.theme_grid("fixed", all, &prefs.theme, Slot::Only, true, form_w, p, cx)),
+                "grids-fixed",
+                Duration::ZERO,
+                10.0,
+            )
+            .into_any_element()
+        };
+        let theme = div().flex().flex_col().gap(px(12.0)).child(follow).child(grids);
+        let density_at = match prefs.spacing {
+            Spacing::Compact => 0,
+            Spacing::Default => 1,
+            Spacing::Spacious => 2,
+        };
+        let density = choice(
+            "density",
+            Some(density_at),
+            vec![
+                Opt::new(t("appsettings.appearance.compact"), t("appsettings.appearance.compactHint"), "rows-4"),
+                Opt::new(t("appsettings.appearance.default"), t("appsettings.appearance.defaultHint"), "rows-3"),
+                Opt::new(t("appsettings.appearance.spacious"), t("appsettings.appearance.spaciousHint"), "rows-2"),
+            ],
+            form_w,
+            p,
+            window,
+            cx,
+            |this, n, cx| {
+                let s = [Spacing::Compact, Spacing::Default, Spacing::Spacious][n];
+                this.set(cx, |pr| pr.spacing = s)
+            },
+        );
+        let display = choice(
+            "message-display",
+            Some(if prefs.density == Density::Cozy { 0 } else { 1 }),
+            vec![
+                Opt::new(t("appsettings.appearance.cozy"), t("appsettings.appearance.cozyHint"), "message-square-text"),
+                Opt::new(
+                    t("appsettings.appearance.compact"),
+                    t("appsettings.appearance.compactDisplayHint"),
+                    "text-align-justify",
+                ),
+            ],
+            form_w,
+            p,
+            window,
+            cx,
+            |this, n, cx| {
+                let d = if n == 0 { Density::Cozy } else { Density::Compact };
+                this.set(cx, |pr| pr.density = d)
+            },
+        );
+        let px_of = |n: f32| format!("{}px", n.round() as i64);
+        let font = self.slider(
+            "chat-font-size",
+            (12.0, 20.0, 1.0),
+            f32::from(prefs.chat_font_size),
+            vec![(12.0, px_of(12.0)), (15.0, px_of(15.0)), (20.0, px_of(20.0))],
+            |n| format!("{}px", n.round() as i64),
+            false,
+            p,
+            window,
+            cx,
+            |pr, v| pr.chat_font_size = v.round() as u8,
+        );
+        let percent = |n: f32| format!("{}%", n.round() as i64);
+        let zoom = self.slider(
+            "zoom",
+            (80.0, 150.0, 10.0),
+            f32::from(prefs.zoom),
+            vec![(80.0, percent(80.0)), (100.0, percent(100.0)), (150.0, percent(150.0))],
+            |n| format!("{}%", n.round() as i64),
+            true,
+            p,
+            window,
+            cx,
+            |pr, v| {
+                pr.zoom = v.round() as u16;
+                pr.text_scale = f32::from(pr.zoom) / 100.0;
+            },
+        );
+        let d = Prefs::default();
+        let theme_changed = prefs.theme != d.theme
+            || prefs.follow_system != d.follow_system
+            || prefs.light_theme != d.light_theme
+            || prefs.dark_theme != d.dark_theme;
+        let form = self.stack(
+            [
+                (
+                    "theme",
+                    t("appsettings.appearance.theme"),
+                    Some(t("appsettings.appearance.themeHint")),
+                    Badge::pref(theme_changed, |pr| {
+                        let d = Prefs::default();
+                        pr.theme = d.theme;
+                        pr.follow_system = d.follow_system;
+                        pr.light_theme = d.light_theme;
+                        pr.dark_theme = d.dark_theme;
+                    }),
+                    theme.into_any_element(),
+                ),
+                (
+                    "density",
+                    t("appsettings.appearance.density"),
+                    Some(t("appsettings.appearance.densityHint")),
+                    pref!(prefs, spacing),
+                    density,
+                ),
+                ("message-display", t("appsettings.appearance.display"), None, pref!(prefs, density), display),
+                ("chat-font-size", t("appsettings.appearance.textSize"), None, pref!(prefs, chat_font_size), font),
+                (
+                    "zoom",
+                    t("appsettings.appearance.zoom"),
+                    Some(t("appsettings.appearance.zoomHint")),
+                    Badge::pref(prefs.zoom != 100, |pr| {
+                        pr.zoom = 100;
+                        pr.text_scale = 1.0;
+                    }),
+                    zoom,
+                ),
+            ],
+            p,
+            cx,
+        );
+        let preview = self.chat_preview(prefs, p);
+        with_preview(form, preview, wide, p)
     }
 
+    /// A few messages in the current look, so density, display and text size show before you
+    /// leave (the web's `ChatPreview`).
+    fn chat_preview(&mut self, prefs: &Prefs, p: &Palette) -> AnyElement {
+        let you = self.account_me().map(|(_, me)| me);
+        let now = crate::core::dms::now_ms();
+        let hana = crate::pb::User {
+            id: "01HANA".into(),
+            username: "hana".into(),
+            display_name: "Hana".into(),
+            ..Default::default()
+        };
+        let you = you.unwrap_or_else(|| crate::pb::User {
+            id: "01YOU".into(),
+            username: "you".into(),
+            display_name: t("appsettings.preview.you"),
+            ..Default::default()
+        });
+        let lines = [
+            (&hana, true, now - 6 * 60_000, t("appsettings.preview.newThemes")),
+            (&hana, false, now - 5 * 60_000, t_with("appsettings.preview.summer", &[("theme", Arg::Str("Sora"))])),
+            (&you, true, now - 60_000, t_with("appsettings.preview.favorite", &[("theme", Arg::Str("**Matcha**"))])),
+        ];
+        let compact = prefs.density == Density::Compact;
+        let k = match prefs.spacing {
+            Spacing::Compact => 0.5,
+            Spacing::Default => 1.0,
+            Spacing::Spacious => 1.6,
+        };
+        let font = f32::from(prefs.chat_font_size);
+        let mut card = div()
+            .rounded(crate::ui::theme::radius_3xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.background)
+            .py(px(12.0))
+            .shadow(crate::ui::settings_controls::shadow_lg());
+        for (n, (user, first, at, text)) in lines.into_iter().enumerate() {
+            let name = crate::core::store::user_name(user);
+            let tint = crate::ui::widgets::name_tint(&user.id, p);
+            let body = crate::ui::text::markdown(SharedString::from(format!("preview-md-{n}")), text)
+                .w_full()
+                .into_any_element();
+            let row = if compact {
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .px(px(16.0))
+                    .py(px(1.0 * k))
+                    .when(first, |el| el.mt(px(6.0 * k)).pt(px(2.0 * k)))
+                    .child(div().flex_none().text_xs().text_color(p.muted_foreground).child(crate::ui::text::clock(at)))
+                    .child(div().flex_none().font_weight(FontWeight::BOLD).text_color(tint).child(name))
+                    .child(div().flex_1().min_w_0().text_size(px(font)).line_height(px(font * 1.625)).child(body))
+            } else {
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .px(px(16.0))
+                    .py(px(2.0 * k))
+                    .when(first, |el| el.mt(px(12.0 * k)).pt(px(4.0 * k)))
+                    .child(
+                        div()
+                            .w(px(40.0))
+                            .flex_none()
+                            .when(first, |el| el.child(crate::ui::widgets::avatar(Some(user), 40.0, p))),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .when(first, |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .items_baseline()
+                                        .gap(px(8.0))
+                                        .h(px(24.0))
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_size(px(16.0))
+                                                .text_color(tint)
+                                                .child(name),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(p.muted_foreground)
+                                                .child(crate::ui::text::when(at)),
+                                        ),
+                                )
+                            })
+                            .child(div().text_size(px(font)).line_height(px(font * 1.625)).child(body)),
+                    )
+            };
+            card = card.child(row);
+        }
+        card.into_any_element()
+    }
+
+    /// Theme cards in their own colors; the check sits on the picked one. With `make`, a card to
+    /// make your own (the web's `ThemeGrid`).
     #[allow(clippy::too_many_arguments)]
     fn theme_grid(
         &mut self,
         id: &'static str,
-        glyph: &str,
-        label: &str,
         list: Vec<Theme>,
         chosen: &str,
         slot: Slot,
+        make: bool,
+        width: f32,
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut grid = div().flex().flex_wrap().gap(px(12.0));
-        for theme in list {
+        let gap = 12.0;
+        let card_w = (width - gap) / 2.0;
+        let mut cards: Vec<AnyElement> = Vec::new();
+        for (n, theme) in list.into_iter().enumerate() {
             let on = theme.id == chosen;
-            let pv = Palette::of(&theme);
-            let t = theme.clone();
-            let delete = (!theme.builtin).then(|| theme.id.clone());
-            grid = grid.child(
-                div()
-                    .id(SharedString::from(format!("theme-{id}-{}", theme.id)))
-                    .relative()
-                    .w(px(196.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .p(px(8.0))
-                    .rounded(corner(16.0))
-                    .border_2()
-                    .border_color(if on { p.primary } else { p.border })
-                    .bg(if on { alpha(p.primary, 0.06) } else { alpha(p.card, 0.5) })
-                    .cursor_pointer()
-                    .hover({
-                        let c = mix(p.border, p.primary, 0.5);
-                        move |s| s.border_color(c)
-                    })
-                    .active(|s| s.top(px(1.0)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.pick_theme(&t, slot, cx)))
-                    .child(theme_preview(&pv))
-                    .child(
+            let tk = &theme.tokens;
+            let c = |name: &str| rgb(tk.get(name));
+            let about = if theme.builtin {
+                let key = format!("appsettings.themes.builtin.{}", theme.id);
+                let text = t(&key);
+                if text == key { theme.description.clone().unwrap_or_default() } else { text }
+            } else {
+                theme.description.clone().unwrap_or_default()
+            };
+            let picked = theme.clone();
+            let hover_border = if on { c("primary") } else { c("border") };
+            let card = div()
+                .id(SharedString::from(format!("theme-{id}-{}", theme.id)))
+                .relative()
+                .w(px(card_w))
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .p(px(16.0))
+                .rounded(crate::ui::theme::radius_2xl())
+                .border_2()
+                .border_color(if on { c("primary") } else { c("border") })
+                .bg(c("background"))
+                .text_color(c("foreground"))
+                .when(on, |el| el.shadow(crate::ui::settings_controls::shadow_lg()))
+                .cursor_pointer()
+                .hover(move |s| s.top(px(-3.0)).border_color(hover_border))
+                .active(|s| s.top(px(1.0)))
+                .on_click(cx.listener(move |this, _, _, cx| this.pick_theme(&picked, slot, cx)))
+                .child(div().flex().items_center().gap(px(8.0)).children(
+                    ["primary", "card", "muted-foreground", "border"].map(|name| {
+                        div().size(px(20.0)).rounded_full().border_1().border_color(c("border")).bg(c(name))
+                    }),
+                ))
+                .child(
+                    div()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .child(theme.name.clone())
+                                .when(!theme.builtin, |el| {
+                                    el.child(icon("sparkles").size(px(14.0)).text_color(c("primary")))
+                                }),
+                        )
+                        .child(div().text_xs().line_height(px(16.0)).text_color(c("muted-foreground")).child(about)),
+                )
+                .when(on, |el| {
+                    el.child(motion::once(
                         div()
+                            .absolute()
+                            .top(px(12.0))
+                            .right(px(12.0))
+                            .size(px(24.0))
+                            .rounded_full()
+                            .bg(c("primary"))
+                            .text_color(c("primary-foreground"))
                             .flex()
                             .items_center()
-                            .gap(px(6.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_sm()
-                            .child(radio(on, p))
-                            .child(div().flex_1().min_w_0().truncate().child(theme.name.clone()))
-                            .when_some(delete, |el, theme_id| {
-                                el.child(
-                                    icon_button(SharedString::from(format!("theme-del-{id}-{theme_id}")), "trash", p)
-                                        .size(px(24.0))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.delete_theme(theme_id.clone(), cx)
-                                        })),
-                                )
-                            }),
-                    ),
+                            .justify_center()
+                            .child(icon("check").size(px(16.0))),
+                        SharedString::from(format!("theme-check-{id}-{}", theme.id)),
+                        Duration::from_millis(280),
+                        |el, t| el.opacity(t),
+                    ))
+                });
+            cards.push(
+                motion::rise(
+                    div().child(card),
+                    SharedString::from(format!("theme-in-{id}-{n}")),
+                    Duration::from_millis(40 * n as u64),
+                    10.0,
+                )
+                .into_any_element(),
             );
         }
-        if label.is_empty() {
-            return grid.into_any_element();
+        if make {
+            let n = cards.len();
+            let (hover_border, hover_fg) = (alpha(p.primary, 0.5), p.primary);
+            cards.push(
+                motion::rise(
+                    div().child(
+                        div()
+                            .id(SharedString::from(format!("theme-make-{id}")))
+                            .w(px(card_w))
+                            .h_full()
+                            .min_h(px(124.0))
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .justify_between()
+                            .gap(px(12.0))
+                            .p(px(16.0))
+                            .rounded(crate::ui::theme::radius_2xl())
+                            .border_2()
+                            .border_dashed()
+                            .border_color(p.border)
+                            .text_color(p.muted_foreground)
+                            .cursor_pointer()
+                            .hover(move |s| s.border_color(hover_border).text_color(hover_fg).top(px(-3.0)))
+                            .active(|s| s.top(px(1.0)))
+                            .on_click(cx.listener(|this, _, _, cx| this.choose(Page::Themes, None, cx)))
+                            .child(
+                                div()
+                                    .size(px(28.0))
+                                    .rounded_full()
+                                    .bg(p.muted)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon("plus").size(px(16.0))),
+                            )
+                            .child(
+                                div()
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::EXTRA_BOLD)
+                                            .child(t("appsettings.themes.makeYourOwn")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .line_height(px(16.0))
+                                            .child(t("appsettings.themes.makeYourOwnHint")),
+                                    ),
+                            ),
+                    ),
+                    SharedString::from(format!("theme-in-{id}-make")),
+                    Duration::from_millis(40 * n as u64),
+                    10.0,
+                )
+                .into_any_element(),
+            );
         }
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.muted_foreground)
-                    .child(icon(glyph).size(px(15.0)))
-                    .child(label.to_owned()),
-            )
-            .child(grid)
-            .into_any_element()
+        let mut grid = div().flex().flex_col().gap(px(gap));
+        let mut cards = cards.into_iter();
+        loop {
+            let a = cards.next();
+            let Some(a) = a else { break };
+            let b = cards.next();
+            grid = grid.child(div().flex().gap(px(gap)).child(a).children(b));
+        }
+        grid.into_any_element()
     }
 
     // ───────────────────────── Background ─────────────────────────

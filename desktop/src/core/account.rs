@@ -33,6 +33,12 @@ pub struct ProfilePatch {
     pub bio: Option<String>,
     pub status: Option<String>,
     pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    /// 0xRRGGBB, or -1 for the color fuwa picks.
+    pub accent_color: Option<i32>,
+    /// When the status clears by itself (unix ms), sent with `status`; None keeps it until changed.
+    pub status_expires_at: Option<i64>,
+    pub effect: Option<String>,
 }
 
 /// A picture's type, from its name, as the instance wants it said.
@@ -292,7 +298,13 @@ impl Core {
                 pronouns: patch.pronouns,
                 bio: patch.bio,
                 status: patch.status,
-                ..Default::default()
+                banner_url: patch.banner_url,
+                accent_color: patch.accent_color,
+                status_expires_at: patch.status_expires_at.map(|ms| prost_types::Timestamp {
+                    seconds: ms.div_euclid(1000),
+                    nanos: (ms.rem_euclid(1000) * 1_000_000) as i32,
+                }),
+                effect: patch.effect,
             })
         )
         .await?;

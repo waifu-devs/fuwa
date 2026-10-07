@@ -628,7 +628,7 @@ impl FuwaApp {
                 let busy = self.core.shared.read(|s| {
                     s.instance(&instance).is_some_and(|i| i.status() == crate::pb::PresenceStatus::DoNotDisturb)
                 });
-                if !self.prefs.notifications || busy {
+                if !self.prefs.notifies() || busy {
                     return;
                 }
                 let streamer = self.prefs.streamer_mode;
@@ -674,7 +674,7 @@ impl FuwaApp {
                 self.toast("door-open", "You're no longer in a server".into(), server, None, None, cx);
             }
             Notice::Friend { instance, title } => {
-                if !self.prefs.notifications {
+                if !self.prefs.notifies() {
                     return;
                 }
                 let body = if self.prefs.streamer_mode {
@@ -1190,6 +1190,12 @@ impl FuwaApp {
         crate::core::reports::used("settings.open");
         let core = self.core.clone();
         let view = cx.new(|cx| SettingsView::new(core, window, cx));
+        // The account pages are about the instance on screen.
+        let on_screen = match &self.nav {
+            Nav::Friends { key } | Nav::Instance { key } | Nav::Server { key, .. } => Some(key.clone()),
+            Nav::Home { dm } => dm.as_ref().map(|(key, _)| key.clone()),
+        };
+        view.update(cx, |v, _| v.account.key = on_screen);
         self._subscriptions.push(cx.subscribe_in(
             &view,
             window,
@@ -1212,6 +1218,9 @@ impl FuwaApp {
                     SettingsEvent::AddInstance => {
                         this.settings = None;
                         this.open_connect(true, window, cx);
+                    }
+                    SettingsEvent::Toast { icon, title } => {
+                        this.toast(icon, title.clone(), String::new(), None, None, cx)
                     }
                 }
                 cx.notify();
@@ -1797,8 +1806,8 @@ impl FuwaApp {
             if !view.update(cx, |v, cx| v.escape(cx)) {
                 self.instance_settings = None;
             }
-        } else if self.settings.is_some() {
-            self.settings = None;
+        } else if let Some(view) = self.settings.clone() {
+            view.update(cx, |v, cx| v.escape(window, cx));
         } else if let Some(connect) = &self.connect {
             if connect.read(cx).can_cancel {
                 self.connect = None;
@@ -1824,7 +1833,7 @@ impl Render for FuwaApp {
 impl FuwaApp {
     fn render_root(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let p = pal(cx);
-        window.set_rem_size(px(16.0 * self.prefs.text_scale.clamp(0.8, 1.4)));
+        window.set_rem_size(px(16.0 * self.prefs.text_scale.clamp(0.8, 1.5)));
         // When something that takes focus closes (a dialog, a page, the
         // switcher), the window takes focus back, or no shortcut would reach it.
         let covers = [

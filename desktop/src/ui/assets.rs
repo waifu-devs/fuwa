@@ -16,6 +16,14 @@ impl AssetSource for Assets {
         if let Some((_, bytes)) = OWN.iter().find(|(p, _)| *p == path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
+        // Profile effects' shapes, drawn from their paths.
+        if let Some(shape) = path
+            .strip_prefix("fx/")
+            .and_then(|n| n.strip_suffix(".svg"))
+            .and_then(crate::core::profile_effects::Shape::by_name)
+        {
+            return Ok(Some(Cow::Owned(shape.svg().into_bytes())));
+        }
         gpui_kit::assets::AllAssets.load(path)
     }
 

@@ -93,7 +93,7 @@ async fn handle(req: Request<Incoming>, tx: mpsc::Sender<Returned>) -> Result<Re
     let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_default();
     let response = match req.uri().path() {
         // Where the instance hands a sign-in back: waifu.dev's, or single sign-on's.
-        "/auth/waifu/callback" | "/auth/sso/done" => page(PAGE),
+        "/auth/waifu/callback" | "/auth/sso/done" | "/auth/provider/done" => page(PAGE),
         "/returned" => {
             let (code, state) = (get("code"), get("state"));
             let problem = if get("error_description").is_empty() { get("error") } else { get("error_description") };

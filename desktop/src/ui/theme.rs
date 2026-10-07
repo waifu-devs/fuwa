@@ -202,7 +202,7 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
     KitTheme::update(cx, |t| {
         t.font_family = FONT.into();
-        t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.4));
+        t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.5));
         t.radius = corner(10.0);
         t.radius_lg = corner(16.0);
         let c = &mut t.colors;

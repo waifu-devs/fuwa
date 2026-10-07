@@ -135,6 +135,61 @@ pub enum Clock {
     H24,
 }
 
+/// How much room messages and lists get (the web app's `density`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Spacing {
+    Compact,
+    #[default]
+    Default,
+    Spacious,
+}
+
+/// Where role colors show: on names, as a dot beside them, or not at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleColors {
+    #[default]
+    Names,
+    Beside,
+    Off,
+}
+
+/// How the microphone decides when you're talking.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMode {
+    #[default]
+    Voice,
+    Ptt,
+}
+
+/// Popped-out cameras fill their window (cropping the edges) or fit in it whole.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PopoutFit {
+    #[default]
+    Cover,
+    Contain,
+}
+
+/// Which sounds play (the web app's `sounds`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sounds {
+    pub message: bool,
+    pub mention: bool,
+    pub join: bool,
+    pub call: bool,
+    pub ring: bool,
+}
+
+impl Default for Sounds {
+    fn default() -> Self {
+        Self { message: true, mention: true, join: false, call: true, ring: true }
+    }
+}
+
 /// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
 /// (Enter for a new line); the web app's `sendWith`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +263,55 @@ pub struct Prefs {
     pub clock: Clock,
     /// Which keys send a message.
     pub send_with: SendWith,
+    /// How much room messages and lists get.
+    pub spacing: Spacing,
+    /// Message text size, in pixels (12 to 20).
+    pub chat_font_size: u8,
+    /// The whole app's size, in percent (80 to 150).
+    pub zoom: u16,
+    /// Effects on other people's profile cards play (your own always shows to you).
+    pub others_effects: bool,
+    /// Color saturation, in percent.
+    pub saturation: u8,
+    pub underline_links: bool,
+    pub role_colors: RoleColors,
+    /// A count of what's unread where the app shows it (the web's tab title).
+    pub unread_badge: bool,
+    pub sounds: Sounds,
+    /// Sound volume, in percent.
+    pub volume: u8,
+    /// Streamer mode hides addresses and your username.
+    pub streamer_hide_personal: bool,
+    /// Streamer mode keeps sounds quiet.
+    pub streamer_mute_sounds: bool,
+    /// Streamer mode keeps notifications quiet.
+    pub streamer_mute_notifications: bool,
+    /// Voice and audio: devices by name, "" for the system's default.
+    pub input_device: String,
+    pub output_device: String,
+    /// Microphone and call volume, in percent (up to 200).
+    pub input_volume: u16,
+    pub output_volume: u16,
+    pub input_mode: InputMode,
+    /// Voice activity picks its level by itself, or uses `sensitivity` (in dB).
+    pub auto_sensitivity: bool,
+    pub sensitivity: i8,
+    /// How long push to talk keeps going after the key comes up, in milliseconds.
+    pub ptt_release: u16,
+    pub echo_cancellation: bool,
+    pub noise_suppression: bool,
+    pub auto_gain_control: bool,
+    /// How loud each person is for you, in percent, by "instance/user id". Missing means 100.
+    pub user_volumes: std::collections::BTreeMap<String, u16>,
+    /// The camera by name, "" for the system's default.
+    pub video_device: String,
+    /// Your own camera shows mirrored to you.
+    pub mirror_video: bool,
+    pub popout_name: bool,
+    pub popout_glow: bool,
+    pub popout_fit: PopoutFit,
+    /// Sharing a screen brings its sound too.
+    pub share_sound: bool,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -223,7 +327,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: "sakura".into(),
-            follow_system: true,
+            follow_system: false,
             light_theme: "sakura".into(),
             dark_theme: "yoru".into(),
             custom_themes: Vec::new(),
@@ -251,6 +355,37 @@ impl Default for Prefs {
             developer_mode: false,
             clock: Clock::Auto,
             send_with: SendWith::Enter,
+            spacing: Spacing::Default,
+            chat_font_size: 15,
+            zoom: 100,
+            others_effects: true,
+            saturation: 100,
+            underline_links: false,
+            role_colors: RoleColors::Names,
+            unread_badge: true,
+            sounds: Sounds::default(),
+            volume: 60,
+            streamer_hide_personal: true,
+            streamer_mute_sounds: true,
+            streamer_mute_notifications: true,
+            input_device: String::new(),
+            output_device: String::new(),
+            input_volume: 100,
+            output_volume: 100,
+            input_mode: InputMode::Voice,
+            auto_sensitivity: true,
+            sensitivity: -50,
+            ptt_release: 200,
+            echo_cancellation: true,
+            noise_suppression: true,
+            auto_gain_control: true,
+            user_volumes: Default::default(),
+            video_device: String::new(),
+            mirror_video: true,
+            popout_name: true,
+            popout_glow: true,
+            popout_fit: PopoutFit::Cover,
+            share_sound: true,
         }
     }
 }
@@ -310,6 +445,20 @@ impl Prefs {
             list.truncate(crate::core::gifs::RECENT);
         }
         self.recent_gifs.retain(|_, list| !list.is_empty());
+        // Before zoom, the app's size was a text scale.
+        if self.zoom == 100 && (self.text_scale - 1.0).abs() > 0.01 {
+            self.zoom = ((self.text_scale * 10.0).round() * 10.0) as u16;
+        }
+        self.zoom = self.zoom.clamp(80, 150);
+        self.text_scale = f32::from(self.zoom) / 100.0;
+        self.chat_font_size = self.chat_font_size.clamp(12, 20);
+        self.saturation = self.saturation.min(100);
+        self.volume = self.volume.min(100);
+        self.input_volume = self.input_volume.min(200);
+        self.output_volume = self.output_volume.min(200);
+        self.sensitivity = self.sensitivity.clamp(-100, 0);
+        self.ptt_release = self.ptt_release.min(2000);
+        self.user_volumes.retain(|_, v| *v <= 200);
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }
@@ -324,6 +473,21 @@ impl Prefs {
         if !known(&self.dark_theme) {
             self.dark_theme = "yoru".into();
         }
+    }
+
+    /// Whether notifications show: on, and not quieted by streamer mode.
+    pub fn notifies(&self) -> bool {
+        self.notifications && !(self.streamer_mode && self.streamer_mute_notifications)
+    }
+
+    /// Whether sounds play: not quieted by streamer mode.
+    pub fn sounds_on(&self) -> bool {
+        !(self.streamer_mode && self.streamer_mute_sounds)
+    }
+
+    /// Whether streamer mode hides addresses and your username now.
+    pub fn hides_personal(&self) -> bool {
+        self.streamer_mode && self.streamer_hide_personal
     }
 
     /// Every theme there is to pick: the built-in ones, then the ones made here.

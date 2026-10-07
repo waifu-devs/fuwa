@@ -7,6 +7,7 @@
 //! a version the window watches, so the window redraws after every change.
 
 pub mod account;
+pub mod account_settings;
 pub mod api;
 pub mod arrange;
 pub mod attachments;
@@ -33,11 +34,13 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod profile_effects;
 pub mod reports;
 pub mod search;
 pub mod secrets;
 pub mod server_admin;
 pub mod shared;
+pub mod sounds;
 pub mod sso;
 pub mod store;
 mod sync;
