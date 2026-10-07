@@ -6,9 +6,10 @@ name: Release SDK
 # built it. The SDK's version follows the server's, so an app can tell which
 # server release it was made against.
 #
-# It needs the NPM_TOKEN secret (an npm automation token that can publish
-# @waifu-devs/fuwa), kept in the "npm" environment, limited to v* tags.
-# Without it, the job says so and publishes nothing.
+# It publishes through npm's trusted publishing: npm trusts this repository,
+# this workflow file and the "npm" environment (limited to v* tags), and the
+# job proves who it is with GitHub's OIDC token, so there's no npm token to
+# keep. Trusted publishing needs npm 11.5.1 or later.
 on:
   push:
     tags: ["v*"]
@@ -20,11 +21,12 @@ jobs:
   publish:
     name: Publish @waifu-devs/fuwa
     runs-on: ubuntu-latest
-    # Holds NPM_TOKEN; its deployment rule lets only v* tags in.
+    # npm's trusted publisher names this environment; its deployment rule
+    # lets only v* tags in.
     environment: npm
     permissions:
       contents: read
-      # For npm provenance.
+      # For trusted publishing (and its provenance).
       id-token: write
     defaults:
       run:
@@ -39,7 +41,8 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: sdk/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
+      - name: npm that can publish through OIDC
+        run: npm install -g npm@^11.5.1
       - run: pnpm install --frozen-lockfile
       - name: Version from the tag
         run: |
@@ -59,11 +62,5 @@ jobs:
       - run: npm pack --dry-run
       - name: Publish
         if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN isn't set, so the SDK wasn't published. Add it to the npm environment (Settings > Environments), then re-run this run."
-            exit 0
-          fi
-          npm publish --provenance --access public
+        # Provenance comes with trusted publishing.
+        run: npm publish --access public
