@@ -9,6 +9,10 @@ pub struct Assets;
 const OWN: &[(&str, &[u8])] = &[
     ("fuwa/mark.svg", include_bytes!("../../assets/fuwa/mark.svg")),
     ("fuwa/face.svg", include_bytes!("../../assets/fuwa/face.svg")),
+    // The marks of the providers people sign in with (Simple Icons, CC0), as the web's `ProviderMarks.tsx`.
+    ("providers/google.svg", include_bytes!("../../assets/providers/google.svg")),
+    ("providers/x.svg", include_bytes!("../../assets/providers/x.svg")),
+    ("providers/twitch.svg", include_bytes!("../../assets/providers/twitch.svg")),
 ];
 
 impl AssetSource for Assets {

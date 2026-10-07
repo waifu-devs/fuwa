@@ -23,7 +23,7 @@ pub fn amber() -> Hsla {
     gpui_kit::rgb(0xf59e0b).into()
 }
 
-fn ink() -> Hsla {
+pub(crate) fn ink() -> Hsla {
     gpui_kit::rgb(0x1c1917).into()
 }
 
@@ -171,7 +171,7 @@ pub fn banner(
 }
 
 /// The striped edge under a heads-up, moving along.
-fn hazard(id: &str, window: &Window) -> AnyElement {
+pub(crate) fn hazard(id: &str, window: &Window) -> AnyElement {
     let mut stripes = div().absolute().top_0().bottom_0().left(px(-32.0)).flex();
     for n in 0..240 {
         stripes = stripes.child(div().w(px(8.0)).h_full().bg(if n % 2 == 0 { amber() } else { ink() }));

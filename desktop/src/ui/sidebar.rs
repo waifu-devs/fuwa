@@ -494,7 +494,9 @@ impl FuwaApp {
                 el.on_drag_move::<ChannelDrag>(cx.listener(|this, event, _, cx| this.drag_moved(event, cx)))
                     .on_drop::<ChannelDrag>(cx.listener(|this, drag, _, cx| this.drag_dropped(drag, cx)))
             });
-        (header, list.into_any_element())
+        // "Happening now" over the channels (live_tiles.rs); the rows' own top padding is its gap.
+        let tiles = self.live_tiles_strip(key, server_id, window, cx);
+        (header, div().when_some(tiles, |el, t| el.child(t)).child(list).into_any_element())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1134,7 +1136,11 @@ impl FuwaApp {
                                 .child(t("dms-calls.dm.list.emptyTitle")),
                         )
                         .child(div().mt(px(6.0)).line_height(px(19.5)).child(crate::ui::text::hint_line(
-                            &t("dms-calls.dm.list.emptyText"),
+                            // The template, its placeholder kept for hint_line to fill in bold.
+                            &crate::core::i18n::t_with(
+                                "dms-calls.dm.list.emptyText",
+                                &[("message", crate::core::i18n::Arg::Str("{message}"))],
+                            ),
                             &[("message", &message)],
                             &p,
                         ))),
@@ -1326,16 +1332,20 @@ impl FuwaApp {
             ));
         let name = me.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| "Not signed in".into());
         let live = connection == crate::core::store::Connection::Live;
-        let sub = if self.prefs.streamer_mode {
-            "Streamer mode".to_owned()
-        } else if live && status != pb::PresenceStatus::Online {
-            crate::ui::menus::status_label(status).to_owned()
+        // The web's UserPanel: your custom status, or what you picked, or your username (masked in streamer mode).
+        let sub = if live && status != pb::PresenceStatus::Online {
+            crate::ui::user_menu::status_name(status)
         } else {
             let _ = &instance;
             me.as_ref()
                 .and_then(|m| {
-                    crate::ui::presence::custom_status(m, crate::core::dms::now_ms())
-                        .or_else(|| Some(format!("@{}", m.username)))
+                    crate::ui::presence::custom_status(m, crate::core::dms::now_ms()).or_else(|| {
+                        Some(if self.prefs.streamer_mode {
+                            format!("@{}", crate::core::accounts::mask_name(&m.username))
+                        } else {
+                            format!("@{}", m.username)
+                        })
+                    })
                 })
                 .unwrap_or_default()
         };
@@ -1352,13 +1362,16 @@ impl FuwaApp {
             .border_color(p.border)
             .child({
                 // Signed in and live, the dot is your status; otherwise it's the connection.
-                let dot = if live {
-                    crate::ui::menus::status_dot(status, 12.0, true, p.rail, &p)
+                let dot = if live && presence {
+                    crate::ui::user_menu::presence_dot(status, 11.2, 3.0, p.card.into(), &p)
+                        .absolute()
+                        .right(px(-5.0))
+                        .bottom(px(-5.0))
                 } else {
-                    conn_dot(connection, &p)
+                    div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(conn_dot(connection, &p))
                 };
-                // An instance without presence has no status to pick.
-                let menu = key.clone().filter(|_| me.is_some() && presence).map(|key| Menu::Status { key });
+                // Your status, custom status and accounts (user_menu.rs).
+                let menu = key.clone().filter(|_| me.is_some()).map(|key| Menu::Status { key });
                 let open = menu.is_some() && self.menu == menu;
                 let hover = p.muted;
                 div()
@@ -1372,22 +1385,12 @@ impl FuwaApp {
                     .rounded(crate::ui::theme::radius_xl())
                     .when(open, |el| el.bg(hover))
                     .when_some(menu, |el, menu| {
-                        el.cursor_pointer()
-                            .hover(move |s| s.bg(hover))
-                            .tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new("Set your status").build(window, cx)
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
-                                cx.notify();
-                            }))
+                        el.cursor_pointer().hover(move |s| s.bg(hover)).on_click(cx.listener(move |this, _, _, cx| {
+                            this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+                            cx.notify();
+                        }))
                     })
-                    .child(
-                        div()
-                            .relative()
-                            .child(avatar(me.as_ref(), 32.0, &p))
-                            .child(div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(dot)),
-                    )
+                    .child(div().relative().child(avatar(me.as_ref(), 32.0, &p)).child(dot))
                     .child(
                         div()
                             .flex_1()
@@ -1397,7 +1400,8 @@ impl FuwaApp {
                             .flex_col()
                             .child(
                                 div()
-                                    .text_sm()
+                                    .text_size(px(14.0))
+                                    .line_height(px(20.0))
                                     .font_weight(FontWeight::BOLD)
                                     .whitespace_nowrap()
                                     .text_ellipsis()
@@ -1405,7 +1409,8 @@ impl FuwaApp {
                             )
                             .child(
                                 div()
-                                    .text_xs()
+                                    .text_size(px(12.0))
+                                    .line_height(px(16.0))
                                     .text_color(p.muted_foreground)
                                     .whitespace_nowrap()
                                     .text_ellipsis()

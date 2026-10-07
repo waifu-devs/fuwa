@@ -3,9 +3,32 @@ use std::path::PathBuf;
 /// The client side of the protocol (proto/fuwa/v1), the same files the server builds from.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
-        "types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media", "role",
-        "invite", "join", "dm", "emoji", "webhook", "agent", "automod", "call", "sso", "presence", "search", "friend",
-        "command", "gif",
+        "types",
+        "node",
+        "auth",
+        "account",
+        "server",
+        "channel",
+        "message",
+        "event",
+        "admin",
+        "media",
+        "role",
+        "invite",
+        "join",
+        "dm",
+        "emoji",
+        "webhook",
+        "agent",
+        "automod",
+        "call",
+        "sso",
+        "presence",
+        "search",
+        "friend",
+        "command",
+        "gif",
+        "live_tile",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let mut config = tonic_prost_build::Config::new();
