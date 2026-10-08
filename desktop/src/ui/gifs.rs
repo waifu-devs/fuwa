@@ -28,6 +28,8 @@ use crate::ui::widgets::{card, icon, icon_button};
 
 /// The picker's size, and its grid's spacing.
 const PANEL_W: f32 = 384.0;
+/// Inside the card's 1px border, which the grids lay out in.
+const INNER_W: f32 = PANEL_W - 2.0;
 const BODY_H: f32 = 336.0;
 const GAP: f32 = 6.0;
 const PAD: f32 = 8.0;
@@ -649,7 +651,7 @@ impl FuwaApp {
         };
         let fresh = self.gifs.born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
         let mut grid = div().p(px(PAD)).flex().flex_wrap().gap(px(GAP));
-        let tile_w = (PANEL_W - PAD * 2.0 - GAP) / 2.0;
+        let tile_w = (INNER_W - PAD * 2.0 - GAP) / 2.0;
         let trending_picture = categories.as_ref().and_then(|c| c.first()).and_then(|c| c.preview.clone());
         grid = grid.child(arrive(
             category_tile("gif-cat|trending", "Trending", Some("trending-up"), trending_picture.as_ref(), tile_w, p)
@@ -738,7 +740,7 @@ impl FuwaApp {
         ratios.extend(
             tiles.iter().map(|t| if t.width > 0 && t.height > 0 { t.height as f32 / t.width as f32 } else { 1.0 }),
         );
-        let (placed, height) = gifs::masonry(&ratios, PANEL_W, GAP, PAD);
+        let (placed, height) = gifs::masonry(&ratios, INNER_W, GAP, PAD);
         let top = -f32::from(self.gifs.scroll.offset().y);
         let near = |y: f32, h: f32| y + h > top - OVERSCAN && y < top + BODY_H + OVERSCAN;
         let saved = self.gifs.saved_urls(key);
@@ -847,7 +849,13 @@ fn gif_tile(
             }
         })
         .on_click(cx.listener(move |this, _, _, cx| this.pick_gif(pick.clone(), cx)))
-        .child(img(SharedString::from(tile.url.clone())).size_full().object_fit(ObjectFit::Cover))
+        // An id keeps the frame it's on, which is what lets GPUI play it.
+        .child(
+            img(SharedString::from(tile.url.clone()))
+                .id(SharedString::from(format!("gif-img|{grid}|{}", tile.key)))
+                .size_full()
+                .object_fit(ObjectFit::Cover),
+        )
         .when(sending, |el| {
             el.child(
                 div()
@@ -885,14 +893,21 @@ fn gif_tile(
             this.toggle_tile(save.clone(), cx)
         }))
         .child(icon("star").size(px(14.0)));
-    let tile_el = div().group(group).absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).child(picture).child(star);
-    motion::rise(
-        tile_el,
-        SharedString::from(format!("gif-in|{grid}|{n}")),
-        Duration::from_millis(20 * n.min(10) as u64),
-        6.0,
-    )
-    .into_any_element()
+    // The rise makes what it moves relative, so the place is held by a box around it.
+    let tile_el = div().group(group).size_full().child(picture).child(star);
+    div()
+        .absolute()
+        .left(px(x))
+        .top(px(y))
+        .w(px(w))
+        .h(px(h))
+        .child(motion::rise(
+            tile_el,
+            SharedString::from(format!("gif-in|{grid}|{n}")),
+            Duration::from_millis(20 * n.min(10) as u64),
+            6.0,
+        ))
+        .into_any_element()
 }
 
 /// A mood's tile; they ripple in when the picker opens.
@@ -905,15 +920,16 @@ fn arrive(tile: gpui_kit::Stateful<gpui_kit::Div>, n: usize, fresh: bool) -> Any
 }
 
 fn category_tile(
-    id: impl Into<gpui_kit::ElementId>,
+    id: impl Into<SharedString>,
     label: &str,
     glyph: Option<&'static str>,
     picture: Option<&pb::GifResult>,
     w: f32,
     p: &Palette,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let id = id.into();
     div()
-        .id(id)
+        .id(id.clone())
         .relative()
         .w(px(w))
         .h(px(88.0))
@@ -926,6 +942,7 @@ fn category_tile(
         .when_some(picture, |el, picture| {
             el.child(
                 img(SharedString::from(picture.preview_url.clone()))
+                    .id(SharedString::from(format!("{id}|img")))
                     .absolute()
                     .inset_0()
                     .size_full()
@@ -985,7 +1002,7 @@ fn empty(glyph: &str, title: &str, text: &str, p: &Palette) -> AnyElement {
 }
 
 fn skeletons(p: &Palette) -> AnyElement {
-    let (placed, _) = gifs::masonry(&[0.9, 1.25, 1.15, 0.85, 1.35, 1.0], PANEL_W, GAP, PAD);
+    let (placed, _) = gifs::masonry(&[0.9, 1.25, 1.15, 0.85, 1.35, 1.0], INNER_W, GAP, PAD);
     let mut inner = div().relative().size_full();
     for (x, y, w, h) in placed {
         inner =
@@ -1054,12 +1071,25 @@ pub(crate) fn gif_in_message(
         .rounded(corner(12.0))
         .overflow_hidden()
         .bg(p.muted)
-        .child(img(SharedString::from(gif.url.clone())).size_full().object_fit(ObjectFit::Cover).with_fallback({
-            let fg = p.muted_foreground;
-            move || {
-                div().size_full().flex().items_center().justify_center().text_color(fg).child("GIF").into_any_element()
-            }
-        }))
+        .child(
+            img(SharedString::from(gif.url.clone()))
+                .id(SharedString::from(format!("gif-msg-img|{mid}")))
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .with_fallback({
+                    let fg = p.muted_foreground;
+                    move || {
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(fg)
+                            .child("GIF")
+                            .into_any_element()
+                    }
+                }),
+        )
         .child(star)
         .when(!credit.is_empty(), |el| {
             el.child(
