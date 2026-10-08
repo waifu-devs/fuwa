@@ -18,6 +18,7 @@ mod compose;
 mod composer;
 mod connect;
 mod context_menu;
+mod decoration_picker;
 mod dialogs;
 mod dm_call;
 mod dm_dialogs;

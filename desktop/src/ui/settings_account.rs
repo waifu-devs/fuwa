@@ -16,6 +16,7 @@ use gpui_kit::{
 
 use crate::core::account::{ProfilePatch, picture_type};
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::profile_items::{offered_effects, resolve_decoration, resolve_effect};
 use crate::core::store::{Connection, user_name};
 use crate::pb;
 use crate::ui::motion;
@@ -103,8 +104,21 @@ pub(crate) struct Draft {
     avatar: String,
     banner: String,
     /// 0xRRGGBB, or -1 for the color fuwa picks from your id.
-    accent: i32,
+    pub(crate) accent: i32,
     effect: String,
+    /// One of the instance's decorations, or "" for none.
+    decoration: String,
+}
+
+/// How you look in one server, for the card's preview: a nickname, an effect and a decoration
+/// there ("" for your own).
+pub(crate) struct ServerLook<'a> {
+    pub server_id: &'a str,
+    pub nickname: &'a str,
+    pub effect: &'a str,
+    pub decoration: &'a str,
+    /// When you joined it, unix milliseconds (0 when unknown).
+    pub joined: i64,
 }
 
 /// Which picture field.
@@ -138,6 +152,7 @@ pub struct AccountForm {
     banner: String,
     accent: i32,
     effect: String,
+    decoration: String,
     clear: Clear,
     bio_preview: bool,
     links: (bool, bool),
@@ -196,6 +211,7 @@ impl AccountForm {
             banner: String::new(),
             accent: -1,
             effect: String::new(),
+            decoration: String::new(),
             clear: Clear::Never,
             bio_preview: false,
             links: (false, false),
@@ -261,6 +277,7 @@ impl SettingsView {
             expires: me.status_expires_at.as_ref().map(|t| ms_of(Some(t))).filter(|ms| *ms > 0),
             avatar: me.avatar_url.clone(),
             accent: -1,
+            decoration: me.decoration_id.clone(),
             ..Draft::default()
         };
         self.load_draft(&base, window, cx);
@@ -294,6 +311,7 @@ impl SettingsView {
             banner: profile.banner_url.clone(),
             accent: profile.accent_color.unwrap_or(-1),
             effect: profile.effect.clone(),
+            decoration: me.decoration_id.clone(),
         };
         self.account.created_at = ms_of(profile.created_at.as_ref());
         self.load_draft(&base, window, cx);
@@ -312,6 +330,7 @@ impl SettingsView {
         f.banner = d.banner.clone();
         f.accent = d.accent;
         f.effect = d.effect.clone();
+        f.decoration = d.decoration.clone();
         f.clear = if !d.status.is_empty() && d.expires.is_some() { Clear::Keep } else { Clear::Never };
         f.error = None;
     }
@@ -329,6 +348,7 @@ impl SettingsView {
             banner: f.banner.clone(),
             accent: f.accent,
             effect: f.effect.clone(),
+            decoration: f.decoration.clone(),
         }
     }
 
@@ -346,6 +366,7 @@ impl SettingsView {
             d.banner != base.banner,
             d.accent != base.accent,
             d.effect != base.effect,
+            d.decoration != base.decoration,
         ]
         .iter()
         .filter(|x| **x)
@@ -386,10 +407,14 @@ impl SettingsView {
             effect: (d.effect != base.effect).then(|| d.effect.clone()),
             status: status_changed.then(|| d.status.trim().to_owned()),
             status_expires_at: if status_changed { clears_at(self.account.clear, base.expires) } else { None },
-            decoration_id: None,
+            decoration_id: (d.decoration != base.decoration).then(|| d.decoration.clone()),
         };
         self.account.saving = true;
         self.account.error = None;
+        let picked = (
+            patch.effect.as_ref().is_some_and(|e| !e.is_empty()),
+            patch.decoration_id.as_ref().is_some_and(|d| !d.is_empty()),
+        );
         let core = self.core.clone();
         let rx = self.core.spawn(async move { core.update_profile(&key, patch).await });
         cx.spawn_in(window, async move |this, cx| {
@@ -398,8 +423,11 @@ impl SettingsView {
                 this.account.saving = false;
                 match result {
                     Ok(profile) => {
-                        if !profile.effect.is_empty() {
+                        if picked.0 {
                             crate::core::reports::used("profile-effect/picked");
+                        }
+                        if picked.1 {
+                            crate::core::reports::used("profile-decoration/picked");
                         }
                         this.take_profile(&profile, window, cx);
                     }
@@ -481,10 +509,11 @@ impl SettingsView {
 
     pub(crate) fn profile_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some((key, me)) = self.account_ready(window, cx) else { return div().into_any_element() };
-        let effects_on = self
-            .core
-            .shared
-            .read(|s| s.instance(&key).and_then(|i| i.node.as_ref()).is_some_and(|n| n.profile_effects));
+        // Instances from before profile effects (or decorations) don't say, and can't keep one.
+        let (effects_on, decorations_on, items) = self.core.shared.read(|s| match s.instance(&key) {
+            Some(i) => (i.effects_on(), i.decorations_on(), i.profile_items.clone()),
+            None => (false, false, Vec::new()),
+        });
         let ready = self.account.ready;
         let d = self.draft(cx);
         let form_w = if self.wide { self.column - 40.0 - 288.0 } else { self.column };
@@ -539,16 +568,60 @@ impl SettingsView {
             ),
         ];
         if effects_on {
-            let about =
-                crate::ui::profile_effect::about(&d.effect).unwrap_or_else(|| t("accountsettings.profile.effectHint"));
+            let about = match resolve_effect(&d.effect, &items) {
+                Some(spec) => crate::ui::profile_effect::effect_text(&spec).1,
+                None => t("accountsettings.profile.effectHint"),
+            };
+            let offered = offered_effects(&items);
             rows.push((
                 "profile-effect",
                 t("settings.nav.profileEffect"),
                 Some(hint(about, p)),
-                self.effect_picker(&d.effect, &me.id, d.accent, ready, form_w, p, cx, |this, id, cx| {
-                    this.account.effect = id;
+                self.effect_picker(
+                    "profile",
+                    &d.effect,
+                    &me.id,
+                    d.accent,
+                    &offered,
+                    None,
+                    ready,
+                    form_w,
+                    p,
+                    cx,
+                    |this, id, cx| {
+                        this.account.effect = id;
+                        cx.notify();
+                    },
+                ),
+            ));
+        }
+        let decorations: Vec<pb::ProfileItem> =
+            items.iter().filter(|i| i.kind == pb::ProfileItemKind::Decoration as i32).cloned().collect();
+        if decorations_on && (!decorations.is_empty() || !d.decoration.is_empty()) {
+            let about = resolve_decoration(&d.decoration, &items)
+                .map(|i| i.description.clone())
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| t("accountsettings.decorations.hint"));
+            let picker = self.decoration_picker(
+                "profile",
+                &d.decoration,
+                &me,
+                &decorations,
+                None,
+                ready,
+                form_w,
+                p,
+                cx,
+                |this, id, cx| {
+                    this.account.decoration = id;
                     cx.notify();
-                }),
+                },
+            );
+            rows.push((
+                "avatar-decoration",
+                t("accountsettings.decorations.label"),
+                Some(hint(about, p)),
+                motion::slide_in(div().child(picker), "avatar-decoration", 12.0).into_any_element(),
             ));
         }
         rows.push((
@@ -628,10 +701,36 @@ impl SettingsView {
         &mut self,
         me: &pb::User,
         d: &Draft,
-        nickname: Option<&str>,
+        server: Option<ServerLook>,
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let nickname = server.as_ref().map(|s| s.nickname);
+        let joined = server.as_ref().map_or(0, |s| s.joined);
+        // What it wears: in a server the picks there, else your own (the draft's), as others see it.
+        let (effect, decoration) = self.account_key().map_or((None, None), |key| {
+            self.core.shared.read(|s| {
+                let Some(i) = s.instance(&key) else { return (None, None) };
+                let effect = i.effects_on().then(|| match &server {
+                    Some(look) if !look.effect.is_empty() => resolve_effect(look.effect, i.server_list(look.server_id)),
+                    _ => resolve_effect(&d.effect, &i.profile_items),
+                });
+                let decoration = i.decorations_on().then(|| match &server {
+                    Some(look) if !look.decoration.is_empty() => {
+                        resolve_decoration(look.decoration, i.server_list(look.server_id))
+                    }
+                    _ => resolve_decoration(&d.decoration, &i.profile_items),
+                });
+                (effect.flatten(), decoration.flatten().map(|item| item.picture_url.clone()))
+            })
+        });
+        // Your dot, where the instance follows who's online.
+        let presence = self.account_key().and_then(|key| {
+            self.core.shared.read(|s| {
+                let people = s.instance(&key)?.people.as_ref()?;
+                Some(crate::ui::presence::shown(people.get(&me.id)))
+            })
+        });
         let mut user = me.clone();
         user.display_name = if d.name.trim().is_empty() { me.username.clone() } else { d.name.trim().to_owned() };
         if let Some(nick) = nickname.map(str::trim).filter(|n| !n.is_empty()) {
@@ -648,8 +747,8 @@ impl SettingsView {
             banner_of(&me.id, if is_link(&d.banner) { d.banner.trim().to_owned() } else { String::new() }, d.accent, p)
                 .h(px(112.0));
         let hidden = self.core.prefs().hides_personal();
-        let effect = (!d.effect.is_empty())
-            .then(|| self.effect_layer("preview-card", &d.effect, &me.id, d.accent, (288.0, 420.0), true, cx));
+        let effect =
+            effect.map(|spec| self.effect_layer("preview-card", &spec, &me.id, d.accent, (288.0, 420.0), true, cx));
         let card = div()
             .relative()
             .overflow_hidden()
@@ -670,13 +769,45 @@ impl SettingsView {
                             .flex()
                             .items_end()
                             .gap(px(8.0))
-                            .child(div().flex_none().rounded_full().p(px(3.0)).bg(p.card).child(
-                                div().rounded_full().border_4().border_color(p.card).child(avatar(
-                                    Some(&user),
-                                    80.0,
-                                    p,
-                                )),
-                            ))
+                            .child(
+                                // Your picture in a ring of the card's color, as the card draws it.
+                                div()
+                                    .flex_none()
+                                    .size(px(86.0))
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left(px(-1.0))
+                                            .top(px(-1.0))
+                                            .size(px(88.0))
+                                            .rounded_full()
+                                            .bg(p.card),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left(px(3.0))
+                                            .top(px(3.0))
+                                            .size(px(80.0))
+                                            .child(crate::ui::widgets::decorated(
+                                                avatar(Some(&user), 80.0, p),
+                                                80.0,
+                                                decoration.as_deref(),
+                                            ))
+                                            .children(presence.map(|status| {
+                                                div().absolute().right(px(-3.0)).bottom(px(-3.0)).child(
+                                                    crate::ui::presence::ringed_dot(
+                                                        status,
+                                                        20.0,
+                                                        5.0,
+                                                        p.card.into(),
+                                                        p,
+                                                    ),
+                                                )
+                                            })),
+                                    ),
+                            )
                             .when(!status.is_empty(), |el| {
                                 el.child(
                                     div()
@@ -764,23 +895,45 @@ impl SettingsView {
                                 }),
                         )
                     })
-                    .when(self.account.created_at > 0, |el| {
+                    .when(self.account.created_at > 0 || joined > 0, |el| {
                         use chrono::TimeZone as _;
-                        let day = chrono::Local
-                            .timestamp_millis_opt(self.account.created_at)
-                            .single()
-                            .map(|d| d.format("%b %-d, %Y").to_string())
-                            .unwrap_or_default();
+                        let day = |ms: i64| {
+                            chrono::Local
+                                .timestamp_millis_opt(ms)
+                                .single()
+                                .map(|d| d.format("%b %-d, %Y").to_string())
+                                .unwrap_or_default()
+                        };
+                        let since = self.account.created_at;
                         el.child(
                             div()
                                 .mt(px(12.0))
                                 .flex()
-                                .items_center()
-                                .gap(px(6.0))
+                                .flex_col()
+                                .gap(px(4.0))
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child(icon("calendar-heart").size(px(14.0)))
-                                .child(t_with("workspace.profile.since", &[("date", Arg::Str(&day))])),
+                                .when(since > 0, |el| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(6.0))
+                                            .child(icon("calendar-heart").size(px(14.0)))
+                                            .child(t_with(
+                                                "workspace.profile.since",
+                                                &[("date", Arg::Str(&day(since)))],
+                                            )),
+                                    )
+                                })
+                                .when(joined > 0, |el| {
+                                    el.child(
+                                        div().pl(px(20.0)).child(t_with(
+                                            "workspace.profile.joined",
+                                            &[("date", Arg::Str(&day(joined)))],
+                                        )),
+                                    )
+                                }),
                         )
                     }),
             )

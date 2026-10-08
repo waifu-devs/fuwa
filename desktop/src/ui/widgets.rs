@@ -193,11 +193,6 @@ pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
     div().size(px(12.8)).rounded_full().bg(color).border_2().border_color(ring)
 }
 
-/// The same in the destructive color, for deleting and other things that can't be undone.
-pub fn danger_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-    filled_button(id, label, p.destructive, gpui_kit::rgb(0xffffff), p)
-}
-
 /// A filled button in the primary color, with a glow on hover and a dip on press.
 pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
     filled_button(id, label, p.primary, p.primary_foreground, p)

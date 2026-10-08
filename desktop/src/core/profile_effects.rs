@@ -123,7 +123,7 @@ pub enum Paint {
     Hex(u32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     pub shape: Shape,
     pub motion: Motion,
@@ -141,9 +141,13 @@ pub struct Layer {
     pub opacity: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Spec {
-    pub id: &'static str,
+    /// A built-in's id, or an offered effect's item id in lowercase.
+    pub id: String,
+    /// Its own name and line; empty for built-ins, whose text is the app's.
+    pub name: String,
+    pub description: String,
     pub layers: Vec<Layer>,
 }
 
@@ -344,7 +348,146 @@ pub fn spec(id: &str) -> Option<Spec> {
         _ => return None,
     };
     let id = IDS.into_iter().find(|i| *i == id)?;
-    Some(Spec { id, layers })
+    Some(Spec { id: id.to_owned(), name: String::new(), description: String::new(), layers })
+}
+
+/// The most layers a spec keeps.
+pub const MAX_LAYERS: usize = 6;
+
+/// Lowercase letters, digits and dashes, up to 32: what the server takes.
+pub fn is_effect_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 32
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !id.starts_with('-')
+}
+
+impl Motion {
+    fn by_name(name: &str) -> Option<Motion> {
+        Some(match name {
+            "fall" => Motion::Fall,
+            "rise" => Motion::Rise,
+            "twinkle" => Motion::Twinkle,
+            "drift" => Motion::Drift,
+            "burst" => Motion::Burst,
+            "shoot" => Motion::Shoot,
+            "pop" => Motion::Pop,
+            _ => return None,
+        })
+    }
+}
+
+impl Region {
+    fn by_name(name: &str) -> Option<Region> {
+        Some(match name {
+            "top" => Region::Top,
+            "bottom" => Region::Bottom,
+            "edges" => Region::Edges,
+            "corners" => Region::Corners,
+            "anywhere" => Region::Anywhere,
+            "top-left" => Region::TopLeft,
+            "top-right" => Region::TopRight,
+            "center" => Region::Center,
+            _ => return None,
+        })
+    }
+}
+
+impl Paint {
+    fn by_name(name: &str) -> Option<Paint> {
+        Some(match name {
+            "primary" => Paint::Primary,
+            "ring" => Paint::Ring,
+            "accent" => Paint::Accent,
+            "foreground" => Paint::Foreground,
+            "card" => Paint::Card,
+            "profile" => Paint::Profile,
+            hex if hex.len() == 7 && hex.starts_with('#') => {
+                let digits = &hex[1..];
+                if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return None;
+                }
+                Paint::Hex(u32::from_str_radix(digits, 16).ok()?)
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// A spec from anywhere (an instance's or a server's profile item, a file
+/// someone made), made safe to play, as the web's `sanitizeEffect`: only
+/// known shapes, motions, regions and colors, and every number held to a
+/// range. None when nothing is left to play.
+pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
+    use serde_json::Value;
+    let r = raw.as_object()?;
+    let id = r.get("id")?.as_str().filter(|id| is_effect_id(id))?;
+    let num = |v: Option<&Value>, min: f64, max: f64| v.and_then(Value::as_f64).map(|n| n.clamp(min, max) as f32);
+    let range = |v: Option<&Value>, min: f64, max: f64| {
+        let list = v?.as_array().filter(|a| a.len() == 2)?;
+        let a = num(list.first(), min, max)?;
+        let b = num(list.get(1), min, max)?;
+        Some((a.min(b), a.max(b)))
+    };
+    let layers: Vec<Layer> = r
+        .get("layers")
+        .and_then(Value::as_array)
+        .map(|l| l.iter().take(MAX_LAYERS).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|l| {
+            let x = l.as_object()?;
+            let text = |k: &str| x.get(k).and_then(Value::as_str);
+            let shape = text("shape").and_then(Shape::by_name)?;
+            let motion = text("motion").and_then(Motion::by_name)?;
+            let intro = match text("phase")? {
+                "intro" => true,
+                "idle" => false,
+                _ => return None,
+            };
+            let from = text("from").and_then(Region::by_name)?;
+            let count = num(x.get("count"), 0.0, MAX_PER_LAYER as f64).filter(|c| *c != 0.0)?;
+            let size = range(x.get("size"), 2.0, 96.0)?;
+            let duration = range(x.get("duration"), 300.0, 20000.0)?;
+            let colors: Vec<Paint> = x
+                .get("colors")
+                .and_then(Value::as_array)
+                .map(|c| c.iter().take(32).filter_map(|c| c.as_str().and_then(Paint::by_name)).take(8).collect())
+                .unwrap_or_default();
+            if colors.is_empty() {
+                return None;
+            }
+            Some(Layer {
+                shape,
+                motion,
+                intro,
+                count: count.round() as u32,
+                from,
+                size,
+                duration,
+                delay: range(x.get("delay"), 0.0, 3000.0).unwrap_or((0.0, 0.0)),
+                colors,
+                spin: num(x.get("spin"), -1440.0, 1440.0).unwrap_or(0.0),
+                sway: num(x.get("sway"), 0.0, 400.0).unwrap_or(0.0),
+                flip: x.get("flip") == Some(&Value::Bool(true)),
+                glow: x.get("glow") == Some(&Value::Bool(true)),
+                opacity: num(x.get("opacity"), 0.05, 1.0).unwrap_or(1.0),
+            })
+        })
+        .collect();
+    if layers.is_empty() {
+        return None;
+    }
+    let text = |k: &str, max: usize| {
+        r.get(k).and_then(Value::as_str).map(|s| s.trim().chars().take(max).collect::<String>()).unwrap_or_default()
+    };
+    let name = text("name", 40);
+    Some(Spec {
+        id: id.to_owned(),
+        name: if name.trim().is_empty() { id.to_owned() } else { name.trim().to_owned() },
+        description: text("description", 120).trim().to_owned(),
+        layers,
+    })
 }
 
 /// One point a particle passes through.
@@ -760,6 +903,26 @@ mod tests {
         for id in IDS {
             assert!(!plan(&spec(id).unwrap(), 120.0, 150.0, "x").is_empty(), "{id}");
         }
+    }
+
+    #[test]
+    fn specs_from_elsewhere_are_held_to_the_format() {
+        let raw = serde_json::json!({
+            "id": "mine", "name": "  Mine ", "layers": [
+                { "shape": "star", "motion": "pop", "phase": "intro", "count": 99, "from": "edges",
+                  "size": [200, 1], "duration": [100, 100], "colors": ["#ff00aa", "nope", "profile"], "spin": 9000 },
+                { "shape": "cube", "motion": "pop", "phase": "intro", "count": 3, "from": "edges",
+                  "size": [2, 4], "duration": [400, 500], "colors": ["primary"] }
+            ]
+        });
+        let s = sanitize(&raw).unwrap();
+        assert_eq!((s.id.as_str(), s.name.as_str()), ("mine", "Mine"));
+        assert_eq!(s.layers.len(), 1);
+        let l = &s.layers[0];
+        assert_eq!((l.count, l.size, l.duration, l.spin), (24, (2.0, 96.0), (300.0, 300.0), 1440.0));
+        assert_eq!(l.colors, vec![Paint::Hex(0xff00aa), Paint::Profile]);
+        assert!(sanitize(&serde_json::json!({ "id": "Bad Id", "layers": [] })).is_none());
+        assert!(sanitize(&serde_json::json!({ "id": "empty", "layers": [] })).is_none());
     }
 
     #[test]

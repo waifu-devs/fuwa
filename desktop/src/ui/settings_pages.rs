@@ -4,7 +4,7 @@
 #[derive(Default)]
 pub(crate) struct PageState {
     /// Profile effects playing, by where they are.
-    pub effects: std::collections::HashMap<&'static str, gpui_kit::Entity<crate::ui::profile_effect::EffectView>>,
+    pub effects: std::collections::HashMap<String, gpui_kit::Entity<crate::ui::profile_effect::EffectView>>,
     /// The effect tile under the pointer.
     pub effect_hover: Option<String>,
     /// The menu open on the page, by id.

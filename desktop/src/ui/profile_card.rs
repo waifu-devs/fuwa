@@ -742,18 +742,25 @@ impl FuwaApp {
             ));
         }
 
-        // Their effect plays over the card (others' only while you let them).
-        let effect = profile
-            .map(|pr| pr.effect.clone())
-            .filter(|e| !e.is_empty() && (f.me || self.prefs.others_effects))
-            .map(|effect| {
-                let view = self.people.effect.clone();
-                let seed = user_id.to_owned();
-                view.update(cx, |v, cx| v.set(&effect, &seed, accent, WIDTH, 420.0, true, cx));
-                gpui_kit::AnyView::from(view)
-                    .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full())
-                    .into_any_element()
-            });
+        // Their effect plays over the card (others' only while you let them): in a server their
+        // pick there, else their own, a built-in or one the instance or server offers.
+        let own = profile.map(|pr| pr.effect.clone()).unwrap_or_default();
+        let worn = (f.me || self.prefs.others_effects)
+            .then(|| {
+                self.core.shared.read(|s| {
+                    s.instance(key).filter(|i| i.effects_on()).and_then(|i| {
+                        let server = f.member.as_ref().map(|m| m.server_id.as_str()).filter(|s| !s.is_empty());
+                        i.worn_effect(&own, server, f.member.as_ref())
+                    })
+                })
+            })
+            .flatten();
+        let effect = worn.map(|spec| {
+            let view = self.people.effect.clone();
+            let seed = user_id.to_owned();
+            view.update(cx, |v, cx| v.set(Some(&spec), &seed, accent, WIDTH, 420.0, true, cx));
+            crate::ui::profile_effect::over_card(view)
+        });
         let _ = window;
         div()
             .relative()

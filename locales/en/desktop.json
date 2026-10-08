@@ -267,18 +267,6 @@
   "server.shared.notAcross": "Messages don't cross instances yet. Their key fingerprint:",
   "server.shared.notCode": "That doesn't look like a share code.",
   "server.shared.notYet": "Not yet",
-  "profileItems.namePlaceholder": "Its file's name",
-  "profileItems.addHint": "A decoration is a square picture, see-through in the middle, drawn around the avatar. A GIF moves. An effect is a .json file in the profile effects format.",
   "profileItems.chooseEffect": "Choose an effect file",
-  "profileItems.notJson": "That isn't a JSON file.",
-  "profileItems.effectTooBig": "That file is too big to be an effect.",
-  "profileItems.decoration": "Decoration",
-  "profileItems.effect": "Effect",
-  "profileItems.none": "Nothing here yet. Add a decoration or an effect.",
-  "profileItems.delete": "Delete",
-  "profileItems.deleteAsk": "Delete {name}? It comes off everyone wearing it.",
-  "profileItems.decorationsOff": "This instance has avatar decorations turned off, so none show for now.",
-  "profileItems.effectLabel": "Profile effect",
-  "profileItems.noDecoration": "None",
-  "profileItems.inServers": "Your profile in servers"
+  "profileItems.effectTooBig": "That file is too big to be an effect."
 }

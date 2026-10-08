@@ -9,6 +9,7 @@ use tonic::Code;
 
 use crate::core::Core;
 use crate::core::api::Problem;
+use crate::core::profile_effects::{self as fx, Spec};
 use crate::core::store::{self, InstanceState};
 use crate::pb;
 use crate::rpc;
@@ -33,7 +34,115 @@ pub enum NewItem {
     Effect { spec: String },
 }
 
+/// An effect item's spec, ready to play: parsed and checked like any spec
+/// that didn't ship with the app, under the item's id in lowercase and its
+/// own name and description (the web's `itemEffect`).
+pub fn item_effect(item: &pb::ProfileItem) -> Option<Spec> {
+    if item.kind != pb::ProfileItemKind::Effect as i32 || item.effect.is_empty() {
+        return None;
+    }
+    parse_effect(&item.effect, Some(&item.id.to_lowercase()), Some((&item.name, &item.description)))
+}
+
+/// A spec from JSON text; `id` and `text` replace its own when given.
+pub fn parse_effect(json: &str, id: Option<&str>, text: Option<(&str, &str)>) -> Option<Spec> {
+    let mut raw: serde_json::Value = serde_json::from_str(json).ok()?;
+    let named = raw.as_object_mut()?;
+    if let Some(id) = id {
+        named.insert("id".into(), id.into());
+    }
+    if let Some((name, description)) = text {
+        named.insert("name".into(), name.into());
+        named.insert("description".into(), description.into());
+    }
+    fx::sanitize(&raw)
+}
+
+/// Why an effect someone pasted or picked can't be added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectProblem {
+    Empty,
+    Json,
+    Spec,
+}
+
+impl EffectProblem {
+    pub fn key(self) -> &'static str {
+        match self {
+            EffectProblem::Empty => "serversettings.profileItems.effectEmpty",
+            EffectProblem::Json => "serversettings.profileItems.effectNotJson",
+            EffectProblem::Spec => "serversettings.profileItems.effectNothing",
+        }
+    }
+}
+
+/// Checks an effect someone is about to add (the instance checks again):
+/// the spec under a stand-in id for the preview, or what's wrong.
+pub fn check_effect_text(text: &str) -> Result<Spec, EffectProblem> {
+    if text.trim().is_empty() {
+        return Err(EffectProblem::Empty);
+    }
+    if serde_json::from_str::<serde_json::Value>(text).is_err() {
+        return Err(EffectProblem::Json);
+    }
+    parse_effect(text, Some("preview"), Some(("preview", ""))).ok_or(EffectProblem::Spec)
+}
+
+/// An item by id, of a kind, whatever the id's case (an effect's spec keeps it in lowercase).
+fn find<'a>(items: &'a [pb::ProfileItem], id: &str, kind: pb::ProfileItemKind) -> Option<&'a pb::ProfileItem> {
+    if id.is_empty() {
+        return None;
+    }
+    items.iter().find(|i| i.kind == kind as i32 && (i.id == id || i.id.eq_ignore_ascii_case(id)))
+}
+
+/// An effect by id: a built-in, else one of the items given.
+pub fn resolve_effect(id: &str, items: &[pb::ProfileItem]) -> Option<Spec> {
+    if id.is_empty() {
+        return None;
+    }
+    fx::spec(id).or_else(|| find(items, id, pb::ProfileItemKind::Effect).and_then(item_effect))
+}
+
+/// A decoration by id among the items given.
+pub fn resolve_decoration<'a>(id: &str, items: &'a [pb::ProfileItem]) -> Option<&'a pb::ProfileItem> {
+    find(items, id, pb::ProfileItemKind::Decoration)
+}
+
+/// The effects a list offers, as pickers take them: each one that can play, oldest first.
+pub fn offered_effects(items: &[pb::ProfileItem]) -> Vec<(String, Spec)> {
+    items.iter().filter_map(|i| item_effect(i).map(|s| (i.id.clone(), s))).collect()
+}
+
+/// A name for an item from a file's name: no extension, separators as
+/// spaces, at most 40 characters (the web's `nameFromFile`).
+pub fn name_from_file(file: &str) -> String {
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    let name = stem.replace(['_', '-'], " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    name.chars().take(40).collect::<String>().trim().to_owned()
+}
+
 impl InstanceState {
+    /// Whether the instance lets profile effects play.
+    pub fn effects_on(&self) -> bool {
+        self.node.as_ref().is_some_and(|n| n.profile_effects)
+    }
+
+    /// A server's offered items (none until its snapshot is in).
+    pub fn server_list(&self, server_id: &str) -> &[pb::ProfileItem] {
+        self.server_items.get(server_id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The effect someone shows: their server profile's pick where they're
+    /// seen in a server (a built-in or one of that server's), else their own
+    /// (a built-in or one of the instance's). The web's `wornEffect`.
+    pub fn worn_effect(&self, own: &str, server_id: Option<&str>, member: Option<&pb::Member>) -> Option<Spec> {
+        match server_id.zip(member).filter(|(_, m)| !m.effect.is_empty()) {
+            Some((sid, m)) => resolve_effect(&m.effect, self.server_list(sid)),
+            None => resolve_effect(own, &self.profile_items),
+        }
+    }
+
     /// Whether the instance draws decorations at all.
     pub fn decorations_on(&self) -> bool {
         self.node.as_ref().is_some_and(|n| n.profile_decorations)
@@ -70,11 +179,10 @@ impl InstanceState {
         let user = user.or_else(|| member.and_then(|m| m.user.as_ref()))?;
         let picked = server_id.zip(member).filter(|(_, m)| !m.decoration_id.is_empty());
         let item = match picked {
-            Some((sid, m)) => self.server_item(sid, &m.decoration_id),
-            None => self.instance_item(&user.decoration_id),
+            Some((sid, m)) => resolve_decoration(&m.decoration_id, self.server_list(sid)),
+            None => resolve_decoration(&user.decoration_id, &self.profile_items),
         };
-        item.filter(|i| i.kind == pb::ProfileItemKind::Decoration as i32 && !i.picture_url.is_empty())
-            .map(|i| i.picture_url.as_str())
+        item.filter(|i| !i.picture_url.is_empty()).map(|i| i.picture_url.as_str())
     }
 
     /// [`InstanceState::decoration_url`] for someone by id, finding their member row.
@@ -250,12 +358,13 @@ impl Core {
         Ok(())
     }
 
-    /// Your profile in one server: an effect and a decoration shown there
-    /// instead of your own (`None` keeps it, empty goes back to your own).
+    /// Your profile in one server: a nickname, and an effect and a decoration
+    /// shown there instead of your own (`None` keeps it, empty goes back to your own).
     pub async fn set_server_look(
         &self,
         key: &str,
         server_id: &str,
+        nickname: Option<String>,
         effect: Option<String>,
         decoration_id: Option<String>,
     ) -> Result<(), Problem> {
@@ -264,9 +373,9 @@ impl Core {
         let req = pb::UpdateMemberRequest {
             server_id: server_id.into(),
             user_id: user_id.unwrap_or_default(),
+            nickname,
             effect,
             decoration_id,
-            ..Default::default()
         };
         let res = rpc!(api.servers(), update_member(req)).await?;
         if let Some(member) = res.member {
@@ -295,6 +404,30 @@ mod tests {
             picture_url: format!("https://k/media/{id}"),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn offered_effects_resolve_by_id_whatever_the_case() {
+        let spec = r#"{"id":"x","layers":[{"shape":"dot","motion":"pop","phase":"intro","count":3,"from":"edges","size":[4,8],"duration":[400,900],"colors":["primary"]}]}"#;
+        let item = pb::ProfileItem {
+            id: "01ABC".into(),
+            kind: pb::ProfileItemKind::Effect as i32,
+            name: "Dots".into(),
+            effect: spec.into(),
+            ..Default::default()
+        };
+        let items = vec![item];
+        let found = resolve_effect("01abc", &items).unwrap();
+        assert_eq!((found.id.as_str(), found.name.as_str()), ("01abc", "Dots"));
+        assert_eq!(resolve_effect("sakura", &items).unwrap().id, "sakura");
+        assert!(resolve_effect("gone", &items).is_none());
+        assert_eq!(offered_effects(&items).len(), 1);
+        assert_eq!(check_effect_text(" ").unwrap_err(), EffectProblem::Empty);
+        assert_eq!(check_effect_text("{").unwrap_err(), EffectProblem::Json);
+        assert_eq!(check_effect_text("{}").unwrap_err(), EffectProblem::Spec);
+        assert!(check_effect_text(spec).is_ok());
+        assert_eq!(name_from_file("Cherry_Blossom.json"), "Cherry Blossom");
+        assert_eq!(name_from_file("ring-gold.png"), "ring gold");
     }
 
     #[test]

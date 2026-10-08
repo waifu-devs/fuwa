@@ -31,6 +31,9 @@ pub(crate) struct ServersForm {
     nickname: Option<Entity<InputState>>,
     /// The nickname the field was filled with, for the server it's for.
     filled: Option<(String, String)>,
+    /// The effect and decoration picked there, while they differ from what's saved.
+    effect: Option<String>,
+    decoration: Option<String>,
     saving: bool,
     error: Option<String>,
     /// The server whose notifications are open.
@@ -138,6 +141,19 @@ impl SettingsView {
                 .and_then(|list| list.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == me.id)).cloned())
         });
         let saved = member.as_ref().map(|m| m.nickname.clone()).unwrap_or_default();
+        let saved_effect = member.as_ref().map(|m| m.effect.clone()).unwrap_or_default();
+        let saved_decoration = member.as_ref().map(|m| m.decoration_id.clone()).unwrap_or_default();
+        // Server profiles keep an effect and a decoration only on instances with profile items.
+        let (effects_on, decorations_on, items) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&key) else { return (false, false, Vec::new()) };
+            let here = crate::core::compat::instance_has(
+                i.node.as_ref().and_then(|n| n.versions.as_ref()),
+                "profile-items",
+                &crate::core::compat::FEATURES,
+            );
+            (i.effects_on() && here, i.decorations_on() && here, i.server_list(&server_id).to_vec())
+        });
+        let accent = self.saved_draft().accent;
         let state = match &self.servers.nickname {
             Some(s) => s.clone(),
             None => {
@@ -149,6 +165,8 @@ impl SettingsView {
         };
         if self.servers.filled.as_ref().map(|(s, _)| s) != Some(&server_id) {
             self.servers.filled = Some((server_id.clone(), saved.clone()));
+            self.servers.effect = None;
+            self.servers.decoration = None;
             let (saved, name) = (saved.clone(), user_name(&me));
             state.update(cx, |s, cx| {
                 s.set_value(saved, window, cx);
@@ -156,7 +174,14 @@ impl SettingsView {
             });
         }
         let value = state.read(cx).value().to_string();
-        let changed = usize::from(value.trim() != saved);
+        let effect = self.servers.effect.clone().unwrap_or_else(|| saved_effect.clone());
+        let decoration = self.servers.decoration.clone().unwrap_or_else(|| saved_decoration.clone());
+        let patch = (
+            (value.trim() != saved).then(|| value.trim().to_owned()),
+            (effect != saved_effect).then(|| effect.clone()),
+            (decoration != saved_decoration).then(|| decoration.clone()),
+        );
+        let changed = usize::from(patch.0.is_some()) + usize::from(patch.1.is_some()) + usize::from(patch.2.is_some());
         if changed > 0 {
             self.holding = true;
         }
@@ -224,13 +249,81 @@ impl SettingsView {
             SharedString::from(format!("nick-{server_id}")),
             12.0,
         );
-        let form = div()
-            .flex()
-            .flex_col()
-            .child(self.row("server", &t("accountsettings.serverProfiles.server"), None, At::of(0, 2), picks, p))
-            .child(self.row("nickname", &t("settings.nav.nickname"), Some(nick_hint), At::of(1, 2), nick, p));
+        let mut rows: Vec<(&'static str, String, Option<AnyElement>, AnyElement)> = vec![
+            ("server", t("accountsettings.serverProfiles.server"), None, picks.into_any_element()),
+            ("nickname", t("settings.nav.nickname"), Some(nick_hint), nick.into_any_element()),
+        ];
+        let form_w = if self.wide { self.column - 40.0 - 288.0 } else { self.column };
+        if effects_on && member.is_some() {
+            let about = match crate::core::profile_items::resolve_effect(&effect, &items) {
+                Some(spec) => crate::ui::profile_effect::effect_text(&spec).1,
+                None => t("accountsettings.serverProfiles.effectHint"),
+            };
+            let offered = crate::core::profile_items::offered_effects(&items);
+            let picker = self.effect_picker(
+                "server",
+                &effect,
+                &me.id,
+                accent,
+                &offered,
+                Some(t("accountsettings.serverProfiles.useMine")),
+                true,
+                form_w,
+                p,
+                cx,
+                |this, id, cx| {
+                    this.servers.effect = Some(id);
+                    this.servers.error = None;
+                    cx.notify();
+                },
+            );
+            rows.push(("server-effect", t("settings.nav.profileEffect"), Some(hint(about, p)), picker));
+        }
+        let decorations: Vec<pb::ProfileItem> =
+            items.iter().filter(|i| i.kind == pb::ProfileItemKind::Decoration as i32).cloned().collect();
+        if decorations_on && member.is_some() && (!decorations.is_empty() || !decoration.is_empty()) {
+            let about = crate::core::profile_items::resolve_decoration(&decoration, &items)
+                .map(|i| i.description.clone())
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| t("accountsettings.serverProfiles.decorationHint"));
+            let picker = self.decoration_picker(
+                "server",
+                &decoration,
+                &me,
+                &decorations,
+                Some(t("accountsettings.serverProfiles.useMine")),
+                true,
+                form_w,
+                p,
+                cx,
+                |this, id, cx| {
+                    this.servers.decoration = Some(id);
+                    this.servers.error = None;
+                    cx.notify();
+                },
+            );
+            rows.push((
+                "server-decoration",
+                t("accountsettings.decorations.label"),
+                Some(hint(about, p)),
+                motion::slide_in(div().child(picker), SharedString::from(format!("decoration-{server_id}")), 12.0)
+                    .into_any_element(),
+            ));
+        }
+        let n_rows = rows.len();
+        let mut form = div().flex().flex_col();
+        for (n, (id, label, h, body)) in rows.into_iter().enumerate() {
+            form = form.child(self.row(id, &label, h, At::of(n, n_rows), body, p));
+        }
         let base = self.saved_draft();
-        let preview = self.profile_preview(&me, &base, Some(value.trim()), p, cx);
+        let look = crate::ui::settings_account::ServerLook {
+            server_id: &server_id,
+            nickname: value.trim(),
+            effect: &effect,
+            decoration: &decoration,
+            joined: crate::ui::text::ms_of(member.as_ref().and_then(|m| m.joined_at.as_ref())),
+        };
+        let preview = self.profile_preview(&me, &base, Some(look), p, cx);
         let alarm = self.alarm();
         let (k, sid) = (key.clone(), server_id.clone());
         let bar = save_bar(
@@ -242,17 +335,21 @@ impl SettingsView {
             p,
             cx,
             move |this, _, cx| {
-                let value =
-                    this.servers.nickname.as_ref().map(|s| s.read(cx).value().trim().to_owned()).unwrap_or_default();
+                let (nickname, effect, decoration) = patch.clone();
                 this.servers.saving = true;
                 let (core, k, sid) = (this.core.clone(), k.clone(), sid.clone());
-                let rx = this.core.spawn(async move { core.set_nickname(&k, &sid, &value).await });
+                let rx =
+                    this.core.spawn(async move { core.set_server_look(&k, &sid, nickname, effect, decoration).await });
                 cx.spawn(async move |this, cx| {
                     let Ok(result) = rx.await else { return };
                     let _ = this.update(cx, |this, cx| {
                         this.servers.saving = false;
                         match result {
-                            Ok(_) => this.servers.filled = None,
+                            Ok(_) => {
+                                this.servers.filled = None;
+                                this.servers.effect = None;
+                                this.servers.decoration = None;
+                            }
                             Err(e) => this.servers.error = Some(e.message),
                         }
                         cx.notify();
@@ -262,6 +359,8 @@ impl SettingsView {
             },
             |this, _, cx| {
                 this.servers.filled = None;
+                this.servers.effect = None;
+                this.servers.decoration = None;
                 this.servers.error = None;
                 cx.notify();
             },
