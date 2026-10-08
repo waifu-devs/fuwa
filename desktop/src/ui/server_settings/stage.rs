@@ -4,6 +4,7 @@
 //! phone's width, switched with two segmented controls.
 
 use super::*;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_3xl, radius_lg, radius_xl};
 
 /// What the preview shows.
@@ -229,7 +230,7 @@ impl ServerSettingsView {
                 .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
-                .child(text.to_uppercase())
+                .child(tracked(text.to_uppercase(), WIDE))
         };
         if !form.rules.is_empty() {
             let mut list = div().flex().flex_col().gap(px(8.0));

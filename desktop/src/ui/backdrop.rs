@@ -34,7 +34,7 @@ pub fn layers(b: &Backdrop, p: &Palette, window: &mut Window, cx: &mut App) -> O
     let size = window.viewport_size();
     let (w, h) = (f32::from(size.width), f32::from(size.height));
     let picture = (!b.image.is_empty()).then(|| picture(&b.image, b.fit, b.blur, w, h, window, cx));
-    let effect = crate::ui::effects::layer(b.effect, b.intensity, b.speed, p, window, cx);
+    let effect = crate::ui::effects::layer(b.effect, b.shader.as_ref(), b.intensity, b.speed, p, window, cx);
     // A new effect or texture fades in, as on the web.
     let fade = |el: AnyElement| {
         div()

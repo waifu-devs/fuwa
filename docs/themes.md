@@ -108,10 +108,14 @@ half resolution and waves at three quarters, and stop while the window is
 hidden or settings cover the app; with reduced motion they draw one frame.
 Where WebGPU isn't there, a CSS version stands in (`styles/app.css`,
 `.fx-*`). `grain`, `paper`, `dots` and `grid` are still textures (CSS, with
-SVG noise inline, never a file from elsewhere). The desktop app draws its
-own version of the same effects with GPUI's shapes (`desktop/src/ui/effects.rs`:
-soft shadows for light, paths for petals and waves, small quads for stars),
-at the same 30 frames a second, still while its window is behind others.
+SVG noise inline, never a file from elsewhere). The desktop app runs the
+same WGSL with wgpu (`desktop/src/core/effects/gpu.rs`): offscreen, at most
+640 pixels on the long side (times each effect's resolution), read back and
+stretched behind the app, at the same 30 frames a second, still while its
+window is behind others. Where it has no GPU adapter, or the GPU is lost, it
+draws its own version of the built-in effects with GPUI's shapes
+(`desktop/src/ui/effects.rs`: soft shadows for light, paths for petals and
+waves, small quads for stars).
 
 ## Custom shaders
 
@@ -163,12 +167,14 @@ What keeps a shader to these inputs, in every app:
   it's too slow for the device. While it runs it's timed every two seconds,
   and three slow samples in a row (over 40 ms) drop it a step or stop it.
 - **Remembered when it hangs.** Before its first frames the app notes it as
-  being tried (the web app's `fuwa:shaders-trying`) and clears the note once
+  being tried (the web app's `fuwa:shaders-trying`, the desktop app's
+  `shaders_trying` setting) and clears the note once
   they come back. A frame that hasn't come back in 2.5 s, a GPU lost while it
   draws, or a note left from last time (the tab died) means it stopped the
   GPU: it isn't run again until it's changed or someone asks to try again.
 
-In every one of these cases, and where there's no WebGPU, the backdrop shows
+In every one of these cases, and where there's no WebGPU (no GPU adapter on
+the desktop), the backdrop shows
 the shader's `fallback` instead, and Settings says why. Custom shaders run at
 most 30 frames a second like the built-in ones, and stop the same way.
 

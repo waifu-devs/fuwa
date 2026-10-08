@@ -24,7 +24,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::server_settings::spinner;
 use crate::ui::settings_controls::{Look, button};
-use crate::ui::text::{ago, ms_of};
+use crate::ui::text::{WIDER, ago, ms_of, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -529,7 +529,7 @@ impl InstanceSettingsView {
         let mut groups = div().flex().flex_wrap().gap_x(px(12.0)).gap_y(px(4.0)).font_family("monospace").text_xs();
         for (n, group) in info.fingerprint.split(' ').enumerate() {
             groups = groups.child(motion::rise(
-                div().child(group.to_owned()),
+                div().child(tracked(group.to_owned(), WIDER)),
                 SharedString::from(format!("federation-print-{n}-{group}")),
                 Duration::from_millis(30 * n as u64),
                 4.0,

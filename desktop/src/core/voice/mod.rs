@@ -10,6 +10,7 @@
 //! and the devices, [`devices`] the microphone and speakers, [`quality`]
 //! how the connection is doing.
 
+pub mod access;
 pub mod devices;
 pub mod link;
 pub mod quality;
@@ -1053,6 +1054,7 @@ impl Running<'_> {
                     "call_device",
                     match t {
                         Trouble::NoMicrophone => "microphone",
+                        Trouble::MicrophoneBlocked => "microphone_blocked",
                         Trouble::NoSpeakers => "speakers",
                     },
                 );

@@ -13,6 +13,9 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use crate::core::effects::custom::{CustomShader, sanitize_shader, shader_problem};
+use crate::core::i18n::{Arg, t_with};
+
 /// The shadcn/ui tokens, in the web app's order.
 pub const TOKENS: [&str; 18] = [
     "background",
@@ -345,7 +348,7 @@ pub enum Fit {
 }
 
 /// What's drawn over the picture: an animated effect, or a still texture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
     #[default]
@@ -354,6 +357,8 @@ pub enum Effect {
     Petals,
     Stars,
     Waves,
+    /// A shader someone wrote, kept in the backdrop's `shader`.
+    Custom,
     Grain,
     Paper,
     Dots,
@@ -361,12 +366,13 @@ pub enum Effect {
 }
 
 impl Effect {
-    pub const ALL: [Effect; 9] = [
+    pub const ALL: [Effect; 10] = [
         Effect::None,
         Effect::Aurora,
         Effect::Petals,
         Effect::Stars,
         Effect::Waves,
+        Effect::Custom,
         Effect::Grain,
         Effect::Paper,
         Effect::Dots,
@@ -380,6 +386,7 @@ impl Effect {
             Effect::Petals => "Petals",
             Effect::Stars => "Starfield",
             Effect::Waves => "Waves",
+            Effect::Custom => "Custom",
             Effect::Grain => "Film grain",
             Effect::Paper => "Paper",
             Effect::Dots => "Dots",
@@ -394,6 +401,7 @@ impl Effect {
             Effect::Petals => "Blossoms drifting down.",
             Effect::Stars => "Twinkling stars, gently drifting.",
             Effect::Waves => "Soft layered waves rolling by.",
+            Effect::Custom => "A shader you write, or one a theme brought.",
             Effect::Grain => "A fine, still noise.",
             Effect::Paper => "Warm fibers like washi paper.",
             Effect::Dots => "A tidy dot pattern.",
@@ -406,8 +414,34 @@ impl Effect {
         matches!(self, Effect::Grain | Effect::Paper | Effect::Dots | Effect::Grid)
     }
 
+    /// The built-in effects drawn by a shader (on the GPU where there is one).
+    pub fn shader(self) -> bool {
+        matches!(self, Effect::Aurora | Effect::Petals | Effect::Stars | Effect::Waves)
+    }
+
+    /// Effects that move, so they have a speed.
+    pub fn moves(self) -> bool {
+        self.shader() || self == Effect::Custom
+    }
+
+    /// Its name in files and settings (`aurora`, `custom`...).
+    pub fn key(self) -> &'static str {
+        match self {
+            Effect::None => "none",
+            Effect::Aurora => "aurora",
+            Effect::Petals => "petals",
+            Effect::Stars => "stars",
+            Effect::Waves => "waves",
+            Effect::Custom => "custom",
+            Effect::Grain => "grain",
+            Effect::Paper => "paper",
+            Effect::Dots => "dots",
+            Effect::Grid => "grid",
+        }
+    }
+
     fn from_str(s: &str) -> Option<Self> {
-        Effect::ALL.into_iter().find(|e| serde_json::to_value(e).ok().as_ref().and_then(Value::as_str) == Some(s))
+        Effect::ALL.into_iter().find(|e| e.key() == s)
     }
 }
 
@@ -428,6 +462,8 @@ pub struct Backdrop {
     pub speed: u8,
     /// How solid the chat is over it, in percent (20 to 100); the sidebars are 20 points more.
     pub panels: u8,
+    /// The shader drawn when `effect` is `Custom`, kept even while another effect is picked.
+    pub shader: Option<CustomShader>,
 }
 
 impl Default for Backdrop {
@@ -441,6 +477,7 @@ impl Default for Backdrop {
             intensity: 70,
             speed: 100,
             panels: 35,
+            shader: None,
         }
     }
 }
@@ -481,6 +518,8 @@ impl Backdrop {
         let b = value.as_object().unwrap_or(&empty);
         let d = Backdrop::default();
         let image = b.get("image").and_then(Value::as_str).filter(|s| is_media_link(s)).unwrap_or_default();
+        let shader = b.get("shader").and_then(sanitize_shader);
+        let effect = b.get("effect").and_then(Value::as_str).and_then(Effect::from_str).unwrap_or_default();
         Backdrop {
             image: image.to_owned(),
             fit: match b.get("fit").and_then(Value::as_str) {
@@ -490,10 +529,11 @@ impl Backdrop {
             },
             dim: clamp(b.get("dim"), DIM, d.dim),
             blur: clamp(b.get("blur"), BLUR, d.blur),
-            effect: b.get("effect").and_then(Value::as_str).and_then(Effect::from_str).unwrap_or_default(),
+            effect: if effect == Effect::Custom && shader.is_none() { Effect::None } else { effect },
             intensity: clamp(b.get("intensity"), INTENSITY, d.intensity),
             speed: clamp(b.get("speed"), SPEED, d.speed),
             panels: clamp(b.get("panels"), PANELS, d.panels),
+            shader,
         }
     }
 
@@ -600,7 +640,11 @@ pub fn parse_file(json: &str) -> Result<Imported, String> {
     if let Some(b) = d.get("backdrop").filter(|b| b.is_object()) {
         let mut plain = b.clone();
         plain["image"] = Value::String(String::new());
-        backdrop = Some(Backdrop::sanitize(&plain));
+        let sane = Backdrop::sanitize(&plain);
+        if let Some(shader) = sane.shader.as_ref().filter(|s| shader_problem(&s.code).is_some()) {
+            notes.push(t_with("system.themeFile.shaderProblem", &[("shader", Arg::Str(&shader.name))]));
+        }
+        backdrop = Some(sane);
         match b.get("image") {
             None | Some(Value::Null) => {}
             Some(Value::String(s)) if s.is_empty() => {}
@@ -694,6 +738,28 @@ mod tests {
         assert!(parse_file("{}").is_err());
         assert!(parse_file("nope").is_err());
         assert_eq!(file_name("Midnight Sakura!"), "midnight-sakura.fuwa-theme.json");
+    }
+
+    #[test]
+    fn custom_shaders_travel_in_theme_files_checked() {
+        let sakura = builtins().remove(0);
+        let shader = crate::core::effects::custom::default_shader();
+        let backdrop = Backdrop { effect: Effect::Custom, shader: Some(shader.clone()), ..Backdrop::default() };
+        let back = parse_file(&to_file(&sakura, Some(&backdrop), None)).unwrap();
+        assert_eq!(back.theme.backdrop, Some(backdrop));
+        assert!(back.notes.is_empty(), "{:?}", back.notes);
+
+        // A shader that binds things of its own comes in, says so, and won't run.
+        let bad = json!({"format": FORMAT, "version": 1, "name": "Bad", "colors": {"background":"#000000","foreground":"#ffffff","card":"#111111","primary":"#ff00ff","primary-foreground":"#000000","muted-foreground":"#888888","border":"#333333"},
+            "backdrop": {"effect": "custom", "shader": {"name": "Sneaky", "code": "@group(0) @binding(1) var<uniform> x: f32;\nfn shade(uv: vec2f) -> vec4f { return vec4f(x); }", "fallback": "stars"}}});
+        let got = parse_file(&bad.to_string()).unwrap();
+        let b = got.theme.backdrop.unwrap();
+        assert_eq!((b.effect, b.shader.map(|s| s.fallback)), (Effect::Custom, Some(Effect::Stars)));
+        assert_eq!(got.notes.len(), 1, "{:?}", got.notes);
+
+        // Custom without a shader is no effect.
+        let b = Backdrop::sanitize(&json!({"effect": "custom"}));
+        assert_eq!((b.effect, b.shader), (Effect::None, None));
     }
 
     #[test]

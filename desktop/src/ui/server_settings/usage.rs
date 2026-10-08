@@ -8,6 +8,7 @@ use super::pages::{boxed, focused, shimmers};
 use super::*;
 use crate::core::instance_admin::{UNITS, format_bytes, parse_cap, split_bytes};
 use crate::ui::settings_controls::{Look, button, switch};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_3xl, radius_lg, radius_md, radius_xl};
 
 /// The caps a server has of its own, as (field, label key, a size).
@@ -287,7 +288,7 @@ impl ServerSettingsView {
                             .line_height(px(16.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
-                            .child(r.label.to_uppercase()),
+                            .child(tracked(r.label.to_uppercase(), WIDE)),
                     )
                     .child(
                         div().mt(px(4.0)).text_2xl().line_height(px(32.0)).font_weight(FontWeight::EXTRA_BOLD).child(

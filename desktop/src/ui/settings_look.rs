@@ -18,6 +18,7 @@ use crate::ui::motion;
 use crate::ui::settings::{Page, SettingsView};
 use crate::ui::settings_app::pref;
 use crate::ui::settings_controls::{Badge, Opt, choice, toggle, with_preview};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, system_dark};
 use crate::ui::widgets::icon;
 
@@ -233,7 +234,7 @@ impl SettingsView {
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
-                                    .child(t("appsettings.appearance.whenLight").to_uppercase()),
+                                    .child(tracked(t("appsettings.appearance.whenLight").to_uppercase(), WIDE)),
                             )
                             .child(self.theme_grid(
                                 "light",
@@ -254,7 +255,7 @@ impl SettingsView {
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
-                                    .child(t("appsettings.appearance.whenDark").to_uppercase()),
+                                    .child(tracked(t("appsettings.appearance.whenDark").to_uppercase(), WIDE)),
                             )
                             .child(self.theme_grid("dark", dark, &prefs.dark_theme, Slot::Dark, false, form_w, p, cx)),
                     ),

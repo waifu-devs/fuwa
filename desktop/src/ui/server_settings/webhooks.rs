@@ -224,50 +224,46 @@ impl ServerSettingsView {
         self.save_hook(w, WebhookPatch { name: Some(name), ..WebhookPatch::default() }, cx);
     }
 
+    /// Asks the system for a picture, frames it, and makes it the webhook's.
     fn pick_hook_picture(&mut self, w: pb::Webhook, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let (core, key) = (self.core.clone(), self.key.clone());
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.error = Some(t("desktop.account.notAPicture"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.hooks.busy = Some((w.id.clone(), Busy::Picture));
+        if self.cropper.is_some() {
+            return;
+        }
+        crate::ui::cropper::choose(
+            self.core.clone(),
+            crate::core::pictures::PictureKind::Avatar,
+            t("desktop.account.choosePicture"),
+            cx,
+            |this| &mut this.cropper,
+            |this, error, cx| {
+                this.error = Some(error);
                 cx.notify();
-            });
-            let rx = core.spawn({
-                let core = core.clone();
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    let url = core.upload_picture(&key, pb::MediaPurpose::Avatar, kind, bytes).await?;
-                    core.update_webhook(&key, &w, WebhookPatch { avatar_url: Some(url), ..WebhookPatch::default() })
-                        .await
-                }
-            });
-            let result = rx.await;
-            let _ = this.update(cx, |this, cx| {
+            },
+            Rc::new(move |this: &mut Self, bytes, mime, cx: &mut Context<Self>| {
+                this.upload_hook_picture(w.clone(), bytes, mime, cx)
+            }),
+        );
+    }
+
+    fn upload_hook_picture(&mut self, w: pb::Webhook, bytes: Vec<u8>, mime: &'static str, cx: &mut Context<Self>) {
+        self.hooks.busy = Some((w.id.clone(), Busy::Picture));
+        let (core, key) = (self.core.clone(), self.key.clone());
+        self.run(
+            cx,
+            async move {
+                let url = core.upload_picture(&key, pb::MediaPurpose::Avatar, mime, bytes).await?;
+                core.update_webhook(&key, &w, WebhookPatch { avatar_url: Some(url), ..WebhookPatch::default() }).await
+            },
+            |this, result, cx| {
                 this.hooks.busy = None;
                 match result {
-                    Ok(Ok(w)) => this.put_hook(w),
-                    Ok(Err(err)) => this.error = Some(err.message),
-                    Err(_) => {}
+                    Ok(w) => this.put_hook(w),
+                    Err(err) => this.error = Some(err.message),
                 }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+        );
+        cx.notify();
     }
 
     fn test_hook(&mut self, w: pb::Webhook, cx: &mut Context<Self>) {

@@ -1999,6 +1999,7 @@ impl FuwaApp {
             )
         })
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+        .when_some(crate::ui::cropper::layer(&self.home.create.cropper), |el, c| el.child(c))
         .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
         .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
         .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))

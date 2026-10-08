@@ -13,6 +13,7 @@ use gpui_kit::{
 use crate::core::i18n::t;
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
+use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner, radius_3xl, radius_xl};
 use crate::ui::widgets::{card, error_line, icon, labeled, pal};
 
@@ -298,7 +299,7 @@ impl FuwaApp {
                     .text_color(tint)
                     .child(icon(glyph).size(px(20.0))),
             )
-            .child(div().flex_1().min_w_0().child(title));
+            .child(div().flex_1().min_w_0().child(tracked(title, TIGHT).wraps()));
         let panel = dialog_card(false, &p)
             .child(dialog_header(title_row, Some(body.into_any_element()), &p))
             .child(content)
@@ -463,7 +464,7 @@ pub(crate) fn section_title(text: &str, p: &Palette) -> Div {
         .text_size(px(11.0))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(p.muted_foreground)
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 trait LeaveExt: Sized {

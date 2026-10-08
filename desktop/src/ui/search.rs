@@ -25,7 +25,7 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::keys::fuzzy;
 use crate::ui::motion;
-use crate::ui::text::{ms_of, when};
+use crate::ui::text::{WIDE, ms_of, tracked, when};
 use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, icon, icon_button, pal};
 
@@ -647,7 +647,7 @@ impl FuwaApp {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group.title.to_uppercase())
+                    .child(tracked(group.title.to_uppercase(), WIDE))
                     .when(recent, |el| {
                         el.child(
                             div()
@@ -656,7 +656,7 @@ impl FuwaApp {
                                 .rounded(corner(4.0))
                                 .cursor_pointer()
                                 .hover(|s| s.text_color(p.foreground))
-                                .child(t("chattools.search.clearRecent"))
+                                .child(tracked(t("chattools.search.clearRecent"), WIDE))
                                 .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let place = clear_place.clone();

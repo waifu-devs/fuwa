@@ -41,6 +41,7 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_admin::{self as admin, MAX_CUSTOM};
 use crate::pb;
 use crate::ui::motion;
+use crate::ui::text::{TIGHT, tracked};
 use crate::ui::theme::Palette;
 use crate::ui::widgets::{error_line, icon, pal};
 
@@ -885,7 +886,9 @@ impl Render for InstanceSettingsView {
         let fills = page == Page::Accounts;
         let header = div()
             .mb(px(24.0))
-            .child(div().text_2xl().line_height(px(32.0)).font_weight(FontWeight::EXTRA_BOLD).child(label))
+            .child(
+                div().text_2xl().line_height(px(32.0)).font_weight(FontWeight::EXTRA_BOLD).child(tracked(label, TIGHT)),
+            )
             .when(!about.is_empty(), |el| {
                 el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(about))
             });

@@ -30,6 +30,7 @@ use crate::pb::{self, AuditAction as A, Permission as P};
 use crate::ui::moderate::{duration, stamp};
 use crate::ui::motion;
 use crate::ui::settings_controls::Look;
+use crate::ui::text::{TIGHT, tracked};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{
     app_badge, avatar, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal, server_icon,
@@ -477,6 +478,8 @@ pub struct ServerSettingsView {
     /// Closing: the screen fades and grows away, then goes.
     closing: Option<Instant>,
     pages: pages::Pages,
+    /// A picture being framed before it's uploaded (the icon, the banner, a webhook's).
+    cropper: Option<crate::ui::cropper::CropSlot>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -544,6 +547,7 @@ impl ServerSettingsView {
         subscriptions.extend(shared_subscriptions);
         Self {
             profile_items: None,
+            cropper: None,
             core,
             key,
             server,
@@ -846,7 +850,7 @@ impl Render for ServerSettingsView {
                     .line_height(px(32.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .when(page.danger(), |el| el.text_color(p.destructive))
-                    .child(page.label()),
+                    .child(tracked(page.label(), TIGHT)),
             )
             .when(!about.is_empty(), |el| {
                 el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(about))
@@ -960,7 +964,8 @@ impl Render for ServerSettingsView {
                     )),
                 )
             })
-            .when_some(nickname, |el, d| el.child(d));
+            .when_some(nickname, |el, d| el.child(d))
+            .when_some(crate::ui::cropper::layer(&self.cropper), |el, c| el.child(c));
 
         // It comes in from a little larger, fading up, and goes the same way.
         use gpui_kit::{Animation, AnimationExt as _};

@@ -2,8 +2,7 @@
 //! `ThemePreview.tsx`, `Backgrounds.tsx` and `BackdropForm.tsx`: your own
 //! themes (made from any theme, tuned with a live preview, passed around as
 //! files), the app in miniature, and the picture and effect behind it.
-//! Custom WGSL shaders run in the web app only; here a theme's shader shows
-//! its fallback, as the web does where WebGPU isn't there.
+//! Custom WGSL shaders are written in `settings_shader.rs`.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -24,6 +23,7 @@ use crate::ui::motion;
 use crate::ui::settings::{Page, SettingsView};
 use crate::ui::settings_controls::{At, Badge, Look, Opt, Setter, button, choice, field, toggle, with_preview};
 use crate::ui::settings_menu::Item;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius_xl, system_dark};
 use crate::ui::widgets::icon;
 
@@ -55,6 +55,8 @@ pub(crate) struct ThemesForm {
     uploading: bool,
     confirming: Option<String>,
     picture_error: Option<String>,
+    /// The custom shader editor.
+    pub shader: crate::ui::settings_shader::ShaderForm,
 }
 
 fn rgba(c: u32) -> gpui_kit::Rgba {
@@ -347,7 +349,7 @@ impl SettingsView {
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.muted_foreground)
-                                .child(title.to_uppercase()),
+                                .child(tracked(title.to_uppercase(), WIDE)),
                         )
                         .child(div().mt(px(2.0)).text_xs().text_color(p.muted_foreground).child(hint)),
                 )
@@ -416,45 +418,10 @@ impl SettingsView {
         let tile_w = (width - gap * (cols as f32 - 1.0)) / cols as f32;
         let pv = *p;
         let mut grid = div().flex().flex_col().gap(px(gap));
-        let mut list: Vec<Option<Effect>> = Effect::ALL.iter().copied().map(Some).collect();
-        list.insert(5, None);
-        for (r, chunk) in list.chunks(cols).enumerate() {
+        for (r, chunk) in Effect::ALL.chunks(cols).enumerate() {
             let mut row = div().flex().gap(px(gap));
-            for (c, effect) in chunk.iter().enumerate() {
+            for (c, effect) in chunk.iter().copied().enumerate() {
                 let n = r * cols + c;
-                let Some(effect) = *effect else {
-                    // Custom shaders are the web app's: here a theme's shader shows its fallback.
-                    row = row.child(
-                        div()
-                            .w(px(tile_w))
-                            .flex()
-                            .flex_col()
-                            .overflow_hidden()
-                            .rounded(radius_xl())
-                            .border_1()
-                            .border_color(p.border)
-                            .opacity(0.5)
-                            .child(
-                                div()
-                                    .h(px(56.0))
-                                    .bg(p.background)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(icon("code-xml").size(px(20.0)).text_color(p.primary)),
-                            )
-                            .child(
-                                div()
-                                    .px(px(8.0))
-                                    .py(px(6.0))
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .truncate()
-                                    .child(t("appsettings.backdrop.effect.custom")),
-                            ),
-                    );
-                    continue;
-                };
                 let active = b.effect == effect;
                 let key = format!("{effect:?}").to_lowercase();
                 let name_key = format!("appsettings.backdrop.effect.{key}");
@@ -466,10 +433,20 @@ impl SettingsView {
                 };
                 let thumb: Option<AnyElement> = if effect == Effect::None {
                     None
+                } else if effect == Effect::Custom {
+                    Some(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("code-xml").size(px(20.0)).text_color(p.primary))
+                            .into_any_element(),
+                    )
                 } else if effect.texture() {
                     crate::ui::backdrop::layers(&thumb_backdrop, &pv, window, cx)
                 } else {
-                    crate::ui::effects::layer(effect, 90, thumb_backdrop.speed, &pv, window, cx)
+                    crate::ui::effects::drawn(effect, 90, thumb_backdrop.speed, &pv, window, cx)
                 };
                 let hover = alpha(p.primary, 0.4);
                 row = row.child(motion::rise(
@@ -485,9 +462,14 @@ impl SettingsView {
                         .cursor_pointer()
                         .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
                         .active(|s| s.top(px(1.0)))
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.patch_backdrop(target, cx, |b| b.effect = effect)),
-                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.patch_backdrop(target, cx, |b| {
+                                b.effect = effect;
+                                if effect == Effect::Custom && b.shader.is_none() {
+                                    b.shader = Some(crate::core::effects::custom::default_shader());
+                                }
+                            })
+                        }))
                         .child(
                             div()
                                 .relative()
@@ -507,7 +489,10 @@ impl SettingsView {
                                 .py(px(6.0))
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
-                                .child(div().truncate().child(t(&name_key)))
+                                .child(div().truncate().child(match (effect, &b.shader) {
+                                    (Effect::Custom, Some(shader)) => shader.name.clone(),
+                                    _ => t(&name_key),
+                                }))
                                 .when(active, |el| {
                                     el.child(
                                         div()
@@ -531,8 +516,11 @@ impl SettingsView {
             grid = grid.child(row);
         }
         let mut effect = div().flex().flex_col().gap(px(8.0)).child(grid);
+        if let Some(shader) = b.shader.as_ref().filter(|_| b.effect == Effect::Custom) {
+            effect = effect.child(self.shader_editor(target, shader, p, window, cx));
+        }
         if b.effect != Effect::None {
-            let moves = !b.effect.texture();
+            let moves = b.effect.moves();
             let speed = if b.speed == 0 { t("appsettings.backdrop.still") } else { format!("{}%", b.speed) };
             effect = effect.child(
                 div()
@@ -708,7 +696,7 @@ impl SettingsView {
                     .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).top(px(-2.0)))
                     .on_click(cx.listener(move |this, _, _, cx| this.upload_background_to(key.clone(), target, cx)))
                     .child(icon(if uploading { "loader-circle" } else { "image-plus" }).size(px(20.0)))
-                    .child(t("appsettings.backdrop.add").to_uppercase())
+                    .child(tracked(t("appsettings.backdrop.add").to_uppercase(), WIDE))
                     .into_any_element(),
             );
         }
@@ -1589,7 +1577,11 @@ impl SettingsView {
             ));
         }
         let label = |text: String| {
-            div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child(text.to_uppercase())
+            div()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .child(tracked(text.to_uppercase(), WIDE))
         };
         let form = div()
             .flex()

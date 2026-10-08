@@ -21,6 +21,7 @@ use crate::core::keybinds::{self, Action, COMPOSER_KEYS, Group};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
 
@@ -530,10 +531,11 @@ impl FuwaApp {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(
+                    .child(tracked(
                         if first_unread { t("chattools.switcher.unreadFirst") } else { t("chattools.switcher.jumpTo") }
                             .to_uppercase(),
-                    ),
+                        WIDE,
+                    )),
             );
         }
         if items.is_empty() {
@@ -806,7 +808,7 @@ impl FuwaApp {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group.name().to_uppercase()),
+                    .child(tracked(group.name().to_uppercase(), WIDE)),
             );
             for action in keybinds::ACTIONS.iter().filter(|a| a.group == group) {
                 let combo = keybinds::binding_of(action, &prefs.keybinds);

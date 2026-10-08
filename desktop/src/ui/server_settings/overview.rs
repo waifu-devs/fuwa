@@ -9,6 +9,7 @@ use gpui_kit::{AnimationExt as _, ObjectFit, StyledImage as _, img};
 
 use super::pages::{boxed, focused, heading, label, part, preview_card};
 use super::*;
+use crate::core::pictures::PictureKind;
 use crate::core::server_pages::{ACCOUNT_AGES, AccessPatch};
 use crate::ui::settings_controls::{Look, Opt, button, chips, choice, toggle};
 use crate::ui::theme::{radius_lg, radius_xl};
@@ -147,57 +148,46 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    /// Asks the system for a picture and uploads it as the icon not saved yet.
+    /// Asks the system for a picture, frames it, and uploads it as the icon not saved yet.
     fn pick_icon(&mut self, cx: &mut Context<Self>) {
-        if self.pages.overview.uploading {
+        if self.pages.overview.uploading || self.cropper.is_some() {
             return;
         }
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let (core, key) = (self.core.clone(), self.key.clone());
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.pages.overview.picture_error = Some(t("workspace.picture.wrongType"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.pages.overview.uploading = true;
-                this.pages.overview.picture_error = None;
+        crate::ui::cropper::choose(
+            self.core.clone(),
+            PictureKind::Icon,
+            t("desktop.account.choosePicture"),
+            cx,
+            |this| &mut this.cropper,
+            |this, error, cx| {
+                this.pages.overview.picture_error = Some(error);
                 cx.notify();
-            });
-            let rx = core.spawn({
-                let core = core.clone();
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    core.upload_picture(&key, pb::MediaPurpose::ServerIcon, kind, bytes).await
-                }
-            });
-            let result = rx.await;
-            let _ = this.update(cx, |this, cx| {
+            },
+            Rc::new(|this: &mut Self, bytes, mime, cx: &mut Context<Self>| this.upload_icon(bytes, mime, cx)),
+        );
+    }
+
+    fn upload_icon(&mut self, bytes: Vec<u8>, mime: &'static str, cx: &mut Context<Self>) {
+        self.pages.overview.uploading = true;
+        self.pages.overview.picture_error = None;
+        let (core, key) = (self.core.clone(), self.key.clone());
+        self.run(
+            cx,
+            async move { core.upload_picture(&key, pb::MediaPurpose::ServerIcon, mime, bytes).await },
+            |this, result, cx| {
                 let o = &mut this.pages.overview;
                 o.uploading = false;
                 match result {
-                    Ok(Ok(url)) => {
+                    Ok(url) => {
                         o.icon = Some(url);
                         o.link_open = false;
                     }
-                    Ok(Err(err)) => o.picture_error = Some(crate::ui::instance_home::capitalized(&err.message)),
-                    Err(_) => {}
+                    Err(err) => o.picture_error = Some(crate::ui::instance_home::capitalized(&err.message)),
                 }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+        );
+        cx.notify();
     }
 
     pub(super) fn overview(

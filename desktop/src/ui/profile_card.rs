@@ -24,6 +24,7 @@ use crate::pb::{self, Permission as P};
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::profile_effect::EffectView;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_md, radius_xl};
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, pal};
 
@@ -186,7 +187,7 @@ pub(crate) fn caps(text: &str, p: &Palette) -> gpui_kit::Div {
         .line_height(px(16.8))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(p.muted_foreground)
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 /// A box under the card (`mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg`), rising in after `delay` ms.

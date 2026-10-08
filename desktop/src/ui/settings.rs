@@ -29,6 +29,7 @@ use crate::ui::motion;
 use crate::ui::settings_account::AccountForm;
 use crate::ui::settings_controls::Sliders;
 use crate::ui::settings_look::Look;
+use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_lg, radius_md};
 use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_button, soft_button};
 
@@ -1004,7 +1005,7 @@ impl SettingsView {
                         .line_height(px(16.8))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
-                        .child(label.to_uppercase()),
+                        .child(tracked(label.to_uppercase(), WIDE)),
                 );
                 y += 16.8 + 4.0 + 2.0;
             }
@@ -1272,7 +1273,7 @@ impl Render for SettingsView {
                     .line_height(px(32.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .when(danger, |el| el.text_color(p.destructive))
-                    .child(label),
+                    .child(tracked(label, TIGHT)),
             )
             .when(!about.is_empty(), |el| {
                 el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(about))

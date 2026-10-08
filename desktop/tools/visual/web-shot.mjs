@@ -1,4 +1,4 @@
-// node web-shot.mjs <name> [route] [--actions file.json] [--width W --height H] [--light]
+// [PREFS=settings.json] node web-shot.mjs <name> [route] [--actions file.json] [--width W --height H] [--light]
 // route defaults to the #general channel; "{server}", "{general}" etc. are filled from state.json.
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -27,6 +27,8 @@ const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleF
 const as = process.env.AS ?? "alice";
 const saved = [{ url: st.url, active: st.ids[as], accounts: [{ userId: st.ids[as], token: st.tokens[as], username: as, displayName: as, avatarUrl: "" }] }];
 await ctx.addInitScript((v) => { if (!localStorage.getItem("fuwa:accounts:v2")) localStorage.setItem("fuwa:accounts:v2", v); }, JSON.stringify(saved));
+// PREFS=file.json sets the app's settings (lib/prefs.ts) before the page loads.
+if (process.env.PREFS) await ctx.addInitScript((v) => localStorage.setItem("fuwa:prefs:v1", v), readFileSync(process.env.PREFS, "utf8"));
 const page = await ctx.newPage();
 await page.goto(st.url + route);
 await page.waitForLoadState("networkidle").catch(() => {});
