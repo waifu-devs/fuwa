@@ -12,12 +12,15 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 use parking_lot::Mutex;
 
+use super::access::{self, Access};
 use super::sound::{FRAME, Pipe, RATE, Resampler};
 
 /// What went wrong with a device, said for the call bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Trouble {
     NoMicrophone,
+    /// The system won't let the app use the microphone (macOS's privacy settings).
+    MicrophoneBlocked,
     NoSpeakers,
 }
 
@@ -151,13 +154,19 @@ fn run(
     while !stop.load(Ordering::Relaxed) {
         let want = listening.load(Ordering::Relaxed);
         if want && input.is_none() {
-            // Nothing stale from before a mute goes out after it.
-            microphone.clear();
-            input = open_input();
-            report(Trouble::NoMicrophone, input.is_none());
-            if input.is_none() {
-                // Tried once per unmute; not again every few moments.
-                listening.store(false, Ordering::Relaxed);
+            // While the system's prompt is up, look again in a moment.
+            let access = access::check(access::Device::Microphone);
+            if access != Access::Asking {
+                // Nothing stale from before a mute goes out after it.
+                microphone.clear();
+                let blocked = access == Access::Blocked;
+                input = if blocked { None } else { open_input() };
+                report(Trouble::MicrophoneBlocked, blocked);
+                report(Trouble::NoMicrophone, input.is_none() && !blocked);
+                if input.is_none() {
+                    // Tried once per unmute; not again every few moments.
+                    listening.store(false, Ordering::Relaxed);
+                }
             }
         } else if !want && input.is_some() {
             input = None;

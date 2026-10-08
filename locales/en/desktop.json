@@ -37,6 +37,8 @@
   "settings.removeHere": "Remove from this computer",
   "settings.streamerHidePersonalHint": "A self-hosted address can be a home IP. Addresses and your username turn into dots everywhere in the app.",
   "voice.micFailed": "Couldn't open that microphone.",
+  "voice.micBlocked": "macOS isn't letting fuwa use your microphone. Allow it in System Settings, under Privacy & Security, then Microphone.",
+  "voice.openPrivacy": "Open System Settings",
   "voice.pttLater": "Push to talk isn't in the desktop app yet.",
   "voice.noProcessing": "The desktop app sends your microphone as it is, so these apply in the web app.",
   "voice.noCamera": "Calls in the desktop app are sound only for now; cameras are in the web app.",

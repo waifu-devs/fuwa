@@ -340,6 +340,8 @@ pub struct Progress {
     pub limited: bool,
     /// The microphone couldn't be opened.
     pub no_microphone: bool,
+    /// Because the system won't let the app use it (macOS's privacy settings).
+    pub microphone_blocked: bool,
 }
 
 #[derive(Default)]
@@ -438,7 +440,13 @@ fn record(taken: Arc<Mutex<Taken>>, stop: Arc<AtomicBool>, max_ms: u64) {
             }
         }
         // The microphone gets a moment to open before it's called missing.
-        if started.elapsed() > Duration::from_millis(400) && devices.trouble().contains(&Trouble::NoMicrophone) {
+        let trouble = devices.trouble();
+        if trouble.contains(&Trouble::MicrophoneBlocked) {
+            let progress = &mut taken.lock().progress;
+            (progress.no_microphone, progress.microphone_blocked) = (true, true);
+            return;
+        }
+        if started.elapsed() > Duration::from_millis(400) && trouble.contains(&Trouble::NoMicrophone) {
             taken.lock().progress.no_microphone = true;
             return;
         }
