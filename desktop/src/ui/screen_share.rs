@@ -1,6 +1,6 @@
 //! Starting a screen share (the web's `calls/ScreenShareDialog.tsx`): every
-//! screen and window as a small picture of what's on it, then how sharp and
-//! how smooth it goes out. The browser's own picker does the first part on
+//! screen and window as a small picture of what's on it, how sharp and how
+//! smooth it goes out, and its sound. The browser's own picker does the first part on
 //! the web; here the app draws it. Pictures are taken one frame each, off the
 //! main thread, as the dialog opens; a window that won't give one (minimized)
 //! keeps its icon.
@@ -17,11 +17,12 @@ use gpui_kit::{
 
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::capture::{self, Screen};
+use crate::core::voice::screen_sound::{self, Missing};
 use crate::core::voice::vp8::Share;
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::overlay::dialog_button;
-use crate::ui::settings_controls::{Look, shadow_sm};
+use crate::ui::settings_controls::{Look, shadow_sm, switch};
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -40,6 +41,10 @@ pub(crate) struct SharePicker {
     /// The one picked to share.
     picked: Option<u32>,
     share: Option<Share>,
+    /// The sound goes too (where it can).
+    sound: bool,
+    /// Whether this computer can share its sound at all.
+    sound_possible: bool,
     /// Which opening the pictures coming in belong to.
     round: u64,
 }
@@ -58,6 +63,8 @@ impl FuwaApp {
         picker.missing.clear();
         picker.picked = picker.screens.first().map(|s| s.id);
         picker.share = Some(Share::new(self.prefs.share_height, self.prefs.share_fps));
+        picker.sound = self.prefs.share_sound;
+        picker.sound_possible = screen_sound::possible();
         picker.round += 1;
         let round = picker.round;
         for screen in picker.screens.clone() {
@@ -93,12 +100,84 @@ impl FuwaApp {
         let picker = &self.calls.picker;
         let Some(id) = picker.picked else { return };
         let share = picker.share.unwrap_or(Share::DEFAULT);
-        self.core.set_prefs(|pr| (pr.share_height, pr.share_fps) = (share.height, share.fps));
+        let (sound, can) = (picker.sound, self.can_share_sound());
+        // A choice the dialog couldn't offer this time is kept for when it can.
+        let kept = if can { sound } else { self.prefs.share_sound };
+        self.core.set_prefs(|pr| (pr.share_height, pr.share_fps, pr.share_sound) = (share.height, share.fps, kept));
         self.prefs.share_height = share.height;
         self.prefs.share_fps = share.fps;
+        self.prefs.share_sound = kept;
         self.dialog = None;
-        self.core.set_screen(true, Some(id));
+        self.core.set_screen(true, Some(id), sound && can);
         cx.notify();
+    }
+
+    /// Whether the sound can go with this share: this computer can take it
+    /// and the instance passes it on.
+    fn can_share_sound(&self) -> bool {
+        self.calls.picker.sound_possible && self.core.call().is_some_and(|c| c.screen_sound_offered)
+    }
+
+    /// The sound's row: a switch, and what it shares, or why it can't.
+    fn share_sound_row(&self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let offered = self.core.call().is_some_and(|c| c.screen_sound_offered);
+        let can = self.can_share_sound();
+        let on = can && self.calls.picker.sound;
+        let about = if !offered {
+            t("dms-calls.calls.share.noServerSound")
+        } else if !self.calls.picker.sound_possible {
+            Missing::Unsupported.message()
+        } else {
+            t("desktop.calls.screenSound.text")
+        };
+        let hover = alpha(p.primary, 0.4);
+        div()
+            .id("share-sound")
+            .mt(px(20.0))
+            .flex()
+            .items_start()
+            .gap(px(12.0))
+            .p(px(12.0))
+            .rounded(radius_xl())
+            .border_1()
+            .border_color(p.border)
+            .when(!can, |el| el.opacity(0.6))
+            .when(can, |el| {
+                el.cursor_pointer().hover(move |s| s.border_color(hover)).on_click(cx.listener(|this, _, _, cx| {
+                    this.calls.picker.sound = !this.calls.picker.sound;
+                    cx.notify();
+                }))
+            })
+            .child(
+                div()
+                    .size(px(36.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(radius_lg())
+                    .bg(p.muted)
+                    .text_color(p.muted_foreground)
+                    .child(icon(if on { "volume-2" } else { "volume-x" }).size(px(18.0))),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(t("dms-calls.calls.share.sound")),
+                    )
+                    .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about)),
+            )
+            .child(div().mt(px(4.0)).child(switch("share-sound-switch", on, !can, p, window, cx, |this, v, cx| {
+                this.calls.picker.sound = v;
+                cx.notify();
+            })))
+            .into_any_element()
     }
 
     pub(crate) fn share_panel(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -221,6 +300,7 @@ impl FuwaApp {
             ))
             .child(list)
             .child(quality)
+            .child(self.share_sound_row(p, window, cx))
             .child(footer)
     }
 

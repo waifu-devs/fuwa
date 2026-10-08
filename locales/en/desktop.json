@@ -272,5 +272,11 @@
   "profileItems.effectTooBig": "That file is too big to be an effect.",
   "video.cameraBlocked": "Your system isn't letting fuwa use the camera. Allow it in System Settings, under Privacy & Security, then Camera.",
   "video.screenBlocked": "Your system isn't letting fuwa record the screen. Allow it in System Settings, under Privacy & Security, then Screen & System Audio Recording.",
-  "video.nothingToShare": "There's nothing to share here. On Linux, sharing a screen needs an X11 session for now."
+  "video.nothingToShare": "There's nothing to share here. On Linux, sharing a screen needs an X11 session for now.",
+  "calls.screenSound.text": "Everything this computer plays. Your call's sound stays out.",
+  "calls.screenSound.needsServer": "Sharing sound needs PulseAudio or PipeWire, and this computer runs neither.",
+  "calls.screenSound.needsMacos": "Sharing sound needs macOS 13 or later.",
+  "calls.screenSound.needsWindows": "Sharing sound needs Windows 10 version 2004 or later.",
+  "calls.screenSound.blocked": "macOS isn't letting fuwa record this computer's sound. Allow it in System Settings, under Privacy & Security, then Screen & System Audio Recording, and share again.",
+  "calls.screenSound.failed": "This computer's sound didn't start, so your screen is shared without it."
 }

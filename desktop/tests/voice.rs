@@ -259,6 +259,60 @@ fn muting_while_rejoining_closes_the_microphone() {
     assert_eq!(alice.microphone_open(), Some(false), "deafened closes it too");
 }
 
+/// A shared screen brings this computer's sound (a tone here): the others
+/// hear it beside its sharer's voice, not as them speaking; its sharer turns
+/// it off for everyone and someone else for themselves, and it goes with
+/// the share.
+#[test]
+fn a_shared_screens_sound_reaches_the_others() {
+    let Setup { key, server, voice, alice, bob, _homes, _instance, .. } = setup("127.0.0.1");
+    let alice_id = alice.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    let pipes = || (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
+    let ((a_mic, a_out), (b_mic, b_out)) = (pipes(), pipes());
+    alice.use_test_pattern();
+    alice.join_voice_with(&key, &server.id, &voice.id, Some((a_mic, a_out.clone())));
+    bob.join_voice_with(&key, &server.id, &voice.id, Some((b_mic, b_out.clone())));
+    for core in [&alice, &bob] {
+        until("connected", || core.call().is_some_and(|c| c.status == Status::Connected && c.screen_sound_offered));
+    }
+    assert!(listen(&b_out) < 0.01, "Alice says nothing");
+
+    alice.set_screen(true, None, true);
+    until("Alice's sound going", || alice.call().is_some_and(|c| c.screen_sound == Some(true)));
+    until("Bob hearing Alice's screen", || listen(&b_out) > 0.1);
+    until("its button for Bob", || bob.call().is_some_and(|c| c.screen_sounds.contains(&alice_id)));
+    assert!(bob.call().is_some_and(|c| !c.speaking.contains(&alice_id)), "a screen isn't its sharer speaking");
+    assert!(listen(&a_out) < 0.01, "nobody hears their own screen back");
+
+    // Bob turns it off for himself, and back on.
+    bob.toggle_screen_quiet(&alice_id);
+    assert!(bob.call().is_some_and(|c| c.quiet_screens.contains(&alice_id)));
+    until("quiet for Bob", || listen(&b_out) < 0.01);
+    bob.toggle_screen_quiet(&alice_id);
+    until("back for Bob", || listen(&b_out) > 0.1);
+
+    // Alice turns it off for everyone, the share going on, and back on.
+    alice.set_screen_sound(false);
+    assert_eq!(alice.call().unwrap().screen_sound, Some(false));
+    until("quiet for everyone", || listen(&b_out) < 0.01);
+    assert!(alice.call().is_some_and(|c| c.self_stream));
+    alice.set_screen_sound(true);
+    until("back for everyone", || listen(&b_out) > 0.1);
+
+    // Stopping the share takes the sound with it.
+    alice.set_screen(false, None, false);
+    assert_eq!(alice.call().unwrap().screen_sound, None);
+    until("gone with the share", || listen(&b_out) < 0.01);
+    until("its button gone", || bob.call().is_some_and(|c| !c.screen_sounds.contains(&alice_id)));
+
+    // Shared without it, there's none.
+    alice.set_screen(true, None, false);
+    until("sharing", || shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| v.self_stream));
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(listen(&b_out) < 0.01, "no sound asked for");
+    assert_eq!(alice.call().unwrap().screen_sound, None);
+}
+
 /// Waits for a picture of `feed` `width` wide (the media part switches
 /// sizes on the next keyframe) and gives its height and a sample of it.
 fn picture(core: &Core, feed: &str, width: u32) -> (u32, u32, [u8; 3]) {
@@ -330,7 +384,7 @@ fn two_people_see_each_other_in_a_voice_channel() {
 
     // A shared screen is a feed of its own, at up to 1080p.
     show(&bob, &format!("{alice_id}-screen"), 1080);
-    alice.set_screen(true, None);
+    alice.set_screen(true, None, false);
     until("Alice shown sharing", || shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| v.self_stream));
     assert_eq!(picture(&bob, &format!("{alice_id}-screen"), 1280).1, 720);
 
@@ -341,7 +395,7 @@ fn two_people_see_each_other_in_a_voice_channel() {
 
     // Turning it off shows it off.
     alice.set_camera(false);
-    alice.set_screen(false, None);
+    alice.set_screen(false, None, false);
     until("Alice's camera shown off", || {
         shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| !v.self_video && !v.self_stream)
     });
@@ -349,7 +403,8 @@ fn two_people_see_each_other_in_a_voice_channel() {
 
 /// In a direct message's call, cameras are sealed end to end, the web's
 /// way (core/calls.rs checks the format): Bob opens Alice's frames with the
-/// conversation's secret, and the media part only ever had ciphertext.
+/// conversation's secret, and the media part only ever had ciphertext. A
+/// shared screen and its sound too.
 #[test]
 fn cameras_in_direct_messages_are_sealed_and_open_for_the_other_person() {
     use fuwa_desktop::core::dms::Content;
@@ -368,10 +423,11 @@ fn cameras_in_direct_messages_are_sealed_and_open_for_the_other_person() {
     until_store(&bob, "the message", |s| {
         s.instance(&key).unwrap().dms.items.get(&conversation).is_some_and(|items| !items.is_empty())
     });
-    for core in [&alice, &bob] {
-        core.use_test_pattern();
-        core.join_dm_call(&key, &conversation);
-    }
+    let a_out = Arc::new(Pipe::speakers());
+    alice.use_test_pattern();
+    alice.join_dm_call_with(&key, &conversation, Some((Arc::new(Pipe::microphone()), a_out.clone())));
+    bob.use_test_pattern();
+    bob.join_dm_call(&key, &conversation);
     for core in [&alice, &bob] {
         until("connected", || core.call().is_some_and(|c| c.status == Status::Connected));
     }
@@ -380,6 +436,8 @@ fn cameras_in_direct_messages_are_sealed_and_open_for_the_other_person() {
     let (w, h, _) = picture(&bob, &alice_id, 640);
     assert_eq!((w, h), (640, 360), "opened and decoded");
     show(&alice, &format!("{bob_id}-screen"), 720);
-    bob.set_screen(true, None);
+    bob.set_screen(true, None, true);
     assert_eq!(picture(&alice, &format!("{bob_id}-screen"), 1280).1, 720);
+    // The screen's sound is sealed by Bob too, and opens for Alice.
+    until("Alice hearing Bob's screen", || listen(&a_out) > 0.1);
 }

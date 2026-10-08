@@ -703,8 +703,9 @@ impl FuwaApp {
             cx.stop_propagation();
             this.pop_out(popped.clone(), cx)
         }));
+        let sound = crate::ui::video::screen_sound_button(&self.core, &state.user_id, mine, "stage", p);
         motion::rise(
-            div().relative().group(SharedString::from(group.clone())).child(tile).child(button),
+            div().relative().group(SharedString::from(group.clone())).child(tile).child(button).children(sound),
             SharedString::from(format!("screen-in|{}", state.user_id)),
             Duration::ZERO,
             -12.0,

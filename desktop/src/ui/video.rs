@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{
-    AnyElement, App, Div, FontWeight, Global, InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _,
-    Pixels, RenderImage, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, StyledImage as _,
-    Window, div, px,
+    AnyElement, App, Div, FontWeight, Global, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
+    ParentElement as _, Pixels, RenderImage, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    StyledImage as _, Window, div, px,
 };
 
 use crate::core::Core;
@@ -191,4 +191,65 @@ pub(crate) fn pop_out_button(id: impl Into<SharedString>, label: String, group: 
         .active(|s| s.opacity(0.8))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
         .child(icon("picture-in-picture-2").size(px(16.0)))
+}
+
+/// The sound button on a shared screen (the web's `ScreenSoundButton`):
+/// yours turns its sound off for everyone, the share going on; someone
+/// else's turns it off for you. Only there while sound comes, top left.
+pub(crate) fn screen_sound_button(
+    core: &Arc<Core>,
+    user_id: &str,
+    mine: bool,
+    tag: &str,
+    p: &Palette,
+) -> Option<Stateful<Div>> {
+    let call = core.call()?;
+    let on = if mine { call.screen_sound? } else { !call.quiet_screens.contains(user_id) };
+    if !mine && !call.screen_sounds.contains(user_id) {
+        return None;
+    }
+    let label = t(match (mine, on) {
+        (true, true) => "dms-calls.calls.video.mySoundOff",
+        (true, false) => "dms-calls.calls.video.mySoundOn",
+        (false, true) => "dms-calls.calls.video.theirSoundOff",
+        (false, false) => "dms-calls.calls.video.theirSoundOn",
+    });
+    let (bg, fg): (Hsla, Hsla) =
+        if on { (alpha(p.background, 0.75), p.foreground.into()) } else { (red().into(), gpui_kit::white()) };
+    let hover: Hsla = if on { p.background.into() } else { alpha(red(), 0.85) };
+    let glyph = div().child(icon(if on { "volume-2" } else { "volume-x" }).size(px(16.0)));
+    let button = div()
+        .id(SharedString::from(format!("screen-sound|{tag}|{user_id}")))
+        .absolute()
+        .top(px(8.0))
+        .left(px(8.0))
+        .h(px(32.0))
+        .px(px(8.0))
+        .flex()
+        .items_center()
+        .rounded(radius_xl())
+        .bg(bg)
+        .text_color(fg)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .active(|s| s.opacity(0.8))
+        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+        // The glyph swaps with a pop whenever it flips.
+        .child(motion::pop(
+            glyph,
+            SharedString::from(format!("screen-sound-glyph|{tag}|{user_id}|{on}")),
+            0.4,
+            -20.0,
+            Duration::ZERO,
+        ));
+    let (core, user) = (core.clone(), user_id.to_owned());
+    Some(button.on_click(move |_, _, cx| {
+        // Not the tile under it too.
+        cx.stop_propagation();
+        if mine {
+            core.set_screen_sound(!on);
+        } else {
+            core.toggle_screen_quiet(&user);
+        }
+    }))
 }

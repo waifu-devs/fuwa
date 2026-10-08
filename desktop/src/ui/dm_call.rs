@@ -490,6 +490,7 @@ impl FuwaApp {
             .w_full()
             .group(SharedString::from(group.clone()))
             .child(tile)
+            .children(crate::ui::video::screen_sound_button(&self.core, &user.id, mine, "dm", p))
             .child(
                 pop_out_button(
                     SharedString::from(format!("dm-pop-screen|{}", user.id)),

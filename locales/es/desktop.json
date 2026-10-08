@@ -3,5 +3,11 @@
   "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto.",
   "shader.noGpu": "Aquí no hay GPU: muestra {fallback}",
   "voice.micBlocked": "macOS no deja que fuwa use tu micrófono. Permítelo en Ajustes del Sistema, en Privacidad y seguridad, Micrófono.",
-  "voice.openPrivacy": "Abrir Ajustes del Sistema"
+  "voice.openPrivacy": "Abrir Ajustes del Sistema",
+  "calls.screenSound.text": "Todo lo que suena en este equipo. El sonido de tu llamada se queda fuera.",
+  "calls.screenSound.needsServer": "Compartir el sonido necesita PulseAudio o PipeWire, y este equipo no usa ninguno.",
+  "calls.screenSound.needsMacos": "Compartir el sonido necesita macOS 13 o posterior.",
+  "calls.screenSound.needsWindows": "Compartir el sonido necesita Windows 10 versión 2004 o posterior.",
+  "calls.screenSound.blocked": "macOS no deja que fuwa grabe el sonido de este equipo. Permítelo en Ajustes del Sistema, en Privacidad y seguridad, Grabación de pantalla y audio del sistema, y vuelve a compartir.",
+  "calls.screenSound.failed": "El sonido de este equipo no se puso en marcha, así que tu pantalla se comparte sin él."
 }
