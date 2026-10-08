@@ -365,7 +365,9 @@ impl FuwaApp {
             .gap(px(8.0))
             .border_t_1()
             .border_color(p.border)
+            // The web's `bg-card/60 backdrop-blur`.
             .bg(alpha(p.card, 0.6))
+            .backdrop_blur(px(8.0))
             .px(px(16.0))
             .py(px(12.0))
             .child(controls)
@@ -534,7 +536,9 @@ impl FuwaApp {
             .items_center()
             .gap(px(6.0))
             .rounded(radius_xl())
+            // The web's `bg-background/75 backdrop-blur`.
             .bg(alpha(p.background, 0.75))
+            .backdrop_blur(px(8.0))
             .px(px(10.0))
             .py(px(4.0))
             .child(

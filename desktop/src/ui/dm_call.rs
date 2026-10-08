@@ -634,7 +634,9 @@ impl FuwaApp {
             .rounded(radius_3xl())
             .border_1()
             .border_color(p.border)
+            // The web's `bg-card/95 backdrop-blur`.
             .bg(alpha(p.card, 0.95))
+            .backdrop_blur(px(8.0))
             .p(px(12.0))
             .pr(px(14.0))
             .shadow(shadow_xl())

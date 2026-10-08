@@ -9,8 +9,10 @@ name: Desktop installers
 # yet, so macOS and Windows warn the first time they open.
 #
 # Release runs this for each tag and attaches what it makes. A pull request
-# that changes the packaging runs it too, so a broken installer shows up
-# before a release, and it can be started by hand from Actions.
+# that changes the packaging or our copy of GPUI (desktop/vendor, whose Metal
+# and Direct3D renderers only build on their own systems) runs it too, so a
+# broken installer shows up before a release, and it can be started by hand
+# from Actions.
 on:
   workflow_call:
     inputs:
@@ -23,6 +25,7 @@ on:
     paths:
       - desktop/Cargo.toml
       - desktop/packaging/**
+      - desktop/vendor/**
       - .github/workflows/desktop.yml
 
 permissions:

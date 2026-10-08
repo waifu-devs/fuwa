@@ -573,8 +573,6 @@ impl FuwaApp {
             .border_t_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.4))
-            // GPUI doesn't clip to the panel's corners.
-            .rounded_b(radius_2xl())
             .text_size(px(11.2))
             .line_height(px(16.0))
             .text_color(p.muted_foreground)
@@ -642,12 +640,15 @@ impl FuwaApp {
                 .pt(px(tall * 0.12))
                 .px(px(12.0))
                 .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.45))
+                // The web's `backdrop-blur-[3px]`.
+                .backdrop_blur(px(3.0))
                 .occlude()
                 .on_click(cx.listener(|this, _, window, cx| this.close_switcher(window, cx)))
-                .child(motion::rise(
+                .child(motion::pop_in(
                     div().w_full().max_w(px(576.0)).flex().flex_col().child(panel),
                     "switcher-panel",
-                    Duration::ZERO,
+                    (0.5, 0.5),
+                    0.94,
                     -12.0,
                 ))
                 .into_any_element(),
@@ -791,7 +792,7 @@ impl FuwaApp {
         true
     }
 
-    pub(crate) fn render_sheet(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.sheet_open {
             return None;
         }
@@ -906,7 +907,7 @@ impl FuwaApp {
             .px(px(32.0))
             .pt(px(12.0))
             .pb(px(8.0))
-            .child(motion::fade_in(
+            .child(motion::pop(
                 div()
                     .size(px(40.0))
                     .flex()
@@ -917,7 +918,9 @@ impl FuwaApp {
                     .text_color(p.primary_foreground)
                     .child(icon("keyboard").size(px(20.0))),
                 "sheet-badge",
-                Duration::from_millis(300),
+                0.6,
+                -20.0,
+                Duration::from_millis(80),
             ))
             .child(
                 div()
@@ -938,7 +941,7 @@ impl FuwaApp {
                             .child(t("chattools.shortcuts.about")),
                     ),
             )
-            .child(
+            .child(motion::answer(
                 div()
                     .id("sheet-close")
                     .flex_shrink_0()
@@ -958,7 +961,12 @@ impl FuwaApp {
                         cx.notify();
                     }))
                     .child(icon("x").size(px(18.0))),
-            );
+                "sheet-close",
+                motion::Pose::turn(90.0),
+                motion::Pose::turn(90.0),
+                window,
+                cx,
+            ));
         let sheet = div()
             .id("sheet")
             .occlude()
@@ -989,6 +997,7 @@ impl FuwaApp {
                 .justify_end()
                 .items_center()
                 .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.4))
+                .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                 .occlude()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sheet_open = false;

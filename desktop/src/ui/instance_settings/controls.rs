@@ -248,6 +248,8 @@ pub(super) fn save_bar(
         .p(px(12.0))
         .pl(px(16.0))
         .shadow(shadow_xl())
+        // The web's `backdrop-blur`: what scrolls under it shows through, blurred.
+        .backdrop_blur(px(8.0))
         .child(div().flex_1().min_w_0().text_sm().line_height(px(20.0)).child(line))
         .child(
             button(
@@ -962,8 +964,9 @@ pub(super) fn dialog(
             .items_center()
             .justify_center()
             .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
+            .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
             .on_click(cx.listener(move |this, _, _, cx| outside(this, cx)))
-            .child(motion::rise(panel, SharedString::from(format!("{id}-rise")), Duration::ZERO, 40.0)),
+            .child(motion::dialog_in(panel, SharedString::from(format!("{id}-rise")))),
         SharedString::from(format!("{id}-fade")),
         Duration::from_millis(200),
     )

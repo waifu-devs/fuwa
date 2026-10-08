@@ -1481,23 +1481,15 @@ impl FuwaApp {
                     this.rail.editing = None;
                     cx.notify();
                 }))
-                .child(motion::rise(card, "folder-dialog-in", Duration::ZERO, 40.0))
+                .child(motion::dialog_in(card, "folder-dialog-in"))
                 .into_any_element(),
         )
     }
 }
 
-/// The web's dialog overlay: the page behind darkened by half.
+/// The web's dialog overlay: the page behind darkened by half and blurred a little.
 pub(crate) fn dialog_scrim(id: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
-    div()
-        .id(id)
-        .absolute()
-        .inset_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
-        .occlude()
+    crate::ui::overlay::shade(id, 0.5, crate::ui::overlay::SCRIM_BLUR)
 }
 
 /// Moves an element by `by` on a spring (the others making room while one is held).

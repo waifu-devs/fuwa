@@ -77,23 +77,23 @@ pub fn start(title: String, body: String, p: &Palette) -> Div {
         move |el, t| {
             let k = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
             let pop = if k < 1.0 { 1.0 - (1.0 - k).powi(3) + (k * std::f32::consts::PI).sin() * 0.12 } else { 1.0 };
-            el.child(
+            el.scale(pop.max(0.001)).child(
                 div()
-                    .size(px(28.0 * pop))
+                    .size(px(28.0))
                     .rounded_full()
                     .bg(s.green)
                     .shadow(vec![gpui_kit::BoxShadow {
                         color: card,
                         offset: gpui_kit::point(px(0.0), px(0.0)),
                         blur_radius: px(0.0),
-                        spread_radius: px(4.0 * pop.min(1.0)),
+                        spread_radius: px(4.0),
                         inset: false,
                     }])
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_color(gpui_kit::white())
-                    .child(icon("lock-keyhole").size(px(14.0 * pop))),
+                    .child(icon("lock-keyhole").size(px(14.0))),
             )
         },
     );

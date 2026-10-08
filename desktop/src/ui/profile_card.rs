@@ -511,11 +511,9 @@ impl FuwaApp {
         // The banner: their picture, or their color shaded toward the corner, or a sweep from their id.
         let banner = if accent < 0 && banner.is_empty() {
             // The web's `server-gradient` with its glow, which GPUI can't draw: painted once as an SVG.
-            div().h(px(112.0)).w_full().child(
-                gpui_kit::img(hue_banner(user_id, WIDTH - 2.0, 112.0, f32::from(radius_3xl()) - 1.0)).size_full(),
-            )
+            div().h(px(112.0)).w_full().child(gpui_kit::img(hue_banner(user_id, WIDTH - 2.0, 112.0)).size_full())
         } else {
-            crate::ui::settings_account::banner_of(user_id, banner, accent, &p).h(px(112.0)).rounded_t(radius_3xl())
+            crate::ui::settings_account::banner_of(user_id, banner, accent, &p).h(px(112.0))
         };
         let banner = motion::once(
             banner,
@@ -1010,13 +1008,13 @@ thread_local! {
 
 /// Someone's banner without a picture or color (the web's `.server-gradient`
 /// on their hue: a 135° sweep under a soft glow at 30% 20%), as an SVG of
-/// `w`×`h` with its top corners rounded by `r`. Made once per person and size.
-fn hue_banner(user_id: &str, w: f32, h: f32, r: f32) -> std::sync::Arc<gpui_kit::Image> {
+/// `w`×`h`; the card clips it to its corners. Made once per person and size.
+fn hue_banner(user_id: &str, w: f32, h: f32) -> std::sync::Arc<gpui_kit::Image> {
     type Made = HashMap<String, std::sync::Arc<gpui_kit::Image>>;
     thread_local! {
         static MADE: RefCell<Made> = RefCell::new(HashMap::new());
     }
-    let key = format!("{user_id}|{w}|{h}|{r}");
+    let key = format!("{user_id}|{w}|{h}");
     if let Some(made) = MADE.with(|m| m.borrow().get(&key).cloned()) {
         return made;
     }
@@ -1040,8 +1038,8 @@ fn hue_banner(user_id: &str, w: f32, h: f32, r: f32) -> std::sync::Arc<gpui_kit:
 <linearGradient id="a" gradientUnits="userSpaceOnUse" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"><stop offset="0" stop-color="{from}"/><stop offset="1" stop-color="{to}"/></linearGradient>
 <radialGradient id="b" gradientUnits="userSpaceOnUse" cx="{gx}" cy="{gy}" r="{reach}"><stop offset="0" stop-color="{glow}" stop-opacity="0.9"/><stop offset="0.6" stop-color="{glow}" stop-opacity="0"/></radialGradient>
 </defs>
-<path id="s" d="M0 {h} V{r} A{r} {r} 0 0 1 {r} 0 H{wr} A{r} {r} 0 0 1 {w} {r} V{h} Z" fill="url(#a)"/>
-<path d="M0 {h} V{r} A{r} {r} 0 0 1 {r} 0 H{wr} A{r} {r} 0 0 1 {w} {r} V{h} Z" fill="url(#b)"/>
+<rect width="{w}" height="{h}" fill="url(#a)"/>
+<rect width="{w}" height="{h}" fill="url(#b)"/>
 </svg>"#,
         W = w * 2.0,
         H = h * 2.0,
@@ -1051,7 +1049,6 @@ fn hue_banner(user_id: &str, w: f32, h: f32, r: f32) -> std::sync::Arc<gpui_kit:
         y2 = cy + d,
         from = hex(hue, 0.7, 0.55),
         to = hex(hue + 40.0, 0.7, 0.45),
-        wr = w - r,
     );
     let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Svg, svg.into_bytes()));
     MADE.with(|m| m.borrow_mut().insert(key, image.clone()));

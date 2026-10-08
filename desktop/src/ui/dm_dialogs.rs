@@ -73,9 +73,10 @@ pub(crate) fn dialog_shell(tag: &str, width: f32, body: Div, window: &Window, cx
             .justify_center()
             .p(px(16.0))
             .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
+            .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
             .occlude()
             .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-            .child(motion::rise(card, SharedString::from(format!("dialog-rise-{tag}")), Duration::ZERO, 40.0)),
+            .child(motion::dialog_in(card, SharedString::from(format!("dialog-rise-{tag}")))),
         SharedString::from(format!("dialog-fade-{tag}")),
         Duration::from_millis(200),
     )

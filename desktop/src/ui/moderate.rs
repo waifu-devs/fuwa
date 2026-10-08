@@ -425,9 +425,10 @@ impl FuwaApp {
                 .items_center()
                 .justify_center()
                 .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
+                .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                 .occlude()
                 .on_click(cx.listener(|this, _, _, cx| this.close_dialog_now(cx)))
-                .child(motion::rise(panel, "dialog-moderate", Duration::ZERO, 40.0)),
+                .child(motion::dialog_in(panel, "dialog-moderate")),
             "dialog-fade-moderate",
             Duration::from_millis(200),
         )

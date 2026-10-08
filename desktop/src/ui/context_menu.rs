@@ -737,9 +737,10 @@ fn menu_card(p: &Palette) -> gpui_kit::Div {
         .shadow(crate::ui::settings_controls::shadow_xl())
 }
 
-/// The menu springs open from a little smaller, as it fades in.
+/// The menu springs open from a little smaller out of its top corner, as it
+/// fades in (the web's `zoom-in-95`).
 fn pop<E: IntoElement + gpui_kit::Styled + 'static>(el: E, id: SharedString) -> impl IntoElement {
-    motion::rise(el, id, Duration::ZERO, -6.0)
+    motion::pop_in(el, id, (0.0, 0.0), 0.95, -6.0)
 }
 
 /// Copies text, saying what was copied (never the text: in streamer mode it may be private).

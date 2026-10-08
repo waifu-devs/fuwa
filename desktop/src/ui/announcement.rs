@@ -35,28 +35,14 @@ pub fn glyph(tone: Tone) -> &'static str {
     }
 }
 
-/// The banner itself, also the live preview on the Announcement page. `close`
-/// is its close button, when it can be closed; `id` keeps its motion apart
-/// from another banner's.
+/// The banner itself, also the live preview on the Announcement page (whose
+/// rounded box clips it). `close` is its close button, when it can be closed;
+/// `id` keeps its motion apart from another banner's.
 pub fn banner(
     id: &str,
     a: &pb::Announcement,
     now: i64,
     close: Option<AnyElement>,
-    p: &Palette,
-    window: &Window,
-) -> AnyElement {
-    banner_in(id, a, now, close, None, p, window)
-}
-
-/// The banner with its top corners rounded to `top` (the Announcement page's preview sits in a
-/// rounded box, and GPUI doesn't clip to rounded corners).
-pub fn banner_in(
-    id: &str,
-    a: &pb::Announcement,
-    now: i64,
-    close: Option<AnyElement>,
-    top: Option<gpui_kit::Pixels>,
     p: &Palette,
     window: &Window,
 ) -> AnyElement {
@@ -141,32 +127,21 @@ pub fn banner_in(
         .py(px(8.0))
         .bg(bg)
         .text_color(fg)
-        .when_some(top, |el, r| el.rounded_t(r))
         .when(tone == Tone::Info, |el| {
             // The web's three-stop sweep: 18% of the primary at the edges, 9% at 60%.
             let (edge, middle) = (mix(p.background, p.primary, 0.18), mix(p.background, p.primary, 0.09));
             el.border_b_1()
                 .border_color(alpha(p.primary, 0.3))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left_0()
-                        .w(gpui_kit::relative(0.6))
-                        .when_some(top, |el, r| el.rounded_tl(r))
-                        .bg(linear_gradient(90.0, linear_color_stop(edge, 0.0), linear_color_stop(middle, 1.0))),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right_0()
-                        .w(gpui_kit::relative(0.4))
-                        .when_some(top, |el, r| el.rounded_tr(r))
-                        .bg(linear_gradient(90.0, linear_color_stop(middle, 0.0), linear_color_stop(edge, 1.0))),
-                )
+                .child(div().absolute().top_0().bottom_0().left_0().w(gpui_kit::relative(0.6)).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(edge, 0.0),
+                    linear_color_stop(middle, 1.0),
+                )))
+                .child(div().absolute().top_0().bottom_0().right_0().w(gpui_kit::relative(0.4)).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(middle, 0.0),
+                    linear_color_stop(edge, 1.0),
+                )))
         })
         .child(badge)
         .child(words)
@@ -266,7 +241,7 @@ impl crate::ui::app::FuwaApp {
         let p = crate::ui::widgets::pal(cx);
         let close = (!critical).then(|| {
             let (key, id) = (key.clone(), a.id.clone());
-            div()
+            let button = div()
                 .id("announcement-close")
                 .size(px(28.0))
                 .rounded_full()
@@ -275,7 +250,6 @@ impl crate::ui::app::FuwaApp {
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
-                .active(|s| s.top(px(1.0)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.set_prefs(|p| {
                         p.closed_announcements.insert(key.clone(), id.clone());
@@ -283,8 +257,10 @@ impl crate::ui::app::FuwaApp {
                     this.prefs = this.core.prefs();
                     cx.notify();
                 }))
-                .child(icon("x").size(px(16.0)))
-                .into_any_element()
+                .child(icon("x").size(px(16.0)));
+            // The web's `group-hover:rotate-90` and `active:scale-90`.
+            let (hover, press) = (motion::Pose::turn(90.0), motion::Pose { scale: 0.9, ..motion::Pose::turn(90.0) });
+            motion::answer(button, "announcement-close", hover, press, window, cx).into_any_element()
         });
         Some(motion::once(
             div().flex_none().child(banner("announcement", &a, now, close, &p, window)),

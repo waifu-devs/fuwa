@@ -1,0 +1,2 @@
+# Rust's default style, as the crates were published (not the repository's).
+edition = "2024"

@@ -492,10 +492,11 @@ impl FuwaApp {
                     cx.notify();
                 })),
         );
-        motion::rise(
+        motion::pop_in(
             menu_frame(256.0, p).id("bell-menu").occlude().on_click(|_, _, cx| cx.stop_propagation()).child(body),
             "bell-menu-in",
-            Duration::ZERO,
+            (0.5, 0.0),
+            0.95,
             -6.0,
         )
         .into_any_element()
@@ -649,7 +650,7 @@ fn float_left(body: gpui_kit::Div, id: &'static str, p: &Palette, cx: &mut Conte
                 .top(px(52.0))
                 .left(px(crate::ui::rail::RAIL + 8.0))
                 .on_click(|_, _, cx| cx.stop_propagation())
-                .child(motion::rise(card(p).rounded(corner(16.0)).child(body), id, Duration::ZERO, -8.0)),
+                .child(motion::pop_in(card(p).rounded(corner(16.0)).child(body), id, (0.0, 0.0), 0.95, -8.0)),
         )
         .into_any_element()
 }

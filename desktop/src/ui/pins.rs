@@ -99,13 +99,12 @@ pub fn pin_mark(id: &str, p: &Palette) -> AnyElement {
         .text_color(p.primary)
         .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.pins.pinned")).build(window, cx))
         .child(motion::once(
-            icon("pin").size(px(12.0)),
+            div().size(px(12.0)).child(icon("pin").size(px(12.0))),
             SharedString::from(format!("pin-mark-in|{id}")),
             Duration::from_millis(350),
             |el, t| {
                 let k = 1.0 - (1.0 - t).powi(3);
-                el.size(px(12.0 * k.max(0.01)))
-                    .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 - 0.7 * (1.0 - k)))
+                el.scale(k.max(0.001)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 - 0.7 * (1.0 - k)))
             },
         ))
         .into_any_element()
@@ -453,9 +452,9 @@ impl FuwaApp {
                 }
             }))
             .child(
-                icon("pin")
-                    .size(px(20.0 * (1.0 + 0.08 * (1.0 - tilt))))
-                    .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt)),
+                div()
+                    .scale(1.0 + 0.08 * (1.0 - tilt))
+                    .child(icon("pin").size(px(20.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt))),
             );
         let card = if open { self.pins_card(cx) } else { None };
         div()
