@@ -1750,19 +1750,13 @@ fn gradient(text: &str, p: &Palette) -> Vec<Hsla> {
         .collect()
 }
 
-/// Big text set tight, as the web's `tracking-tight` (-0.025em): GPUI has no
-/// letter spacing, so each letter is its own box, pulled in.
+/// Big text set tight, as the web's `tracking-tight`.
 fn tracked(text: &str, size: f32, colors: Option<Vec<Hsla>>) -> Div {
-    let mut row = div().flex().flex_none().text_size(px(size)).whitespace_nowrap();
-    for (n, c) in text.chars().enumerate() {
-        let letter = div()
-            .flex_none()
-            .when(n > 0, |el| el.ml(px(-0.025 * size)))
-            .when_some(colors.as_ref().and_then(|c| c.get(n)).copied(), |el, color| el.text_color(color))
-            .child(if c == ' ' { "\u{00a0}".to_owned() } else { c.to_string() });
-        row = row.child(letter);
-    }
-    row
+    let line = super::text::tracked(text.to_owned(), super::text::TIGHT);
+    div().flex().flex_none().text_size(px(size)).child(match colors {
+        Some(colors) => line.letter_colors(colors),
+        None => line,
+    })
 }
 
 /// Soft colored glows drifting behind the welcome (the web's bubble background at 30%).

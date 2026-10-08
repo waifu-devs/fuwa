@@ -16,6 +16,7 @@ use super::*;
 use crate::core::onboarding::{self as onb, PICK, RULES, SAY_HELLO};
 use crate::ui::banner::{accent, cover, hex, hue_of, on_accent, parse_hex};
 use crate::ui::overlay::emoji_tile;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_lg, radius_xl};
 
 /// The shapes a banner is shown in, as the web lists them: a name, and its width and height.
@@ -392,59 +393,48 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    /// Asks the system for a picture and uploads it as the banner, to save with the rest.
+    /// Asks the system for a picture, frames it, and uploads it as the banner, to save with the rest.
     fn pick_banner(&mut self, cx: &mut Context<Self>) {
-        if self.onboard.uploading {
+        if self.onboard.uploading || self.cropper.is_some() {
             return;
         }
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.server.onboarding.chooseBanner").into()),
-        });
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.error = Some(t("desktop.account.notAPicture"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.onboard.uploading = true;
-                this.error = None;
+        crate::ui::cropper::choose(
+            self.core.clone(),
+            crate::core::pictures::PictureKind::Banner,
+            t("desktop.server.onboarding.chooseBanner"),
+            cx,
+            |this| &mut this.cropper,
+            |this, error, cx| {
+                this.error = Some(error);
                 cx.notify();
-            });
-            let rx = core.spawn({
-                let core = core.clone();
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    core.upload_picture_for(&key, &sid, pb::MediaPurpose::Banner, kind, bytes).await
-                }
-            });
-            let result = rx.await;
-            let _ = this.update(cx, |this, cx| {
+            },
+            Rc::new(|this: &mut Self, bytes, mime, cx: &mut Context<Self>| this.upload_banner(bytes, mime, cx)),
+        );
+    }
+
+    fn upload_banner(&mut self, bytes: Vec<u8>, mime: &'static str, cx: &mut Context<Self>) {
+        self.onboard.uploading = true;
+        self.error = None;
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(
+            cx,
+            async move { core.upload_picture_for(&key, &sid, pb::MediaPurpose::Banner, mime, bytes).await },
+            |this, result, cx| {
                 this.onboard.uploading = false;
                 match result {
                     // A new picture starts with its middle in focus.
-                    Ok(Ok(url)) => {
+                    Ok(url) => {
                         if let Some(look) = this.onboard.look.as_mut() {
                             look.0 = url;
                             look.1 = (50, 50);
                         }
                     }
-                    Ok(Err(err)) => this.error = Some(err.message),
-                    Err(_) => {}
+                    Err(err) => this.error = Some(err.message),
                 }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+        );
+        cx.notify();
     }
 
     /// Moves the focus to where the pointer is over the picture.
@@ -760,7 +750,14 @@ impl ServerSettingsView {
                                         .h(px(sh)),
                                 ),
                             )
-                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(name))
+                            .child(
+                                div()
+                                    .text_size(px(10.4))
+                                    .line_height(px(16.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(p.muted_foreground)
+                                    .child(tracked(name.to_uppercase(), WIDE)),
+                            )
                     })))
                     .into_any_element()
             }
@@ -1116,6 +1113,8 @@ impl ServerSettingsView {
                             t("serversettings.onboarding.addChoice"),
                             p,
                         )
+                        .rounded(radius_xl())
+                        .border_dashed()
                         .on_click(cx.listener(move |this, _, window, cx| this.add_option(key, window, cx))),
                     );
                 }
@@ -1207,6 +1206,8 @@ impl ServerSettingsView {
                     },
                     p,
                 )
+                .rounded(radius_lg())
+                .border_dashed()
                 .on_click(cx.listener(toggle_open(Open::Roles))),
             )
             .child(
@@ -1218,6 +1219,8 @@ impl ServerSettingsView {
                     },
                     p,
                 )
+                .rounded(radius_lg())
+                .border_dashed()
                 .on_click(cx.listener(toggle_open(Open::Channels))),
             )
             .child(icon_button(SharedString::from(format!("onb-option-remove-{key}")), "x", p).on_click(cx.listener(
@@ -1383,8 +1386,11 @@ impl ServerSettingsView {
             .p(px(16.0))
             .child(
                 div().text_xs().line_height(px(16.0)).font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
-                    t_with("join.onboarding.stepOf", &[("step", Arg::Num(1)), ("total", Arg::Num(total as i64))])
-                        .to_uppercase(),
+                    tracked(
+                        t_with("join.onboarding.stepOf", &[("step", Arg::Num(1)), ("total", Arg::Num(total as i64))])
+                            .to_uppercase(),
+                        WIDE,
+                    ),
                 ),
             )
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(if step.title.is_empty() {

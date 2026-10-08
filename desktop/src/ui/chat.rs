@@ -27,7 +27,7 @@ use crate::ui::context_menu::{self, MenuOf};
 use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, SCHEME, mention_links};
 use crate::ui::motion;
-use crate::ui::text::{clock, images_as_links, ms_of, when};
+use crate::ui::text::{TIGHT, clock, images_as_links, ms_of, tracked, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
@@ -2397,9 +2397,11 @@ impl FuwaApp {
                             .text_center()
                             .child(
                                 div()
+                                    .flex()
+                                    .justify_center()
                                     .text_xl()
                                     .font_weight(FontWeight::EXTRA_BOLD)
-                                    .child(format!("Sign in with {provider}")),
+                                    .child(tracked(format!("Sign in with {provider}"), TIGHT)),
                             )
                             .child(div().text_sm().text_color(p.muted_foreground).child(format!(
                                 "{} asks members to sign in through {provider}{every}. You're still a member; the channels come back once you do.",

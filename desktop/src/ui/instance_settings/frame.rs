@@ -16,6 +16,7 @@ use gpui_kit::{
 use super::{InstanceSettingsEvent, InstanceSettingsView, Page};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_md};
 use crate::ui::widgets::icon;
 
@@ -505,7 +506,7 @@ impl InstanceSettingsView {
                     .line_height(px(16.8))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group.label.to_uppercase()),
+                    .child(tracked(group.label.to_uppercase(), WIDE)),
             );
             y += 16.8 + 4.0 + 2.0;
             for (i, section) in group.sections.iter().enumerate() {

@@ -358,7 +358,7 @@ pub fn app_badge(id: impl Into<ElementId>, label: &'static str, p: &Palette) -> 
         .text_size(px(10.0))
         .font_weight(FontWeight::EXTRA_BOLD)
         .when(label == "AGENT", |el| el.child(icon("bot").size(px(10.0))))
-        .child(label)
+        .child(crate::ui::text::tracked(label, crate::ui::text::WIDE))
         .with_animation(id, Animation::new(duration).with_easing(easing), |el, t| {
             el.opacity(t.clamp(0.0, 1.0)).mt(px((1.0 - t) * 3.0))
         })

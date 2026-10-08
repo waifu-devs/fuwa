@@ -15,6 +15,7 @@ use crate::core::reports::{self, Pending};
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_controls::toggle;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -49,7 +50,7 @@ impl SettingsView {
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
-                        .child(title.to_uppercase()),
+                        .child(tracked(title.to_uppercase(), WIDE)),
                 );
             for (n, line) in lines.into_iter().enumerate() {
                 ul = ul.child(motion::slide_in(
@@ -127,7 +128,7 @@ impl SettingsView {
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
-                                    .child(t("appsettings.advanced.waiting").to_uppercase()),
+                                    .child(tracked(t("appsettings.advanced.waiting").to_uppercase(), WIDE)),
                             )
                             .child(chip(
                                 "bug",

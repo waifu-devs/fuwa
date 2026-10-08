@@ -17,6 +17,7 @@ use crate::ui::chat::Row;
 use crate::ui::chat::emoji_glyph;
 use crate::ui::mentions::Pick;
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, icon};
 use crate::ui::{emoji, mentions};
@@ -354,7 +355,7 @@ impl FuwaApp {
             .font_weight(FontWeight::EXTRA_BOLD)
             .text_color(p.muted_foreground)
             .when(!glyph.is_empty(), |el| el.child(icon(glyph).size(px(12.0))))
-            .child(text.to_uppercase())
+            .child(tracked(text.to_uppercase(), WIDE))
     }
 
     /// The message box's right-click menu (the web's `composerMenu`): cut and

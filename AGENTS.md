@@ -525,7 +525,9 @@
     frame encryption, byte for byte the web app's; the call itself comes
     with the app's sound; `voice/access.rs` asks macOS for the microphone
     and camera, which it allows only to a bundle whose Info.plist says why,
-    `desktop/packaging/macos/`), `reports.rs` (the anonymous reports: panics, also
+    `desktop/packaging/macos/`), `pictures.rs` (the web's `lib/pictures.ts`:
+    crop sizes and math, cutting the crop out; `ui/cropper.rs` is the
+    cropper every picture upload goes through), `reports.rs` (the anonymous reports: panics, also
     written to `crashes.txt` in the config folder so a crash is sent next
     time, failed and timed `rpc!` calls, startup, catching up, slow frames
     and a few feature counts, sent every 10 minutes through
@@ -575,10 +577,16 @@
     card over the sidebar's foot when a new version is ready,
     `backdrop.rs` what's drawn behind the app (picture, blurred once off the
     main thread when asked, dimming, a texture made here as a PNG or SVG
-    tile and repeated), `effects.rs` the moving effects (the web's shaders
-    redrawn with shadows, paths and quads, 30 frames a second while the
-    window is in front, one still frame otherwise, and none while a
-    full-screen page like server settings covers them), `keys.rs` the
+    tile and repeated), `effects.rs` the moving effects (the web's own
+    WGSL, built-in and custom, drawn offscreen by `core/effects/gpu.rs` on a
+    wgpu device of its own and shown as a picture; without a GPU the
+    built-in ones redrawn with shadows, paths and quads; 30 frames a second
+    while the window is in front, one still frame otherwise, and none while
+    a full-screen page like server settings covers them),
+    `settings_shader.rs` the custom shader editor under Background (the
+    web's `ShaderEditor.tsx`, over `core/effects`: `custom.rs` the prelude,
+    checks and starters word for word the web's, `status.rs` what happened
+    to each shader, kept across restarts in `Prefs::shaders_trying`), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
     the shortcut sheet) over `core/keybinds.rs` (the web's
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
@@ -655,7 +663,8 @@
     (the ones you added, at either address they have), redirects included,
     like the web app's `lib/shown.ts`; instances fetch other sites' pictures
     themselves (`server/src/outside.rs`). Markdown goes through `text::markdown`,
-    whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
+    whose links open only for http(s) and mailto; `text::tracked` is letter
+    spacing (Tailwind's `tracking-*`, which GPUI lacks), one line or wrapping. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion; `ambient` loops
     run only while the window is in front); `theme.rs` is
     the theme on screen as a palette (with the surfaces `docs/themes.md`

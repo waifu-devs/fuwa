@@ -14,6 +14,7 @@ use super::*;
 use crate::core::moderation::outranks;
 use crate::core::permissions::Access;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_3xl, radius_lg, radius_xl};
 
 pub(super) struct PeopleState {
@@ -113,7 +114,7 @@ fn count_line(glyph: &str, text: String, p: &Palette) -> Div {
         .font_weight(FontWeight::BOLD)
         .text_color(p.muted_foreground)
         .child(icon(glyph).size(px(14.0)))
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 /// A row of a list (`rounded-2xl border bg-background/40`).

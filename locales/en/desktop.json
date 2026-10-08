@@ -106,6 +106,7 @@
   "background.repeat": "Repeat",
   "background.dim": "Dim the picture",
   "background.effectNote": "Moving effects draw at most 30 frames a second, and stop while fuwa is behind other windows.",
+  "shader.noGpu": "No GPU here: shows {fallback}",
   "background.panels": "Solid panels",
   "privacy.sentErrors": "Kinds of errors and where in the app they happened",
   "privacy.sentTimings": "How long things took: starting up, catching up, slow frames and requests",

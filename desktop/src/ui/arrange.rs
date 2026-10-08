@@ -23,6 +23,7 @@ use gpui_kit::{
 use crate::core::arrange::{Drop, layout_of, moved};
 use crate::ui::app::FuwaApp;
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{alpha, corner};
 use crate::ui::widgets::{icon, pal};
 
@@ -75,7 +76,7 @@ impl Render for ChannelDrag {
                             .flex_1()
                             .text_size(px(11.0))
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(self.name.to_uppercase()),
+                            .child(tracked(self.name.to_uppercase(), WIDE)),
                     )
                     .when(self.count > 0, |el| {
                         el.child(

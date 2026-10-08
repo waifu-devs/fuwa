@@ -15,6 +15,7 @@ use gpui_kit::{
 
 use crate::pb;
 use crate::ui::motion;
+use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, corner};
 use crate::ui::widgets::server_icon;
 
@@ -264,10 +265,15 @@ pub fn banner_hero(
                             .text_xs()
                             .font_weight(gpui_kit::FontWeight::EXTRA_BOLD)
                             .text_color(accent(server))
-                            .child(eyebrow.to_uppercase()),
+                            .child(tracked(eyebrow.to_uppercase(), WIDE)),
                     )
                 })
-                .child(div().text_xl().font_weight(gpui_kit::FontWeight::EXTRA_BOLD).child(server.name.clone()))
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(gpui_kit::FontWeight::EXTRA_BOLD)
+                        .child(tracked(server.name.clone(), TIGHT).wraps()),
+                )
                 .when(members > 0, |el| {
                     el.child(
                         div()

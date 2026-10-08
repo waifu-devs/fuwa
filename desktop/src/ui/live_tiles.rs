@@ -21,6 +21,7 @@ use crate::pb;
 use crate::ui::app::FuwaApp;
 use crate::ui::context_menu::{Built, Item, MenuOf, run};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_md, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal};
 
@@ -217,7 +218,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
                     .child(live_dot(format!("strip|{key}|{server_id}"), window, cx))
-                    .child(t("tiles.strip.label").to_uppercase()),
+                    .child(tracked(t("tiles.strip.label").to_uppercase(), WIDE)),
             )
             .child(list);
         Some(

@@ -22,6 +22,7 @@ use crate::core::gifs::{self as gifs, KeptGif};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, icon, icon_button};
 
@@ -577,7 +578,7 @@ impl FuwaApp {
                 .text_size(px(10.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
-                .child(format!("Powered by {credit} · through this instance"))
+                .child(tracked(format!("Powered by {credit} · through this instance"), WIDE))
         });
         let panel = card(p)
             .w(px(PANEL_W))

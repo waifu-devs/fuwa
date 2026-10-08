@@ -31,6 +31,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::profile_effect::{EffectView, effect_in, mini_card};
 use crate::ui::settings_controls::{Look, button, shadow_sm};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::widgets::{avatar, decorated, icon, pal};
 
@@ -834,8 +835,15 @@ impl ProfileItemsView {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(title.to_uppercase())
-                    .child(div().rounded_full().bg(p.muted).px(px(8.0)).py(px(2.0)).child(count.to_string())),
+                    .child(tracked(title.to_uppercase(), WIDE))
+                    .child(
+                        div()
+                            .rounded_full()
+                            .bg(p.muted)
+                            .px(px(8.0))
+                            .py(px(2.0))
+                            .child(tracked(count.to_string(), WIDE)),
+                    ),
             )
             .when(count == 0, |el| el.child(div().text_sm().text_color(p.muted_foreground).child(empty)))
             .child(grid)

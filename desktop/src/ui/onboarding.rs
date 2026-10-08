@@ -19,6 +19,7 @@ use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::banner::{accent, on_accent};
 use crate::ui::motion;
 use crate::ui::overlay::{emoji_tile, section_title};
+use crate::ui::text::{TIGHT, tracked};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{icon, pal};
 
@@ -332,7 +333,7 @@ impl FuwaApp {
             body = body.child(self.onboarding_done(&server, &channels, &look, tint, &p, cx));
         } else if let Some(step) = flow.steps.get(flow.at).cloned() {
             // The step's title and words, then what it asks, sliding in from the way it came.
-            // `flex flex-col gap-3 pt-3 pb-1`: the title (`text-lg font-extrabold`) and its words together.
+            // `flex flex-col gap-3 pt-3 pb-1`: the title (`text-lg font-extrabold tracking-tight`) and its words together.
             let mut content = div().flex().flex_col().gap(px(12.0)).pt(px(12.0)).pb(px(4.0)).child(
                 div()
                     .flex()
@@ -342,7 +343,7 @@ impl FuwaApp {
                             .text_lg()
                             .line_height(px(28.0))
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(step.title.clone()),
+                            .child(tracked(step.title.clone(), TIGHT).wraps()),
                     )
                     .when(!step.description.trim().is_empty(), |el| {
                         el.child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(

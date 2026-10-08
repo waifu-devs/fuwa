@@ -22,6 +22,7 @@ use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_md, radius_sm, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal};
 
@@ -356,13 +357,14 @@ impl FuwaApp {
                         .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
-                        .child(
+                        .child(tracked(
                             t_with(
                                 "dms-calls.friends.page.heading",
                                 &[("tab", Arg::Str(&tab_label)), ("count", Arg::Num(shown.len() as i64))],
                             )
                             .to_uppercase(),
-                        ),
+                            WIDE,
+                        )),
                 ),
         );
 

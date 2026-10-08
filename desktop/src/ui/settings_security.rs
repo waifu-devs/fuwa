@@ -19,6 +19,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_controls::{At, Look, button, field, hint, warn};
+use crate::ui::text::{WIDER, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -882,11 +883,12 @@ impl SettingsView {
                     .bg(p.muted)
                     .px(px(8.0))
                     .py(px(6.0))
-                    .text_center()
+                    .flex()
+                    .justify_center()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .font_family("monospace")
-                    .child(code.clone()),
+                    .child(tracked(code.clone(), WIDER)),
                 SharedString::from(format!("code-{n}-{code}")),
                 Duration::from_millis(50 + 35 * n as u64),
                 10.0,

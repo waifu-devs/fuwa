@@ -65,6 +65,11 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+# Runs the backdrop's WGSL shaders offscreen (core/effects/gpu.rs): the wgpu
+# GPUI already draws with on Linux, so it isn't built twice there.
+wgpu = "29.0.4"
+# The frames those shaders make, as pictures for GPUI (the version GPUI uses).
+image = { version = "0.25", default-features = false }
 
 # Asking macOS for the microphone and camera (core/voice/access.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

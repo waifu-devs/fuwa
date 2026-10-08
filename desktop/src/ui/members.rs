@@ -20,6 +20,7 @@ use crate::core::i18n::t;
 use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::alpha;
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, pal};
 
@@ -274,7 +275,7 @@ fn heading(
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
                 .when_some(color, |el, c| el.child(div().flex_none().size(px(8.0)).rounded_full().bg(rgb(c))))
-                .child(text),
+                .child(tracked(text, WIDE)),
         )
         .into_any_element()
 }

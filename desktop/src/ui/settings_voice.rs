@@ -21,6 +21,7 @@ use crate::ui::settings::SettingsView;
 use crate::ui::settings_app::pref;
 use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, toggle};
 use crate::ui::settings_menu::Item;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -112,7 +113,7 @@ impl SettingsView {
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(icon(glyph).size(px(14.0)))
-                    .child(label.to_uppercase()),
+                    .child(tracked(label.to_uppercase(), WIDE)),
             )
             .child(div().w_full().child(self.dropdown(id.to_owned(), trigger.w_full(), items, false, 280.0, p, cx)))
             .into_any_element()

@@ -29,6 +29,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::server_settings::spinner;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::{icon, server_icon};
 
@@ -167,7 +168,7 @@ fn heading(glyph: Option<&str>, text: &str, p: &Palette) -> gpui_kit::Div {
         .font_weight(FontWeight::BOLD)
         .text_color(p.muted_foreground)
         .when_some(glyph, |el, g| el.child(icon(g).size(px(14.0))))
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 /// One of the totals over the list (`rounded-2xl border bg-background/50 p-3`), counting up.
@@ -191,7 +192,7 @@ fn total(id: String, glyph: &str, label: &str, value: f64, sized: bool, n: usize
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(icon(glyph).size(px(14.0)))
-                    .child(label.to_uppercase()),
+                    .child(tracked(label.to_uppercase(), WIDE)),
             )
             .child(
                 div()
@@ -737,7 +738,10 @@ impl InstanceSettingsView {
             .font_weight(FontWeight::BOLD)
             .text_color(p.muted_foreground)
             .child(icon("server").size(px(14.0)))
-            .child(t_with("instancesettings.servers.count", &[("count", Arg::Num(count as i64))]).to_uppercase());
+            .child(tracked(
+                t_with("instancesettings.servers.count", &[("count", Arg::Num(count as i64))]).to_uppercase(),
+                WIDE,
+            ));
         let mut rows = div().flex().flex_col().gap(px(6.0));
         let now = now_ms();
         for (n, entry) in shown.iter().enumerate() {
@@ -998,7 +1002,7 @@ impl InstanceSettingsView {
                             .line_height(px(14.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
-                            .child(t(key).to_uppercase()),
+                            .child(tracked(t(key).to_uppercase(), WIDE)),
                     )
                     .child(div().text_lg().line_height(px(28.0)).font_weight(FontWeight::EXTRA_BOLD).child(
                         motion::count_up(
