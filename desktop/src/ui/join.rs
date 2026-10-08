@@ -1952,7 +1952,7 @@ pub(crate) fn rules_list(rules: &[String], p: &Palette) -> Div {
 }
 
 /// "I agree": a card that fills in and draws its tick when pressed (the web's `AgreeCheck`).
-fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<Div> {
+pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<Div> {
     let hover = alpha(p.primary, 0.4);
     div()
         .id("apply-agree")

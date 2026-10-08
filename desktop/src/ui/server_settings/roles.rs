@@ -1,5 +1,5 @@
-//! The Roles page: every role, highest first, moved up or down past the ones
-//! ranked below your own, and the chosen one beside the list: how it looks,
+//! The Roles page: every role, highest first, dragged into rank by its handle
+//! (only those below your own move), and the chosen one beside the list: how it looks,
 //! what it can do and who has it. @everyone sits at the bottom and holds what
 //! everybody can do. The web's `settings/server/Roles.tsx`.
 
@@ -9,9 +9,14 @@ use gpui_kit::component::Disableable as _;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::rgb;
 
+use gpui_kit::{Render, Stateful, point};
+
+use super::pages::form_row;
 use super::*;
 use crate::core::permissions::{self, Access, Bits, GROUPS, bit};
 use crate::core::server_admin::RolePatch;
+use crate::ui::settings_controls::{Look, button};
+use crate::ui::theme::{radius_2xl, radius_lg, radius_md, radius_xl};
 
 /// Colors to pick from, light to deep, as on the web.
 const SWATCHES: [u32; 24] = [
@@ -122,7 +127,7 @@ pub(super) fn group_name(title: &str) -> String {
 }
 
 /// How tall a row in the role list is, gap included.
-const ROW: f32 = 42.0;
+const ROW: f32 = 38.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RoleTab {
@@ -188,6 +193,11 @@ pub(super) struct Roles {
     /// The order being saved, shown until the server answers.
     moving: Option<Vec<String>>,
     saved: Option<Instant>,
+    /// Picking any color: the box for its hex code is open.
+    custom: bool,
+    hex: Entity<InputState>,
+    /// What went wrong with the last save, said in the save bar.
+    error: Option<String>,
 }
 
 impl Roles {
@@ -195,7 +205,8 @@ impl Roles {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.roles.newRole")));
         let perm_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.roles.search")));
         let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.shared.findSomeone")));
-        let subscriptions = [&name, &perm_query, &member_query]
+        let hex = cx.new(|cx| InputState::new(window, cx).placeholder("#f472b6"));
+        let mut subscriptions: Vec<Subscription> = [&name, &perm_query, &member_query]
             .into_iter()
             .map(|input| {
                 cx.subscribe(input, |_: &mut ServerSettingsView, _, e: &InputEvent, cx| {
@@ -205,6 +216,17 @@ impl Roles {
                 })
             })
             .collect();
+        subscriptions.push(cx.subscribe(&hex, |this: &mut ServerSettingsView, hex, e: &InputEvent, cx| {
+            if let InputEvent::Change = e {
+                let text = hex.read(cx).value().trim().trim_start_matches('#').to_string();
+                if text.len() == 6
+                    && let Ok(c) = u32::from_str_radix(&text, 16)
+                {
+                    this.roles.edits.color = Some(Some(c));
+                }
+                cx.notify()
+            }
+        }));
         let roles = Self {
             selected: None,
             tab: RoleTab::Display,
@@ -220,6 +242,9 @@ impl Roles {
             busy: None,
             moving: None,
             saved: None,
+            custom: false,
+            hex,
+            error: None,
         };
         (roles, subscriptions)
     }
@@ -338,27 +363,6 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    /// Swaps a role with the one above or below it, when you rank above both.
-    fn move_role(&mut self, order: &[String], id: &str, by: isize, cx: &mut Context<Self>) {
-        let Some(at) = order.iter().position(|r| r == id) else { return };
-        let to = at as isize + by;
-        if to < 0 || to as usize >= order.len() || self.roles.moving.is_some() {
-            return;
-        }
-        let mut next = order.to_vec();
-        next.swap(at, to as usize);
-        self.roles.moving = Some(next.clone());
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        self.run(cx, async move { core.reorder_roles(&key, &sid, next).await }, |this, result, cx| {
-            this.roles.moving = None;
-            if let Err(err) = result {
-                this.error = Some(err.message);
-            }
-            cx.notify();
-        });
-        cx.notify();
-    }
-
     fn changes(&self, role: &pb::Role, everyone: bool, cx: &Context<Self>) -> usize {
         let e = &self.roles.edits;
         let name = self.roles.name.read(cx).value().trim().to_string();
@@ -378,7 +382,7 @@ impl ServerSettingsView {
         let e = self.roles.edits.clone();
         let name = self.roles.name.read(cx).value().trim().to_string();
         if !everyone && name.is_empty() {
-            self.error = Some(t("desktop.server.roles.needsName"));
+            self.roles.error = Some(t("serversettings.roles.needsName"));
             cx.notify();
             return;
         }
@@ -398,7 +402,7 @@ impl ServerSettingsView {
             revoke: permissions::to_list(revoke),
         };
         self.roles.saving = true;
-        self.error = None;
+        self.roles.error = None;
         let (core, key, sid, rid) = (self.core.clone(), self.key.clone(), self.server.clone(), role.id.clone());
         self.run(cx, async move { core.update_role(&key, &sid, &rid, patch).await }, |this, result, cx| {
             this.roles.saving = false;
@@ -409,7 +413,7 @@ impl ServerSettingsView {
                     this.roles.saved = Some(Instant::now());
                     this.flash_saved(cx);
                 }
-                Err(err) => this.error = Some(err.message),
+                Err(err) => this.roles.error = Some(err.message),
             }
             cx.notify();
         });
@@ -419,7 +423,7 @@ impl ServerSettingsView {
     fn discard_role(&mut self, role: &pb::Role, window: &mut Window, cx: &mut Context<Self>) {
         self.roles.edits = Edits::default();
         self.roles.filled_for = None;
-        self.error = None;
+        self.roles.error = None;
         self.fill_role(role, window, cx);
         cx.notify();
     }
@@ -491,35 +495,38 @@ impl ServerSettingsView {
         }
         let role = by_id.get(selected.as_str()).map(|r| (*r).clone());
         let everyone = selected == everyone_id;
-        if everyone && self.roles.tab != RoleTab::Permissions {
+        if everyone && self.roles.tab == RoleTab::Members {
+            self.roles.tab = RoleTab::Permissions;
+        }
+        if everyone && self.roles.tab == RoleTab::Display {
             self.roles.tab = RoleTab::Permissions;
         }
         if let Some(role) = &role {
             self.fill_role(role, window, cx);
         }
 
-        // The list, each row sliding to its place when the order changes.
-        let mut rows = div().relative().h(px(ROW * order.len() as f32));
+        // The list, each row sliding to its place when the order changes; the highlight glides.
+        let mut rows = div().relative().h(px(ROW * order.len() as f32 - 2.0));
+        let active_at = order.iter().position(|id| *id == selected);
+        if let Some(at) = active_at {
+            let y = motion::follow("role-hl", at as f32 * ROW, window, cx);
+            rows = rows.child(
+                div()
+                    .absolute()
+                    .left(px(30.0))
+                    .right_0()
+                    .top(px(y))
+                    .h(px(36.0))
+                    .rounded(radius_lg())
+                    .bg(alpha(p.primary, 0.12)),
+            );
+        }
         for (n, id) in order.iter().enumerate() {
             let Some(r) = by_id.get(id.as_str()) else { continue };
             let y = motion::follow(SharedString::from(format!("role-y-{id}")), n as f32 * ROW, window, cx);
             let active = *id == selected;
             let locked = !snap.access.above(r.position);
-            // You can't lift a role past one you don't rank above.
-            let up =
-                !locked && n > 0 && by_id.get(order[n - 1].as_str()).is_some_and(|o| snap.access.above(o.position));
-            let down = !locked && n + 1 < order.len();
-            let row = self.role_row(
-                r,
-                counts.get(id.as_str()).copied().unwrap_or(0),
-                active,
-                locked,
-                up,
-                down,
-                &order,
-                p,
-                cx,
-            );
+            let row = self.role_row(r, counts.get(id.as_str()).copied().unwrap_or(0), active, locked, n, &order, p, cx);
             rows = rows.child(div().absolute().left_0().right_0().top(px(y)).child(motion::rise(
                 row,
                 SharedString::from(format!("role-in-{id}")),
@@ -529,22 +536,24 @@ impl ServerSettingsView {
         }
         let everyone_row = {
             let on = everyone;
-            let hover = alpha(p.muted, 0.7);
+            let (hover, fg) = (alpha(p.muted, 0.7), p.foreground);
             div()
                 .id("role-everyone")
+                .relative()
                 .mt(px(8.0))
-                .h(px(48.0))
+                .h(px(44.0))
                 .px(px(12.0))
                 .flex()
                 .items_center()
-                .gap(px(10.0))
-                .rounded(corner(12.0))
+                .gap(px(8.0))
+                .rounded(radius_xl())
                 .border_1()
                 .border_dashed()
                 .border_color(p.border)
+                .text_sm()
                 .cursor_pointer()
-                .when(on, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary))
-                .when(!on, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
+                .when(on, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary).font_weight(FontWeight::BOLD))
+                .when(!on, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
                 .on_click({
                     let id = everyone_id.clone();
                     cx.listener(move |this, _, _, cx| this.select_role(id.clone(), cx))
@@ -554,10 +563,15 @@ impl ServerSettingsView {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("@everyone"))
+                        .flex()
+                        .flex_col()
+                        .child(div().truncate().line_height(px(20.0)).child("@everyone"))
                         .child(
                             div()
-                                .text_xs()
+                                .truncate()
+                                .text_size(px(11.2))
+                                .line_height(px(15.0))
+                                .font_weight(FontWeight::NORMAL)
                                 .text_color(p.muted_foreground)
                                 .child(t("serversettings.roles.everyoneHint")),
                         ),
@@ -566,43 +580,46 @@ impl ServerSettingsView {
         let can_create = snap.access.has(P::ManageRoles);
         let making = self.roles.busy.as_deref() == Some("new");
         let list = div()
-            .w(px(260.0))
+            .w(px(272.0))
             .flex_none()
             .flex()
             .flex_col()
-            .gap(px(10.0))
+            .gap(px(12.0))
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .justify_between()
                     .gap(px(8.0))
                     .child(
                         div()
-                            .flex_1()
                             .min_w_0()
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
-                            .child(t("desktop.server.roles.intro")),
+                            .child(t("serversettings.roles.intro")),
                     )
                     .when(can_create, |el| {
                         el.child(
-                            primary_button(
+                            button(
                                 "role-new",
-                                if making { t("desktop.server.roles.making") } else { t("serversettings.shared.new") },
+                                t("serversettings.shared.new"),
+                                if making { None } else { Some("plus") },
+                                Look::Primary,
+                                true,
                                 p,
                             )
-                            .h(px(34.0))
-                            .px(px(12.0))
-                            .child(icon("plus").size(px(15.0)))
-                            .when(making, |el| el.opacity(0.6))
-                            .on_click(cx.listener(|this, _, _, cx| this.new_role(cx))),
+                            .rounded(radius_xl())
+                            .font_weight(FontWeight::BOLD)
+                            .when(making, |el| el.opacity(0.6).child(spinner("role-new-spin", 16.0, window)))
+                            .when(!making, |el| el.on_click(cx.listener(|this, _, _, cx| this.new_role(cx)))),
                         )
                     }),
             )
             .child(
                 div()
-                    .p(px(6.0))
-                    .rounded(corner(16.0))
+                    .p(px(8.0))
+                    .rounded(radius_2xl())
                     .border_1()
                     .border_color(p.border)
                     .bg(alpha(p.background, 0.4))
@@ -611,11 +628,10 @@ impl ServerSettingsView {
             );
 
         let editor = match role {
-            Some(role) => motion::rise(
+            Some(role) => motion::slide_in(
                 self.role_editor(&role, everyone, &snap, p, window, cx),
                 SharedString::from(format!("role-editor-{}", role.id)),
-                Duration::ZERO,
-                10.0,
+                16.0,
             )
             .into_any_element(),
             None => div()
@@ -629,11 +645,39 @@ impl ServerSettingsView {
         div()
             .flex()
             .items_start()
-            .gap(px(28.0))
-            .pb(px(80.0))
+            .gap(px(32.0))
             .child(list)
             .child(div().flex_1().min_w_0().child(editor))
             .into_any_element()
+    }
+
+    /// Drops a role being dragged at `to` in the order, if you rank above every role it passes.
+    fn drop_role(&mut self, order: &[String], id: &str, to: usize, cx: &mut Context<Self>) {
+        let Some(at) = order.iter().position(|r| r == id) else { return };
+        if at == to || self.roles.moving.is_some() {
+            return;
+        }
+        let snap = self.snap();
+        let passes = if to < at { &order[to..at] } else { &order[at + 1..=to.min(order.len() - 1)] };
+        let mine = passes
+            .iter()
+            .all(|o| snap.roles.iter().find(|r| &r.id == o).is_some_and(|r| snap.access.above(r.position)));
+        if !mine {
+            return;
+        }
+        let mut next = order.to_vec();
+        let moved = next.remove(at);
+        next.insert(to.min(next.len()), moved);
+        self.roles.moving = Some(next.clone());
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(cx, async move { core.reorder_roles(&key, &sid, next).await }, |this, result, cx| {
+            this.roles.moving = None;
+            if let Err(err) = result {
+                cx.emit(ServerSettingsEvent::Toast { icon: "circle-alert", title: err.message });
+            }
+            cx.notify();
+        });
+        cx.notify();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -643,86 +687,99 @@ impl ServerSettingsView {
         count: usize,
         active: bool,
         locked: bool,
-        up: bool,
-        down: bool,
+        n: usize,
         order: &[String],
         p: &Palette,
         cx: &mut Context<Self>,
-    ) -> gpui_kit::Div {
+    ) -> Stateful<gpui_kit::Div> {
         let color = role_color(r);
-        let hover = alpha(p.muted, 0.7);
-        let mover = |glyph: &str, by: isize, enabled: bool, cx: &mut Context<Self>| {
-            let (id, order) = (r.id.clone(), order.to_vec());
-            let hover = alpha(p.muted_foreground, 0.14);
-            div()
-                .id(SharedString::from(format!("role-{glyph}-{}", r.id)))
-                .size(px(18.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(corner(5.0))
-                .text_color(alpha(p.muted_foreground, if enabled { 0.9 } else { 0.25 }))
-                .when(enabled, |el| {
-                    el.cursor_pointer()
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| this.move_role(&order, &id, by, cx)))
-                })
-                .child(icon(glyph).size(px(14.0)))
-        };
+        let (hover, fg) = (alpha(p.muted, 0.7), p.foreground);
         let handle = if locked {
             div()
-                .w(px(20.0))
-                .flex()
-                .justify_center()
-                .text_color(alpha(p.muted_foreground, 0.5))
-                .child(icon("lock").size(px(13.0)))
-        } else {
-            div().w(px(20.0)).flex().flex_col().items_center().child(mover("chevron-up", -1, up, cx)).child(mover(
-                "chevron-down",
-                1,
-                down,
-                cx,
-            ))
-        };
-        let id = r.id.clone();
-        div().h(px(ROW - 4.0)).flex().items_center().gap(px(2.0)).child(handle).child(
-            div()
-                .id(SharedString::from(format!("role-pick-{}", r.id)))
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .px(px(8.0))
+                .size(px(28.0))
+                .flex_none()
                 .flex()
                 .items_center()
-                .gap(px(8.0))
-                .rounded(corner(10.0))
-                .cursor_pointer()
-                .text_sm()
-                .when(active, |el| el.bg(alpha(p.primary, 0.12)).font_weight(FontWeight::BOLD))
-                .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
-                .on_click(cx.listener(move |this, _, _, cx| this.select_role(id.clone(), cx)))
-                .child(dot(color, 10.0, p))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .when_some(color.filter(|_| active), |el, c| el.text_color(color_of(c)))
-                        .child(r.name.clone()),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(3.0))
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(icon("users").size(px(11.0)))
-                        .child(count.to_string()),
-                ),
-        )
+                .justify_center()
+                .text_color(alpha(p.muted_foreground, 0.5))
+                .child(icon("lock").size(px(14.0)))
+                .into_any_element()
+        } else {
+            let drag = RoleDrag { id: r.id.clone(), name: r.name.clone().into(), color };
+            let (bg, fg) = (p.muted, p.foreground);
+            div()
+                .id(SharedString::from(format!("role-grip-{}", r.id)))
+                .size(px(28.0))
+                .flex_none()
+                .rounded(radius_md())
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_grab()
+                .text_color(alpha(p.muted_foreground, 0.6))
+                .hover(move |s| s.bg(bg).text_color(fg))
+                .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                .child(icon("grip-vertical").size(px(16.0)))
+                .into_any_element()
+        };
+        let id = r.id.clone();
+        let order = order.to_vec();
+        let drop_hl = alpha(p.primary, 0.08);
+        div()
+            .id(SharedString::from(format!("role-row-{}", r.id)))
+            .h(px(36.0))
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .rounded(radius_lg())
+            .drag_over::<RoleDrag>(move |s, _, _, _| s.bg(drop_hl))
+            .on_drop::<RoleDrag>(
+                cx.listener(move |this, drag: &RoleDrag, _, cx| this.drop_role(&order, &drag.id, n, cx)),
+            )
+            .child(handle)
+            .child(
+                div()
+                    .id(SharedString::from(format!("role-pick-{}", r.id)))
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .px(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(radius_lg())
+                    .cursor_pointer()
+                    .text_sm()
+                    .when(active, |el| el.font_weight(FontWeight::BOLD))
+                    .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.select_role(id.clone(), cx)))
+                    .child(motion::once(
+                        dot(color, 12.0, p),
+                        SharedString::from(format!("role-dot-{}-{color:?}", r.id)),
+                        Duration::from_millis(300),
+                        |el, t| el.opacity(0.3 + 0.7 * t),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .when_some(color.filter(|_| active), |el, c| el.text_color(color_of(c)))
+                            .child(r.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .text_size(px(11.2))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(p.muted_foreground)
+                            .child(icon("users").size(px(12.0)))
+                            .child(count.to_string()),
+                    ),
+            )
     }
 
     fn role_editor(
@@ -741,7 +798,6 @@ impl ServerSettingsView {
         let shown = if typed.is_empty() { t("serversettings.roles.newRole") } else { typed };
         let holders = snap.members.iter().filter(|m| m.role_ids.contains(&role.id)).count();
 
-        let mut tabs = div().flex().gap(px(4.0)).p(px(4.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.6));
         let options: Vec<(RoleTab, String)> = if everyone {
             vec![(RoleTab::Permissions, t("serversettings.shared.permissions"))]
         } else {
@@ -751,37 +807,21 @@ impl ServerSettingsView {
                 (RoleTab::Members, t_with("serversettings.roles.membersTab", &[("count", Arg::Num(holders as i64))])),
             ]
         };
-        if options.len() > 1 {
-            for (tab, label) in options {
-                let on = self.roles.tab == tab;
-                let hover = alpha(p.foreground, 0.06);
-                tabs = tabs.child(
-                    div()
-                        .id(SharedString::from(format!("role-tab-{}", tab as u8)))
-                        .px(px(12.0))
-                        .h(px(30.0))
-                        .flex()
-                        .items_center()
-                        .rounded(corner(9.0))
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .when(on, |el| el.bg(p.card).text_color(p.foreground))
-                        .when(!on, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.roles.tab = tab;
-                            cx.notify();
-                        }))
-                        .child(label),
-                );
-            }
-        }
+        let chosen = options.iter().position(|(t, _)| *t == self.roles.tab).unwrap_or(0);
+        let tabs_of: Vec<RoleTab> = options.iter().map(|(t, _)| *t).collect();
+        let labels: Vec<String> = options.into_iter().map(|(_, l)| l).collect();
+        let tabs = (labels.len() > 1).then(|| {
+            self.seg_tabs("role-tabs", labels, chosen, p, window, cx, move |this, n, cx| {
+                this.roles.tab = tabs_of[n];
+                cx.notify();
+            })
+        });
         let header = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(12.0))
-            .mb(px(18.0))
+            .mb(px(20.0))
             .child(
                 div()
                     .flex_1()
@@ -790,13 +830,14 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(8.0))
                     .text_lg()
+                    .line_height(px(28.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .when(!everyone, |el| {
-                        el.child(motion::rise(
-                            dot(color, 14.0, p),
-                            SharedString::from(format!("role-dot-{color:?}")),
-                            Duration::ZERO,
-                            -6.0,
+                        el.child(motion::once(
+                            dot(color, 16.0, p),
+                            SharedString::from(format!("role-title-dot-{color:?}")),
+                            Duration::from_millis(350),
+                            |el, t| el.opacity(t),
                         ))
                     })
                     .child(
@@ -806,23 +847,24 @@ impl ServerSettingsView {
                             .child(if everyone { "@everyone".to_owned() } else { shown.clone() }),
                     ),
             )
-            .child(tabs);
+            .children(tabs);
 
         let tab = self.roles.tab;
         let body = match tab {
-            RoleTab::Display if !everyone => self.role_display(role, &e, color, &shown, locked, snap, p, cx),
-            RoleTab::Members if !everyone => self.role_members(role, locked, snap, p, cx),
-            _ => self.role_permissions(role, &e, everyone, locked, &snap.access, p, cx),
+            RoleTab::Display if !everyone => self.role_display(role, &e, color, &shown, locked, snap, p, window, cx),
+            RoleTab::Members if !everyone => self.role_members(role, locked, snap, p, window, cx),
+            _ => self.role_permissions(role, &e, everyone, locked, &snap.access, p, window, cx),
         };
 
         let n = self.changes(role, everyone, cx);
         let saving = self.roles.saving;
         if n > 0 {
             let (r1, r2) = (role.clone(), role.clone());
-            self.bar = Some(save_bar(
+            self.bar = Some(bar_with_error(
                 "role-save-bar",
                 n,
                 saving,
+                self.roles.error.as_deref(),
                 p,
                 cx,
                 move |this, window, cx| this.discard_role(&r1, window, cx),
@@ -833,33 +875,34 @@ impl ServerSettingsView {
                 },
             ));
         }
-        let _ = window;
         div()
             .flex()
             .flex_col()
             .child(header)
             .when(locked, |el| {
-                el.child(
+                el.child(super::pages::slide_in(
                     div()
-                        .mb(px(14.0))
+                        .mb(px(16.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
                         .px(px(12.0))
                         .py(px(8.0))
-                        .rounded(corner(12.0))
+                        .rounded(radius_xl())
                         .bg(alpha(p.muted, 0.6))
                         .text_sm()
+                        .line_height(px(20.0))
                         .text_color(p.muted_foreground)
-                        .child(icon("lock").size(px(15.0)))
+                        .child(icon("lock").size(px(16.0)))
                         .child(t("serversettings.roles.locked")),
-                )
+                    "role-locked",
+                ))
             })
             .child(motion::rise(
                 body,
                 SharedString::from(format!("role-body-{}-{}", role.id, tab as u8)),
                 Duration::ZERO,
-                8.0,
+                10.0,
             ))
     }
 
@@ -873,78 +916,170 @@ impl ServerSettingsView {
         locked: bool,
         snap: &Snap,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
+        // A ring around the picked swatch (`ring-2 ring-foreground ring-offset-2`).
+        let ring = |el: Stateful<gpui_kit::Div>, on: bool| {
+            el.when(on, |el| {
+                el.shadow(vec![
+                    gpui_kit::BoxShadow {
+                        color: p.foreground.into(),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(4.0),
+                        inset: false,
+                    },
+                    gpui_kit::BoxShadow {
+                        color: p.background.into(),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(2.0),
+                        inset: false,
+                    },
+                ])
+            })
+        };
         let mut swatches = div().flex().flex_wrap().gap(px(8.0));
         for c in std::iter::once(None).chain(SWATCHES.iter().map(|c| Some(*c))) {
             let on = color == c;
-            let ring = p.foreground;
             let mut swatch = div()
                 .id(SharedString::from(format!("swatch-{c:?}")))
-                .size(px(32.0))
+                .relative()
+                .size(px(36.0))
                 .flex()
                 .items_center()
                 .justify_center()
                 .rounded_full()
                 .when(locked, |el| el.opacity(0.5))
                 .when(!locked, |el| {
-                    el.cursor_pointer().hover(|s| s.size(px(34.0)).m(px(-1.0))).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.roles.edits.color = Some(c);
-                            cx.notify();
-                        },
-                    ))
+                    el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                        this.roles.edits.color = Some(c);
+                        this.roles.custom = false;
+                        cx.notify();
+                    }))
                 });
             swatch = match c {
                 Some(c) => swatch.bg(color_of(c)),
                 None => swatch.border_2().border_color(alpha(p.muted_foreground, 0.4)).bg(p.background),
             };
+            swatch = ring(swatch, on);
             if on {
-                swatch = swatch.border_2().border_color(ring).child(motion::rise(
+                swatch = swatch.child(motion::once(
                     icon("check").size(px(16.0)).text_color(if c.is_some() { rgb(0xffffff) } else { p.foreground }),
                     SharedString::from(format!("swatch-check-{c:?}")),
-                    Duration::ZERO,
-                    -4.0,
+                    Duration::from_millis(260),
+                    |el, t| el.opacity(t),
                 ));
             } else if c.is_none() {
-                swatch = swatch.child(div().w(px(16.0)).h(px(2.0)).rounded_full().bg(alpha(p.muted_foreground, 0.6)));
+                swatch = swatch.child(icon("slash").size(px(20.0)).text_color(alpha(p.muted_foreground, 0.6)));
             }
             swatches = swatches.child(swatch);
         }
+        // Any color at all: the rainbow, or the color itself once it's one of a kind.
+        let custom = color.is_some_and(|c| !SWATCHES.contains(&c));
+        let rainbow = div()
+            .id("swatch-custom")
+            .size(px(36.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .border_2()
+            .border_dashed()
+            .map(|el| match color.filter(|_| custom) {
+                Some(c) => el.border_color(gpui_kit::transparent_black()).bg(color_of(c)),
+                None => el.border_color(alpha(p.muted_foreground, 0.4)).bg(gpui_kit::linear_gradient(
+                    135.0,
+                    gpui_kit::linear_color_stop(color_of(0xf472b6), 0.0),
+                    gpui_kit::linear_color_stop(color_of(0x38bdf8), 1.0),
+                )),
+            })
+            .when(locked, |el| el.opacity(0.5))
+            .when(!locked, |el| {
+                el.cursor_pointer().on_click(cx.listener(|this, _, window, cx| {
+                    this.roles.custom = !this.roles.custom;
+                    if this.roles.custom {
+                        this.roles.hex.update(cx, |s, cx| s.focus(window, cx));
+                    }
+                    cx.notify();
+                }))
+            })
+            .when(custom, |el| el.child(icon("check").size(px(16.0)).text_color(rgb(0xffffff))));
+        swatches = swatches.child(ring(rainbow, custom));
+        let hex_box = self.roles.custom.then(|| {
+            super::pages::slide_in(
+                div().mt(px(8.0)).w(px(160.0)).child(super::pages::boxed(
+                    Input::new(&self.roles.hex).appearance(false),
+                    36.0,
+                    super::pages::focused(&self.roles.hex, window, cx),
+                    p,
+                )),
+                "role-hex",
+            )
+        });
         let hoist = e.hoist.unwrap_or(role.hoist);
         let mentionable = e.mentionable.unwrap_or(role.mentionable);
-        let toggle =
-            |id: &str, title: &str, body: &str, on: bool, cx: &mut Context<Self>, set: fn(&mut Edits, bool)| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(div().font_weight(FontWeight::BOLD).text_sm().child(title.to_owned()))
-                            .child(div().text_xs().text_color(p.muted_foreground).child(body.to_owned())),
-                    )
-                    .child(switch(SharedString::from(id.to_owned()), on, locked, cx, move |this, v, cx| {
+        let mut toggle = |id: &'static str, title: &str, body: &str, on: bool, set: fn(&mut Edits, bool)| {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(16.0))
+                .when(locked, |el| el.opacity(0.6))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div().font_weight(FontWeight::BOLD).text_sm().line_height(px(20.0)).child(title.to_owned()),
+                        )
+                        .child(
+                            div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(body.to_owned()),
+                        ),
+                )
+                .child(crate::ui::settings_controls::switch(
+                    id,
+                    on,
+                    locked,
+                    p,
+                    window,
+                    cx,
+                    move |this: &mut Self, v, cx| {
                         set(&mut this.roles.edits, v);
                         cx.notify();
-                    }))
-            };
+                    },
+                ))
+        };
+        let hoist_toggle = toggle(
+            "role-hoist",
+            &t("serversettings.roles.hoist"),
+            &t("serversettings.roles.hoistHint"),
+            hoist,
+            |e, v| e.hoist = Some(v),
+        );
+        let mention_toggle = toggle(
+            "role-mentionable",
+            &t("serversettings.roles.mentionable"),
+            &t("serversettings.roles.mentionableHint"),
+            mentionable,
+            |e, v| e.mentionable = Some(v),
+        );
         let mention_bg = color.map(|c| color_of(c).opacity(0.15)).unwrap_or(alpha(p.primary, 0.15));
         let mention_fg = color.map(color_of).unwrap_or(p.primary.into());
         let me = snap.me.clone();
         let my_name = me.as_ref().map(user_name).unwrap_or_else(|| t("serversettings.shared.you"));
+        let my_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
         // The greeting around the mention, split where the role goes.
         let line = t_with("serversettings.roles.previewLine", &[("role", Arg::Str("\u{E000}"))]);
         let (hey, welcome) = line.split_once('\u{E000}').unwrap_or((line.as_str(), ""));
-        let (hey, welcome) = (hey.trim_end().to_owned(), welcome.to_owned());
+        let (hey, welcome) = (hey.to_owned(), welcome.to_owned());
         let preview = div()
             .flex()
             .flex_col()
-            .gap(px(10.0))
+            .gap(px(12.0))
             .p(px(12.0))
-            .rounded(corner(16.0))
+            .rounded(radius_2xl())
             .bg(alpha(p.muted, 0.5))
             .child(
                 div().flex().items_center().gap(px(10.0)).child(avatar(me.as_ref(), 36.0, p)).child(
@@ -953,7 +1088,10 @@ impl ServerSettingsView {
                         .child(
                             div()
                                 .font_weight(FontWeight::BOLD)
-                                .when_some(color, |el, c| el.text_color(color_of(c)))
+                                .text_color(match color {
+                                    Some(c) => color_of(c),
+                                    None => crate::ui::widgets::name_tint(&my_id, p),
+                                })
                                 .child(my_name),
                         )
                         .child(
@@ -961,38 +1099,36 @@ impl ServerSettingsView {
                                 .flex()
                                 .flex_wrap()
                                 .items_center()
-                                .gap(px(0.0))
                                 .text_sm()
+                                .line_height(px(20.0))
                                 .text_color(p.muted_foreground)
-                                .child(hey.clone())
+                                .child(hey.replace(' ', "\u{a0}"))
                                 .child(
                                     div()
-                                        .when(!hey.is_empty(), |el| el.ml(px(4.0)))
                                         .px(px(4.0))
-                                        .rounded(corner(6.0))
+                                        .rounded(radius_md())
                                         .bg(mention_bg)
                                         .text_color(mention_fg)
                                         .font_weight(FontWeight::BOLD)
                                         .child(format!("@{shown}")),
                                 )
-                                .child(welcome),
+                                .child(welcome.replace(' ', "\u{a0}")),
                         ),
                 ),
             )
             .when(hoist, |el| {
-                el.child(motion::rise(
+                el.child(super::pages::slide_in(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(6.0))
                         .text_xs()
+                        .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
                         .child(dot(color, 8.0, p))
                         .child(format!("{} — 1", shown.to_uppercase())),
                     "role-hoist-preview",
-                    Duration::ZERO,
-                    -6.0,
                 ))
             });
 
@@ -1006,12 +1142,12 @@ impl ServerSettingsView {
                     div()
                         .flex()
                         .flex_col()
-                        .gap(px(10.0))
+                        .gap(px(12.0))
                         .p(px(16.0))
-                        .rounded(corner(16.0))
+                        .rounded(radius_2xl())
                         .border_1()
                         .border_color(alpha(p.destructive, 0.4))
-                        .bg(alpha(p.destructive, 0.06))
+                        .bg(alpha(p.destructive, 0.05))
                         .child(
                             div()
                                 .flex()
@@ -1023,30 +1159,37 @@ impl ServerSettingsView {
                                 .child(t_with("serversettings.roles.deleteAsk", &[("role", Arg::Str(&role.name))])),
                         )
                         .child(
-                            div().text_sm().text_color(p.muted_foreground).child(t("serversettings.roles.deleteHint")),
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.roles.deleteHint")),
                         )
                         .child(
                             div()
                                 .flex()
                                 .justify_end()
                                 .gap(px(8.0))
-                                .child(soft_button("role-keep", t("serversettings.shared.keepIt"), p).on_click(
-                                    cx.listener(|this, _, _, cx| {
-                                        this.roles.confirming = false;
-                                        cx.notify();
-                                    }),
-                                ))
                                 .child(
-                                    danger_button(
+                                    button("role-keep", t("serversettings.shared.keepIt"), None, Look::Ghost, false, p)
+                                        .rounded(radius_xl())
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.roles.confirming = false;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    button(
                                         "role-delete-yes",
-                                        if busy {
-                                            t("accountsettings.privacy.deleting")
-                                        } else {
-                                            t("serversettings.shared.delete")
-                                        },
+                                        t("serversettings.shared.delete"),
+                                        if busy { None } else { Some("trash") },
+                                        Look::Destructive,
+                                        false,
                                         p,
                                     )
-                                    .child(icon("trash").size(px(15.0)))
+                                    .rounded(radius_xl())
+                                    .font_weight(FontWeight::BOLD)
+                                    .when(busy, |el| el.opacity(0.6))
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
                                             if !this.roles.saving {
@@ -1064,28 +1207,25 @@ impl ServerSettingsView {
             )
         } else {
             let red = alpha(p.destructive, 0.1);
+            let destructive = p.destructive;
             Some(
                 div()
+                    .flex()
                     .child(
-                        div()
-                            .id("role-delete")
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .px(px(12.0))
-                            .h(px(36.0))
-                            .rounded(corner(12.0))
-                            .cursor_pointer()
-                            .text_color(p.destructive)
-                            .font_weight(FontWeight::BOLD)
-                            .text_sm()
-                            .hover(move |s| s.bg(red))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.roles.confirming = true;
-                                cx.notify();
-                            }))
-                            .child(icon("trash").size(px(15.0)))
-                            .child(t("serversettings.roles.delete")),
+                        super::pages::hover_button(
+                            "role-delete",
+                            t("serversettings.roles.delete"),
+                            Some("trash"),
+                            false,
+                            p,
+                            move |s| s.bg(red),
+                        )
+                        .text_color(destructive)
+                        .font_weight(FontWeight::MEDIUM)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.roles.confirming = true;
+                            cx.notify();
+                        })),
                     )
                     .into_any_element(),
             )
@@ -1094,44 +1234,38 @@ impl ServerSettingsView {
         div()
             .flex()
             .flex_col()
-            .gap(px(20.0))
-            .child(labeled(&t("serversettings.roles.name"), Input::new(&self.roles.name).large().disabled(locked), p))
-            .child(labeled(
+            .child(
+                form_row(
+                    &t("serversettings.roles.name"),
+                    None,
+                    super::pages::boxed(
+                        Input::new(&self.roles.name).appearance(false).disabled(locked),
+                        44.0,
+                        super::pages::focused(&self.roles.name, window, cx),
+                        p,
+                    ),
+                    false,
+                    p,
+                )
+                // The first row sits right under the tabs, as the web's does.
+                .pt(px(0.0)),
+            )
+            .child(form_row(
                 &t("serversettings.roles.color"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.roles.colorHint")))
-                    .child(swatches),
+                Some(t("serversettings.roles.colorHint")),
+                div().flex().flex_col().child(swatches).children(hex_box),
+                false,
                 p,
             ))
-            .child(labeled(
+            .child(form_row(
                 &t("serversettings.roles.howItShows"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .child(toggle(
-                        "role-hoist",
-                        &t("serversettings.roles.hoist"),
-                        &t("serversettings.roles.hoistHint"),
-                        hoist,
-                        cx,
-                        |e, v| e.hoist = Some(v),
-                    ))
-                    .child(toggle(
-                        "role-mentionable",
-                        &t("serversettings.roles.mentionable"),
-                        &t("serversettings.roles.mentionableHint"),
-                        mentionable,
-                        cx,
-                        |e, v| e.mentionable = Some(v),
-                    )),
+                None,
+                div().flex().flex_col().gap(px(16.0)).child(hoist_toggle).child(mention_toggle),
+                false,
                 p,
             ))
-            .child(labeled(&t("settings.controls.preview"), preview, p))
-            .children(delete)
+            .child(form_row(&t("settings.controls.preview"), None, preview, true, p))
+            .children(delete.map(|d| div().py(px(20.0)).child(d)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1143,15 +1277,19 @@ impl ServerSettingsView {
         locked: bool,
         access: &Access,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
         let bits = e.permissions(role);
         let live = permissions::from_list(&role.permissions);
         let query = self.roles.perm_query.read(cx).value().trim().to_lowercase();
-        let mut out =
-            div().flex().flex_col().gap(px(16.0)).child(div().text_sm().text_color(p.muted_foreground).child(
-                if everyone { t("serversettings.roles.everyoneIntro") } else { t("serversettings.roles.roleIntro") },
-            ));
+        let mut out = div().flex().flex_col().gap(px(16.0)).child(
+            div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(if everyone {
+                t("serversettings.roles.everyoneIntro")
+            } else {
+                t("serversettings.roles.roleIntro")
+            }),
+        );
         // Clearing takes away only what you could give.
         let clearable = permissions::KNOWN
             .iter()
@@ -1160,11 +1298,13 @@ impl ServerSettingsView {
         out = out.child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap(px(8.0))
-                .child(div().flex_1().child(Input::new(&self.roles.perm_query).prefix(icon("search").size(px(16.0)))))
+                .child(super::people::search_box(&self.roles.perm_query, p, window, cx).flex_1().min_w(px(192.0)))
                 .child(
-                    soft_button("role-clear", t("serversettings.roles.clearAll"), p)
+                    button("role-clear", t("serversettings.roles.clearAll"), None, Look::Ghost, true, p)
+                        .rounded(radius_xl())
                         .when(locked || clearable == 0, |el| el.opacity(0.5))
                         .when(!locked && clearable != 0, |el| {
                             el.on_click(cx.listener(move |this, _, _, cx| {
@@ -1192,26 +1332,29 @@ impl ServerSettingsView {
             let mut section = div().flex().flex_col().child(
                 div()
                     .mb(px(4.0))
-                    .text_size(px(11.0))
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
                     .child(group_name(title).to_uppercase()),
             );
+            let count = matching.len();
             for (n, perm) in matching.into_iter().enumerate() {
                 let (label, about) = (permission_name(perm), permission_about(perm));
                 let on = bits & bit(perm) != 0;
                 let allowed = access.may_change(bit(perm), access.server);
                 let admin = perm == P::Administrator;
+                let last = n + 1 == count;
                 let row = div()
                     .flex()
                     .items_center()
                     .gap(px(16.0))
-                    .py(px(10.0))
-                    .border_b_1()
-                    .border_color(alpha(p.border, 0.6))
+                    .py(px(12.0))
+                    .when(!last, |el| el.border_b_1().border_color(alpha(p.border, 0.6)))
                     .when(admin && on, |el| {
-                        el.px(px(12.0))
-                            .rounded(corner(12.0))
+                        el.mx(px(-12.0))
+                            .px(px(12.0))
+                            .rounded(radius_xl())
                             .border_color(gpui_kit::transparent_black())
                             .bg(alpha(p.destructive, 0.08))
                     })
@@ -1225,9 +1368,10 @@ impl ServerSettingsView {
                                     .items_center()
                                     .gap(px(6.0))
                                     .text_sm()
+                                    .line_height(px(20.0))
                                     .font_weight(FontWeight::BOLD)
                                     .when(admin, |el| {
-                                        el.child(icon("shield-alert").size(px(15.0)).text_color(if on {
+                                        el.child(icon("shield-alert").size(px(16.0)).text_color(if on {
                                             p.destructive
                                         } else {
                                             p.muted_foreground
@@ -1240,25 +1384,28 @@ impl ServerSettingsView {
                                                 .flex()
                                                 .items_center()
                                                 .gap(px(4.0))
-                                                .px(px(7.0))
-                                                .h(px(18.0))
+                                                .px(px(8.0))
+                                                .py(px(2.0))
                                                 .rounded_full()
                                                 .bg(p.muted)
-                                                .text_size(px(10.0))
+                                                .text_size(px(10.4))
+                                                .font_weight(FontWeight::BOLD)
                                                 .text_color(p.muted_foreground)
-                                                .child(icon("lock").size(px(10.0)))
+                                                .child(icon("lock").size(px(12.0)))
                                                 .child(t("serversettings.roles.notYours")),
                                         )
                                     }),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(about)),
+                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about)),
                     )
-                    .child(switch(
+                    .child(crate::ui::settings_controls::switch(
                         SharedString::from(format!("perm-{}", perm as i32)),
                         on,
                         locked || !allowed,
+                        p,
+                        window,
                         cx,
-                        move |this, v, cx| {
+                        move |this: &mut Self, v, cx| {
                             this.roles.edits.switch(live, bit(perm), v);
                             cx.notify();
                         },
@@ -1292,6 +1439,7 @@ impl ServerSettingsView {
         locked: bool,
         snap: &Snap,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Div {
         let query = self.roles.member_query.read(cx).value().trim().to_lowercase();
@@ -1302,13 +1450,24 @@ impl ServerSettingsView {
             let adding = self.roles.adding;
             out = out.child(
                 div().flex().child(
-                    soft_button("role-add-members", t("serversettings.roles.addMembers"), p)
-                        .child(icon("user-plus").size(px(15.0)))
-                        .when(adding, |el| el.bg(alpha(p.primary, 0.16)))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.roles.adding = !this.roles.adding;
-                            cx.notify();
-                        })),
+                    button(
+                        "role-add-members",
+                        t("serversettings.roles.addMembers"),
+                        Some("user-plus"),
+                        if adding { Look::Ghost } else { Look::Outline },
+                        false,
+                        p,
+                    )
+                    .rounded(radius_xl())
+                    .font_weight(FontWeight::BOLD)
+                    .when(adding, |el| el.bg(p.secondary))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.roles.adding = !this.roles.adding;
+                        if this.roles.adding {
+                            this.roles.member_query.update(cx, |s, cx| s.focus(window, cx));
+                        }
+                        cx.notify();
+                    })),
                 ),
             );
             if adding {
@@ -1331,27 +1490,31 @@ impl ServerSettingsView {
                 let mut list =
                     div().id("role-others").flex().flex_col().gap(px(2.0)).max_h(px(240.0)).overflow_y_scroll();
                 if others.is_empty() {
-                    list = list.child(div().py(px(12.0)).text_center().text_sm().text_color(p.muted_foreground).child(
-                        if query.is_empty() {
-                            t("serversettings.roles.everyoneHas")
-                        } else {
-                            t("serversettings.shared.nobodyMatches")
-                        },
-                    ));
+                    list = list.child(
+                        div().px(px(8.0)).py(px(12.0)).text_center().text_sm().text_color(p.muted_foreground).child(
+                            if query.is_empty() {
+                                t("serversettings.roles.everyoneHas")
+                            } else {
+                                t("serversettings.shared.nobodyMatches")
+                            },
+                        ),
+                    );
                 }
                 for (n, m) in others.into_iter().enumerate() {
                     let Some(user) = m.user.clone() else { continue };
                     let (uid, rid) = (user.id.clone(), role.id.clone());
                     let hover = alpha(p.primary, 0.1);
-                    list = list.child(motion::rise(
+                    let group = SharedString::from(format!("role-give-g-{}", user.id));
+                    list = list.child(motion::slide_in(
                         div()
                             .id(SharedString::from(format!("role-give-{}", user.id)))
+                            .group(group.clone())
                             .flex()
                             .items_center()
                             .gap(px(10.0))
                             .px(px(8.0))
                             .py(px(6.0))
-                            .rounded(corner(12.0))
+                            .rounded(radius_xl())
                             .cursor_pointer()
                             .text_sm()
                             .hover(move |s| s.bg(hover))
@@ -1363,28 +1526,37 @@ impl ServerSettingsView {
                             .child(
                                 div().flex_1().min_w_0().truncate().font_weight(FontWeight::BOLD).child(member_name(m)),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(format!("@{}", user.username)))
-                            .child(icon("plus").size(px(15.0)).text_color(p.primary)),
-                        SharedString::from(format!("role-other-{}", user.id)),
-                        Duration::from_millis(15 * n.min(12) as u64),
-                        -6.0,
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(p.muted_foreground)
+                                    .child(format!("@{}", user.username)),
+                            )
+                            .child(
+                                div()
+                                    .opacity(0.0)
+                                    .group_hover(group, |s| s.opacity(1.0))
+                                    .text_color(p.primary)
+                                    .child(icon("plus").size(px(16.0))),
+                            ),
+                        SharedString::from(format!("role-other-{}-{n}", user.id)),
+                        -8.0,
                     ));
                 }
-                out = out.child(motion::rise(
+                out = out.child(super::pages::slide_in(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(8.0))
                         .p(px(8.0))
-                        .rounded(corner(16.0))
+                        .rounded(radius_2xl())
                         .border_1()
                         .border_color(p.border)
                         .bg(alpha(p.background, 0.4))
-                        .child(Input::new(&self.roles.member_query).prefix(icon("search").size(px(16.0))))
+                        .child(super::people::search_box(&self.roles.member_query, p, window, cx))
                         .child(list),
                     "role-adding",
-                    Duration::ZERO,
-                    -8.0,
                 ));
             }
         }
@@ -1399,13 +1571,24 @@ impl ServerSettingsView {
                     .child(t("serversettings.roles.nobody")),
             );
         }
+        let mut list = div().flex().flex_col().gap(px(6.0));
         for (n, m) in holders.into_iter().enumerate() {
             let Some(user) = m.user.clone() else { continue };
             let (uid, rid) = (user.id.clone(), role.id.clone());
             let red = alpha(p.destructive, 0.1);
-            out = out.child(motion::rise(
-                row(p)
+            let hover_border = alpha(p.primary, 0.3);
+            list = list.child(motion::rise(
+                div()
+                    .id(SharedString::from(format!("role-holder-row-{}", user.id)))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
                     .p(px(8.0))
+                    .rounded(radius_2xl())
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(alpha(p.background, 0.4))
+                    .hover(move |s| s.border_color(hover_border))
                     .when(busy.as_deref() == Some(user.id.as_str()), |el| el.opacity(0.5))
                     .child(avatar(Some(&user), 36.0, p))
                     .child(
@@ -1416,20 +1599,30 @@ impl ServerSettingsView {
                                 div()
                                     .truncate()
                                     .font_weight(FontWeight::BOLD)
-                                    .when_some(color, |el, c| el.text_color(color_of(c)))
+                                    .text_color(match color {
+                                        Some(c) => color_of(c),
+                                        None => crate::ui::widgets::name_tint(&user.id, p),
+                                    })
                                     .child(member_name(m)),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(format!("@{}", user.username))),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(format!("@{}", user.username)),
+                            ),
                     )
                     .when(!locked, |el| {
                         el.child(
                             div()
                                 .id(SharedString::from(format!("role-take-{}", user.id)))
-                                .size(px(34.0))
+                                .size(px(36.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(corner(10.0))
+                                .rounded(radius_xl())
                                 .cursor_pointer()
                                 .text_color(p.muted_foreground)
                                 .hover({
@@ -1444,10 +1637,53 @@ impl ServerSettingsView {
                     }),
                 SharedString::from(format!("role-holder-{}", user.id)),
                 Duration::from_millis(20 * n.min(12) as u64),
-                8.0,
+                10.0,
             ));
         }
-        out
+        out.child(list)
+    }
+}
+
+/// A role being dragged into rank, and the copy of it that follows the pointer.
+#[derive(Clone)]
+pub(super) struct RoleDrag {
+    id: String,
+    name: SharedString,
+    color: Option<u32>,
+}
+
+impl Render for RoleDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = pal(cx);
+        div()
+            .w(px(220.0))
+            .h(px(36.0))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(radius_lg())
+            .bg(p.background)
+            .text_sm()
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.foreground)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.45),
+                offset: point(px(0.0), px(12.0)),
+                blur_radius: px(30.0),
+                spread_radius: px(-12.0),
+                inset: false,
+            }])
+            .child(icon("grip-vertical").size(px(16.0)).text_color(p.muted_foreground))
+            .child(dot(self.color, 12.0, &p))
+            .child(self.name.clone())
+    }
+}
+
+impl ServerSettingsView {
+    /// Opens a tab of the role editor (search jumping to a role's permissions or members).
+    pub(super) fn roles_tab(&mut self, tab: RoleTab) {
+        self.roles.tab = tab;
     }
 }
 

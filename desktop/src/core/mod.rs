@@ -48,6 +48,7 @@ pub mod search;
 pub mod secrets;
 pub mod secure_threads;
 pub mod server_admin;
+pub mod server_pages;
 pub mod shared;
 pub mod sounds;
 pub mod sso;

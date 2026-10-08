@@ -452,10 +452,10 @@ impl ServerSettingsView {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(6.0))
-                    .py(px(28.0))
+                    .gap(px(8.0))
+                    .py(px(32.0))
                     .child(motion::once(
-                        div().text_size(px(40.0)).child("🫥"),
+                        div().text_size(px(36.0)).line_height(px(40.0)).child("🫥"),
                         "emoji-empty-bob",
                         Duration::from_millis(1400),
                         |el, t| {
@@ -464,7 +464,13 @@ impl ServerSettingsView {
                         },
                     ))
                     .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.emoji.none")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.emoji.noneHint"))),
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("serversettings.emoji.noneHint")),
+                    ),
                 "emoji-empty",
                 Duration::from_millis(80),
                 8.0,
@@ -489,6 +495,7 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(6.0))
                     .text_xs()
+                    .line_height(px(16.0))
                     .text_color(amber)
                     .child(icon("image-plus").size(px(14.0)))
                     .child(t("serversettings.emoji.full")),
@@ -552,8 +559,9 @@ impl ServerSettingsView {
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.emoji.drop")))
             .child(
                 div()
-                    .max_w(px(400.0))
+                    .max_w(px(384.0))
                     .text_xs()
+                    .line_height(px(16.0))
                     .text_color(p.muted_foreground)
                     .child(t("serversettings.emoji.dropHint")),
             )
@@ -565,6 +573,7 @@ impl ServerSettingsView {
                     .rounded_full()
                     .bg(p.muted)
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .child(match cap {
                         Some(cap) => t_with(
@@ -677,6 +686,7 @@ impl ServerSettingsView {
                             div()
                                 .truncate()
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .text_color(if failed { p.destructive } else { p.muted_foreground })
                                 .child(status),
                         ),
@@ -769,6 +779,7 @@ impl ServerSettingsView {
                         .h(px(32.0))
                         .px(px(12.0))
                         .text_xs()
+                        .line_height(px(16.0))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if this.emojis.busy.is_none() {
                                 this.remove_emoji(yes.clone(), cx)
@@ -833,6 +844,7 @@ impl ServerSettingsView {
                                 .items_center()
                                 .gap(px(6.0))
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .text_color(p.muted_foreground)
                                 .child(avatar(creator, 16.0, p))
                                 .child(div().min_w_0().truncate().child(about)),

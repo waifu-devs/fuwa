@@ -1347,6 +1347,13 @@ impl FuwaApp {
             |this: &mut Self, view, event: &ServerSettingsEvent, window, cx| {
                 match event {
                     ServerSettingsEvent::Close => this.server_settings = None,
+                    ServerSettingsEvent::OpenAgents => {
+                        this.server_settings = None;
+                        this.open_settings(window, cx);
+                        if let Some(settings) = this.settings.clone() {
+                            settings.update(cx, |v, cx| v.choose(crate::ui::settings::Page::Agents, None, cx));
+                        }
+                    }
                     ServerSettingsEvent::Toast { icon, title } => {
                         this.toast(icon, title.clone(), String::new(), None, None, cx)
                     }
@@ -1357,6 +1364,10 @@ impl FuwaApp {
                         };
                         let dialog = Dialog::Moderate { key, server, user_id: user_id.clone(), action: *action };
                         this.open_dialog(dialog, window, cx);
+                    }
+                    ServerSettingsEvent::Invite { .. } => {
+                        let server = view.read(cx).server.clone();
+                        this.open_dialog(Dialog::Invite { link: None, server }, window, cx);
                     }
                     ServerSettingsEvent::CreateChannel { parent } => {
                         let (key, server) = {
@@ -1861,8 +1872,8 @@ impl FuwaApp {
             self.rail.editing = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
-        } else if self.server_settings.is_some() {
-            self.server_settings = None;
+        } else if let Some(view) = self.server_settings.clone() {
+            view.update(cx, |v, cx| v.escape(window, cx));
         } else if let Some(view) = self.instance_settings.clone() {
             if !view.update(cx, |v, cx| v.escape(cx)) {
                 self.instance_settings = None;

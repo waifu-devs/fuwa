@@ -8,13 +8,15 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui_kit::StyledImage as _;
 use gpui_kit::{Bounds, ImgResourceLoader, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Resource, canvas, img};
 
 use super::roles::switch;
 use super::*;
 use crate::core::onboarding::{self as onb, PICK, RULES, SAY_HELLO};
-use crate::ui::banner::{accent, cover, hex, hue_of, on_accent, parse_hex, server_banner};
+use crate::ui::banner::{accent, cover, hex, hue_of, on_accent, parse_hex};
 use crate::ui::overlay::emoji_tile;
+use crate::ui::theme::{radius_2xl, radius_lg, radius_xl};
 
 /// The shapes a banner is shown in, as the web lists them: a name, and its width and height.
 fn crops() -> [(String, f32, f32); 3] {
@@ -53,6 +55,9 @@ pub(super) struct Onboard {
     /// The banner, its focus and accent as they're being edited (`None` until filled).
     look: Option<(String, (i32, i32), i32)>,
     hex: Entity<InputState>,
+    /// The banner's link, typed in ("Use a link"), and whether its box is open.
+    link: Entity<InputState>,
+    link_open: bool,
     uploading: bool,
     /// Where the focal point editor is on screen, for turning a click into a focus.
     focus_box: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -63,7 +68,7 @@ pub(super) struct Onboard {
 impl Onboard {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
         let hex = cx.new(|cx| InputState::new(window, cx).placeholder("#ff88aa"));
-        let subs = vec![cx.subscribe(&hex, |this: &mut ServerSettingsView, input, e: &InputEvent, cx| {
+        let mut subs = vec![cx.subscribe(&hex, |this: &mut ServerSettingsView, input, e: &InputEvent, cx| {
             if let InputEvent::Change = e {
                 if let Some(color) = parse_hex(&input.read(cx).value())
                     && let Some(look) = this.onboard.look.as_mut()
@@ -73,6 +78,20 @@ impl Onboard {
                 cx.notify()
             }
         })];
+        let link = cx.new(|cx| InputState::new(window, cx).placeholder("https://…"));
+        subs.push(cx.subscribe(&link, |this: &mut ServerSettingsView, input, e: &InputEvent, cx| {
+            if let InputEvent::Change = e {
+                let typed = input.read(cx).value().trim().to_string();
+                if let Some(look) = this.onboard.look.as_mut()
+                    && (typed.is_empty() || typed.starts_with("https://") || typed.starts_with("http://"))
+                    && look.0 != typed
+                {
+                    look.0 = typed;
+                    look.1 = (50, 50);
+                }
+                cx.notify()
+            }
+        }));
         let onboard = Self {
             saved: None,
             loading: false,
@@ -84,6 +103,8 @@ impl Onboard {
             open: None,
             look: None,
             hex,
+            link,
+            link_open: false,
             uploading: false,
             focus_box: Rc::new(Cell::new(None)),
             dragging: false,
@@ -485,35 +506,145 @@ impl ServerSettingsView {
             })
             .flatten();
 
-        let buttons = div()
+        // The picture, as the web's `PictureField` for a banner: the tile (click to change it),
+        // then upload or change, remove, and setting it from a link.
+        let link_open = self.onboard.link_open;
+        let tile = div()
+            .id("banner-tile")
+            .group("banner-tile")
+            .relative()
+            .w(px(240.0))
+            .h(px(96.0))
+            .flex_none()
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.muted)
+            .cursor_pointer()
+            .active(|s| s.opacity(0.9))
+            .on_click(cx.listener(|this, _, _, cx| this.pick_banner(cx)))
+            .child(if url.is_empty() {
+                crate::ui::banner::server_banner_round(&drafted, 238.0, 94.0, None, 15.0, window, cx)
+            } else {
+                img(SharedString::from(url.clone()))
+                    .size_full()
+                    .object_fit(gpui_kit::ObjectFit::Cover)
+                    .rounded(radius_2xl())
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(radius_2xl())
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(2.0))
+                    .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.45))
+                    .text_color(gpui_kit::white())
+                    .text_size(px(10.4))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .opacity(if uploading { 1.0 } else { 0.0 })
+                    .group_hover("banner-tile", |s| s.opacity(1.0))
+                    .child(if uploading {
+                        spinner("banner-busy", 20.0, window)
+                    } else {
+                        icon("camera").size(px(20.0)).into_any_element()
+                    })
+                    .child(if uploading { String::new() } else { t("workspace.picture.changeShort").to_uppercase() }),
+            );
+        let (fg, destructive) = (p.foreground, p.destructive);
+        let actions = div()
             .flex()
+            .flex_wrap()
+            .items_center()
             .gap(px(8.0))
             .child(
-                primary_button(
+                crate::ui::settings_controls::button(
                     "banner-pick",
-                    if uploading {
-                        t("serversettings.emoji.uploading")
-                    } else if url.is_empty() {
-                        t("workspace.picture.upload.banner")
+                    if url.is_empty() {
+                        t("workspace.picture.uploadShort")
                     } else {
                         t("workspace.picture.changeShort")
                     },
+                    Some("image-up"),
+                    crate::ui::settings_controls::Look::Outline,
+                    false,
                     p,
                 )
-                .when(uploading, |el| el.opacity(0.6))
+                .rounded(radius_xl())
+                .when(uploading, |el| el.opacity(0.5))
                 .on_click(cx.listener(|this, _, _, cx| this.pick_banner(cx))),
             )
             .when(!url.is_empty(), |el| {
-                el.child(soft_button("banner-remove", t("system.picture.remove"), p).on_click(cx.listener(
-                    |this, _, _, cx| {
+                el.child(
+                    super::pages::hover_button(
+                        "banner-remove",
+                        t("system.picture.remove"),
+                        Some("trash"),
+                        false,
+                        p,
+                        move |s| s.text_color(destructive),
+                    )
+                    .text_color(p.muted_foreground)
+                    .font_weight(FontWeight::MEDIUM)
+                    .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(look) = this.onboard.look.as_mut() {
                             look.0.clear();
                             look.1 = (50, 50);
                         }
+                        this.onboard.link.update(cx, |s, cx| s.set_value("", window, cx));
                         cx.notify();
-                    },
-                )))
-            });
+                    })),
+                )
+            })
+            .child(
+                div()
+                    .id("banner-link")
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .rounded(radius_lg())
+                    .px(px(6.0))
+                    .py(px(4.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .cursor_pointer()
+                    .hover(move |s| s.text_color(fg))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.onboard.link_open = !this.onboard.link_open;
+                        if this.onboard.link_open {
+                            let now = this.onboard.look.as_ref().map(|l| l.0.clone()).unwrap_or_default();
+                            this.onboard.link.update(cx, |s, cx| s.set_value(now, window, cx));
+                        }
+                        cx.notify();
+                    }))
+                    .child(icon("link").size(px(14.0)))
+                    .child(if link_open { t("workspace.picture.hideLink") } else { t("workspace.picture.useLink") }),
+            );
+        let link_box = link_open.then(|| {
+            motion::rise(
+                div().pt(px(4.0)).child(super::pages::boxed(
+                    Input::new(&self.onboard.link).appearance(false),
+                    44.0,
+                    super::pages::focused(&self.onboard.link, window, cx),
+                    p,
+                )),
+                "banner-link-box",
+                Duration::ZERO,
+                -6.0,
+            )
+        });
+        let buttons = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(div().flex().items_center().gap(px(16.0)).child(tile).child(actions))
+            .children(link_box);
 
         // The focal point: the whole picture, with a dot to drag where it matters.
         let focal = match &size {
@@ -561,17 +692,23 @@ impl ServerSettingsView {
                             ))
                         }),
                     )
-                    .child(div().ml(px(6.0)).text_sm().text_color(p.muted_foreground).child(t_with(
-                        "desktop.server.onboarding.focus",
-                        &[("x", Arg::Num(focus.0.into())), ("y", Arg::Num(focus.1.into()))],
-                    )));
+                    .child(div().ml(px(6.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(
+                        t_with(
+                            "desktop.server.onboarding.focus",
+                            &[("x", Arg::Num(focus.0.into())), ("y", Arg::Num(focus.1.into()))],
+                        ),
+                    ));
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.focalPoint")))
                     .child(
-                        div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.onboarding.focusHint")),
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("desktop.server.onboarding.focusHint")),
                     )
                     .child(
                         div()
@@ -623,12 +760,12 @@ impl ServerSettingsView {
                                         .h(px(sh)),
                                 ),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(name))
+                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(name))
                     })))
                     .into_any_element()
             }
             None if !url.is_empty() => shimmer_rows(1, p).into_any_element(),
-            None => server_banner(&drafted, 380.0, 120.0, None, window, cx),
+            None => div().into_any_element(),
         };
 
         // The accent: the server's own hue, colors from the banner, or any.
@@ -640,29 +777,45 @@ impl ServerSettingsView {
         for c in size.as_ref().map(|s| s.2.clone()).unwrap_or_default() {
             options.push((c, gpui_kit::rgb(c as u32).into(), hex(c)));
         }
-        let swatch_row = div().flex().flex_wrap().items_center().gap(px(8.0)).children(options.into_iter().map(
-            |(value, shown, name)| {
+        let ring = p.foreground;
+        let swatch_row = div().flex().flex_wrap().items_center().gap(px(8.0)).children(
+            options.into_iter().enumerate().map(|(n, (value, shown, name))| {
                 let on = color == value;
-                div()
-                    .id(SharedString::from(format!("accent-{value}")))
-                    .size(px(30.0))
+                // The web's `Swatch`: a 36px button, a ring when picked and a tick at its corner.
+                let face = div()
+                    .size_full()
                     .rounded_full()
                     .bg(shown)
-                    .border_2()
-                    .border_color(if on { p.foreground.into() } else { Hsla::transparent_black() })
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(n == 0, |el| el.child(icon("wand-sparkles").size(px(14.0)).text_color(gpui_kit::white())));
+                div()
+                    .id(SharedString::from(format!("accent-{value}")))
+                    .relative()
+                    .size(px(36.0))
+                    .p(px(4.0))
+                    .rounded_full()
+                    .when(on, |el| el.border_2().border_color(ring).p(px(2.0)))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.85))
                     .tooltip(move |window, cx| {
                         gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
                     })
+                    .child(face)
                     .when(on, |el| {
                         el.child(
                             div()
-                                .size_full()
+                                .absolute()
+                                .right(px(-4.0))
+                                .bottom(px(-4.0))
+                                .size(px(16.0))
+                                .rounded_full()
+                                .bg(p.foreground)
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(icon("check").size(px(14.0)).text_color(gpui_kit::white())),
+                                .child(icon("check").size(px(10.0)).text_color(p.background)),
                         )
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -673,35 +826,64 @@ impl ServerSettingsView {
                         this.onboard.hex.update(cx, |s, cx| s.set_value(text, window, cx));
                         cx.notify();
                     }))
-            },
-        ));
+            }),
+        );
+        // Any color: a pill with the color and its hex (`h-9 rounded-full border`).
+        let custom = color >= 0 && !size.as_ref().is_some_and(|s| s.2.contains(&color));
+        let hex_pill = div()
+            .h(px(36.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .px(px(8.0))
+            .rounded_full()
+            .border_1()
+            .border_color(if custom { p.foreground.into() } else { Hsla::from(p.border) })
+            .text_xs()
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.muted_foreground)
+            .child(
+                div()
+                    .size(px(20.0))
+                    .flex_none()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(p.border)
+                    .when(color >= 0, |el| el.bg(gpui_kit::rgb(color as u32 & 0xff_ffff))),
+            )
+            .child(div().w(px(80.0)).font_family("monospace").child(Input::new(&self.onboard.hex).appearance(false)));
         let accent_part = div()
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.nav.accentColor")))
-            .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.accentHint")))
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(swatch_row)
-                    .child(div().w(px(120.0)).child(Input::new(&self.onboard.hex))),
-            );
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(icon("palette").size(px(16.0)).text_color(p.muted_foreground))
+                            .child(t("serversettings.nav.accentColor")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("serversettings.welcome.accentHint")),
+                    ),
+            )
+            .child(div().flex().flex_wrap().items_center().gap(px(8.0)).child(swatch_row).child(hex_pill));
 
         div()
             .flex()
             .flex_col()
-            .gap(px(14.0))
-            .pb(px(18.0))
-            .border_b_1()
-            .border_color(p.border)
-            .child(
-                div().child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.banner"))).child(
-                    div().text_sm().text_color(p.muted_foreground).child(t("serversettings.welcome.bannerHint")),
-                ),
-            )
+            .gap(px(20.0))
+            // Its heading is the page's "Banner and color" section, as on the web.
             .child(buttons)
             .child(focal)
             .child(accent_part)
@@ -747,26 +929,23 @@ impl ServerSettingsView {
             )
         });
         let enabled = self.onboard.enabled;
-        let toggle = div()
-            .flex()
-            .items_center()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.enabled")))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(p.muted_foreground)
-                            .child(t("serversettings.onboarding.enabledHint")),
-                    ),
-            )
-            .child(switch("onboarding-on".into(), enabled, false, cx, |this, on, cx| {
-                this.onboard.enabled = on;
-                cx.notify();
-            }));
+        // The web's `Toggle` over a rule.
+        let toggle = div().pb(px(20.0)).border_b_1().border_color(alpha(p.border, 0.7)).child(
+            crate::ui::settings_controls::toggle(
+                "onboarding-on",
+                &t("serversettings.onboarding.enabled"),
+                Some(&t("serversettings.onboarding.enabledHint")),
+                enabled,
+                false,
+                p,
+                window,
+                cx,
+                |this: &mut Self, on, cx| {
+                    this.onboard.enabled = on;
+                    cx.notify();
+                },
+            ),
+        );
 
         let count = self.onboard.steps.len();
         let mut list = div().flex().flex_col().gap(px(10.0));
@@ -787,53 +966,47 @@ impl ServerSettingsView {
                     continue;
                 }
                 let first = first_text.clone();
-                let hover = alpha(p.primary, 0.4);
                 adds = adds.child(
-                    div()
-                        .id(SharedString::from(format!("onb-add-{kind}")))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .h(px(36.0))
-                        .px(px(14.0))
-                        .rounded(corner(12.0))
-                        .border_1()
-                        .border_dashed()
-                        .border_color(p.border)
-                        .cursor_pointer()
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(p.muted_foreground)
-                        .hover(move |s| s.border_color(hover))
-                        .active(|s| s.top(px(1.0)))
-                        .child(icon(glyph).size(px(15.0)))
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.add_step(onb::new_step(kind, first.as_deref()), window, cx);
-                            cx.notify();
-                        })),
+                    crate::ui::settings_controls::button(
+                        SharedString::from(format!("onb-add-{kind}")),
+                        "",
+                        Some("plus"),
+                        crate::ui::settings_controls::Look::Outline,
+                        false,
+                        p,
+                    )
+                    .rounded(radius_xl())
+                    .border_dashed()
+                    .child(icon(glyph).size(px(16.0)).text_color(p.muted_foreground))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.add_step(onb::new_step(kind, first.as_deref()), window, cx);
+                        cx.notify();
+                    })),
                 );
             }
         }
-        div()
+        let steps = div()
             .flex()
             .flex_col()
-            .gap(px(14.0))
-            .py(px(18.0))
-            .border_t_1()
-            .border_color(p.border)
-            .child(toggle)
+            .gap(px(12.0))
+            .py(px(20.0))
             .child(
                 div()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.steps")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
-                        "desktop.server.onboarding.stepsHint",
+                    .child(
+                        div()
+                            .line_height(px(24.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("serversettings.onboarding.steps")),
+                    )
+                    .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(t_with(
+                        "serversettings.onboarding.stepsHint",
                         &[("max", Arg::Num(onb::MAX_STEPS as i64))],
                     ))),
             )
             .child(list)
-            .child(adds)
-            .into_any_element()
+            .child(adds);
+        div().flex().flex_col().child(toggle).child(steps).into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -872,7 +1045,7 @@ impl ServerSettingsView {
                     .text_color(p.primary)
                     .child(icon(glyph).size(px(15.0))),
             )
-            .child(div().flex_1().text_sm().text_color(p.muted_foreground).child(hint))
+            .child(div().flex_1().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(hint))
             .child(
                 icon_button(SharedString::from(format!("onb-up-{key}")), "chevron-up", p)
                     .when(at == 0, |el| el.opacity(0.3))
@@ -1188,12 +1361,8 @@ impl ServerSettingsView {
     }
 
     /// The first step as a newcomer sees it, beside the welcome screen's preview.
-    pub(super) fn onboarding_preview(
-        &self,
-        server: &pb::Server,
-        p: &Palette,
-        cx: &Context<Self>,
-    ) -> Option<AnyElement> {
+    /// The first step of onboarding as new members get it (the web's `OnboardingFlow` in preview).
+    pub(super) fn onboarding_card(&self, server: &pb::Server, p: &Palette, cx: &Context<Self>) -> Option<AnyElement> {
         let draft = self.onboarding_draft(cx);
         if !draft.enabled {
             return None;
@@ -1215,7 +1384,7 @@ impl ServerSettingsView {
             .gap(px(8.0))
             .p(px(16.0))
             .child(
-                div().text_xs().font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
+                div().text_xs().line_height(px(16.0)).font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(
                     t_with("join.onboarding.stepOf", &[("step", Arg::Num(1)), ("total", Arg::Num(total as i64))])
                         .to_uppercase(),
                 ),
@@ -1229,6 +1398,7 @@ impl ServerSettingsView {
             body = body.child(
                 div()
                     .text_xs()
+                    .line_height(px(16.0))
                     .text_color(p.muted_foreground)
                     .child(crate::ui::text::markdown("onb-preview-words", step.description.clone())),
             );
@@ -1251,7 +1421,7 @@ impl ServerSettingsView {
                             option.emoji.clone()
                         },
                     ))
-                    .child(div().truncate().text_xs().font_weight(FontWeight::BOLD).child(
+                    .child(div().truncate().text_xs().line_height(px(16.0)).font_weight(FontWeight::BOLD).child(
                         if option.label.is_empty() {
                             t("desktop.server.onboarding.aChoice")
                         } else {
@@ -1269,6 +1439,7 @@ impl ServerSettingsView {
                     .bg(tint)
                     .text_color(on_accent(tint))
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .child(format!(
                         "{} →",
@@ -1276,31 +1447,7 @@ impl ServerSettingsView {
                     )),
             ),
         );
-        Some(
-            div()
-                .w(px(320.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(t("serversettings.nav.onboarding").to_uppercase()),
-                )
-                .child(
-                    div()
-                        .rounded(corner(20.0))
-                        .border_1()
-                        .border_color(p.border)
-                        .bg(p.card)
-                        .shadow_lg()
-                        .overflow_hidden()
-                        .child(body),
-                )
-                .into_any_element(),
-        )
+        Some(div().p(px(8.0)).child(body).into_any_element())
     }
 }
 
@@ -1333,8 +1480,8 @@ fn flag(
         }))
         .child(
             div()
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child(title.to_owned()))
-                .child(div().text_xs().text_color(p.muted_foreground).child(about.to_owned())),
+                .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(title.to_owned()))
+                .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about.to_owned())),
         )
         .into_any_element()
 }

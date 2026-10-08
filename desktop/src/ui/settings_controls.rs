@@ -328,7 +328,7 @@ impl SettingsView {
 
 /// The web's switch (`h-5 w-8`): the primary when on, the input color when off, and the thumb
 /// springs across.
-pub(crate) fn switch(
+pub(crate) fn switch<V: 'static>(
     id: impl Into<SharedString>,
     on: bool,
     disabled: bool,
@@ -365,7 +365,7 @@ pub(crate) fn switch(
 
 /// A labelled switch: the words flip it too (`Toggle`).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn toggle(
+pub(crate) fn toggle<V: 'static>(
     id: &'static str,
     label: &str,
     hint: Option<&str>,
@@ -426,7 +426,7 @@ fn columns(n: usize) -> usize {
 
 /// A row (or rows) of option cards; the selection glides between them (`Choice`).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn choice(
+pub(crate) fn choice<V: 'static>(
     id: &'static str,
     chosen: Option<usize>,
     options: Vec<Opt>,
@@ -535,7 +535,7 @@ pub(crate) fn choice(
 
 /// A few options side by side in a pill; the highlight glides to the chosen one (`Segmented`).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn segmented(
+pub(crate) fn segmented<V: 'static>(
     id: &'static str,
     options: Vec<(String, Option<&'static str>)>,
     chosen: usize,
@@ -588,7 +588,7 @@ pub(crate) fn segmented(
 }
 
 /// Small pill choices; the chosen one fills in with a check (`Chips`).
-pub(crate) fn chips(
+pub(crate) fn chips<V: 'static>(
     id: &'static str,
     options: Vec<String>,
     chosen: usize,
@@ -776,7 +776,7 @@ pub(crate) fn with_preview(form: impl IntoElement, preview: impl IntoElement, wi
 /// The bar that slides up while there are unsaved changes (`SaveBar`). `alarm` while someone
 /// tried to leave: it shakes and turns red.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn save_bar(
+pub(crate) fn save_bar<V: 'static>(
     id: &'static str,
     count: usize,
     saving: bool,
