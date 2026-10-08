@@ -348,6 +348,19 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
 }
 @keyframes ping { 75%, 100% { transform: scale(2.6); opacity: 0; } }
 
+/* ───────────────────────── Terms and privacy ─────────────────────────
+   The documents on pages/Legal.tsx. */
+.legal > * + * { margin-top: 0.9em; }
+.legal h1 { font-size: 2rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.legal h1 + p { margin-top: 0.4em; color: var(--muted-foreground); }
+.legal h2 { margin-top: 1.8em; font-size: 1.2rem; font-weight: 800; line-height: 1.3; }
+.legal ul { padding-left: 1.4em; list-style: disc; }
+.legal li + li { margin-top: 0.35em; }
+.legal li::marker { color: var(--primary); }
+.legal strong { font-weight: 800; }
+.legal a { color: var(--primary); font-weight: 700; text-decoration: underline 2px color-mix(in srgb, var(--primary) 35%, transparent); text-underline-offset: 3px; }
+.legal a:hover { text-decoration-color: var(--primary); }
+
 /* ───────────────────────── Member Markdown ─────────────────────────
    Rendered by components/Markdown.tsx; colors come from theme tokens. */
 .markdown { overflow-wrap: anywhere; }
