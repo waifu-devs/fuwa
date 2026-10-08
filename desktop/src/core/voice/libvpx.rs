@@ -96,7 +96,8 @@ impl Encoder {
                 self.frames,
                 1,
                 flags,
-                sys::VPX_DL_REALTIME as sys::vpx_enc_deadline_t,
+                // Its type has a name only from libvpx 1.15 on.
+                sys::VPX_DL_REALTIME as _,
             );
             self.frames += 1;
             if code != sys::VPX_CODEC_OK {
