@@ -18,6 +18,7 @@ use gpui_kit::{
 use super::{Found, Page, ServerSettingsEvent, ServerSettingsView, search};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_md};
 use crate::ui::widgets::icon;
 
@@ -269,7 +270,7 @@ impl ServerSettingsView {
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
                         .truncate()
-                        .child(label.to_uppercase()),
+                        .child(tracked(label.to_uppercase(), WIDE)),
                 );
                 y += 16.8 + 4.0 + 2.0;
             }

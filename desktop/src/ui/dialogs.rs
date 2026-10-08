@@ -20,6 +20,7 @@ use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::overlay::{dialog_button, dialog_card, dialog_close, dialog_header, dialog_layer};
 use crate::ui::settings_controls::{Look, button, field};
+use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_md, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
 
@@ -404,7 +405,7 @@ impl FuwaApp {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(div().truncate().child(t_with("workspace.invite.title", &[("server", Arg::Str(&name))])))
+                    .child(tracked(t_with("workspace.invite.title", &[("server", Arg::Str(&name))]), TIGHT).wraps())
                     .when_some(channel, |el, channel| {
                         el.child(
                             div()
@@ -492,7 +493,7 @@ impl FuwaApp {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(t("workspace.invite.link").to_uppercase()),
+                    .child(tracked(t("workspace.invite.link").to_uppercase(), WIDE)),
             )
             .child(link_field);
         if let Some(error) = state.error.clone() {
@@ -795,7 +796,7 @@ impl FuwaApp {
         .font_weight(FontWeight::BOLD)
         .when(busy || !named, |el| el.opacity(0.5))
         .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx)));
-        dialog_card(false, p).child(dialog_header(t("workspace.createChannel.title"), None, p)).child(
+        dialog_card(false, p).child(dialog_header(tracked(t("workspace.createChannel.title"), TIGHT), None, p)).child(
             div()
                 .flex()
                 .flex_col()
@@ -882,7 +883,11 @@ impl FuwaApp {
                     -8.0,
                 ))
             })
-            .child(div().flex_1().min_w_0().pt(px(4.0)).child(dialog_header(title, Some(note.into_any_element()), p)));
+            .child(div().flex_1().min_w_0().pt(px(4.0)).child(dialog_header(
+                tracked(title, TIGHT).wraps(),
+                Some(note.into_any_element()),
+                p,
+            )));
         let muted = alpha(p.muted, 0.5);
         let content: AnyElement = match &self.rules {
             None if self.dialog_error.is_some() => div()
@@ -1146,7 +1151,7 @@ impl FuwaApp {
                                     .line_height(px(16.0))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
-                                    .child(t("join.startHere").to_uppercase()),
+                                    .child(tracked(t("join.startHere").to_uppercase(), WIDE)),
                             )
                             .child(grid),
                     );
@@ -1165,7 +1170,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(icon("scroll-text").size(px(14.0)))
-                    .child(t("join.welcome.beforeYouTalk").to_uppercase()),
+                    .child(tracked(t("join.welcome.beforeYouTalk").to_uppercase(), WIDE)),
             );
             section = section.child(match rules {
                 None => div()
@@ -1287,7 +1292,7 @@ impl FuwaApp {
                 Duration::ZERO,
                 -6.0,
             ))
-            .child(div().flex_1().min_w_0().child(title));
+            .child(div().flex_1().min_w_0().child(tracked(title, TIGHT).wraps()));
         dialog_card(false, p)
             .child(dialog_header(title_row, Some(body.into_any_element()), p))
             .child(

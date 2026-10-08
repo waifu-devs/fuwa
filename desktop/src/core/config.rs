@@ -264,6 +264,9 @@ pub struct Prefs {
     pub custom_themes: Vec<Theme>,
     /// The picture and effect behind the app, under themes that don't bring their own.
     pub backdrop: Backdrop,
+    /// Custom shaders whose first frames were being tried, by id: one still
+    /// here at startup stopped the app, so it isn't run again (`core::effects::status`).
+    pub shaders_trying: Vec<String>,
     pub motion: MotionChoice,
     pub density: Density,
     /// Hides instance addresses and your username, for streaming or sharing your screen.
@@ -393,6 +396,7 @@ impl Default for Prefs {
             dark_theme: "yoru".into(),
             custom_themes: Vec::new(),
             backdrop: Backdrop::default(),
+            shaders_trying: Vec::new(),
             motion: MotionChoice::System,
             density: Density::Cozy,
             streamer_mode: false,
@@ -503,6 +507,9 @@ impl Prefs {
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        let over = self.shaders_trying.len().saturating_sub(crate::core::effects::status::MAX_TRYING);
+        self.shaders_trying.drain(..over);
+        self.shaders_trying.retain(|id| (1..=8).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric()));
         for list in self.recent_searches.values_mut() {
             list.truncate(crate::core::search::MAX_RECENT);
         }

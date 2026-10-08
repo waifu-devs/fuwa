@@ -29,6 +29,7 @@ use crate::ui::instance_home::{
     server_door, shadow_xl, shake, shimmer, spinner, tag,
 };
 use crate::ui::motion;
+use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal, server_icon};
 
@@ -100,6 +101,8 @@ pub struct CreateForm {
     /// An uploaded icon, on the instance it went to.
     icon: Option<(String, String)>,
     uploading: bool,
+    /// The icon being framed before it's uploaded.
+    pub(crate) cropper: Option<crate::ui::cropper::CropSlot>,
     /// Which instance it goes on, and the region picked there.
     place: String,
     region: Option<(String, String)>,
@@ -132,6 +135,7 @@ impl CreateForm {
                 discoverable: false,
                 icon: None,
                 uploading: false,
+                cropper: None,
                 place: String::new(),
                 region: None,
                 busy: false,
@@ -394,7 +398,7 @@ impl FuwaApp {
                     .text_size(px(24.0))
                     .line_height(px(32.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
-                    .child(server.name.clone()),
+                    .child(tracked(server.name.clone(), TIGHT).wraps()),
             )
             .child(
                 div()
@@ -1502,36 +1506,34 @@ impl FuwaApp {
     }
 
     fn pick_server_icon(&mut self, key: &str, _window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let (core, key) = (self.core.clone(), key.to_owned());
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.home.create.error = Some(t("desktop.account.notAPicture"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.home.create.uploading = true;
-                this.home.create.error = None;
+        if self.home.create.uploading || self.home.create.cropper.is_some() {
+            return;
+        }
+        let key = key.to_owned();
+        crate::ui::cropper::choose(
+            self.core.clone(),
+            crate::core::pictures::PictureKind::Icon,
+            t("desktop.account.choosePicture"),
+            cx,
+            |this| &mut this.home.create.cropper,
+            |this, error, cx| {
+                this.home.create.error = Some(error);
                 cx.notify();
-            });
-            let rx = core.spawn({
-                let (core, key) = (core.clone(), key.clone());
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    core.upload_picture(&key, pb::MediaPurpose::ServerIcon, kind, bytes).await
-                }
-            });
+            },
+            std::rc::Rc::new(move |this: &mut Self, bytes, mime, cx: &mut Context<Self>| {
+                this.upload_server_icon(key.clone(), bytes, mime, cx)
+            }),
+        );
+    }
+
+    fn upload_server_icon(&mut self, key: String, bytes: Vec<u8>, mime: &'static str, cx: &mut Context<Self>) {
+        self.home.create.uploading = true;
+        self.home.create.error = None;
+        let rx = self.core.spawn({
+            let (core, key) = (self.core.clone(), key.clone());
+            async move { core.upload_picture(&key, pb::MediaPurpose::ServerIcon, mime, bytes).await }
+        });
+        cx.spawn(async move |this, cx| {
             let result = rx.await;
             let _ = this.update(cx, |this, cx| {
                 this.home.create.uploading = false;
@@ -1544,6 +1546,7 @@ impl FuwaApp {
             });
         })
         .detach();
+        cx.notify();
     }
 
     pub(crate) fn create_server_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1913,7 +1916,7 @@ fn section_label(text: &str, p: &Palette) -> Div {
         .line_height(px(16.0))
         .font_weight(FontWeight::BOLD)
         .text_color(p.muted_foreground)
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 /// A server's rules, numbered (the web's `RulesList`).
@@ -2119,7 +2122,7 @@ pub(crate) fn banner_hero_wide(
                                     .line_height(px(16.0))
                                     .font_weight(FontWeight::EXTRA_BOLD)
                                     .text_color(eyebrow_color)
-                                    .child(eyebrow.to_uppercase()),
+                                    .child(tracked(eyebrow.to_uppercase(), WIDE)),
                             )
                         })
                         .child(
@@ -2127,7 +2130,7 @@ pub(crate) fn banner_hero_wide(
                                 .text_size(px(24.0))
                                 .line_height(px(32.0))
                                 .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(server.name.clone()),
+                                .child(tracked(server.name.clone(), TIGHT).wraps()),
                         )
                         .when(members > 0, |el| {
                             el.child(

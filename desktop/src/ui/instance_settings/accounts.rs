@@ -23,6 +23,7 @@ use crate::pb::{self, AccountFilter as Filter};
 use crate::ui::motion;
 use crate::ui::server_settings::spinner;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, WIDER, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_md, radius_sm, radius_xl};
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, name_tint, pal};
 
@@ -432,13 +433,14 @@ impl InstanceSettingsView {
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
                 .child(icon("users").size(px(14.0)))
-                .child(
+                .child(tracked(
                     t_with(
                         if more { "instancesettings.accounts.countMore" } else { "instancesettings.accounts.count" },
                         &[("count", Arg::Num(shown as i64))],
                     )
                     .to_uppercase(),
-                );
+                    WIDE,
+                ));
             let column = div().flex_1().min_h_0().flex().flex_col().gap(px(16.0)).child(header);
             if shown == 0 {
                 column
@@ -1219,7 +1221,7 @@ impl InstanceSettingsView {
             div().flex().justify_center().font_family("monospace").text_lg().font_weight(FontWeight::BOLD);
         for (n, ch) in password.chars().enumerate() {
             letters = letters.child(motion::rise(
-                div().when(ch == '-', |el| el.text_color(p.muted_foreground)).child(ch.to_string()),
+                div().when(ch == '-', |el| el.text_color(p.muted_foreground)).child(tracked(ch.to_string(), WIDER)),
                 SharedString::from(format!("password-letter-{n}")),
                 Duration::from_millis(100 + 25 * n as u64),
                 8.0,
@@ -1241,7 +1243,7 @@ impl InstanceSettingsView {
                     .text_lg()
                     .font_weight(FontWeight::BOLD)
                     .text_color(alpha(p.muted_foreground, 0.4))
-                    .child("•".repeat(password.chars().count()))
+                    .child(tracked("•".repeat(password.chars().count()), WIDER))
                     .into_any_element()
             } else {
                 letters.into_any_element()

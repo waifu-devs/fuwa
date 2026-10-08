@@ -39,6 +39,9 @@ python3 diff.py general         # out/general-side.png (both side by side), out/
   `{"hover": "css"}`, `{"mouse": [x, y]}`, `{"at": [x, y]}` (a click at a
   point), `{"wheel": [x, y, dy]}` (scroll at a point), `{"press": "Escape"}`,
   `{"type": "hi"}`, `{"wait": 500}`.
+  `PREFS=settings.json` sets the web app's settings first (`lib/prefs.ts`, the
+  same shape as the desktop's for the theme and backdrop); `SETTINGS=` does
+  that for `desk.sh start`.
 - `desk.sh do click X Y | move X Y | key ctrl+comma | type TEXT | scroll X Y N`
   works in the window's coordinates, the same as the web screenshot's.
   `AS=bob desk.sh start` (and `AS=bob node web-shot.mjs ...`) signs in as

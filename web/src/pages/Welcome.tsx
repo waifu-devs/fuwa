@@ -6,6 +6,7 @@ import { RotatingText, RotatingTextContainer } from "@/components/animate-ui/pri
 import { Connect, useHomeInstance } from "@/components/Connect";
 import { DesktopDownload } from "@/components/DesktopDownload";
 import { FuwaMark } from "@/components/Icons";
+import { LegalFooter } from "@/components/LegalLinks";
 import { Petals } from "@/components/Petals";
 import { useI18n } from "@/i18n/react";
 import type { Key } from "@/i18n/i18n";
@@ -106,6 +107,7 @@ export function Welcome({ initialUrl }: { initialUrl?: string }) {
           <Connect initialUrl={initialUrl} />
         </motion.div>
       </div>
+      <LegalFooter url={home?.url} className="absolute inset-x-0 bottom-4" />
     </div>
   );
 }

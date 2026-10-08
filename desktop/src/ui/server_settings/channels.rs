@@ -17,6 +17,7 @@ use crate::core::arrange::{self, Layout};
 use crate::core::permissions::{self, Access, Bits, CHANNEL_GROUPS, bit};
 use crate::core::server_admin::ChannelPatch;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_lg, radius_md, radius_xl};
 
 /// Discord's slow mode stops, in seconds.
@@ -646,7 +647,7 @@ impl ServerSettingsView {
             .child(icon(glyph(c)).size(px(if category { 14.0 } else { 16.0 })))
             .child(div().min_w_0().truncate().map(|el| {
                 if category {
-                    el.text_xs().font_weight(FontWeight::BOLD).child(c.name.to_uppercase())
+                    el.text_xs().font_weight(FontWeight::BOLD).child(tracked(c.name.to_uppercase(), WIDE))
                 } else {
                     el.text_sm().child(c.name.clone())
                 }
@@ -1362,7 +1363,7 @@ impl ServerSettingsView {
                         .text_size(px(11.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(p.muted_foreground)
-                        .child(t("serversettings.channelPermissions.whoCanSee").to_uppercase()),
+                        .child(tracked(t("serversettings.channelPermissions.whoCanSee").to_uppercase(), WIDE)),
                 )
                 .child(chips);
             if viewers.is_empty() {
@@ -1523,7 +1524,7 @@ impl ServerSettingsView {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group_name(title).to_uppercase()),
+                    .child(tracked(group_name(title).to_uppercase(), WIDE)),
             );
             for perm in list.iter().copied() {
                 let label = permission_name(perm);
@@ -1947,7 +1948,7 @@ impl Render for ChanDrag {
             .child(icon(self.glyph).size(px(16.0)).text_color(p.primary))
             .child(div().font_weight(FontWeight::BOLD).map(|el| {
                 if self.category {
-                    el.text_xs().child(self.name.to_uppercase())
+                    el.text_xs().child(tracked(self.name.to_uppercase(), WIDE))
                 } else {
                     el.text_sm().child(self.name.clone())
                 }

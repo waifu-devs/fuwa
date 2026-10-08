@@ -3191,6 +3191,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "wgpu",
  "windows-capture",
  "zed-scap",
  "zune-jpeg 0.5.15",

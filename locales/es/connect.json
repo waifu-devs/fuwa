@@ -91,5 +91,11 @@
   "providerDone.newNote": "Iniciarás sesión aquí con {provider}. Elige el nombre con el que te verán; puedes cambiarlo después.",
   "providerDone.useProfile": "Usar mi nombre y foto de {provider}",
   "providerDone.pictureOnly": "Tu foto, copiada a esta instancia",
-  "providerDone.create": "Crear mi cuenta"
+  "providerDone.create": "Crear mi cuenta",
+  "legal.terms": "Términos",
+  "legal.privacy": "Privacidad",
+  "legal.termsTitle": "Términos del servicio",
+  "legal.privacyTitle": "Política de privacidad",
+  "legal.agree": "Al continuar, aceptas los {terms} y la {privacy}.",
+  "legal.home": "Volver a fuwa"
 }

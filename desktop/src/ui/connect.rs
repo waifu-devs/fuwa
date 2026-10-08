@@ -29,6 +29,8 @@ use crate::ui::widgets::{avatar, fuwa_mark, icon, pal};
 
 /// Where "one you run" goes.
 const SELF_HOSTING: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/self-hosting.md";
+/// Addresses Waifu Devs runs fuwa on (the web's `lib/hosted.ts`).
+const HOSTED_DOMAINS: [&str; 1] = ["fuwa.chat"];
 
 /// The welcome's rotating line, one after another.
 const PHRASES: [&str; 4] = [
@@ -552,7 +554,10 @@ impl ConnectView {
                         .child(t("connect.account.noSignIns")),
                 );
             }
-            return body.when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p))).into_any_element();
+            return body
+                .when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p)))
+                .when(others, |el| el.children(self.agreement(p)))
+                .into_any_element();
         }
         if others {
             body = body.child(
@@ -681,7 +686,47 @@ impl ConnectView {
                 .when(self.busy, |el| el.opacity(0.5).child(spinner(p.primary_foreground)))
                 .when(!self.busy, |el| el.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))),
             )
+            .children(self.agreement(p))
             .into_any_element()
+    }
+
+    /// "By continuing, you agree to the Terms of Service and the Privacy
+    /// Policy.", under the ways in, on Waifu Devs' own instances alone. The
+    /// pages open in the browser.
+    fn agreement(&self, p: &Palette) -> Option<AnyElement> {
+        if !hosted_by_us(&self.url) {
+            return None;
+        }
+        let base = self.url.trim_end_matches('/').to_owned();
+        let text = t_with("connect.legal.agree", &[("terms", Arg::Str("{terms}")), ("privacy", Arg::Str("{privacy}"))]);
+        let mut line = div()
+            .flex()
+            .flex_wrap()
+            .justify_center()
+            .text_size(px(12.0))
+            .line_height(px(16.0))
+            .text_color(p.muted_foreground);
+        for piece in agreement_pieces(&text) {
+            line = match piece {
+                Piece::Word(word) => line.child(word),
+                Piece::Link(page) => {
+                    let url = format!("{base}/{page}");
+                    let label =
+                        if page == "terms" { t("connect.legal.termsTitle") } else { t("connect.legal.privacyTitle") };
+                    line.child(
+                        div()
+                            .id(page)
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(p.primary)
+                            .cursor_pointer()
+                            .hover(|s| s.underline())
+                            .on_click(move |_, _, cx| crate::ui::text::open_link(&url, cx))
+                            .child(label),
+                    )
+                }
+            };
+        }
+        Some(line.into_any_element())
     }
 
     /// The instance's name and address over the sign-in, with the way back.
@@ -1188,6 +1233,7 @@ impl ConnectView {
                         el.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
                     }),
             )
+            .children(self.agreement(p))
             .into_any_element()
     }
 
@@ -1704,19 +1750,13 @@ fn gradient(text: &str, p: &Palette) -> Vec<Hsla> {
         .collect()
 }
 
-/// Big text set tight, as the web's `tracking-tight` (-0.025em): GPUI has no
-/// letter spacing, so each letter is its own box, pulled in.
+/// Big text set tight, as the web's `tracking-tight`.
 fn tracked(text: &str, size: f32, colors: Option<Vec<Hsla>>) -> Div {
-    let mut row = div().flex().flex_none().text_size(px(size)).whitespace_nowrap();
-    for (n, c) in text.chars().enumerate() {
-        let letter = div()
-            .flex_none()
-            .when(n > 0, |el| el.ml(px(-0.025 * size)))
-            .when_some(colors.as_ref().and_then(|c| c.get(n)).copied(), |el, color| el.text_color(color))
-            .child(if c == ' ' { "\u{00a0}".to_owned() } else { c.to_string() });
-        row = row.child(letter);
-    }
-    row
+    let line = super::text::tracked(text.to_owned(), super::text::TIGHT);
+    div().flex().flex_none().text_size(px(size)).child(match colors {
+        Some(colors) => line.letter_colors(colors),
+        None => line,
+    })
 }
 
 /// Soft colored glows drifting behind the welcome (the web's bubble background at 30%).
@@ -1848,6 +1888,44 @@ fn dots(p: &Palette) -> impl IntoElement {
     }))
 }
 
+/// Whether the instance at this address is one Waifu Devs runs: one of its
+/// own hosts, reached over https (the web's `lib/hosted.ts`). Only these link
+/// Waifu Devs' terms and privacy policy.
+fn hosted_by_us(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    parsed.scheme() == "https"
+        && parsed.host_str().is_some_and(|h| HOSTED_DOMAINS.iter().any(|d| h == *d || h.ends_with(&format!(".{d}"))))
+}
+
+/// A piece of "By continuing, you agree to the {terms} and the {privacy}.":
+/// words (each with its space, so the line wraps between them) or a link.
+#[derive(Debug, PartialEq)]
+enum Piece {
+    Word(String),
+    Link(&'static str),
+}
+
+fn agreement_pieces(text: &str) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    loop {
+        let next =
+            ["terms", "privacy"].into_iter().filter_map(|k| rest.find(&format!("{{{k}}}")).map(|at| (at, k))).min();
+        let (plain, link) = match next {
+            Some((at, k)) => (&rest[..at], Some(k)),
+            None => (rest, None),
+        };
+        pieces.extend(plain.split_inclusive(' ').map(|w| Piece::Word(w.to_owned())));
+        match link {
+            Some(k) => {
+                pieces.push(Piece::Link(k));
+                rest = &rest[plain.len() + k.len() + 2..];
+            }
+            None => return pieces,
+        }
+    }
+}
+
 /// "Any fuwa server works: ours, a friend's, or {link}." around its link.
 fn split_link(text: &str) -> (String, String) {
     match text.split_once("{link}") {
@@ -1886,5 +1964,27 @@ mod tests {
         assert_eq!(issuer_name(""), "waifu.dev");
         assert_eq!(issuer_name("https://api.waifu.dev"), "waifu.dev");
         assert!(plain_http("http://chat.example.com") && !plain_http("http://127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn only_our_own_addresses_link_our_terms() {
+        assert!(hosted_by_us("https://fuwa.chat") && hosted_by_us("https://eu.fuwa.chat/"));
+        assert!(
+            !hosted_by_us("http://fuwa.chat")
+                && !hosted_by_us("https://notfuwa.chat")
+                && !hosted_by_us("https://fuwa.chat.evil.example")
+        );
+        assert_eq!(
+            agreement_pieces("By you, {terms} and {privacy}."),
+            vec![
+                Piece::Word("By ".into()),
+                Piece::Word("you, ".into()),
+                Piece::Link("terms"),
+                Piece::Word(" ".into()),
+                Piece::Word("and ".into()),
+                Piece::Link("privacy"),
+                Piece::Word(".".into()),
+            ]
+        );
     }
 }

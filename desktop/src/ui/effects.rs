@@ -1,34 +1,86 @@
-//! The animated backdrop effects (aurora, petals, stars, waves): the web
-//! app's shaders (`web/src/lib/effects/shaders.ts`) redrawn with what GPUI
-//! paints cheaply. Light is soft shadows, shapes are paths and stars are
-//! small quads: a few hundred primitives a frame, the same motion and colors
-//! as the web (the theme's primary, the same hue turned 48 degrees, and the
-//! page).
+//! The animated backdrop effects. Where there's a GPU adapter they're the
+//! web app's own WGSL (`core/effects`: the built-in shaders and people's
+//! custom ones), drawn offscreen by `core::effects::gpu` and shown here as a
+//! picture stretched over the window. Without one (or once the GPU is lost)
+//! the built-in effects are redrawn with what GPUI paints cheaply: light is
+//! soft shadows, shapes are paths and stars are small quads, a few hundred
+//! primitives a frame with the same motion and colors as the web (the
+//! theme's primary, the same hue turned 48 degrees, and the page). A custom
+//! shader shows its fallback there, and wherever it can't run.
 //!
 //! They draw 30 frames a second while the window is in front, like the
-//! web's, and hold still with reduced motion, at speed 0 or while the window
-//! is behind others. The effect keeps its own clock, so a speed change
-//! carries on from where it is instead of jumping.
+//! web's, hold still with reduced motion, at speed 0 or while the window
+//! is behind others, and ask for no frames at all while a full-screen page
+//! covers them. The effect keeps its own clock, so a speed change carries on
+//! from where it is instead of jumping.
 
 use std::collections::HashMap;
 use std::f32::consts::TAU;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::{
     AnyElement, App, Bounds, BoxShadow, Corners, Hsla, IntoElement as _, ParentElement as _, Path, PathBuilder, Pixels,
-    Rgba, Styled as _, Window, canvas, div, fill, point, px, size,
+    RenderImage, Rgba, Styled as _, Window, canvas, div, fill, point, px, size,
 };
 use parking_lot::Mutex;
 
+use crate::core::effects::custom::{CustomShader, shader_id};
+use crate::core::effects::gpu::{self, Gpu, Inputs, Source};
+use crate::core::effects::status::{self, ShaderStatus};
 use crate::core::themes::Effect;
 use crate::ui::theme::Palette;
 
 /// Time between frames: 30 a second, like the web's effects.
 const FRAME: Duration = Duration::from_millis(33);
 
+/// What a backdrop's effect draws: a custom shader while it can run, else
+/// its fallback; none for the still ones.
+pub fn source(effect: Effect, shader: Option<&CustomShader>) -> Option<Source> {
+    match (effect, shader) {
+        (Effect::Custom, Some(s)) => {
+            let runs = gpu::gpu() != Gpu::Missing
+                && status::status(&shader_id(&s.code)).is_none_or(|st| matches!(st, ShaderStatus::Running { .. }));
+            if runs {
+                Some(Source::Custom(s.code.clone()))
+            } else {
+                s.fallback.shader().then_some(Source::Effect(s.fallback))
+            }
+        }
+        (e, _) if e.shader() => Some(Source::Effect(e)),
+        _ => None,
+    }
+}
+
 /// The layer for an animated effect, filling its parent; none for the still ones.
 pub fn layer(
+    effect: Effect,
+    shader: Option<&CustomShader>,
+    intensity: u8,
+    speed: u8,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let source = source(effect, shader)?;
+    let held = HELD.load(Ordering::Relaxed);
+    let running = speed > 0 && window.is_window_active() && !cx.reduce_motion() && !held;
+    let time = clock(running, speed);
+    if running {
+        again(window, cx);
+    }
+    let still = speed == 0 || cx.reduce_motion();
+    Some(match source {
+        // No GPU: the built-in effects drawn by hand.
+        Source::Effect(effect) if gpu::gpu() == Gpu::Missing => by_hand(effect, intensity, time, p),
+        source => shaded(source, intensity, still, time, held, p),
+    })
+}
+
+/// The hand-drawn version of a built-in effect, for the effect cards in
+/// settings (like the web's CSS ones there).
+pub fn drawn(
     effect: Effect,
     intensity: u8,
     speed: u8,
@@ -36,7 +88,7 @@ pub fn layer(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<AnyElement> {
-    if !matches!(effect, Effect::Aurora | Effect::Petals | Effect::Stars | Effect::Waves) {
+    if !effect.shader() {
         return None;
     }
     let running = speed > 0 && window.is_window_active() && !cx.reduce_motion() && !HELD.load(Ordering::Relaxed);
@@ -44,27 +96,127 @@ pub fn layer(
     if running {
         again(window, cx);
     }
+    Some(by_hand(effect, intensity, time, p))
+}
+
+fn by_hand(effect: Effect, intensity: u8, time: f32, p: &Palette) -> AnyElement {
     let colors = Colors::of(p);
-    Some(
-        div()
-            .absolute()
-            .inset_0()
-            .opacity(f32::from(intensity) / 100.0)
-            .child(
-                canvas(
-                    |_, _, _| (),
-                    move |bounds, (), window, _| match effect {
-                        Effect::Aurora => aurora(bounds, time, &colors, window),
-                        Effect::Petals => petals(bounds, time, &colors, window),
-                        Effect::Stars => stars(bounds, time, &colors, window),
-                        Effect::Waves => waves(bounds, time, &colors, window),
-                        _ => {}
-                    },
-                )
-                .size_full(),
+    div()
+        .absolute()
+        .inset_0()
+        .opacity(f32::from(intensity) / 100.0)
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, (), window, _| match effect {
+                    Effect::Aurora => aurora(bounds, time, &colors, window),
+                    Effect::Petals => petals(bounds, time, &colors, window),
+                    Effect::Stars => stars(bounds, time, &colors, window),
+                    Effect::Waves => waves(bounds, time, &colors, window),
+                    _ => {}
+                },
             )
-            .into_any_element(),
+            .size_full(),
+        )
+        .into_any_element()
+}
+
+/// A frame shown for a layer, and when it was last drawn.
+struct Shown {
+    source: Source,
+    image: Arc<RenderImage>,
+    painted: Instant,
+}
+
+/// The frames on screen by layer, and the ones replaced (taken out of
+/// GPUI's atlas a moment later, once no frame on screen still uses them).
+#[derive(Default)]
+struct Pictures {
+    shown: HashMap<u64, Shown>,
+    retired: Vec<(Instant, Arc<RenderImage>)>,
+}
+
+static PICTURES: Mutex<Option<Pictures>> = Mutex::new(None);
+
+/// An effect drawn by its shader: the latest frame from `core::effects::gpu`, stretched over the layer.
+fn shaded(source: Source, intensity: u8, still: bool, time: f32, held: bool, p: &Palette) -> AnyElement {
+    let rgba = |c: Rgba| [c.r, c.g, c.b, 1.0];
+    let colors = [rgba(p.primary), rgba(p.glow), rgba(p.background), rgba(p.foreground)];
+    // Only shaders that read the pointer are drawn again when it moves.
+    let follows = matches!(&source, Source::Custom(code) if code.contains("pointer"));
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, cx| {
+            let scale = window.scale_factor();
+            let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            if w < 1.0 || h < 1.0 {
+                return;
+            }
+            let pixels = ((w * scale).round() as u32, (h * scale).round() as u32);
+            let mouse = window.mouse_position();
+            let pointer = [f32::from(mouse.x - bounds.origin.x) / w, f32::from(mouse.y - bounds.origin.y) / h];
+            let inputs = Inputs {
+                colors,
+                time,
+                intensity: f32::from(intensity) / 100.0,
+                pointer: follows.then_some(pointer),
+                still,
+            };
+            // Covered by a full-screen page: nothing new is drawn, the last frame stays.
+            let key = if held { gpu::layer_key(&source, pixels) } else { gpu::request(&source, pixels, inputs) };
+            let now = Instant::now();
+            let mut pictures = PICTURES.lock();
+            let pictures = pictures.get_or_insert_with(Pictures::default);
+            if let Some(frame) = gpu::take(key)
+                && let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.bgra)
+            {
+                let image = Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+                let old = pictures.shown.insert(key, Shown { source: source.clone(), image, painted: now });
+                pictures.retired.extend(old.map(|o| (now, o.image)));
+            }
+            // A new size (a resize) shows the last frame of the same effect until its own comes.
+            let image = match pictures.shown.get_mut(&key) {
+                Some(shown) => {
+                    shown.painted = now;
+                    Some(shown.image.clone())
+                }
+                None => pictures
+                    .shown
+                    .values()
+                    .filter(|s| s.source == source)
+                    .max_by_key(|s| s.painted)
+                    .map(|s| s.image.clone()),
+            };
+            if let Some(image) = image {
+                let _ = window.paint_image(bounds, bounds, Corners::default(), image, 0, false);
+            }
+            // Frames nobody has drawn for a while, and replaced ones, leave the atlas.
+            let stale: Vec<u64> = pictures
+                .shown
+                .iter()
+                .filter(|(_, s)| now - s.painted > Duration::from_secs(3))
+                .map(|(k, _)| *k)
+                .collect();
+            for k in stale {
+                if let Some(old) = pictures.shown.remove(&k) {
+                    pictures.retired.push((now, old.image));
+                }
+            }
+            let (gone, kept): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut pictures.retired).into_iter().partition(|(at, _)| now - *at > FRAME * 3);
+            pictures.retired = kept;
+            for (_, image) in gone {
+                let _ = window.drop_image(image);
+            }
+            if gpu::waiting(key) {
+                again(window, cx);
+            }
+        },
     )
+    .absolute()
+    .inset_0()
+    .size_full()
+    .into_any_element()
 }
 
 /// The effect's clock in seconds, moving at `speed` percent while running.

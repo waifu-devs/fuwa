@@ -4,6 +4,7 @@
 //! pictures, color, effect, status that clears by itself, about me), the
 //! password with its strength meter, and every device signed in.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -14,8 +15,9 @@ use gpui_kit::{
     px, rgb,
 };
 
-use crate::core::account::{ProfilePatch, picture_type};
+use crate::core::account::ProfilePatch;
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::pictures::PictureKind;
 use crate::core::profile_items::{offered_effects, resolve_decoration, resolve_effect};
 use crate::core::store::{Connection, user_name};
 use crate::pb;
@@ -159,6 +161,8 @@ pub struct AccountForm {
     any_color: bool,
     uploading: Option<Kind>,
     picture_error: Option<(Kind, String)>,
+    /// The picture being framed before it's uploaded.
+    cropper: Option<crate::ui::cropper::CropSlot>,
     saving: bool,
     error: Option<String>,
     /// Password page.
@@ -218,6 +222,7 @@ impl AccountForm {
             any_color: false,
             uploading: None,
             picture_error: None,
+            cropper: None,
             saving: false,
             error: None,
             show_password: false,
@@ -452,44 +457,39 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Asks the system for a picture and uploads it for the avatar or banner; saving is the
-    /// page's, from the save bar.
+    /// Asks the system for a picture, frames it, and uploads it for the avatar or banner;
+    /// saving is the page's, from the save bar.
     fn pick_picture(&mut self, kind: Kind, cx: &mut Context<Self>) {
-        let Some(key) = self.account.key.clone() else { return };
-        if self.account.uploading.is_some() {
+        if self.account.key.is_none() || self.account.uploading.is_some() || self.account.cropper.is_some() {
             return;
         }
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let core = self.core.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(mime) = picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.account.picture_error = Some((kind, t("workspace.picture.wrongType")));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.account.uploading = Some(kind);
-                this.account.picture_error = None;
+        let shape = if kind == Kind::Avatar { PictureKind::Avatar } else { PictureKind::Banner };
+        crate::ui::cropper::choose(
+            self.core.clone(),
+            shape,
+            t("desktop.account.choosePicture"),
+            cx,
+            |this| &mut this.account.cropper,
+            move |this, error, cx| {
+                this.account.picture_error = Some((kind, error));
                 cx.notify();
-            });
-            let purpose = if kind == Kind::Avatar { pb::MediaPurpose::Avatar } else { pb::MediaPurpose::Banner };
-            let rx = core.spawn({
-                let core = core.clone();
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    core.upload_picture(&key, purpose, mime, bytes).await
-                }
-            });
+            },
+            Rc::new(move |this: &mut Self, bytes, mime, cx: &mut Context<Self>| {
+                this.upload_picture(kind, bytes, mime, cx)
+            }),
+        );
+    }
+
+    fn upload_picture(&mut self, kind: Kind, bytes: Vec<u8>, mime: &'static str, cx: &mut Context<Self>) {
+        let Some(key) = self.account.key.clone() else { return };
+        self.account.uploading = Some(kind);
+        self.account.picture_error = None;
+        let purpose = if kind == Kind::Avatar { pb::MediaPurpose::Avatar } else { pb::MediaPurpose::Banner };
+        let rx = self.core.spawn({
+            let core = self.core.clone();
+            async move { core.upload_picture(&key, purpose, mime, bytes).await }
+        });
+        cx.spawn(async move |this, cx| {
             let result = rx.await;
             let _ = this.update(cx, |this, cx| {
                 this.account.uploading = None;
@@ -505,10 +505,14 @@ impl SettingsView {
             });
         })
         .detach();
+        cx.notify();
     }
 
     pub(crate) fn profile_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some((key, me)) = self.account_ready(window, cx) else { return div().into_any_element() };
+        if let Some(cropper) = crate::ui::cropper::layer(&self.account.cropper) {
+            self.state.overlay = Some(cropper);
+        }
         // Instances from before profile effects (or decorations) don't say, and can't keep one.
         let (effects_on, decorations_on, items) = self.core.shared.read(|s| match s.instance(&key) {
             Some(i) => (i.effects_on(), i.decorations_on(), i.profile_items.clone()),
@@ -976,9 +980,15 @@ impl SettingsView {
             })
             .on_click(cx.listener(move |this, _, _, cx| this.pick_picture(kind, cx)))
             .child(match &shown {
-                Some(url) => {
-                    img(SharedString::from(url.clone())).size_full().object_fit(ObjectFit::Cover).into_any_element()
-                }
+                // Rounded itself: the tile doesn't clip it to its corners.
+                Some(url) => img(SharedString::from(url.clone()))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .map(|el| match kind {
+                        Kind::Avatar => el.rounded_full(),
+                        Kind::Banner => el.rounded(radius_2xl()),
+                    })
+                    .into_any_element(),
                 None => fallback,
             })
             .child(

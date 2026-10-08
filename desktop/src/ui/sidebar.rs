@@ -20,6 +20,7 @@ use crate::ui::arrange::{ChannelDrag, Slot};
 use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
 use crate::ui::rail::RAIL;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, pal, server_icon};
 
@@ -329,14 +330,7 @@ impl FuwaApp {
                                         turn.to_radians(),
                                     ))),
                             )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .child(cat.name.to_uppercase()),
-                            )
+                            .child(div().min_w_0().overflow_hidden().child(tracked(cat.name.to_uppercase(), WIDE)))
                             .when(closed && !list.is_empty(), |el| {
                                 el.child(
                                     div()
@@ -1028,7 +1022,7 @@ impl FuwaApp {
                 .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
-                .child(text.to_uppercase())
+                .child(tracked(text.to_uppercase(), WIDE))
         };
         let emerald = gpui_kit::rgb(0x10b981);
         let mut section = div()

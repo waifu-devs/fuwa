@@ -1242,6 +1242,7 @@ impl Running<'_> {
                     "call_device",
                     match t {
                         Trouble::NoMicrophone => "microphone",
+                        Trouble::MicrophoneBlocked => "microphone_blocked",
                         Trouble::NoSpeakers => "speakers",
                     },
                 );

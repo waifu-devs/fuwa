@@ -393,17 +393,16 @@ impl FuwaApp {
                         changed = true;
                     }
                     if let Some(r) = &this.voice.recording
-                        && r.recorder.progress().no_microphone
+                        && let progress = r.recorder.progress()
+                        && progress.no_microphone
                     {
                         this.voice.recording = None;
-                        this.toast(
-                            "mic-off",
-                            "Couldn't open a microphone".into(),
-                            "Check that one is plugged in and that Fuwa may use it.".into(),
-                            None,
-                            None,
-                            cx,
-                        );
+                        let body = if progress.microphone_blocked {
+                            t("desktop.voice.micBlocked")
+                        } else {
+                            "Check that one is plugged in and that Fuwa may use it.".into()
+                        };
+                        this.toast("mic-off", "Couldn't open a microphone".into(), body, None, None, cx);
                     }
                     if changed {
                         this.sync_list(cx);

@@ -30,8 +30,6 @@ nokhwa = { version = "0.10", default-features = false, features = ["input-native
 zune-jpeg = "0.5"
 # Screens and windows to share; X11 only on Linux (Wayland would need PipeWire).
 zed-scap = { version = "=0.0.8-zed", default-features = false, features = ["x11"] }
-# Pictures handed to GPUI as they're decoded.
-image = { version = "0.25", default-features = false }
 str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 anyhow = "1"
 base64 = "0.22"
@@ -73,6 +71,12 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+# Runs the backdrop's WGSL shaders offscreen (core/effects/gpu.rs): the wgpu
+# GPUI already draws with on Linux, so it isn't built twice there.
+wgpu = "29.0.4"
+# The frames those shaders make, and video as it's decoded, as pictures for
+# GPUI (the version GPUI uses).
+image = { version = "0.25", default-features = false }
 
 # Asking macOS for the microphone and camera (core/voice/access.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -137,6 +141,12 @@ icons = [
 
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"
+# Why the app wants the microphone and camera: macOS asks only when it's said.
+info-plist-path = "packaging/macos/Info.plist"
+entitlements = "packaging/macos/entitlements.plist"
+# Signed ad hoc ("-"), so the bundle and what it says hold together and macOS
+# remembers what was allowed. Not a Developer ID yet: still a warning the first time.
+signing-identity = "-"
 
 [package.metadata.packager.nsis]
 # Installs for the person running it, so it doesn't ask for an administrator.

@@ -22,6 +22,7 @@ use crate::core::config::Prefs;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, mix, radius_lg, radius_md, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -125,7 +126,7 @@ pub(crate) fn caps(text: &str, p: &Palette) -> Div {
         .line_height(px(16.0))
         .font_weight(FontWeight::BOLD)
         .text_color(p.muted_foreground)
-        .child(text.to_uppercase())
+        .child(tracked(text.to_uppercase(), WIDE))
 }
 
 /// A muted line under a setting (`text-sm text-muted-foreground`).

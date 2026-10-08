@@ -23,6 +23,7 @@ use crate::ui::app::{FuwaApp, Target};
 use crate::ui::chat::emoji_glyph;
 use crate::ui::emoji::{self, Catalog, Choice};
 use crate::ui::motion;
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, icon, server_icon};
 
@@ -649,7 +650,7 @@ fn section_title(title: &str, mark: &Mark, p: &Palette) -> impl IntoElement {
             Mark::Icon(name) => icon(name).size(px(12.0)).into_any_element(),
             Mark::Server(server) => server_icon(server, 16.0, 6.0, p).into_any_element(),
         })
-        .child(div().min_w_0().truncate().child(title.to_uppercase()))
+        .child(tracked(title.to_uppercase(), WIDE))
 }
 
 /// The emoji you're on, big, with the name to type and where it's from.

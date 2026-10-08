@@ -8,6 +8,7 @@ import { useAction } from "@/fuwa/hooks";
 import { normalizeUrl } from "@/fuwa/saved";
 import { TwoFactorStep } from "@/components/Connect";
 import { FuwaMark } from "@/components/Icons";
+import { LegalAgreement } from "@/components/LegalLinks";
 import { Petals } from "@/components/Petals";
 import { Private } from "@/components/Private";
 import { ProviderMark } from "@/components/ProviderMarks";
@@ -330,6 +331,7 @@ function NewAccount({
         {create.pending ? <LoaderCircleIcon className="animate-spin" /> : <ArrowRightIcon />}
         {t("connect.providerDone.create")}
       </Button>
+      <LegalAgreement url={answer.pending.url} />
     </form>
   );
 }

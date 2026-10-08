@@ -13,6 +13,7 @@ use super::roles::permission_name;
 use super::*;
 use crate::core::shared::{CodeLeft, SHAREABLE, code_left, find_share_code, share_code_instance, waiting};
 use crate::ui::shared_marks::{glyph, server_picture, server_tag};
+use crate::ui::text::{WIDE, tracked};
 
 /// What a confirm strip ends.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -229,7 +230,7 @@ fn heading(title: &str, count: usize, p: &Palette) -> Div {
         .text_size(px(11.0))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(p.muted_foreground)
-        .child(title.to_uppercase())
+        .child(tracked(title.to_uppercase(), WIDE))
         .when(count > 0, |el| {
             el.child(div().px(px(6.0)).rounded_full().bg(p.muted).text_size(px(10.0)).child(motion::count_up(
                 SharedString::from(format!("shared-count-{title}")),

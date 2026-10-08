@@ -527,7 +527,12 @@
     (prebuilt by shiguredo_libvpx, or vcpkg's on Windows through `voice/libvpx.rs`),
     `voice/capture.rs` taking and encoding yours in three simulcast sizes,
     `voice/video.rs` decoding others' and the sizes asked of them, drawn by
-    `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md), `reports.rs` (the anonymous reports: panics, also
+    `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md;
+    `voice/access.rs` asks macOS for the microphone and camera, which it
+    allows only to a bundle whose Info.plist says why,
+    `desktop/packaging/macos/`), `pictures.rs` (the web's `lib/pictures.ts`:
+    crop sizes and math, cutting the crop out; `ui/cropper.rs` is the
+    cropper every picture upload goes through), `reports.rs` (the anonymous reports: panics, also
     written to `crashes.txt` in the config folder so a crash is sent next
     time, failed and timed `rpc!` calls, startup, catching up, slow frames
     and a few feature counts, sent every 10 minutes through
@@ -577,10 +582,16 @@
     card over the sidebar's foot when a new version is ready,
     `backdrop.rs` what's drawn behind the app (picture, blurred once off the
     main thread when asked, dimming, a texture made here as a PNG or SVG
-    tile and repeated), `effects.rs` the moving effects (the web's shaders
-    redrawn with shadows, paths and quads, 30 frames a second while the
-    window is in front, one still frame otherwise, and none while a
-    full-screen page like server settings covers them), `keys.rs` the
+    tile and repeated), `effects.rs` the moving effects (the web's own
+    WGSL, built-in and custom, drawn offscreen by `core/effects/gpu.rs` on a
+    wgpu device of its own and shown as a picture; without a GPU the
+    built-in ones redrawn with shadows, paths and quads; 30 frames a second
+    while the window is in front, one still frame otherwise, and none while
+    a full-screen page like server settings covers them),
+    `settings_shader.rs` the custom shader editor under Background (the
+    web's `ShaderEditor.tsx`, over `core/effects`: `custom.rs` the prelude,
+    checks and starters word for word the web's, `status.rs` what happened
+    to each shader, kept across restarts in `Prefs::shaders_trying`), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
     the shortcut sheet) over `core/keybinds.rs` (the web's
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
@@ -657,7 +668,8 @@
     (the ones you added, at either address they have), redirects included,
     like the web app's `lib/shown.ts`; instances fetch other sites' pictures
     themselves (`server/src/outside.rs`). Markdown goes through `text::markdown`,
-    whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
+    whose links open only for http(s) and mailto; `text::tracked` is letter
+    spacing (Tailwind's `tracking-*`, which GPUI lacks), one line or wrapping. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion; `ambient` loops
     run only while the window is in front); `theme.rs` is
     the theme on screen as a palette (with the surfaces `docs/themes.md`
@@ -850,7 +862,13 @@
     `components/HostedBadge.tsx` shows "Hosted by Waifu Devs" for those alone,
     reached over https, on the welcome screen, the instance home and sidebar,
     and invite pages. Only the address decides it, never anything an instance
-    says about itself.
+    says about itself. The same check shows Waifu Devs' terms and privacy
+    policy (`src/legal/*.md`, English only, at `/terms` and `/privacy` through
+    `pages/Legal.tsx`): a "Terms · Privacy" footer on the welcome page and
+    "By continuing, you agree to..." under the ways in
+    (`components/LegalLinks.tsx`; the desktop's `agreement` in
+    `ui/connect.rs`). Any other instance shows none of it. A change to what
+    fuwa.chat keeps or who it shares with belongs in `privacy.md` too.
 - `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
   Railway project ("fuwa"): the published image, a volume at `/data`, the
   domain. Its `SPLIT` setting turns it into a directory (on that volume),

@@ -25,6 +25,7 @@ use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav};
 use crate::ui::motion;
+use crate::ui::text::{TIGHT, Tracked, tracked};
 use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
 
@@ -1202,24 +1203,20 @@ fn conn_dot(c: Connection, p: &Palette, window: &Window) -> AnyElement {
 
 /// Text on the web's `.gradient-text`: the primary sweeping toward violet,
 /// one color per letter.
-fn gradient_text(before: &str, name: &str, after: &str, p: &Palette) -> StyledText {
+fn gradient_text(before: &str, name: &str, after: &str, p: &Palette) -> Tracked {
     let text = format!("{before}{name}{after}");
     let start: Hsla = p.primary.into();
     let violet = gpui_kit::rgb(0xa78bfa);
     let end = mix(p.primary, violet, 0.55);
-    let chars: Vec<(usize, char)> = name.char_indices().collect();
-    let n = chars.len().max(2) - 1;
-    let highlights = chars
-        .iter()
-        .enumerate()
-        .map(|(i, (at, c))| {
-            let f = i as f32 / n as f32;
-            let color = lerp(start, end, f);
-            let from = before.len() + at;
-            (from..from + c.len_utf8(), HighlightStyle { color: Some(color), ..Default::default() })
-        })
-        .collect::<Vec<_>>();
-    StyledText::new(text).with_highlights(highlights)
+    let n = name.chars().count().max(2) - 1;
+    let plain: Hsla = p.foreground.into();
+    let colors = before
+        .chars()
+        .map(|_| plain)
+        .chain(name.chars().enumerate().map(|(i, _)| lerp(start, end, i as f32 / n as f32)))
+        .chain(after.chars().map(|_| plain))
+        .collect();
+    tracked(text, TIGHT).letter_colors(colors)
 }
 
 fn lerp(a: Hsla, b: Hsla, f: f32) -> Hsla {

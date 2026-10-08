@@ -11,6 +11,8 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
+use crate::core::voice::access::{self, Access};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sound {
     Message,
@@ -177,6 +179,8 @@ pub struct MicTest {
     level: Arc<std::sync::atomic::AtomicI32>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     pub failed: Arc<std::sync::atomic::AtomicBool>,
+    /// It failed because the system won't let the app use the microphone.
+    pub blocked: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MicTest {
@@ -185,8 +189,22 @@ impl MicTest {
         let level = Arc::new(std::sync::atomic::AtomicI32::new(-100));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (l, s, f, name) = (level.clone(), stop.clone(), failed.clone(), device.to_owned());
+        let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (l, s, f, b, name) = (level.clone(), stop.clone(), failed.clone(), blocked.clone(), device.to_owned());
         let _ = std::thread::Builder::new().name("fuwa-mic-test".into()).spawn(move || {
+            // Waits while the system's prompt is up.
+            loop {
+                match access::check(access::Device::Microphone) {
+                    Access::Allowed => break,
+                    Access::Asking if !s.load(Ordering::Relaxed) => std::thread::sleep(Duration::from_millis(250)),
+                    Access::Asking => return,
+                    Access::Blocked => {
+                        b.store(true, Ordering::Relaxed);
+                        f.store(true, Ordering::Relaxed);
+                        return;
+                    }
+                }
+            }
             let Some(device) = input_device(&name) else {
                 f.store(true, Ordering::Relaxed);
                 return;
@@ -235,7 +253,7 @@ impl MicTest {
             }
             drop(stream);
         });
-        Self { level, stop, failed }
+        Self { level, stop, failed, blocked }
     }
 
     pub fn level(&self) -> f32 {

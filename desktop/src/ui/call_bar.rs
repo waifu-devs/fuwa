@@ -116,13 +116,14 @@ impl FuwaApp {
             })
             .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(where_))
             .when(connected, |el| el.child(div().ml_auto().flex_none().pl(px(8.0)).child(clock(seconds))));
-        let no_mic = call.trouble.contains(&Trouble::NoMicrophone);
+        let blocked = call.trouble.contains(&Trouble::MicrophoneBlocked);
+        let no_mic = blocked || call.trouble.contains(&Trouble::NoMicrophone);
         if no_mic && !self.calls.mic_missing && !call.self_mute {
             self.core.mute_for_no_microphone();
         }
         self.calls.mic_missing = no_mic;
-        let trouble = match (call.trouble.contains(&Trouble::NoMicrophone), call.trouble.contains(&Trouble::NoSpeakers))
-        {
+        let trouble = match (no_mic, call.trouble.contains(&Trouble::NoSpeakers)) {
+            _ if blocked => Some(t("desktop.voice.micBlocked")),
             (true, true) => Some(t("desktop.voice.noDevices")),
             (true, false) => Some(t("workspace.calls.mic.notFound")),
             (false, true) => Some(t("desktop.voice.noSpeakers")),
@@ -134,22 +135,22 @@ impl FuwaApp {
             video_trouble
                 .map(|screen| t(if screen { "desktop.video.screenBlocked" } else { "desktop.video.cameraBlocked" }))
         });
-        let allow = video_trouble.filter(|_| access::has_settings()).map(|screen| {
+        // Where to let it in: the microphone first, as its line comes first.
+        let settings = if blocked { Some(None) } else { video_trouble.map(Some) };
+        let allow = settings.filter(|_| access::has_settings()).map(|screen| {
             div()
-                .id("call-allow-video")
+                .id("call-allow")
                 .ml(px(18.0))
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.primary)
                 .cursor_pointer()
                 .hover(|s| s.underline())
-                .child(t("desktop.video.openPrivacy"))
-                .on_click(move |_, _, _| {
-                    if screen {
-                        crate::core::voice::capture::open_screen_settings();
-                    } else {
-                        access::open_settings(access::Device::Camera);
-                    }
+                .child(t("desktop.voice.openPrivacy"))
+                .on_click(move |_, _, _| match screen {
+                    None => access::open_settings(access::Device::Microphone),
+                    Some(true) => crate::core::voice::capture::open_screen_settings(),
+                    Some(false) => access::open_settings(access::Device::Camera),
                 })
         });
         let warn: gpui_kit::Rgba = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };

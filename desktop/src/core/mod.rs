@@ -19,6 +19,7 @@ pub mod commands;
 pub mod compat;
 pub mod config;
 pub mod dms;
+pub mod effects;
 pub mod emoji;
 pub mod friends;
 pub mod gifs;
@@ -36,6 +37,7 @@ pub mod moderation;
 pub mod notifications;
 pub mod onboarding;
 pub mod permissions;
+pub mod pictures;
 pub mod pins;
 pub mod polls;
 pub mod presence;
@@ -266,6 +268,25 @@ impl Core {
             move || shared.update(|_| {})
         });
         let game_activity = prefs.game_activity;
+        // Custom shaders being tried are kept in the settings, so one that stops the app is remembered.
+        effects::status::start(
+            prefs.shaders_trying.clone(),
+            {
+                let (prefs, paths) = (shared.prefs.clone(), paths.clone());
+                move |list| {
+                    let saved = {
+                        let mut prefs = prefs.lock();
+                        prefs.shaders_trying = list;
+                        prefs.clone()
+                    };
+                    config::store_prefs(&paths, &saved);
+                }
+            },
+            {
+                let shared = shared.clone();
+                move || shared.update(|_| {})
+            },
+        );
         let core = Arc::new(Self {
             shared,
             paths,

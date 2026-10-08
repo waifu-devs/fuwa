@@ -1,4 +1,7 @@
 {
   "profileItems.chooseEffect": "Elige un archivo de efecto",
-  "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto."
+  "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto.",
+  "shader.noGpu": "Aquí no hay GPU: muestra {fallback}",
+  "voice.micBlocked": "macOS no deja que fuwa use tu micrófono. Permítelo en Ajustes del Sistema, en Privacidad y seguridad, Micrófono.",
+  "voice.openPrivacy": "Abrir Ajustes del Sistema"
 }

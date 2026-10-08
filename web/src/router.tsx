@@ -26,6 +26,7 @@ import { lazyComponent } from "@/components/lazy";
 import { useUi } from "@/lib/ui";
 import { reportThrown, setRouteSource } from "@/lib/reports";
 
+const LegalPage = lazyComponent(() => import("@/pages/Legal").then((m) => m.Legal));
 const SettingsScreens = lazyComponent(() => import("@/components/settings/UserSettings").then((m) => m.UserSettings));
 
 /** Settings load from their own file the first time they open (or once the app is idle). */
@@ -95,6 +96,10 @@ const inviteHere = createRoute({
     return <Navigate to="/$instance/invite/$code" params={{ instance: instanceKey(window.location.origin), code }} replace />;
   },
 });
+
+/** Waifu Devs' terms and privacy policy, on its own instances (pages/Legal). */
+const terms = createRoute({ getParentRoute: () => root, path: "terms", component: () => <LegalPage page="terms" /> });
+const privacy = createRoute({ getParentRoute: () => root, path: "privacy", component: () => <LegalPage page="privacy" /> });
 
 /** Where waifu.dev sends people back to after signing in with a linked account. */
 const linkedCallback = createRoute({ getParentRoute: () => root, path: "auth/waifu/callback", component: LinkedCallback });
@@ -169,6 +174,8 @@ const routeTree = root.addChildren([
   index,
   connect,
   inviteHere,
+  terms,
+  privacy,
   linkedCallback,
   ssoDone,
   providerDone,

@@ -16,6 +16,7 @@ use super::*;
 use crate::core::permissions::{self, Access, Bits, GROUPS, bit};
 use crate::core::server_admin::RolePatch;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_lg, radius_md, radius_xl};
 
 /// Colors to pick from, light to deep, as on the web.
@@ -1127,7 +1128,7 @@ impl ServerSettingsView {
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
                         .child(dot(color, 8.0, p))
-                        .child(format!("{} — 1", shown.to_uppercase())),
+                        .child(tracked(format!("{} — 1", shown.to_uppercase()), WIDE)),
                     "role-hoist-preview",
                 ))
             });
@@ -1336,7 +1337,7 @@ impl ServerSettingsView {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group_name(title).to_uppercase()),
+                    .child(tracked(group_name(title).to_uppercase(), WIDE)),
             );
             let count = matching.len();
             for (n, perm) in matching.into_iter().enumerate() {

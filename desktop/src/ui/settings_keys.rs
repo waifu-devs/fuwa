@@ -17,6 +17,7 @@ use crate::ui::keys::{combo_of, keycaps};
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::radius_xl;
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::icon;
@@ -221,7 +222,7 @@ impl SettingsView {
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
-                    .child(group.name().to_uppercase()),
+                    .child(tracked(group.name().to_uppercase(), WIDE)),
             );
             for action in ACTIONS.iter().filter(|a| a.group == group) {
                 section = section.child(self.action_row(action, n, prefs, p, cx));

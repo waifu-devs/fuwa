@@ -8,6 +8,7 @@ use gpui_kit::component::input::Textarea;
 
 use super::*;
 use crate::ui::overlay::{emoji_tile, welcome_emoji};
+use crate::ui::text::{TIGHT, WIDE, tracked};
 
 const MAX_CHANNELS: usize = 5;
 const DESCRIPTION_MAX: usize = 300;
@@ -383,7 +384,11 @@ impl ServerSettingsView {
                     .child(
                         div()
                             .child(
-                                div().text_lg().line_height(px(28.0)).font_weight(FontWeight::EXTRA_BOLD).child(title),
+                                div()
+                                    .text_lg()
+                                    .line_height(px(28.0))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .child(tracked(title, TIGHT)),
                             )
                             .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(hint)),
                     )
@@ -729,7 +734,7 @@ impl ServerSettingsView {
                             .text_size(px(11.0))
                             .font_weight(FontWeight::EXTRA_BOLD)
                             .text_color(p.muted_foreground)
-                            .child(t("join.startHere").to_uppercase()),
+                            .child(tracked(t("join.startHere").to_uppercase(), WIDE)),
                     )
                     .child(list),
             );

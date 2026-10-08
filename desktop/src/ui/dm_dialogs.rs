@@ -20,6 +20,7 @@ use crate::ui::app::FuwaApp;
 use crate::ui::dm_view::{seal, shadow_2xl};
 use crate::ui::motion;
 use crate::ui::settings_controls::{Look, button};
+use crate::ui::text::{TIGHT, WIDER, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal};
 
@@ -360,7 +361,7 @@ impl FuwaApp {
                             .text_size(px(16.0))
                             .line_height(px(24.0))
                             .font_weight(FontWeight::BOLD)
-                            .child(group.clone()),
+                            .child(tracked(group.clone(), WIDER)),
                         SharedString::from(format!("safety-{safety}-{n}")),
                         Duration::from_millis(150 + 35 * n as u64),
                         6.0,
@@ -569,7 +570,7 @@ impl FuwaApp {
             .flex_col()
             .child(div().mb(px(16.0)).flex().justify_center().child(padlock("dm", &p)))
             .child(dialog_header(
-                t("dms-calls.dm.encrypted").into_any_element(),
+                tracked(t("dms-calls.dm.encrypted"), TIGHT).into_any_element(),
                 Some(description.into_any_element()),
                 &p,
             ))
