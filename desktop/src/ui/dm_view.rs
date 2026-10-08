@@ -581,9 +581,14 @@ pub(crate) fn render_line(line: &SysLine, p: &Palette) -> AnyElement {
                 .flex()
                 .flex_wrap()
                 .items_baseline()
-                .gap_x(px(4.0))
+                .gap_x(px(3.6))
                 .text_color(p.muted_foreground)
-                .child(div().max_w_full().text_size(px(14.4)).line_height(px(21.6)).child(line.text.clone()))
+                // Word by word, so the time follows the last one on its line, as inline text does on the web.
+                .children(
+                    line.text.split_whitespace().map(|word| {
+                        div().max_w_full().text_size(px(14.4)).line_height(px(21.6)).child(word.to_owned())
+                    }),
+                )
                 .child(div().text_xs().line_height(px(16.0)).whitespace_nowrap().child(clock(line.at))),
         )
         .into_any_element()
@@ -1228,7 +1233,7 @@ impl FuwaApp {
             .items_center()
             .gap(px(12.0))
             .text_size(px(11.2))
-            .line_height(px(16.0))
+            .line_height(px(16.8))
             .text_color(p.muted_foreground)
             .when(hidden, |el| el.opacity(0.0))
             .map(|el| match also {
