@@ -120,13 +120,13 @@ export function Roles({ instanceKey, serverId, initial }: { instanceKey: string;
     return out;
   }, [members]);
 
-  // A role deleted elsewhere falls back to the first; @everyone has no members tab.
+  // A role deleted elsewhere falls back to the first; @everyone has only permissions.
   const selected = byId.has(picked) ? picked : (ranked[0]?.id ?? serverId);
-  const tab = selected === serverId && chosenTab === "members" ? "permissions" : chosenTab;
+  const tab = selected === serverId ? "permissions" : chosenTab;
 
   const pick = (id: string) => {
     setSelected(id);
-    if (id === serverId && tab === "members") setTab("permissions");
+    if (id === serverId) setTab("permissions");
     if (window.matchMedia("(max-width: 1023px)").matches) setTimeout(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
