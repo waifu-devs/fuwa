@@ -1,6 +1,6 @@
 [package]
 name = "fuwa-e2ee-wasm"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.91"
 description = "fuwa-e2ee for the web app, as WebAssembly"
