@@ -17,3 +17,14 @@ export function hostedByUs(url: string | undefined): boolean {
     return false;
   }
 }
+
+/** Waifu Devs' terms and privacy policy, served at /terms and /privacy on its instances alone. */
+export type LegalPage = "terms" | "privacy";
+
+/** Where people write to Waifu Devs about the terms and their privacy. */
+export const LEGAL_CONTACT = "veryimportantemail@fuwa.chat";
+
+/** The page on the hosted instance at this base URL. */
+export function legalLink(url: string, page: LegalPage): string {
+  return new URL(`/${page}`, url).href;
+}

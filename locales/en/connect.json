@@ -91,5 +91,11 @@
   "providerDone.newNote": "You'll sign in here with {provider}. Pick the name people see you by; you can change it later.",
   "providerDone.useProfile": "Use my {provider} name and picture",
   "providerDone.pictureOnly": "Your picture, copied to this instance",
-  "providerDone.create": "Make my account"
+  "providerDone.create": "Make my account",
+  "legal.terms": "Terms",
+  "legal.privacy": "Privacy",
+  "legal.termsTitle": "Terms of Service",
+  "legal.privacyTitle": "Privacy Policy",
+  "legal.agree": "By continuing, you agree to the {terms} and the {privacy}.",
+  "legal.home": "Back to fuwa"
 }
