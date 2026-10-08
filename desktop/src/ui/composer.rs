@@ -458,9 +458,7 @@ fn slow_note(gate: &Gate, p: &Palette) -> AnyElement {
         .child(snail)
         .child(text)
         .when(gate.exempt, |el| {
-            el.tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("chat.composer.slowExempt")).build(window, cx)
-            })
+            el.tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.composer.slowExempt")).build(window, cx))
         });
     motion::slide_in(note, "slow-note-in", 8.0).into_any_element()
 }

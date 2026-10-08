@@ -217,7 +217,7 @@ impl FuwaApp {
         let open = self.gifs.open;
         Some(
             crate::ui::widgets::tool_button("gif-open", "image-play", open, p)
-                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("GIFs").build(window, cx))
+                .tooltip(|window, cx| crate::ui::overlay::Tip::new("GIFs").build(window, cx))
                 .on_click(cx.listener(|this, _, window, cx| {
                     if this.gifs.open {
                         this.close_gifs(cx);
@@ -842,7 +842,7 @@ fn gif_tile(
             let title = tile.title.clone();
             move |window, cx| {
                 let say = if title.is_empty() { "Send this GIF".to_owned() } else { format!("Send {title}") };
-                gpui_kit::component::tooltip::Tooltip::new(say).build(window, cx)
+                crate::ui::overlay::Tip::new(say).build(window, cx)
             }
         })
         .on_click(cx.listener(move |this, _, _, cx| this.pick_gif(pick.clone(), cx)))
@@ -877,7 +877,7 @@ fn gif_tile(
         .active(|s| s.top(px(7.0)))
         .tooltip(move |window, cx| {
             let say = if starred { "Remove from your GIFs" } else { "Save to your GIFs" };
-            gpui_kit::component::tooltip::Tooltip::new(say).build(window, cx)
+            crate::ui::overlay::Tip::new(say).build(window, cx)
         })
         .on_click(cx.listener(move |this, _, _, cx| {
             cx.stop_propagation();
@@ -1036,7 +1036,7 @@ pub(crate) fn gif_in_message(
         .when(!starred, |el| el.opacity(0.0).group_hover(group.clone(), |s| s.opacity(1.0)))
         .tooltip(move |window, cx| {
             let say = if starred { "Remove from your GIFs" } else { "Save to your GIFs" };
-            gpui_kit::component::tooltip::Tooltip::new(say).build(window, cx)
+            crate::ui::overlay::Tip::new(say).build(window, cx)
         })
         .on_click(move |_, _, cx| {
             cx.stop_propagation();

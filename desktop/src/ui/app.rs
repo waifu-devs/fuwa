@@ -374,6 +374,8 @@ pub struct FuwaApp {
     pub landed: Option<(String, Instant)>,
     /// The quick switcher, and the shortcut sheet, when open.
     pub switcher: Option<crate::ui::keys::Switcher>,
+    /// What the web-drawn dialogs keep while open (`ui/dialogs.rs`).
+    pub web_dialogs: crate::ui::dialogs::WebDialogs,
     pub sheet_open: bool,
     /// Calls: the open voice channel, the card open over one, calls turned down (`ui::call_parts`).
     pub(crate) calls: crate::ui::call_parts::CallsUi,
@@ -597,6 +599,7 @@ impl FuwaApp {
             landed: None,
             theme_fade: None,
             switcher: None,
+            web_dialogs: Default::default(),
             sheet_open: false,
             covers: 0,
             calls: Default::default(),
@@ -772,12 +775,14 @@ impl FuwaApp {
     ) {
         let id = self.next_toast;
         self.next_toast += 1;
+        // A note (one that opens nothing) stays 2.2 seconds, as the web's toasts do.
+        let stay = if open.is_none() { Duration::from_millis(2200) } else { Duration::from_secs(5) };
         self.toasts.push(Toast { id, icon, title, body, open, channel, thread: None, leaving: false });
         if self.toasts.len() > 4 {
             self.toasts.remove(0);
         }
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(5)).await;
+            cx.background_executor().timer(stay).await;
             let _ = this.update(cx, |this, cx| this.dismiss_toast(id, cx));
         })
         .detach();
@@ -1446,20 +1451,7 @@ impl FuwaApp {
         self.dialog_busy = false;
         self.dialog_error = None;
         self.copied = None;
-        if let Dialog::Invite { link: None, server } = &dialog
-            && let Nav::Server { key, .. } = &self.nav
-        {
-            let (core, key, server) = (self.core.clone(), key.clone(), server.clone());
-            self.run(cx, async move { core.create_invite(&key, &server).await }, |this, result, cx| {
-                if let Some(Dialog::Invite { link, .. }) = &mut this.dialog {
-                    match result {
-                        Ok(made) => *link = Some(made),
-                        Err(err) => this.dialog_error = Some(err.message),
-                    }
-                }
-                cx.notify();
-            });
-        }
+        self.web_dialog_opened(&dialog, window, cx);
         if let Dialog::CreateServer { key } = &dialog {
             self.reset_create_form(key, window, cx);
         }
@@ -1476,7 +1468,7 @@ impl FuwaApp {
     }
 
     /// Greets a new member of the open server with its welcome screen, once,
-    /// after any rules. People who can change it never get it unasked.
+    /// with the rules to agree to at its end when they haven't yet. People who can change it never get it unasked.
     fn maybe_welcome(&mut self, cx: &mut Context<Self>) {
         let Nav::Server { key, server } = self.nav.clone() else { return };
         let seen = format!("{key}/{server}");
@@ -1495,7 +1487,6 @@ impl FuwaApp {
                 crate::core::onboarding::due(i, &server, now_ms())?,
                 srv.has_welcome_screen
                     && !onboarded
-                    && !me.pending
                     && !i.access(&server).has(crate::pb::Permission::ManageServer)
                     && now_ms() - joined < NEW_FOR,
             ))
@@ -1528,6 +1519,7 @@ impl FuwaApp {
                 this.dialog = Some(Dialog::Welcome { key: key.clone(), server: server.clone() });
                 this.dialog_error = None;
                 this.welcome = Some(screen);
+                this.welcome_opened(&key, &server, cx);
                 cx.notify();
             }
         });
@@ -1667,13 +1659,7 @@ impl FuwaApp {
                     );
                 }
             }
-            Dialog::Invite { link, .. } => {
-                if let Some(link) = link {
-                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(link));
-                    self.copied = Some(Instant::now());
-                    cx.notify();
-                }
-            }
+            Dialog::Invite { .. } => self.copy_invite(cx),
             Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } | Dialog::Picture { .. } => {
                 self.close_dialog(cx)
             }
@@ -1697,7 +1683,8 @@ impl FuwaApp {
                 self.dialog_busy = true;
                 let rx = core.spawn({
                     let (core, key, server) = (core.clone(), key.clone(), server.clone());
-                    async move { core.create_channel(&key, &server, &value, kind, &parent).await }
+                    let (name, parent) = crate::ui::dialogs::channel_request(kind, &value, &parent);
+                    async move { core.create_channel(&key, &server, &name, kind, &parent).await }
                 });
                 cx.spawn_in(window, async move |this, cx| {
                     let Ok(result) = rx.await else { return };
@@ -2014,8 +2001,8 @@ impl FuwaApp {
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
         .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
-        .when_some(self.render_sheet(cx), |el, sheet| el.child(sheet))
-        .when_some(self.render_switcher(cx), |el, switcher| el.child(switcher))
+        .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))
+        .when_some(self.render_switcher(window, cx), |el, switcher| el.child(switcher))
         .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
         .child(self.render_toasts(window, cx))
         .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {

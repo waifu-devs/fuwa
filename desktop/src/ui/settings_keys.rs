@@ -569,7 +569,7 @@ fn small_button(
             move |s| s.bg(bg).text_color(fg)
         })
         .active(|s| s.top(px(1.0)))
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
         .on_click(on_click)
         .child(icon(glyph).size(px(16.0)))
 }

@@ -93,8 +93,7 @@ impl FuwaApp {
             .hover(move |st| st.bg(hover).text_color(fg))
             .active(|st| st.opacity(0.85))
             .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.recordings.buttonTitle"))
-                    .build(window, cx)
+                crate::ui::overlay::Tip::new(t("dms-calls.calls.recordings.buttonTitle")).build(window, cx)
             })
             .on_click(cx.listener(move |this, _, _, cx| this.open_recordings(&k, &s, &c, cx)))
             .child(icon("audio-lines").size(px(18.0)))
@@ -580,10 +579,8 @@ impl FuwaApp {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.primary)
                                 .tooltip(|window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(t(
-                                        "dms-calls.calls.recordings.videoTitle",
-                                    ))
-                                    .build(window, cx)
+                                    crate::ui::overlay::Tip::new(t("dms-calls.calls.recordings.videoTitle"))
+                                        .build(window, cx)
                                 })
                                 .child(icon("video").size(px(14.0)))
                                 .child(t("dms-calls.calls.recordings.withVideo")),
@@ -756,8 +753,7 @@ impl FuwaApp {
                     .text_color(p.muted_foreground)
                     .hover(move |s| s.bg(danger_bg).text_color(danger))
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.recordings.deleteTitle"))
-                            .build(window, cx)
+                        crate::ui::overlay::Tip::new(t("dms-calls.calls.recordings.deleteTitle")).build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(r) = this.calls.recordings.as_mut() {
@@ -854,9 +850,7 @@ impl FuwaApp {
                                 .id(SharedString::from(format!("rec-live|{}|{}|{glyph}", rec.id, track.user_id)))
                                 .relative()
                                 .text_color(p.muted_foreground)
-                                .tooltip(move |window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(t(live_key)).build(window, cx)
-                                })
+                                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(live_key)).build(window, cx))
                                 .child(icon(glyph).size(px(14.0))),
                         );
                     }
@@ -884,9 +878,7 @@ impl FuwaApp {
                                 },
                             ))
                         })
-                        .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t(their)).build(window, cx)
-                        })
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(their)).build(window, cx))
                         .child(if getting {
                             motion::ambient(
                                 icon("loader-circle").size(px(16.0)),

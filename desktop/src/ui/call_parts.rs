@@ -247,7 +247,7 @@ pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
             .items_center()
             .justify_center()
             .text_color(if by_mod { p.destructive } else { p.muted_foreground })
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(t(label)).build(window, cx))
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(label)).build(window, cx))
             .child(icon(glyph).size(px(14.0)));
         row = row.child(motion::once(cell, id, Duration::from_millis(260), |el, t| el.opacity(t)));
     }
@@ -300,7 +300,7 @@ fn call_button_frame(
         .when_some(bg, |el, bg| el.bg(bg))
         .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
         .active(|s| s.opacity(0.85))
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
 }
 
 /// The web's `HangUpButton`: big and red, its phone turning on hover.
@@ -322,7 +322,7 @@ pub(crate) fn hang_up_button(id: impl Into<SharedString>, size: Size, label: Str
         .shadow(shadow_sm())
         .hover(|s| s.opacity(0.92))
         .active(|s| s.opacity(0.8))
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
         .child(icon("phone-off").size(px(size.icon())))
 }
 
@@ -632,9 +632,7 @@ impl FuwaApp {
                 .cursor_pointer()
                 .text_color(p.muted_foreground)
                 .hover(move |s| s.bg(p.muted).text_color(fg))
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(mute_label.clone()).build(window, cx)
-                })
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(mute_label.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let to = if silent { 100.0 } else { 0.0 };
                     this.set_person_volume(&volume_key, to, cx);

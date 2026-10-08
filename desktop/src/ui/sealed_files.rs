@@ -172,7 +172,7 @@ fn one_file(
                     .tooltip({
                         let name = file.name.clone();
                         move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t_with(
+                            crate::ui::overlay::Tip::new(t_with(
                                 "dms-calls.dm.sealed.download",
                                 &[("name", Arg::Str(&name))],
                             ))
@@ -225,7 +225,7 @@ fn one_file(
             .cursor_pointer()
             .hover(move |st| st.bg(hover_bg).text_color(hover_fg))
             .when(busy, |el| el.opacity(0.5))
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
             .child(icon(glyph).size(px(16.0)))
     };
     let show = (hinted && opened.is_none()).then(|| {
@@ -409,9 +409,7 @@ impl FuwaApp {
         let place = place.to_owned();
         crate::ui::widgets::tool_button("enc-attach", "paperclip", false, p)
             .when(!ready, |el| el.opacity(0.5))
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.dm.files.attachTitle")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.dm.files.attachTitle")).build(window, cx))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if ready {
                     this.pick_sealed_files(place.clone(), cx)
@@ -514,9 +512,7 @@ impl FuwaApp {
                             .hover(move |st| st.bg(hover))
                             .tooltip({
                                 let label = t_with("dms-calls.dm.files.remove", &[("name", Arg::Str(&file.name))]);
-                                move |window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
-                                }
+                                move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx)
                             })
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 PICKED.with(|pk| {

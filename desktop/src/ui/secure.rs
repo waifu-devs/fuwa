@@ -52,15 +52,6 @@ pub fn name_hint(kind: pb::ChannelType) -> &'static str {
     }
 }
 
-/// The kinds of channel someone can make, with what each is for.
-pub const KINDS: [(pb::ChannelType, &str, &str, &str); 5] = [
-    (pb::ChannelType::Text, "hash", "Text", "Messages, links, Markdown"),
-    (pb::ChannelType::Announcement, "megaphone", "Announcements", "News people follow"),
-    (pb::ChannelType::Secure, "shield-check", "Secure", "End-to-end encrypted: not even the server can read it"),
-    (pb::ChannelType::Voice, "volume-2", "Voice", "Talk, hang out, play together"),
-    (pb::ChannelType::Category, "folder", "Category", "Groups channels"),
-];
-
 /// The top of a secure channel's list: its title, and how it's kept private
 /// (with `{secure}` for the words in bold).
 pub fn beginning(name: &str, shares_history: bool) -> Row {
@@ -379,9 +370,7 @@ impl FuwaApp {
             .when(ready, |el| el.child(self.secure_threads_button(&channel.id, p, cx)))
             .child(
                 trust_pill("secure-pill", Trust::Encrypted, t("chat.secure.encrypted"), p)
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("chat.secure.seeWho")).build(window, cx)
-                    })
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.secure.seeWho")).build(window, cx))
                     .on_click(cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx))),
             )
     }

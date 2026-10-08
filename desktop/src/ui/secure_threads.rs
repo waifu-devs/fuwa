@@ -330,9 +330,7 @@ impl FuwaApp {
     pub(crate) fn secure_threads_button(&self, channel: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let side = side_of(channel);
         crate::ui::widgets::header_button("secure-threads", "messages-square", side.is_some(), p)
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("chat.threads.threads")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.threads.threads")).build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| this.toggle_secure_threads(window, cx)))
             .into_any_element()
     }
@@ -449,7 +447,7 @@ impl FuwaApp {
                 .text_color(if on { p.primary } else { p.muted_foreground })
                 .when(on, |el| el.bg(alpha(p.primary, 0.1)))
                 .hover(move |s| s.bg(hover))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
                 .child(icon(glyph).size(px(16.0)))
         };
         let where_key = match (archived, locked) {
@@ -717,9 +715,7 @@ impl FuwaApp {
                     .cursor_pointer()
                     .text_color(p.muted_foreground)
                     .hover(move |s| s.bg(hover))
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("chat.threads.closeList")).build(window, cx)
-                    })
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.threads.closeList")).build(window, cx))
                     .on_click(cx.listener(|this, _, window, cx| this.close_secure_side(window, cx)))
                     .child(icon("x").size(px(16.0))),
             );

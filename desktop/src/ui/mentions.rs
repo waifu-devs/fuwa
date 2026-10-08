@@ -355,9 +355,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
                         "chat.mentions.role",
                         &[("name", crate::core::i18n::Arg::Str(chip.label.trim_start_matches('@')))],
                     );
-                    el.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                    })
+                    el.tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                 })
                 .when_some(user, |el, username| {
                     el.cursor_pointer().when(!chip.mine, |el| el.hover(move |s| s.bg(hover))).on_click(

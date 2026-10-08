@@ -683,9 +683,7 @@ impl InstanceSettingsView {
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(pictures_sub.clone()).build(window, cx)
-                    })
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(pictures_sub.clone()).build(window, cx))
                     .child(total(
                         format!("servers-total-pictures-{picture_bytes}"),
                         "image",

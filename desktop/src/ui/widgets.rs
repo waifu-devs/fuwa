@@ -30,15 +30,6 @@ pub fn fuwa_mark(size: f32, p: &Palette) -> impl IntoElement {
         .child(svg().path("fuwa/face.svg").absolute().inset_0().size(px(size)).text_color(p.primary_foreground))
 }
 
-/// A stable color for something, from its id, as the web app's `hueOf`.
-pub fn hue_color(id: &str, dark: bool) -> Hsla {
-    let mut h: u32 = 0;
-    for c in id.encode_utf16() {
-        h = h.wrapping_mul(31).wrapping_add(u32::from(c));
-    }
-    hsla((h % 360) as f32 / 360.0, 0.62, if dark { 0.66 } else { 0.58 }, 1.0)
-}
-
 /// The hue that belongs to an id, as the web app's `hueOf`.
 pub fn hue_of(id: &str) -> f32 {
     let mut h: u32 = 0;
@@ -187,11 +178,6 @@ pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
 /// A filled button in the primary color, with a glow on hover and a dip on press.
 pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
     filled_button(id, label, p.primary, p.primary_foreground, p)
-}
-
-/// The same in the destructive color, for deleting and other things that can't be undone.
-pub fn danger_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-    filled_button(id, label, p.destructive, gpui_kit::rgb(0xffffff), p)
 }
 
 fn filled_button(

@@ -799,9 +799,7 @@ impl ServerSettingsView {
                     .when(on, |el| el.border_2().border_color(ring).p(px(2.0)))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.85))
-                    .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
-                    })
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(name.clone()).build(window, cx))
                     .child(face)
                     .when(on, |el| {
                         el.child(

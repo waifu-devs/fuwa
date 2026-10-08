@@ -8,7 +8,6 @@
 
 use std::time::Duration;
 
-use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -22,8 +21,8 @@ use crate::core::keybinds::{self, Action, COMPOSER_KEYS, Group};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{icon, pal};
+use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_3xl, radius_lg, radius_xl};
+use crate::ui::widgets::{icon, pal, server_icon};
 
 /// The combo a key press makes, in the web's words; None for a bare modifier.
 pub fn combo_of(key: &Keystroke) -> Option<String> {
@@ -501,18 +500,22 @@ impl FuwaApp {
         out
     }
 
-    pub(crate) fn render_switcher(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_switcher(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let switcher = self.switcher.as_ref()?;
+        // `pt-[12vh]` and `max-h-[70vh]`: parts of the window's height.
+        let tall = f32::from(window.viewport_size().height);
         let p = pal(cx);
         let typed = switcher.query.read(cx).value().to_string();
         let active = switcher.active;
         let items = self.switcher_items(cx);
+        // `p-2`, scrolling inside the panel's `max-h-[70vh]`.
         let mut list = div()
             .id("switcher-list")
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
             .p(px(8.0))
-            .max_h(px(420.0))
             .overflow_y_scroll()
             .track_scroll(&switcher.scroll);
         if typed.is_empty() && !items.is_empty() {
@@ -523,7 +526,8 @@ impl FuwaApp {
                     .px(px(8.0))
                     .pt(px(4.0))
                     .pb(px(6.0))
-                    .text_size(px(11.0))
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(
@@ -539,7 +543,14 @@ impl FuwaApp {
                 t_with("chattools.switcher.nothingCalled", &[("query", Arg::Str(&typed))])
             };
             list = list.child(motion::rise(
-                div().py(px(32.0)).text_center().text_sm().text_color(p.muted_foreground).child(text),
+                div()
+                    .px(px(12.0))
+                    .py(px(32.0))
+                    .text_center()
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .text_color(p.muted_foreground)
+                    .child(text),
                 "switcher-empty",
                 Duration::ZERO,
                 6.0,
@@ -549,25 +560,30 @@ impl FuwaApp {
             list = list.child(self.switcher_row(item, n, n == active, &p, cx));
         }
         let footer = div()
+            .flex_none()
             .flex()
             .flex_wrap()
             .items_center()
-            .gap(px(16.0))
+            .gap_x(px(16.0))
+            .gap_y(px(4.0))
             .px(px(16.0))
             .py(px(8.0))
             .border_t_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.4))
-            .text_size(px(11.0))
+            // GPUI doesn't clip to the panel's corners.
+            .rounded_b(radius_2xl())
+            .text_size(px(11.2))
+            .line_height(px(16.0))
             .text_color(p.muted_foreground)
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(2.0))
+                    .gap(px(4.0))
                     .child(icon("arrow-up").size(px(12.0)))
                     .child(icon("arrow-down").size(px(12.0)))
-                    .child(format!(" {}", t("chattools.switcher.move"))),
+                    .child(t("chattools.switcher.move")),
             )
             .child(
                 div()
@@ -579,52 +595,55 @@ impl FuwaApp {
             )
             .child(marked(t_with("chattools.switcher.channelsOnly", &[("mark", Arg::Str("#"))]), "#", &p))
             .child(marked(t_with("chattools.switcher.serversOnly", &[("mark", Arg::Str("*"))]), "*", &p));
-        let panel = div()
-            .id("switcher")
-            .occlude()
-            .w_full()
-            .max_w(px(560.0))
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .rounded(corner(18.0))
-            .border_1()
-            .border_color(p.border)
-            .bg(p.card)
-            .shadow(vec![gpui_kit::BoxShadow {
-                color: alpha(p.primary, if p.dark { 0.25 } else { 0.18 }),
-                offset: gpui_kit::point(px(0.0), px(24.0)),
-                blur_radius: px(60.0),
-                spread_radius: px(-12.0),
-                inset: false,
-            }])
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .px(px(14.0))
-                    .py(px(8.0))
-                    .border_b_1()
-                    .border_color(p.border)
-                    .child(Input::new(&switcher.query).large().appearance(false).prefix(icon("search").size(px(18.0)))),
-            )
-            .child(list)
-            .child(footer);
+        // `max-w-xl rounded-2xl border bg-popover shadow-2xl`, at most 70% of the window tall.
+        let panel =
+            div()
+                .id("switcher")
+                .occlude()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .w_full()
+                .max_w(px(576.0))
+                .max_h(px(tall * 0.7))
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .rounded(radius_2xl())
+                .border_1()
+                .border_color(p.border)
+                .bg(p.card)
+                .text_color(p.foreground)
+                .shadow(crate::ui::overlay::shadow_2xl())
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .h(px(57.0))
+                        .px(px(16.0))
+                        .border_b_1()
+                        .border_color(p.border)
+                        .text_lg()
+                        .child(Input::new(&switcher.query).appearance(false).text_size(px(18.0)).prefix(
+                            div().mr(px(4.0)).child(icon("search").size(px(20.0)).text_color(p.muted_foreground)),
+                        )),
+                )
+                .child(list)
+                .child(footer);
         Some(
             div()
                 .id("switcher-scrim")
                 .absolute()
                 .inset_0()
                 .flex()
-                .justify_center()
-                .pt(px(110.0))
-                .px(px(16.0))
-                .bg(alpha(p.rail, if p.dark { 0.55 } else { 0.4 }))
+                .flex_col()
+                .items_center()
+                .pt(px(tall * 0.12))
+                .px(px(12.0))
+                .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.45))
                 .occlude()
                 .on_click(cx.listener(|this, _, window, cx| this.close_switcher(window, cx)))
                 .child(motion::rise(
-                    div().w_full().max_w(px(560.0)).child(panel),
+                    div().w_full().max_w(px(576.0)).flex().flex_col().child(panel),
                     "switcher-panel",
                     Duration::ZERO,
                     -12.0,
@@ -633,11 +652,36 @@ impl FuwaApp {
         )
     }
 
+    /// One place to go: an icon tile (or the server's icon), its name with the
+    /// letters that matched, where it is under it, an unread count, and ⏎ on the lit one.
     fn switcher_row(&self, item: Item, n: usize, active: bool, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let glyph = match (&item.channel, item.kind) {
-            (None, _) => "layout-grid",
-            (Some(_), pb::ChannelType::Announcement) => "megaphone",
-            _ => "hash",
+        let lead: AnyElement = match (&item.channel, item.kind) {
+            (None, _) => {
+                let server = self
+                    .core
+                    .shared
+                    .read(|s| s.instance(&item.key).and_then(|i| i.server(&item.server)).cloned())
+                    .unwrap_or_default();
+                server_icon(&server, 32.0, 16.0, p).text_size(px(10.4)).into_any_element()
+            }
+            (Some(_), kind) => div()
+                .size(px(32.0))
+                .flex_none()
+                .rounded(radius_lg())
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(p.muted)
+                .child(
+                    icon(match kind {
+                        pb::ChannelType::Announcement => "megaphone",
+                        pb::ChannelType::Voice => "volume-2",
+                        pb::ChannelType::Secure => "shield-check",
+                        _ => "hash",
+                    })
+                    .size(px(16.0)),
+                )
+                .into_any_element(),
         };
         let name_len = item.name.len();
         let ranges: Vec<std::ops::Range<usize>> = item
@@ -648,23 +692,23 @@ impl FuwaApp {
             .map(|(_, (b, c))| b..b + c.len_utf8())
             .filter(|r| r.end <= name_len)
             .collect();
-        let bold = HighlightStyle {
-            color: Some(p.primary.into()),
-            font_weight: Some(FontWeight::EXTRA_BOLD),
-            ..Default::default()
-        };
+        let bold =
+            HighlightStyle { color: Some(p.primary.into()), font_weight: Some(FontWeight::BOLD), ..Default::default() };
         let name = StyledText::new(item.name.clone()).with_highlights(ranges.into_iter().map(|r| (r, bold)));
+        let strong = active || item.unread > 0;
         let pick = item.clone();
         div()
             .id(SharedString::from(format!("switch-{n}")))
+            .relative()
+            .flex_shrink_0()
             .flex()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(12.0))
             .px(px(10.0))
-            .h(px(44.0))
-            .flex_shrink_0()
-            .rounded(corner(10.0))
+            .py(px(8.0))
+            .rounded(radius_xl())
             .cursor_pointer()
+            .text_color(if active { p.foreground } else { p.muted_foreground })
             .when(active, |el| el.bg(alpha(p.primary, 0.12)))
             .on_mouse_move(cx.listener(move |this, _, _, cx| {
                 if let Some(s) = &mut this.switcher
@@ -675,24 +719,61 @@ impl FuwaApp {
                 }
             }))
             .on_click(cx.listener(move |this, _, window, cx| this.pick(pick.clone(), window, cx)))
-            .child(icon(glyph).size(px(16.0)).text_color(if active { p.primary } else { p.muted_foreground }))
-            .child(div().min_w_0().font_weight(FontWeight::BOLD).child(name))
+            .child(lead)
             .child(
-                div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted_foreground).child(item.place.clone()),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_base()
+                            .line_height(px(24.0))
+                            .when(strong, |el| el.font_weight(FontWeight::BOLD).text_color(p.foreground))
+                            .child(name),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(item.place.clone()),
+                    ),
             )
             .when(item.unread > 0, |el| {
                 el.child(
                     div()
-                        .px(px(7.0))
+                        .h(px(20.0))
+                        .min_w(px(20.0))
+                        .px(px(6.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .rounded_full()
-                        .bg(p.primary)
-                        .text_color(p.primary_foreground)
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::BOLD)
+                        .bg(p.destructive)
+                        .text_color(gpui_kit::white())
+                        .text_size(px(11.2))
+                        .font_weight(FontWeight::EXTRA_BOLD)
                         .child(if item.unread > 99 { "99+".to_owned() } else { item.unread.to_string() }),
                 )
             })
-            .when(active, |el| el.child(icon("corner-down-left").size(px(14.0)).text_color(p.primary)))
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(p.muted_foreground)
+                    .when(!active, |el| el.opacity(0.0))
+                    .when(active, |el| {
+                        el.child(motion::slide_in(
+                            icon("corner-down-left").size(px(16.0)),
+                            SharedString::from(format!("switch-go-{n}")),
+                            -6.0,
+                        ))
+                    })
+                    .when(!active, |el| el.child(icon("corner-down-left").size(px(16.0)))),
+            )
             .into_any_element()
     }
 
@@ -708,19 +789,21 @@ impl FuwaApp {
         true
     }
 
-    pub(crate) fn render_sheet(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_sheet(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.sheet_open {
             return None;
         }
         let p = pal(cx);
         let prefs = &self.prefs;
         let mut row = 0usize;
-        let mut columns = div().flex().flex_wrap().gap_x(px(40.0)).gap_y(px(20.0)).px(px(24.0)).py(px(16.0));
+        // `grid sm:grid-cols-2 gap-x-10 gap-y-6 px-8 py-4` across the sheet's 894px inside its border.
+        let mut columns = div().flex().flex_wrap().gap_x(px(40.0)).gap_y(px(24.0)).px(px(32.0)).py(px(16.0));
         for group in Group::ALL {
-            let mut section = div().w(px(380.0)).max_w_full().flex().flex_col().child(
+            let mut section = div().w(px(395.0)).max_w_full().flex().flex_col().child(
                 div()
                     .mb(px(4.0))
-                    .text_size(px(11.0))
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(group.name().to_uppercase()),
@@ -812,15 +895,15 @@ impl FuwaApp {
                         }
                     }))
                     .child(icon("sparkles").size(px(15.0)))
-                    .child(t("desktop.sheet.change")),
+                    .child(t("chattools.shortcuts.change")),
             );
         let header = div()
             .flex()
             .items_center()
             .gap(px(12.0))
             .px(px(32.0))
-            .pt(px(10.0))
-            .pb(px(6.0))
+            .pt(px(12.0))
+            .pb(px(8.0))
             .child(motion::fade_in(
                 div()
                     .size(px(40.0))
@@ -838,8 +921,20 @@ impl FuwaApp {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.shortcuts.title")))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.sheet.about"))),
+                    .child(
+                        div()
+                            .text_lg()
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("chattools.shortcuts.title")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("chattools.shortcuts.about")),
+                    ),
             )
             .child(
                 div()
@@ -852,7 +947,10 @@ impl FuwaApp {
                     .rounded_full()
                     .cursor_pointer()
                     .text_color(p.muted_foreground)
-                    .hover(|s| s.bg(alpha(p.muted_foreground, 0.12)))
+                    .hover({
+                        let (bg, fg) = (p.muted, p.foreground);
+                        move |s| s.bg(bg).text_color(fg)
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.sheet_open = false;
                         cx.notify();
@@ -863,11 +961,12 @@ impl FuwaApp {
             .id("sheet")
             .occlude()
             .w_full()
-            .max_w(px(880.0))
-            .max_h(px(620.0))
+            .max_w(px(896.0))
+            .max_h(px(f32::from(window.viewport_size().height) * 0.85))
             .flex()
             .flex_col()
-            .rounded_t(corner(24.0))
+            .rounded_t(radius_3xl())
+            .shadow(crate::ui::overlay::shadow_2xl())
             .border_1()
             .border_b_0()
             .border_color(p.border)
@@ -887,7 +986,7 @@ impl FuwaApp {
                 .flex_col()
                 .justify_end()
                 .items_center()
-                .bg(alpha(p.rail, if p.dark { 0.55 } else { 0.4 }))
+                .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.4))
                 .occlude()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sheet_open = false;

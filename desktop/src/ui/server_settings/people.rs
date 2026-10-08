@@ -752,7 +752,7 @@ impl ServerSettingsView {
             let target = uid.clone();
             row = row.child(motion::once(
                 pill.id(SharedString::from(format!("member-pill-{uid}")))
-                    .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(ends.clone()).build(w, cx))
+                    .tooltip(move |w, cx| crate::ui::overlay::Tip::new(ends.clone()).build(w, cx))
                     .when(s.can.timeout, |el| {
                         el.cursor_pointer().hover(move |s| s.bg(hover)).on_click(cx.listener(move |_, _, _, cx| {
                             cx.emit(ServerSettingsEvent::Moderate {

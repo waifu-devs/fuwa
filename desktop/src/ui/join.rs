@@ -2021,10 +2021,23 @@ fn banner_hero(
     window: &mut Window,
     cx: &mut Context<FuwaApp>,
 ) -> AnyElement {
+    banner_hero_wide(server, eyebrow, badge, 446.0, p, window, cx)
+}
+
+/// The same across a card `width` wide inside its border (the welcome screen's is wider).
+pub(crate) fn banner_hero_wide(
+    server: &pb::Server,
+    eyebrow: &str,
+    badge: Option<AnyElement>,
+    width: f32,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<FuwaApp>,
+) -> AnyElement {
     let accent = crate::ui::banner::accent(server);
     let banner = crate::ui::banner::server_banner_round(
         server,
-        446.0,
+        width,
         160.0,
         Some(p.card.into()),
         f32::from(radius_3xl()) - 1.0,

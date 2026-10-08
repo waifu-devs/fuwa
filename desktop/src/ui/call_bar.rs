@@ -73,9 +73,7 @@ impl FuwaApp {
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
             .active(|s| s.opacity(0.9))
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.panel.details")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.calls.panel.details")).build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_call_pop(CallPop::Connection, cx)))
             .child(signal(&call.status, &call.quality, &p, "panel", window))
             .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
@@ -111,8 +109,7 @@ impl FuwaApp {
                         .id("call-lock")
                         .flex_none()
                         .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.panel.encrypted"))
-                                .build(window, cx)
+                            crate::ui::overlay::Tip::new(t("dms-calls.calls.panel.encrypted")).build(window, cx)
                         })
                         .child(icon("lock-keyhole").size(px(12.0))),
                 )

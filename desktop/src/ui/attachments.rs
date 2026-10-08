@@ -212,7 +212,7 @@ fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<Fuw
         )
         .child(
             icon_button(SharedString::from(format!("save|{id}")), "download", p)
-                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Save").build(window, cx))
+                .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
                 .on_click(move |_, _, cx| {
                     let _ =
                         this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
@@ -241,7 +241,7 @@ impl FuwaApp {
 
     pub(crate) fn attach_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         crate::ui::widgets::tool_button("attach", "paperclip", false, p)
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new(t("chat.files.attach")).build(window, cx))
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.files.attach")).build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx)))
             .into_any_element()
     }
@@ -433,7 +433,7 @@ impl FuwaApp {
             .border_1()
             .border_color(if failed.is_some() { alpha(p.destructive, 0.6) } else { p.border.into() })
             .bg(if failed.is_some() { alpha(p.destructive, 0.05) } else { alpha(p.muted, 0.4) })
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx));
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx));
         card = match &s.preview {
             Some(path) => card.child(
                 img(path.clone())
@@ -545,11 +545,8 @@ impl FuwaApp {
                 el.child(
                     round("staged-retry", "rotate-cw", p.primary)
                         .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t_with(
-                                "chat.files.retry",
-                                &[("name", Arg::Str(&name))],
-                            ))
-                            .build(window, cx)
+                            crate::ui::overlay::Tip::new(t_with("chat.files.retry", &[("name", Arg::Str(&name))]))
+                                .build(window, cx)
                         })
                         .on_click(cx.listener(move |this, _, _, cx| this.retry_file(id, cx))),
                 )
@@ -558,11 +555,8 @@ impl FuwaApp {
                 let name = s.name.clone();
                 round("staged-remove", "x", p.destructive)
                     .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t_with(
-                            "chat.files.remove",
-                            &[("name", Arg::Str(&name))],
-                        ))
-                        .build(window, cx)
+                        crate::ui::overlay::Tip::new(t_with("chat.files.remove", &[("name", Arg::Str(&name))]))
+                            .build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| this.remove_file(id, cx)))
             });
@@ -752,9 +746,7 @@ impl FuwaApp {
                                 )
                                 .child(
                                     icon_button("picture-save", "download", &p)
-                                        .tooltip(|window, cx| {
-                                            gpui_kit::component::tooltip::Tooltip::new("Save").build(window, cx)
-                                        })
+                                        .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.save_file(
                                                 key.clone(),

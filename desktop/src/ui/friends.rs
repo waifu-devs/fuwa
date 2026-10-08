@@ -1027,10 +1027,8 @@ impl FuwaApp {
                     b.on_click(on(Act::Request, cx)).into_any_element()
                 } else {
                     let tip = t_with("dms-calls.friends.actions.notTaking", &[("name", Arg::Str(&name))]);
-                    b.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                    })
-                    .into_any_element()
+                    b.tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
+                        .into_any_element()
                 }
             }
             OUTGOING => swap(
@@ -1097,9 +1095,7 @@ impl FuwaApp {
                     .hover(move |s| s.bg(soft).text_color(red))
                     .active(|s| s.top(px(1.0)))
                     .child(icon("ban").size(px(16.0)))
-                    .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                    })
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                     .on_click(on(Act::Block, cx)),
             );
         }

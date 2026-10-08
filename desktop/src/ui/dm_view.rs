@@ -772,7 +772,7 @@ impl FuwaApp {
                 el.child(
                     trust_pill("dm-trust", trust, label, &p)
                         .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.dm.trust.title")).build(window, cx)
+                            crate::ui::overlay::Tip::new(t("dms-calls.dm.trust.title")).build(window, cx)
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
                             let dialog = crate::ui::app::Dialog::Safety { key: key.clone(), conversation: id.clone() };
@@ -1363,9 +1363,7 @@ impl FuwaApp {
             .items_center()
             .justify_center()
             .text_color(s.green)
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.dm.composer.sealed")).build(window, cx)
-            })
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.dm.composer.sealed")).build(window, cx))
             .child(icon("lock-keyhole").size(px(16.0)));
         let send = voice.is_none().then(|| {
             div()
@@ -1479,9 +1477,7 @@ pub(crate) fn shared_pill(id: &str, p: &Palette) -> AnyElement {
         .line_height(px(14.0))
         .font_weight(FontWeight::BOLD)
         .text_color(p.muted_foreground)
-        .tooltip(|window, cx| {
-            gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.dm.row.sharedTitle")).build(window, cx)
-        })
+        .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.dm.row.sharedTitle")).build(window, cx))
         .child(icon("rotate-ccw-clock").size(px(12.0)))
         .child(t("dms-calls.dm.row.shared"))
         .into_any_element()

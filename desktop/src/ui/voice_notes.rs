@@ -510,8 +510,7 @@ impl FuwaApp {
                     .hover(move |s| s.bg(bin_bg).text_color(bin_fg))
                     .active(|s| s.top(px(1.0)))
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.voice.recorder.throwAwayTitle"))
-                            .build(window, cx)
+                        crate::ui::overlay::Tip::new(t("dms-calls.voice.recorder.throwAwayTitle")).build(window, cx)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.discard_recording(cx);
@@ -615,7 +614,7 @@ impl FuwaApp {
                 el.text_color(p.muted_foreground).hover(move |s| s.bg(bg).text_color(fg))
             })
             .cursor_pointer()
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
             .on_mouse_down(
                 gpui_kit::MouseButton::Left,
                 cx.listener(|this, e: &gpui_kit::MouseDownEvent, _, cx| {
@@ -734,7 +733,7 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
             .when(failed, |el| el.bg(p.muted).text_color(p.muted_foreground))
             .cursor_pointer()
             .active(|s| s.opacity(0.85))
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |this, cx| this.play_voice(file.clone(), None, cx));
             })
@@ -868,7 +867,7 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
             .hover(move |s| s.bg(bg).text_color(fg))
             .active(|s| s.opacity(0.85))
             .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.voice.message.speedTitle")).build(window, cx)
+                crate::ui::overlay::Tip::new(t("dms-calls.voice.message.speedTitle")).build(window, cx)
             })
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |this, cx| this.next_voice_rate(cx));

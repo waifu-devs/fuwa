@@ -108,7 +108,7 @@ impl FuwaApp {
                 .when(going, |el| el.bg(green()).text_color(gpui_kit::white()).hover(|s| s.opacity(0.92)))
                 .when(!going, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
                 .active(|s| s.opacity(0.85))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.join_dm_call(&k, &c);
                     cx.notify();
@@ -490,8 +490,7 @@ impl FuwaApp {
             .child(
                 round(format!("decline|{}", r.key), p.destructive)
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.incoming.decline"))
-                            .build(window, cx)
+                        crate::ui::overlay::Tip::new(t("dms-calls.calls.incoming.decline")).build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.calls.declined.insert(decline_key.clone());
@@ -502,8 +501,7 @@ impl FuwaApp {
             .child(
                 round(format!("answer|{}", r.key), green())
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(t("dms-calls.calls.incoming.answer"))
-                            .build(window, cx)
+                        crate::ui::overlay::Tip::new(t("dms-calls.calls.incoming.answer")).build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.core.join_dm_call(&k, &c);

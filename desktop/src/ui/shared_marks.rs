@@ -106,7 +106,7 @@ pub fn badge(id: &str, label: String, color: impl Into<Hsla>) -> impl IntoElemen
             .items_center()
             .justify_center()
             .child(glyph(13.0, color))
-            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)),
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx)),
         SharedString::from(format!("shared-badge-in-{id}")),
         Duration::from_millis(120),
         6.0,
