@@ -337,7 +337,11 @@ impl InstanceSettingsView {
                             Ok(next) => {
                                 this.replace_account(next);
                                 this.accounts.pending = None;
-                                this.toast("power-off", format!("{name} is turned off"), cx);
+                                this.toast(
+                                    "power-off",
+                                    t_with("instancesettings.accounts.turnedOff", &[("name", Arg::Str(&name))]),
+                                    cx,
+                                );
                             }
                             Err(problem) => this.accounts.dialog_error = Some(problem.message),
                         }
@@ -681,7 +685,10 @@ impl InstanceSettingsView {
             if a.disabled_reason.is_empty() {
                 gpui_kit::StyledText::new(t_with("instancesettings.accounts.offNoReason", &[("date", Arg::Str(&day))]))
             } else {
-                let template = t_with("instancesettings.accounts.offReason", &[("date", Arg::Str(&day))]);
+                let template = t_with(
+                    "instancesettings.accounts.offReason",
+                    &[("date", Arg::Str(&day)), ("reason", Arg::Str("{reason}"))],
+                );
                 let (before, after) = template.split_once("{reason}").unwrap_or((template.as_str(), ""));
                 let text = format!("{before}{}{after}", a.disabled_reason);
                 let italic =
@@ -888,6 +895,7 @@ impl InstanceSettingsView {
             }
             let copied = id.clone();
             let what = t("common.copy.accountId");
+            let done = t_with("common.copied", &[("what", Arg::Str(&what))]);
             items = items.child(item(
                 "copy-id",
                 "fingerprint-pattern",
@@ -895,7 +903,7 @@ impl InstanceSettingsView {
                 false,
                 Box::new(move |this, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
-                    this.toast("copy", t("common.copied"), cx);
+                    this.toast("copy", done.clone(), cx);
                 }),
                 cx,
             ));

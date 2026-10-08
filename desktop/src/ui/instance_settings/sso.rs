@@ -107,6 +107,13 @@ impl Sso {
         let mut lines = Vec::new();
         for (key, placeholder, masked, get, set) in LINES {
             let state = cx.new(|cx| {
+                // The web's translated placeholders; the rest are examples.
+                let placeholder = match key {
+                    "client_id" => t("system.sso.clientId"),
+                    "client_secret" => t("system.sso.clientSecret"),
+                    "scopes" => t("instancesettings.provider.scopes"),
+                    _ => placeholder.to_owned(),
+                };
                 let s = InputState::new(window, cx).placeholder(placeholder);
                 if masked { s.masked(true) } else { s }
             });

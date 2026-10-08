@@ -19,7 +19,7 @@ use crate::core::dms::now_ms;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::instance_manage::{self as manage, LENGTHS, TEXT_MAX};
 use crate::pb::{self, AnnouncementTone as Tone};
-use crate::ui::announcement::banner;
+use crate::ui::announcement::banner_in;
 use crate::ui::motion;
 use crate::ui::server_settings::{amber, spinner};
 use crate::ui::theme::{Palette, alpha, corner};
@@ -233,7 +233,7 @@ impl InstanceSettingsView {
                     .border_1()
                     .border_color(p.border)
                     .bg(alpha(p.background, 0.4))
-                    .child(banner("announcement-preview", &draft, now, close, p, window))
+                    .child(banner_in("announcement-preview", &draft, now, close, Some(corner(15.0)), p, window))
                     .child(sketch),
             )
             .child(motion::rise(
@@ -365,7 +365,7 @@ impl InstanceSettingsView {
                 el.child(motion::rise(
                     div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(
                         crate::ui::text::hint_line(
-                            &t("instancesettings.announcement.comesDownAt"),
+                            &t_with("instancesettings.announcement.comesDownAt", &[("time", Arg::Str("{time}"))]),
                             &[("time", manage::stamp_label(at, now).as_str())],
                             p,
                         ),

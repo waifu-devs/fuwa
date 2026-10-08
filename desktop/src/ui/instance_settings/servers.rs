@@ -1509,7 +1509,10 @@ impl InstanceSettingsView {
             let armed = typed == s.name;
             let d = &self.servers.detail;
             let busy = d.delete_busy;
-            let confirm_text = bold_parts(&t("serversettings.danger.confirm"), &[("name", s.name.as_str())]);
+            let confirm_text = bold_parts(
+                &t_with("serversettings.danger.confirm", &[("name", Arg::Str("{name}"))]),
+                &[("name", s.name.as_str())],
+            );
             section = section.child(motion::rise(
                 div()
                     .flex()

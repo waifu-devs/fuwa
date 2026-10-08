@@ -46,6 +46,20 @@ pub fn banner(
     p: &Palette,
     window: &Window,
 ) -> AnyElement {
+    banner_in(id, a, now, close, None, p, window)
+}
+
+/// The banner with its top corners rounded to `top` (the Announcement page's preview sits in a
+/// rounded box, and GPUI doesn't clip to rounded corners).
+pub fn banner_in(
+    id: &str,
+    a: &pb::Announcement,
+    now: i64,
+    close: Option<AnyElement>,
+    top: Option<gpui_kit::Pixels>,
+    p: &Palette,
+    window: &Window,
+) -> AnyElement {
     let tone = tone_of(a);
     let (bg, fg, chip, chip_fg) = match tone {
         Tone::Warning => (mix(p.background, gpui_kit::rgb(0xf59e0b), 0.18), p.foreground.into(), amber(), ink()),
@@ -127,21 +141,32 @@ pub fn banner(
         .py(px(8.0))
         .bg(bg)
         .text_color(fg)
+        .when_some(top, |el, r| el.rounded_t(r))
         .when(tone == Tone::Info, |el| {
             // The web's three-stop sweep: 18% of the primary at the edges, 9% at 60%.
             let (edge, middle) = (mix(p.background, p.primary, 0.18), mix(p.background, p.primary, 0.09));
             el.border_b_1()
                 .border_color(alpha(p.primary, 0.3))
-                .child(div().absolute().top_0().bottom_0().left_0().w(gpui_kit::relative(0.6)).bg(linear_gradient(
-                    90.0,
-                    linear_color_stop(edge, 0.0),
-                    linear_color_stop(middle, 1.0),
-                )))
-                .child(div().absolute().top_0().bottom_0().right_0().w(gpui_kit::relative(0.4)).bg(linear_gradient(
-                    90.0,
-                    linear_color_stop(middle, 0.0),
-                    linear_color_stop(edge, 1.0),
-                )))
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .w(gpui_kit::relative(0.6))
+                        .when_some(top, |el, r| el.rounded_tl(r))
+                        .bg(linear_gradient(90.0, linear_color_stop(edge, 0.0), linear_color_stop(middle, 1.0))),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(gpui_kit::relative(0.4))
+                        .when_some(top, |el, r| el.rounded_tr(r))
+                        .bg(linear_gradient(90.0, linear_color_stop(middle, 0.0), linear_color_stop(edge, 1.0))),
+                )
         })
         .child(badge)
         .child(words)
