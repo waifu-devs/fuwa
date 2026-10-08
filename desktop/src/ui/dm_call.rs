@@ -1,15 +1,16 @@
 //! Calls in direct messages (the web's components/calls/DmCall.tsx and
 //! IncomingCalls.tsx): the call button in a conversation's header, the
-//! call across the top of the conversation while one goes on, and the card
-//! that rings wherever you are when someone calls you. Every frame is sealed
-//! end to end (core/voice): the instance only passes them on.
+//! call across the top of the conversation while one goes on (tiles while a
+//! camera or screen is on), and the card that rings wherever you are when
+//! someone calls you. Every frame, sound and picture, is sealed end to end
+//! (core/voice): the instance only passes them on.
 
 use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
 };
 
 use crate::core::calls::clock;
@@ -17,14 +18,14 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
-use crate::ui::call_parts::{
-    CallPop, Side, Size, camera_button, green, hang_up_button, person_avatar, screen_button, voice_avatar,
-};
+use crate::ui::call_parts::{CallPop, Side, Size, green, hang_up_button, person_avatar, voice_avatar};
 use crate::ui::motion;
+use crate::ui::popout::Popped;
 use crate::ui::settings_controls::shadow_xl;
 use crate::ui::text::ms_of;
-use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl};
-use crate::ui::widgets::{icon, pal};
+use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_lg};
+use crate::ui::video::{live_badge, pop_out_button};
+use crate::ui::widgets::{hue_gradient, icon, pal};
 
 /// How long a new call rings for; after that it's still there to join from the conversation.
 const RING: Duration = Duration::from_secs(45);
@@ -185,6 +186,18 @@ impl FuwaApp {
             );
         }
         let speaking = mine.as_ref().map(|c| c.speaking.clone()).unwrap_or_default();
+        // Whose camera and screen are on: the others' only while you're in the call.
+        let (my_video, my_stream) = mine.as_ref().map(|c| (c.self_video, c.self_stream)).unwrap_or_default();
+        let on = |user: &str, screen: bool| {
+            if !in_call {
+                return false;
+            }
+            if user == me {
+                return if screen { my_stream } else { my_video };
+            }
+            participants.iter().any(|v| v.user_id == user && if screen { v.self_stream } else { v.self_video })
+        };
+        let filming = users.iter().any(|u| on(&u.id, false) || on(&u.id, true));
         let mut people = div().flex().items_center().gap(px(40.0));
         for user in &users {
             let is_here = here.contains(&user.id);
@@ -235,14 +248,29 @@ impl FuwaApp {
             }
             people = people.child(holder);
         }
+        let people = if filming {
+            let mut tiles = div().w_full().max_w(px(768.0)).flex().flex_wrap().gap(px(12.0));
+            for user in users.iter().filter(|u| on(&u.id, true)) {
+                tiles = tiles.child(self.dm_screen_tile(key, user, user.id == me, &p, window, cx));
+            }
+            for user in &users {
+                let here = here.contains(&user.id);
+                let talking = speaking.contains(&user.id);
+                tiles = tiles.child(self.dm_camera_tile(key, user, here, on(&user.id, false), talking, &p, window, cx));
+            }
+            motion::rise(tiles, SharedString::from(format!("dm-cameras|{conversation}")), Duration::ZERO, 8.0)
+                .into_any_element()
+        } else {
+            people.into_any_element()
+        };
         let controls: AnyElement = if in_call {
             div()
                 .flex()
                 .items_center()
                 .gap(px(8.0))
                 .child(self.mute_buttons("dm", Size::Lg, cx))
-                .child(camera_button("dm-camera", Size::Lg, false, &p))
-                .child(screen_button("dm-screen", Size::Lg, false, &p))
+                .child(self.camera_button("dm", Size::Lg, false, cx))
+                .child(self.screen_button("dm", Size::Lg, false, window, cx))
                 .when_some(self.record_button("dm", Size::Lg, false, window, cx), |el, b| el.child(b))
                 .child(hang_up_button("dm-hang-up", Size::Lg, t("dms-calls.calls.dm.hangUp"), &p).on_click(
                     cx.listener(|this, _, _, cx| {
@@ -315,6 +343,167 @@ impl FuwaApp {
             motion::rise(strip, SharedString::from(format!("dm-strip|{conversation}")), Duration::ZERO, -8.0)
                 .into_any_element(),
         )
+    }
+
+    /// One of you while a camera is on in the call (the web's `Camera`):
+    /// a tile with the camera, or the avatar.
+    #[allow(clippy::too_many_arguments)]
+    fn dm_camera_tile(
+        &mut self,
+        key: &str,
+        user: &pb::User,
+        here: bool,
+        video: bool,
+        talking: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = crate::core::store::user_name(user);
+        let group = format!("dm-tile|{}", user.id);
+        let feed = crate::core::voice::video::feed_of(&user.id, false);
+        let camera =
+            video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius_2xl(), window, cx));
+        let tile = div()
+            .relative()
+            .w_full()
+            .aspect_ratio(16.0 / 9.0)
+            .overflow_hidden()
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(if talking { gpui_kit::Hsla::from(green()) } else { p.border.into() })
+            .bg(p.card)
+            .child(hue_gradient(&user.id, 16.0, div().absolute().inset_0()).opacity(0.25))
+            .child(div().absolute().inset_0().flex().items_center().justify_center().child(voice_avatar(
+                Some(user),
+                &user.id,
+                64.0,
+                20.0,
+                4.0,
+                talking,
+                &format!("dm-tile|{}", user.id),
+                window,
+                cx,
+            )))
+            .children(camera)
+            .child(
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .bottom(px(8.0))
+                    .max_w(relative(0.8))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .rounded(radius_lg())
+                    .bg(alpha(p.background, 0.75))
+                    .px(px(8.0))
+                    .py(px(2.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::BOLD)
+                    .child(name.clone()),
+            );
+        let popped = Popped { instance: key.to_owned(), user: user.id.clone(), server: None, screen: false };
+        div()
+            .relative()
+            .w(relative(0.48))
+            .flex_grow(1.0)
+            .group(SharedString::from(group.clone()))
+            .when(!here, |el| el.opacity(0.5))
+            .child(tile)
+            .when(here, |el| {
+                el.child(
+                    pop_out_button(
+                        SharedString::from(format!("dm-pop|{}", user.id)),
+                        t_with("dms-calls.calls.video.popOutTitle", &[("name", Arg::Str(&name))]),
+                        &group,
+                        p,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        // Not the tile under it too.
+                        cx.stop_propagation();
+                        this.pop_out(popped.clone(), cx)
+                    })),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// A shared screen in the call: the whole width, shown whole.
+    fn dm_screen_tile(
+        &mut self,
+        key: &str,
+        user: &pb::User,
+        mine: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = crate::core::store::user_name(user);
+        let group = format!("dm-screen|{}", user.id);
+        let feed = crate::core::voice::video::feed_of(&user.id, true);
+        let label = if mine {
+            t("dms-calls.calls.screen.yours")
+        } else {
+            t_with("dms-calls.calls.screen.theirs", &[("name", Arg::Str(&name))])
+        };
+        let popped = Popped { instance: key.to_owned(), user: user.id.clone(), server: None, screen: true };
+        let tile = div()
+            .relative()
+            .w_full()
+            .aspect_ratio(16.0 / 9.0)
+            .overflow_hidden()
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(gpui_kit::black())
+            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, radius_2xl(), window, cx))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .bottom(px(8.0))
+                    .max_w(relative(0.8))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .rounded(radius_lg())
+                    .bg(alpha(p.background, 0.8))
+                    .px(px(8.0))
+                    .py(px(2.0))
+                    .child(live_badge())
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(label),
+                    ),
+            );
+        div()
+            .relative()
+            .w_full()
+            .group(SharedString::from(group.clone()))
+            .child(tile)
+            .child(
+                pop_out_button(
+                    SharedString::from(format!("dm-pop-screen|{}", user.id)),
+                    t_with("dms-calls.calls.video.popOutScreenTitle", &[("name", Arg::Str(&name))]),
+                    &group,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not the tile under it too.
+                    cx.stop_propagation();
+                    this.pop_out(popped.clone(), cx)
+                })),
+            )
+            .into_any_element()
     }
 
     /// Calls that started a moment ago in conversations you're in, that you're not in yet.

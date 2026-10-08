@@ -117,13 +117,17 @@ jobs:
     defaults:
       run:
         working-directory: desktop
+    env:
+      # libvpx comes prebuilt for named Ubuntu releases; this one's runs on
+      # any newer one, so ubuntu-latest moving on doesn't break the build.
+      LIBVPX_TARGET: ubuntu-24.04_x86_64
     steps:
       - uses: actions/checkout@v4
       - name: What GPUI needs on Linux
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libasound2-dev
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libasound2-dev libvpx-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -134,6 +138,11 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      # Windows' libvpx path (core/voice/libvpx.rs), on Ubuntu's libvpx: the
+      # same VP8 and video call tests the prebuilt one passes.
+      - run: cargo clippy --all-targets --locked --no-default-features --features system-libvpx -- -D warnings
+      - run: cargo test --locked --no-default-features --features system-libvpx --test voice
+      - run: cargo test --locked --no-default-features --features system-libvpx --lib vp8
 
   proto:
     name: Protocol (buf lint)

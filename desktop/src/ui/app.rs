@@ -484,6 +484,31 @@ impl FuwaApp {
         })
         .detach();
 
+        // while a call goes on or the camera is being checked.
+        // while a call goes on.
+        let mut pictures = core.videos().changes();
+        cx.spawn_in(window, async move |this, cx| {
+            while pictures.changed().await.is_ok() {
+                let going = this.update(cx, |this, cx| {
+                    if this.core.call().is_some() || this.core.camera_testing().0 {
+                        cx.notify();
+                    }
+                });
+                if going.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+        // A popped-out camera's window closed: it shows nothing any more.
+        let weak = cx.entity().downgrade();
+        subscriptions.push(cx.on_window_closed(move |cx, id| {
+            let _ = weak.update(cx, |this, cx| {
+                this.calls.popouts.retain(|_, h| h.window_id() != id);
+                crate::ui::video::forget_window(&this.core, id.as_u64(), cx);
+            });
+        }));
+
         // Tell the person about what happens elsewhere.
         if let Some(mut notices) = core.take_notices() {
             cx.spawn_in(window, async move |this, cx| {
@@ -665,6 +690,14 @@ impl FuwaApp {
         self.ensure_loaded(cx);
         self.sync_list(cx);
         self.sync_thread(cx);
+        // Hanging up closes the popped-out cameras and lets go of every picture.
+        // A moderator turning your camera off reaches you at once, not at the next keep.
+        self.core.watch_video_moderation();
+        let in_call = self.core.call().is_some();
+        if std::mem::replace(&mut self.calls.in_call, in_call) && !in_call {
+            self.close_pop_outs(cx);
+            crate::ui::video::clear(window, cx);
+        }
         cx.notify();
     }
 
@@ -2006,6 +2039,8 @@ impl FuwaApp {
         .when_some(self.render_switcher(window, cx), |el, switcher| el.child(switcher))
         .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
         .child(self.render_toasts(window, cx))
+        // After everything: which cameras this window showed, and how big.
+        .child(crate::ui::video::commit(self.core.clone()))
         .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
             // A new theme washes in: the old page color fades away over it.
             el.child(div().absolute().inset_0().bg(color).with_animation(

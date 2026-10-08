@@ -1,7 +1,8 @@
 //! A voice channel, open (the web's components/calls/VoiceStage.tsx):
-//! everyone in it as a tile that glows while they talk, who's recording,
-//! and the controls for your own place there. The desktop's calls are sound
-//! only, so tiles show people's avatars, as the web's do with cameras off.
+//! shared screens on top, big, then everyone in it as a tile that glows
+//! while they talk (their camera, when it's on), who's recording, and the
+//! controls for your own place there. Each tile pops out into a window of
+//! its own.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -9,9 +10,9 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat, InteractiveElement as _, IntoElement,
+    AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement as _, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window,
-    div, point, px,
+    div, point, px, relative,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -19,12 +20,13 @@ use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::call_parts::{
-    CallPop, Side, Size, camera_button, green, hang_up_button, in_voice, red, screen_button, toggle_icon, voice_avatar,
-    voice_flags,
+    CallPop, Side, Size, green, hang_up_button, in_voice, red, toggle_icon, voice_avatar, voice_flags,
 };
 use crate::ui::motion;
+use crate::ui::popout::Popped;
 use crate::ui::settings_controls::shadow_sm;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
+use crate::ui::video::{live_badge, pop_out_button};
 use crate::ui::widgets::{app_badge, hue_gradient, icon, is_agent, pal};
 
 /// The stage's scroll area's padding (`p-6`) and the gap between tiles (`gap-4`).
@@ -129,6 +131,12 @@ impl FuwaApp {
         });
         let call = self.core.call().filter(|c| c.in_channel(key, &channel.id));
         let joined = call.is_some();
+        let me = self.core.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())));
+        let me = me.unwrap_or_default();
+        let mine = call.as_ref().map(|c| (c.self_video, c.self_stream)).unwrap_or_default();
+        // Screens come through only while you're in the channel; yours from this app.
+        let sharing: Vec<&pb::VoiceState> =
+            states.iter().filter(|s| joined && if s.user_id == me { mine.1 } else { s.self_stream }).collect();
 
         // ── The header ──
         let header = div()
@@ -184,14 +192,53 @@ impl FuwaApp {
             let tile_w = (width - GAP * (cols as f32 - 1.0)) / cols as f32;
             let tile_h = tile_w * 9.0 / 16.0;
             let rows = states.len().div_ceil(cols);
-            let content_h = rows as f32 * tile_h + (rows as f32 - 1.0) * GAP;
-            let top = ((h - PAD * 2.0 - content_h) / 2.0).max(0.0);
-            let mut grid = div().w(px(width)).mx_auto().mt(px(top)).flex().flex_wrap().gap(px(GAP));
-            for (n, state) in states.iter().enumerate() {
-                grid =
-                    grid.child(self.tile(key, server, &channel.id, state, n, tile_w, tile_h, joined, &p, window, cx));
+            let mut content_h = rows as f32 * tile_h + (rows as f32 - 1.0) * GAP;
+            // Shared screens above, as wide as the stage lets them (two a row when it's wide).
+            let screens_w = (w - PAD * 2.0).clamp(200.0, 1024.0);
+            let screen_cols = if sharing.len() > 1 && screens_w >= 1000.0 { 2 } else { 1 };
+            let screen_w = (screens_w - GAP * (screen_cols as f32 - 1.0)) / screen_cols as f32;
+            let screen_h = screen_w * 9.0 / 16.0;
+            let screens = (!sharing.is_empty()).then(|| {
+                let mut row = div().w(px(screens_w)).mx_auto().mb(px(GAP)).flex().flex_wrap().gap(px(GAP));
+                for state in &sharing {
+                    row = row.child(self.screen_tile(
+                        key,
+                        server,
+                        state,
+                        state.user_id == me,
+                        screen_w,
+                        screen_h,
+                        &p,
+                        window,
+                        cx,
+                    ));
+                }
+                motion::rise(row, "stage-screens", Duration::ZERO, -12.0)
+            });
+            if !sharing.is_empty() {
+                let screen_rows = sharing.len().div_ceil(screen_cols);
+                content_h += screen_rows as f32 * (screen_h + GAP);
             }
-            grid.into_any_element()
+            let top = ((h - PAD * 2.0 - content_h) / 2.0).max(0.0);
+            let mut grid = div().w(px(width)).mx_auto().flex().flex_wrap().gap(px(GAP));
+            for (n, state) in states.iter().enumerate() {
+                let video = joined && if state.user_id == me { mine.0 } else { state.self_video };
+                grid = grid.child(self.tile(
+                    key,
+                    server,
+                    &channel.id,
+                    state,
+                    n,
+                    tile_w,
+                    tile_h,
+                    joined,
+                    video,
+                    &p,
+                    window,
+                    cx,
+                ));
+            }
+            div().mt(px(top)).children(screens).child(grid).into_any_element()
         };
         let measure = {
             let cell = self.calls.stage_box.clone();
@@ -232,8 +279,8 @@ impl FuwaApp {
                 .items_center()
                 .gap(px(8.0))
                 .child(self.mute_buttons("stage", Size::Lg, cx))
-                .child(camera_button("stage-camera", Size::Lg, false, &p))
-                .child(screen_button("stage-screen", Size::Lg, false, &p))
+                .child(self.camera_button("stage", Size::Lg, false, cx))
+                .child(self.screen_button("stage", Size::Lg, false, window, cx))
                 .when_some(self.record_button("stage", Size::Lg, false, window, cx), |el, b| el.child(b))
                 .child(hang_up_button("stage-leave", Size::Lg, t("dms-calls.calls.controls.disconnect"), &p).on_click(
                     cx.listener(|this, _, _, cx| {
@@ -418,7 +465,8 @@ impl FuwaApp {
         n: usize,
         w: f32,
         h: f32,
-        _joined: bool,
+        joined: bool,
+        video: bool,
         p: &Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -505,9 +553,13 @@ impl FuwaApp {
                 el.child(app_badge(SharedString::from(format!("tile-agent|{}", state.user_id)), "AGENT", p))
             })
             .child(voice_flags(state, p));
+        let feed = crate::core::voice::video::feed_of(&state.user_id, false);
+        let camera =
+            video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius, window, cx));
         let tile = div()
             .id(SharedString::from(tag.clone()))
             .relative()
+            .overflow_hidden()
             .w(px(w))
             .h(px(h))
             .rounded(radius)
@@ -531,14 +583,129 @@ impl FuwaApp {
                 window,
                 cx,
             )))
+            .children(camera)
             .child(chip);
-        let mut holder = div().relative().child(tile);
+        let group = format!("tile-group|{}", state.user_id);
+        let mut holder = div().relative().group(SharedString::from(group.clone())).child(tile);
+        if joined {
+            let name = self
+                .core
+                .shared
+                .read(|s| s.instance(key).map(|i| i.display_name(Some(server), &state.user_id)).unwrap_or_default());
+            let popped = Popped {
+                instance: key.to_owned(),
+                user: state.user_id.clone(),
+                server: Some(server.to_owned()),
+                screen: false,
+            };
+            holder = holder.child(
+                pop_out_button(
+                    SharedString::from(format!("pop|{}", state.user_id)),
+                    t_with("dms-calls.calls.video.popOutTitle", &[("name", Arg::Str(&name))]),
+                    &group,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not the tile under it too.
+                    cx.stop_propagation();
+                    this.pop_out(popped.clone(), cx)
+                })),
+            );
+        }
         if open {
             let card = self.person_card(key, Some(server), Some(channel), &state.user_id, window, cx);
             holder = holder.child(self.hang(card, Side::Right));
         }
         motion::rise(holder, SharedString::from(format!("{tag}|in")), Duration::from_millis(40 * n.min(8) as u64), 16.0)
             .into_any_element()
+    }
+
+    /// Someone's shared screen (the web's `ScreenTile`): whole, on black,
+    /// with whose it is and that it's live.
+    #[allow(clippy::too_many_arguments)]
+    fn screen_tile(
+        &mut self,
+        key: &str,
+        server: &str,
+        state: &pb::VoiceState,
+        mine: bool,
+        w: f32,
+        h: f32,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = self
+            .core
+            .shared
+            .read(|s| s.instance(key).map(|i| i.display_name(Some(server), &state.user_id)).unwrap_or_default());
+        let feed = crate::core::voice::video::feed_of(&state.user_id, true);
+        let label = if mine {
+            t("dms-calls.calls.screen.yours")
+        } else {
+            t_with("dms-calls.calls.screen.theirs", &[("name", Arg::Str(&name))])
+        };
+        let group = format!("screen-group|{}", state.user_id);
+        let popped = Popped {
+            instance: key.to_owned(),
+            user: state.user_id.clone(),
+            server: Some(server.to_owned()),
+            screen: true,
+        };
+        let tile = div()
+            .relative()
+            .w(px(w))
+            .h(px(h))
+            .overflow_hidden()
+            .rounded(radius_3xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(gpui_kit::black())
+            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, radius_3xl(), window, cx))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .bottom(px(8.0))
+                    .max_w(relative(0.8))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .rounded(radius_xl())
+                    .bg(alpha(p.background, 0.8))
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .child(live_badge())
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(label),
+                    ),
+            );
+        let button = pop_out_button(
+            SharedString::from(format!("pop-screen|{}", state.user_id)),
+            t_with("dms-calls.calls.video.popOutScreenTitle", &[("name", Arg::Str(&name))]),
+            &group,
+            p,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            // Not the tile under it too.
+            cx.stop_propagation();
+            this.pop_out(popped.clone(), cx)
+        }));
+        motion::rise(
+            div().relative().group(SharedString::from(group.clone())).child(tile).child(button),
+            SharedString::from(format!("screen-in|{}", state.user_id)),
+            Duration::ZERO,
+            -12.0,
+        )
+        .into_any_element()
     }
 
     /// Who's recording the channel, for everyone to see, while anyone is.

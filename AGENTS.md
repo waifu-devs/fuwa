@@ -522,9 +522,14 @@
     `server_admin.rs`
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
-    frame encryption, byte for byte the web app's; the call itself comes
-    with the app's sound; `voice/access.rs` asks macOS for the microphone
-    and camera, which it allows only to a bundle whose Info.plist says why,
+    frame encryption, byte for byte the web app's; the call itself is
+    `voice/`: str0m, Opus, and VP8 through libvpx for cameras and screens
+    (prebuilt by shiguredo_libvpx, or vcpkg's on Windows through `voice/libvpx.rs`),
+    `voice/capture.rs` taking and encoding yours in three simulcast sizes,
+    `voice/video.rs` decoding others' and the sizes asked of them, drawn by
+    `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md;
+    `voice/access.rs` asks macOS for the microphone and camera, which it
+    allows only to a bundle whose Info.plist says why,
     `desktop/packaging/macos/`), `pictures.rs` (the web's `lib/pictures.ts`:
     crop sizes and math, cutting the crop out; `ui/cropper.rs` is the
     cropper every picture upload goes through), `reports.rs` (the anonymous reports: panics, also

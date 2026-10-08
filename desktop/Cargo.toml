@@ -24,6 +24,12 @@ path = "src/lib.rs"
 [dependencies]
 cpal = "0.18"
 opus = "0.4"
+# The camera: V4L2, AVFoundation or Media Foundation.
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
+# MJPEG frames from cameras that send only those.
+zune-jpeg = "0.5"
+# Screens and windows to share; X11 only on Linux (Wayland would need PipeWire).
+zed-scap = { version = "=0.0.8-zed", default-features = false, features = ["x11"] }
 str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 anyhow = "1"
 base64 = "0.22"
@@ -68,7 +74,8 @@ url = "2"
 # Runs the backdrop's WGSL shaders offscreen (core/effects/gpu.rs): the wgpu
 # GPUI already draws with on Linux, so it isn't built twice there.
 wgpu = "29.0.4"
-# The frames those shaders make, as pictures for GPUI (the version GPUI uses).
+# The frames those shaders make, and video as it's decoded, as pictures for
+# GPUI (the version GPUI uses).
 image = { version = "0.25", default-features = false }
 
 # Asking macOS for the microphone and camera (core/voice/access.rs).
@@ -77,6 +84,31 @@ block2 = "0.6"
 objc2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString"] }
+
+# Cameras and shared screens in calls are VP8, through libvpx: a static
+# build, fetched prebuilt for each system (checked against its SHA-256), so
+# installers need no libvpx of their own.
+[target.'cfg(not(windows))'.dependencies]
+shiguredo_libvpx = { version = "=2026.1.0", optional = true }
+# The same calls on a libvpx found on the system, for trying Windows' path elsewhere.
+env-libvpx-sys = { version = "=5.1.3", features = ["generate"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# zed-scap asks for windows-capture 1, but 1.5 changed Settings::new; held
+# at the last one it builds with.
+windows-capture = "=1.4.4"
+# The prebuilt libvpx above is built with MinGW, which MSVC can't link; on
+# Windows it's vcpkg's (VPX_LIB_DIR and friends, see desktop.yml), with
+# bindings made from its headers.
+env-libvpx-sys = { version = "=5.1.3", features = ["generate"] }
+
+[features]
+default = ["prebuilt-libvpx"]
+prebuilt-libvpx = ["dep:shiguredo_libvpx"]
+# Windows' libvpx path (core/voice/libvpx.rs) on another system, against its
+# libvpx, instead of the prebuilt one (both name their library vpx):
+# --no-default-features --features system-libvpx.
+system-libvpx = ["dep:env-libvpx-sys"]
 
 [build-dependencies]
 protoc-bin-vendored = "3"

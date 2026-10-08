@@ -49,6 +49,7 @@ pub mod perf;
 mod pins;
 mod png;
 mod polls;
+mod popout;
 mod presence;
 mod profile_card;
 mod profile_effect;
@@ -88,6 +89,7 @@ pub(crate) mod threads;
 mod timestamps;
 mod update;
 mod user_menu;
+mod video;
 mod voice_notes;
 mod voice_stage;
 mod widgets;
@@ -155,17 +157,20 @@ pub fn run() -> anyhow::Result<()> {
             theme::apply(&core.prefs(), window.appearance(), cx);
             cx.new(|cx| app::FuwaApp::new(core.clone(), window, cx))
         });
-        match opened {
+        let main = match opened {
             Ok((window, _)) => {
                 let _ = window.update(cx, |_, window, _| window.activate_window());
+                Some(window.window_id())
             }
             Err(err) => {
                 eprintln!("couldn't open the window: {err}");
                 cx.quit();
+                None
             }
-        }
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
+        };
+        // Closing the main window quits, popped-out cameras or not.
+        cx.on_window_closed(move |cx, closed| {
+            if cx.windows().is_empty() || Some(closed) == main {
                 cx.quit();
             }
         })

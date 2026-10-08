@@ -41,8 +41,6 @@
   "voice.openPrivacy": "Open System Settings",
   "voice.pttLater": "Push to talk isn't in the desktop app yet.",
   "voice.noProcessing": "The desktop app sends your microphone as it is, so these apply in the web app.",
-  "voice.noCamera": "Calls in the desktop app are sound only for now; cameras are in the web app.",
-  "voice.noScreen": "Calls in the desktop app are sound only for now; sharing your screen is in the web app.",
   "voice.left": "Left the call",
   "voice.noDevices": "No microphone or speakers found.",
   "voice.noSpeakers": "No speakers found: you can't hear others.",
@@ -271,5 +269,8 @@
   "server.shared.notCode": "That doesn't look like a share code.",
   "server.shared.notYet": "Not yet",
   "profileItems.chooseEffect": "Choose an effect file",
-  "profileItems.effectTooBig": "That file is too big to be an effect."
+  "profileItems.effectTooBig": "That file is too big to be an effect.",
+  "video.cameraBlocked": "Your system isn't letting fuwa use the camera. Allow it in System Settings, under Privacy & Security, then Camera.",
+  "video.screenBlocked": "Your system isn't letting fuwa record the screen. Allow it in System Settings, under Privacy & Security, then Screen & System Audio Recording.",
+  "video.nothingToShare": "There's nothing to share here. On Linux, sharing a screen needs an X11 session for now."
 }

@@ -1,9 +1,9 @@
 //! The Voice & video page, as the web's `settings/app/Voice.tsx`: the
 //! microphone and speakers calls use (picked from this computer's devices,
 //! through `core::sounds`), a live mic test against where voice activity
-//! opens, the input mode, sensitivity, and call sounds. Desktop calls are
-//! sound only and send the microphone as it is, so the camera and the
-//! browser's sound processing say so instead of pretending.
+//! opens, the input mode, sensitivity, the camera (picked, and checked as
+//! others will see it) and call sounds. Desktop calls send the microphone
+//! as it is, so the browser's sound processing says so instead of pretending.
 
 use crate::core::voice::access;
 use std::time::Duration;
@@ -42,10 +42,23 @@ pub(crate) fn voice_settings() -> Vec<(&'static str, String, &'static str)> {
 pub(crate) struct VoiceForm {
     /// This computer's microphones and speakers, read when the page opens.
     devices: Option<(Vec<String>, Vec<String>)>,
+    /// And its cameras.
+    cameras: Option<Vec<String>>,
     pub mic: Option<MicTest>,
     mic_failed: bool,
     /// The mic test failed because the system won't let the app use the microphone.
     mic_blocked: bool,
+    /// The camera check, while it's on: it stops when this goes.
+    camera: Option<CameraCheck>,
+}
+
+/// Stops the camera check when the page lets go of it.
+pub(crate) struct CameraCheck(std::sync::Arc<crate::core::Core>);
+
+impl Drop for CameraCheck {
+    fn drop(&mut self) {
+        self.0.camera_test(false);
+    }
 }
 
 /// -100..0 dB as a share of a meter.
@@ -416,28 +429,101 @@ impl SettingsView {
                 |this, on, cx| this.set(cx, |pr| pr.auto_gain_control = on),
             ))
             .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.voice.noProcessing")));
+        // The camera: which one, and a look at it as others will see it.
+        if self.voice.cameras.is_none() {
+            self.voice.cameras = Some(crate::core::voice::capture::cameras());
+        }
+        let cameras = self.voice.cameras.clone().unwrap_or_default();
+        let (checking, failed) = self.core.camera_testing();
+        if !checking && self.voice.camera.is_some() {
+            self.voice.camera = None;
+        }
+        let problem = failed.map(|f| {
+            use crate::core::voice::capture::Failure;
+            t(match f {
+                Failure::Blocked => "desktop.video.cameraBlocked",
+                Failure::NotFound => "workspace.calls.camera.notFound",
+                Failure::Busy => "workspace.calls.camera.busy",
+                Failure::Failed => "workspace.calls.camera.failed",
+            })
+        });
+        let preview: AnyElement = if checking {
+            crate::ui::video::feed_view(
+                &self.core,
+                crate::core::voice::CAMERA_TEST,
+                gpui_kit::ObjectFit::Cover,
+                radius_2xl(),
+                window,
+                cx,
+            )
+        } else {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .text_color(p.muted_foreground)
+                .child(icon("video-off").size(px(32.0)))
+                .when_some(problem.clone(), |el, text| {
+                    el.child(div().max_w(px(320.0)).text_center().text_sm().child(text))
+                })
+                .into_any_element()
+        };
+        let (hover_bg, hover_fg) = (p.primary, p.primary_foreground);
+        let check = div()
+            .id("camera-check")
+            .h(px(36.0))
+            .px(px(14.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(radius_xl())
+            .bg(p.muted)
+            .text_sm()
+            .font_weight(FontWeight::BOLD)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+            .child(icon(if checking { "video-off" } else { "video" }).size(px(16.0)))
+            .child(t(if checking { "appsettings.voice.stop" } else { "appsettings.voice.cameraTestStart" }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if checking {
+                    this.voice.camera = None;
+                } else {
+                    this.core.camera_test(true);
+                    this.voice.camera = Some(CameraCheck(this.core.clone()));
+                }
+                cx.notify();
+            }));
         let camera = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
+            .child(self.device_picker(
+                "camera-device",
+                "video",
+                t("appsettings.voice.camera"),
+                &prefs.video_device,
+                &cameras,
+                p,
+                cx,
+                |pr, v| pr.video_device = v,
+            ))
             .child(
                 div()
+                    .relative()
                     .w_full()
                     .max_w(px(448.0))
                     .h(px(252.0))
+                    .overflow_hidden()
                     .rounded(radius_2xl())
                     .border_1()
                     .border_color(p.border)
                     .bg(p.muted)
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(8.0))
-                    .text_color(p.muted_foreground)
-                    .child(icon("video-off").size(px(32.0)))
-                    .child(div().max_w(px(320.0)).text_center().text_sm().child(t("desktop.voice.noCamera"))),
+                    .child(preview),
             )
+            .child(div().flex().child(check))
             .child(toggle(
                 "mirror",
                 &t("appsettings.voice.mirror"),
@@ -447,7 +533,10 @@ impl SettingsView {
                 p,
                 window,
                 cx,
-                |this, on, cx| this.set(cx, |pr| pr.mirror_video = on),
+                |this, on, cx| {
+                    this.set(cx, |pr| pr.mirror_video = on);
+                    this.core.apply_mirror();
+                },
             ));
         let volume = prefs.volume;
         let out = prefs.output_device.clone();
@@ -576,7 +665,17 @@ impl SettingsView {
                 ),
                 processing.into_any_element(),
             ),
-            ("camera", t("appsettings.voice.camera"), None, pref!(prefs, mirror_video), camera.into_any_element()),
+            (
+                "camera",
+                t("appsettings.voice.camera"),
+                None,
+                Badge::pref(prefs.video_device != d.video_device || prefs.mirror_video != d.mirror_video, |pr| {
+                    let d = Prefs::default();
+                    pr.video_device = d.video_device;
+                    pr.mirror_video = d.mirror_video;
+                }),
+                camera.into_any_element(),
+            ),
             (
                 "call-sounds",
                 t("appsettings.voice.callSounds"),

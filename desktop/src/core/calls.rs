@@ -1,14 +1,13 @@
 //! Calls, as far as the desktop app has them: who's in each voice channel
 //! and which conversations have a call going (both kept in the [`Store`]
 //! from the event streams), and the end-to-end encryption calls in direct
-//! messages use, byte for byte the same as the web app's
+//! messages use (sound, cameras and shared screens), byte for byte the same as the web app's
 //! (web/src/calls/frames.worker.ts), so a desktop app and a browser can
 //! share one.
 //!
-//! The call itself (voice channels, sound only so far) is in
-//! [`voice`](crate::core::voice): str0m, Opus and cpal, talking to
-//! `CallService` the way web/src/calls/engine.ts does. Direct-message calls
-//! will seal their frames with [`FrameKey`].
+//! The call itself is in [`voice`](crate::core::voice): str0m, Opus, VP8
+//! and cpal, talking to `CallService` the way web/src/calls/engine.ts does.
+//! Direct-message calls seal their frames with [`Frames`].
 //!
 //! [`Store`]: crate::core::store::Store
 
@@ -85,34 +84,59 @@ impl FrameKey {
         Some(Self { epoch: u32::try_from(epoch).ok()?, key })
     }
 
-    /// Seals a frame this sender sends, with a fresh random nonce.
-    pub fn seal(&self, frame: &[u8]) -> Option<Vec<u8>> {
+    /// Seals a frame this sender sends, with a fresh random nonce. A
+    /// camera's (`video`) keeps its VP8 header in the clear.
+    pub fn seal(&self, frame: &[u8], video: bool) -> Option<Vec<u8>> {
         let mut nonce = [0u8; NONCE_LEN];
         getrandom::fill(&mut nonce).ok()?;
-        self.seal_with(frame, nonce)
+        self.seal_with(frame, nonce, video)
     }
 
-    fn seal_with(&self, frame: &[u8], nonce: [u8; NONCE_LEN]) -> Option<Vec<u8>> {
-        let mut aad = [0u8; 5];
-        aad[..4].copy_from_slice(&self.epoch.to_be_bytes());
-        aad[4] = VERSION;
+    fn seal_with(&self, frame: &[u8], nonce: [u8; NONCE_LEN], video: bool) -> Option<Vec<u8>> {
+        let clear = clear_bytes(frame, video);
+        let mut aad = Vec::with_capacity(clear + 5);
+        aad.extend_from_slice(&frame[..clear]);
+        aad.extend_from_slice(&self.epoch.to_be_bytes());
+        aad.push(VERSION);
         let mut out = frame.to_vec();
-        self.key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(aad), &mut out).ok()?;
+        let mut body = out.split_off(clear);
+        self.key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(&aad[..]), &mut body).ok()?;
+        out.extend_from_slice(&body);
         out.extend_from_slice(&nonce);
-        out.extend_from_slice(&aad);
+        out.extend_from_slice(&aad[clear..]);
         Some(out)
     }
 
     /// Opens a frame this sender sealed at this key's epoch.
-    pub fn open(&self, sealed: &[u8]) -> Option<Vec<u8>> {
+    pub fn open(&self, sealed: &[u8], video: bool) -> Option<Vec<u8>> {
         if frame_epoch(sealed)? != self.epoch {
+            return None;
+        }
+        let clear = clear_bytes(sealed, video);
+        if sealed.len() <= clear + TRAILER + TAG_LEN {
             return None;
         }
         let (body, trailer) = sealed.split_at(sealed.len() - TRAILER);
         let nonce = Nonce::try_assume_unique_for_key(&trailer[..NONCE_LEN]).ok()?;
-        let mut out = body.to_vec();
-        let plain = self.key.open_in_place(nonce, Aad::from(&trailer[NONCE_LEN..]), &mut out).ok()?;
-        Some(plain.to_vec())
+        let mut aad = Vec::with_capacity(clear + 5);
+        aad.extend_from_slice(&body[..clear]);
+        aad.extend_from_slice(&trailer[NONCE_LEN..]);
+        let mut out = body[clear..].to_vec();
+        let plain = self.key.open_in_place(nonce, Aad::from(&aad[..]), &mut out).ok()?;
+        let mut frame = Vec::with_capacity(clear + plain.len());
+        frame.extend_from_slice(&body[..clear]);
+        frame.extend_from_slice(plain);
+        Some(frame)
+    }
+}
+
+/// How many bytes at the start of a frame stay in the clear: a VP8 frame's
+/// header, 10 bytes on a keyframe (its first bit is 0) and 3 on others, so
+/// the media part can start each viewer on a keyframe. Sound has none.
+fn clear_bytes(frame: &[u8], video: bool) -> usize {
+    match frame.first() {
+        Some(first) if video => frame.len().min(if first & 1 == 0 { 10 } else { 3 }),
+        _ => 0,
     }
 }
 
@@ -174,14 +198,30 @@ impl Frames {
     /// Seals a frame of your own sound.
     pub fn seal(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         let me = self.me.clone();
-        self.key(&me)?.seal(frame)
+        self.key(&me)?.seal(frame, false)
     }
 
-    /// Opens a frame from `sender` (a stream id: their account id).
+    /// Seals a frame of your own camera or shared screen.
+    pub fn seal_video(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
+        let me = self.me.clone();
+        self.key(&me)?.seal(frame, true)
+    }
+
+    /// Opens a frame of sound from `sender` (their account id).
     pub fn open(&mut self, sender: &str, sealed: &[u8]) -> Opened {
+        self.open_kind(sender, sealed, false)
+    }
+
+    /// Opens a frame of `sender`'s camera or shared screen.
+    pub fn open_video(&mut self, sender: &str, sealed: &[u8]) -> Opened {
+        self.open_kind(sender, sealed, true)
+    }
+
+    fn open_kind(&mut self, sender: &str, sealed: &[u8], video: bool) -> Opened {
         match frame_epoch(sealed) {
             Some(epoch) if u64::from(epoch) > self.epoch => Opened::Newer(epoch),
-            Some(epoch) if u64::from(epoch) == self.epoch => match self.key(sender).and_then(|k| k.open(sealed)) {
+            Some(epoch) if u64::from(epoch) == self.epoch => match self.key(sender).and_then(|k| k.open(sealed, video))
+            {
                 Some(plain) => Opened::Plain(plain),
                 None => Opened::Dropped,
             },
@@ -415,22 +455,56 @@ mod tests {
         let sealed = unhex(FROM_WEB);
         assert_eq!(frame_epoch(&sealed), Some(7));
         let key = FrameKey::new(7, &secret(), "u1").unwrap();
-        assert_eq!(key.open(&sealed).as_deref(), Some(&b"hello opus frame"[..]));
+        assert_eq!(key.open(&sealed, false).as_deref(), Some(&b"hello opus frame"[..]));
         let nonce: [u8; 12] = std::array::from_fn(|i| 0xa0 + i as u8);
-        assert_eq!(key.seal_with(b"hello opus frame", nonce).unwrap(), sealed, "and seals the same way");
+        assert_eq!(key.seal_with(b"hello opus frame", nonce, false).unwrap(), sealed, "and seals the same way");
+    }
+
+    /// Camera frames sealed the web's way (frames.worker.ts's seal, run in
+    /// Node's WebCrypto with the same secret, sender, epoch and nonce): a
+    /// keyframe keeps 10 bytes in the clear, any other frame 3.
+    #[test]
+    fn camera_frames_seal_like_the_web_with_their_header_clear() {
+        let key = FrameKey::new(7, &secret(), "u1").unwrap();
+        let nonce: [u8; 12] = std::array::from_fn(|i| 0xa0 + i as u8);
+        let keyframe = [&[0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a, 0x40, 0x01, 0xb4, 0x00][..], b"keyframe body"].concat();
+        let delta = [&[0x31, 0x02, 0x00][..], b"delta body"].concat();
+        let from_web = [
+            (
+                keyframe,
+                "1002009d012a4001b400403c46d2288e0d8fc52d0afb4873ddece259d2bc9cb991b1ce6d628beba0a1a2a3a4a5a6a7a8a9aaab0000000701",
+            ),
+            (delta, "3102004f3c53c03bcf0285813693c12dab8d22a60eaf6ae4591badfef9a0a1a2a3a4a5a6a7a8a9aaab0000000701"),
+        ];
+        for (plain, sealed) in from_web {
+            let sealed = unhex(sealed);
+            assert_eq!(key.seal_with(&plain, nonce, true).unwrap(), sealed);
+            assert_eq!(key.open(&sealed, true).unwrap(), plain);
+            let clear = if plain[0] & 1 == 0 { 10 } else { 3 };
+            assert_eq!(sealed[..clear], plain[..clear], "the header stays readable");
+            // The header is part of what's authenticated.
+            let mut changed = sealed.clone();
+            changed[1] ^= 1;
+            assert!(key.open(&changed, true).is_none());
+        }
+        let mut alice = Frames::new("a", 1, secret());
+        let mut bob = Frames::new("b", 1, secret());
+        let frame = [0x00u8; 40];
+        let sealed = alice.seal_video(&frame).unwrap();
+        assert_eq!(bob.open_video("a", &sealed), Opened::Plain(frame.to_vec()));
     }
 
     #[test]
     fn only_the_sender_and_epoch_open_it() {
         let key = FrameKey::new(3, &secret(), "u1").unwrap();
-        let sealed = key.seal(b"frame").unwrap();
-        assert_eq!(key.open(&sealed).as_deref(), Some(&b"frame"[..]));
-        assert!(FrameKey::new(3, &secret(), "u2").unwrap().open(&sealed).is_none(), "someone else's key");
-        assert!(FrameKey::new(4, &secret(), "u1").unwrap().open(&sealed).is_none(), "another epoch");
+        let sealed = key.seal(b"frame", false).unwrap();
+        assert_eq!(key.open(&sealed, false).as_deref(), Some(&b"frame"[..]));
+        assert!(FrameKey::new(3, &secret(), "u2").unwrap().open(&sealed, false).is_none(), "someone else's key");
+        assert!(FrameKey::new(4, &secret(), "u1").unwrap().open(&sealed, false).is_none(), "another epoch");
         let mut tampered = sealed.clone();
         tampered[0] ^= 1;
-        assert!(key.open(&tampered).is_none());
-        assert!(key.open(b"short").is_none());
+        assert!(key.open(&tampered, false).is_none());
+        assert!(key.open(b"short", false).is_none());
     }
 
     #[test]
