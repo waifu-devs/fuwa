@@ -37,6 +37,7 @@ for (const a of actions) {
   if (a.rclick) await page.click(fill(a.rclick), { button: "right" });
   if (a.hover) await page.hover(fill(a.hover));
   if (a.mouse) await page.mouse.move(a.mouse[0], a.mouse[1]);
+  if (a.wheel) { await page.mouse.move(a.wheel[0], a.wheel[1]); await page.mouse.wheel(0, a.wheel[2]); }
   if (a.at) await page.mouse.click(a.at[0], a.at[1]);
   if (a.press) await page.keyboard.press(a.press);
   if (a.type) await page.keyboard.type(a.type);
