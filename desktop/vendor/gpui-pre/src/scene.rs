@@ -1398,7 +1398,7 @@ mod tests {
         let inner = RoundedMask::rect(rect(20., 20., 60., 60.));
         assert_eq!(card.intersect(&inner), inner);
         // A strip across the top keeps the top corners only.
-        let top = card.intersect(&RoundedMask::rect(rect(0., 0., 100., 20.)));
+        let top = card.intersect(&RoundedMask::rect(rect(0., 0., 100., 30.)));
         assert_eq!(top.corner_radii.top_left, px(12.));
         assert_eq!(top.corner_radii.bottom_left, px(0.));
         // Radii never pass half the overlap.
