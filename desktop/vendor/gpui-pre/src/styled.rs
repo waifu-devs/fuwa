@@ -748,6 +748,86 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Scales this element and everything inside it around its transform origin, without
+    /// changing layout.
+    /// [Docs](https://tailwindcss.com/docs/scale)
+    fn scale(mut self, scale: f32) -> Self {
+        self.style().transform.scale_x = Some(scale);
+        self.style().transform.scale_y = Some(scale);
+        self
+    }
+
+    /// Scales this element and everything inside it horizontally.
+    fn scale_x(mut self, scale: f32) -> Self {
+        self.style().transform.scale_x = Some(scale);
+        self
+    }
+
+    /// Scales this element and everything inside it vertically.
+    fn scale_y(mut self, scale: f32) -> Self {
+        self.style().transform.scale_y = Some(scale);
+        self
+    }
+
+    /// Turns this element and everything inside it clockwise around its transform origin.
+    /// [Docs](https://tailwindcss.com/docs/rotate)
+    fn rotate(mut self, angle: impl Into<gpui::Radians>) -> Self {
+        self.style().transform.rotate = Some(angle.into().0);
+        self
+    }
+
+    /// Moves this element and everything inside it sideways, without changing layout.
+    /// [Docs](https://tailwindcss.com/docs/translate)
+    fn translate_x(mut self, offset: impl Into<gpui::Pixels>) -> Self {
+        self.style().transform.translate_x = Some(offset.into());
+        self
+    }
+
+    /// Moves this element and everything inside it up or down, without changing layout.
+    fn translate_y(mut self, offset: impl Into<gpui::Pixels>) -> Self {
+        self.style().transform.translate_y = Some(offset.into());
+        self
+    }
+
+    /// Sets the point this element scales and turns around, as fractions of its size
+    /// (0.5, 0.5 is its center, the default).
+    /// [Docs](https://tailwindcss.com/docs/transform-origin)
+    fn transform_origin(mut self, x: f32, y: f32) -> Self {
+        self.style().transform.origin_x = Some(x);
+        self.style().transform.origin_y = Some(y);
+        self
+    }
+
+    /// Blurs what's behind this element by `radius` (the blur's standard deviation), inside
+    /// its rounded corners, like CSS's `backdrop-filter: blur()`. A see-through background
+    /// tints the blur.
+    /// [Docs](https://tailwindcss.com/docs/backdrop-filter-blur)
+    fn backdrop_blur(mut self, radius: impl Into<gpui::Pixels>) -> Self {
+        self.style().backdrop_blur = Some(radius.into());
+        self
+    }
+
+    /// Blurs what's behind this element by 4px, as Tailwind's `backdrop-blur-sm`.
+    fn backdrop_blur_sm(self) -> Self {
+        self.backdrop_blur(px(4.))
+    }
+
+    /// Blurs what's behind this element by 12px, as Tailwind's `backdrop-blur-md`
+    /// (`backdrop-blur` alone is 8px).
+    fn backdrop_blur_md(self) -> Self {
+        self.backdrop_blur(px(12.))
+    }
+
+    /// Blurs what's behind this element by 16px, as Tailwind's `backdrop-blur-lg`.
+    fn backdrop_blur_lg(self) -> Self {
+        self.backdrop_blur(px(16.))
+    }
+
+    /// Blurs what's behind this element by 24px, as Tailwind's `backdrop-blur-xl`.
+    fn backdrop_blur_xl(self) -> Self {
+        self.backdrop_blur(px(24.))
+    }
+
     /// Sets the grid columns of this element.
     fn grid_cols(mut self, cols: u16) -> Self {
         self.style().grid_cols = Some(GridTemplate {

@@ -3,8 +3,9 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    AtlasTextureId, BackdropBlur, Background, Bounds, Corners, DevicePixels, GpuSpecs, Path, Point,
+    PrimitiveBatch, RoundedMask, ScaledPixels, Scene, Size, TransformationMatrix,
+    get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -109,6 +110,95 @@ struct PathRasterizationVertex {
     st_position: Point<f32>,
     color: Background,
     bounds: Bounds<ScaledPixels>,
+    content_mask: RoundedMask<ScaledPixels>,
+    element_transform: TransformationMatrix,
+}
+
+/// One step of blurring a copy of the frame (`BlurPass` in the shaders).
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+struct BlurPass {
+    target_size: [f32; 2],
+    target_texture_size: [f32; 2],
+    source_texture_size: [f32; 2],
+    source_limit: [f32; 2],
+    direction: [f32; 2],
+    scale: f32,
+    sigma: f32,
+}
+
+/// A blurred copy drawn back over the frame (`BackdropBlur` in the shaders).
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+struct BackdropBlurInstance {
+    bounds: Bounds<ScaledPixels>,
+    corner_radii: Corners<ScaledPixels>,
+    content_mask: RoundedMask<ScaledPixels>,
+    element_transform: TransformationMatrix,
+    region_origin: [f32; 2],
+    texture_size: [f32; 2],
+    texture_limit: [f32; 2],
+    scale: f32,
+    opacity: f32,
+}
+
+/// Where a backdrop blur reads the frame and how it shrinks it, in device pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlurRegion {
+    origin: [u32; 2],
+    size: [u32; 2],
+    /// Frame pixels per pixel of the shrunk copy: 1, 2, 4 or 8.
+    scale: u32,
+    /// The gaussian's standard deviation in the shrunk copy's pixels.
+    sigma: f32,
+}
+
+impl BlurRegion {
+    /// The frame pixels a blur reads: where it lands on screen, with room for
+    /// the gaussian's tails, inside the frame. `None` when nothing shows.
+    fn new(blur: &BackdropBlur, frame_size: Size<DevicePixels>) -> Option<Self> {
+        let sigma = blur.blur_radius.0.max(0.0);
+        let visible = blur.bounds.intersect(&blur.content_mask.bounds);
+        if visible.is_empty() || sigma <= 0.0 {
+            return None;
+        }
+        let drawn = blur.element_transform.map_bounds(visible);
+        let margin = (sigma * 3.0).ceil();
+        let frame_width = frame_size.width.0.max(0) as f32;
+        let frame_height = frame_size.height.0.max(0) as f32;
+        let left = (drawn.origin.x.0 - margin).floor().clamp(0.0, frame_width);
+        let top = (drawn.origin.y.0 - margin).floor().clamp(0.0, frame_height);
+        let right = (drawn.origin.x.0 + drawn.size.width.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_width);
+        let bottom = (drawn.origin.y.0 + drawn.size.height.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        // Shrink so the gaussian stays a few pixels wide: cheap, and smooth
+        // once stretched back.
+        let scale = match sigma {
+            s if s < 4.0 => 1,
+            s if s < 8.0 => 2,
+            s if s < 16.0 => 4,
+            _ => 8,
+        };
+        Some(Self {
+            origin: [left as u32, top as u32],
+            size: [(right - left) as u32, (bottom - top) as u32],
+            scale,
+            sigma: sigma / scale as f32,
+        })
+    }
+
+    fn shrunk_size(&self) -> [u32; 2] {
+        [
+            self.size[0].div_ceil(self.scale).max(1),
+            self.size[1].div_ceil(self.scale).max(1),
+        ]
+    }
 }
 
 pub struct WgpuSurfaceConfig {
@@ -124,6 +214,8 @@ pub struct WgpuSurfaceConfig {
 }
 
 struct WgpuPipelines {
+    blur_passes: wgpu::RenderPipeline,
+    backdrop_blurs: wgpu::RenderPipeline,
     quads: wgpu::RenderPipeline,
     shadows: wgpu::RenderPipeline,
     path_rasterization: wgpu::RenderPipeline,
@@ -194,6 +286,27 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    /// A copy of the frame's region under a backdrop blur, and the two
+    /// textures it's shrunk and blurred between. Made at the frame's size the
+    /// first time a blur is drawn.
+    blur_textures: Option<BlurTextures>,
+}
+
+struct BlurTextures {
+    copy: wgpu::Texture,
+    copy_view: wgpu::TextureView,
+    first: wgpu::Texture,
+    first_view: wgpu::TextureView,
+    second: wgpu::Texture,
+    second_view: wgpu::TextureView,
+}
+
+impl BlurTextures {
+    fn destroy(&self) {
+        self.copy.destroy();
+        self.first.destroy();
+        self.second.destroy();
+    }
 }
 
 struct CachedTextureBindGroup {
@@ -207,6 +320,7 @@ impl WgpuResources {
         self.path_intermediate_view = None;
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
+        self.blur_textures = None;
     }
 }
 
@@ -444,8 +558,14 @@ impl WgpuRenderer {
             );
         }
 
+        // Backdrop blurs copy what's been drawn out of the frame. Where the
+        // surface can't be read, they're left out and their tint still shows.
+        let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        if surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage,
             format: surface_format,
             width: clamped_width.max(1),
             height: clamped_height.max(1),
@@ -771,6 +891,36 @@ impl WgpuRendererCore {
             })
         };
 
+        let blur_passes = create_pipeline(
+            "blur_passes",
+            "vs_blur_pass",
+            "fs_blur_pass",
+            &layouts.globals,
+            &layouts.instances,
+            Some(&layouts.texture),
+            wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            1,
+            &shader_module,
+        );
+
+        let backdrop_blurs = create_pipeline(
+            "backdrop_blurs",
+            "vs_backdrop_blur",
+            "fs_backdrop_blur",
+            &layouts.globals,
+            &layouts.instances,
+            Some(&layouts.texture),
+            wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(color_target.clone())],
+            1,
+            &shader_module,
+        );
+
         let quads = create_pipeline(
             "quads",
             "vs_quad",
@@ -931,6 +1081,8 @@ impl WgpuRendererCore {
         );
 
         WgpuPipelines {
+            blur_passes,
+            backdrop_blurs,
             quads,
             shadows,
             path_rasterization,
@@ -1038,6 +1190,9 @@ impl WgpuRenderer {
         }
         if let Some(ref texture) = resources.path_msaa_texture {
             texture.destroy();
+        }
+        if let Some(ref textures) = resources.blur_textures {
+            textures.destroy();
         }
 
         // Invalidate intermediate textures - they will be lazily recreated
@@ -1196,9 +1351,15 @@ impl WgpuRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let premultiplied_alpha =
             self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        let readable_frame = self
+            .surface_config
+            .usage
+            .contains(wgpu::TextureUsages::COPY_SRC)
+            .then_some(&frame.texture);
         if let Err(error) = core.render_frame(
             scene,
             &frame_view,
+            readable_frame,
             size,
             premultiplied_alpha,
             wgpu::Color::TRANSPARENT,
@@ -1353,6 +1514,7 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                blur_textures: None,
             },
             atlas,
             path_globals_offset,
@@ -1418,6 +1580,7 @@ impl WgpuRendererCore {
         &mut self,
         scene: &Scene,
         target_view: &wgpu::TextureView,
+        target_texture: Option<&wgpu::Texture>,
         size: Size<DevicePixels>,
         premultiplied_alpha: bool,
         clear_color: wgpu::Color,
@@ -1468,7 +1631,7 @@ impl WgpuRendererCore {
             bytemuck::bytes_of(&gamma_params),
         );
 
-        self.record_frame(scene, target_view, clear_color)
+        self.record_frame(scene, target_view, target_texture, size, clear_color)
             .inspect_err(|_| {
                 // Queue writes are staged before encoding; flush them even if the frame fails.
                 self.resources.queue.submit(std::iter::empty());
@@ -1479,6 +1642,8 @@ impl WgpuRendererCore {
         &mut self,
         scene: &Scene,
         frame_view: &wgpu::TextureView,
+        frame_texture: Option<&wgpu::Texture>,
+        frame_size: Size<DevicePixels>,
         clear_color: wgpu::Color,
     ) -> Result<wgpu::SubmissionIndex> {
         let mut instance_offset = 0;
@@ -1612,6 +1777,42 @@ impl WgpuRendererCore {
                     // Surfaces are macOS-only for video playback and are not
                     // implemented by the WGPU renderer.
                     PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::BackdropBlurs(range) => {
+                        let Some(frame_texture) = frame_texture else {
+                            continue;
+                        };
+                        for blur in &scene.backdrop_blurs[range] {
+                            let Some(region) = BlurRegion::new(blur, frame_size) else {
+                                continue;
+                            };
+                            // The blur reads what's been drawn so far, so the
+                            // pass ends here and starts again after it.
+                            drop(pass);
+                            let instance = self.blur_backdrop(
+                                &mut encoder,
+                                frame_texture,
+                                frame_size,
+                                blur,
+                                region,
+                                &mut instance_offset,
+                            )?;
+                            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("main_pass_continued"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: frame_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                    depth_slice: None,
+                                })],
+                                depth_stencil_attachment: None,
+                                ..Default::default()
+                            });
+                            self.draw_backdrop_blur(&instance, &mut pass)?;
+                        }
+                    }
                 }
             }
         }
@@ -1801,13 +2002,13 @@ impl WgpuRendererCore {
             paths
                 .iter()
                 .map(|p| PathSprite {
-                    bounds: p.clipped_bounds(),
+                    bounds: p.drawn_bounds(),
                 })
                 .collect()
         } else {
-            let mut bounds = first_path.clipped_bounds();
+            let mut bounds = first_path.drawn_bounds();
             for path in paths.iter().skip(1) {
-                bounds = bounds.union(&path.clipped_bounds());
+                bounds = bounds.union(&path.drawn_bounds());
             }
             vec![PathSprite { bounds }]
         };
@@ -1847,6 +2048,8 @@ impl WgpuRendererCore {
                 st_position: v.st_position,
                 color: path.color,
                 bounds,
+                content_mask: path.content_mask,
+                element_transform: path.element_transform,
             }));
         }
 
@@ -1901,6 +2104,210 @@ impl WgpuRendererCore {
         }
 
         Ok(true)
+    }
+
+    /// Makes the blur textures at the frame's size, if they aren't already.
+    fn ensure_blur_textures(&mut self, size: Size<DevicePixels>) {
+        let width = (size.width.0 as u32).max(1);
+        let height = (size.height.0 as u32).max(1);
+        if self
+            .resources
+            .blur_textures
+            .as_ref()
+            .is_some_and(|textures| {
+                textures.copy.width() == width && textures.copy.height() == height
+            })
+        {
+            return;
+        }
+        let format = self.target_format;
+        let device = &self.resources.device;
+        let texture = |label, usage| {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            (texture, view)
+        };
+        let (copy, copy_view) = texture(
+            "backdrop_blur_copy",
+            wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let drawn = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let (first, first_view) = texture("backdrop_blur_first", drawn);
+        let (second, second_view) = texture("backdrop_blur_second", drawn);
+        if let Some(old) = self.resources.blur_textures.take() {
+            old.destroy();
+        }
+        self.resources.blur_textures = Some(BlurTextures {
+            copy,
+            copy_view,
+            first,
+            first_view,
+            second,
+            second_view,
+        });
+    }
+
+    /// Copies the frame under `blur` out, shrinks it and blurs it on both
+    /// axes, and returns the instance that draws the result back.
+    fn blur_backdrop(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_texture: &wgpu::Texture,
+        frame_size: Size<DevicePixels>,
+        blur: &BackdropBlur,
+        region: BlurRegion,
+        instance_offset: &mut u64,
+    ) -> Result<InstanceBinding> {
+        self.ensure_blur_textures(frame_size);
+        let textures = self
+            .resources
+            .blur_textures
+            .as_ref()
+            .context("blur textures")?;
+        let texture_size = [textures.copy.width() as f32, textures.copy.height() as f32];
+        let (copy_view, first_view, second_view) = (
+            textures.copy_view.clone(),
+            textures.first_view.clone(),
+            textures.second_view.clone(),
+        );
+
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: frame_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: region.origin[0],
+                    y: region.origin[1],
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &textures.copy,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: region.size[0],
+                height: region.size[1],
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let shrunk = region.shrunk_size();
+        let shrunk = [shrunk[0] as f32, shrunk[1] as f32];
+        let passes = [
+            // Shrink the copy into the first texture.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: [region.size[0] as f32, region.size[1] as f32],
+                direction: [0.0, 0.0],
+                scale: region.scale as f32,
+                sigma: region.sigma,
+            },
+            // Across, into the second.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: shrunk,
+                direction: [1.0, 0.0],
+                scale: 1.0,
+                sigma: region.sigma,
+            },
+            // Down, back into the first.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: shrunk,
+                direction: [0.0, 1.0],
+                scale: 1.0,
+                sigma: region.sigma,
+            },
+        ];
+        let binding =
+            self.write_instance_binding("blur_passes_bind_group", instance_offset, &passes)?;
+        let steps = [
+            (&copy_view, &first_view),
+            (&first_view, &second_view),
+            (&second_view, &first_view),
+        ];
+        for (index, (source, target)) in steps.into_iter().enumerate() {
+            let source = self.create_texture_bind_group("blur_source_bind_group", source);
+            let resources = self.resources();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blur_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&resources.pipelines.blur_passes);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            pass.set_bind_group(1, &binding.bind_group, &[]);
+            pass.set_bind_group(2, &source, &[]);
+            let instance = binding.first_instance + index as u32;
+            pass.draw(0..4, instance..instance + 1);
+        }
+
+        let instance = BackdropBlurInstance {
+            bounds: blur.bounds,
+            corner_radii: blur.corner_radii,
+            content_mask: blur.content_mask,
+            element_transform: blur.element_transform,
+            region_origin: [region.origin[0] as f32, region.origin[1] as f32],
+            texture_size,
+            texture_limit: shrunk,
+            scale: region.scale as f32,
+            opacity: blur.opacity,
+        };
+        self.write_instance_binding(
+            "backdrop_blurs_bind_group",
+            instance_offset,
+            std::slice::from_ref(&instance),
+        )
+    }
+
+    /// Draws a blurred copy, from the first blur texture, back over the frame.
+    fn draw_backdrop_blur(
+        &self,
+        instance: &InstanceBinding,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> Result<()> {
+        let resources = self.resources();
+        let textures = resources.blur_textures.as_ref().context("blur textures")?;
+        let texture =
+            self.create_texture_bind_group("backdrop_blur_bind_group", &textures.first_view);
+        pass.set_pipeline(&resources.pipelines.backdrop_blurs);
+        pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+        pass.set_bind_group(1, &instance.bind_group, &[]);
+        pass.set_bind_group(2, &texture, &[]);
+        pass.draw(0..4, instance.first_instance..instance.first_instance + 1);
+        Ok(())
     }
 
     fn write_instance_binding<T>(
@@ -2396,14 +2803,19 @@ impl WgpuHeadlessRenderer {
     fn render(&mut self, scene: &Scene, size: Size<DevicePixels>) -> anyhow::Result<()> {
         self.check_gpu_errors()?;
         self.ensure_render_target(size)?;
-        let view = self
+        let target = self
             .render_target
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?
-            .view
-            .clone();
-        self.core
-            .render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
+            .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?;
+        let (view, texture) = (target.view.clone(), target.texture.clone());
+        self.core.render_frame(
+            scene,
+            &view,
+            Some(&texture),
+            size,
+            false,
+            wgpu::Color::BLACK,
+        )?;
         Ok(())
     }
 
@@ -2611,9 +3023,8 @@ impl RenderingParameters {
 mod tests {
     use super::*;
     use gpui::{
-        BorderStyle, ColorSpace, ContentMask, Corners, Edges, Hsla, MonochromeSprite,
-        PolychromeSprite, Quad, Shadow, Size, SubpixelSprite, Underline, linear_color_stop,
-        linear_gradient,
+        BorderStyle, ColorSpace, Corners, Edges, Hsla, MonochromeSprite, PolychromeSprite, Quad,
+        Radians, Shadow, Size, SubpixelSprite, Underline, linear_color_stop, linear_gradient,
     };
     #[cfg(target_os = "linux")]
     use gpui::{DevicePixels, PlatformHeadlessRenderer, Scene};
@@ -2642,11 +3053,40 @@ mod tests {
             order: 0,
             border_style: BorderStyle::Solid,
             bounds,
-            content_mask: ContentMask { bounds },
+            content_mask: RoundedMask::rect(bounds),
             background: color.into(),
             border_color: color,
             corner_radii: Corners::default(),
             border_widths: Edges::default(),
+            element_transform: TransformationMatrix::unit(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn scaled_bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<ScaledPixels> {
+        Bounds {
+            origin: Point {
+                x: x.into(),
+                y: y.into(),
+            },
+            size: Size {
+                width: width.into(),
+                height: height.into(),
+            },
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn backdrop_blur(bounds: Bounds<ScaledPixels>, blur_radius: f32) -> BackdropBlur {
+        BackdropBlur {
+            order: 0,
+            blur_radius: blur_radius.into(),
+            bounds,
+            corner_radii: Corners::default(),
+            content_mask: RoundedMask::rect(bounds),
+            element_transform: TransformationMatrix::unit(),
+            opacity: 1.0,
+            pad: 0,
         }
     }
 
@@ -2768,6 +3208,195 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn headless_renderer_clips_to_rounded_content_masks() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let mut scene = Scene::default();
+        let mut quad = solid_quad(0.0, 0.0, 64.0, 64.0, gpui::red());
+        quad.content_mask = RoundedMask {
+            bounds: scaled_bounds(0.0, 0.0, 64.0, 64.0),
+            corner_radii: Corners::all(16.0.into()),
+        };
+        scene.insert_primitive(quad);
+        scene.finish();
+
+        let image = renderer.render_scene_to_image(&scene, device_size(64, 64))?;
+        // The corners are cut away, the middle and the straight edges stay.
+        assert_pixel(&image, 1, 1, BLACK);
+        assert_pixel(&image, 62, 62, BLACK);
+        assert_pixel(&image, 32, 32, RED);
+        assert_pixel(&image, 32, 0, RED);
+        assert_pixel(&image, 0, 32, RED);
+        // The rounding is antialiased: a pixel on the arc is partly covered.
+        let edge = image.get_pixel(4, 4).0[0];
+        assert!(edge > 10 && edge < 245, "pixel on the arc was {edge}");
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn headless_renderer_transforms_primitives() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let mut scene = Scene::default();
+        // A 20 by 20 square scaled by 2 around (10, 10) and moved 20 right
+        // covers 10..50 across and -10..30 down.
+        let mut quad = solid_quad(0.0, 0.0, 20.0, 20.0, gpui::red());
+        quad.element_transform = TransformationMatrix::unit()
+            .translate(Point {
+                x: 30.0.into(),
+                y: 10.0.into(),
+            })
+            .scale(Size {
+                width: 2.0,
+                height: 2.0,
+            })
+            .translate(Point {
+                x: (-10.0).into(),
+                y: (-10.0).into(),
+            });
+        quad.content_mask = RoundedMask::rect(scaled_bounds(-100.0, -100.0, 300.0, 300.0));
+        scene.insert_primitive(quad);
+        scene.finish();
+
+        let image = renderer.render_scene_to_image(&scene, device_size(64, 40))?;
+        assert_pixel(&image, 5, 5, BLACK);
+        assert_pixel(&image, 12, 2, RED);
+        assert_pixel(&image, 48, 28, RED);
+        assert_pixel(&image, 52, 20, BLACK);
+        assert_pixel(&image, 30, 32, BLACK);
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn headless_renderer_rotates_primitives() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let mut scene = Scene::default();
+        // A square turned 45 degrees around its center becomes a diamond.
+        let mut quad = solid_quad(16.0, 16.0, 32.0, 32.0, gpui::red());
+        let center = Point {
+            x: 32.0.into(),
+            y: 32.0.into(),
+        };
+        quad.element_transform = TransformationMatrix::unit()
+            .translate(center)
+            .rotate(Radians(std::f32::consts::FRAC_PI_4))
+            .translate(Point {
+                x: (-32.0).into(),
+                y: (-32.0).into(),
+            });
+        quad.content_mask = RoundedMask::rect(scaled_bounds(0.0, 0.0, 64.0, 64.0));
+        scene.insert_primitive(quad);
+        scene.finish();
+
+        let image = renderer.render_scene_to_image(&scene, device_size(64, 64))?;
+        // The diamond's points reach past the square's sides; its corners don't.
+        assert_pixel(&image, 32, 32, RED);
+        assert_pixel(&image, 32, 12, RED);
+        assert_pixel(&image, 12, 32, RED);
+        assert_pixel(&image, 18, 18, BLACK);
+        assert_pixel(&image, 46, 46, BLACK);
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn headless_renderer_blurs_backdrops() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let mut scene = Scene::default();
+        // Red on the left half, blue on the right, then a blur over the middle.
+        scene.insert_primitive(solid_quad(0.0, 0.0, 32.0, 32.0, gpui::red()));
+        scene.insert_primitive(solid_quad(32.0, 0.0, 32.0, 32.0, gpui::blue()));
+        scene.insert_primitive(backdrop_blur(scaled_bounds(16.0, 0.0, 32.0, 32.0), 6.0));
+        scene.finish();
+
+        let image = renderer.render_scene_to_image(&scene, device_size(64, 32))?;
+        // Outside the blur nothing changes.
+        assert_pixel(&image, 4, 16, RED);
+        assert_pixel(&image, 60, 16, BLUE);
+        // At the seam the two colors mix; nearer each side, that side wins.
+        let [r, _, b, _] = image.get_pixel(32, 16).0;
+        assert!(r > 60 && b > 60, "the seam was {r}, {b}");
+        let [r, _, b, _] = image.get_pixel(26, 16).0;
+        assert!(r > b && b > 5, "left of the seam was {r}, {b}");
+        let [r, _, b, _] = image.get_pixel(38, 16).0;
+        assert!(b > r && r > 5, "right of the seam was {r}, {b}");
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn headless_renderer_draws_over_backdrop_blurs() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let mut scene = Scene::default();
+        scene.insert_primitive(solid_quad(0.0, 0.0, 32.0, 32.0, gpui::red()));
+        scene.insert_primitive(solid_quad(32.0, 0.0, 32.0, 32.0, gpui::blue()));
+        // A large blur shrinks the copy; what's painted after it lands on top.
+        scene.insert_primitive(backdrop_blur(scaled_bounds(0.0, 0.0, 64.0, 32.0), 20.0));
+        scene.insert_primitive(solid_quad(28.0, 12.0, 8.0, 8.0, gpui::green()));
+        scene.finish();
+
+        let image = renderer.render_scene_to_image(&scene, device_size(64, 32))?;
+        let [r, g, b, _] = image.get_pixel(32, 16).0;
+        assert!(
+            g > 100 && r < 30 && b < 30,
+            "the square on top was {r}, {g}, {b}"
+        );
+        let [r, _, b, _] = image.get_pixel(24, 16).0;
+        assert!(r > 40 && b > 40, "the blur under it was {r}, {b}");
+        Ok(())
+    }
+
+    #[test]
+    fn blur_regions_cover_the_gaussian_and_stay_in_the_frame() {
+        let frame = Size {
+            width: DevicePixels(200),
+            height: DevicePixels(100),
+        };
+        let mut blur = BackdropBlur {
+            order: 0,
+            blur_radius: 8.0.into(),
+            bounds: Bounds {
+                origin: Point {
+                    x: 50.0.into(),
+                    y: 40.0.into(),
+                },
+                size: Size {
+                    width: 20.0.into(),
+                    height: 10.0.into(),
+                },
+            },
+            corner_radii: Corners::default(),
+            content_mask: RoundedMask::rect(Bounds {
+                origin: Point::default(),
+                size: Size {
+                    width: 200.0.into(),
+                    height: 100.0.into(),
+                },
+            }),
+            element_transform: TransformationMatrix::unit(),
+            opacity: 1.0,
+            pad: 0,
+        };
+        let region = BlurRegion::new(&blur, frame).unwrap();
+        assert_eq!(region.origin, [26, 16]);
+        assert_eq!(region.size, [68, 58]);
+        assert_eq!(region.scale, 4);
+        assert_eq!(region.sigma, 2.0);
+        assert_eq!(region.shrunk_size(), [17, 15]);
+
+        // Clamped to the frame.
+        blur.bounds.origin.x = 0.0.into();
+        let region = BlurRegion::new(&blur, frame).unwrap();
+        assert_eq!(region.origin[0], 0);
+        assert_eq!(region.size[0], 44);
+
+        // Nothing to blur outside the content mask.
+        blur.content_mask.bounds.size.width = 0.0.into();
+        assert!(BlurRegion::new(&blur, frame).is_none());
+    }
+
     #[test]
     fn webgl_shader_is_valid_wgsl_without_storage_buffers() {
         assert!(!WEBGL_SHADERS.contains("var<storage"));
@@ -2796,18 +3425,62 @@ mod tests {
 
     #[test]
     fn webgl_record_sizes_match_shader_word_strides() {
-        assert_eq!(std::mem::size_of::<Quad>(), 40 * 4);
-        assert_eq!(std::mem::size_of::<Shadow>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<PathRasterizationVertex>(), 26 * 4);
+        assert_eq!(std::mem::size_of::<Quad>(), 50 * 4);
+        assert_eq!(std::mem::size_of::<Shadow>(), 38 * 4);
+        assert_eq!(std::mem::size_of::<PathRasterizationVertex>(), 40 * 4);
         assert_eq!(std::mem::size_of::<PathSprite>(), 4 * 4);
-        assert_eq!(std::mem::size_of::<Underline>(), 16 * 4);
-        assert_eq!(std::mem::size_of::<MonochromeSprite>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<SubpixelSprite>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<PolychromeSprite>(), 24 * 4);
+        assert_eq!(std::mem::size_of::<Underline>(), 26 * 4);
+        assert_eq!(std::mem::size_of::<MonochromeSprite>(), 38 * 4);
+        assert_eq!(std::mem::size_of::<SubpixelSprite>(), 38 * 4);
+        assert_eq!(std::mem::size_of::<PolychromeSprite>(), 34 * 4);
+        assert_eq!(std::mem::size_of::<BlurPass>(), 12 * 4);
+        assert_eq!(std::mem::size_of::<BackdropBlurInstance>(), 30 * 4);
+    }
+
+    /// Fields the shaders read as `vec2` or `mat2x2` must start on 8 bytes
+    /// in storage buffers, and records must be a multiple of 8 long.
+    #[test]
+    fn records_keep_eight_byte_alignment_for_the_shaders() {
+        use std::mem::{offset_of, size_of};
+        assert_eq!(offset_of!(Quad, content_mask) % 8, 0);
+        assert_eq!(offset_of!(Quad, element_transform) % 8, 0);
+        assert_eq!(offset_of!(Shadow, content_mask) % 8, 0);
+        assert_eq!(offset_of!(Shadow, element_bounds) % 8, 0);
+        assert_eq!(offset_of!(Shadow, element_transform) % 8, 0);
+        assert_eq!(offset_of!(Underline, content_mask) % 8, 0);
+        assert_eq!(offset_of!(Underline, element_transform) % 8, 0);
+        assert_eq!(offset_of!(MonochromeSprite, tile) % 8, 0);
+        assert_eq!(offset_of!(MonochromeSprite, transformation) % 8, 0);
+        assert_eq!(offset_of!(MonochromeSprite, element_transform) % 8, 0);
+        assert_eq!(offset_of!(SubpixelSprite, element_transform) % 8, 0);
+        assert_eq!(offset_of!(PolychromeSprite, content_mask) % 8, 0);
+        assert_eq!(offset_of!(PolychromeSprite, tile) % 8, 0);
+        assert_eq!(offset_of!(PolychromeSprite, element_transform) % 8, 0);
+        assert_eq!(offset_of!(PathRasterizationVertex, bounds) % 8, 0);
+        assert_eq!(offset_of!(PathRasterizationVertex, content_mask) % 8, 0);
+        assert_eq!(
+            offset_of!(PathRasterizationVertex, element_transform) % 8,
+            0
+        );
+        assert_eq!(offset_of!(BackdropBlurInstance, content_mask) % 8, 0);
+        assert_eq!(offset_of!(BackdropBlurInstance, element_transform) % 8, 0);
+        assert_eq!(offset_of!(BackdropBlurInstance, region_origin) % 8, 0);
+        for size in [
+            size_of::<Quad>(),
+            size_of::<Shadow>(),
+            size_of::<Underline>(),
+            size_of::<MonochromeSprite>(),
+            size_of::<PolychromeSprite>(),
+            size_of::<PathRasterizationVertex>(),
+            size_of::<BlurPass>(),
+            size_of::<BackdropBlurInstance>(),
+        ] {
+            assert_eq!(size % 8, 0);
+        }
     }
 
     #[test]
-    fn webgl_quad_layout_matches_fixed_decoder() {
+    fn webgl_quad_layout_matches_decoder() {
         let quad = Quad {
             order: 41,
             border_style: BorderStyle::Dashed,
@@ -2821,7 +3494,7 @@ mod tests {
                     height: 4.0.into(),
                 },
             },
-            content_mask: ContentMask {
+            content_mask: RoundedMask {
                 bounds: Bounds {
                     origin: Point {
                         x: 5.0.into(),
@@ -2831,6 +3504,12 @@ mod tests {
                         width: 7.0.into(),
                         height: 8.0.into(),
                     },
+                },
+                corner_radii: Corners {
+                    top_left: 9.0.into(),
+                    top_right: 10.0.into(),
+                    bottom_right: 34.0.into(),
+                    bottom_left: 35.0.into(),
                 },
             },
             background: linear_gradient(
@@ -2873,53 +3552,68 @@ mod tests {
                 bottom: 32.0.into(),
                 left: 33.0.into(),
             },
+            element_transform: TransformationMatrix {
+                rotation_scale: [[36.0, 37.0], [38.0, 39.0]],
+                translation: [40.0, 41.0],
+            },
         };
 
         let bytes = unsafe { WgpuRendererCore::instance_bytes(std::slice::from_ref(&quad)) };
         let words: &[u32] = bytemuck::cast_slice(bytes);
+        let f = |value: f32| value.to_bits();
         assert_eq!(
             words,
             &[
                 41,
                 1,
-                1.0_f32.to_bits(),
-                2.0_f32.to_bits(),
-                3.0_f32.to_bits(),
-                4.0_f32.to_bits(),
-                5.0_f32.to_bits(),
-                6.0_f32.to_bits(),
-                7.0_f32.to_bits(),
-                8.0_f32.to_bits(),
+                f(1.0),
+                f(2.0),
+                f(3.0),
+                f(4.0),
+                f(5.0),
+                f(6.0),
+                f(7.0),
+                f(8.0),
+                f(9.0),
+                f(10.0),
+                f(34.0),
+                f(35.0),
                 1,
                 1,
                 0,
                 0,
                 0,
                 0,
-                11.0_f32.to_bits(),
-                12.0_f32.to_bits(),
-                13.0_f32.to_bits(),
-                14.0_f32.to_bits(),
-                15.0_f32.to_bits(),
-                16.0_f32.to_bits(),
-                17.0_f32.to_bits(),
-                18.0_f32.to_bits(),
-                19.0_f32.to_bits(),
-                20.0_f32.to_bits(),
-                21.0_f32.to_bits(),
+                f(11.0),
+                f(12.0),
+                f(13.0),
+                f(14.0),
+                f(15.0),
+                f(16.0),
+                f(17.0),
+                f(18.0),
+                f(19.0),
+                f(20.0),
+                f(21.0),
                 0,
-                22.0_f32.to_bits(),
-                23.0_f32.to_bits(),
-                24.0_f32.to_bits(),
-                25.0_f32.to_bits(),
-                26.0_f32.to_bits(),
-                27.0_f32.to_bits(),
-                28.0_f32.to_bits(),
-                29.0_f32.to_bits(),
-                30.0_f32.to_bits(),
-                31.0_f32.to_bits(),
-                32.0_f32.to_bits(),
-                33.0_f32.to_bits(),
+                f(22.0),
+                f(23.0),
+                f(24.0),
+                f(25.0),
+                f(26.0),
+                f(27.0),
+                f(28.0),
+                f(29.0),
+                f(30.0),
+                f(31.0),
+                f(32.0),
+                f(33.0),
+                f(36.0),
+                f(37.0),
+                f(38.0),
+                f(39.0),
+                f(40.0),
+                f(41.0),
             ]
         );
     }

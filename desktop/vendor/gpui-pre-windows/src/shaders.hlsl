@@ -95,6 +95,18 @@ struct TransformationMatrix {
     float2 translation;
 };
 
+// A content mask with its rounded corners, in the primitive's own space
+// (before its element transform).
+struct ContentMask {
+    Bounds bounds;
+    Corners corner_radii;
+};
+
+// Where a point in a primitive's own space lands in the window.
+float2 apply_transform(TransformationMatrix transformation, float2 position) {
+    return mul(position, transformation.rotation_scale) + transformation.translation;
+}
+
 static const float M_PI_F = 3.141592653f;
 static const float3 GRAYSCALE_FACTORS = float3(0.2126f, 0.7152f, 0.0722f);
 
@@ -112,6 +124,13 @@ float4 distance_from_clip_rect_impl(float2 position, Bounds clip_bounds) {
     float2 tl = position - clip_bounds.origin;
     float2 br = clip_bounds.origin + clip_bounds.size - position;
     return float4(tl.x, br.x, tl.y, br.y);
+}
+
+// Distances from the clip rect's edges, in the primitive's own space, moved
+// out half a pixel: pixels whose centers are further out than that can't be
+// touched by the antialiased mask, so the rasterizer drops them.
+float4 clip_distances(float2 position, Bounds clip_bounds) {
+    return distance_from_clip_rect_impl(position, clip_bounds) + 0.5;
 }
 
 float4 distance_from_clip_rect(float2 unit_vertex, Bounds bounds, Bounds clip_bounds) {
@@ -314,6 +333,14 @@ float quad_sdf(float2 pt, Bounds bounds, Corners corner_radii) {
     return quad_sdf_impl(corner_center_to_point, corner_radius);
 }
 
+// How much of the pixel at `position` (in the primitive's own space) the
+// content mask lets through: all of it well inside, antialiased along rounded
+// corners and turned edges. Square, untransformed masks sit on whole pixels,
+// so they cut exactly as a plain rectangle test would.
+float content_mask_alpha(float2 position, ContentMask mask) {
+    return saturate(0.5 - quad_sdf(position, mask.bounds, mask.corner_radii));
+}
+
 GradientColor prepare_gradient_color(uint tag, uint color_space, Hsla solid, LinearColorStop colors[2]) {
     GradientColor output;
     if (tag == 0 || tag == 2 || tag == 3) {
@@ -502,11 +529,12 @@ struct Quad {
     uint order;
     uint border_style;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Background background;
     Hsla border_color;
     Corners corner_radii;
     Edges border_widths;
+    TransformationMatrix element_transform;
 };
 
 struct QuadVertexOutput {
@@ -516,6 +544,7 @@ struct QuadVertexOutput {
     nointerpolation float4 background_solid: COLOR1;
     nointerpolation float4 background_color0: COLOR2;
     nointerpolation float4 background_color1: COLOR3;
+    float2 local_position: TEXCOORD1;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -526,6 +555,7 @@ struct QuadFragmentInput {
     nointerpolation float4 background_solid: COLOR1;
     nointerpolation float4 background_color0: COLOR2;
     nointerpolation float4 background_color1: COLOR3;
+    float2 local_position: TEXCOORD1;
 };
 
 StructuredBuffer<Quad> quads: register(t1);
@@ -534,7 +564,9 @@ QuadVertexOutput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_I
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint quad_id = batch_start_index + instance_id;
     Quad quad = quads[quad_id];
-    float4 device_position = to_device_position(unit_vertex, quad.bounds);
+    float2 local_position = unit_vertex * quad.bounds.size + quad.bounds.origin;
+    float4 device_position =
+        to_device_position_impl(apply_transform(quad.element_transform, local_position));
 
     GradientColor gradient = prepare_gradient_color(
         quad.background.tag,
@@ -542,11 +574,12 @@ QuadVertexOutput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_I
         quad.background.solid,
         quad.background.colors
     );
-    float4 clip_distance = distance_from_clip_rect(unit_vertex, quad.bounds, quad.content_mask);
+    float4 clip_distance = clip_distances(local_position, quad.content_mask.bounds);
     float4 border_color = hsla_to_rgba(quad.border_color);
 
     QuadVertexOutput output;
     output.position = device_position;
+    output.local_position = local_position;
     output.border_color = border_color;
     output.quad_id = quad_id;
     output.background_solid = gradient.solid;
@@ -558,7 +591,8 @@ QuadVertexOutput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_I
 
 float4 quad_fragment(QuadFragmentInput input): SV_Target {
     Quad quad = quads[input.quad_id];
-    float4 background_color = gradient_color(quad.background, input.position.xy, quad.bounds,
+    float mask_alpha = content_mask_alpha(input.local_position, quad.content_mask);
+    float4 background_color = gradient_color(quad.background, input.local_position, quad.bounds,
     input.background_solid, input.background_color0, input.background_color1);
 
     bool unrounded = quad.corner_radii.top_left == 0.0 &&
@@ -572,12 +606,12 @@ float4 quad_fragment(QuadFragmentInput input): SV_Target {
         quad.border_widths.right == 0.0 &&
         quad.border_widths.bottom == 0.0 &&
         unrounded) {
-        return background_color;
+        return background_color * float4(1.0, 1.0, 1.0, mask_alpha);
     }
 
     float2 size = quad.bounds.size;
     float2 half_size = size / 2.;
-    float2 the_point = input.position.xy - quad.bounds.origin;
+    float2 the_point = input.local_position - quad.bounds.origin;
     float2 center_to_point = the_point - half_size;
 
     // Signed distance field threshold for inclusion of pixels. 0.5 is the
@@ -631,7 +665,7 @@ float4 quad_fragment(QuadFragmentInput input): SV_Target {
 
     // Fast path for points that must be part of the background
     if (is_within_inner_straight_border && !is_near_rounded_corner) {
-        return background_color;
+        return background_color * float4(1.0, 1.0, 1.0, mask_alpha);
     }
 
     // Signed distance of the point to the outside edge of the quad's border
@@ -844,7 +878,7 @@ float4 quad_fragment(QuadFragmentInput input): SV_Target {
                     saturate(antialias_threshold - inner_sdf));
     }
 
-    return color * float4(1.0, 1.0, 1.0, saturate(antialias_threshold - outer_sdf));
+    return color * float4(1.0, 1.0, 1.0, saturate(antialias_threshold - outer_sdf) * mask_alpha);
 }
 
 /*
@@ -858,18 +892,20 @@ struct Shadow {
     float blur_radius;
     Bounds bounds;
     Corners corner_radii;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     Bounds element_bounds;
     Corners element_corner_radii;
     uint inset;
     uint pad; // align to 8 bytes
+    TransformationMatrix element_transform;
 };
 
 struct ShadowVertexOutput {
     nointerpolation uint shadow_id: TEXCOORD0;
     float4 position: SV_Position;
     nointerpolation float4 color: COLOR;
+    float2 local_position: TEXCOORD1;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -877,6 +913,7 @@ struct ShadowFragmentInput {
   nointerpolation uint shadow_id: TEXCOORD0;
   float4 position: SV_Position;
   nointerpolation float4 color: COLOR;
+  float2 local_position: TEXCOORD1;
 };
 
 StructuredBuffer<Shadow> shadows: register(t1);
@@ -897,12 +934,15 @@ ShadowVertexOutput shadow_vertex(uint vertex_id: SV_VertexID, uint instance_id: 
         bounds.size += 2.0 * margin;
     }
 
-    float4 device_position = to_device_position(unit_vertex, bounds);
-    float4 clip_distance = distance_from_clip_rect(unit_vertex, bounds, shadow.content_mask);
+    float2 local_position = unit_vertex * bounds.size + bounds.origin;
+    float4 device_position =
+        to_device_position_impl(apply_transform(shadow.element_transform, local_position));
+    float4 clip_distance = clip_distances(local_position, shadow.content_mask.bounds);
     float4 color = hsla_to_rgba(shadow.color);
 
     ShadowVertexOutput output;
     output.position = device_position;
+    output.local_position = local_position;
     output.color = color;
     output.shadow_id = shadow_id;
     output.clip_distance = clip_distance;
@@ -915,12 +955,12 @@ float4 shadow_fragment(ShadowFragmentInput input): SV_TARGET {
 
     float2 half_size = shadow.bounds.size / 2.;
     float2 center = shadow.bounds.origin + half_size;
-    float2 point0 = input.position.xy - center;
+    float2 point0 = input.local_position - center;
     float corner_radius = pick_corner_radius(point0, shadow.corner_radii);
 
     float alpha;
     if (shadow.blur_radius == 0.) {
-        float distance = quad_sdf(input.position.xy, shadow.bounds, shadow.corner_radii);
+        float distance = quad_sdf(input.local_position, shadow.bounds, shadow.corner_radii);
         alpha = saturate(0.5 - distance);
     } else {
         // The signal is only non-zero in a limited range, so don't waste samples
@@ -945,11 +985,12 @@ float4 shadow_fragment(ShadowFragmentInput input): SV_TARGET {
         // The inset shadow is the complement of the (blurred) hole rect, clipped to the element.
         // `saturate(0.5 - d)` gives a 1-pixel antialiased edge: d <= -0.5 -> 1, d >= 0.5 -> 0.
         alpha = 1.0 - alpha;
-        float element_distance = quad_sdf(input.position.xy, shadow.element_bounds,
+        float element_distance = quad_sdf(input.local_position, shadow.element_bounds,
                                           shadow.element_corner_radii);
         alpha *= saturate(0.5 - element_distance);
     }
 
+    alpha *= content_mask_alpha(input.local_position, shadow.content_mask);
     return input.color * float4(1., 1., 1., alpha);
 }
 
@@ -964,6 +1005,8 @@ struct PathRasterizationSprite {
     float2 st_position;
     Background color;
     Bounds bounds;
+    ContentMask content_mask;
+    TransformationMatrix element_transform;
 };
 
 StructuredBuffer<PathRasterizationSprite> path_rasterization_sprites: register(t1);
@@ -972,6 +1015,7 @@ struct PathVertexOutput {
     float4 position: SV_Position;
     float2 st_position: TEXCOORD0;
     nointerpolation uint vertex_id: TEXCOORD1;
+    float2 local_position: TEXCOORD2;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -979,16 +1023,19 @@ struct PathFragmentInput {
     float4 position: SV_Position;
     float2 st_position: TEXCOORD0;
     nointerpolation uint vertex_id: TEXCOORD1;
+    float2 local_position: TEXCOORD2;
 };
 
 PathVertexOutput path_rasterization_vertex(uint vertex_id: SV_VertexID) {
     PathRasterizationSprite sprite = path_rasterization_sprites[vertex_id];
 
     PathVertexOutput output;
-    output.position = to_device_position_impl(sprite.xy_position);
+    output.position =
+        to_device_position_impl(apply_transform(sprite.element_transform, sprite.xy_position));
+    output.local_position = sprite.xy_position;
     output.st_position = sprite.st_position;
     output.vertex_id = vertex_id;
-    output.clip_distance = distance_from_clip_rect_impl(sprite.xy_position, sprite.bounds);
+    output.clip_distance = clip_distances(sprite.xy_position, sprite.content_mask.bounds);
 
     return output;
 }
@@ -1010,11 +1057,12 @@ float4 path_rasterization_fragment(PathFragmentInput input): SV_Target {
         float distance = f / length(gradient);
         alpha = saturate(0.5 - distance);
     }
+    alpha *= content_mask_alpha(input.local_position, sprite.content_mask);
 
     GradientColor gradient = prepare_gradient_color(
         background.tag, background.color_space, background.solid, background.colors);
 
-    float4 color = gradient_color(background, input.position.xy, bounds,
+    float4 color = gradient_color(background, input.local_position, bounds,
         gradient.solid, gradient.color0, gradient.color1);
     return float4(color.rgb * color.a * alpha, alpha * color.a);
 }
@@ -1066,16 +1114,18 @@ struct Underline {
     uint order;
     uint pad;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     float thickness;
     uint wavy;
+    TransformationMatrix element_transform;
 };
 
 struct UnderlineVertexOutput {
   nointerpolation uint underline_id: TEXCOORD0;
   float4 position: SV_Position;
   nointerpolation float4 color: COLOR;
+  float2 local_position: TEXCOORD1;
   float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1083,6 +1133,7 @@ struct UnderlineFragmentInput {
   nointerpolation uint underline_id: TEXCOORD0;
   float4 position: SV_Position;
   nointerpolation float4 color: COLOR;
+  float2 local_position: TEXCOORD1;
 };
 
 StructuredBuffer<Underline> underlines: register(t1);
@@ -1091,13 +1142,15 @@ UnderlineVertexOutput underline_vertex(uint vertex_id: SV_VertexID, uint instanc
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint underline_id = batch_start_index + instance_id;
     Underline underline = underlines[underline_id];
-    float4 device_position = to_device_position(unit_vertex, underline.bounds);
-    float4 clip_distance = distance_from_clip_rect(unit_vertex, underline.bounds,
-                                                    underline.content_mask);
+    float2 local_position = unit_vertex * underline.bounds.size + underline.bounds.origin;
+    float4 device_position =
+        to_device_position_impl(apply_transform(underline.element_transform, local_position));
+    float4 clip_distance = clip_distances(local_position, underline.content_mask.bounds);
     float4 color = hsla_to_rgba(underline.color);
 
     UnderlineVertexOutput output;
     output.position = device_position;
+    output.local_position = local_position;
     output.color = color;
     output.underline_id = underline_id;
     output.clip_distance = clip_distance;
@@ -1109,11 +1162,12 @@ float4 underline_fragment(UnderlineFragmentInput input): SV_Target {
     const float WAVE_HEIGHT_RATIO = 0.8;
 
     Underline underline = underlines[input.underline_id];
+    float mask_alpha = content_mask_alpha(input.local_position, underline.content_mask);
     if (underline.wavy) {
         float half_thickness = underline.thickness * 0.5;
         float2 origin = underline.bounds.origin;
 
-        float2 st = ((input.position.xy - origin) / underline.bounds.size.y) - float2(0., 0.5);
+        float2 st = ((input.local_position - origin) / underline.bounds.size.y) - float2(0., 0.5);
         float frequency = (M_PI_F * WAVE_FREQUENCY * underline.thickness) / underline.bounds.size.y;
         float amplitude = (underline.thickness * WAVE_HEIGHT_RATIO) / underline.bounds.size.y;
 
@@ -1125,9 +1179,9 @@ float4 underline_fragment(UnderlineFragmentInput input): SV_Target {
         float distance_from_bottom_border = distance_in_pixels + half_thickness;
         float alpha = saturate(
             0.5 - max(-distance_from_bottom_border, distance_from_top_border));
-        return input.color * float4(1., 1., 1., alpha);
+        return input.color * float4(1., 1., 1., alpha * mask_alpha);
     } else {
-        return input.color;
+        return input.color * float4(1., 1., 1., mask_alpha);
     }
 }
 
@@ -1141,16 +1195,19 @@ struct MonochromeSprite {
     uint order;
     uint pad;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     AtlasTile tile;
     TransformationMatrix transformation;
+    TransformationMatrix element_transform;
 };
 
 struct MonochromeSpriteVertexOutput {
     float4 position: SV_Position;
     float2 tile_position: POSITION;
     nointerpolation float4 color: COLOR;
+    float2 local_position: TEXCOORD0;
+    nointerpolation uint sprite_id: TEXCOORD1;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1158,6 +1215,8 @@ struct MonochromeSpriteFragmentInput {
     float4 position: SV_Position;
     float2 tile_position: POSITION;
     nointerpolation float4 color: COLOR;
+    float2 local_position: TEXCOORD0;
+    nointerpolation uint sprite_id: TEXCOORD1;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1167,9 +1226,13 @@ MonochromeSpriteVertexOutput monochrome_sprite_vertex(uint vertex_id: SV_VertexI
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint sprite_id = batch_start_index + instance_id;
     MonochromeSprite sprite = mono_sprites[sprite_id];
+    // The sprite's own transform places it in its element, whose transform
+    // places it in the window.
+    float2 local_position = apply_transform(sprite.transformation,
+        unit_vertex * sprite.bounds.size + sprite.bounds.origin);
     float4 device_position =
-        to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
-    float4 clip_distance = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);
+        to_device_position_impl(apply_transform(sprite.element_transform, local_position));
+    float4 clip_distance = clip_distances(local_position, sprite.content_mask.bounds);
     float2 tile_position = to_tile_position(unit_vertex, sprite.tile);
     float4 color = hsla_to_rgba(sprite.color);
 
@@ -1177,6 +1240,8 @@ MonochromeSpriteVertexOutput monochrome_sprite_vertex(uint vertex_id: SV_VertexI
     output.position = device_position;
     output.tile_position = tile_position;
     output.color = color;
+    output.local_position = local_position;
+    output.sprite_id = sprite_id;
     output.clip_distance = clip_distance;
     return output;
 }
@@ -1184,7 +1249,9 @@ MonochromeSpriteVertexOutput monochrome_sprite_vertex(uint vertex_id: SV_VertexI
 float4 monochrome_sprite_fragment(MonochromeSpriteFragmentInput input): SV_Target {
     float sample = t_sprite.Sample(s_sprite, input.tile_position).r;
     float alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
-    return float4(input.color.rgb, input.color.a * alpha_corrected);
+    float mask_alpha = content_mask_alpha(input.local_position,
+        mono_sprites[input.sprite_id].content_mask);
+    return float4(input.color.rgb, input.color.a * alpha_corrected * mask_alpha);
 }
 
 MonochromeSpriteVertexOutput subpixel_sprite_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceID) {
@@ -1198,9 +1265,11 @@ SubpixelSpriteFragmentOutput subpixel_sprite_fragment(MonochromeSpriteFragmentIn
     }
     float3 alpha_corrected = apply_contrast_and_gamma_correction3(sample, input.color.rgb, subpixel_enhanced_contrast, gamma_ratios);
 
+    float mask_alpha = content_mask_alpha(input.local_position,
+        mono_sprites[input.sprite_id].content_mask);
     SubpixelSpriteFragmentOutput output;
     output.foreground = float4(input.color.rgb, 1.0f);
-    output.alpha = float4(input.color.a * alpha_corrected, 1.0f);
+    output.alpha = float4(input.color.a * alpha_corrected * mask_alpha, 1.0f);
     return output;
 }
 
@@ -1216,15 +1285,17 @@ struct PolychromeSprite {
     uint grayscale;
     float opacity;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Corners corner_radii;
     AtlasTile tile;
+    TransformationMatrix element_transform;
 };
 
 struct PolychromeSpriteVertexOutput {
     nointerpolation uint sprite_id: TEXCOORD0;
     float4 position: SV_Position;
     float2 tile_position: POSITION;
+    float2 local_position: TEXCOORD1;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1232,6 +1303,7 @@ struct PolychromeSpriteFragmentInput {
     nointerpolation uint sprite_id: TEXCOORD0;
     float4 position: SV_Position;
     float2 tile_position: POSITION;
+    float2 local_position: TEXCOORD1;
 };
 
 StructuredBuffer<PolychromeSprite> poly_sprites: register(t1);
@@ -1240,13 +1312,15 @@ PolychromeSpriteVertexOutput polychrome_sprite_vertex(uint vertex_id: SV_VertexI
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint sprite_id = batch_start_index + instance_id;
     PolychromeSprite sprite = poly_sprites[sprite_id];
-    float4 device_position = to_device_position(unit_vertex, sprite.bounds);
-    float4 clip_distance = distance_from_clip_rect(unit_vertex, sprite.bounds,
-                                                    sprite.content_mask);
+    float2 local_position = unit_vertex * sprite.bounds.size + sprite.bounds.origin;
+    float4 device_position =
+        to_device_position_impl(apply_transform(sprite.element_transform, local_position));
+    float4 clip_distance = clip_distances(local_position, sprite.content_mask.bounds);
     float2 tile_position = to_tile_position(unit_vertex, sprite.tile);
 
     PolychromeSpriteVertexOutput output;
     output.position = device_position;
+    output.local_position = local_position;
     output.tile_position = tile_position;
     output.sprite_id = sprite_id;
     output.clip_distance = clip_distance;
@@ -1256,13 +1330,154 @@ PolychromeSpriteVertexOutput polychrome_sprite_vertex(uint vertex_id: SV_VertexI
 float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Target {
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
     float4 sample = t_sprite.Sample(s_sprite, input.tile_position);
-    float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
+    float distance = quad_sdf(input.local_position, sprite.bounds, sprite.corner_radii);
 
     float4 color = sample;
     if (sprite.grayscale != 0u) {
         float3 grayscale = dot(color.rgb, GRAYSCALE_FACTORS);
         color = float4(grayscale, sample.a);
     }
-    color.a *= sprite.opacity * saturate(0.5 - distance);
+    color.a *= sprite.opacity * saturate(0.5 - distance) *
+        content_mask_alpha(input.local_position, sprite.content_mask);
     return color;
+}
+
+/*
+**
+**              Backdrop blurs
+**
+*/
+
+// One step of blurring a copy of the frame: shrinking it (`direction` zero)
+// or one axis of the gaussian. It writes `target_size` pixels from the target
+// texture's top-left corner, reading the source's first `source_limit` pixels.
+struct BlurPass {
+    float2 target_size;
+    float2 target_texture_size;
+    float2 source_texture_size;
+    float2 source_limit;
+    float2 direction;
+    // Source pixels per target pixel, when shrinking.
+    float scale;
+    // The gaussian's standard deviation, in target pixels.
+    float sigma;
+};
+
+struct BlurPassVertexOutput {
+    float4 position: SV_Position;
+    nointerpolation uint pass_id: TEXCOORD0;
+};
+
+StructuredBuffer<BlurPass> blur_passes: register(t1);
+
+BlurPassVertexOutput blur_pass_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    uint pass_id = batch_start_index + instance_id;
+    BlurPass blur_pass = blur_passes[pass_id];
+    float2 position = unit_vertex * blur_pass.target_size / blur_pass.target_texture_size;
+
+    BlurPassVertexOutput output;
+    output.position = float4(position * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    output.pass_id = pass_id;
+    return output;
+}
+
+// Samples the source at `position` (in its pixels), never past the part
+// that holds the region, which repeats at its edges.
+float4 sample_blur_source(BlurPass blur_pass, float2 position) {
+    float2 clamped = clamp(position, float2(0.5, 0.5), blur_pass.source_limit - float2(0.5, 0.5));
+    return t_sprite.SampleLevel(s_sprite, clamped / blur_pass.source_texture_size, 0.0);
+}
+
+float4 blur_pass_fragment(BlurPassVertexOutput input): SV_Target {
+    BlurPass blur_pass = blur_passes[input.pass_id];
+    float2 position = input.position.xy;
+
+    if (all(blur_pass.direction == float2(0.0, 0.0))) {
+        // Shrinking: the average of the `scale` by `scale` block of source
+        // pixels under this one, from one bilinear sample per two by two.
+        int taps = max(int(blur_pass.scale / 2.0), 1);
+        float step = blur_pass.scale / float(taps);
+        float2 block_origin = (position - float2(0.5, 0.5)) * blur_pass.scale;
+        float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+        [loop]
+        for (int y = 0; y < taps; y++) {
+            [loop]
+            for (int x = 0; x < taps; x++) {
+                float2 offset = (float2(float(x), float(y)) + float2(0.5, 0.5)) * step;
+                sum += sample_blur_source(blur_pass, block_origin + offset);
+            }
+        }
+        return sum / float(taps * taps);
+    }
+
+    int radius = min(int(ceil(blur_pass.sigma * 3.0)), 48);
+    float denominator = 2.0 * blur_pass.sigma * blur_pass.sigma;
+    float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+    float total = 0.0;
+    [loop]
+    for (int i = -radius; i <= radius; i++) {
+        float distance = float(i);
+        float weight = exp(-distance * distance / max(denominator, 0.0001));
+        sum += weight * sample_blur_source(blur_pass, position + blur_pass.direction * distance);
+        total += weight;
+    }
+    return sum / total;
+}
+
+// Drawing a blurred copy back over the frame, inside the element's rounded
+// shape. The copy's texel (0, 0) holds the frame's `region_origin`, and each
+// texel covers `scale` frame pixels.
+struct BackdropBlur {
+    Bounds bounds;
+    Corners corner_radii;
+    ContentMask content_mask;
+    TransformationMatrix element_transform;
+    float2 region_origin;
+    float2 texture_size;
+    float2 texture_limit;
+    float scale;
+    float opacity;
+};
+
+struct BackdropBlurVertexOutput {
+    nointerpolation uint blur_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 local_position: TEXCOORD1;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+struct BackdropBlurFragmentInput {
+    nointerpolation uint blur_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 local_position: TEXCOORD1;
+};
+
+StructuredBuffer<BackdropBlur> backdrop_blurs: register(t1);
+
+BackdropBlurVertexOutput backdrop_blur_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    uint blur_id = batch_start_index + instance_id;
+    BackdropBlur blur = backdrop_blurs[blur_id];
+    float2 local_position = unit_vertex * blur.bounds.size + blur.bounds.origin;
+
+    BackdropBlurVertexOutput output;
+    output.position =
+        to_device_position_impl(apply_transform(blur.element_transform, local_position));
+    output.local_position = local_position;
+    output.blur_id = blur_id;
+    output.clip_distance = clip_distances(local_position, blur.content_mask.bounds);
+    return output;
+}
+
+float4 backdrop_blur_fragment(BackdropBlurFragmentInput input): SV_Target {
+    BackdropBlur blur = backdrop_blurs[input.blur_id];
+    float2 texel = (input.position.xy - blur.region_origin) / blur.scale;
+    float2 clamped = clamp(texel, float2(0.5, 0.5), blur.texture_limit - float2(0.5, 0.5));
+    float4 color = t_sprite.SampleLevel(s_sprite, clamped / blur.texture_size, 0.0);
+
+    float shape_alpha = saturate(0.5 - quad_sdf(input.local_position, blur.bounds, blur.corner_radii));
+    float alpha = blur.opacity * shape_alpha *
+        content_mask_alpha(input.local_position, blur.content_mask);
+    return float4(color.rgb, alpha);
 }

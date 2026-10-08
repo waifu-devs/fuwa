@@ -79,8 +79,24 @@ struct DirectXResources {
     path_intermediate_msaa_texture: ID3D11Texture2D,
     path_intermediate_msaa_view: Option<ID3D11RenderTargetView>,
 
+    // A copy of the frame's region under a backdrop blur, and the two
+    // textures it's shrunk and blurred between. Made at the frame's size the
+    // first time a blur is drawn.
+    blur_textures: Option<BlurTextures>,
+
     // Cached viewport
     viewport: D3D11_VIEWPORT,
+}
+
+struct BlurTextures {
+    copy: ID3D11Texture2D,
+    copy_srv: Option<ID3D11ShaderResourceView>,
+    first_rtv: Option<ID3D11RenderTargetView>,
+    first_srv: Option<ID3D11ShaderResourceView>,
+    second_rtv: Option<ID3D11RenderTargetView>,
+    second_srv: Option<ID3D11ShaderResourceView>,
+    width: u32,
+    height: u32,
 }
 
 struct DirectXRenderPipelines {
@@ -92,6 +108,8 @@ struct DirectXRenderPipelines {
     mono_sprites: PipelineState<MonochromeSprite>,
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
+    blur_passes: PipelineState<BlurPass>,
+    backdrop_blurs: PipelineState<BackdropBlurInstance>,
 }
 
 struct DirectXGlobalElements {
@@ -385,6 +403,9 @@ impl DirectXRenderer {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                PrimitiveBatch::BackdropBlurs(range) => {
+                    self.draw_backdrop_blurs(&scene.backdrop_blurs[range])
+                }
             }
             .with_context(|| {
                 format!(
@@ -641,6 +662,8 @@ impl DirectXRenderer {
                 st_position: v.st_position,
                 color: path.color,
                 bounds: path.clipped_bounds(),
+                content_mask: path.content_mask,
+                element_transform: path.element_transform,
             }));
         }
 
@@ -691,13 +714,13 @@ impl DirectXRenderer {
             paths
                 .iter()
                 .map(|path| PathSprite {
-                    bounds: path.clipped_bounds(),
+                    bounds: path.drawn_bounds(),
                 })
                 .collect::<Vec<_>>()
         } else {
-            let mut bounds = first_path.clipped_bounds();
+            let mut bounds = first_path.drawn_bounds();
             for path in paths.iter().skip(1) {
-                bounds = bounds.union(&path.clipped_bounds());
+                bounds = bounds.union(&path.drawn_bounds());
             }
             vec![PathSprite { bounds }]
         };
@@ -820,6 +843,157 @@ impl DirectXRenderer {
         Ok(())
     }
 
+    /// Each blur copies the frame under it out, shrinks it and blurs it on
+    /// both axes into the first blur texture, and draws that back inside its
+    /// element's shape.
+    fn draw_backdrop_blurs(&mut self, blurs: &[BackdropBlur]) -> Result<()> {
+        if blurs.is_empty() {
+            return Ok(());
+        }
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let resources = self.resources.as_mut().context("resources missing")?;
+        let frame_size = size(
+            DevicePixels(resources.viewport.Width as i32),
+            DevicePixels(resources.viewport.Height as i32),
+        );
+        let (width, height) = (frame_size.width.0 as u32, frame_size.height.0 as u32);
+        if resources
+            .blur_textures
+            .as_ref()
+            .is_none_or(|textures| textures.width != width || textures.height != height)
+        {
+            resources.blur_textures = Some(create_blur_textures(&devices.device, width, height)?);
+        }
+        let textures = resources.blur_textures.as_ref().unwrap();
+        let render_target = resources
+            .render_target
+            .as_ref()
+            .context("render target missing")?;
+        let batch_params = self
+            .globals
+            .batch_params_buffer
+            .as_ref()
+            .context("batch params buffer missing")?;
+        let texture_size = [width as f32, height as f32];
+
+        for blur in blurs {
+            let Some(region) = BlurRegion::new(blur, frame_size) else {
+                continue;
+            };
+            let context = &devices.device_context;
+            unsafe {
+                // The blur reads what's been drawn so far.
+                let source_box = D3D11_BOX {
+                    left: region.origin[0],
+                    top: region.origin[1],
+                    front: 0,
+                    right: region.origin[0] + region.size[0],
+                    bottom: region.origin[1] + region.size[1],
+                    back: 1,
+                };
+                context.CopySubresourceRegion(
+                    &textures.copy,
+                    0,
+                    0,
+                    0,
+                    0,
+                    render_target,
+                    0,
+                    Some(&source_box),
+                );
+            }
+
+            let shrunk = region.shrunk_size();
+            let shrunk = [shrunk[0] as f32, shrunk[1] as f32];
+            let passes = [
+                // Shrink the copy into the first texture.
+                BlurPass {
+                    target_size: shrunk,
+                    target_texture_size: texture_size,
+                    source_texture_size: texture_size,
+                    source_limit: [region.size[0] as f32, region.size[1] as f32],
+                    direction: [0.0, 0.0],
+                    scale: region.scale as f32,
+                    sigma: region.sigma,
+                },
+                // Across, into the second.
+                BlurPass {
+                    target_size: shrunk,
+                    target_texture_size: texture_size,
+                    source_texture_size: texture_size,
+                    source_limit: shrunk,
+                    direction: [1.0, 0.0],
+                    scale: 1.0,
+                    sigma: region.sigma,
+                },
+                // Down, back into the first.
+                BlurPass {
+                    target_size: shrunk,
+                    target_texture_size: texture_size,
+                    source_texture_size: texture_size,
+                    source_limit: shrunk,
+                    direction: [0.0, 1.0],
+                    scale: 1.0,
+                    sigma: region.sigma,
+                },
+            ];
+            self.pipelines
+                .blur_passes
+                .update_buffer(&devices.device, context, &passes)?;
+            let steps = [
+                (&textures.copy_srv, &textures.first_rtv),
+                (&textures.first_srv, &textures.second_rtv),
+                (&textures.second_srv, &textures.first_rtv),
+            ];
+            for (index, (source, target)) in steps.into_iter().enumerate() {
+                unsafe {
+                    // A texture can't be read and drawn into at once.
+                    context.PSSetShaderResources(0, Some(&[None]));
+                    context.OMSetRenderTargets(Some(slice::from_ref(target)), None);
+                }
+                self.pipelines.blur_passes.draw_range_with_texture(
+                    context,
+                    slice::from_ref(source),
+                    batch_params,
+                    slice::from_ref(&self.globals.sampler),
+                    index as u32,
+                    1,
+                )?;
+            }
+
+            let instance = BackdropBlurInstance {
+                bounds: blur.bounds,
+                corner_radii: blur.corner_radii,
+                content_mask: blur.content_mask,
+                element_transform: blur.element_transform,
+                region_origin: [region.origin[0] as f32, region.origin[1] as f32],
+                texture_size,
+                texture_limit: shrunk,
+                scale: region.scale as f32,
+                opacity: blur.opacity,
+            };
+            self.pipelines.backdrop_blurs.update_buffer(
+                &devices.device,
+                context,
+                slice::from_ref(&instance),
+            )?;
+            unsafe {
+                context.PSSetShaderResources(0, Some(&[None]));
+                context
+                    .OMSetRenderTargets(Some(slice::from_ref(&resources.render_target_view)), None);
+            }
+            self.pipelines.backdrop_blurs.draw_range_with_texture(
+                context,
+                slice::from_ref(&textures.first_srv),
+                batch_params,
+                slice::from_ref(&self.globals.sampler),
+                0,
+                1,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
         let devices = self.devices.as_ref().context("devices missing")?;
         let desc = unsafe { devices.adapter.GetDesc1() }?;
@@ -908,6 +1082,7 @@ impl DirectXResources {
             path_intermediate_msaa_texture,
             path_intermediate_msaa_view,
             path_intermediate_srv,
+            blur_textures: None,
             viewport,
         })
     }
@@ -934,6 +1109,7 @@ impl DirectXResources {
         self.path_intermediate_msaa_texture = path_intermediate_msaa_texture;
         self.path_intermediate_msaa_view = path_intermediate_msaa_view;
         self.path_intermediate_srv = path_intermediate_srv;
+        self.blur_textures = None;
         self.viewport = viewport;
         Ok(())
     }
@@ -997,6 +1173,20 @@ impl DirectXRenderPipelines {
             16,
             create_blend_state(device)?,
         )?;
+        let blur_passes = PipelineState::new(
+            device,
+            "blur_pass_pipeline",
+            ShaderModule::BlurPass,
+            4,
+            create_blend_state_for_blur_passes(device)?,
+        )?;
+        let backdrop_blurs = PipelineState::new(
+            device,
+            "backdrop_blur_pipeline",
+            ShaderModule::BackdropBlur,
+            4,
+            create_blend_state(device)?,
+        )?;
 
         Ok(Self {
             shadow_pipeline,
@@ -1007,6 +1197,8 @@ impl DirectXRenderPipelines {
             mono_sprites,
             subpixel_sprites,
             poly_sprites,
+            blur_passes,
+            backdrop_blurs,
         })
     }
 }
@@ -1273,6 +1465,96 @@ struct PathRasterizationSprite {
     st_position: Point<f32>,
     color: Background,
     bounds: Bounds<ScaledPixels>,
+    content_mask: RoundedMask<ScaledPixels>,
+    element_transform: TransformationMatrix,
+}
+
+/// One step of blurring a copy of the frame (`BlurPass` in the shaders).
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct BlurPass {
+    target_size: [f32; 2],
+    target_texture_size: [f32; 2],
+    source_texture_size: [f32; 2],
+    source_limit: [f32; 2],
+    direction: [f32; 2],
+    scale: f32,
+    sigma: f32,
+}
+
+/// A blurred copy drawn back over the frame (`BackdropBlur` in the shaders).
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct BackdropBlurInstance {
+    bounds: Bounds<ScaledPixels>,
+    corner_radii: Corners<ScaledPixels>,
+    content_mask: RoundedMask<ScaledPixels>,
+    element_transform: TransformationMatrix,
+    region_origin: [f32; 2],
+    texture_size: [f32; 2],
+    texture_limit: [f32; 2],
+    scale: f32,
+    opacity: f32,
+}
+
+/// Where a backdrop blur reads the frame and how it shrinks it, in device
+/// pixels (the same as the wgpu renderer's).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlurRegion {
+    origin: [u32; 2],
+    size: [u32; 2],
+    /// Frame pixels per pixel of the shrunk copy: 1, 2, 4 or 8.
+    scale: u32,
+    /// The gaussian's standard deviation in the shrunk copy's pixels.
+    sigma: f32,
+}
+
+impl BlurRegion {
+    /// The frame pixels a blur reads: where it lands on screen, with room for
+    /// the gaussian's tails, inside the frame. `None` when nothing shows.
+    fn new(blur: &BackdropBlur, frame_size: Size<DevicePixels>) -> Option<Self> {
+        let sigma = blur.blur_radius.0.max(0.0);
+        let visible = blur.bounds.intersect(&blur.content_mask.bounds);
+        if visible.is_empty() || sigma <= 0.0 {
+            return None;
+        }
+        let drawn = blur.element_transform.map_bounds(visible);
+        let margin = (sigma * 3.0).ceil();
+        let frame_width = frame_size.width.0.max(0) as f32;
+        let frame_height = frame_size.height.0.max(0) as f32;
+        let left = (drawn.origin.x.0 - margin).floor().clamp(0.0, frame_width);
+        let top = (drawn.origin.y.0 - margin).floor().clamp(0.0, frame_height);
+        let right = (drawn.origin.x.0 + drawn.size.width.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_width);
+        let bottom = (drawn.origin.y.0 + drawn.size.height.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        // Shrink so the gaussian stays a few pixels wide: cheap, and smooth
+        // once stretched back.
+        let scale = match sigma {
+            s if s < 4.0 => 1,
+            s if s < 8.0 => 2,
+            s if s < 16.0 => 4,
+            _ => 8,
+        };
+        Some(Self {
+            origin: [left as u32, top as u32],
+            size: [(right - left) as u32, (bottom - top) as u32],
+            scale,
+            sigma: sigma / scale as f32,
+        })
+    }
+
+    fn shrunk_size(&self) -> [u32; 2] {
+        [
+            self.size[0].div_ceil(self.scale).max(1),
+            self.size[1].div_ceil(self.scale).max(1),
+        ]
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1436,6 +1718,55 @@ fn create_path_intermediate_texture(
     Ok((texture, Some(shader_resource_view.unwrap())))
 }
 
+/// The blur textures, at the frame's size and format: the copy only read
+/// by shaders, and the two the passes draw into and read back.
+fn create_blur_textures(device: &ID3D11Device, width: u32, height: u32) -> Result<BlurTextures> {
+    let texture = |bind_flags: u32| -> Result<ID3D11Texture2D> {
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: width,
+            Height: height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: RENDER_TARGET_FORMAT,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: bind_flags,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+        let mut output = None;
+        unsafe { device.CreateTexture2D(&desc, None, Some(&mut output))? };
+        output.context("creating a blur texture")
+    };
+    let shader_view = |texture: &ID3D11Texture2D| -> Result<Option<ID3D11ShaderResourceView>> {
+        let mut view = None;
+        unsafe { device.CreateShaderResourceView(texture, None, Some(&mut view))? };
+        Ok(view)
+    };
+    let target_view = |texture: &ID3D11Texture2D| -> Result<Option<ID3D11RenderTargetView>> {
+        let mut view = None;
+        unsafe { device.CreateRenderTargetView(texture, None, Some(&mut view))? };
+        Ok(view)
+    };
+    let drawn = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
+    let copy = texture(D3D11_BIND_SHADER_RESOURCE.0 as u32)?;
+    let first = texture(drawn)?;
+    let second = texture(drawn)?;
+    Ok(BlurTextures {
+        copy_srv: shader_view(&copy)?,
+        first_rtv: target_view(&first)?,
+        first_srv: shader_view(&first)?,
+        second_rtv: target_view(&second)?,
+        second_srv: shader_view(&second)?,
+        copy,
+        width,
+        height,
+    })
+}
+
 #[inline]
 fn create_path_intermediate_msaa_texture_and_view(
     device: &ID3D11Device,
@@ -1542,6 +1873,19 @@ fn create_blend_state_for_path_rasterization(device: &ID3D11Device) -> Result<ID
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    unsafe {
+        let mut state = None;
+        device.CreateBlendState(&desc, Some(&mut state))?;
+        Ok(state.unwrap())
+    }
+}
+
+/// The blur passes write their output as is.
+#[inline]
+fn create_blend_state_for_blur_passes(device: &ID3D11Device) -> Result<ID3D11BlendState> {
+    let mut desc = D3D11_BLEND_DESC::default();
+    desc.RenderTarget[0].BlendEnable = false.into();
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
@@ -1716,6 +2060,8 @@ pub(crate) mod shader_resources {
         MonochromeSprite,
         SubpixelSprite,
         PolychromeSprite,
+        BlurPass,
+        BackdropBlur,
         EmojiRasterization,
     }
 
@@ -1789,6 +2135,14 @@ pub(crate) mod shader_resources {
                 ShaderModule::PolychromeSprite => match target {
                     ShaderTarget::Vertex => POLYCHROME_SPRITE_VERTEX_BYTES,
                     ShaderTarget::Fragment => POLYCHROME_SPRITE_FRAGMENT_BYTES,
+                },
+                ShaderModule::BlurPass => match target {
+                    ShaderTarget::Vertex => BLUR_PASS_VERTEX_BYTES,
+                    ShaderTarget::Fragment => BLUR_PASS_FRAGMENT_BYTES,
+                },
+                ShaderModule::BackdropBlur => match target {
+                    ShaderTarget::Vertex => BACKDROP_BLUR_VERTEX_BYTES,
+                    ShaderTarget::Fragment => BACKDROP_BLUR_FRAGMENT_BYTES,
                 },
                 ShaderModule::EmojiRasterization => match target {
                     ShaderTarget::Vertex => EMOJI_RASTERIZATION_VERTEX_BYTES,
@@ -1880,6 +2234,8 @@ pub(crate) mod shader_resources {
                 ShaderModule::MonochromeSprite => "monochrome_sprite",
                 ShaderModule::SubpixelSprite => "subpixel_sprite",
                 ShaderModule::PolychromeSprite => "polychrome_sprite",
+                ShaderModule::BlurPass => "blur_pass",
+                ShaderModule::BackdropBlur => "backdrop_blur",
                 ShaderModule::EmojiRasterization => "emoji_rasterization",
             }
         }

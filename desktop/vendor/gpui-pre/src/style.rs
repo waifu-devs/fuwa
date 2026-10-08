@@ -8,8 +8,8 @@ use crate::{
     AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
     CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement, Font,
     FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Hsla, Length, Pixels, Point,
-    PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun, Window, black, phi,
-    point, px, quad, rems, size,
+    PointRefinement, Radians, Rgba, RoundedMask, ScaledPixels, SharedString, Size, SizeRefinement,
+    Styled, TextRun, TransformationMatrix, Window, black, phi, point, px, quad, rems, size,
 };
 use collections::HashSet;
 use refineable::Refineable;
@@ -301,6 +301,13 @@ pub struct Style {
     /// The opacity of this element
     pub opacity: Option<f32>,
 
+    /// Scales, turns and moves this element and everything inside it, without changing layout
+    #[refineable]
+    pub transform: ElementTransform,
+
+    /// Blurs what's behind this element by this much (the blur's standard deviation)
+    pub backdrop_blur: Option<Pixels>,
+
     /// The grid columns of this element
     /// Roughly equivalent to the Tailwind `grid-cols-<number>`
     pub grid_cols: Option<GridTemplate>,
@@ -331,6 +338,71 @@ impl StyleRefinement {
     /// The grid location of this element
     pub fn grid_location_mut(&mut self) -> &mut GridLocation {
         self.grid_location.get_or_insert_default()
+    }
+}
+
+/// How an element and everything inside it is scaled, turned and moved when painted, like
+/// CSS's `scale`, `rotate` and `translate` together: scaled first, then turned, then moved,
+/// around its origin. Layout doesn't see it; painting, clipping and hit testing do.
+#[derive(Refineable, Copy, Clone, Debug, PartialEq)]
+#[refineable(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ElementTransform {
+    /// Horizontal scale, 1 for the element's own size.
+    pub scale_x: f32,
+    /// Vertical scale, 1 for the element's own size.
+    pub scale_y: f32,
+    /// Clockwise turn, in radians.
+    pub rotate: f32,
+    /// How far it's moved right.
+    pub translate_x: Pixels,
+    /// How far it's moved down.
+    pub translate_y: Pixels,
+    /// The point it scales and turns around, as a fraction of its width.
+    pub origin_x: f32,
+    /// The point it scales and turns around, as a fraction of its height.
+    pub origin_y: f32,
+}
+
+impl Default for ElementTransform {
+    fn default() -> Self {
+        Self {
+            scale_x: 1.,
+            scale_y: 1.,
+            rotate: 0.,
+            translate_x: Pixels::ZERO,
+            translate_y: Pixels::ZERO,
+            origin_x: 0.5,
+            origin_y: 0.5,
+        }
+    }
+}
+
+impl ElementTransform {
+    /// Whether it leaves the element as it is.
+    pub fn is_identity(&self) -> bool {
+        self.scale_x == 1.
+            && self.scale_y == 1.
+            && self.rotate == 0.
+            && self.translate_x == Pixels::ZERO
+            && self.translate_y == Pixels::ZERO
+    }
+
+    /// The transform from the element's space into its parent's, for an element laid out at
+    /// `bounds`. Pass it to [`Window::with_transform`].
+    pub fn matrix(&self, bounds: Bounds<Pixels>) -> TransformationMatrix {
+        if self.is_identity() {
+            return TransformationMatrix::unit();
+        }
+        let origin = point(
+            bounds.origin.x + bounds.size.width * self.origin_x,
+            bounds.origin.y + bounds.size.height * self.origin_y,
+        );
+        let to = |p: Point<Pixels>| point(ScaledPixels(p.x.0), ScaledPixels(p.y.0));
+        TransformationMatrix::unit()
+            .translate(to(origin + point(self.translate_x, self.translate_y)))
+            .rotate(Radians(self.rotate))
+            .scale(size(self.scale_x, self.scale_y))
+            .translate(to(-origin))
     }
 }
 
@@ -684,6 +756,50 @@ impl Style {
         }
     }
 
+    /// The content mask for this element style with its rounded corners: like
+    /// [`Self::overflow_mask`], rounded inside the element's own corners when it hides its
+    /// overflow on both axes.
+    pub fn rounded_overflow_mask(
+        &self,
+        bounds: Bounds<Pixels>,
+        rem_size: Pixels,
+    ) -> Option<RoundedMask<Pixels>> {
+        let mask = self.overflow_mask(bounds, rem_size)?;
+        if self.overflow.x == Overflow::Visible || self.overflow.y == Overflow::Visible {
+            return Some(mask.into());
+        }
+        let radii = self
+            .corner_radii
+            .to_pixels(rem_size)
+            .clamp_radii_for_quad_size(bounds.size);
+        // Inside a border, the corners are rounded less by its width, as in CSS.
+        let (top, right, bottom, left) = if self
+            .border_color
+            .is_some_and(|color| !color.is_transparent())
+        {
+            let widths = self.border_widths.to_pixels(rem_size);
+            (widths.top, widths.right, widths.bottom, widths.left)
+        } else {
+            (Pixels::ZERO, Pixels::ZERO, Pixels::ZERO, Pixels::ZERO)
+        };
+        let inner = |radius: Pixels, a: Pixels, b: Pixels| (radius - a.max(b)).max(Pixels::ZERO);
+        Some(RoundedMask {
+            bounds: mask.bounds,
+            corner_radii: Corners {
+                top_left: inner(radii.top_left, top, left),
+                top_right: inner(radii.top_right, top, right),
+                bottom_right: inner(radii.bottom_right, bottom, right),
+                bottom_left: inner(radii.bottom_left, bottom, left),
+            },
+        })
+    }
+
+    /// The transform this style gives an element laid out at `bounds`, from its space into
+    /// its parent's.
+    pub fn transform_matrix(&self, bounds: Bounds<Pixels>) -> TransformationMatrix {
+        self.transform.matrix(bounds)
+    }
+
     /// Paints the background of an element styled with this style.
     pub fn paint(
         &self,
@@ -709,6 +825,10 @@ impl Style {
             .clamp_radii_for_quad_size(bounds.size);
 
         window.paint_drop_shadows(bounds, corner_radii, &self.box_shadow);
+
+        if let Some(blur_radius) = self.backdrop_blur {
+            window.paint_backdrop_blur(bounds, corner_radii, blur_radius);
+        }
 
         let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
@@ -809,6 +929,8 @@ impl Default for Style {
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
             opacity: None,
+            transform: ElementTransform::default(),
+            backdrop_blur: None,
             grid_rows: None,
             grid_cols: None,
             grid_location: None,

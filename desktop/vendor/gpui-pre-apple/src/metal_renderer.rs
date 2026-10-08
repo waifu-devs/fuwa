@@ -7,8 +7,9 @@ use cocoa::{
     quartzcore::AutoresizingMask,
 };
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path, Point,
-    PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
+    AtlasTextureId, BackdropBlur, Background, Bounds, Corners, DevicePixels, PaintSurface, Path,
+    Point, PrimitiveBatch, RoundedMask, ScaledPixels, Scene, Size, TransformationMatrix, point,
+    size,
 };
 #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 use image::RgbaImage;
@@ -127,6 +128,8 @@ pub struct MetalRenderer {
     monochrome_sprites_pipeline_state: metal::RenderPipelineState,
     polychrome_sprites_pipeline_state: metal::RenderPipelineState,
     surfaces_pipeline_state: metal::RenderPipelineState,
+    blur_passes_pipeline_state: metal::RenderPipelineState,
+    backdrop_blurs_pipeline_state: metal::RenderPipelineState,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
@@ -135,6 +138,10 @@ pub struct MetalRenderer {
     path_intermediate_texture: Option<metal::Texture>,
     path_intermediate_msaa_texture: Option<metal::Texture>,
     path_sample_count: u32,
+    /// A copy of the frame's region under a backdrop blur, and the two
+    /// textures it's shrunk and blurred between. Made at the frame's size the
+    /// first time a blur is drawn.
+    blur_textures: Option<BlurTextures>,
     /// Offscreen render target reused across `render_scene` calls when
     /// rendering headlessly without reading pixels back.
     #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
@@ -147,6 +154,109 @@ pub struct PathRasterizationVertex {
     pub st_position: Point<f32>,
     pub color: Background,
     pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: RoundedMask<ScaledPixels>,
+    pub element_transform: TransformationMatrix,
+}
+
+/// One step of blurring a copy of the frame: shrinking it (`direction` zero)
+/// or one axis of the gaussian. It writes `target_size` pixels from the
+/// target texture's top-left corner, reading the source's first
+/// `source_limit` pixels.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct BlurPass {
+    pub target_size: [f32; 2],
+    pub target_texture_size: [f32; 2],
+    pub source_texture_size: [f32; 2],
+    pub source_limit: [f32; 2],
+    pub direction: [f32; 2],
+    /// Source pixels per target pixel, when shrinking.
+    pub scale: f32,
+    /// The gaussian's standard deviation, in target pixels.
+    pub sigma: f32,
+}
+
+/// A blurred copy drawn back over the frame inside an element's shape. The
+/// copy's texel (0, 0) holds the frame at `region_origin`, and each texel
+/// covers `scale` frame pixels.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct BackdropBlurInstance {
+    pub bounds: Bounds<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    pub content_mask: RoundedMask<ScaledPixels>,
+    pub element_transform: TransformationMatrix,
+    pub region_origin: [f32; 2],
+    pub texture_size: [f32; 2],
+    pub texture_limit: [f32; 2],
+    pub scale: f32,
+    pub opacity: f32,
+}
+
+struct BlurTextures {
+    copy: metal::Texture,
+    first: metal::Texture,
+    second: metal::Texture,
+}
+
+/// Where a backdrop blur reads the frame and how it shrinks it, in device
+/// pixels (the same as the wgpu renderer's).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlurRegion {
+    origin: [u32; 2],
+    size: [u32; 2],
+    /// Frame pixels per pixel of the shrunk copy: 1, 2, 4 or 8.
+    scale: u32,
+    /// The gaussian's standard deviation in the shrunk copy's pixels.
+    sigma: f32,
+}
+
+impl BlurRegion {
+    /// The frame pixels a blur reads: where it lands on screen, with room for
+    /// the gaussian's tails, inside the frame. `None` when nothing shows.
+    fn new(blur: &BackdropBlur, frame_size: Size<DevicePixels>) -> Option<Self> {
+        let sigma = blur.blur_radius.0.max(0.0);
+        let visible = blur.bounds.intersect(&blur.content_mask.bounds);
+        if visible.is_empty() || sigma <= 0.0 {
+            return None;
+        }
+        let drawn = blur.element_transform.map_bounds(visible);
+        let margin = (sigma * 3.0).ceil();
+        let frame_width = frame_size.width.0.max(0) as f32;
+        let frame_height = frame_size.height.0.max(0) as f32;
+        let left = (drawn.origin.x.0 - margin).floor().clamp(0.0, frame_width);
+        let top = (drawn.origin.y.0 - margin).floor().clamp(0.0, frame_height);
+        let right = (drawn.origin.x.0 + drawn.size.width.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_width);
+        let bottom = (drawn.origin.y.0 + drawn.size.height.0 + margin)
+            .ceil()
+            .clamp(0.0, frame_height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        // Shrink so the gaussian stays a few pixels wide: cheap, and smooth
+        // once stretched back.
+        let scale = match sigma {
+            s if s < 4.0 => 1,
+            s if s < 8.0 => 2,
+            s if s < 16.0 => 4,
+            _ => 8,
+        };
+        Some(Self {
+            origin: [left as u32, top as u32],
+            size: [(right - left) as u32, (bottom - top) as u32],
+            scale,
+            sigma: sigma / scale as f32,
+        })
+    }
+
+    fn shrunk_size(&self) -> [u32; 2] {
+        [
+            self.size[0].div_ceil(self.scale).max(1),
+            self.size[1].div_ceil(self.scale).max(1),
+        ]
+    }
 }
 
 impl MetalRenderer {
@@ -161,8 +271,8 @@ impl MetalRenderer {
         // https://developer.apple.com/documentation/metal/managing-your-game-window-for-metal-in-macos
         layer.set_opaque(!transparent);
         layer.set_maximum_drawable_count(3);
-        // Allow texture reading for visual tests (captures screenshots without ScreenCaptureKit)
-        #[cfg(any(test, feature = "test-support"))]
+        // Backdrop blurs copy what's been drawn out of the drawable (and
+        // visual tests read it back).
         layer.set_framebuffer_only(false);
         unsafe {
             let _: () = msg_send![&*layer, setAllowsNextDrawableTimeout: NO];
@@ -324,6 +434,22 @@ impl MetalRenderer {
             "surface_fragment",
             MTLPixelFormat::BGRA8Unorm,
         );
+        let blur_passes_pipeline_state = build_blur_pass_pipeline_state(
+            &device,
+            &library,
+            "blur_passes",
+            "blur_pass_vertex",
+            "blur_pass_fragment",
+            MTLPixelFormat::BGRA8Unorm,
+        );
+        let backdrop_blurs_pipeline_state = build_pipeline_state(
+            &device,
+            &library,
+            "backdrop_blurs",
+            "backdrop_blur_vertex",
+            "backdrop_blur_fragment",
+            MTLPixelFormat::BGRA8Unorm,
+        );
 
         let command_queue = device.new_command_queue();
         let sprite_atlas = Arc::new(MetalAtlas::new(device.clone(), is_apple_gpu));
@@ -346,6 +472,8 @@ impl MetalRenderer {
             monochrome_sprites_pipeline_state,
             polychrome_sprites_pipeline_state,
             surfaces_pipeline_state,
+            blur_passes_pipeline_state,
+            backdrop_blurs_pipeline_state,
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -353,6 +481,7 @@ impl MetalRenderer {
             path_intermediate_texture: None,
             path_intermediate_msaa_texture: None,
             path_sample_count: PATH_SAMPLE_COUNT,
+            blur_textures: None,
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
         }
@@ -400,6 +529,7 @@ impl MetalRenderer {
         // We are uncertain when this happens, but sometimes size can be 0 here. Most likely before
         // the layout pass on window creation. Zero-sized texture creation causes SIGABRT.
         // https://github.com/zed-industries/zed/issues/36229
+        self.blur_textures = None;
         if size.width.0 <= 0 || size.height.0 <= 0 {
             self.path_intermediate_texture = None;
             self.path_intermediate_msaa_texture = None;
@@ -742,6 +872,39 @@ impl MetalRenderer {
                     command_encoder,
                 ),
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
+                PrimitiveBatch::BackdropBlurs(range) => {
+                    for blur in &scene.backdrop_blurs[range] {
+                        let Some(region) = BlurRegion::new(blur, viewport_size) else {
+                            continue;
+                        };
+                        // The blur reads what's been drawn so far, so the
+                        // encoder ends here and starts again after it.
+                        command_encoder.end_encoding();
+                        let blurred = self.blur_backdrop(
+                            command_buffer,
+                            texture,
+                            viewport_size,
+                            blur,
+                            region,
+                            writer,
+                        );
+                        command_encoder = new_command_encoder_for_texture(
+                            command_buffer,
+                            texture,
+                            viewport_size,
+                            None,
+                        );
+                        match blurred {
+                            Ok(instance) => {
+                                self.draw_backdrop_blur(&instance, viewport_size, command_encoder)
+                            }
+                            Err(error) => {
+                                command_encoder.end_encoding();
+                                return Err(error);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -772,6 +935,8 @@ impl MetalRenderer {
                 st_position: v.st_position,
                 color: path.color,
                 bounds: path.bounds.intersect(&path.content_mask.bounds),
+                content_mask: path.content_mask,
+                element_transform: path.element_transform,
             }));
         }
         let vertex_instance_bindings = writer.write(&vertices)?;
@@ -948,13 +1113,13 @@ impl MetalRenderer {
             sprites = paths
                 .iter()
                 .map(|path| PathSprite {
-                    bounds: path.clipped_bounds(),
+                    bounds: path.drawn_bounds(),
                 })
                 .collect();
         } else {
-            let mut bounds = first_path.clipped_bounds();
+            let mut bounds = first_path.drawn_bounds();
             for path in paths.iter().skip(1) {
-                bounds = bounds.union(&path.clipped_bounds());
+                bounds = bounds.union(&path.drawn_bounds());
             }
             sprites = vec![PathSprite { bounds }];
         }
@@ -1197,6 +1362,11 @@ impl MetalRenderer {
                 mem::size_of_val(&texture_size) as u64,
                 &texture_size as *const Size<DevicePixels> as *const _,
             );
+            command_encoder.set_fragment_buffer(
+                SurfaceInputIndex::Surfaces as u64,
+                Some(&instance_bindings.surfaces.buffer),
+                instance_bindings.surfaces.offset as u64,
+            );
             // let y_texture = y_texture.get_texture().unwrap().
             command_encoder.set_fragment_texture(SurfaceInputIndex::YTexture as u64, unsafe {
                 let texture = CVMetalTextureGetTexture(y_texture.as_concrete_TypeRef());
@@ -1215,6 +1385,201 @@ impl MetalRenderer {
                 (first_surface + index) as u64,
             );
         }
+    }
+}
+
+impl MetalRenderer {
+    /// Makes the blur textures at the frame's size, if they aren't already.
+    fn ensure_blur_textures(&mut self, size: Size<DevicePixels>) {
+        let width = size.width.0.max(1) as u64;
+        let height = size.height.0.max(1) as u64;
+        if self.blur_textures.as_ref().is_some_and(|textures| {
+            textures.copy.width() == width && textures.copy.height() == height
+        }) {
+            return;
+        }
+        let texture = |usage| {
+            let descriptor = metal::TextureDescriptor::new();
+            descriptor.set_width(width);
+            descriptor.set_height(height);
+            descriptor.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+            descriptor.set_storage_mode(metal::MTLStorageMode::Private);
+            descriptor.set_usage(usage);
+            self.device.new_texture(&descriptor)
+        };
+        let drawn = metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead;
+        self.blur_textures = Some(BlurTextures {
+            copy: texture(metal::MTLTextureUsage::ShaderRead),
+            first: texture(drawn),
+            second: texture(drawn),
+        });
+    }
+
+    /// Copies the frame under `blur` out, shrinks it and blurs it on both
+    /// axes into the first blur texture, and returns the instance that draws
+    /// the result back.
+    fn blur_backdrop(
+        &mut self,
+        command_buffer: &metal::CommandBufferRef,
+        frame: &metal::TextureRef,
+        viewport_size: Size<DevicePixels>,
+        blur: &BackdropBlur,
+        region: BlurRegion,
+        writer: &mut InstanceBufferWriter,
+    ) -> Result<InstanceBinding> {
+        self.ensure_blur_textures(viewport_size);
+        let textures = self.blur_textures.as_ref().context("blur textures")?;
+        let texture_size = [textures.copy.width() as f32, textures.copy.height() as f32];
+
+        let blit = command_buffer.new_blit_command_encoder();
+        blit.copy_from_texture(
+            frame,
+            0,
+            0,
+            metal::MTLOrigin {
+                x: region.origin[0] as u64,
+                y: region.origin[1] as u64,
+                z: 0,
+            },
+            metal::MTLSize {
+                width: region.size[0] as u64,
+                height: region.size[1] as u64,
+                depth: 1,
+            },
+            &textures.copy,
+            0,
+            0,
+            metal::MTLOrigin { x: 0, y: 0, z: 0 },
+        );
+        blit.end_encoding();
+
+        let shrunk = region.shrunk_size();
+        let shrunk = [shrunk[0] as f32, shrunk[1] as f32];
+        let passes = [
+            // Shrink the copy into the first texture.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: [region.size[0] as f32, region.size[1] as f32],
+                direction: [0.0, 0.0],
+                scale: region.scale as f32,
+                sigma: region.sigma,
+            },
+            // Across, into the second.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: shrunk,
+                direction: [1.0, 0.0],
+                scale: 1.0,
+                sigma: region.sigma,
+            },
+            // Down, back into the first.
+            BlurPass {
+                target_size: shrunk,
+                target_texture_size: texture_size,
+                source_texture_size: texture_size,
+                source_limit: shrunk,
+                direction: [0.0, 1.0],
+                scale: 1.0,
+                sigma: region.sigma,
+            },
+        ];
+        let passes_binding = writer.write(&passes)?;
+        let steps = [
+            (&textures.copy, &textures.first),
+            (&textures.first, &textures.second),
+            (&textures.second, &textures.first),
+        ];
+        for (index, (source, target)) in steps.into_iter().enumerate() {
+            let render_pass_descriptor = metal::RenderPassDescriptor::new();
+            let color_attachment = render_pass_descriptor
+                .color_attachments()
+                .object_at(0)
+                .unwrap();
+            color_attachment.set_texture(Some(target));
+            color_attachment.set_load_action(metal::MTLLoadAction::DontCare);
+            color_attachment.set_store_action(metal::MTLStoreAction::Store);
+            let encoder = command_buffer.new_render_command_encoder(render_pass_descriptor);
+            encoder.set_render_pipeline_state(&self.blur_passes_pipeline_state);
+            encoder.set_vertex_buffer(
+                BlurInputIndex::Vertices as u64,
+                Some(&self.unit_vertices),
+                0,
+            );
+            encoder.set_vertex_buffer(
+                BlurInputIndex::Passes as u64,
+                Some(&passes_binding.buffer),
+                passes_binding.offset as u64,
+            );
+            encoder.set_fragment_buffer(
+                BlurInputIndex::Passes as u64,
+                Some(&passes_binding.buffer),
+                passes_binding.offset as u64,
+            );
+            encoder.set_fragment_texture(BlurInputIndex::Source as u64, Some(source));
+            encoder.draw_primitives_instanced_base_instance(
+                metal::MTLPrimitiveType::Triangle,
+                0,
+                6,
+                1,
+                index as u64,
+            );
+            encoder.end_encoding();
+        }
+
+        let instance = BackdropBlurInstance {
+            bounds: blur.bounds,
+            corner_radii: blur.corner_radii,
+            content_mask: blur.content_mask,
+            element_transform: blur.element_transform,
+            region_origin: [region.origin[0] as f32, region.origin[1] as f32],
+            texture_size,
+            texture_limit: shrunk,
+            scale: region.scale as f32,
+            opacity: blur.opacity,
+        };
+        writer.write(std::slice::from_ref(&instance))
+    }
+
+    /// Draws a blurred copy, from the first blur texture, back over the frame.
+    fn draw_backdrop_blur(
+        &self,
+        instance: &InstanceBinding,
+        viewport_size: Size<DevicePixels>,
+        command_encoder: &metal::RenderCommandEncoderRef,
+    ) {
+        let Some(textures) = self.blur_textures.as_ref() else {
+            return;
+        };
+        command_encoder.set_render_pipeline_state(&self.backdrop_blurs_pipeline_state);
+        command_encoder.set_vertex_buffer(
+            BackdropBlurInputIndex::Vertices as u64,
+            Some(&self.unit_vertices),
+            0,
+        );
+        command_encoder.set_vertex_buffer(
+            BackdropBlurInputIndex::Blurs as u64,
+            Some(&instance.buffer),
+            instance.offset as u64,
+        );
+        command_encoder.set_fragment_buffer(
+            BackdropBlurInputIndex::Blurs as u64,
+            Some(&instance.buffer),
+            instance.offset as u64,
+        );
+        command_encoder.set_vertex_bytes(
+            BackdropBlurInputIndex::ViewportSize as u64,
+            mem::size_of_val(&viewport_size) as u64,
+            &viewport_size as *const Size<DevicePixels> as *const _,
+        );
+        command_encoder.set_fragment_texture(
+            BackdropBlurInputIndex::Blurred as u64,
+            Some(&textures.first),
+        );
+        command_encoder.draw_primitives_instanced(metal::MTLPrimitiveType::Triangle, 0, 6, 1);
     }
 }
 
@@ -1308,6 +1673,35 @@ fn build_pipeline_state(
     color_attachment.set_source_alpha_blend_factor(metal::MTLBlendFactor::One);
     color_attachment.set_destination_rgb_blend_factor(metal::MTLBlendFactor::OneMinusSourceAlpha);
     color_attachment.set_destination_alpha_blend_factor(metal::MTLBlendFactor::One);
+
+    device
+        .new_render_pipeline_state(&descriptor)
+        .expect("could not create render pipeline state")
+}
+
+/// A pipeline that writes its output as is, for the blur passes.
+fn build_blur_pass_pipeline_state(
+    device: &metal::DeviceRef,
+    library: &metal::LibraryRef,
+    label: &str,
+    vertex_fn_name: &str,
+    fragment_fn_name: &str,
+    pixel_format: metal::MTLPixelFormat,
+) -> metal::RenderPipelineState {
+    let vertex_fn = library
+        .get_function(vertex_fn_name, None)
+        .expect("error locating vertex function");
+    let fragment_fn = library
+        .get_function(fragment_fn_name, None)
+        .expect("error locating fragment function");
+
+    let descriptor = metal::RenderPipelineDescriptor::new();
+    descriptor.set_label(label);
+    descriptor.set_vertex_function(Some(vertex_fn.as_ref()));
+    descriptor.set_fragment_function(Some(fragment_fn.as_ref()));
+    let color_attachment = descriptor.color_attachments().object_at(0).unwrap();
+    color_attachment.set_pixel_format(pixel_format);
+    color_attachment.set_blending_enabled(false);
 
     device
         .new_render_pipeline_state(&descriptor)
@@ -1412,6 +1806,7 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
         surfaces: writer.write_iter(scene.surfaces.iter().map(|surface| SurfaceBounds {
             bounds: surface.bounds,
             content_mask: surface.content_mask,
+            element_transform: surface.element_transform,
         }))?,
     })
 }
@@ -1593,17 +1988,33 @@ enum PathRasterizationInputIndex {
     ViewportSize = 1,
 }
 
+#[repr(C)]
+enum BlurInputIndex {
+    Vertices = 0,
+    Passes = 1,
+    Source = 2,
+}
+
+#[repr(C)]
+enum BackdropBlurInputIndex {
+    Vertices = 0,
+    Blurs = 1,
+    ViewportSize = 2,
+    Blurred = 3,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct PathSprite {
     pub bounds: Bounds<ScaledPixels>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C)]
 pub struct SurfaceBounds {
     pub bounds: Bounds<ScaledPixels>,
-    pub content_mask: ContentMask<ScaledPixels>,
+    pub content_mask: RoundedMask<ScaledPixels>,
+    pub element_transform: TransformationMatrix,
 }
 
 #[cfg(any(test, feature = "bench-support", feature = "test-support"))]

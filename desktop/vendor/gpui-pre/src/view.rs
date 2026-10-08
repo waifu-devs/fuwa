@@ -1,8 +1,8 @@
 use crate::{
-    AnyElement, AnyEntity, AnyWeakEntity, App, AvailableSpace, Bounds, ContentMask, Context,
-    Element, ElementId, Entity, EntityId, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, PaintIndex, Pixels, PrepaintStateIndex, Render, RenderOnce, Size, Style,
-    StyleRefinement, TextStyle, WeakEntity,
+    AnyElement, AnyEntity, AnyWeakEntity, App, AvailableSpace, Bounds, Context, Element, ElementId,
+    Entity, EntityId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintIndex,
+    Pixels, PrepaintStateIndex, Render, RenderOnce, RoundedMask, Size, Style, StyleRefinement,
+    TextStyle, TransformationMatrix, WeakEntity,
 };
 use crate::{Empty, Window};
 use anyhow::Result;
@@ -301,7 +301,8 @@ struct ViewElementState {
 
 struct ViewElementCacheKey {
     bounds: Bounds<Pixels>,
-    content_mask: ContentMask<Pixels>,
+    content_mask: RoundedMask<Pixels>,
+    transform: TransformationMatrix,
     text_style: TextStyle,
 }
 
@@ -478,12 +479,14 @@ fn prepaint_view(
         window.with_element_state::<ViewElementState, _>(
             global_id.unwrap(),
             |element_state, window| {
-                let content_mask = window.content_mask();
+                let content_mask = window.rounded_content_mask();
+                let transform = window.element_transform();
                 let text_style = window.text_style();
 
                 if let Some(mut element_state) = element_state
                     && element_state.cache_key.bounds == bounds
                     && element_state.cache_key.content_mask == content_mask
+                    && element_state.cache_key.transform == transform
                     && element_state.cache_key.text_style == text_style
                     && !window.dirty_views.contains(&entity_id)
                     && !window.refreshing
@@ -519,6 +522,7 @@ fn prepaint_view(
                         cache_key: ViewElementCacheKey {
                             bounds,
                             content_mask,
+                            transform,
                             text_style,
                         },
                     },

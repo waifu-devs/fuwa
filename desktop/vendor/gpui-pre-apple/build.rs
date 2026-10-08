@@ -1,4 +1,5 @@
 // Modified for gpui-pre (snapshot of zed@1a28cff): the gpui sources it reads are vendored under `vendor/gpui`.
+// Patched for fuwa: they're read from the vendored gpui-pre beside this crate instead.
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
 
 fn main() {
@@ -44,6 +45,7 @@ mod macos_build {
             "PointF".into(),
             "Hsla".into(),
             "ContentMask".into(),
+            "RoundedMask".into(),
             "Uniforms".into(),
             "AtlasTile".into(),
             "PathRasterizationInputIndex".into(),
@@ -63,6 +65,10 @@ mod macos_build {
             "SurfaceInputIndex".into(),
             "SurfaceBounds".into(),
             "TransformationMatrix".into(),
+            "BlurInputIndex".into(),
+            "BlurPass".into(),
+            "BackdropBlurInputIndex".into(),
+            "BackdropBlurInstance".into(),
         ]);
         config.no_includes = true;
         config.enumeration.prefix_with_name = true;
@@ -100,8 +106,11 @@ mod macos_build {
     /// Locate the gpui crate directory relative to this crate. Resolved at
     /// build-script runtime against this crate's manifest dir, so no checkout
     /// path is baked into a compiled artifact (which corgi rejects).
+    ///
+    /// Patched for fuwa: the vendored gpui-pre next to this crate, whose
+    /// scene types the shaders read, rather than the copy that shipped here.
     fn find_gpui_crate_dir() -> PathBuf {
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("vendor/gpui")
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../gpui-pre")
     }
 
     /// To enable runtime compilation, we need to "stitch" the shaders file with the generated header

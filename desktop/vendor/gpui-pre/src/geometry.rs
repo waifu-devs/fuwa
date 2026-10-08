@@ -3170,6 +3170,12 @@ impl From<f32> for ScaledPixels {
     }
 }
 
+impl From<ScaledPixels> for f32 {
+    fn from(pixels: ScaledPixels) -> Self {
+        pixels.0
+    }
+}
+
 impl Div for ScaledPixels {
     type Output = f32;
 

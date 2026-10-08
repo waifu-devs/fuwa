@@ -12,6 +12,8 @@
 @group(1) @binding(0) var<storage, read> b_underlines: array<Underline>;
 @group(1) @binding(0) var<storage, read> b_mono_sprites: array<MonochromeSprite>;
 @group(1) @binding(0) var<storage, read> b_poly_sprites: array<PolychromeSprite>;
+@group(1) @binding(0) var<storage, read> b_blur_passes: array<BlurPass>;
+@group(1) @binding(0) var<storage, read> b_backdrop_blurs: array<BackdropBlur>;
 
 fn load_quad(instance_id: u32) -> Quad {
     return b_quads[instance_id];
@@ -39,4 +41,12 @@ fn load_mono_sprite(instance_id: u32) -> MonochromeSprite {
 
 fn load_poly_sprite(instance_id: u32) -> PolychromeSprite {
     return b_poly_sprites[instance_id];
+}
+
+fn load_blur_pass(instance_id: u32) -> BlurPass {
+    return b_blur_passes[instance_id];
+}
+
+fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
+    return b_backdrop_blurs[instance_id];
 }

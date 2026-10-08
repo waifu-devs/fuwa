@@ -6,8 +6,8 @@ use crate::Inspector;
 use crate::profiler;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
-    Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
+    AsyncWindowContext, AtlasTile, AvailableSpace, BackdropBlur, Background, BorderStyle, Bounds,
+    BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
@@ -15,7 +15,7 @@ use crate::{
     MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas,
     PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PolychromeSprite,
     Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams, RenderImage,
-    RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
+    RenderImageParams, RenderSvgParams, Replay, ResizeEdge, RoundedMask, SMOOTH_SVG_SCALE_FACTOR,
     SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size,
     StrikethroughStyle, Style, SubpixelSprite, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextInputConfiguration,
@@ -829,9 +829,18 @@ pub struct Hitbox {
     pub content_mask: ContentMask<Pixels>,
     /// Flags that specify hitbox behavior.
     pub behavior: HitboxBehavior,
+    /// From window coordinates into the hitbox's own, when it was inserted
+    /// inside a transformed element.
+    pub(crate) to_local: TransformationMatrix,
 }
 
 impl Hitbox {
+    /// Whether `point`, in window coordinates, is inside the hitbox's bounds,
+    /// following any transform its element was drawn with.
+    pub fn contains(&self, point: &Point<Pixels>) -> bool {
+        self.bounds.contains(&self.to_local.apply_point(*point))
+    }
+
     /// Checks if the hitbox is currently hovered. Returns `false` during keyboard input modality
     /// so that keyboard navigation suppresses hover highlights. Except when handling
     /// `ScrollWheelEvent`, this is typically what you want when determining whether to handle mouse
@@ -1108,7 +1117,7 @@ impl Frame {
         let mut hit_test = HitTest::default();
         for hitbox in self.hitboxes.iter().rev() {
             let bounds = hitbox.bounds.intersect(&hitbox.content_mask.bounds);
-            if bounds.contains(&position) {
+            if bounds.contains(&hitbox.to_local.apply_point(position)) {
                 hit_test.ids.push(hitbox.id);
                 if !set_hover_hitbox_count
                     && hitbox.behavior == HitboxBehavior::BlockMouseExceptScroll
@@ -1179,7 +1188,10 @@ pub struct Window {
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
-    pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
+    pub(crate) content_mask_stack: Vec<RoundedMask<Pixels>>,
+    /// Where each transformed element's space lands in the window, innermost
+    /// last. Content masks pushed inside one are in its own space.
+    pub(crate) transform_stack: Vec<TransformationMatrix>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
     /// window, so that only actual changes are forwarded (reconfiguring a live
@@ -2039,6 +2051,7 @@ impl Window {
             rendered_entity_stack: Vec::new(),
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
+            transform_stack: Vec::new(),
             element_opacity: 1.0,
             requested_autoscroll: None,
             last_text_input_configuration: None,
@@ -3083,12 +3096,9 @@ impl Window {
 
         let mut paint_span = |start, end| {
             self.next_frame.scene.insert_primitive(Underline {
-                content_mask: ContentMask {
-                    bounds: Bounds::from_corners(
-                        point(start, bounds.top()),
-                        point(end, bounds.bottom()),
-                    ),
-                },
+                content_mask: underline.content_mask.intersect(&RoundedMask::rect(
+                    Bounds::from_corners(point(start, bounds.top()), point(end, bounds.bottom())),
+                )),
                 ..underline
             });
         };
@@ -3116,6 +3126,7 @@ impl Window {
                 .opacity(self.element_opacity()),
             thickness: self.snap_stroke(style.thickness),
             wavy: style.wavy.into(),
+            element_transform: self.scaled_element_transform(),
         }
     }
 
@@ -3158,9 +3169,11 @@ impl Window {
     }
 
     #[inline]
-    fn snapped_content_mask(&self) -> ContentMask<ScaledPixels> {
-        ContentMask {
-            bounds: self.cover_bounds(self.content_mask().bounds),
+    fn snapped_content_mask(&self) -> RoundedMask<ScaledPixels> {
+        let mask = self.rounded_content_mask();
+        RoundedMask {
+            bounds: self.cover_bounds(mask.bounds),
+            corner_radii: mask.corner_radii.scale(self.scale_factor()),
         }
     }
 
@@ -3985,7 +3998,7 @@ impl Window {
     ) -> R {
         self.invalidator.debug_assert_paint_or_prepaint();
         if let Some(mask) = mask {
-            let mask = mask.intersect(&self.content_mask());
+            let mask = RoundedMask::from(mask).intersect(&self.rounded_content_mask());
             self.content_mask_stack.push(mask);
             let result = f(self);
             self.content_mask_stack.pop();
@@ -3993,6 +4006,77 @@ impl Window {
         } else {
             f(self)
         }
+    }
+
+    /// Like [`Self::with_content_mask`], for a mask with rounded corners: what
+    /// an element that hides its overflow and has rounded corners clips its
+    /// children to. See [`RoundedMask::intersect`] for how it combines with
+    /// the current mask.
+    #[inline]
+    pub fn with_rounded_content_mask<R>(
+        &mut self,
+        mask: Option<RoundedMask<Pixels>>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.invalidator.debug_assert_paint_or_prepaint();
+        if let Some(mask) = mask {
+            let mask = mask.intersect(&self.rounded_content_mask());
+            self.content_mask_stack.push(mask);
+            let result = f(self);
+            self.content_mask_stack.pop();
+            result
+        } else {
+            f(self)
+        }
+    }
+
+    /// Paints and lays out what `f` does through `transform`, given in this
+    /// element's space (see [`TransformationMatrix`]; [`ElementTransform`]
+    /// makes one around an element's own origin). Everything painted inside
+    /// is transformed, and hitboxes follow it. Call it the same way in
+    /// prepaint and paint.
+    ///
+    /// The current content mask carries on in the transformed space: exactly
+    /// when the transform only scales and moves, and as the bounding box of
+    /// the turned mask when it rotates.
+    ///
+    /// [`ElementTransform`]: crate::ElementTransform
+    pub fn with_transform<R>(
+        &mut self,
+        transform: TransformationMatrix,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.invalidator.debug_assert_paint_or_prepaint();
+        if transform.is_unit() {
+            return f(self);
+        }
+        let mask = match transform.inverse() {
+            Some(inverse) => self.rounded_content_mask().transformed(&inverse),
+            // Squashed flat: nothing inside shows or can be hit.
+            None => RoundedMask::rect(Bounds::default()),
+        };
+        let total = self.element_transform().compose(transform);
+        self.transform_stack.push(total);
+        self.content_mask_stack.push(mask);
+        let result = f(self);
+        self.content_mask_stack.pop();
+        self.transform_stack.pop();
+        result
+    }
+
+    /// Where the current element's space lands in the window, in logical
+    /// pixels: the transforms of every element around it, composed.
+    pub fn element_transform(&self) -> TransformationMatrix {
+        self.transform_stack
+            .last()
+            .copied()
+            .unwrap_or_else(TransformationMatrix::unit)
+    }
+
+    /// The current element transform in device pixels, as primitives take it.
+    fn scaled_element_transform(&self) -> TransformationMatrix {
+        self.element_transform()
+            .scale_translation(self.scale_factor())
     }
 
     /// Updates the global element offset relative to the current offset. This is used to implement
@@ -4127,16 +4211,19 @@ impl Window {
 
     /// Obtain the current content mask. This method should only be called during element drawing.
     pub fn content_mask(&self) -> ContentMask<Pixels> {
+        self.rounded_content_mask().content_mask()
+    }
+
+    /// The current content mask with its rounded corners, if any. This method should only be
+    /// called during element drawing.
+    pub fn rounded_content_mask(&self) -> RoundedMask<Pixels> {
         self.invalidator.debug_assert_paint_or_prepaint();
-        self.content_mask_stack
-            .last()
-            .cloned()
-            .unwrap_or_else(|| ContentMask {
-                bounds: Bounds {
-                    origin: Point::default(),
-                    size: self.viewport_size,
-                },
+        self.content_mask_stack.last().copied().unwrap_or_else(|| {
+            RoundedMask::rect(Bounds {
+                origin: Point::default(),
+                size: self.viewport_size,
             })
+        })
     }
 
     /// Provide elements in the called function with a new namespace in which their identifiers must be unique.
@@ -4354,9 +4441,10 @@ impl Window {
         let content_mask = self.content_mask();
         let clipped_bounds = bounds.intersect(&content_mask.bounds);
         if !clipped_bounds.is_empty() {
-            self.next_frame
-                .scene
-                .push_layer(self.cover_bounds(clipped_bounds));
+            let layer_bounds = self
+                .scaled_element_transform()
+                .map_bounds(self.cover_bounds(clipped_bounds));
+            self.next_frame.scene.push_layer(layer_bounds);
         }
 
         let result = f(self);
@@ -4386,6 +4474,7 @@ impl Window {
         let opacity = self.element_opacity();
         let element_bounds = self.cover_bounds(bounds);
         let element_corner_radii = corner_radii.scale(scale_factor);
+        let element_transform = self.scaled_element_transform();
         for shadow in shadows {
             if shadow.inset {
                 continue;
@@ -4402,6 +4491,7 @@ impl Window {
                 element_corner_radii,
                 inset: 0,
                 pad: 0,
+                element_transform,
             });
         }
     }
@@ -4422,6 +4512,7 @@ impl Window {
         let opacity = self.element_opacity();
         let element_bounds = self.cover_bounds(bounds);
         let element_corner_radii = corner_radii.scale(scale_factor);
+        let element_transform = self.scaled_element_transform();
         for shadow in shadows {
             if !shadow.inset {
                 continue;
@@ -4447,6 +4538,7 @@ impl Window {
                 element_corner_radii,
                 inset: 1,
                 pad: 0,
+                element_transform,
             });
         }
     }
@@ -4514,6 +4606,7 @@ impl Window {
             corner_radii: quad.corner_radii.scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
+            element_transform: self.scaled_element_transform(),
         };
 
         if !quad.background.is_transparent() {
@@ -4555,12 +4648,10 @@ impl Window {
         ];
 
         for strip in strips {
-            let content_mask_bounds = quad.content_mask.bounds.intersect(&strip);
-            if !content_mask_bounds.is_empty() {
+            let content_mask = quad.content_mask.intersect(&RoundedMask::rect(strip));
+            if !content_mask.bounds.is_empty() {
                 self.next_frame.scene.insert_primitive(Quad {
-                    content_mask: ContentMask {
-                        bounds: content_mask_bounds,
-                    },
+                    content_mask,
                     ..quad
                 });
             }
@@ -4574,14 +4665,14 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
-        let content_mask = self.content_mask();
+        let content_mask = self.rounded_content_mask();
         let opacity = self.element_opacity();
         path.content_mask = content_mask;
         let color: Background = color.into();
         path.color = color.opacity(opacity);
-        self.next_frame
-            .scene
-            .insert_primitive(path.scale(scale_factor));
+        let mut path = path.scale(scale_factor);
+        path.element_transform = self.scaled_element_transform();
+        self.next_frame.scene.insert_primitive(path);
     }
 
     /// Paint an underline into the scene for the next frame at the current z-index.
@@ -4625,6 +4716,7 @@ impl Window {
             thickness: self.snap_stroke(style.thickness),
             color: style.color.unwrap_or_default().opacity(opacity),
             wavy: false.into(),
+            element_transform: self.scaled_element_transform(),
         });
     }
 
@@ -4698,6 +4790,7 @@ impl Window {
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
+                    element_transform: self.scaled_element_transform(),
                 });
             } else {
                 self.next_frame.scene.insert_primitive(MonochromeSprite {
@@ -4708,6 +4801,7 @@ impl Window {
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
+                    element_transform: self.scaled_element_transform(),
                 });
             }
         }
@@ -4790,6 +4884,7 @@ impl Window {
                 content_mask,
                 tile,
                 opacity,
+                element_transform: self.scaled_element_transform(),
             });
         }
         Ok(())
@@ -4855,6 +4950,7 @@ impl Window {
             color: color.opacity(element_opacity),
             tile,
             transformation,
+            element_transform: self.scaled_element_transform(),
         });
 
         Ok(())
@@ -4962,6 +5058,7 @@ impl Window {
             corner_radii,
             tile: sub_tile,
             opacity,
+            element_transform: self.scaled_element_transform(),
         });
         Ok(())
     }
@@ -4981,7 +5078,40 @@ impl Window {
             order: 0,
             bounds,
             content_mask,
+            element_transform: self.scaled_element_transform(),
             image_buffer,
+        });
+    }
+
+    /// Blurs what's been painted beneath `bounds` so far, inside its rounded
+    /// corners, like CSS's `backdrop-filter: blur(blur_radius)`. Paint it
+    /// before the element's own background, which usually tints the blur.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_backdrop_blur(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        blur_radius: Pixels,
+    ) {
+        self.invalidator.debug_assert_paint();
+        let opacity = self.element_opacity();
+        if blur_radius <= Pixels::ZERO || opacity <= 0. {
+            return;
+        }
+        let scale_factor = self.scale_factor();
+        let corner_radii = corner_radii
+            .clamp_radii_for_quad_size(bounds.size)
+            .scale(scale_factor);
+        self.next_frame.scene.insert_primitive(BackdropBlur {
+            order: 0,
+            blur_radius: blur_radius.scale(scale_factor),
+            bounds: self.snap_bounds(bounds),
+            corner_radii,
+            content_mask: self.snapped_content_mask(),
+            element_transform: self.scaled_element_transform(),
+            opacity,
+            pad: 0,
         });
     }
 
@@ -5112,11 +5242,16 @@ impl Window {
         let content_mask = self.content_mask();
         let mut id = self.next_hitbox_id;
         self.next_hitbox_id = self.next_hitbox_id.next();
+        let to_local = self
+            .element_transform()
+            .inverse()
+            .unwrap_or_else(TransformationMatrix::unit);
         let hitbox = Hitbox {
             id,
             bounds,
             content_mask,
             behavior,
+            to_local,
         };
         self.next_frame.hitboxes.push(hitbox.clone());
         hitbox
@@ -7671,7 +7806,7 @@ mod tests {
         DragMoveEvent, Empty, ExternalDragPayload, ExternalPaths, FileDragPaths, FileDropEvent,
         FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement, KeyDownEvent,
         Keystroke, LongPressEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
-        Pixels, PlatformInput, Point, Render, RequestFrameOptions, ScaledPixels,
+        Pixels, PlatformInput, Point, Render, RequestFrameOptions, RoundedMask, ScaledPixels,
         StatefulInteractiveElement as _, Styled, TestAppContext, TouchDragEvent, TouchEvent,
         TouchId, TouchPhase, Underline, UnderlineStyle, Window, WindowAppearance, WindowOptions,
         canvas, div, hsla, point, px, size,
@@ -9059,12 +9194,12 @@ mod tests {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    window.content_mask_stack.push(ContentMask {
-                        bounds: Bounds::from_corners(
+                    window
+                        .content_mask_stack
+                        .push(RoundedMask::rect(Bounds::from_corners(
                             point(px(-1000.), px(-1000.)),
                             point(px(1000.), px(1000.)),
-                        ),
-                    });
+                        )));
                     paint(window);
                     window.content_mask_stack.pop();
                 },
@@ -9131,6 +9266,137 @@ mod tests {
                 );
             })
             .unwrap();
+    }
+
+    struct TransformedSquare {
+        hitbox: Rc<RefCell<Option<crate::Hitbox>>>,
+    }
+
+    impl Render for TransformedSquare {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let slot = self.hitbox.clone();
+            div().size_full().child(
+                div()
+                    .absolute()
+                    .left(px(100.))
+                    .top(px(100.))
+                    .size(px(100.))
+                    .scale(2.)
+                    .rounded(px(10.))
+                    .overflow_hidden()
+                    .bg(hsla(0., 1., 0.5, 1.))
+                    .child(
+                        canvas(
+                            move |bounds, window, _| {
+                                *slot.borrow_mut() = Some(
+                                    window.insert_hitbox(bounds, crate::HitboxBehavior::Normal),
+                                );
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .size_full(),
+                    ),
+            )
+        }
+    }
+
+    /// A square scaled by 2 around its center is hit, painted and clipped where
+    /// it lands, not where it was laid out.
+    #[test]
+    fn test_transforms_reach_hitboxes_and_primitives() {
+        let mut cx = TestAppContext::single();
+        let hitbox = Rc::new(RefCell::new(None));
+        let window = cx.add_window({
+            let hitbox = hitbox.clone();
+            move |_, _| TransformedSquare { hitbox }
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+            let hitbox = hitbox
+                .borrow()
+                .clone()
+                .expect("the canvas inserted a hitbox");
+            // Laid out at 100..200, it lands at 50..250.
+            assert!(hitbox.is_hovered_at(point(px(60.), px(60.)), window));
+            assert!(hitbox.is_hovered_at(point(px(240.), px(150.)), window));
+            assert!(!hitbox.is_hovered_at(point(px(40.), px(150.)), window));
+            assert!(!hitbox.is_hovered_at(point(px(150.), px(260.)), window));
+            assert!(hitbox.contains(&point(px(60.), px(60.))));
+            assert!(!hitbox.contains(&point(px(255.), px(60.))));
+
+            let scale = window.scale_factor();
+            let quad = window
+                .rendered_frame
+                .scene
+                .quads
+                .iter()
+                .find(|quad| !quad.element_transform.is_unit())
+                .expect("the square's background is transformed");
+            assert_eq!(quad.element_transform.rotation_scale, [[2., 0.], [0., 2.]]);
+            assert_eq!(
+                quad.element_transform.translation,
+                [-150. * scale, -150. * scale]
+            );
+        })
+        .unwrap();
+    }
+
+    /// An element that hides its overflow clips its children to its rounded
+    /// corners, and the corners carry on through masks nested inside it.
+    #[test]
+    fn test_rounded_content_masks() {
+        let mut cx = TestAppContext::single();
+        let window = cx.add_window(|_, _| EmptyView);
+        cx.update_window(window.into(), |_, window, _| {
+            window.invalidator.set_phase(super::DrawPhase::Paint);
+            let outer = crate::RoundedMask {
+                bounds: Bounds::new(point(px(0.), px(0.)), size(px(100.), px(100.))),
+                corner_radii: crate::Corners::all(px(12.)),
+            };
+            window.with_rounded_content_mask(Some(outer), |window| {
+                assert_eq!(window.rounded_content_mask(), outer);
+                // A scroll area inset by a 2px border keeps rounder corners less 2.
+                let inset = Bounds::new(point(px(2.), px(2.)), size(px(96.), px(96.)));
+                window.with_content_mask(Some(ContentMask { bounds: inset }), |window| {
+                    let mask = window.rounded_content_mask();
+                    assert_eq!(mask.bounds, inset);
+                    assert_eq!(mask.corner_radii, crate::Corners::all(px(10.)));
+                });
+                // A list below the rounded top corners keeps only the bottom ones.
+                let list = Bounds::new(point(px(0.), px(40.)), size(px(100.), px(60.)));
+                window.with_content_mask(Some(ContentMask { bounds: list }), |window| {
+                    let radii = window.rounded_content_mask().corner_radii;
+                    assert_eq!(radii.top_left, px(0.));
+                    assert_eq!(radii.top_right, px(0.));
+                    assert_eq!(radii.bottom_left, px(12.));
+                    assert_eq!(radii.bottom_right, px(12.));
+                });
+            });
+            // Inside a transform, the mask is in the element's own space.
+            let transform = crate::ElementTransform {
+                scale_x: 2.,
+                scale_y: 2.,
+                ..Default::default()
+            }
+            .matrix(Bounds::new(point(px(0.), px(0.)), size(px(100.), px(100.))));
+            window.with_content_mask(
+                Some(ContentMask {
+                    bounds: Bounds::new(point(px(0.), px(0.)), size(px(100.), px(100.))),
+                }),
+                |window| {
+                    window.with_transform(transform, |window| {
+                        // 0..100 seen through a 2x scale around 50 is 25..75.
+                        let mask = window.content_mask();
+                        assert_eq!(
+                            mask.bounds,
+                            Bounds::new(point(px(25.), px(25.)), size(px(50.), px(50.)))
+                        );
+                    });
+                },
+            );
+            window.invalidator.set_phase(super::DrawPhase::None);
+        })
+        .unwrap();
     }
 }
 
