@@ -1770,12 +1770,12 @@ impl ServerSettingsView {
                         ))
                     })
                     .child(motion::once(
-                        icon(glyph).size(px(14.0)),
+                        div().size(px(14.0)).child(icon(glyph).size(px(14.0))),
                         SharedString::from(format!("tri-pop-{}-{}-{value}-{on}", o.target_id, perm as i32)),
                         Duration::from_millis(if on { 260 } else { 1 }),
                         move |el, t| {
                             let s = if on { 0.6 + 0.4 * t + 0.25 * (t * std::f32::consts::PI).sin() } else { 1.0 };
-                            el.size(px(14.0 * s))
+                            el.scale(s)
                         },
                     )),
             );

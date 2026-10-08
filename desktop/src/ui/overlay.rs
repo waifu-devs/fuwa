@@ -6,7 +6,7 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    AnyElement, Context, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Rgba,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
@@ -54,15 +54,18 @@ pub fn host_sentence(host: &str, p: &Palette) -> gpui_kit::StyledText {
     gpui_kit::StyledText::new(text).with_highlights([(lead.len()..lead.len() + host.len(), bold)])
 }
 
-/// The web's dialog overlay (`bg-black/50`): the whole window behind, rail
-/// and sidebar included, darkened by half; it swallows clicks.
+/// How much the web's dialog overlays blur what's behind them (`backdrop-blur-[2px]`).
+pub const SCRIM_BLUR: f32 = 2.0;
+
+/// The web's dialog overlay (`bg-black/50 backdrop-blur-[2px]`): the whole
+/// window behind, rail and sidebar included, darkened by half and blurred a
+/// little; it swallows clicks.
 pub fn scrim(id: impl Into<ElementId>, _p: &Palette) -> Stateful<Div> {
-    shade(id, 0.5)
+    shade(id, 0.5, SCRIM_BLUR)
 }
 
-/// A layer over the whole window darkened by `dim` (the quick switcher's is
-/// `black/45`, the shortcut sheet's `black/40`).
-pub fn shade(id: impl Into<ElementId>, dim: f32) -> Stateful<Div> {
+/// A layer over the whole window darkened by `dim` and blurred by `blur`.
+pub fn shade(id: impl Into<ElementId>, dim: f32, blur: f32) -> Stateful<Div> {
     div()
         .id(id.into())
         .absolute()
@@ -70,6 +73,7 @@ pub fn shade(id: impl Into<ElementId>, dim: f32) -> Stateful<Div> {
         .flex()
         .items_center()
         .justify_center()
+        .backdrop_blur(px(blur))
         .bg(gpui_kit::hsla(0.0, 0.0, 0.0, dim))
         .occlude()
 }
@@ -117,28 +121,59 @@ pub fn dialog_header(title: impl IntoElement, description: Option<AnyElement>, p
 }
 
 /// The dialog's close button (`absolute top-4 right-4 size-8 rounded-full`),
-/// which turns a quarter on hover.
-pub fn dialog_close(id: impl Into<ElementId>, p: &Palette) -> Stateful<Div> {
-    let (hover, fg) = (p.muted, p.foreground);
-    div()
-        .id(id.into())
-        .absolute()
-        .top(px(16.0))
-        .right(px(16.0))
-        .size(px(32.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .cursor_pointer()
-        .text_color(p.muted_foreground)
-        .hover(move |s| s.bg(hover).text_color(fg))
-        .child(icon("x").size(px(16.0)))
+/// which turns a quarter on hover (`hover:rotate-90`).
+pub fn dialog_close(id: impl Into<SharedString>, p: &Palette) -> DialogClose {
+    DialogClose { id: id.into(), muted: p.muted, foreground: p.foreground, quiet: p.muted_foreground, on_click: None }
+}
+
+/// See [`dialog_close`].
+#[derive(gpui_kit::IntoElement)]
+pub struct DialogClose {
+    id: SharedString,
+    muted: Rgba,
+    foreground: Rgba,
+    quiet: Rgba,
+    on_click: Option<ClickHandler>,
+}
+
+type ClickHandler = Box<dyn Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App)>;
+
+impl DialogClose {
+    pub fn on_click(
+        mut self,
+        handler: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+    ) -> Self {
+        self.on_click = Some(Box::new(handler));
+        self
+    }
+}
+
+impl gpui_kit::RenderOnce for DialogClose {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        let (hover, fg) = (self.muted, self.foreground);
+        let button = div()
+            .id(self.id.clone())
+            .absolute()
+            .top(px(16.0))
+            .right(px(16.0))
+            .size(px(32.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .text_color(self.quiet)
+            .hover(move |s| s.bg(hover).text_color(fg))
+            .when_some(self.on_click, |el, handler| el.on_click(handler))
+            .child(icon("x").size(px(16.0)));
+        let turn = motion::Pose::turn(90.0);
+        motion::answer(button, self.id, turn, turn, window, cx)
+    }
 }
 
 /// A dialog over the window: the scrim fades in (200ms) and the card springs
-/// up from 40px below, as the web's dialogs do. `close` runs on a click
-/// outside the card.
+/// up from 40px below, growing from 96%, as the web's dialogs do. `close`
+/// runs on a click outside the card.
 pub fn dialog_layer(
     tag: &str,
     panel: impl IntoElement,
@@ -146,11 +181,9 @@ pub fn dialog_layer(
     close: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 ) -> AnyElement {
     motion::fade_in(
-        scrim("dialog-scrim", p).on_click(close).child(motion::rise(
+        scrim("dialog-scrim", p).on_click(close).child(motion::dialog_in(
             div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
             SharedString::from(format!("dialog-{tag}")),
-            Duration::ZERO,
-            40.0,
         )),
         SharedString::from(format!("dialog-fade-{tag}")),
         Duration::from_millis(200),

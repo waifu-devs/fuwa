@@ -255,11 +255,16 @@ impl FuwaApp {
                     }
                     cx.notify();
                 }))
-                .child(div().size(px(28.0)).flex_none().flex().items_center().justify_center().child(avatar(
-                    Some(&user),
-                    28.0 * face_scale,
-                    &p,
-                )))
+                .child(
+                    div()
+                        .size(px(28.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .scale(face_scale)
+                        .child(avatar(Some(&user), 28.0, &p)),
+                )
                 .child(
                     div()
                         .flex_1()

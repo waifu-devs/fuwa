@@ -739,15 +739,7 @@ impl FuwaApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let banner = crate::ui::banner::server_banner_round(
-            server,
-            w - 2.0,
-            80.0,
-            Some(p.card.into()),
-            f32::from(radius_3xl()) - 1.0,
-            window,
-            cx,
-        );
+        let banner = crate::ui::banner::server_banner(server, w - 2.0, 80.0, Some(p.card.into()), window, cx);
         let members = server.member_count;
         let border = p.border;
         let hover = p.primary;
@@ -1363,7 +1355,7 @@ pub(crate) fn filled_button(
                 inset: false,
             }])
         })
-        .active(|s| s.top(px(0.0)).opacity(0.9))
+        .active(|s| s.top(px(0.0)).scale(0.94))
 }
 
 /// The web's `variant="outline"` button: the page's color, a border, a soft shadow.

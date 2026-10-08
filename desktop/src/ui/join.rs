@@ -323,15 +323,7 @@ impl FuwaApp {
     ) -> AnyElement {
         let server = &found.server;
         let w = 448.0;
-        let banner = crate::ui::banner::server_banner_round(
-            server,
-            w - 2.0,
-            144.0,
-            Some(p.card.into()),
-            f32::from(radius_3xl()) - 1.0,
-            window,
-            cx,
-        );
+        let banner = crate::ui::banner::server_banner(server, w - 2.0, 144.0, Some(p.card.into()), window, cx);
         let accent = crate::ui::banner::accent(server);
         let inviter = found.inviter.clone().map(|u| {
             let name = crate::core::store::user_name(&u);
@@ -833,14 +825,10 @@ impl FuwaApp {
                     .items_center()
                     .justify_center()
                     .bg(hsla(0.0, 0.0, 0.0, 0.5))
+                    .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                     .occlude()
                     .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-                    .child(motion::rise(
-                        panel,
-                        SharedString::from(format!("join-dialog-{tag_name}")),
-                        Duration::ZERO,
-                        40.0,
-                    )),
+                    .child(motion::dialog_in(panel, SharedString::from(format!("join-dialog-{tag_name}")))),
                 SharedString::from(format!("join-dialog-fade-{tag_name}")),
                 Duration::from_millis(200),
             )
@@ -1987,7 +1975,7 @@ pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<D
             Duration::from_millis(300),
             move |el, t| {
                 let s = if checked { 1.0 + 0.25 * (t * std::f32::consts::PI).sin() } else { 1.0 };
-                el.size(px(24.0 * s)).m(px(-12.0 * (s - 1.0)))
+                el.scale(s)
             },
         ))
         .child(div().flex_1().min_w_0().child(label.to_owned()))
@@ -2035,15 +2023,7 @@ pub(crate) fn banner_hero_wide(
     cx: &mut Context<FuwaApp>,
 ) -> AnyElement {
     let accent = crate::ui::banner::accent(server);
-    let banner = crate::ui::banner::server_banner_round(
-        server,
-        width,
-        160.0,
-        Some(p.card.into()),
-        f32::from(radius_3xl()) - 1.0,
-        window,
-        cx,
-    );
+    let banner = crate::ui::banner::server_banner(server, width, 160.0, Some(p.card.into()), window, cx);
     let members = server.member_count;
     let eyebrow_color = mix(accent.into(), p.foreground, 0.25);
     let green: Hsla = gpui_kit::rgb(0x10b981).into();

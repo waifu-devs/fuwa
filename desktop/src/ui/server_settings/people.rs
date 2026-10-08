@@ -1188,6 +1188,7 @@ impl ServerSettingsView {
                 .items_center()
                 .justify_center()
                 .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
+                .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                 .on_mouse_down(
                     gpui_kit::MouseButton::Left,
                     cx.listener(|this, _, _, cx| {

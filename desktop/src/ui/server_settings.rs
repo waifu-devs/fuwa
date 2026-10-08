@@ -1074,6 +1074,8 @@ pub(crate) fn bar_with_error<V: 'static>(
         .p(px(12.0))
         .pl(px(16.0))
         .shadow(shadow_xl())
+        // The web's `backdrop-blur`: what scrolls under it shows through, blurred.
+        .backdrop_blur(px(8.0))
         .child(div().flex_1().min_w_0().text_sm().line_height(px(20.0)).child(line))
         .child(
             button(

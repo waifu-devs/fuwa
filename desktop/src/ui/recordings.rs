@@ -419,7 +419,7 @@ impl FuwaApp {
                             cx.notify();
                         }),
                     )
-                    .child(motion::rise(card, "recordings-in", Duration::ZERO, 40.0)),
+                    .child(motion::dialog_in(card, "recordings-in")),
                 "recordings-fade",
                 Duration::from_millis(200),
             )

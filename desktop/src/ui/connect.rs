@@ -1303,12 +1303,13 @@ impl Render for ConnectView {
                     .items_center()
                     .justify_center()
                     .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
+                    .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if this.can_cancel {
                             cx.emit(ConnectEvent::Cancel);
                         }
                     }))
-                    .child(motion::rise(card, "connect-dialog-in", Duration::ZERO, 40.0))
+                    .child(motion::dialog_in(card, "connect-dialog-in"))
                     .into_any_element()
             }
         }
@@ -1395,7 +1396,9 @@ impl ConnectView {
                             .rounded_full()
                             .border_1()
                             .border_color(p.border)
+                            // The web's `bg-card/70 backdrop-blur`.
                             .bg(alpha(p.card, 0.7))
+                            .backdrop_blur(px(8.0))
                             .text_size(px(14.0))
                             .line_height(px(20.0))
                             .font_weight(FontWeight::BOLD)
@@ -1719,7 +1722,8 @@ fn tracked(text: &str, size: f32, colors: Option<Vec<Hsla>>) -> Div {
     row
 }
 
-/// Soft colored glows drifting behind the welcome (the web's bubble background at 30%).
+/// Soft colored glows drifting behind the welcome (the web's bubble background at 30%,
+/// blurred by 40px as its layer is).
 fn bubbles(window: &mut Window, _cx: &mut Context<ConnectView>, p: &Palette) -> AnyElement {
     let blobs: [(Hsla, f32, f32, f32, u64); 5] = [
         (p.primary.into(), 0.55, 0.38, 520.0, 16000),
@@ -1730,10 +1734,10 @@ fn bubbles(window: &mut Window, _cx: &mut Context<ConnectView>, p: &Palette) -> 
     ];
     let mut layer = div().absolute().inset_0();
     for (n, (color, x, y, size, period)) in blobs.into_iter().enumerate() {
-        // A radial fade from layered circles, since GPUI has no blur.
+        // The web's radial gradient, in a few steps the blur smooths over.
         let mut blob = div().absolute().left(gpui_kit::relative(x)).top(gpui_kit::relative(y)).size(px(0.0));
-        for k in 0..20 {
-            let d = size * (1.0 - k as f32 * 0.045);
+        for k in 0..5 {
+            let d = size * (1.0 - k as f32 * 0.18);
             blob = blob.child(
                 div()
                     .absolute()
@@ -1741,7 +1745,7 @@ fn bubbles(window: &mut Window, _cx: &mut Context<ConnectView>, p: &Palette) -> 
                     .top(px(-d / 2.0))
                     .size(px(d))
                     .rounded_full()
-                    .bg(Hsla { a: 0.011, ..color }),
+                    .bg(Hsla { a: 0.044, ..color }),
             );
         }
         let phase = n as f32 * 1.3;
@@ -1756,7 +1760,7 @@ fn bubbles(window: &mut Window, _cx: &mut Context<ConnectView>, p: &Palette) -> 
             },
         ));
     }
-    layer.into_any_element()
+    layer.child(div().absolute().inset_0().backdrop_blur(px(40.0))).into_any_element()
 }
 
 /// The web's `.dot-grid`: a dot every 22px, fading toward the edges.

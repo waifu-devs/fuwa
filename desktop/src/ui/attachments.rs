@@ -19,7 +19,7 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Target};
 use crate::ui::motion;
-use crate::ui::overlay::scrim;
+use crate::ui::overlay::shade;
 use crate::ui::theme::{Palette, alpha, corner, radius_xl};
 use crate::ui::widgets::{icon, icon_button};
 
@@ -711,7 +711,8 @@ impl FuwaApp {
         let (w, h) = attachments::fit_box(size.0, size.1, (room.0.max(200.0), room.1.max(200.0)));
         let (key, url_owned, name_owned) = (key.to_owned(), url.to_owned(), name.to_owned());
         motion::fade_in(
-            scrim("picture-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
+            // The web's `bg-black/80 backdrop-blur-sm`.
+            shade("picture-scrim", 0.8, 4.0).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
                 motion::rise(
                     div()
                         .id("picture-panel")
@@ -720,13 +721,15 @@ impl FuwaApp {
                         .items_center()
                         .gap(px(12.0))
                         .on_click(|_, _, cx| cx.stop_propagation())
-                        .child(
+                        .child(motion::grow_in(
                             img(SharedString::from(url.to_owned()))
                                 .w(px(w))
                                 .h(px(h))
                                 .rounded(corner(14.0))
                                 .object_fit(ObjectFit::Contain),
-                        )
+                            "picture-zoom",
+                            0.92,
+                        ))
                         .child(
                             div()
                                 .flex()

@@ -338,8 +338,14 @@ impl InstanceSettingsView {
             SharedString::from(format!("instance-badge-{slot}-{enabled}")),
             Duration::from_millis(400),
             move |el, t| {
-                // A hop when it's turned on (the web's scale and tilt).
-                if enabled { el.relative().top(px(-4.0 * (t * std::f32::consts::PI).sin())) } else { el }
+                // Turned on, it swells to 118% and tips back 8 degrees on the way (the web's
+                // `scale: [1, 1.18, 1], rotate: [0, -8, 0]`).
+                if enabled {
+                    let k = (t * std::f32::consts::PI).sin();
+                    el.scale(1.0 + 0.18 * k).rotate(gpui_kit::radians((-8.0 * k).to_radians()))
+                } else {
+                    el
+                }
             },
         );
         let green = tw(0x009966, 0x00d492, p);

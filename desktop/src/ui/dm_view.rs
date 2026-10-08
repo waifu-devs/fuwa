@@ -438,18 +438,17 @@ pub(crate) fn render_start(start: &DmStart, p: &Palette) -> AnyElement {
             // Springs in after the picture, as the web's badge does (0.45s in, a little overshoot).
             let k = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
             let pop = if k < 1.0 { 1.0 - (1.0 - k).powi(3) + (k * std::f32::consts::PI).sin() * 0.12 } else { 1.0 };
-            let size = 32.0 * pop;
-            el.child(
+            el.scale(pop.max(0.001)).child(
                 div()
-                    .size(px(size))
+                    .size(px(32.0))
                     .rounded_full()
                     .bg(s.green)
-                    .shadow(ring_of(card, 4.0 * pop.min(1.0)))
+                    .shadow(ring_of(card, 4.0))
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_color(gpui_kit::white())
-                    .child(icon("lock-keyhole").size(px(16.0 * pop))),
+                    .child(icon("lock-keyhole").size(px(16.0))),
             )
         },
     );
@@ -693,9 +692,9 @@ pub(crate) fn trust_pill(id: &str, trust: Trust, label: String, p: &Palette) -> 
         Duration::from_millis(450),
         move |el, t| {
             let pop = 0.3 + 0.7 * (1.0 - (1.0 - t).powi(3)) + (t * std::f32::consts::PI).sin() * 0.15;
-            el.child(
-                icon(glyph).size(px(14.0 * pop.min(1.15))).rotate(gpui_kit::radians((-40.0 * (1.0 - t)).to_radians())),
-            )
+            el.scale(pop.min(1.15))
+                .rotate(gpui_kit::radians((-40.0 * (1.0 - t)).to_radians()))
+                .child(icon(glyph).size(px(14.0)))
         },
     );
     div()
