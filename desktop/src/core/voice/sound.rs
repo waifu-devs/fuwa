@@ -216,6 +216,8 @@ struct Voice {
 #[derive(Default)]
 pub struct Mixer {
     voices: HashMap<String, Voice>,
+    /// How loud each person is for you (1 is as they sent it), by stream; missing is 1.
+    gains: HashMap<String, f32>,
 }
 
 impl Mixer {
@@ -248,6 +250,13 @@ impl Mixer {
         self.voices.clear();
     }
 
+    /// How loud each person is for you, by account id (the web's per-person volume).
+    pub fn set_gains(&mut self, gains: &HashMap<String, f32>) {
+        if &self.gains != gains {
+            self.gains = gains.clone();
+        }
+    }
+
     /// The next 20 ms of everyone together, and who among them is speaking.
     pub fn mix(&mut self, out: &mut [f32; FRAME]) -> HashSet<String> {
         out.fill(0.0);
@@ -264,8 +273,9 @@ impl Mixer {
             }
             let n = FRAME.min(voice.waiting.len());
             let mut sum = 0.0;
+            let gain = self.gains.get(who).copied().unwrap_or(1.0);
             for (slot, sample) in out.iter_mut().zip(voice.waiting.drain(..n)) {
-                *slot += sample;
+                *slot += sample * gain;
                 sum += sample * sample;
             }
             if voice.waiting.is_empty() {

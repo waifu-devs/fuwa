@@ -9,7 +9,7 @@
 //! layout, so either app plays what the other recorded.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -39,6 +39,8 @@ const SEALED_MIN: usize = 28;
 pub const MOST_FETCHED: usize = 8 * 1024 * 1024;
 /// What the opened file is.
 pub const CONTENT_TYPE: &str = "audio/ogg; codecs=opus";
+/// What a voice message sent in a server's channel is called (the web's `VOICE_FILENAME`).
+pub const VOICE_FILENAME: &str = "voice-message.ogg";
 
 /// A file sealed for an encrypted message: the bytes for the instance, and
 /// the key and digest that go inside the message.
@@ -457,16 +459,19 @@ pub struct Player {
     no_speakers: Arc<AtomicBool>,
     seek: Arc<Mutex<Option<u64>>>,
     stop: Arc<AtomicBool>,
+    /// How fast it plays (an f32's bits): 1, 1.5 or 2, the pitch kept.
+    rate: Arc<AtomicU32>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Player {
-    pub fn play(sound: Arc<Vec<f32>>, from_ms: u64) -> Self {
+    pub fn play(sound: Arc<Vec<f32>>, from_ms: u64, rate: f32) -> Self {
         let total = sound.len() as u64;
         let at = Arc::new(AtomicU64::new((from_ms * u64::from(RATE) / 1000).min(total)));
         let (paused, done, stop) = (Arc::default(), Arc::<AtomicBool>::default(), Arc::<AtomicBool>::default());
         let seek = Arc::new(Mutex::new(None));
         let no_speakers = Arc::new(AtomicBool::new(false));
+        let rate = Arc::new(AtomicU32::new(rate.to_bits()));
         let thread = {
             let state = Playback {
                 at: at.clone(),
@@ -475,6 +480,7 @@ impl Player {
                 no_speakers: no_speakers.clone(),
                 seek: seek.clone(),
                 stop: stop.clone(),
+                rate: rate.clone(),
             };
             std::thread::Builder::new().name("fuwa-voice-play".into()).spawn(move || play(sound, state)).ok()
         };
@@ -482,7 +488,12 @@ impl Player {
             no_speakers.store(true, Ordering::Relaxed);
             done.store(true, Ordering::Relaxed);
         }
-        Self { total, at, paused, done, no_speakers, seek, stop, thread }
+        Self { total, at, paused, done, no_speakers, seek, stop, rate, thread }
+    }
+
+    /// Plays faster or slower from here on, at the same pitch.
+    pub fn set_rate(&self, rate: f32) {
+        self.rate.store(rate.to_bits(), Ordering::Relaxed);
     }
 
     /// Where it is and how long it is, in milliseconds.
@@ -539,10 +550,73 @@ struct Playback {
     no_speakers: Arc<AtomicBool>,
     seek: Arc<Mutex<Option<u64>>>,
     stop: Arc<AtomicBool>,
+    rate: Arc<AtomicU32>,
+}
+
+/// Plays a sound faster (or slower) at the same pitch, a frame at a time:
+/// overlapping windows taken from the sound `rate` times as far apart as
+/// they're laid down, each nudged to where it best lines up with what came
+/// before (WSOLA), so speech stays clear.
+struct Stretch {
+    /// The second half of the last window, waiting for the next to overlap it.
+    tail: Vec<f32>,
+    /// Where the last window was taken from in the sound.
+    last: Option<usize>,
+}
+
+/// Each window is two frames long; one frame comes out per window.
+const WINDOW: usize = FRAME * 2;
+/// How far a window may move to line up (10 ms each way), and in what steps.
+const SEARCH: usize = 480;
+const SEARCH_STEP: usize = 8;
+
+impl Stretch {
+    fn new() -> Self {
+        Self { tail: vec![0.0; FRAME], last: None }
+    }
+
+    /// The next frame, from around `at` in the sound; None past its end.
+    fn next(&mut self, sound: &[f32], at: usize) -> Option<Vec<f32>> {
+        if at >= sound.len() {
+            return None;
+        }
+        // Where the last window would naturally go on: line up with it.
+        let pos = match self.last {
+            Some(last) => {
+                let natural = last + FRAME;
+                let from = at.saturating_sub(SEARCH);
+                let to = (at + SEARCH).min(sound.len().saturating_sub(FRAME));
+                let mut best = (f32::MIN, at.min(to));
+                let mut d = from;
+                while d <= to {
+                    let mut score = 0.0f32;
+                    for k in (0..FRAME).step_by(4) {
+                        score +=
+                            sound.get(d + k).copied().unwrap_or(0.0) * sound.get(natural + k).copied().unwrap_or(0.0);
+                    }
+                    if score > best.0 {
+                        best = (score, d);
+                    }
+                    d += SEARCH_STEP;
+                }
+                best.1
+            }
+            None => at,
+        };
+        self.last = Some(pos);
+        let hann = |i: usize| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / WINDOW as f32).cos();
+        let sample = |i: usize| sound.get(pos + i).copied().unwrap_or(0.0) * hann(i);
+        let out: Vec<f32> = (0..FRAME).map(|i| self.tail[i] + sample(i)).collect();
+        self.tail = (FRAME..WINDOW).map(sample).collect();
+        Some(out)
+    }
 }
 
 fn play(sound: Arc<Vec<f32>>, state: Playback) {
-    let Playback { at, paused, done, no_speakers, seek, stop } = state;
+    let Playback { at, paused, done, no_speakers, seek, stop, rate } = state;
+    let mut stretch: Option<Stretch> = None;
+    // Where each frame handed to the speakers came from, to say where it's at.
+    let mut handed: VecDeque<usize> = VecDeque::new();
     let speakers = Arc::new(Pipe::new(FRAME * 10, FRAME * 2));
     let devices = Devices::open(Arc::new(Pipe::microphone()), speakers.clone(), false);
     let started = Instant::now();
@@ -553,26 +627,46 @@ fn play(sound: Arc<Vec<f32>>, state: Playback) {
     while !stop.load(Ordering::Relaxed) {
         if let Some(to) = seek.lock().take() {
             speakers.clear();
+            handed.clear();
+            stretch = None;
             fed = to as usize;
         }
         let pausing = paused.load(Ordering::Relaxed);
         if pausing {
             if !was_paused {
                 // What was waiting would play on: it waits for the next play instead.
-                fed = fed.saturating_sub(speakers.len());
+                fed = handed.front().copied().unwrap_or(fed);
                 speakers.clear();
+                handed.clear();
+                stretch = None;
             }
             was_paused = true;
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
         was_paused = false;
+        let speed = f32::from_bits(rate.load(Ordering::Relaxed)).clamp(0.5, 3.0);
         while speakers.len() < FRAME * 6 && fed < total {
-            let end = (fed + FRAME).min(total);
-            speakers.push(&sound[fed..end]);
-            fed = end;
+            handed.push_back(fed);
+            if (speed - 1.0).abs() < 0.01 {
+                stretch = None;
+                let end = (fed + FRAME).min(total);
+                speakers.push(&sound[fed..end]);
+                fed = end;
+            } else {
+                let frame = stretch.get_or_insert_with(Stretch::new).next(&sound, fed);
+                if let Some(frame) = frame {
+                    speakers.push(&frame);
+                }
+                fed = (fed + (FRAME as f32 * speed) as usize).min(total);
+            }
         }
-        at.store(fed.saturating_sub(speakers.len()) as u64, Ordering::Relaxed);
+        // What's still waiting in the speakers hasn't played: it's at the oldest of those.
+        let waiting = speakers.len().div_ceil(FRAME);
+        while handed.len() > waiting {
+            handed.pop_front();
+        }
+        at.store(handed.front().copied().unwrap_or(fed) as u64, Ordering::Relaxed);
         // The speakers get a moment to open before they're called missing.
         if started.elapsed() > Duration::from_millis(400) && devices.trouble().contains(&Trouble::NoSpeakers) {
             no_speakers.store(true, Ordering::Relaxed);
@@ -695,8 +789,26 @@ impl Core {
         Ok(())
     }
 
+    /// Uploads a recording for a message in a server's channel, as the web's
+    /// `uploadVoice`: a plain Ogg Opus attachment (channels aren't end-to-end
+    /// encrypted) carrying its length and waveform, to be the message's only file.
+    pub async fn upload_voice(&self, key: &str, server_id: &str, clip: &Clip) -> Result<pb::Attachment, Problem> {
+        reports::used("message.send_voice");
+        let mut file = self.upload_bytes(key, server_id, VOICE_FILENAME.into(), "audio/ogg", clip.ogg.to_vec()).await?;
+        // This device already has the sound: no need to fetch it back to play it.
+        let id = if file.id.is_empty() {
+            file.url.rsplit('/').next().unwrap_or_default().to_owned()
+        } else {
+            file.id.clone()
+        };
+        keep_opened(&id, clip.ogg.clone());
+        file.voice = Some(pb::VoiceNote { duration_ms: clip.duration_ms, waveform: clip.waveform.clone() });
+        Ok(file)
+    }
+
     /// A voice message's sound, ready to play: fetched from the instance,
-    /// checked against its digest and opened (once a run).
+    /// checked against its digest and opened (once a run). One sent in a
+    /// server's channel (no key) is a plain file, played as it comes.
     pub async fn voice_sound(&self, key: &str, file: &VoiceFile) -> Result<Arc<Vec<f32>>, Problem> {
         let unopenable = || Problem::new(tonic::Code::DataLoss, "That voice message can't be played.");
         let ogg = match opened(&file.media_id) {
@@ -709,6 +821,16 @@ impl Core {
                 }
                 let url = format!("{}/media/{}", api.url.trim_end_matches('/'), file.media_id);
                 let bytes = crate::core::account::fetch(&url, MOST_FETCHED).await?;
+                if file.key.is_empty() {
+                    let ogg = Arc::new(bytes);
+                    keep_opened(&file.media_id, ogg.clone());
+                    let sound = tokio::task::spawn_blocking(move || decode(&ogg))
+                        .await
+                        .ok()
+                        .flatten()
+                        .ok_or_else(unopenable)?;
+                    return Ok(Arc::new(sound));
+                }
                 if bytes.len() as i64 != file.size {
                     return Err(unopenable());
                 }
@@ -787,6 +909,28 @@ mod tests {
         let last = bad.len() - 1;
         bad[last] ^= 1;
         assert!(read_ogg(&bad).is_none());
+    }
+
+    #[test]
+    fn stretching_keeps_the_pitch_and_the_level() {
+        // A 440 Hz tone played twice as fast stays a 440 Hz tone, about as loud, in frames.
+        let tone: Vec<f32> =
+            (0..RATE as usize).map(|n| (n as f32 * 440.0 * std::f32::consts::TAU / RATE as f32).sin() * 0.5).collect();
+        let mut stretch = Stretch::new();
+        let (mut out, mut at) = (Vec::new(), 0usize);
+        while let Some(frame) = stretch.next(&tone, at) {
+            assert_eq!(frame.len(), FRAME);
+            out.extend(frame);
+            at += FRAME * 2;
+        }
+        assert!(out.len() <= tone.len() / 2 + FRAME, "{}", out.len());
+        // Skip the first frame (it fades in), then count rising zero crossings over a second's worth.
+        let body = &out[FRAME..];
+        let crossings = body.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f32;
+        let hz = crossings * RATE as f32 / body.len() as f32;
+        assert!((hz - 440.0).abs() < 25.0, "{hz}");
+        let peak = body.iter().copied().fold(0f32, |a, b| a.max(b.abs()));
+        assert!((0.35..=0.65).contains(&peak), "{peak}");
     }
 
     #[test]

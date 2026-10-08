@@ -4,7 +4,9 @@
 //! Each page shows only to people whose permissions open it, as in the web
 //! app's `ServerSettingsDialog.tsx`.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,9 +14,9 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    hsla, px,
+    AnyElement, AppContext as _, Bounds, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div, hsla, point, px,
 };
 
 use crate::core::Core;
@@ -27,23 +29,74 @@ use crate::core::store::user_name;
 use crate::pb::{self, AuditAction as A, Permission as P};
 use crate::ui::moderate::{duration, stamp};
 use crate::ui::motion;
+use crate::ui::settings_controls::Look;
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{
-    app_badge, avatar, danger_button, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal,
-    primary_button, server_icon, soft_button,
+    app_badge, avatar, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal, server_icon,
 };
+use gpui_kit::{Div, Stateful};
 
 mod agents;
+mod applications;
+mod audit;
 mod automod;
 mod channels;
 mod emoji;
+mod frame;
+mod joinform;
+mod menu;
 mod onboarding;
+mod overview;
+mod pages;
+mod people;
 mod recordings;
 pub(crate) mod roles;
 pub(crate) use roles::switch;
 mod shared;
+mod sso;
+mod stage;
+mod usage;
 mod webhooks;
 mod welcome;
+
+/// The web's `<Button className="rounded-xl font-bold">` as these pages use it: `h-9`, `text-sm`,
+/// and any icon given after the words drawn before them, as lucide icons sit in the web's buttons.
+fn web_button(
+    id: impl Into<gpui_kit::ElementId>,
+    label: impl Into<SharedString>,
+    look: Look,
+    p: &Palette,
+) -> Stateful<Div> {
+    crate::ui::settings_controls::button(id, label, None, look, false, p)
+        .rounded(crate::ui::theme::radius_xl())
+        .font_weight(FontWeight::BOLD)
+        .flex_row_reverse()
+}
+
+pub(crate) fn primary_button(
+    id: impl Into<gpui_kit::ElementId>,
+    label: impl Into<SharedString>,
+    p: &Palette,
+) -> Stateful<Div> {
+    web_button(id, label, Look::Primary, p)
+}
+
+pub(crate) fn danger_button(
+    id: impl Into<gpui_kit::ElementId>,
+    label: impl Into<SharedString>,
+    p: &Palette,
+) -> Stateful<Div> {
+    web_button(id, label, Look::Destructive, p)
+}
+
+/// The web's outline buttons.
+pub(crate) fn soft_button(
+    id: impl Into<gpui_kit::ElementId>,
+    label: impl Into<SharedString>,
+    p: &Palette,
+) -> Stateful<Div> {
+    web_button(id, label, Look::Outline, p)
+}
 
 pub enum ServerSettingsEvent {
     Close,
@@ -56,6 +109,12 @@ pub enum ServerSettingsEvent {
     CreateChannel {
         parent: String,
     },
+    /// Open the invite dialog over the settings, to the server (empty) or a channel.
+    Invite {
+        channel: String,
+    },
+    /// Open the app's own settings at Agents (where people make theirs).
+    OpenAgents,
     /// Say something for a moment, over the settings.
     Toast {
         icon: &'static str,
@@ -64,8 +123,11 @@ pub enum ServerSettingsEvent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Page {
+pub(crate) enum Page {
     Overview,
+    Access,
+    Sso,
+    JoinForm,
     Welcome,
     Invites,
     Roles,
@@ -75,74 +137,23 @@ enum Page {
     Integrations,
     Shared,
     Recordings,
+    Usage,
+    Limits,
+    Applications,
     Members,
     Bans,
     AutoMod,
     AuditLog,
+    Ownership,
+    Danger,
 }
 
-impl Page {
-    fn label(self) -> String {
-        match self {
-            Page::Overview => t("serversettings.nav.overview"),
-            Page::Welcome => t("serversettings.nav.welcome"),
-            Page::Invites => t("serversettings.nav.invites"),
-            Page::Roles => t("serversettings.nav.roles"),
-            Page::Channels => t("serversettings.nav.channels"),
-            Page::Emoji => t("serversettings.nav.emoji"),
-            Page::ProfileItems => t("serversettings.nav.profileItems"),
-            Page::Integrations => t("serversettings.nav.integrations"),
-            Page::Shared => t("serversettings.nav.shared"),
-            Page::Recordings => t("serversettings.nav.recordings"),
-            Page::Members => t("serversettings.nav.members"),
-            Page::Bans => t("serversettings.nav.bans"),
-            Page::AutoMod => t("serversettings.nav.automod"),
-            Page::AuditLog => t("serversettings.nav.auditLog"),
-        }
-    }
-
-    fn glyph(self) -> &'static str {
-        match self {
-            Page::Overview => "settings",
-            Page::Welcome => "party-popper",
-            Page::Invites => "link",
-            Page::Roles => "shield",
-            Page::Channels => "hash",
-            Page::Emoji => "face-slightly-smiling-plus",
-            Page::ProfileItems => "sparkles",
-            Page::Integrations => "webhook",
-            Page::Shared => "link-2",
-            Page::Recordings => "video",
-            Page::Members => "users",
-            Page::Bans => "gavel",
-            Page::AutoMod => "bot",
-            Page::AuditLog => "scroll-text",
-        }
-    }
-
-    fn about(self) -> String {
-        match self {
-            Page::Overview => t("desktop.server.overviewAbout"),
-            Page::Invites => t("desktop.server.invitesAbout"),
-            Page::Roles => t("desktop.server.rolesAbout"),
-            Page::Channels => t("serversettings.nav.channelsAbout"),
-            Page::Emoji => t("serversettings.nav.emojiAbout"),
-            Page::ProfileItems => t("serversettings.nav.profileItemsAbout"),
-            Page::Welcome => t("serversettings.nav.welcomeAbout"),
-            Page::Integrations => t("serversettings.nav.integrationsAbout"),
-            Page::Shared => t("serversettings.nav.sharedAbout"),
-            Page::Recordings => t("serversettings.nav.recordingsAbout"),
-            Page::Members => t("desktop.server.membersAbout"),
-            Page::Bans => t("serversettings.nav.bansAbout"),
-            Page::AutoMod => t("serversettings.nav.automodAbout"),
-            Page::AuditLog => t("desktop.server.auditLogAbout"),
-        }
-    }
-}
-
-/// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 10] = [
+/// Every page, in the web's menu order (`serverSettingsTabs.ts`).
+const ALL: [Page; 22] = [
     Page::Overview,
+    Page::Access,
+    Page::Sso,
+    Page::JoinForm,
     Page::Welcome,
     Page::Invites,
     Page::Roles,
@@ -152,79 +163,266 @@ const SETTINGS: [Page; 10] = [
     Page::Integrations,
     Page::Shared,
     Page::Recordings,
+    Page::Usage,
+    Page::Limits,
+    Page::Applications,
+    Page::Members,
+    Page::Bans,
+    Page::AutoMod,
+    Page::AuditLog,
+    Page::Ownership,
+    Page::Danger,
 ];
-const MODERATION: [Page; 4] = [Page::Members, Page::Bans, Page::AutoMod, Page::AuditLog];
 
-/// The pages someone with this access may open.
-fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
-    let invites = access.has(P::ManageServer)
-        || access.has(P::CreateInvite)
-        || access.channels.keys().any(|c| access.has_in(c, P::CreateInvite));
-    let members = [P::KickMembers, P::BanMembers, P::TimeOutMembers, P::ManageNicknames, P::ManageRoles]
-        .into_iter()
-        .any(|p| access.has(p));
-    let mut out = Vec::new();
-    if access.has(P::ManageServer) {
-        out.push(Page::Overview);
-        out.push(Page::Welcome);
+impl Page {
+    /// Whether someone with this access (and whether they run the instance) may open it.
+    fn open_to(self, access: &crate::core::permissions::Access, admin: bool) -> bool {
+        let manage = access.has(P::ManageServer);
+        match self {
+            Page::Overview | Page::Access | Page::JoinForm | Page::Welcome | Page::Shared | Page::Recordings => manage,
+            Page::AutoMod => manage,
+            Page::Sso | Page::Ownership => access.owner,
+            Page::Invites => {
+                manage
+                    || access.has(P::CreateInvite)
+                    || access.channels.keys().any(|c| access.has_in(c, P::CreateInvite))
+            }
+            Page::Roles => access.has(P::ManageRoles),
+            Page::Channels => {
+                access.channels.keys().any(|c| access.has_in(c, P::ManageChannels) || access.has_in(c, P::ManageRoles))
+            }
+            Page::Emoji => access.has(P::ManageEmoji),
+            Page::ProfileItems => manage,
+            Page::Integrations => access.has(P::ManageWebhooks) || manage,
+            Page::Usage => admin || manage,
+            Page::Limits => admin,
+            Page::Applications => access.has(P::KickMembers),
+            Page::Members => [P::ManageRoles, P::ManageNicknames, P::KickMembers, P::BanMembers, P::TimeOutMembers]
+                .into_iter()
+                .any(|p| access.has(p)),
+            Page::Bans => access.has(P::BanMembers),
+            Page::AuditLog => access.has(P::ViewAuditLog),
+            Page::Danger => access.owner || admin,
+        }
     }
-    if invites {
-        out.push(Page::Invites);
+
+    fn label(self) -> String {
+        t(&format!("serversettings.nav.{}", self.key()))
     }
-    if access.has(P::ManageRoles) {
-        out.push(Page::Roles);
+
+    fn glyph(self) -> &'static str {
+        match self {
+            Page::Overview => "settings",
+            Page::Access => "door-open",
+            Page::Sso => "building",
+            Page::JoinForm => "clipboard-list",
+            Page::Welcome => "party-popper",
+            Page::Invites => "link",
+            Page::Roles => "shield",
+            Page::Channels => "hash",
+            Page::Emoji => "face-slightly-smiling-plus",
+            Page::ProfileItems => "sparkles",
+            Page::Integrations => "webhook",
+            Page::Shared => "link-2",
+            Page::Recordings => "video",
+            Page::Usage => "chart-column",
+            Page::Limits => "gauge",
+            Page::Applications => "inbox",
+            Page::Members => "users",
+            Page::Bans => "gavel",
+            Page::AutoMod => "bot",
+            Page::AuditLog => "scroll-text",
+            Page::Ownership => "crown",
+            Page::Danger => "trash",
+        }
     }
-    if access.channels.keys().any(|c| access.has_in(c, P::ManageChannels) || access.has_in(c, P::ManageRoles)) {
-        out.push(Page::Channels);
+
+    /// The line under the page's heading.
+    fn about(self) -> String {
+        match self {
+            Page::Ownership | Page::Danger => String::new(),
+            _ => t(&format!("serversettings.nav.{}About", self.key())),
+        }
     }
-    if access.has(P::ManageEmoji) {
-        out.push(Page::Emoji);
+
+    /// The page's name in the translations (`serversettings.nav.<key>`).
+    fn key(self) -> &'static str {
+        match self {
+            Page::Overview => "overview",
+            Page::Access => "access",
+            Page::Sso => "sso",
+            Page::JoinForm => "joinForm",
+            Page::Welcome => "welcome",
+            Page::Invites => "invites",
+            Page::Roles => "roles",
+            Page::Channels => "channels",
+            Page::Emoji => "emoji",
+            Page::ProfileItems => "profileItems",
+            Page::Integrations => "integrations",
+            Page::Shared => "shared",
+            Page::Recordings => "recordings",
+            Page::Usage => "usage",
+            Page::Limits => "limits",
+            Page::Applications => "applications",
+            Page::Members => "members",
+            Page::Bans => "bans",
+            Page::AutoMod => "automod",
+            Page::AuditLog => "auditLog",
+            Page::Ownership => "ownership",
+            Page::Danger => "danger",
+        }
     }
-    if access.has(P::ManageServer) {
-        out.push(Page::ProfileItems);
+
+    fn danger(self) -> bool {
+        matches!(self, Page::Ownership | Page::Danger)
     }
-    if access.has(P::ManageWebhooks) || access.has(P::ManageServer) {
-        out.push(Page::Integrations);
+
+    /// Which group of the menu it's in: the server's, the people's, or the dangerous ones.
+    fn group(self) -> usize {
+        match self {
+            Page::Applications | Page::Members | Page::Bans | Page::AutoMod | Page::AuditLog => 1,
+            Page::Ownership | Page::Danger => 2,
+            _ => 0,
+        }
     }
-    if access.has(P::ManageServer) {
-        out.push(Page::Shared);
-        out.push(Page::Recordings);
+
+    /// More words search finds it by (the web's `keywords`).
+    fn keywords(self) -> &'static str {
+        match self {
+            Page::Access => "join public private lock",
+            Page::Sso => {
+                "sso saml oidc openid okta entra azure google workspace keycloak authentik identity provider organization company"
+            }
+            Page::JoinForm => "rules screening agree questions application form onboarding",
+            Page::Welcome => {
+                "welcome onboarding new members greet suggested channels banner header cover accent color interests"
+            }
+            Page::Invites => "invite link code revoke expire uses",
+            Page::Roles => "permissions admin moderator rank color hoist mention everyone",
+            Page::Channels => "reorder drag category topic slowmode slow mode private permissions overwrites",
+            Page::Emoji => "emoji emote custom sticker upload",
+            Page::ProfileItems => "profile items effects decorations avatar frame sparkle wear",
+            Page::Integrations => {
+                "webhook webhooks integration apps bot bots agent agents ci github feed rss alerts post api discord"
+            }
+            Page::Shared => "share connect slack connect other server guest home code external partner",
+            Page::Recordings => "record recording call voice video camera screen webm",
+            Page::Usage => "storage members messages",
+            Page::Limits => "caps members channels storage",
+            Page::Applications => "apply review approve reject let in turn down pending waiting",
+            Page::Members => "admin role kick ban timeout nickname",
+            Page::Bans => "unban banned",
+            Page::AutoMod => {
+                "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out ai smart jev clef typesafe cloudflare hate scam"
+            }
+            Page::AuditLog => "history log moderation",
+            Page::Ownership => "owner hand give",
+            Page::Danger => "remove",
+            Page::Overview => "",
+        }
     }
-    if members {
-        out.push(Page::Members);
+
+    /// Single settings on the page search can jump to: (id, label, keywords).
+    fn settings(self) -> Vec<(&'static str, String, &'static str)> {
+        let s = |id, key: &str, words| (id, t(key), words);
+        match self {
+            Page::Overview => vec![
+                s("name", "serversettings.nav.serverName", ""),
+                s("icon", "serversettings.nav.serverIcon", "picture image upload logo avatar"),
+                s("description", "serversettings.nav.description", ""),
+                s("join-messages", "serversettings.nav.joinMessages", "system channel welcome greet"),
+                s("default-notifications", "serversettings.nav.defaultNotifications", "mentions ping"),
+            ],
+            Page::Access => vec![
+                s("discoverable", "serversettings.nav.discoverable", "discoverable public hidden invite only"),
+                s(
+                    "applications",
+                    "serversettings.nav.applyToJoin",
+                    "applications review approve screening vetting questions",
+                ),
+                s("linked-only", "serversettings.nav.linkedOnly", "linked verified account sign in"),
+                s("account-age", "serversettings.nav.accountAge", "new accounts spam raid verification"),
+            ],
+            Page::Sso => vec![
+                s("sso-protocol", "serversettings.nav.ssoProtocol", "saml oidc openid"),
+                s("sso-required", "serversettings.nav.ssoRequired", "sso members join"),
+                s("sso-recheck", "serversettings.nav.ssoRecheck", "sso recheck expire days"),
+                s("sso-domains", "serversettings.nav.ssoDomains", "sso allowed"),
+            ],
+            Page::JoinForm => vec![
+                s("rules", "serversettings.nav.rules", "screening agree code of conduct"),
+                s("questions", "serversettings.nav.questions", "apply form"),
+            ],
+            Page::Welcome => vec![
+                s("banner-picture", "settings.nav.banner", "header cover picture image"),
+                s("banner-focus", "serversettings.nav.bannerFocus", "crop position"),
+                s("accent-color", "serversettings.nav.accentColor", "colour tint theme"),
+                s("welcome-enabled", "serversettings.nav.welcomeEnabled", ""),
+                s("welcome-description", "serversettings.nav.welcomeMessage", "description"),
+                s("welcome-channels", "serversettings.nav.suggestedChannels", "start here"),
+                s("onboarding-enabled", "serversettings.nav.onboarding", "steps interests"),
+                s(
+                    "onboarding-steps",
+                    "serversettings.nav.onboardingSteps",
+                    "pick interests roles channels rules hello",
+                ),
+            ],
+            Page::Roles => vec![
+                s("role-permissions", "serversettings.nav.rolePermissions", "administrator manage"),
+                s("role-members", "serversettings.nav.roleMembers", "assign give"),
+            ],
+            Page::Channels => vec![
+                s("slowmode", "serversettings.nav.slowmode", "slowmode rate limit"),
+                s("channel-permissions", "serversettings.nav.channelPermissions", "private hidden access roles"),
+            ],
+            Page::Integrations => vec![
+                s("agents", "settings.nav.agents", "bot add username"),
+                s("webhooks", "serversettings.nav.webhooks", "address url token"),
+            ],
+            Page::Recordings => vec![s("record-video", "serversettings.nav.recordVideo", "camera screen share webm")],
+            _ => Vec::new(),
+        }
     }
-    if access.has(P::BanMembers) {
-        out.push(Page::Bans);
-    }
-    if access.has(P::ManageServer) {
-        out.push(Page::AutoMod);
-    }
-    if access.has(P::ViewAuditLog) {
-        out.push(Page::AuditLog);
-    }
-    out
+}
+
+/// The pages someone with this access may open, in menu order.
+fn pages(access: &crate::core::permissions::Access, admin: bool) -> Vec<Page> {
+    ALL.into_iter().filter(|pg| pg.open_to(access, admin)).collect()
 }
 
 /// Whether someone with this access gets server settings at all.
 pub fn can_open(access: &crate::core::permissions::Access) -> bool {
-    !pages(access).is_empty()
+    !pages(access, false).is_empty()
 }
 
-/// What the audit log can be narrowed to, as chips.
-fn filters() -> [(A, String); 8] {
-    [
-        (A::Unspecified, t("serversettings.audit.kind.anything")),
-        (A::MemberTimeOut, t("serversettings.audit.kind.timeOut")),
-        (A::MemberKick, t("serversettings.audit.kind.kick")),
-        (A::MemberBan, t("serversettings.audit.kind.ban")),
-        (A::MemberUnban, t("serversettings.audit.kind.unban")),
-        (A::MessageDelete, t("serversettings.audit.kind.messageDelete")),
-        (A::ServerUpdate, t("serversettings.audit.kind.serverUpdate")),
-        (A::InviteCreate, t("serversettings.audit.kind.inviteCreate")),
-    ]
+/// A page and the settings on it a search found.
+type Found = (Page, Vec<(&'static str, String, &'static str)>);
+
+/// Pages and single settings whose words hold every word typed (the web's `search`).
+fn search(shown: &[Page], query: &str) -> Option<Vec<Found>> {
+    let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_owned).collect();
+    if words.is_empty() {
+        return None;
+    }
+    let hits = |hay: &str| {
+        let hay = hay.to_lowercase();
+        words.iter().all(|w| hay.contains(w.as_str()))
+    };
+    let mut out = Vec::new();
+    for &page in shown {
+        let own = format!("{} {} {}", page.label(), page.about(), page.keywords());
+        let settings: Vec<_> =
+            page.settings().into_iter().filter(|s| hits(&format!("{} {} {}", s.1, s.2, page.label()))).collect();
+        if !settings.is_empty() || hits(&own) {
+            out.push((page, settings));
+        }
+    }
+    Some(out)
 }
 
 pub struct ServerSettingsView {
+    /// The Profile items page, made when first opened.
+    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     core: Arc<Core>,
     pub key: String,
     pub server: String,
@@ -234,8 +432,6 @@ pub struct ServerSettingsView {
     member_query: Entity<InputState>,
     /// Which server the fields were filled from, so they fill once.
     filled: bool,
-    busy: bool,
-    uploading: bool,
     error: Option<String>,
     saved: Option<Instant>,
     invites: Option<(Vec<pb::Invite>, People)>,
@@ -257,10 +453,30 @@ pub struct ServerSettingsView {
     onboard: onboarding::Onboard,
     shared: shared::Shared,
     recordings: recordings::Recordings,
-    /// The Profile items page, made when first opened.
-    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
+    /// The menu's search.
+    query: Entity<InputState>,
+    focused_once: bool,
+    /// The setting search picked, glowing where it landed (and a count, so it glows again).
+    glow: Option<(&'static str, u32)>,
+    /// A setting to scroll to once its page is on screen.
+    scroll_to: Option<&'static str>,
+    /// When search asked for `scroll_to`, to give up on one that never shows.
+    scroll_since: Option<Instant>,
+    /// Where each search target was drawn, for scrolling to it.
+    places: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
+    scroll: ScrollHandle,
+    /// The width the page's column has, and whether a preview fits beside a form.
+    column: f32,
+    wide: bool,
+    /// Unsaved edits on the page on screen (a save bar was drawn); leaving shakes it.
+    held: bool,
+    /// Someone tried to leave with unsaved edits: how many times, and when last.
+    nudge: (u32, Option<Instant>),
+    /// Closing: the screen fades and grows away, then goes.
+    closing: Option<Instant>,
+    pages: pages::Pages,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -270,9 +486,11 @@ impl ServerSettingsView {
     pub fn new(core: Arc<Core>, key: String, server: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.namePlaceholder")));
         let description = cx.new(|cx| {
-            TextareaState::new(window, cx).auto_grow(3, 8).placeholder(t("desktop.server.descriptionPlaceholder"))
+            TextareaState::new(window, cx).auto_grow(2, 8).placeholder(t("desktop.server.descriptionPlaceholder"))
         });
-        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.shared.findSomeone")));
+        let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.members.search")));
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder(t("settings.screen.search")));
+        let (pages, page_subscriptions) = pages::Pages::new(window, cx);
         // The page reads the instance as it draws, so it draws again when that changes.
         let mut changes = core.changes();
         cx.spawn_in(window, async move |this, cx| {
@@ -308,7 +526,13 @@ impl ServerSettingsView {
                     cx.notify()
                 }
             }),
+            cx.subscribe(&query, |_: &mut Self, _, e: &InputEvent, cx| {
+                if let InputEvent::Change = e {
+                    cx.notify()
+                }
+            }),
         ];
+        subscriptions.extend(page_subscriptions);
         subscriptions.extend(role_subscriptions);
         subscriptions.extend(emoji_subscriptions);
         subscriptions.extend(hook_subscriptions);
@@ -319,6 +543,7 @@ impl ServerSettingsView {
         subscriptions.extend(channel_subscriptions);
         subscriptions.extend(shared_subscriptions);
         Self {
+            profile_items: None,
             core,
             key,
             server,
@@ -327,8 +552,6 @@ impl ServerSettingsView {
             description,
             member_query,
             filled: false,
-            busy: false,
-            uploading: false,
             error: None,
             saved: None,
             invites: None,
@@ -350,8 +573,20 @@ impl ServerSettingsView {
             channels,
             shared,
             recordings: Default::default(),
-            profile_items: None,
             bar: None,
+            query,
+            focused_once: false,
+            glow: None,
+            scroll_to: None,
+            scroll_since: None,
+            places: Rc::new(RefCell::new(HashMap::new())),
+            scroll: ScrollHandle::new(),
+            column: 792.0,
+            wide: true,
+            held: false,
+            nudge: (0, None),
+            closing: None,
+            pages,
             _subscriptions: subscriptions,
         }
     }
@@ -421,36 +656,26 @@ impl ServerSettingsView {
         };
         self.audit_loading = true;
         let (core, key, sid, action) = (self.core.clone(), self.key.clone(), self.server.clone(), self.audit_action);
-        self.run(cx, async move { core.audit_log(&key, &sid, &before, "", action).await }, move |this, result, cx| {
-            this.audit_loading = false;
-            match result {
-                Ok((entries, people, more)) => {
-                    this.audit_people.extend(people);
-                    this.audit_more = more;
-                    match (&mut this.audit, older) {
-                        (Some(list), true) => list.extend(entries),
-                        _ => this.audit = Some(entries),
+        let actor = self.pages.people.audit_actor.clone();
+        self.run(
+            cx,
+            async move { core.audit_log(&key, &sid, &before, &actor, action).await },
+            move |this, result, cx| {
+                this.audit_loading = false;
+                match result {
+                    Ok((entries, people, more)) => {
+                        this.audit_people.extend(people);
+                        this.audit_more = more;
+                        match (&mut this.audit, older) {
+                            (Some(list), true) => list.extend(entries),
+                            _ => this.audit = Some(entries),
+                        }
                     }
+                    Err(err) => this.error = Some(err.message),
                 }
-                Err(err) => this.error = Some(err.message),
-            }
-            cx.notify();
-        });
-    }
-
-    fn save(&mut self, patch: ServerPatch, cx: &mut Context<Self>) {
-        self.busy = true;
-        self.error = None;
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        self.run(cx, async move { core.update_server(&key, &sid, patch).await }, |this, result, cx| {
-            this.busy = false;
-            match result {
-                Ok(_) => this.flash_saved(cx),
-                Err(err) => this.error = Some(err.message),
-            }
-            cx.notify();
-        });
-        cx.notify();
+                cx.notify();
+            },
+        );
     }
 
     /// Says "Saved" for a moment.
@@ -462,827 +687,37 @@ impl ServerSettingsView {
         })
         .detach();
     }
-
-    /// Asks the system for a picture and makes it the server's icon.
-    fn pick_icon(&mut self, cx: &mut Context<Self>) {
-        if self.uploading {
-            return;
-        }
-        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(t("desktop.account.choosePicture").into()),
-        });
-        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.error = Some(t("desktop.account.notAPicture"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.uploading = true;
-                this.error = None;
-                cx.notify();
-            });
-            let rx = core.spawn({
-                let core = core.clone();
-                async move {
-                    let bytes = crate::core::account::read_picture(&path).await?;
-                    let url = core.upload_picture(&key, pb::MediaPurpose::ServerIcon, kind, bytes).await?;
-                    core.update_server(&key, &sid, ServerPatch { icon_url: Some(url), ..ServerPatch::default() }).await
-                }
-            });
-            let result = rx.await;
-            let _ = this.update(cx, |this, cx| {
-                this.uploading = false;
-                match result {
-                    Ok(Ok(_)) => this.flash_saved(cx),
-                    Ok(Err(err)) => this.error = Some(err.message),
-                    Err(_) => {}
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn overview(
-        &mut self,
-        server: &pb::Server,
-        p: &Palette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if !self.filled {
-            self.filled = true;
-            let (name, about) = (server.name.clone(), server.description.clone());
-            self.name.update(cx, |s, cx| s.set_value(name, window, cx));
-            self.description.update(cx, |s, cx| s.set_value(about, window, cx));
-        }
-        let name = self.name.read(cx).value().trim().to_owned();
-        let about = self.description.read(cx).value().trim().to_owned();
-        let dirty = name != server.name || about != server.description;
-        let uploading = self.uploading;
-
-        let picture = div()
-            .id("server-icon")
-            .relative()
-            .size(px(96.0))
-            .flex_none()
-            .cursor_pointer()
-            .group("icon")
-            .child(server_icon(server, 96.0, 32.0, p))
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .rounded(px(32.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(2.0))
-                    .bg(alpha(p.rail, 0.6))
-                    .text_color(gpui_kit::white())
-                    .text_xs()
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .opacity(if uploading { 1.0 } else { 0.0 })
-                    .group_hover("icon", |s| s.opacity(1.0))
-                    .child(icon(if uploading { "loader-circle" } else { "camera" }).size(px(20.0)))
-                    .child(if uploading {
-                        t("serversettings.emoji.uploading")
-                    } else {
-                        t("workspace.picture.changeShort")
-                    }),
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.pick_icon(cx)));
-
-        let level = server.default_notifications();
-        let channels: Vec<pb::Channel> = self.core.shared.read(|s| {
-            s.instance(&self.key)
-                .and_then(|i| i.channels.get(&self.server))
-                .into_iter()
-                .flatten()
-                .filter(|c| c.r#type == pb::ChannelType::Text as i32)
-                .cloned()
-                .collect()
-        });
-        let mut joins: Vec<(String, String)> = vec![(String::new(), t("serversettings.shared.off"))];
-        joins.extend(channels.iter().map(|c| (c.id.clone(), format!("#{}", c.name))));
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(22.0))
-            .child(
-                div().flex().gap(px(20.0)).items_start().child(picture).child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .gap(px(14.0))
-                        .child(labeled(&t("serversettings.nav.serverName"), Input::new(&self.name).large(), p))
-                        .child(labeled(&t("serversettings.nav.description"), Textarea::new(&self.description), p)),
-                ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(10.0))
-                    .when_some(self.saved.filter(|t| t.elapsed() < Duration::from_secs(3)), |el, _| {
-                        el.child(motion::rise(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .text_sm()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(p.success)
-                                .child(icon("check").size(px(16.0)))
-                                .child(t("desktop.account.saved")),
-                            "saved",
-                            Duration::ZERO,
-                            6.0,
-                        ))
-                    })
-                    .child(
-                        primary_button(
-                            "server-save",
-                            if self.busy { t("settings.controls.saving") } else { t("settings.controls.save") },
-                            p,
-                        )
-                        .when(!dirty || name.is_empty(), |el| el.opacity(0.5))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if !dirty || this.busy {
-                                return;
-                            }
-                            let name = this.name.read(cx).value().trim().to_owned();
-                            if name.is_empty() {
-                                this.error = Some(t("desktop.server.needsName"));
-                                cx.notify();
-                                return;
-                            }
-                            let about = this.description.read(cx).value().trim().to_owned();
-                            this.save(
-                                ServerPatch { name: Some(name), description: Some(about), ..ServerPatch::default() },
-                                cx,
-                            );
-                        })),
-                    ),
-            )
-            .child(labeled(
-                &t("serversettings.nav.defaultNotifications"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(chips(
-                        "notify",
-                        &[
-                            (pb::NotificationLevel::All as i64, t("common.notify.all")),
-                            (pb::NotificationLevel::Mentions as i64, t("common.notify.mentions")),
-                        ],
-                        level as i64,
-                        p,
-                        cx,
-                        |this, v, cx| {
-                            let level = pb::NotificationLevel::try_from(v as i32).unwrap_or_default();
-                            this.save(ServerPatch { default_notifications: Some(level), ..ServerPatch::default() }, cx);
-                        },
-                    ))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.notificationsHint"))),
-                p,
-            ))
-            .child(labeled(
-                &t("serversettings.nav.joinMessages"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(text_chips("joins", &joins, &server.system_channel_id, p, cx, |this, id, cx| {
-                        this.save(ServerPatch { system_channel_id: Some(id), ..ServerPatch::default() }, cx);
-                    }))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.server.joinMessagesHint"))),
-                p,
-            ))
-            .into_any_element()
-    }
-
-    fn invites_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let base = self.core.api(&self.key).map(|a| a.url.trim_end_matches('/').to_owned()).unwrap_or_default();
-        let (me, manage, channels) = self.core.shared.read(|s| {
-            let i = s.instance(&self.key);
-            (
-                i.and_then(|i| i.me.as_ref().map(|m| m.id.clone())).unwrap_or_default(),
-                i.is_some_and(|i| i.access(&self.server).has(P::ManageServer)),
-                i.and_then(|i| i.channels.get(&self.server).cloned()).unwrap_or_default(),
-            )
-        });
-        let make = primary_button("invite-make", t("desktop.server.makeInvite"), p)
-            .child(icon("plus").size(px(16.0)))
-            .on_click(cx.listener(|this, _, _, cx| {
-                let (core, key, sid) = (this.core.clone(), this.key.clone(), this.server.clone());
-                this.run(cx, async move { core.create_invite(&key, &sid).await }, |this, result, cx| {
-                    match result {
-                        Ok(_) => this.load_invites(cx),
-                        Err(err) => this.error = Some(err.message),
-                    }
-                    cx.notify();
-                });
-            }));
-        let mut list = div().flex().flex_col().gap(px(8.0));
-        match &self.invites {
-            None => list = list.child(shimmer_rows(3, p)),
-            Some((invites, _)) if invites.is_empty() => {
-                list = list.child(empty("link", &t("desktop.server.noInvites"), &t("desktop.server.noInvitesHint"), p))
-            }
-            Some((invites, people)) => {
-                let now = now_ms();
-                for (n, invite) in invites.iter().enumerate() {
-                    let link = format!("{base}/invite/{}", invite.code);
-                    let inviter = people.get(&invite.inviter_id);
-                    let channel = channels.iter().find(|c| c.id == invite.channel_id).map(|c| format!("#{}", c.name));
-                    let uses = if invite.max_uses > 0 {
-                        t_with(
-                            "desktop.server.usesOf",
-                            &[("uses", Arg::Num(invite.uses as i64)), ("max", Arg::Num(invite.max_uses as i64))],
-                        )
-                    } else {
-                        t_with("workspace.invite.uses.count", &[("count", Arg::Num(invite.uses as i64))])
-                    };
-                    let expires = match invite.expires_at.as_ref().map(|t| t.seconds * 1000) {
-                        None => t("serversettings.invites.neverExpires"),
-                        Some(ms) if ms <= now => t("desktop.server.expired"),
-                        Some(ms) => t_with("serversettings.invites.expires", &[("time", Arg::Str(&stamp(ms)))]),
-                    };
-                    let copied = self
-                        .copied
-                        .as_ref()
-                        .is_some_and(|(c, at)| *c == invite.code && at.elapsed() < Duration::from_secs(2));
-                    let can_revoke = manage || invite.inviter_id == me;
-                    let code = invite.code.clone();
-                    list = list.child(motion::rise(
-                        row(p)
-                            .child(
-                                div()
-                                    .size(px(40.0))
-                                    .flex_none()
-                                    .rounded(corner(12.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(alpha(p.primary, 0.12))
-                                    .text_color(p.primary)
-                                    .child(icon("link").size(px(18.0))),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .child(link.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(6.0))
-                                            .text_xs()
-                                            .text_color(p.muted_foreground)
-                                            .child(avatar(inviter, 16.0, p))
-                                            .child(inviter.map(user_name).unwrap_or_else(|| t("common.someone")))
-                                            .when_some(channel, |el, c| el.child("·").child(c))
-                                            .child("·")
-                                            .child(uses)
-                                            .child("·")
-                                            .child(expires),
-                                    ),
-                            )
-                            .child(
-                                icon_button(
-                                    SharedString::from(format!("copy-{code}")),
-                                    if copied { "check" } else { "copy" },
-                                    p,
-                                )
-                                .when(copied, |el| el.text_color(p.success))
-                                .on_click(cx.listener({
-                                    let (code, link) = (code.clone(), link.clone());
-                                    move |this, _, _, cx| {
-                                        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(link.clone()));
-                                        this.copied = Some((code.clone(), Instant::now()));
-                                        cx.notify();
-                                    }
-                                })),
-                            )
-                            .when(can_revoke, |el| {
-                                el.child(
-                                    icon_button_in(
-                                        SharedString::from(format!("revoke-{code}")),
-                                        "link-2-off",
-                                        p,
-                                        p.destructive,
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            let (core, key, sid, code) = (
-                                                this.core.clone(),
-                                                this.key.clone(),
-                                                this.server.clone(),
-                                                code.clone(),
-                                            );
-                                            let gone = code.clone();
-                                            this.run(
-                                                cx,
-                                                async move { core.delete_invite(&key, &sid, &code).await },
-                                                move |this, result, cx| {
-                                                    match result {
-                                                        Ok(()) => {
-                                                            if let Some((list, _)) = &mut this.invites {
-                                                                list.retain(|i| i.code != gone);
-                                                            }
-                                                        }
-                                                        Err(err) => this.error = Some(err.message),
-                                                    }
-                                                    cx.notify();
-                                                },
-                                            );
-                                        },
-                                    )),
-                                )
-                            }),
-                        SharedString::from(format!("invite-in-{}", invite.code)),
-                        Duration::from_millis(30 * n.min(12) as u64),
-                        8.0,
-                    ));
-                }
-            }
-        }
-        div().flex().flex_col().gap(px(16.0)).child(div().flex().child(make)).child(list).into_any_element()
-    }
-
-    fn members_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let query = self.member_query.read(cx).value().trim().to_lowercase();
-        let now = now_ms();
-        let amber = amber(p);
-        let rows: Vec<MemberRow> = self.core.shared.read(|s| {
-            let Some(i) = s.instance(&self.key) else { return Vec::new() };
-            let owner = i.server(&self.server).map(|s| s.owner_id.clone()).unwrap_or_default();
-            let roles = i.roles.get(&self.server).cloned().unwrap_or_default();
-            i.members
-                .get(&self.server)
-                .into_iter()
-                .flatten()
-                .filter(|m| {
-                    query.is_empty()
-                        || m.user.as_ref().is_some_and(|u| {
-                            u.username.to_lowercase().contains(&query)
-                                || user_name(u).to_lowercase().contains(&query)
-                                || m.nickname.to_lowercase().contains(&query)
-                        })
-                })
-                .map(|m| {
-                    let uid = m.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-                    let held: Vec<(String, Option<u32>)> = roles
-                        .iter()
-                        .filter(|r| m.role_ids.contains(&r.id))
-                        .map(|r| (r.name.clone(), r.color.map(|c| c as u32)))
-                        .collect();
-                    (m.clone(), i.can_moderate(&self.server, &uid), held, uid == owner)
-                })
-                .collect()
-        });
-        let mut list = div().flex().flex_col().gap(px(6.0));
-        if rows.is_empty() {
-            list = list.child(empty(
-                "search",
-                &t("dms-calls.friends.page.noMatchTitle"),
-                &t("desktop.server.noMemberHint"),
-                p,
-            ));
-        }
-        for (n, (m, allowed, roles, owner)) in rows.into_iter().enumerate() {
-            let Some(user) = m.user.clone() else { continue };
-            let name = if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() };
-            let until = timed_out_until(&m, now);
-            let joined = m.joined_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
-            let mut actions = div().flex().gap(px(2.0)).flex_none();
-            for permission in allowed {
-                let (glyph, action, color) = match permission {
-                    P::TimeOutMembers => ("hourglass", Action::TimeOut(3_600), p.primary),
-                    P::KickMembers => ("door-open", Action::Kick, p.destructive),
-                    _ => ("gavel", Action::Ban(0), p.destructive),
-                };
-                let uid = user.id.clone();
-                actions = actions.child(
-                    icon_button_in(SharedString::from(format!("{glyph}-{}", user.id)), glyph, p, color).on_click(
-                        cx.listener(move |_, _, _, cx| {
-                            cx.emit(ServerSettingsEvent::Moderate { user_id: uid.clone(), action })
-                        }),
-                    ),
-                );
-            }
-            list = list.child(motion::rise(
-                row(p)
-                    .child(avatar(Some(&user), 40.0, p))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(div().font_weight(FontWeight::BOLD).text_ellipsis().child(name))
-                                    .when(owner, |el| {
-                                        el.child(icon("crown").size(px(14.0)).text_color(hsla(0.12, 0.9, 0.55, 1.0)))
-                                    })
-                                    .when(is_agent(Some(&user)), |el| {
-                                        el.child(app_badge(
-                                            SharedString::from(format!("members-badge|{}", user.id)),
-                                            "AGENT",
-                                            p,
-                                        ))
-                                    })
-                                    .when(m.pending, |el| {
-                                        el.child(pill(&t("desktop.server.notAgreed"), p.muted_foreground.into()))
-                                    })
-                                    .when_some(until, |el, until| {
-                                        el.child(pill(
-                                            &t_with(
-                                                "desktop.server.timedOutFor",
-                                                &[("time", Arg::Str(&crate::ui::moderate::left(until - now)))],
-                                            ),
-                                            amber,
-                                        ))
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .text_xs()
-                                    .text_color(p.muted_foreground)
-                                    .child(format!("@{}", user.username))
-                                    .when(joined > 0, |el| {
-                                        el.child("·").child(t_with(
-                                            "desktop.server.joined",
-                                            &[("date", Arg::Str(&stamp(joined)))],
-                                        ))
-                                    })
-                                    .children(roles.into_iter().map(|(role, color)| {
-                                        let dot = color
-                                            .map(|c| Hsla::from(gpui_kit::rgb(c)))
-                                            .unwrap_or(p.muted_foreground.into());
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .px(px(7.0))
-                                            .h(px(20.0))
-                                            .rounded_full()
-                                            .bg(p.secondary)
-                                            .text_color(p.foreground)
-                                            .font_weight(FontWeight::BOLD)
-                                            .child(div().size(px(8.0)).rounded_full().bg(dot))
-                                            .child(role)
-                                    })),
-                            ),
-                    )
-                    .child(actions),
-                SharedString::from(format!("member-row-{}", user.id)),
-                Duration::from_millis(25 * n.min(14) as u64),
-                8.0,
-            ));
-        }
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .child(Input::new(&self.member_query).large().prefix(icon("search").size(px(16.0))))
-            .child(list)
-            .into_any_element()
-    }
-
-    fn bans_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let mut list = div().flex().flex_col().gap(px(8.0));
-        match &self.bans {
-            None => list = list.child(shimmer_rows(3, p)),
-            Some((bans, _)) if bans.is_empty() => {
-                list =
-                    list.child(empty("shield-check", &t("desktop.server.noBans"), &t("desktop.server.noBansHint"), p))
-            }
-            Some((bans, people)) => {
-                for (n, ban) in bans.iter().enumerate() {
-                    let user = ban.user.clone();
-                    let uid = user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-                    let by = people.get(&ban.banned_by_id).map(user_name).unwrap_or_else(|| t("common.someone"));
-                    let at = ban.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
-                    list = list.child(motion::rise(
-                        row(p)
-                            .child(avatar(user.as_ref(), 40.0, p))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::BOLD)
-                                            .child(user.as_ref().map(user_name).unwrap_or_default()),
-                                    )
-                                    .child(div().text_sm().child(if ban.reason.is_empty() {
-                                        t("serversettings.bans.noReason")
-                                    } else {
-                                        ban.reason.clone()
-                                    }))
-                                    .child(div().text_xs().text_color(p.muted_foreground).child(t_with(
-                                        "serversettings.bans.bannedBy",
-                                        &[("name", Arg::Str(&by)), ("date", Arg::Str(&stamp(at)))],
-                                    ))),
-                            )
-                            .child(
-                                soft_button(
-                                    SharedString::from(format!("unban-{uid}")),
-                                    t("serversettings.bans.unban"),
-                                    p,
-                                )
-                                .child(icon("undo").size(px(14.0)))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let (core, key, sid, uid) =
-                                        (this.core.clone(), this.key.clone(), this.server.clone(), uid.clone());
-                                    let gone = uid.clone();
-                                    this.run(
-                                        cx,
-                                        async move { core.unban(&key, &sid, &uid).await },
-                                        move |this, result, cx| {
-                                            match result {
-                                                Ok(()) => {
-                                                    if let Some((list, _)) = &mut this.bans {
-                                                        list.retain(|b| b.user.as_ref().is_none_or(|u| u.id != gone));
-                                                    }
-                                                }
-                                                Err(err) => this.error = Some(err.message),
-                                            }
-                                            cx.notify();
-                                        },
-                                    );
-                                })),
-                            ),
-                        SharedString::from(format!("ban-in-{n}")),
-                        Duration::from_millis(30 * n.min(12) as u64),
-                        8.0,
-                    ));
-                }
-            }
-        }
-        list.into_any_element()
-    }
-
-    fn audit_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let filters: Vec<(i64, String)> = filters().into_iter().map(|(a, l)| (a as i64, l)).collect();
-        let picked = self.audit_action as i64;
-        let channels = self
-            .core
-            .shared
-            .read(|s| s.instance(&self.key).and_then(|i| i.channels.get(&self.server).cloned()).unwrap_or_default());
-        let mut list = div().flex().flex_col().gap(px(6.0));
-        match &self.audit {
-            None => list = list.child(shimmer_rows(4, p)),
-            Some(entries) if entries.is_empty() => {
-                list = list.child(empty(
-                    "scroll-text",
-                    &t("serversettings.audit.empty"),
-                    &if self.audit_action == A::Unspecified {
-                        t("serversettings.audit.emptyHint")
-                    } else {
-                        t("desktop.server.audit.noMatch")
-                    },
-                    p,
-                ))
-            }
-            Some(entries) => {
-                for (n, entry) in entries.iter().enumerate() {
-                    list = list.child(self.audit_entry(entry, n, &channels, p, cx));
-                }
-            }
-        }
-        let more = self.audit_more && self.audit.is_some();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(chips("audit-filter", &filters, picked, p, cx, |this, v, cx| {
-                this.audit_action = A::try_from(v as i32).unwrap_or(A::Unspecified);
-                this.audit_open = None;
-                this.load_audit(false, cx);
-            }))
-            .child(list)
-            .when(more, |el| {
-                el.child(
-                    div().flex().justify_center().child(
-                        soft_button(
-                            "audit-more",
-                            if self.audit_loading {
-                                t("desktop.server.loading")
-                            } else {
-                                t("serversettings.audit.older")
-                            },
-                            p,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.load_audit(true, cx))),
-                    ),
-                )
-            })
-            .into_any_element()
-    }
-
-    fn audit_entry(
-        &self,
-        entry: &pb::AuditEntry,
-        n: usize,
-        channels: &[pb::Channel],
-        p: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let action = entry.action();
-        let (glyph, tint) = kind(action, p);
-        let actor = self.audit_people.get(&entry.actor_id);
-        let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
-        let details: Vec<&pb::AuditChange> = entry.changes.iter().filter(|c| c.field != "deleted_messages").collect();
-        let expandable = !details.is_empty() || !entry.reason.is_empty();
-        let open = expandable && self.audit_open.as_deref() == Some(entry.id.as_str());
-        let id = entry.id.clone();
-        let text = sentence(entry, &self.audit_people, channels);
-        let head = div()
-            .id(SharedString::from(format!("audit-{}", entry.id)))
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .p(px(12.0))
-            .when(expandable, |el| el.cursor_pointer())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if !expandable {
-                    return;
-                }
-                this.audit_open = if this.audit_open.as_deref() == Some(id.as_str()) { None } else { Some(id.clone()) };
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .relative()
-                    .size(px(36.0))
-                    .flex_none()
-                    .rounded(corner(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(tint.opacity(0.15))
-                    .text_color(tint)
-                    .child(icon(glyph).size(px(16.0)))
-                    .child(
-                        div()
-                            .absolute()
-                            .right(px(-6.0))
-                            .bottom(px(-6.0))
-                            .rounded_full()
-                            .border_2()
-                            .border_color(p.card)
-                            .child(avatar(actor, 18.0, p)),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        crate::ui::text::markdown(SharedString::from(format!("audit-text-{}", entry.id)), text)
-                            .w_full(),
-                    )
-                    .child(div().text_xs().text_color(p.muted_foreground).child(stamp(at))),
-            )
-            .when(expandable, |el| {
-                el.child(
-                    icon(if open { "chevron-up" } else { "chevron-down" })
-                        .size(px(16.0))
-                        .text_color(p.muted_foreground),
-                )
-            });
-        let mut item = div()
-            .rounded(corner(16.0))
-            .border_1()
-            .border_color(if open { alpha(p.primary, 0.4) } else { p.border.into() })
-            .bg(if open { alpha(p.muted_foreground, 0.06) } else { p.card.into() })
-            .overflow_hidden()
-            .child(head);
-        if open {
-            let one_side = match action {
-                A::InviteCreate | A::AutoModRuleCreate | A::EmojiCreate | A::WebhookCreate | A::ProfileItemCreate => {
-                    Some(true)
-                }
-                A::InviteDelete | A::AutoModRuleDelete | A::EmojiDelete | A::WebhookDelete | A::ProfileItemDelete => {
-                    Some(false)
-                }
-                _ => None,
-            };
-            let mut more = div()
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .px(px(14.0))
-                .py(px(10.0))
-                .pl(px(60.0))
-                .border_t_1()
-                .border_color(p.border)
-                .text_sm();
-            if !entry.reason.is_empty() {
-                more = more.child(
-                    div()
-                        .flex()
-                        .gap(px(4.0))
-                        .child(div().text_color(p.muted_foreground).child(t("serversettings.audit.reason")))
-                        .child(entry.reason.clone()),
-                );
-            }
-            let green = hsla(0.42, 0.6, if p.dark { 0.6 } else { 0.36 }, 1.0);
-            for (k, change) in details.into_iter().enumerate() {
-                let label = field_label(&change.field);
-                let before = value(&change.field, &change.before, entry, &self.audit_people, channels);
-                let after = value(&change.field, &change.after, entry, &self.audit_people, channels);
-                let line = div().flex().flex_wrap().items_center().gap(px(6.0)).child(
-                    div()
-                        .text_color(p.muted_foreground)
-                        .child(t_with("desktop.server.audit.field", &[("field", Arg::Str(&label))])),
-                );
-                let line = match one_side {
-                    Some(after_side) => line.child(chip_text(
-                        if after_side { after } else { before },
-                        p.foreground.into(),
-                        p.secondary.into(),
-                    )),
-                    None => line
-                        .child(chip_text(before, p.destructive.into(), alpha(p.destructive, 0.1)).line_through())
-                        .child(icon("arrow-right").size(px(13.0)).text_color(p.muted_foreground))
-                        .child(chip_text(after, green, green.opacity(0.12))),
-                };
-                more = more.child(motion::rise(
-                    line,
-                    SharedString::from(format!("change-{}-{k}", entry.id)),
-                    Duration::from_millis(40 * k as u64),
-                    4.0,
-                ));
-            }
-            item = item.child(more);
-        }
-        motion::slide_in(item, SharedString::from(format!("audit-in-{}-{n}", entry.id)), -12.0).into_any_element()
-    }
 }
 
 impl Render for ServerSettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // As the web's dialog does, the search takes the keys when settings open.
+        if !self.focused_once {
+            self.focused_once = true;
+            self.query.update(cx, |q, cx| q.focus(window, cx));
+        }
         let p = pal(cx);
-        let (server, access) = self.core.shared.read(|s| {
+        let (server, access, admin) = self.core.shared.read(|s| {
             let i = s.instance(&self.key);
-            (i.and_then(|i| i.server(&self.server).cloned()), i.map(|i| i.access(&self.server)).unwrap_or_default())
+            (
+                i.and_then(|i| i.server(&self.server).cloned()),
+                i.map(|i| i.access(&self.server)).unwrap_or_default(),
+                i.is_some_and(|i| i.admin),
+            )
         });
         let Some(server) = server else {
             // The server went away (left, kicked or deleted).
             cx.defer_in(window, |_, _, cx| cx.emit(ServerSettingsEvent::Close));
             return div().into_any_element();
         };
-        let mut allowed = pages(&access);
-        // Instances from before video in recordings have nothing to choose.
-        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
-            allowed.retain(|pg| *pg != Page::Recordings);
-        }
+        let mut allowed = pages(&access, admin);
         // Nor anything to offer before profile items.
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
             allowed.retain(|pg| *pg != Page::ProfileItems);
+        }
+        // Instances from before video in recordings have nothing to choose.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
+            allowed.retain(|pg| *pg != Page::Recordings);
         }
         // Requests waiting on this server's approval, counted on the menu once the list is read.
         let requests = self.core.shared.read(|s| {
@@ -1293,6 +728,10 @@ impl Render for ServerSettingsView {
         if allowed.contains(&Page::Shared) {
             self.load_shared(cx);
         }
+        if allowed.contains(&Page::Applications) {
+            self.load_applications(false, cx);
+        }
+        let waiting = self.pages.applications.waiting();
         // Permissions can change while it's open: fall back to a page still yours.
         let page = match self.page.filter(|pg| allowed.contains(pg)).or_else(|| allowed.first().copied()) {
             Some(page) => page,
@@ -1305,100 +744,30 @@ impl Render for ServerSettingsView {
             self.open(page, cx);
         }
 
-        let mut menu = div().flex().flex_col().w(px(220.0)).child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .px(px(10.0))
-                .pb(px(14.0))
-                .child(server_icon(&server, 32.0, 10.0, &p))
-                .child(
-                    div()
-                        .min_w_0()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(server.name.clone()),
-                ),
-        );
-        let mut y = 46.0;
-        let mut at_y = 0.0;
-        for (group, list) in
-            [(t("serversettings.nav.subtitle"), &SETTINGS[..]), (t("instancesettings.nav.moderation"), &MODERATION[..])]
-        {
-            let shown: Vec<Page> = list.iter().copied().filter(|pg| allowed.contains(pg)).collect();
-            if shown.is_empty() {
-                continue;
-            }
-            menu = menu.child(
-                div()
-                    .h(px(30.0))
-                    .px(px(10.0))
-                    .when(y > 46.0, |el| el.mt(px(14.0)))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(p.muted_foreground)
-                    .child(group.to_uppercase()),
-            );
-            y += if y > 46.0 { 44.0 } else { 30.0 };
-            for pg in shown {
-                let on = pg == page;
-                if on {
-                    at_y = y;
-                }
-                let hover = alpha(p.primary, 0.08);
-                menu = menu.child(
-                    div()
-                        .id(SharedString::from(format!("smenu-{pg:?}")))
-                        .h(px(38.0))
-                        .mb(px(2.0))
-                        .px(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .rounded(corner(10.0))
-                        .cursor_pointer()
-                        .text_color(if on { p.foreground } else { p.muted_foreground })
-                        .when(on, |el| el.font_weight(FontWeight::BOLD))
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| this.open(pg, cx)))
-                        .child(if pg == Page::Shared {
-                            crate::ui::shared_marks::glyph(17.0, if on { p.primary } else { p.muted_foreground })
-                                .into_any_element()
-                        } else {
-                            icon(pg.glyph())
-                                .size(px(17.0))
-                                .text_color(if on { p.primary } else { p.muted_foreground })
-                                .into_any_element()
-                        })
-                        .child(div().flex_1().child(pg.label()))
-                        .when(pg == Page::Shared && requests > 0, |el| {
-                            el.child(crate::ui::widgets::badge(requests as u32, &p))
-                        }),
-                );
-                y += 40.0;
-            }
-        }
-        let at = motion::follow("server-settings-hl", at_y, window, cx);
-        let menu = div()
-            .relative()
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(px(at))
-                    .h(px(38.0))
-                    .rounded(corner(10.0))
-                    .bg(alpha(p.primary, 0.16)),
-            )
-            .child(menu);
+        // The web's layout: the menu takes 15rem and half of what's left past 67rem; the
+        // page's column is at most 60rem, less the close button's 4rem and its padding.
+        let width = f32::from(window.viewport_size().width);
+        let aside = 240.0 + ((width - 1072.0).max(0.0) / 2.0);
+        let main = (width - aside).max(320.0);
+        let inner = main.min(960.0);
+        self.column = inner - 64.0 - 80.0;
+        self.wide = width >= 1280.0;
+
+        let badges = move |pg: Page| match pg {
+            Page::Shared => requests,
+            Page::Applications => waiting,
+            _ => 0,
+        };
+        let menu = self.menu(&server.name, &allowed, page, &badges, &p, window, cx);
 
         self.bar = None;
+        frame::ALARM.with(|a| a.set(self.alarm()));
         let body = match page {
             Page::Overview => self.overview(&server, &p, window, cx),
-            Page::Invites => self.invites_page(&p, cx),
+            Page::Access => self.access_page(&server, &p, window, cx),
+            Page::Sso => self.sso_page(&server, &p, window, cx),
+            Page::JoinForm => self.join_form_page(&server, &p, window, cx),
+            Page::Invites => self.invites_page(&p, window, cx),
             Page::Welcome => self.welcome_page(&server, &p, window, cx),
             Page::Roles => self.roles_page(&p, window, cx),
             Page::Channels => self.channels_page(&p, window, cx),
@@ -1421,131 +790,197 @@ impl Render for ServerSettingsView {
                     .into_any_element()
             }
             Page::Integrations => {
-                let mut both = div().flex().flex_col().gap(px(36.0));
+                let mut both = div().flex().flex_col().gap(px(32.0));
                 if access.has(P::ManageServer) {
-                    both = both.child(self.agents_page(&p, window, cx));
+                    let agents = self.agents_page(&p, window, cx);
+                    both = both.child(self.mark("agents", div().child(agents), &p));
                 }
                 if access.has(P::ManageWebhooks) {
-                    both = both.child(self.webhooks_page(&p, window, cx));
+                    let hooks = self.webhooks_page(&p, window, cx);
+                    both = both.child(self.mark("webhooks", div().child(hooks), &p));
                 }
                 both.into_any_element()
             }
             Page::Shared => self.shared_page(&p, window, cx),
-            Page::Recordings => self.recordings_page(&server, &p, cx),
-            Page::Members => self.members_page(&p, cx),
-            Page::Bans => self.bans_page(&p, cx),
+            Page::Recordings => self.recordings_page(&server, &p, window, cx),
+            Page::Usage => self.usage_page(&p, window, cx),
+            Page::Limits => self.limits_page(&p, window, cx),
+            Page::Applications => self.applications_page(&server, &p, window, cx),
+            Page::Members => self.members_page(&p, window, cx),
+            Page::Bans => self.bans_page(&p, window, cx),
             Page::AutoMod => self.automod_page(&p, window, cx),
-            Page::AuditLog => self.audit_page(&p, cx),
+            Page::AuditLog => self.audit_page(&p, window, cx),
+            Page::Ownership => self.ownership_page(&server, &p, window, cx),
+            Page::Danger => self.danger_page(&server, &p, window, cx),
         };
+        frame::ALARM.with(|a| a.set(None));
+        self.held = self.bar.is_some();
+
+        // A setting picked from search: once it's been drawn, scroll it to the middle.
+        if let Some(id) = self.scroll_to {
+            let place = self.places.borrow().get(id).copied();
+            match place {
+                Some(b) => {
+                    let view = self.scroll.bounds();
+                    let offset = self.scroll.offset();
+                    let content_y = f32::from(b.origin.y - view.origin.y - offset.y);
+                    let target = content_y - (f32::from(view.size.height) - f32::from(b.size.height)) / 2.0;
+                    let most = f32::from(self.scroll.max_offset().y);
+                    self.scroll.set_offset(point(px(0.0), px(-target.clamp(0.0, most.max(0.0)))));
+                    self.scroll_to = None;
+                }
+                // Looked for a moment and it isn't on the page (a role or channel not picked yet).
+                None if self.scroll_since.is_some_and(|at| at.elapsed() > Duration::from_millis(1500)) => {
+                    self.scroll_to = None
+                }
+                None => window.request_animation_frame(),
+            }
+        }
+
+        let about = page.about();
+        let header = div()
+            .mb(px(24.0))
+            .child(
+                div()
+                    .text_2xl()
+                    .line_height(px(32.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .when(page.danger(), |el| el.text_color(p.destructive))
+                    .child(page.label()),
+            )
+            .when(!about.is_empty(), |el| {
+                el.child(div().mt(px(4.0)).text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(about))
+            });
+        // The save bar sits under the page, or over the column's foot while the page scrolls
+        // (the web's `sticky bottom-0`).
+        let scrolls = f32::from(self.scroll.max_offset().y) > 0.5;
+        let bar = self.bar.take();
+        let (inline_bar, floating_bar) = if scrolls { (None, bar) } else { (bar, None) };
+        // The column, and the close button's 4rem beside it (kept clear, as the web's sticky one is).
         let content = div()
-            .w(px(if matches!(page, Page::Roles | Page::Welcome | Page::Channels) { 860.0 } else { 680.0 }))
+            .w(px(main.max(inner)))
+            .flex_none()
+            .px(px(40.0))
+            .pr(px(40.0 + 64.0 + (main.max(inner) - inner)))
+            .pt(px(64.0))
+            .pb(px(if floating_bar.is_some() { 96.0 } else { 16.0 }))
             .flex()
             .flex_col()
-            .gap(px(6.0))
-            .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(page.label()))
-            .child(div().text_color(p.muted_foreground).child(page.about()))
-            .child(div().h(px(18.0)))
-            .when_some(error_line(self.error.as_deref(), &p), |el, e| el.child(div().mb(px(12.0)).child(e)))
-            .child(body);
+            .child(motion::rise(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(header)
+                    .when_some(error_line(self.error.as_deref(), &p), |el, e| el.child(div().mb(px(12.0)).child(e)))
+                    .child(body),
+                SharedString::from(format!("spage-{page:?}")),
+                Duration::ZERO,
+                14.0,
+            ))
+            .when_some(inline_bar, |el, bar| el.child(div().mt(px(24.0)).pb(px(8.0)).child(bar)));
 
-        motion::fade_in(
-            div()
-                .id("server-settings")
-                .size_full()
-                .occlude()
-                .flex()
-                .bg(p.background)
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(300.0))
-                        .h_full()
-                        .flex()
-                        .justify_end()
-                        .pt(px(56.0))
-                        .pr(px(16.0))
-                        .bg(p.sidebar)
-                        .child(motion::slide_in(menu, "server-settings-menu", -24.0)),
+        let (hover_bg, hover_fg, hover_ring) = (p.muted, p.foreground, alpha(p.foreground, 0.4));
+        let close = div()
+            .id("server-settings-close")
+            .absolute()
+            .top(px(64.0))
+            .left(px(aside + inner - 24.0 - 40.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(4.0))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| this.close(cx)))
+            .child(
+                div()
+                    .id("server-settings-close-ring")
+                    .size(px(40.0))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(p.border)
+                    .text_color(p.muted_foreground)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(move |s| s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring))
+                    .active(|s| s.top(px(1.0)))
+                    .child(icon("x").size(px(20.0))),
+            )
+            .child(div().text_size(px(10.4)).font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"));
+
+        let nickname = self.nickname_dialog(&p, window, cx);
+        let behind = crate::ui::backdrop::layers(&crate::ui::theme::backdrop(cx), &p, window, cx);
+        let screen = div()
+            .id("server-settings")
+            .absolute()
+            .inset_0()
+            // At least the window, so the menu's surface runs down the whole side however short it is.
+            .min_w(px(width))
+            .min_h(window.viewport_size().height)
+            .occlude()
+            .flex()
+            // The page's surface, out to the window's edge past the close button (the web's
+            // screen is `bg-background` and its page draws nothing over it).
+            .bg(p.chat_surface)
+            .text_color(p.foreground)
+            // The web's body line height; Tailwind's text sizes set their own where pages use them.
+            .line_height(gpui_kit::relative(1.5))
+            .when_some(behind, |el, behind| el.child(behind))
+            .child(
+                div()
+                    .id("server-settings-menu")
+                    .flex_none()
+                    .w(px(aside))
+                    .h(window.viewport_size().height)
+                    .flex()
+                    .justify_end()
+                    .bg(p.side_surface)
+                    .border_r_1()
+                    .border_color(p.border)
+                    .overflow_y_scroll()
+                    .child(menu),
+            )
+            .child(
+                div()
+                    .id("server-settings-body")
+                    .flex_1()
+                    .h(window.viewport_size().height)
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(content),
+            )
+            .child(close)
+            .when_some(floating_bar, |el, bar| {
+                el.child(
+                    div().absolute().bottom(px(8.0)).left(px(aside + 40.0)).w(px(self.column)).child(motion::rise(
+                        div().child(bar),
+                        "server-settings-bar",
+                        Duration::ZERO,
+                        80.0,
+                    )),
                 )
-                .child(
-                    div()
-                        .id("server-settings-body")
-                        .flex_1()
-                        .h_full()
-                        .overflow_y_scroll()
-                        .pt(px(56.0))
-                        .px(px(40.0))
-                        .pb(px(40.0))
-                        .child(motion::rise(
-                            content,
-                            SharedString::from(format!("spage-{page:?}")),
-                            Duration::ZERO,
-                            14.0,
-                        )),
-                )
-                .when_some(self.bar.take(), |el, bar| {
-                    el.child(
-                        div().absolute().bottom(px(24.0)).left(px(300.0)).right_0().flex().justify_center().child(bar),
-                    )
-                })
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(20.0))
-                        .right(px(24.0))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(4.0))
-                        .child(
-                            div()
-                                .id("server-settings-close")
-                                .size(px(38.0))
-                                .rounded_full()
-                                .border_2()
-                                .border_color(p.muted_foreground)
-                                .text_color(p.muted_foreground)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_pointer()
-                                .hover({
-                                    let c = p.primary;
-                                    move |s| s.border_color(c).text_color(c)
-                                })
-                                .active(|s| s.top(px(1.0)))
-                                .on_click(cx.listener(|_, _, _, cx| cx.emit(ServerSettingsEvent::Close)))
-                                .child(icon("x").size(px(18.0))),
-                        )
-                        .child(
-                            div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"),
-                        ),
-                ),
-            "server-settings-in",
-            Duration::from_millis(160),
-        )
-        .into_any_element()
+            })
+            .when_some(nickname, |el, d| el.child(d));
+
+        // It comes in from a little larger, fading up, and goes the same way.
+        use gpui_kit::{Animation, AnimationExt as _};
+        let (id, out) = match self.closing {
+            Some(at) => (SharedString::from(format!("server-settings-out-{at:?}")), true),
+            None => (SharedString::from("server-settings-in"), false),
+        };
+        let (w, h) = (width, f32::from(window.viewport_size().height));
+        screen
+            .with_animation(id, Animation::new(frame::OPENING).with_easing(gpui_kit::ease_out_quint()), move |el, t| {
+                let k = if out { 1.0 - t } else { t };
+                let (dx, dy) = (w * 0.02 * (1.0 - k), h * 0.02 * (1.0 - k));
+                el.opacity(k).top(px(-dy)).bottom(px(-dy)).left(px(-dx)).right(px(-dx))
+            })
+            .into_any_element()
     }
 }
 
-/// A member, what you may do to them, their roles (name and color), and whether they own the server.
-type MemberRow = (pb::Member, Vec<P>, Vec<(String, Option<u32>)>, bool);
-
 pub(crate) fn amber(p: &Palette) -> Hsla {
     hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0)
-}
-
-/// A card-like row in a list.
-fn row(p: &Palette) -> gpui_kit::Div {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(12.0))
-        .p(px(12.0))
-        .rounded(corner(16.0))
-        .bg(p.card)
-        .border_1()
-        .border_color(p.border)
 }
 
 pub(crate) fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
@@ -1575,11 +1010,9 @@ pub(crate) fn marked(text: &str, p: &Palette) -> gpui_kit::StyledText {
     crate::ui::instance_settings::emphasized(&parts, p)
 }
 
-fn chip_text(text: String, fg: Hsla, bg: Hsla) -> gpui_kit::Div {
-    div().px(px(6.0)).rounded(px(6.0)).bg(bg).text_color(fg).child(text)
-}
-
-/// The floating "n changes not saved" bar, with Discard and Save.
+/// The bar of unsaved changes, with Discard and Save (the web's `SaveBar`). The screen puts it
+/// under the page or over the column's foot; while someone just tried to leave it shakes and
+/// turns red.
 pub(crate) fn save_bar<V: 'static>(
     id: &str,
     n: usize,
@@ -1589,56 +1022,98 @@ pub(crate) fn save_bar<V: 'static>(
     discard: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
-    motion::rise(
+    bar_with_error(id, n, saving, None, p, cx, discard, save)
+}
+
+/// The same, saying what went wrong with the last save in place of the count.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn bar_with_error<V: 'static>(
+    id: &str,
+    n: usize,
+    saving: bool,
+    error: Option<&str>,
+    p: &Palette,
+    cx: &mut Context<V>,
+    discard: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+) -> AnyElement {
+    use crate::ui::settings_controls::{Look, button, shadow_xl};
+    let alarm = frame::ALARM.with(|a| a.get());
+    let alarmed = alarm.is_some();
+    let line: AnyElement = if let Some(e) = error {
+        div().text_color(p.destructive).child(crate::ui::instance_home::capitalized(e)).into_any_element()
+    } else if alarmed {
         div()
-            .id(SharedString::from(format!("{id}-card")))
-            .occlude()
-            .w(px(560.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.destructive)
+            .child(t("settings.controls.careful"))
+            .into_any_element()
+    } else {
+        div()
             .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(16.0))
-            .py(px(10.0))
-            .rounded(corner(16.0))
-            .bg(p.card)
-            .border_1()
-            .border_color(alpha(p.primary, 0.4))
-            .shadow(vec![gpui_kit::BoxShadow {
-                color: alpha(p.primary, if p.dark { 0.3 } else { 0.2 }),
-                offset: gpui_kit::point(px(0.0), px(16.0)),
-                blur_radius: px(40.0),
-                spread_radius: px(-10.0),
-                inset: false,
-            }])
+            .gap(px(4.0))
+            .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
             .child(
                 div()
-                    .flex_1()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .child(t_with("desktop.server.unsaved", &[("count", Arg::Num(n as i64))])),
+                    .text_color(p.muted_foreground)
+                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(n as i64))])),
             )
-            .child(
-                soft_button(SharedString::from(format!("{id}-discard")), t("settings.controls.discard"), p)
-                    .on_click(cx.listener(move |this, _, window, cx| discard(this, window, cx))),
+            .into_any_element()
+    };
+    let bar = div()
+        .id(SharedString::from(format!("{id}-card")))
+        .occlude()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(12.0))
+        .rounded(crate::ui::theme::radius_2xl())
+        .border_1()
+        .border_color(if alarmed { alpha(p.destructive, 0.7) } else { p.border.into() })
+        .bg(if alarmed { mix(p.card, p.destructive, 0.1) } else { alpha(p.card, 0.95) })
+        .p(px(12.0))
+        .pl(px(16.0))
+        .shadow(shadow_xl())
+        .child(div().flex_1().min_w_0().text_sm().line_height(px(20.0)).child(line))
+        .child(
+            button(
+                SharedString::from(format!("{id}-discard")),
+                t("settings.controls.discard"),
+                None,
+                Look::Ghost,
+                true,
+                p,
             )
-            .child(
-                primary_button(
-                    SharedString::from(format!("{id}-save")),
-                    if saving { t("settings.controls.saving") } else { t("settings.controls.save") },
-                    p,
-                )
-                .when(saving, |el| el.opacity(0.6))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if !saving {
-                        save(this, window, cx)
-                    }
-                })),
-            ),
-        SharedString::from(id.to_owned()),
-        Duration::ZERO,
-        12.0,
-    )
-    .into_any_element()
+            .rounded(crate::ui::theme::radius_xl())
+            .when(!saving, |el| el.on_click(cx.listener(move |this, _, w, cx| discard(this, w, cx)))),
+        )
+        .child(
+            button(
+                SharedString::from(format!("{id}-save")),
+                if saving { t("settings.controls.saving") } else { t("settings.controls.save") },
+                None,
+                Look::Primary,
+                true,
+                p,
+            )
+            .rounded(crate::ui::theme::radius_xl())
+            .px(px(16.0))
+            .font_weight(FontWeight::BOLD)
+            .when(saving, |el| el.opacity(0.5))
+            .when(!saving, |el| el.on_click(cx.listener(move |this, _, w, cx| save(this, w, cx)))),
+        );
+    match alarm {
+        Some(k) => {
+            motion::once(bar, SharedString::from(format!("{id}-shake-{k}")), Duration::from_millis(500), |el, t| {
+                let x = [0.0, -10.0, 10.0, -8.0, 8.0, -4.0, 4.0, 0.0];
+                let at = t * 7.0;
+                let i = (at.floor() as usize).min(6);
+                let f = at - i as f32;
+                el.relative().left(px(x[i] + (x[i + 1] - x[i]) * f))
+            })
+        }
+        None => bar.into_any_element(),
+    }
 }
 
 /// A circle that turns while something's on its way.
@@ -1659,49 +1134,6 @@ pub(crate) fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
             move |el, t| el.opacity(0.5 + 0.5 * ((t + k as f32 * 0.15) * std::f32::consts::TAU).sin().abs()),
         )
     }))
-}
-
-fn empty(glyph: &str, title: &str, body: &str, p: &Palette) -> impl IntoElement {
-    motion::rise(
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(8.0))
-            .py(px(48.0))
-            .child(icon(glyph).size(px(32.0)).text_color(p.muted_foreground))
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title.to_owned()))
-            .child(div().text_sm().text_color(p.muted_foreground).child(body.to_owned())),
-        SharedString::from(format!("empty-{title}")),
-        Duration::ZERO,
-        8.0,
-    )
-}
-
-/// Choices as pills, the picked one filled; it pops each time it changes.
-fn chips(
-    id: &'static str,
-    options: &[(i64, String)],
-    picked: i64,
-    p: &Palette,
-    cx: &mut Context<ServerSettingsView>,
-    pick: fn(&mut ServerSettingsView, i64, &mut Context<ServerSettingsView>),
-) -> AnyElement {
-    div()
-        .flex()
-        .flex_wrap()
-        .gap(px(6.0))
-        .children(options.iter().map(|(value, label)| {
-            let (on, value) = (*value == picked, *value);
-            chip(SharedString::from(format!("{id}-{value}")), label, on, p)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if !on {
-                        pick(this, value, cx)
-                    }
-                }))
-                .into_any_element()
-        }))
-        .into_any_element()
 }
 
 /// The same, keyed by text (a channel's id).
@@ -1752,73 +1184,6 @@ pub(crate) fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui
         })
         .active(|s| s.top(px(1.0)))
         .child(label.to_owned())
-}
-
-/// An audit entry's icon and tint.
-fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
-    let sky = hsla(0.55, 0.85, 0.5, 1.0);
-    let green = hsla(0.42, 0.65, 0.42, 1.0);
-    let violet = hsla(0.74, 0.7, 0.62, 1.0);
-    let amber = amber(p);
-    let orange = hsla(0.07, 0.9, 0.55, 1.0);
-    let pink = hsla(0.92, 0.8, 0.6, 1.0);
-    let red: Hsla = p.destructive.into();
-    match action {
-        A::ServerUpdate => ("settings", sky),
-        A::ChannelCreate => ("folder-plus", green),
-        A::ChannelUpdate => ("hash", sky),
-        A::ChannelDelete => ("trash", red),
-        A::ChannelsReorder => ("arrow-down-up", sky),
-        A::ChannelPermissionsUpdate => ("lock", sky),
-        A::RoleCreate => ("shield-plus", green),
-        A::RoleUpdate => ("shield", violet),
-        A::RoleDelete => ("shield-x", red),
-        A::RolesReorder => ("arrow-down-up", violet),
-        A::MemberRolesUpdate | A::MemberUpdate => ("user-cog", violet),
-        A::MemberTimeOut => ("hourglass", amber),
-        A::MemberKick => ("door-open", orange),
-        A::MemberBan => ("gavel", red),
-        A::MemberUnban => ("undo", green),
-        A::MessageDelete => ("message-square-x", red),
-        A::MessagePin => ("pin", sky),
-        A::MessageUnpin => ("pin-off", sky),
-        A::LiveTileEnd => ("radio", sky),
-        A::OwnershipTransfer => ("crown", amber),
-        A::InviteCreate => ("link", green),
-        A::InviteDelete => ("link-2-off", red),
-        A::ApplicationApprove => ("user-check", green),
-        A::ApplicationReject => ("user-x", red),
-        A::JoinFormUpdate => ("clipboard-list", sky),
-        A::WelcomeScreenUpdate => ("party-popper", pink),
-        A::OnboardingUpdate => ("sparkles", pink),
-        A::AutoModRuleCreate => ("shield-check", green),
-        A::AutoModRuleUpdate => ("shield-alert", sky),
-        A::AutoModRuleDelete => ("shield-x", red),
-        A::AutoModTimeOut => ("bot", amber),
-        A::AutoModMessageDelete => ("bot", red),
-        A::EmojiCreate => ("face-slightly-smiling-plus", green),
-        A::EmojiUpdate => ("face-slightly-smiling", sky),
-        A::EmojiDelete => ("face-slightly-frowning", red),
-        A::WebhookCreate => ("webhook", green),
-        A::WebhookUpdate => ("webhook", sky),
-        A::WebhookDelete => ("unplug", red),
-        A::AgentAdd => ("bot", violet),
-        A::ShareCodeCreate | A::SharedChannelRequest => ("link", green),
-        A::ShareCodeDelete => ("link-2-off", red),
-        A::SharedChannelApprove => ("check", green),
-        A::SharedChannelUpdate => ("settings", sky),
-        A::SharedChannelDisconnect => ("unplug", red),
-        A::SharedChannelBlock => ("user-x", red),
-        A::SharedChannelUnblock => ("undo", green),
-        A::ThreadLock => ("lock", amber),
-        A::ThreadUnlock => ("lock-open", green),
-        A::ThreadDelete => ("message-square-x", red),
-        A::PollEnd => ("check", amber),
-        A::ProfileItemCreate => ("sparkles", green),
-        A::ProfileItemUpdate => ("sparkles", sky),
-        A::ProfileItemDelete => ("trash", red),
-        A::Unspecified => ("scroll-text", p.muted_foreground.into()),
-    }
 }
 
 fn field_label(field: &str) -> String {
@@ -2240,6 +1605,29 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.emojiDelete",
             &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&emoji_before))],
         ),
+        A::ProfileItemCreate => t_with(
+            "serversettings.audit.s.profileItemCreate",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate if only("name") => t_with(
+            "serversettings.audit.s.renamed",
+            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate => {
+            let name = if change("name").is_some() {
+                after.clone()
+            } else {
+                format!("**{}**", t("serversettings.audit.aProfileItem"))
+            };
+            t_with(
+                "serversettings.audit.s.profileItemUpdate",
+                &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))],
+            )
+        }
+        A::ProfileItemDelete => t_with(
+            "serversettings.audit.s.profileItemDelete",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))],
+        ),
         A::WebhookCreate => t_with(
             "serversettings.audit.s.webhookCreate",
             &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after)), ("channel", Arg::Str(&place))],
@@ -2300,29 +1688,6 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.pollEndIn",
             &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
         ),
-        A::ProfileItemCreate => t_with(
-            "serversettings.audit.s.profileItemCreate",
-            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))],
-        ),
-        A::ProfileItemUpdate if only("name") => t_with(
-            "serversettings.audit.s.renamed",
-            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
-        ),
-        A::ProfileItemUpdate => {
-            let name = if change("name").is_some() {
-                after.clone()
-            } else {
-                format!("**{}**", t("serversettings.audit.aProfileItem"))
-            };
-            t_with(
-                "serversettings.audit.s.profileItemUpdate",
-                &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))],
-            )
-        }
-        A::ProfileItemDelete => t_with(
-            "serversettings.audit.s.profileItemDelete",
-            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))],
-        ),
         A::Unspecified => t_with("serversettings.audit.s.unknown", &[("actor", Arg::Str(&actor))]),
     }
 }
@@ -2364,34 +1729,31 @@ mod tests {
     fn pages_follow_permissions() {
         use crate::core::permissions::Access;
         let nobody = Access::default();
-        assert!(pages(&nobody).is_empty());
+        assert!(pages(&nobody, false).is_empty());
         let channels = std::iter::once(("general".to_owned(), u32::MAX)).collect();
         let owner = Access { owner: true, server: u32::MAX, channels, ..Access::default() };
         assert_eq!(words("ManageServer"), "Manage server");
-        assert_eq!(
-            pages(&owner),
-            vec![
-                Page::Overview,
-                Page::Welcome,
-                Page::Invites,
-                Page::Roles,
-                Page::Channels,
-                Page::Emoji,
-                Page::ProfileItems,
-                Page::Integrations,
-                Page::Shared,
-                Page::Recordings,
-                Page::Members,
-                Page::Bans,
-                Page::AutoMod,
-                Page::AuditLog
-            ]
-        );
+        let mut all = ALL.to_vec();
+        all.retain(|p| *p != Page::Limits);
+        assert_eq!(pages(&owner, false), all);
+        assert_eq!(pages(&owner, true), ALL.to_vec());
         let hooks = Access { server: crate::core::permissions::bit(P::ManageWebhooks), ..Access::default() };
-        assert_eq!(pages(&hooks), vec![Page::Integrations]);
+        assert_eq!(pages(&hooks, false), vec![Page::Integrations]);
+        // An instance admin who isn't in charge here sees the usage, the caps and the way to delete it.
+        assert_eq!(pages(&nobody, true), vec![Page::Usage, Page::Limits, Page::Danger]);
         // Managing one channel opens the Channels page.
         let one = std::iter::once(("general".to_owned(), crate::core::permissions::bit(P::ManageRoles))).collect();
         let keeper = Access { channels: one, ..Access::default() };
-        assert_eq!(pages(&keeper), vec![Page::Channels]);
+        assert_eq!(pages(&keeper, false), vec![Page::Channels]);
+    }
+
+    #[test]
+    fn search_finds_pages_and_settings() {
+        let found = search(&ALL, "slow").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, Page::Channels);
+        assert_eq!(found[0].1[0].0, "slowmode");
+        assert!(search(&ALL, "  ").is_none());
+        assert!(search(&ALL, "zzzz").unwrap().is_empty());
     }
 }

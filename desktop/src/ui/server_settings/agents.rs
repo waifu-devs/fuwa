@@ -127,64 +127,71 @@ impl ServerSettingsView {
             pb::McpAccessMode::Unspecified => pb::McpAccessMode::All,
             mode => mode,
         };
-        let width = 112.0;
         let chosen = mcp_choices().iter().position(|(m, _)| *m == current).unwrap_or(0);
+        // Where the highlight sits, in thirds of the row: it glides between choices.
         let pill = gpui_kit::base::motion::spring(
             "mcp-choice",
-            chosen as f32 * width,
+            chosen as f32,
             gpui_kit::base::motion::Spring::new(Duration::from_millis(340)).with_damping(0.75),
             window,
             cx,
         );
-        let mut row = div()
-            .relative()
-            .flex()
-            .p(px(4.0))
-            .rounded(corner(12.0))
-            .bg(alpha(p.muted_foreground, 0.1))
-            .w(px(width * 3.0 + 8.0))
-            .child(
-                div()
-                    .absolute()
-                    .top(px(4.0))
-                    .left(px(4.0 + pill))
-                    .w(px(width))
-                    .h(px(30.0))
-                    .rounded(corner(9.0))
-                    .bg(p.card),
-            );
+        let mut inner = div().relative().flex().w_full().child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(gpui_kit::relative(pill / 3.0))
+                .w(gpui_kit::relative(1.0 / 3.0))
+                .px(px(2.0))
+                .child(div().size_full().rounded(crate::ui::theme::radius_lg()).bg(p.background).shadow(vec![
+                    gpui_kit::BoxShadow {
+                        color: hsla(0.0, 0.0, 0.0, 0.05),
+                        offset: point(px(0.0), px(1.0)),
+                        blur_radius: px(2.0),
+                        spread_radius: px(0.0),
+                        inset: false,
+                    },
+                ])),
+        );
         for (mode, label) in mcp_choices() {
             let on = mode == current;
             let kept = access.agent_ids.clone();
-            row = row.child(
+            let fg = p.foreground;
+            inner = inner.child(
                 div()
                     .id(SharedString::from(format!("mcp-{}", mode as i32)))
                     .relative()
-                    .w(px(width))
-                    .h(px(30.0))
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(28.0))
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(if on { p.foreground } else { p.muted_foreground })
                     .when(!on, |el| {
-                        el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                            // Chosen agents are kept for "Only chosen"; the others need none.
-                            let ids = if mode == pb::McpAccessMode::Chosen { kept.clone() } else { Vec::new() };
-                            this.save_mcp(mode, ids, cx);
-                        }))
+                        el.cursor_pointer().hover(move |s| s.text_color(fg)).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                // Chosen agents are kept for "Only chosen"; the others need none.
+                                let ids = if mode == pb::McpAccessMode::Chosen { kept.clone() } else { Vec::new() };
+                                this.save_mcp(mode, ids, cx);
+                            },
+                        ))
                     })
                     .child(label),
             );
         }
+        let row = div().p(px(4.0)).rounded(crate::ui::theme::radius_xl()).bg(alpha(p.muted, 0.6)).child(inner);
         motion::rise(
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
                 .p(px(12.0))
-                .rounded(corner(16.0))
+                .rounded(crate::ui::theme::radius_2xl())
                 .border_1()
                 .border_color(p.border)
                 .bg(alpha(p.background, 0.4))
@@ -194,9 +201,21 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(8.0))
                         .child(icon("plug-zap").size(px(16.0)).text_color(hsla(0.73, 0.7, 0.62, 1.0)))
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("serversettings.agents.mcp"))),
+                        .child(
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .font_weight(FontWeight::BOLD)
+                                .child(t("serversettings.agents.mcp")),
+                        ),
                 )
-                .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.agents.mcpHint")))
+                .child(
+                    div()
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("serversettings.agents.mcpHint")),
+                )
                 .child(row),
             "mcp-choice-in",
             Duration::ZERO,
@@ -323,27 +342,65 @@ impl ServerSettingsView {
                     .flex_1()
                     .min_w_0()
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("settings.nav.agents")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t("serversettings.agents.intro"))),
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("serversettings.agents.intro")),
+                    ),
             );
 
         let field = div()
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(div().flex_1().child(Input::new(&self.agents.username).prefix(icon("at-sign").size(px(15.0)))))
             .child(
-                primary_button("agent-add", t("serversettings.channelPermissions.add"), p)
-                    .flex_none()
-                    .when(adding, |el| el.opacity(0.6))
-                    .child(if adding {
-                        spinner("agent-add-spin", 15.0, window)
-                    } else {
-                        icon("plus").size(px(15.0)).into_any_element()
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let name = this.agents.username.read(cx).value().to_string();
-                        this.add_agent(name, window, cx)
-                    })),
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        super::pages::boxed(
+                            Input::new(&self.agents.username).appearance(false),
+                            40.0,
+                            super::pages::focused(&self.agents.username, window, cx),
+                            p,
+                        )
+                        .pl(px(28.0)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(12.0))
+                            .top(px(12.0))
+                            .text_color(p.muted_foreground)
+                            .child(icon("at-sign").size(px(16.0))),
+                    ),
+            )
+            .child(
+                crate::ui::settings_controls::button(
+                    "agent-add",
+                    "",
+                    None,
+                    crate::ui::settings_controls::Look::Primary,
+                    false,
+                    p,
+                )
+                .h(px(40.0))
+                .rounded(crate::ui::theme::radius_xl())
+                .font_weight(FontWeight::BOLD)
+                .when(adding, |el| el.opacity(0.6))
+                .child(if adding {
+                    spinner("agent-add-spin", 16.0, window)
+                } else {
+                    icon("plus").size(px(16.0)).into_any_element()
+                })
+                .child(t("serversettings.channelPermissions.add"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let name = this.agents.username.read(cx).value().to_string();
+                    this.add_agent(name, window, cx)
+                })),
             );
         let field = match self.agents.shook.filter(|at| at.elapsed() < Duration::from_millis(450)) {
             Some(at) => field
@@ -362,6 +419,7 @@ impl ServerSettingsView {
             let mut row = div().flex().flex_wrap().items_center().gap(px(6.0)).child(
                 div()
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .child(t("serversettings.agents.yours")),
@@ -385,6 +443,7 @@ impl ServerSettingsView {
                         .bg(alpha(p.background, 0.6))
                         .cursor_pointer()
                         .text_xs()
+                        .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .hover(move |s| s.bg(hover).border_color(border))
                         .active(|s| s.top(px(1.0)))
@@ -416,14 +475,15 @@ impl ServerSettingsView {
                     .border_dashed()
                     .border_color(p.border)
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(motion::once(
-                        div().text_size(px(26.0)).child("🤖"),
+                        div().text_size(px(24.0)).line_height(px(32.0)).child("🤖"),
                         "agents-empty-bob",
                         Duration::from_millis(1200),
                         |el, t| el.relative().top(px(-5.0 * (t * std::f32::consts::PI).sin())),
                     ))
-                    .child(div().flex_1().min_w_0().child(t("desktop.server.agents.none"))),
+                    .child(div().flex_1().min_w_0().child(self.agents_none_line(p, cx))),
                 "agents-empty",
                 Duration::ZERO,
                 6.0,
@@ -436,6 +496,28 @@ impl ServerSettingsView {
             section = section.child(list);
         }
         section.into_any_element()
+    }
+
+    /// "No agents here yet. Make your own under Settings, Agents.", the link opening them.
+    fn agents_none_line(&self, p: &Palette, cx: &mut Context<Self>) -> gpui_kit::InteractiveText {
+        let link = t("serversettings.agents.settingsAgents");
+        let line = t_with("serversettings.agents.none", &[("settings", Arg::Str("\u{1}"))]);
+        let (before, after) = line.split_once('\u{1}').unwrap_or((line.as_str(), ""));
+        let text = format!("{before}{link}{after}");
+        let range = before.len()..before.len() + link.len();
+        let style = gpui_kit::HighlightStyle {
+            color: Some(p.primary.into()),
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        };
+        let view = cx.entity().downgrade();
+        gpui_kit::InteractiveText::new(
+            "agents-none-line",
+            gpui_kit::StyledText::new(text).with_highlights(vec![(range.clone(), style)]),
+        )
+        .on_click(vec![range], move |_, _, cx| {
+            let _ = view.update(cx, |_, cx| cx.emit(ServerSettingsEvent::OpenAgents));
+        })
     }
 
     fn agent_row(
@@ -487,6 +569,7 @@ impl ServerSettingsView {
                         .h(px(32.0))
                         .px(px(12.0))
                         .text_xs()
+                        .line_height(px(16.0))
                         .on_click(cx.listener(move |this, _, _, cx| this.remove_agent(yes.clone(), cx))),
                     )
                     .child(icon_button(SharedString::from(format!("agent-out-no-{no}")), "x", p).on_click(
@@ -513,6 +596,7 @@ impl ServerSettingsView {
                 .rounded(corner(12.0))
                 .cursor_pointer()
                 .text_sm()
+                .line_height(px(20.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
                 .hover(move |s| s.bg(red).text_color(c))
@@ -545,6 +629,7 @@ impl ServerSettingsView {
                         .items_center()
                         .gap(px(6.0))
                         .text_xs()
+                        .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
                         .child("MCP")
@@ -606,7 +691,9 @@ impl ServerSettingsView {
                                     ))
                                 }),
                         )
-                        .child(div().truncate().text_xs().text_color(p.muted_foreground).child(line)),
+                        .child(
+                            div().truncate().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(line),
+                        ),
                 )
                 .children(mcp_switch)
                 .child(end),

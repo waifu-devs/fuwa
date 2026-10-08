@@ -54,16 +54,40 @@ impl Paths {
 }
 
 /// An instance you added, with its session token when you're signed in.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedInstance {
     pub url: String,
-    /// Only ever read from older files, which kept it here: it's moved to the keychain.
+    /// The account in use's token. Only ever read from older files, which
+    /// kept it here: it's moved to the keychain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// Every account signed in to here, the one in use too, as cards to
+    /// switch between (the web's `fuwa/saved.ts`); their tokens are in the keychain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts: Vec<SavedAccount>,
+}
+
+/// An account kept on an instance: what the switcher shows of it, and its session.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedAccount {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    /// Its picture, only ever one on its own instance.
+    #[serde(default)]
+    pub avatar_url: String,
+    /// In the keychain, never in the file.
+    #[serde(skip)]
     pub token: Option<String>,
 }
 
 fn token_name(url: &str) -> String {
     format!("token:{url}")
+}
+
+/// Where a kept account's token is, beside the instance's own (the one in use).
+fn account_token_name(url: &str, user_id: &str) -> String {
+    format!("token:{url}#{user_id}")
 }
 
 pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
@@ -79,6 +103,11 @@ pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
             }
             None => saved.token = secrets.get(&token_name(&saved.url)),
         }
+        for account in &mut saved.accounts {
+            account.token = secrets.get(&account_token_name(&saved.url, &account.user_id));
+        }
+        // An account whose token is gone (the keychain was cleared) can't be switched to.
+        saved.accounts.retain(|a| a.token.is_some() && !a.user_id.is_empty());
     }
     if moved {
         store_instances(paths, secrets, &list);
@@ -88,16 +117,36 @@ pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
 
 pub fn store_instances(paths: &Paths, secrets: &Secrets, list: &[SavedInstance]) {
     let before: Vec<SavedInstance> = read(&paths.instances()).unwrap_or_default();
-    for gone in before.iter().filter(|b| !list.iter().any(|s| s.url == b.url)) {
-        secrets.delete(&token_name(&gone.url));
+    for old in &before {
+        let now = list.iter().find(|s| s.url == old.url);
+        if now.is_none() {
+            secrets.delete(&token_name(&old.url));
+        }
+        for gone in
+            old.accounts.iter().filter(|a| !now.is_some_and(|s| s.accounts.iter().any(|b| b.user_id == a.user_id)))
+        {
+            secrets.delete(&account_token_name(&old.url, &gone.user_id));
+        }
     }
     for saved in list {
         match &saved.token {
             Some(token) => secrets.set(&token_name(&saved.url), token),
             None => secrets.delete(&token_name(&saved.url)),
         }
+        for account in &saved.accounts {
+            if let Some(token) = &account.token {
+                secrets.set(&account_token_name(&saved.url, &account.user_id), token);
+            }
+        }
     }
-    let plain: Vec<SavedInstance> = list.iter().map(|s| SavedInstance { url: s.url.clone(), token: None }).collect();
+    let plain: Vec<SavedInstance> = list
+        .iter()
+        .map(|s| SavedInstance {
+            url: s.url.clone(),
+            token: None,
+            accounts: s.accounts.iter().map(|a| SavedAccount { token: None, ..a.clone() }).collect(),
+        })
+        .collect();
     if let Err(err) = write_json(&paths.instances(), &plain) {
         tracing::warn!("couldn't save the instance list: {err}");
     }
@@ -120,6 +169,84 @@ pub enum Density {
     #[default]
     Cozy,
     Compact,
+}
+
+/// The 12 or 24 hour clock for message times; `Auto` is the language's own
+/// (the web app's `clock` pref).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Clock {
+    #[default]
+    Auto,
+    #[serde(rename = "12h")]
+    H12,
+    #[serde(rename = "24h")]
+    H24,
+}
+
+/// How much room messages and lists get (the web app's `density`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Spacing {
+    Compact,
+    #[default]
+    Default,
+    Spacious,
+}
+
+/// Where role colors show: on names, as a dot beside them, or not at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleColors {
+    #[default]
+    Names,
+    Beside,
+    Off,
+}
+
+/// How the microphone decides when you're talking.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMode {
+    #[default]
+    Voice,
+    Ptt,
+}
+
+/// Popped-out cameras fill their window (cropping the edges) or fit in it whole.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PopoutFit {
+    #[default]
+    Cover,
+    Contain,
+}
+
+/// Which sounds play (the web app's `sounds`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sounds {
+    pub message: bool,
+    pub mention: bool,
+    pub join: bool,
+    pub call: bool,
+    pub ring: bool,
+}
+
+impl Default for Sounds {
+    fn default() -> Self {
+        Self { message: true, mention: true, join: false, call: true, ring: true }
+    }
+}
+
+/// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
+/// (Enter for a new line); the web app's `sendWith`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SendWith {
+    #[default]
+    Enter,
+    ModEnter,
 }
 
 /// The app's settings: this computer's, for every instance (like the web
@@ -181,6 +308,71 @@ pub struct Prefs {
     pub recent_gifs: std::collections::BTreeMap<String, Vec<crate::core::gifs::KeptGif>>,
     /// Shows "Copy … ID" on servers, channels, people and messages.
     pub developer_mode: bool,
+    /// The 12 or 24 hour clock for times in chat.
+    pub clock: Clock,
+    /// Which keys send a message.
+    pub send_with: SendWith,
+    /// Live tiles turned off everywhere (`core::live_tiles`; the web's `fuwa:live-tiles:off`).
+    pub live_tiles_off: bool,
+    /// Live tiles someone hid, by id, newest last.
+    pub live_tiles_hidden: Vec<String>,
+    /// Servers whose live tiles are off, by id.
+    pub live_tiles_quiet: std::collections::BTreeSet<String>,
+    /// Rail folders open on this computer, as `instance/folder` (the web's `lib/rail-open.ts`).
+    pub rail_open: std::collections::BTreeSet<String>,
+    /// The sign-in notice closed on each instance, by the way to sign in it was about.
+    pub sign_in_notice_closed: std::collections::BTreeMap<String, String>,
+    /// How fast voice messages play: 1, 1.5 or 2 (the web's voice rate).
+    pub voice_rate: f32,
+    /// How much room messages and lists get.
+    pub spacing: Spacing,
+    /// Message text size, in pixels (12 to 20).
+    pub chat_font_size: u8,
+    /// The whole app's size, in percent (80 to 150).
+    pub zoom: u16,
+    /// Effects on other people's profile cards play (your own always shows to you).
+    pub others_effects: bool,
+    /// Color saturation, in percent.
+    pub saturation: u8,
+    pub underline_links: bool,
+    pub role_colors: RoleColors,
+    /// A count of what's unread where the app shows it (the web's tab title).
+    pub unread_badge: bool,
+    pub sounds: Sounds,
+    /// Sound volume, in percent.
+    pub volume: u8,
+    /// Streamer mode hides addresses and your username.
+    pub streamer_hide_personal: bool,
+    /// Streamer mode keeps sounds quiet.
+    pub streamer_mute_sounds: bool,
+    /// Streamer mode keeps notifications quiet.
+    pub streamer_mute_notifications: bool,
+    /// Voice and audio: devices by name, "" for the system's default.
+    pub input_device: String,
+    pub output_device: String,
+    /// Microphone and call volume, in percent (up to 200).
+    pub input_volume: u16,
+    pub output_volume: u16,
+    pub input_mode: InputMode,
+    /// Voice activity picks its level by itself, or uses `sensitivity` (in dB).
+    pub auto_sensitivity: bool,
+    pub sensitivity: i8,
+    /// How long push to talk keeps going after the key comes up, in milliseconds.
+    pub ptt_release: u16,
+    pub echo_cancellation: bool,
+    pub noise_suppression: bool,
+    pub auto_gain_control: bool,
+    /// How loud each person is for you, in percent, by "instance/user id". Missing means 100.
+    pub user_volumes: std::collections::BTreeMap<String, u16>,
+    /// The camera by name, "" for the system's default.
+    pub video_device: String,
+    /// Your own camera shows mirrored to you.
+    pub mirror_video: bool,
+    pub popout_name: bool,
+    pub popout_glow: bool,
+    pub popout_fit: PopoutFit,
+    /// Sharing a screen brings its sound too.
+    pub share_sound: bool,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -196,7 +388,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: "sakura".into(),
-            follow_system: true,
+            follow_system: false,
             light_theme: "sakura".into(),
             dark_theme: "yoru".into(),
             custom_themes: Vec::new(),
@@ -222,6 +414,45 @@ impl Default for Prefs {
             recent_searches: Default::default(),
             recent_gifs: Default::default(),
             developer_mode: false,
+            clock: Clock::Auto,
+            send_with: SendWith::Enter,
+            live_tiles_off: false,
+            live_tiles_hidden: Vec::new(),
+            live_tiles_quiet: Default::default(),
+            rail_open: Default::default(),
+            sign_in_notice_closed: Default::default(),
+            voice_rate: 1.0,
+            spacing: Spacing::Default,
+            chat_font_size: 15,
+            zoom: 100,
+            others_effects: true,
+            saturation: 100,
+            underline_links: false,
+            role_colors: RoleColors::Names,
+            unread_badge: true,
+            sounds: Sounds::default(),
+            volume: 60,
+            streamer_hide_personal: true,
+            streamer_mute_sounds: true,
+            streamer_mute_notifications: true,
+            input_device: String::new(),
+            output_device: String::new(),
+            input_volume: 100,
+            output_volume: 100,
+            input_mode: InputMode::Voice,
+            auto_sensitivity: true,
+            sensitivity: -50,
+            ptt_release: 200,
+            echo_cancellation: true,
+            noise_suppression: true,
+            auto_gain_control: true,
+            user_volumes: Default::default(),
+            video_device: String::new(),
+            mirror_video: true,
+            popout_name: true,
+            popout_glow: true,
+            popout_fit: PopoutFit::Cover,
+            share_sound: true,
         }
     }
 }
@@ -281,6 +512,20 @@ impl Prefs {
             list.truncate(crate::core::gifs::RECENT);
         }
         self.recent_gifs.retain(|_, list| !list.is_empty());
+        // Before zoom, the app's size was a text scale.
+        if self.zoom == 100 && (self.text_scale - 1.0).abs() > 0.01 {
+            self.zoom = ((self.text_scale * 10.0).round() * 10.0) as u16;
+        }
+        self.zoom = self.zoom.clamp(80, 150);
+        self.text_scale = f32::from(self.zoom) / 100.0;
+        self.chat_font_size = self.chat_font_size.clamp(12, 20);
+        self.saturation = self.saturation.min(100);
+        self.volume = self.volume.min(100);
+        self.input_volume = self.input_volume.min(200);
+        self.output_volume = self.output_volume.min(200);
+        self.sensitivity = self.sensitivity.clamp(-100, 0);
+        self.ptt_release = self.ptt_release.min(2000);
+        self.user_volumes.retain(|_, v| *v <= 200);
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }
@@ -295,6 +540,21 @@ impl Prefs {
         if !known(&self.dark_theme) {
             self.dark_theme = "yoru".into();
         }
+    }
+
+    /// Whether notifications show: on, and not quieted by streamer mode.
+    pub fn notifies(&self) -> bool {
+        self.notifications && !(self.streamer_mode && self.streamer_mute_notifications)
+    }
+
+    /// Whether sounds play: not quieted by streamer mode.
+    pub fn sounds_on(&self) -> bool {
+        !(self.streamer_mode && self.streamer_mute_sounds)
+    }
+
+    /// Whether streamer mode hides addresses and your username now.
+    pub fn hides_personal(&self) -> bool {
+        self.streamer_mode && self.streamer_hide_personal
     }
 
     /// Every theme there is to pick: the built-in ones, then the ones made here.
@@ -353,9 +613,30 @@ mod tests {
         let secrets = Secrets::open(&paths.config);
         assert!(load_instances(&paths, &secrets).is_empty());
         assert_eq!(load_prefs(&paths), Prefs::default());
-        let list = vec![SavedInstance { url: "https://fuwa.chat".into(), token: Some("t".into()) }];
+        let alice = SavedAccount {
+            user_id: "a".into(),
+            username: "alice".into(),
+            display_name: "Alice".into(),
+            avatar_url: String::new(),
+            token: Some("t".into()),
+        };
+        let bob =
+            SavedAccount { user_id: "b".into(), username: "bob".into(), token: Some("u".into()), ..alice.clone() };
+        let list = vec![SavedInstance {
+            url: "https://fuwa.chat".into(),
+            token: Some("t".into()),
+            accounts: vec![alice.clone(), bob.clone()],
+        }];
         store_instances(&paths, &secrets, &list);
         assert_eq!(load_instances(&paths, &secrets), list);
+        // Forgetting an account forgets its token.
+        let fewer = vec![SavedInstance { accounts: vec![alice], ..list[0].clone() }];
+        store_instances(&paths, &secrets, &fewer);
+        assert_eq!(secrets.get("token:https://fuwa.chat#b"), None);
+        assert_eq!(load_instances(&paths, &secrets), fewer);
+        let file = std::fs::read_to_string(home.path().join("config/instances.json")).unwrap();
+        assert!(!file.contains("\"u\"") && file.contains("alice"), "{file}");
+        store_instances(&paths, &secrets, &list);
         // The token isn't in the instance list's file.
         let file = std::fs::read_to_string(home.path().join("config/instances.json")).unwrap();
         assert!(!file.contains("\"t\""), "{file}");

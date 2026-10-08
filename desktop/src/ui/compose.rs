@@ -1,12 +1,24 @@
 //! Writing, beyond typing: the @ list, editing a message in place, and the
 //! keys both take before the text fields see them.
 
-use gpui_kit::{Context, Focusable as _, Keystroke, Window};
+use std::time::Duration;
+
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AnyElement, Context, ElementId, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, Keystroke,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+};
 
 use crate::core::dms::Content;
+use crate::core::i18n::t;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Picker, Target};
 use crate::ui::chat::Row;
+use crate::ui::chat::emoji_glyph;
+use crate::ui::mentions::Pick;
+use crate::ui::motion;
+use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon};
 use crate::ui::{emoji, mentions};
 
 impl FuwaApp {
@@ -30,6 +42,11 @@ impl FuwaApp {
             return true;
         }
         if key.key == "escape" && self.discard_recording(cx) {
+            return true;
+        }
+        // Enter sends a recording started with a tap.
+        if key.key == "enter" && bare && self.tapped_recording() && self.recording_here() {
+            self.send_recording(cx);
             return true;
         }
         if key.key == "escape" && self.close_time_picker(window, cx) {
@@ -88,6 +105,12 @@ impl FuwaApp {
                 _ => return false,
             }
             cx.notify();
+            return true;
+        }
+        // With the Chat setting on Ctrl+Enter, that sends and Enter adds a line.
+        let with = self.core.prefs().send_with;
+        if with == crate::core::config::SendWith::ModEnter && crate::ui::composer::sends_message(key, with) {
+            self.send_now(window, cx);
             return true;
         }
         if key.key == "up" && bare && self.composer.read(cx).value().is_empty() {
@@ -185,6 +208,197 @@ impl FuwaApp {
             Some(i) => emoji::Catalog::of(&i.servers, &i.emojis, &server).encode(text),
             None => text.to_owned(),
         })
+    }
+
+    /// The @ list (the web's `MentionPicker`), over the composer: people,
+    /// roles and @everyone, or emoji after a colon. The pointer lights a row
+    /// as the arrows do.
+    pub(crate) fn picker_list(&self, picker: Picker, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let emoji = matches!(picker.options.first(), Some(Pick::Emoji(_)));
+        let mut list = div().flex().flex_col().child(Self::above_title(
+            if emoji { "face-slightly-smiling" } else { "at-sign" },
+            &t(if emoji { "chat.mentionPicker.emoji" } else { "chat.mentionPicker.mention" }),
+            p,
+        ));
+        for (n, pick) in picker.options.iter().enumerate() {
+            let active = n == picker.active;
+            let side = |text: String, glyph: Option<&str>| {
+                div()
+                    .ml_auto()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .children(glyph.map(|g| icon(g).size(px(12.0))))
+                    .child(text)
+            };
+            let slot = || div().size(px(24.0)).flex_none().flex().items_center().justify_center();
+            let (lead, name, sub): (AnyElement, String, Option<gpui_kit::Div>) = match pick {
+                Pick::Member { user, name } => (
+                    avatar(Some(user), 24.0, p).into_any_element(),
+                    name.clone(),
+                    Some(side(format!("@{}", user.username), None)),
+                ),
+                Pick::Role { name, color, .. } => (
+                    slot()
+                        .child(
+                            div()
+                                .size(px(10.0))
+                                .rounded_full()
+                                .bg(color.map(|c| Hsla::from(rgb(c))).unwrap_or(p.muted_foreground.into())),
+                        )
+                        .into_any_element(),
+                    format!("@{name}"),
+                    Some(side(t("chat.mentionPicker.role"), Some("shield"))),
+                ),
+                Pick::Everyone(which) => (
+                    slot()
+                        .rounded_full()
+                        .bg(alpha(p.primary, 0.15))
+                        .text_color(p.primary)
+                        .child(icon("at-sign").size(px(14.0)))
+                        .into_any_element(),
+                    format!("@{which}"),
+                    Some(side(t("chat.mentionPicker.everyone"), None)),
+                ),
+                Pick::Emoji(choice) => (
+                    emoji_glyph(choice, 22.0),
+                    format!(":{}:", choice.name),
+                    match (&choice.from, &choice.url) {
+                        (Some(server), _) => Some(side(server.clone(), None)),
+                        (None, Some(_)) => Some(side(t("chat.mentionPicker.thisServer"), None)),
+                        (None, None) => None,
+                    },
+                ),
+            };
+            let pick = pick.clone();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("pick|{}", pick.id())))
+                    .h(px(36.0))
+                    .px(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(radius_xl())
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(active, |el| el.bg(alpha(p.primary, 0.12)))
+                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        if *hovered
+                            && let Some(picker) = &mut this.picker
+                            && picker.active != n
+                        {
+                            picker.active = n;
+                            cx.notify();
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(pick.clone(), window, cx)))
+                    .child(lead)
+                    .child(div().min_w_0().truncate().font_weight(FontWeight::BOLD).child(name))
+                    .children(sub),
+            );
+        }
+        Self::above_composer(list, format!("picker-{}", picker.start), p)
+    }
+
+    /// A list floating just above the composer, as wide as its box (the web's
+    /// `absolute inset-x-0 bottom-full mb-2 rounded-2xl border bg-popover p-1.5 shadow-xl`).
+    pub(crate) fn above_composer(list: gpui_kit::Div, id: impl Into<SharedString>, p: &Palette) -> AnyElement {
+        let card = div()
+            .mb(px(8.0))
+            .overflow_hidden()
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .shadow(vec![
+                gpui_kit::BoxShadow {
+                    color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.1),
+                    offset: gpui_kit::point(px(0.0), px(20.0)),
+                    blur_radius: px(25.0),
+                    spread_radius: px(-5.0),
+                    inset: false,
+                },
+                gpui_kit::BoxShadow {
+                    color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.1),
+                    offset: gpui_kit::point(px(0.0), px(8.0)),
+                    blur_radius: px(10.0),
+                    spread_radius: px(-6.0),
+                    inset: false,
+                },
+            ])
+            .child(list.p(px(6.0)));
+        div()
+            .absolute()
+            .left(px(16.0))
+            .right(px(16.0))
+            .bottom(gpui_kit::relative(1.0))
+            .child(motion::rise(card, ElementId::Name(id.into()), Duration::ZERO, 8.0))
+            .into_any_element()
+    }
+
+    /// Such a list's small title: an icon and a word in capitals.
+    pub(crate) fn above_title(glyph: &str, text: &str, p: &Palette) -> gpui_kit::Div {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .px(px(8.0))
+            .pt(px(2.0))
+            .pb(px(4.0))
+            .text_size(px(10.4))
+            .line_height(px(14.0))
+            .font_weight(FontWeight::EXTRA_BOLD)
+            .text_color(p.muted_foreground)
+            .when(!glyph.is_empty(), |el| el.child(icon(glyph).size(px(12.0))))
+            .child(text.to_uppercase())
+    }
+
+    /// The message box's right-click menu (the web's `composerMenu`): cut and
+    /// copy what's selected, paste, select all, then an emoji at the caret.
+    pub(crate) fn composer_items(&self, cx: &gpui_kit::App) -> crate::ui::context_menu::Built {
+        use crate::ui::context_menu::{Built, Item, run};
+        use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
+        let (selected, has_text) = {
+            let state = self.composer.read(cx);
+            (!state.selected_value().is_empty(), !state.value().is_empty())
+        };
+        let mod_key = |k: &str| format!("{}+{k}", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" });
+        // Each acts on the box, so it gets the focus back first.
+        let on_box = |action: fn() -> Box<dyn gpui_kit::Action>| {
+            run(move |this, window, cx| {
+                this.composer.update(cx, |state, cx| state.focus(window, cx));
+                window.dispatch_action(action(), cx);
+            })
+        };
+        let mut edit = Vec::new();
+        if selected {
+            edit.push(
+                Item::act(t("workspace.menu.composer.cut"), "scissors", on_box(|| Box::new(Cut))).hint(mod_key("X")),
+            );
+            edit.push(
+                Item::act(t("workspace.menu.composer.copy"), "copy", on_box(|| Box::new(Copy))).hint(mod_key("C")),
+            );
+        }
+        edit.push(
+            Item::act(t("workspace.menu.composer.paste"), "clipboard-paste", on_box(|| Box::new(Paste)))
+                .hint(mod_key("V")),
+        );
+        if has_text {
+            edit.push(
+                Item::act(t("workspace.menu.composer.selectAll"), "text-cursor-input", on_box(|| Box::new(SelectAll)))
+                    .hint(mod_key("A")),
+            );
+        }
+        let emoji = Item::act(
+            t("workspace.menu.composer.emoji"),
+            "face-slightly-smiling",
+            run(|this, window, cx| this.open_emoji(window, cx)),
+        );
+        Built::of(vec![edit, vec![emoji]])
     }
 
     // ───────────────────────── Editing ─────────────────────────

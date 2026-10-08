@@ -12,16 +12,17 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash as _;
 use std::time::Duration;
 
-use gpui_kit::component::Sizable as _;
+use gpui_kit::Focusable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window, div, px,
+    WeakEntity, Window, div, px, rgb,
 };
 use prost::Message as _;
 
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::polls::{self, ANSWER, DURATIONS, Draft, MAX_ANSWERS, MIN_ANSWERS, QUESTION};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Target};
@@ -30,7 +31,7 @@ use crate::ui::mentions::Look;
 use crate::ui::motion;
 use crate::ui::overlay::scrim;
 use crate::ui::server_settings::roles::switch;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, card, error_line, icon, icon_button, pal, primary_button, soft_button};
 
 /// What the window keeps about polls between frames.
@@ -197,6 +198,7 @@ fn pill(
         .gap(px(4.0))
         .px(px(8.0))
         .py(px(2.0))
+        .line_height(px(18.2))
         .rounded_full()
         .bg(bg)
         .text_color(fg)
@@ -210,7 +212,7 @@ fn footer_button(
     label: Option<&'static str>,
     p: &Palette,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let hover = alpha(p.muted_foreground, 0.12);
+    let hover = p.muted;
     let fg = p.foreground;
     div()
         .id(id)
@@ -219,7 +221,9 @@ fn footer_button(
         .gap(px(4.0))
         .px(px(8.0))
         .py(px(4.0))
-        .rounded(corner(8.0))
+        .line_height(px(16.0))
+        .whitespace_nowrap()
+        .rounded(crate::ui::theme::radius_lg())
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .hover(move |s| s.bg(hover).text_color(fg))
@@ -231,13 +235,13 @@ fn footer_button(
 /// The card under a poll's message.
 pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<FuwaApp>) -> AnyElement {
     let poll = &c.poll;
-    let muted = alpha(p.muted_foreground, 0.12);
+    let muted = p.muted;
     let mut pills = div()
         .flex()
         .flex_wrap()
         .items_center()
         .gap(px(6.0))
-        .text_size(px(11.0))
+        .text_size(px(11.2))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(p.muted_foreground)
         .child(pill(Some("chart-column"), "Poll", p.primary, alpha(p.primary, 0.12)))
@@ -254,7 +258,7 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
             };
             div()
                 .id(SharedString::from(format!("poll-kind|{mid}")))
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip).build(window, cx))
                 .child(pill(Some(glyph), text, p.muted_foreground, muted))
         });
     if c.closed {
@@ -267,8 +271,8 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
     }
     let header = div().flex().flex_col().gap(px(6.0)).child(pills).child(
         div()
-            .text_size(px(16.0))
-            .line_height(px(21.0))
+            .text_size(px(16.32))
+            .line_height(px(22.44))
             .font_weight(FontWeight::EXTRA_BOLD)
             .child(poll.question.clone()),
     );
@@ -290,11 +294,18 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         } else {
             alpha(p.foreground, 0.08)
         };
-        let bar = div().absolute().left_0().top_0().bottom_0().rounded(corner(11.0)).bg(bar_color).with_animation(
-            SharedString::from(format!("poll-bar|{mid}|{}|{}|{}", a.id, from.to_bits(), to.to_bits())),
-            Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_out_quint()),
-            move |el, t| el.w(gpui_kit::relative(from + (to - from) * t)),
-        );
+        let bar = div()
+            .absolute()
+            .left_0()
+            .top_0()
+            .bottom_0()
+            .rounded(crate::ui::theme::radius_xl())
+            .bg(bar_color)
+            .with_animation(
+                SharedString::from(format!("poll-bar|{mid}|{}|{}|{}", a.id, from.to_bits(), to.to_bits())),
+                Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_out_quint()),
+                move |el, t| el.w(gpui_kit::relative(from + (to - from) * t)),
+            );
         let mark = div()
             .size(px(18.0))
             .flex_none()
@@ -319,7 +330,7 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         let row = div()
             .id(SharedString::from(format!("poll-answer|{mid}|{id}")))
             .relative()
-            .rounded(corner(12.0))
+            .rounded(crate::ui::theme::radius_xl())
             .border_1()
             .border_color(if chosen { alpha(p.primary, 0.6) } else { p.border.into() })
             .when(dim, |el| el.opacity(0.62))
@@ -333,20 +344,35 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                     .px(px(12.0))
                     .py(px(8.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .child(mark)
                     .when_some(answer_emoji(&a.emoji, c.pictures.get(n).and_then(Option::as_ref), 18.0), |el, e| {
                         el.child(e)
                     })
-                    .child(div().flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).child(a.text.clone()))
-                    .when(winner, |el| el.child(icon("trophy").size(px(15.0)).text_color(p.primary)))
+                    .child(div().flex_1().min_w_0().font_weight(FontWeight::BOLD).child(a.text.clone()))
+                    .when(winner, |el| el.child(icon("trophy").size(px(16.0)).text_color(rgb(0xf59e0b))))
                     .when(c.results, |el| {
-                        el.child(
+                        // The web's numbers: the votes muted, then the share in a 36px column.
+                        el.child(motion::slide_in(
                             div()
                                 .flex_none()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(6.0))
                                 .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(format!("{} · {percent}%", a.votes)),
-                        )
+                                .line_height(px(16.0))
+                                .child(div().text_color(p.muted_foreground).child(a.votes.to_string()))
+                                .child(
+                                    div()
+                                        .w(px(36.0))
+                                        .flex()
+                                        .justify_end()
+                                        .font_weight(FontWeight::EXTRA_BOLD)
+                                        .child(format!("{percent}%")),
+                                ),
+                            SharedString::from(format!("poll-numbers|{mid}|{id}")),
+                            8.0,
+                        ))
                     }),
             );
         let row = if c.can_vote {
@@ -455,8 +481,10 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .flex()
         .flex_wrap()
         .items_center()
-        .gap(px(8.0))
+        .gap_x(px(12.0))
+        .gap_y(px(6.0))
         .text_xs()
+        .line_height(px(16.0))
         .text_color(p.muted_foreground)
         .child(
             div()
@@ -473,11 +501,13 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .flex()
         .flex_col()
         .gap(px(12.0))
-        .p(px(14.0))
-        .rounded(corner(16.0))
+        .p(px(16.0))
+        .rounded(crate::ui::theme::radius_2xl())
         .border_1()
         .border_color(p.border)
-        .bg(alpha(p.card, 0.7))
+        // Solid: GPUI draws a shadow under see-through fills, which the web clips away.
+        .bg(crate::ui::theme::mix(p.chat_surface.into(), p.card, 0.7))
+        .shadow(crate::ui::polls::shadow_sm())
         .child(header)
         .child(answers)
         .child(footer)
@@ -835,7 +865,7 @@ impl FuwaApp {
         let channel_name = self.core.shared.read(|s| {
             s.instance(&place.key).and_then(|i| i.channel(&place.server, &place.channel)).map(|c| c.name.clone())
         });
-        let question = cx.new(|cx| InputState::new(window, cx).placeholder("What should we play tonight?"));
+        let question = cx.new(|cx| InputState::new(window, cx).placeholder(t("chattools.editor.questionPlaceholder")));
         let emoji_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find an emoji"));
         let mut subs = vec![
             cx.subscribe_in(&question, window, |this: &mut Self, input, event: &InputEvent, window, cx| match event {
@@ -897,7 +927,9 @@ impl FuwaApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Answer {
-        let text = cx.new(|cx| InputState::new(window, cx).placeholder("Add an answer"));
+        let n = self.polls.editor.as_ref().map_or(id as usize, |e| e.answers.len());
+        let name = t_with("chattools.editor.answer", &[("n", Arg::Num(n as i64 + 1))]);
+        let text = cx.new(|cx| InputState::new(window, cx).placeholder(name));
         subs.push(cx.subscribe_in(
             &text,
             window,
@@ -981,6 +1013,9 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// The poll editor (the web's `PollEditor` dialog): the question, 2 to 10
+    /// answers each with an emoji if you like, how long it runs, single or
+    /// multiple choice and anonymous votes, then one button to post it.
     pub(crate) fn render_poll_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
         let Some(draft) = self.poll_draft(cx) else { return div().into_any_element() };
@@ -993,26 +1028,60 @@ impl FuwaApp {
                 .unwrap_or_default();
             (look, catalog, self.prefs.skin_tone)
         });
-        let count = draft.question.chars().count();
+        let focused =
+            |input: &Entity<InputState>, cx: &gpui_kit::App| input.read(cx).focus_handle(cx).is_focused(window);
+        let left = QUESTION as i64 - draft.question.chars().count() as i64;
+        let amber = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };
         let question = div()
             .flex()
             .flex_col()
-            .gap(px(6.0))
+            .gap(px(8.0))
             .child(
                 div()
                     .flex()
+                    .items_baseline()
                     .justify_between()
-                    .child(label("QUESTION", &p))
-                    .child(div().text_xs().text_color(p.muted_foreground).child(format!("{count}/{QUESTION}"))),
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t("chattools.editor.question"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(if left < 30 { amber } else { p.muted_foreground })
+                            .child(left.to_string()),
+                    ),
             )
-            .child(Input::new(&e.question).large());
+            .child(
+                field(&e.question, 44.0, focused(&e.question, cx), &p)
+                    .text_size(px(15.2))
+                    .font_weight(FontWeight::BOLD),
+            );
 
-        let mut answers = div().flex().flex_col().gap(px(8.0)).child(label("ANSWERS", &p));
+        let mut answers = div().flex().flex_col().gap(px(8.0)).child(
+            div()
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .child(t("chattools.editor.answers"))
+                .child(div().text_xs().font_weight(FontWeight::NORMAL).text_color(p.muted_foreground).child(t_with(
+                    "chattools.editor.answerCount",
+                    &[("count", Arg::Num(e.answers.len() as i64)), ("max", Arg::Num(MAX_ANSWERS as i64))],
+                ))),
+        );
         let removable = e.answers.len() > MIN_ANSWERS;
         for (n, a) in e.answers.iter().enumerate() {
             let picking = e.emoji_for == Some(n);
-            let glyph = answer_emoji(&a.emoji, look_picture(&look, &a.emoji).as_ref(), 18.0);
+            let glyph = answer_emoji(&a.emoji, look_picture(&look, &a.emoji).as_ref(), 20.0);
             let id = a.id;
+            let fg = p.primary;
+            let tip = if a.emoji.is_empty() {
+                t_with("chattools.editor.addAnswerEmoji", &[("n", Arg::Num(n as i64 + 1))])
+            } else {
+                t_with("chattools.editor.answerEmoji", &[("n", Arg::Num(n as i64 + 1))])
+            };
             let emoji_button = div()
                 .id(SharedString::from(format!("poll-emoji|{id}")))
                 .size(px(40.0))
@@ -1020,19 +1089,14 @@ impl FuwaApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(corner(12.0))
+                .rounded(radius_xl())
                 .border_1()
-                .border_color(if picking { p.primary } else { p.border })
-                .text_color(p.muted_foreground)
+                .border_color(if picking { alpha(p.primary, 0.5) } else { p.border.into() })
+                .bg(alpha(p.muted, 0.4))
+                .text_color(if picking { p.primary } else { p.muted_foreground })
                 .cursor_pointer()
-                .hover({
-                    let border = p.primary;
-                    move |s| s.border_color(border)
-                })
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(format!("Add an emoji to answer {}", n + 1))
-                        .build(window, cx)
-                })
+                .hover(move |s| s.text_color(fg))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let Some(e) = this.polls.editor.as_mut() else { return };
                     let Some(at) = e.answers.iter().position(|a| a.id == id) else { return };
@@ -1046,40 +1110,62 @@ impl FuwaApp {
                     cx.notify();
                 }))
                 .child(glyph.unwrap_or_else(|| icon("face-slightly-smiling-plus").size(px(18.0)).into_any_element()));
+            let (danger_bg, danger) = (alpha(p.destructive, 0.1), p.destructive);
+            // The remove button keeps its place while there are only two, unseen (the web's `opacity-0`).
+            let remove = div()
+                .id(SharedString::from(format!("poll-remove|{id}")))
+                .size(px(32.0))
+                .flex_none()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(p.muted_foreground)
+                .when(!removable, |el| el.opacity(0.0))
+                .when(removable, |el| {
+                    el.cursor_pointer()
+                        .hover(move |s| s.bg(danger_bg).text_color(danger))
+                        .tooltip(move |window, cx| {
+                            crate::ui::overlay::Tip::new(t_with(
+                                "chattools.editor.removeAnswer",
+                                &[("n", Arg::Num(n as i64 + 1))],
+                            ))
+                            .build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if let Some(e) = this.polls.editor.as_mut() {
+                                e.answers.retain(|a| a.id != id);
+                                e.emoji_for = None;
+                            }
+                            this.number_answers(window, cx);
+                            cx.notify();
+                        }))
+                })
+                .child(icon("x").size(px(16.0)));
             let row = div()
                 .flex()
                 .items_center()
                 .gap(px(8.0))
                 .child(emoji_button)
-                .child(div().flex_1().min_w_0().child(Input::new(&a.text).large()))
-                .when(removable, |el| {
-                    el.child(icon_button(SharedString::from(format!("poll-remove|{id}")), "x", &p).on_click(
-                        cx.listener(move |this, _, _, cx| {
-                            if let Some(e) = this.polls.editor.as_mut() {
-                                e.answers.retain(|a| a.id != id);
-                                e.emoji_for = None;
-                            }
-                            cx.notify();
-                        }),
-                    ))
-                });
+                .child(div().flex_1().min_w_0().child(field(&a.text, 40.0, focused(&a.text, cx), &p)))
+                .child(remove);
             answers =
-                answers.child(motion::rise(row, SharedString::from(format!("poll-row|{id}")), Duration::ZERO, 6.0));
+                answers.child(motion::rise(row, SharedString::from(format!("poll-row|{id}")), Duration::ZERO, -8.0));
             if picking {
                 answers = answers.child(self.answer_picker(n, &catalog, tone, &p, cx));
             }
         }
         if e.answers.len() < MAX_ANSWERS {
-            let hover = alpha(p.primary, 0.08);
+            let (border, fg) = (alpha(p.primary, 0.5), p.primary);
             answers = answers.child(
                 div()
                     .id("poll-add")
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .justify_center()
+                    .gap(px(6.0))
                     .h(px(40.0))
-                    .px(px(12.0))
-                    .rounded(corner(12.0))
+                    .rounded(radius_xl())
                     .border_1()
                     .border_dashed()
                     .border_color(p.border)
@@ -1087,49 +1173,64 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .text_color(p.muted_foreground)
                     .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
+                    .hover(move |s| s.border_color(border).text_color(fg))
+                    .active(|s| s.opacity(0.85))
                     .on_click(cx.listener(|this, _, window, cx| this.add_answer(window, cx)))
                     .child(icon("plus").size(px(16.0)))
-                    .child("Add an answer"),
+                    .child(t("chattools.editor.addAnswer")),
             );
         }
 
         let mut durations = div().flex().flex_wrap().gap(px(6.0));
-        for (name, hours) in DURATIONS {
+        for hours in DURATIONS.iter().map(|(_, h)| *h) {
             let on = e.hours == hours;
-            let hover = alpha(p.primary, 0.08);
+            let (border, fg) = (alpha(p.primary, 0.4), p.foreground);
+            let label = match hours {
+                0 => t("chattools.editor.noEnd"),
+                h if h % 168 == 0 => t_with("chattools.editor.weeks", &[("count", Arg::Num(i64::from(h / 168)))]),
+                h if h % 24 == 0 => t_with("chattools.editor.days", &[("count", Arg::Num(i64::from(h / 24)))]),
+                h => t_with("chattools.editor.hours", &[("count", Arg::Num(i64::from(h)))]),
+            };
             durations = durations.child(
                 div()
                     .id(SharedString::from(format!("poll-hours|{hours}")))
                     .px(px(12.0))
-                    .h(px(30.0))
-                    .flex()
-                    .items_center()
+                    .py(px(6.0))
                     .rounded_full()
-                    .text_sm()
+                    .border_1()
+                    .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .border_1()
-                    .when(on, |el| el.border_color(p.primary).bg(alpha(p.primary, 0.14)).text_color(p.primary))
-                    .when(!on, |el| {
-                        el.border_color(p.border).text_color(p.muted_foreground).hover(move |s| s.bg(hover))
+                    .when(on, |el| {
+                        el.border_color(gpui_kit::transparent_black()).bg(p.primary).text_color(p.primary_foreground)
                     })
+                    .when(!on, |el| {
+                        el.border_color(p.border)
+                            .text_color(p.muted_foreground)
+                            .hover(move |s| s.border_color(border).text_color(fg))
+                    })
+                    .active(|s| s.opacity(0.85))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(e) = this.polls.editor.as_mut() {
                             e.hours = hours;
                         }
                         cx.notify();
                     }))
-                    .child(name),
+                    .child(label),
             );
         }
         let toggles = div()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(p.border)
             .child(toggle_row(
-                "Pick more than one",
-                if e.multiple { "People can choose as many answers as they like." } else { "People choose one answer." },
+                "list-checks",
+                e.multiple,
+                t("chattools.editor.multiple"),
+                t(if e.multiple { "chattools.editor.multipleOn" } else { "chattools.editor.multipleOff" }),
                 switch("poll-multiple".into(), e.multiple, false, cx, |this: &mut Self, on, cx| {
                     if let Some(e) = this.polls.editor.as_mut() {
                         e.multiple = on;
@@ -1138,13 +1239,12 @@ impl FuwaApp {
                 }),
                 &p,
             ))
+            .child(div().h(px(1.0)).bg(p.border))
             .child(toggle_row(
-                "Anonymous votes",
-                if e.anonymous {
-                    "Nobody here, moderators and admins included, sees who voted for what, and results show when the poll ends. Voters see this before they vote."
-                } else {
-                    "Everyone in the channel can see who voted for what. Voters see this before they vote."
-                },
+                if e.anonymous { "eye-off" } else { "eye" },
+                e.anonymous,
+                t("chattools.editor.anonymous"),
+                t(if e.anonymous { "chattools.editor.anonymousOn" } else { "chattools.editor.anonymousOff" }),
                 switch("poll-anonymous".into(), e.anonymous, false, cx, |this: &mut Self, on, cx| {
                     if let Some(e) = this.polls.editor.as_mut() {
                         e.anonymous = on;
@@ -1154,59 +1254,123 @@ impl FuwaApp {
                 &p,
             ));
 
-        let ready = draft.ready();
+        let ready = draft.ready() && !e.busy;
         let submit = if draft.filled() < MIN_ANSWERS {
-            "Add at least two answers"
+            t("chattools.editor.needAnswers")
         } else if draft.question.trim().is_empty() {
-            "Ask a question"
-        } else if e.busy {
-            "Posting…"
+            t("chattools.editor.needQuestion")
         } else {
-            "Post poll"
+            t("chattools.editor.post")
         };
-        let body = div()
-            .id("poll-editor-body")
-            .max_h((window.viewport_size().height - px(220.0)).max(px(240.0)))
-            .overflow_y_scroll()
+        let error = e.error.clone().map(|why| {
+            div()
+                .rounded(radius_xl())
+                .bg(alpha(p.destructive, 0.1))
+                .px(px(12.0))
+                .py(px(8.0))
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.destructive)
+                .child(why)
+        });
+        let post = primary_button("poll-post", submit, &p)
+            .w_full()
+            .h(px(44.0))
+            .rounded(radius_xl())
+            .text_sm()
+            .when(e.busy, |el| {
+                el.child(icon("loader-circle").size(px(16.0)).with_animation(
+                    "poll-posting",
+                    Animation::new(Duration::from_millis(900)).repeat(),
+                    |el, t| el.rotate(gpui_kit::percentage(t)),
+                ))
+            })
+            .when(!ready, |el| el.opacity(0.5))
+            .on_click(cx.listener(|this, _, _, cx| this.send_poll(cx)));
+        let form = div()
             .flex()
             .flex_col()
-            .gap(px(18.0))
-            .pr(px(4.0))
+            .gap(px(20.0))
             .child(question)
             .child(answers)
-            .child(div().flex().flex_col().gap(px(8.0)).child(label("HOW LONG IT RUNS", &p)).child(durations))
-            .child(toggles);
-        let panel = card(&p)
-            .w(px(520.0))
-            .p(px(24.0))
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(dialog_head(
-                "chart-column",
-                "Make a poll",
-                format!("Everyone who can see #{} can vote.", e.channel_name),
-                &p,
-                cx,
-            ))
-            .child(body)
-            .when_some(error_line(e.error.as_deref(), &p), |el, err| el.child(err))
             .child(
                 div()
                     .flex()
-                    .justify_end()
-                    .gap(px(10.0))
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("chattools.editor.runsFor")))
+                    .child(durations),
+            )
+            .child(toggles)
+            .children(error)
+            .child(post);
+        let muted = p.muted;
+        let fg = p.foreground;
+        let panel = div()
+            .id("poll-editor-body")
+            .relative()
+            .w(px(512.0))
+            .max_h((window.viewport_size().height - px(32.0)).max(px(240.0)))
+            .overflow_y_scroll()
+            .p(px(24.0))
+            .rounded(crate::ui::theme::radius_3xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.25),
+                offset: gpui_kit::point(px(0.0), px(25.0)),
+                blur_radius: px(50.0),
+                spread_radius: px(-12.0),
+                inset: false,
+            }])
+            .child(
+                div()
+                    .mb(px(20.0))
+                    .pr(px(32.0))
                     .child(
-                        soft_button("poll-cancel", "Cancel", &p)
-                            .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
+                        div()
+                            .text_xl()
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("chattools.editor.title")),
                     )
                     .child(
-                        primary_button("poll-post", submit, &p)
-                            .when(!ready || e.busy, |el| el.opacity(0.55))
-                            .on_click(cx.listener(|this, _, _, cx| this.send_poll(cx))),
+                        div()
+                            .mt(px(4.0))
+                            .text_sm()
+                            .text_color(p.muted_foreground)
+                            .child(t_with("chattools.editor.about", &[("channel", Arg::Str(&e.channel_name))])),
                     ),
+            )
+            .child(form)
+            .child(
+                div()
+                    .id("dialog-close")
+                    .absolute()
+                    .top(px(16.0))
+                    .right(px(16.0))
+                    .size(px(32.0))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(p.muted_foreground)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(muted).text_color(fg))
+                    .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
+                    .child(icon("x").size(px(16.0))),
             );
-        dialog_frame(panel, "poll", &p, cx)
+        dialog_frame(div().child(panel), "poll", &p, cx)
+    }
+
+    /// Calls each answer by its number again ("Answer 1", "Answer 2") after one goes.
+    fn number_answers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(e) = self.polls.editor.as_ref() else { return };
+        for (n, a) in e.answers.iter().enumerate() {
+            let name = t_with("chattools.editor.answer", &[("n", Arg::Num(n as i64 + 1))]);
+            a.text.update(cx, |s, cx| s.set_placeholder(name, window, cx));
+        }
     }
 
     /// A small emoji picker under an answer: this server's emoji and the standard set, searchable.
@@ -1307,26 +1471,66 @@ fn clip(input: &Entity<InputState>, max: usize, window: &mut Window, cx: &mut Co
     }
 }
 
-fn label(text: &'static str, p: &Palette) -> gpui_kit::Div {
-    div().text_size(px(11.0)).font_weight(FontWeight::EXTRA_BOLD).text_color(p.muted_foreground).child(text)
-}
-
-fn toggle_row(title: &'static str, hint: &'static str, control: impl IntoElement, p: &Palette) -> gpui_kit::Div {
+/// A switch in the editor's box: its icon in a tile (lit while on), what it is and what it does.
+fn toggle_row(
+    glyph: &'static str,
+    on: bool,
+    title: String,
+    hint: String,
+    control: impl IntoElement,
+    p: &Palette,
+) -> gpui_kit::Div {
     div()
         .flex()
-        .items_start()
+        .items_center()
         .gap(px(12.0))
+        .p(px(12.0))
+        .child(
+            div()
+                .size(px(36.0))
+                .flex_none()
+                .rounded(radius_xl())
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(on, |el| el.bg(alpha(p.primary, 0.15)).text_color(p.primary))
+                .when(!on, |el| el.bg(p.muted).text_color(p.muted_foreground))
+                .child(icon(glyph).size(px(18.0))),
+        )
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
-                .child(div().text_xs().text_color(p.muted_foreground).child(hint)),
+                .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(title))
+                .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(hint)),
         )
         .child(control)
+}
+
+/// A text field drawn like the web's `Input` in the editor: rounded, a border
+/// that turns the ring color with a soft ring around it while focused.
+fn field(input: &Entity<InputState>, height: f32, focused: bool, p: &Palette) -> gpui_kit::Div {
+    div()
+        .h(px(height))
+        .flex()
+        .items_center()
+        .px(px(2.0))
+        .rounded(radius_xl())
+        .border_1()
+        .border_color(if focused { alpha(p.primary, 0.6) } else { p.border.into() })
+        .bg(p.card)
+        .when(focused, |el| {
+            el.shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.primary, 0.25),
+                offset: gpui_kit::point(px(0.0), px(0.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(3.0),
+                inset: false,
+            }])
+        })
+        .child(div().flex_1().min_w_0().child(Input::new(input).appearance(false)))
 }
 
 fn dialog_head(
@@ -1417,6 +1621,27 @@ struct Page {
     loading: bool,
     loaded: bool,
     error: Option<String>,
+}
+
+/// Tailwind's `shadow-sm`.
+pub(crate) fn shadow_sm() -> Vec<gpui_kit::BoxShadow> {
+    let black = |a: f32| gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a };
+    vec![
+        gpui_kit::BoxShadow {
+            color: black(0.1),
+            offset: gpui_kit::point(px(0.0), px(1.0)),
+            blur_radius: px(3.0),
+            spread_radius: px(0.0),
+            inset: false,
+        },
+        gpui_kit::BoxShadow {
+            color: black(0.1),
+            offset: gpui_kit::point(px(0.0), px(1.0)),
+            blur_radius: px(2.0),
+            spread_radius: px(-1.0),
+            inset: false,
+        },
+    ]
 }
 
 #[cfg(test)]

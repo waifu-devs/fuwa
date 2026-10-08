@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 use parking_lot::Mutex;
 
@@ -114,7 +114,6 @@ fn run(
     listening: Arc<AtomicBool>,
     trouble: Arc<Mutex<Vec<Trouble>>>,
 ) {
-    let host = cpal::default_host();
     let report = |what: Trouble, on: bool| {
         let mut list = trouble.lock();
         list.retain(|t| *t != what);
@@ -123,7 +122,7 @@ fn run(
         }
     };
     let open_input = || {
-        let device = host.default_input_device()?;
+        let device = crate::core::sounds::picked_input()?;
         let config = device.default_input_config().ok()?;
         let stream = match config.sample_format() {
             SampleFormat::F32 => input_stream::<f32>(&device, config.config(), microphone.clone()),
@@ -135,7 +134,7 @@ fn run(
         stream.play().ok()?;
         Some(stream)
     };
-    let output = host.default_output_device().and_then(|device| {
+    let output = crate::core::sounds::picked_output().and_then(|device| {
         let config = device.default_output_config().ok()?;
         let stream = match config.sample_format() {
             SampleFormat::F32 => output_stream::<f32>(&device, config.config(), speakers.clone()),

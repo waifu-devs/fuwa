@@ -364,17 +364,21 @@ impl ServerSettingsView {
                         .flex()
                         .flex_col()
                         .items_center()
-                        .gap(px(6.0))
-                        .py(px(28.0))
+                        .gap(px(8.0))
+                        .py(px(32.0))
                         .child(motion::once(
-                            div().text_size(px(40.0)).child("🪝"),
+                            div().text_size(px(36.0)).line_height(px(40.0)).child("🪝"),
                             "hook-empty-bob",
                             Duration::from_millis(1200),
                             |el, t| el.relative().top(px(-6.0 * (t * std::f32::consts::PI).sin())),
                         ))
                         .child(div().font_weight(FontWeight::BOLD).child(t("serversettings.webhooks.none")))
                         .child(
-                            div().text_sm().text_color(p.muted_foreground).child(t("serversettings.webhooks.noneHint")),
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.webhooks.noneHint")),
                         ),
                     "hook-empty",
                     Duration::from_millis(80),
@@ -462,20 +466,25 @@ impl ServerSettingsView {
                             .child(
                                 div()
                                     .text_sm()
+                                    .line_height(px(20.0))
                                     .text_color(p.muted_foreground)
                                     .child(t("serversettings.webhooks.intro")),
                             ),
                     )
                     .child(
-                        primary_button("hook-new", t("serversettings.webhooks.new"), p)
-                            .flex_none()
-                            .when(creating || self.hooks.list.is_none(), |el| el.opacity(0.6))
-                            .child(if creating {
+                        super::pages::act(
+                            "hook-new",
+                            t("serversettings.webhooks.new"),
+                            if creating {
                                 spinner("hook-new-spin", 16.0, window)
                             } else {
                                 icon("plus").size(px(16.0)).into_any_element()
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.new_hook(cx))),
+                            },
+                            crate::ui::settings_controls::Look::Primary,
+                            p,
+                        )
+                        .when(creating || self.hooks.list.is_none(), |el| el.opacity(0.5))
+                        .on_click(cx.listener(|this, _, _, cx| this.new_hook(cx))),
                     ),
             )
             .into_any_element()
@@ -548,6 +557,7 @@ impl ServerSettingsView {
                             .items_center()
                             .gap(px(4.0))
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
                             .child(icon(channel_glyph(channel)).size(px(12.0)))
                             .child(div().min_w_0().truncate().child(about)),
@@ -684,6 +694,7 @@ impl ServerSettingsView {
                                 .min_w_0()
                                 .font_family("monospace")
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .when(!shown, |el| el.truncate())
                                 .child(if shown { url.clone() } else { "•".repeat(28) }),
                             SharedString::from(format!("hook-addr-{id}-{shown}")),
@@ -717,6 +728,7 @@ impl ServerSettingsView {
                             .h(px(32.0))
                             .px(px(12.0))
                             .text_sm()
+                            .line_height(px(20.0))
                             .child(motion::rise(
                                 icon(if copied { "check" } else { "copy" }).size(px(14.0)),
                                 SharedString::from(format!("hook-copy-icon-{id}-{copied}")),
@@ -735,7 +747,13 @@ impl ServerSettingsView {
                             })),
                         ),
                 )
-                .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.webhooks.secret")))
+                .child(
+                    div()
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("serversettings.webhooks.secret")),
+                )
         };
 
         let test = {
@@ -777,10 +795,12 @@ impl ServerSettingsView {
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(div().px(px(4.0)).text_xs().font_weight(FontWeight::BOLD).child(match ask {
-                            Ask::Reset => t("serversettings.webhooks.resetAsk"),
-                            Ask::Delete => t("serversettings.webhooks.deleteAsk"),
-                        }))
+                        .child(div().px(px(4.0)).text_xs().line_height(px(16.0)).font_weight(FontWeight::BOLD).child(
+                            match ask {
+                                Ask::Reset => t("serversettings.webhooks.resetAsk"),
+                                Ask::Delete => t("serversettings.webhooks.deleteAsk"),
+                            },
+                        ))
                         .child(
                             danger_button(
                                 SharedString::from(format!("hook-yes-{id}")),
@@ -794,6 +814,7 @@ impl ServerSettingsView {
                             .h(px(32.0))
                             .px(px(12.0))
                             .text_xs()
+                            .line_height(px(16.0))
                             .on_click(cx.listener(move |this, _, _, cx| this.answer_hook(w2.clone(), ask, cx))),
                         )
                         .child(icon_button(SharedString::from(format!("hook-no-{id}")), "x", p).on_click(cx.listener(
@@ -844,6 +865,7 @@ impl ServerSettingsView {
                             .rounded(corner(12.0))
                             .cursor_pointer()
                             .text_sm()
+                            .line_height(px(20.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.destructive)
                             .hover(move |s| s.bg(red))
@@ -887,6 +909,7 @@ impl ServerSettingsView {
                             .items_center()
                             .gap(px(6.0))
                             .text_xs()
+                            .line_height(px(16.0))
                             .text_color(p.muted_foreground)
                             .child(avatar(creator, 16.0, p))
                             .child({
@@ -928,6 +951,7 @@ impl ServerSettingsView {
                     .p(px(12.0))
                     .cursor_pointer()
                     .text_sm()
+                    .line_height(px(20.0))
                     .font_weight(FontWeight::BOLD)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.hooks.how_to = !this.hooks.how_to;
@@ -950,6 +974,7 @@ impl ServerSettingsView {
                         .px(px(12.0))
                         .pb(px(12.0))
                         .text_sm()
+                        .line_height(px(20.0))
                         .text_color(p.muted_foreground)
                         .child(t_with(
                             "serversettings.webhooks.howToPost",
@@ -969,6 +994,7 @@ impl ServerSettingsView {
                                 .bg(p.muted)
                                 .font_family("monospace")
                                 .text_xs()
+                                .line_height(px(16.0))
                                 .text_color(p.foreground)
                                 .child(code),
                         )

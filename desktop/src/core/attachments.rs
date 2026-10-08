@@ -217,7 +217,6 @@ pub fn on_instance(url: &str, instance: &str) -> bool {
 impl Core {
     /// Uploads a file from disk to attach to a message in `server_id`.
     pub async fn upload_attachment(&self, key: &str, server_id: &str, path: &Path) -> Result<pb::Attachment, Problem> {
-        let api = self.api(key).ok_or_else(|| Problem::new(Code::Unavailable, "That instance isn't here."))?;
         let unreadable = || Problem::new(Code::NotFound, "Couldn't read that file.");
         let filename: String =
             clean_name(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
@@ -230,6 +229,20 @@ impl Core {
         }
         let bytes = tokio::fs::read(path).await.map_err(|_| unreadable())?;
         let content_type = content_type_of(&filename);
+        self.upload_bytes(key, server_id, filename, content_type, bytes).await
+    }
+
+    /// Uploads bytes (a file read, or a voice message just recorded) to attach to a message in `server_id`.
+    pub async fn upload_bytes(
+        &self,
+        key: &str,
+        server_id: &str,
+        filename: String,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<pb::Attachment, Problem> {
+        let api = self.api(key).ok_or_else(|| Problem::new(Code::Unavailable, "That instance isn't here."))?;
+        let size = bytes.len() as u64;
         let res = rpc!(
             api.media(),
             create_upload(pb::CreateUploadRequest {

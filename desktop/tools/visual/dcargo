@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Runs cargo for the desktop crate of the checkout you're in. Several checkouts
+# (git worktrees) can share one target dir through FUWA_DESK_TARGET, so the
+# dependencies build once; debuginfo is off to keep it small.
+# After `dcargo build`, the checkout's binary is copied to
+# $FUWA_VISUAL_DIR/bin/<checkout>/fuwa-desktop, which desk.sh starts: with a
+# shared target dir, the one in it is whoever built last.
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+export CARGO_TARGET_DIR=${FUWA_DESK_TARGET:-$root/desktop/target}
+export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+cd "$root/desktop"
+if [ "${1:-}" = build ]; then
+  cargo "$@"
+  dest=${FUWA_VISUAL_DIR:-/tmp/fuwa-visual}/bin/$(basename "$root"); mkdir -p "$dest"
+  cp -f "$CARGO_TARGET_DIR/debug/fuwa-desktop" "$dest/fuwa-desktop.tmp" && mv -f "$dest/fuwa-desktop.tmp" "$dest/fuwa-desktop"
+else
+  exec cargo "$@"
+fi

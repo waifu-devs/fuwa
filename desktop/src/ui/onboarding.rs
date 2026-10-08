@@ -16,13 +16,14 @@ use gpui_kit::{
 use crate::core::onboarding::{self, GoHere, PICK, RULES, SAY_HELLO};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp};
-use crate::ui::banner::{accent, banner_hero, on_accent};
+use crate::ui::banner::{accent, on_accent};
 use crate::ui::motion;
-use crate::ui::overlay::{emoji_tile, scrim, section_title};
+use crate::ui::overlay::{emoji_tile, section_title};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, pal};
+use crate::ui::widgets::{icon, pal};
 
-const WIDTH: f32 = 540.0;
+/// The web's wide dialog (`max-w-2xl`).
+const WIDTH: f32 = 672.0;
 
 /// One run through a server's onboarding.
 pub struct Flow {
@@ -306,7 +307,24 @@ impl FuwaApp {
         } else {
             format!("Step {} of {}", flow.at + 1, total)
         };
-        let mut body = div().flex().flex_col().gap(px(14.0)).px(px(24.0)).pt(px(14.0)).pb(px(8.0));
+        let mut body = div().flex().flex_col().px(px(24.0));
+        // The web's `Dots`: `mt-3 gap-1.5`, each `h-1.5 w-1.5` on the muted color, the current
+        // one `w-7` in the accent gliding along, the ones done the accent at 55%.
+        if !flow.loading && !done && total > 1 {
+            let at = flow.at;
+            let lead = motion::follow("onb-dot", at as f32 * 12.0, window, cx);
+            let mut dots = div().relative().mt(px(12.0)).flex().items_center().gap(px(6.0)).h(px(6.0));
+            for n in 0..total {
+                dots =
+                    dots.child(div().w(px(if n == at { 28.0 } else { 6.0 })).h(px(6.0)).rounded_full().bg(if n < at {
+                        Hsla { a: 0.55, ..tint }
+                    } else {
+                        p.muted.into()
+                    }));
+            }
+            dots = dots.child(div().absolute().top_0().left(px(lead)).w(px(28.0)).h(px(6.0)).rounded_full().bg(tint));
+            body = body.child(dots);
+        }
 
         if flow.loading {
             body = body.child(crate::ui::search::skeleton(4, &p));
@@ -314,20 +332,30 @@ impl FuwaApp {
             body = body.child(self.onboarding_done(&server, &channels, &look, tint, &p, cx));
         } else if let Some(step) = flow.steps.get(flow.at).cloned() {
             // The step's title and words, then what it asks, sliding in from the way it came.
-            let mut content = div()
-                .flex()
-                .flex_col()
-                .gap(px(12.0))
-                .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(step.title.clone()))
-                .when(!step.description.trim().is_empty(), |el| {
-                    el.child(div().text_sm().text_color(p.muted_foreground).child(crate::ui::text::markdown(
-                        SharedString::from(format!("onb-desc-{}", step.id)),
-                        step.description.clone(),
-                    )))
-                });
+            // `flex flex-col gap-3 pt-3 pb-1`: the title (`text-lg font-extrabold`) and its words together.
+            let mut content = div().flex().flex_col().gap(px(12.0)).pt(px(12.0)).pb(px(4.0)).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_lg()
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(step.title.clone()),
+                    )
+                    .when(!step.description.trim().is_empty(), |el| {
+                        el.child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(
+                            crate::ui::text::markdown(
+                                SharedString::from(format!("onb-desc-{}", step.id)),
+                                step.description.clone(),
+                            ),
+                        ))
+                    }),
+            );
             content = match step.kind {
                 PICK => content.child(self.pick_cards(&step, &roles, &look, tint, &p, cx)),
-                RULES => content.child(self.rules_box(tint, &p, cx)),
+                RULES => content.child(self.rules_box(&p, cx)),
                 _ => {
                     let name = channels
                         .iter()
@@ -344,7 +372,9 @@ impl FuwaApp {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
-                                    .text_sm()
+                                    .text_xs()
+                                    .line_height(px(16.0))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
                                     .child(icon("message-circle-heart").size(px(16.0)).text_color(tint))
                                     .child(format!("Goes to {name}")),
@@ -375,23 +405,8 @@ impl FuwaApp {
             body = body.child(div().text_sm().text_color(p.destructive).child(error.clone()));
         }
 
-        // Dots, the error, and the buttons, under the part that scrolls.
-        let mut foot = div().flex().flex_col().gap(px(12.0)).px(px(24.0)).pt(px(10.0)).pb(px(22.0));
-        if !flow.loading && !done && total > 1 {
-            let at = flow.at;
-            let pill = motion::follow("onb-dot", at as f32 * 14.0, window, cx);
-            let mut dots = div().relative().flex().gap(px(8.0)).h(px(6.0));
-            for n in 0..total {
-                dots = dots.child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(if n < at {
-                    Hsla { a: 0.55, ..tint }
-                } else {
-                    alpha(p.muted_foreground, 0.3)
-                }));
-            }
-            dots = dots
-                .child(div().absolute().top_0().left(px(pill - 7.0)).w(px(20.0)).h(px(6.0)).rounded_full().bg(tint));
-            foot = foot.child(div().flex().justify_center().child(dots));
-        }
+        // The error and the buttons (`mt-4`, the dialog's `pb-5`), under the part that scrolls.
+        let mut foot = div().flex().flex_col().gap(px(12.0)).px(px(24.0)).pt(px(16.0)).pb(px(20.0));
         if let Some(error) = flow.error.clone().filter(|_| !flow.loading && flow.at < flow.steps.len()) {
             foot = foot.child(motion::rise(
                 div().text_sm().font_weight(FontWeight::BOLD).text_color(p.destructive).child(error.clone()),
@@ -406,25 +421,28 @@ impl FuwaApp {
 
         // The banner and the buttons always show; the step scrolls in what's left.
         let room = (f32::from(window.viewport_size().height) - 460.0).max(160.0);
-        let panel = card(&p)
+        // The dialog frame every web dialog has (`rounded-3xl border bg-card shadow-2xl`).
+        let hero = crate::ui::join::banner_hero_wide(
+            &server,
+            &eyebrow,
+            Some(icon("sparkles").size(px(14.0)).into_any_element()),
+            WIDTH - 2.0,
+            &p,
+            window,
+            cx,
+        );
+        let panel = div()
             .w(px(WIDTH))
-            .overflow_hidden()
-            .child(banner_hero(&server, &eyebrow, WIDTH, &p, window, cx))
+            .rounded(crate::ui::theme::radius_3xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .text_color(p.foreground)
+            .shadow(crate::ui::overlay::shadow_2xl())
+            .child(hero)
             .child(div().id("onb-body").max_h(px(room)).overflow_y_scroll().child(body))
             .child(foot);
-        Some(
-            motion::fade_in(
-                scrim("dialog-scrim", &p).child(motion::rise(
-                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                    "onboarding",
-                    Duration::ZERO,
-                    24.0,
-                )),
-                "dialog-fade-onboarding",
-                Duration::from_millis(160),
-            )
-            .into_any_element(),
-        )
+        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}))
     }
 
     fn pick_cards(
@@ -452,19 +470,21 @@ impl FuwaApp {
                         .px(px(6.0))
                         .py(px(1.0))
                         .rounded_full()
-                        .bg(Hsla { a: 0.14, ..color })
+                        .bg(p.muted)
                         .text_color(color)
-                        .text_xs()
+                        .text_size(px(10.4))
+                        .line_height(px(14.0))
                         .font_weight(FontWeight::BOLD)
                         .child(format!("@{}", r.name))
                 })
                 .collect();
+            // `size-6 border-2`, `rounded-lg` for several, round for one.
             let mark = div()
-                .size(px(18.0))
+                .size(px(24.0))
                 .flex_none()
                 .border_2()
-                .border_color(if on { tint } else { alpha(p.muted_foreground, 0.5) })
-                .when(step.multiple, |el| el.rounded(corner(5.0)))
+                .border_color(if on { tint } else { alpha(p.muted_foreground, 0.3) })
+                .when(step.multiple, |el| el.rounded(crate::ui::theme::radius_lg()))
                 .when(!step.multiple, |el| el.rounded_full())
                 .when(on, |el| el.bg(tint))
                 .flex()
@@ -472,26 +492,27 @@ impl FuwaApp {
                 .justify_center()
                 .when(on, |el| {
                     el.child(motion::once(
-                        icon("check").size(px(12.0)).text_color(on_accent(tint)),
+                        icon("check").size(px(14.0)).text_color(gpui_kit::white()),
                         SharedString::from(format!("onb-tick-{}", option.id)),
                         Duration::from_millis(280),
-                        |el, t| el.size(px(12.0 * (0.3 + 0.7 * t))),
+                        |el, t| el.size(px(14.0 * (0.3 + 0.7 * t))),
                     ))
                 });
             grid = grid.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("onb-opt-{}", option.id)))
                     .w(px((WIDTH - 48.0 - 8.0) / 2.0 - 2.0))
+                    // `flex items-center gap-3 rounded-2xl border p-3`, on the page at 60% until picked.
                     .flex()
-                    .items_start()
-                    .gap(px(10.0))
-                    .p(px(10.0))
-                    .rounded(corner(14.0))
+                    .items_center()
+                    .gap(px(12.0))
+                    .p(px(12.0))
+                    .rounded(crate::ui::theme::radius_2xl())
                     .border_1()
                     .border_color(if on { tint } else { p.border.into() })
-                    .bg(if on { Hsla { a: 0.12, ..tint } } else { p.secondary.into() })
+                    .bg(if on { Hsla { a: 0.12, ..tint } } else { alpha(p.background, 0.6) })
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(Hsla { a: 0.6, ..tint }))
+                    .hover(move |s| s.border_color(Hsla { a: 0.45, ..tint }))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(flow) = this.onboarding.flow.as_mut() {
                             onboarding::toggle(&mut flow.picked, &step_c, &oid);
@@ -499,29 +520,32 @@ impl FuwaApp {
                         }
                         cx.notify();
                     }))
-                    .child(emoji_tile(&option.emoji, look, tint, "sparkles"))
+                    .child(option_tile(&option.emoji, look, p))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap(px(2.0))
                             .child(
                                 div()
                                     .font_weight(FontWeight::BOLD)
                                     .text_sm()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
+                                    .line_height(px(20.0))
+                                    .truncate()
                                     .child(option.label.clone()),
                             )
                             .when(!option.description.is_empty(), |el| {
                                 el.child(
-                                    div().text_xs().text_color(p.muted_foreground).child(option.description.clone()),
+                                    div()
+                                        .text_xs()
+                                        .line_height(px(16.0))
+                                        .text_color(p.muted_foreground)
+                                        .child(option.description.clone()),
                                 )
                             })
                             .when(!chips.is_empty(), |el| {
-                                el.child(div().flex().flex_wrap().gap(px(4.0)).children(chips))
+                                el.child(div().mt(px(4.0)).flex().flex_wrap().gap(px(4.0)).children(chips))
                             }),
                     )
                     .child(mark),
@@ -533,71 +557,32 @@ impl FuwaApp {
         grid.into_any_element()
     }
 
-    fn rules_box(&self, tint: Hsla, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    /// The rules step: the numbered rules (`RulesList`, `max-h-60`) and "I agree" (`AgreeCheck`).
+    fn rules_box(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let Some(flow) = self.onboarding.flow.as_ref() else { return div().into_any_element() };
-        let agreed = flow.agreed;
         let list = if flow.rules.is_empty() {
-            div().text_sm().text_color(p.muted_foreground).child("This server has no rules written down.")
+            div()
+                .text_sm()
+                .text_color(p.muted_foreground)
+                .child(crate::core::i18n::t("join.rules.none"))
+                .into_any_element()
         } else {
-            div().flex().flex_col().gap(px(6.0)).children(flow.rules.iter().enumerate().map(|(n, rule)| {
-                div()
-                    .flex()
-                    .gap(px(10.0))
-                    .p(px(10.0))
-                    .rounded(corner(12.0))
-                    .bg(p.secondary)
-                    .child(
-                        div()
-                            .size(px(22.0))
-                            .flex_none()
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(Hsla { a: 0.16, ..tint })
-                            .text_color(tint)
-                            .text_xs()
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .child((n + 1).to_string()),
-                    )
-                    .child(div().flex_1().min_w_0().text_sm().child(rule.clone()))
-            }))
+            crate::ui::dialogs::rules_list(&flow.rules, 240.0, p).into_any_element()
         };
         div()
             .flex()
             .flex_col()
-            .gap(px(10.0))
-            .child(div().id("onb-rules").max_h(px(240.0)).overflow_y_scroll().child(list))
-            .child(
-                div()
-                    .id("onb-agree")
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(flow) = this.onboarding.flow.as_mut() {
-                            flow.agreed = !flow.agreed;
-                            flow.error = None;
-                        }
-                        cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .size(px(18.0))
-                            .rounded(corner(5.0))
-                            .border_2()
-                            .border_color(if agreed { tint } else { alpha(p.muted_foreground, 0.5) })
-                            .when(agreed, |el| el.bg(tint))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(agreed, |el| el.child(icon("check").size(px(12.0)).text_color(on_accent(tint)))),
-                    )
-                    .child(
-                        div().text_sm().font_weight(FontWeight::BOLD).child("I've read the rules and agree to them"),
-                    ),
-            )
+            .gap(px(12.0))
+            .child(list)
+            .child(crate::ui::dialogs::agree_check("onb-agree", flow.agreed, p).on_click(cx.listener(
+                |this, _, _, cx| {
+                    if let Some(flow) = this.onboarding.flow.as_mut() {
+                        flow.agreed = !flow.agreed;
+                        flow.error = None;
+                    }
+                    cx.notify();
+                },
+            )))
             .into_any_element()
     }
 
@@ -702,7 +687,7 @@ impl FuwaApp {
         let (glyph, label) = match step.map(|s| s.kind) {
             None => ("party-popper", "Start exploring"),
             Some(RULES) => ("check", "Agree"),
-            Some(SAY_HELLO) => ("send-horizontal", "Send"),
+            Some(SAY_HELLO) => ("send", "Send"),
             Some(_) if last => ("arrow-right", "Finish"),
             Some(_) => ("arrow-right", "Next"),
         };
@@ -712,12 +697,17 @@ impl FuwaApp {
         let busy = flow.busy;
         let primary = div()
             .id("onb-go")
+            // `h-10 min-w-32 rounded-xl font-bold text-white shadow-md`.
             .h(px(40.0))
-            .px(px(18.0))
-            .rounded(corner(12.0))
+            .min_w(px(128.0))
+            .px(px(16.0))
+            .rounded(crate::ui::theme::radius_xl())
             .flex()
             .items_center()
+            .justify_center()
             .gap(px(8.0))
+            .text_sm()
+            .shadow_md()
             .bg(tint)
             .text_color(on_accent(tint))
             .font_weight(FontWeight::BOLD)
@@ -777,5 +767,35 @@ fn capitalized(text: &str) -> String {
     match chars.next() {
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
         None => "That didn't go through".into(),
+    }
+}
+
+/// An option's emoji on its tile (`size-10 rounded-xl bg-muted/70 text-xl`), or a sparkle without one.
+fn option_tile(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> AnyElement {
+    let base = div()
+        .size(px(40.0))
+        .flex_none()
+        .rounded(crate::ui::theme::radius_xl())
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(alpha(p.muted, 0.7));
+    let own = emoji
+        .strip_prefix('<')
+        .and_then(|e| e.strip_suffix('>'))
+        .and_then(|e| e.rsplit_once(':'))
+        .and_then(|(_, id)| look.emojis.get(&id.to_uppercase()));
+    match own {
+        Some(url) => {
+            use gpui_kit::StyledImage as _;
+            base.child(
+                gpui_kit::img(SharedString::from(url.clone())).size(px(24.0)).object_fit(gpui_kit::ObjectFit::Contain),
+            )
+            .into_any_element()
+        }
+        None if !emoji.is_empty() && !emoji.starts_with('<') => {
+            base.text_xl().child(emoji.to_owned()).into_any_element()
+        }
+        None => base.child(icon("sparkles").size(px(16.0)).text_color(p.muted_foreground)).into_any_element(),
     }
 }

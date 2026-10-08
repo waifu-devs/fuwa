@@ -132,14 +132,6 @@ impl FuwaApp {
                         }),
                     ));
                 }
-                if m.can_pin && !m.editing {
-                    let (id, pinned, in_thread) = (m.id.clone(), m.pinned, thread.is_some());
-                    primary.push(Item::act(
-                        if pinned { t("chattools.pins.unpinMessage") } else { t("chattools.pins.pin") },
-                        if pinned { "pin-off" } else { "pin" },
-                        run(move |this, _, cx| this.toggle_pin(id.clone(), !pinned, in_thread, cx)),
-                    ));
-                }
                 if !m.unreadable && !m.content.trim().is_empty() {
                     let text = m.content.clone();
                     primary.push(Item::act(
@@ -148,7 +140,16 @@ impl FuwaApp {
                         run(move |this, _, cx| copy(this, text.clone(), "text", cx)),
                     ));
                 }
+                // Pinning is managing, in its own group as on the web.
                 let mut manage = Vec::new();
+                if m.can_pin && !m.editing {
+                    let (id, pinned, in_thread) = (m.id.clone(), m.pinned, thread.is_some());
+                    manage.push(Item::act(
+                        if pinned { t("chattools.pins.unpinMessage") } else { t("chattools.pins.pin") },
+                        if pinned { "pin-off" } else { "pin" },
+                        run(move |this, _, cx| this.toggle_pin(id.clone(), !pinned, in_thread, cx)),
+                    ));
+                }
                 if m.keep_out && !m.editing && !m.keeping_out {
                     let id = m.id.clone();
                     manage.push(
@@ -186,6 +187,11 @@ impl FuwaApp {
                 self.category_items(key, server, category, copy_id(category, "category"))
             }
             MenuOf::Server { key, server } => self.server_items(key, server, copy_id(server, "server")),
+            MenuOf::Applied { key, server } => self.applied_items(key, server),
+            MenuOf::ServerHeader { key, server } => self.server_header_items(key, server, copy_id(server, "server")),
+            MenuOf::LiveTile { key, server, tile } => self.live_tile_items(key, server, tile),
+            MenuOf::RailFolder { key, folder } => self.rail_folder_items(key, folder),
+            MenuOf::RailAdd => self.rail_add_items(),
             MenuOf::Dm { key, conversation } => {
                 let (unread, other) = self.core.shared.read(|s| {
                     let Some(i) = s.instance(key) else { return (0, String::new()) };
@@ -211,6 +217,7 @@ impl FuwaApp {
                 .disabled(unread == 0);
                 Built::of(vec![vec![read], copy_id(&other, "user")])
             }
+            MenuOf::Composer => self.composer_items(cx),
         }
     }
 
@@ -223,6 +230,10 @@ impl FuwaApp {
             member: Option<pb::Member>,
             roles: Vec<pb::Role>,
             allowed: Vec<P>,
+            /// You may change their nickname.
+            rename: bool,
+            /// Timed out now.
+            timed_out: bool,
             /// Where you stand with them, when this instance has friends.
             friend: Option<i32>,
         }
@@ -254,12 +265,18 @@ impl FuwaApp {
                 }
                 _ => (Vec::new(), Vec::new()),
             };
+            let rename = server.is_some_and(|sv| member.is_some() && i.can_rename(sv, user_id));
+            let timed_out = member
+                .as_ref()
+                .is_some_and(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()).is_some());
             Some(Facts {
                 me,
                 agent: crate::ui::widgets::is_agent(user.as_ref()),
                 dms: matches!(i.dms.status, crate::core::dms::DmStatus::Ready | crate::core::dms::DmStatus::Starting),
                 username: user.map(|u| u.username).unwrap_or_default(),
                 member,
+                rename,
+                timed_out,
                 roles,
                 allowed,
                 friend: matches!(
@@ -274,7 +291,7 @@ impl FuwaApp {
         {
             let (k, uid, sv) = (key.to_owned(), user_id.to_owned(), server.map(str::to_owned));
             primary.push(Item::act(
-                "Profile",
+                crate::core::i18n::t("workspace.menu.member.profile"),
                 "user-round",
                 run(move |this, window, cx| {
                     let dialog = Dialog::Profile { key: k.clone(), user_id: uid.clone(), server: sv.clone() };
@@ -286,11 +303,11 @@ impl FuwaApp {
             let (k, uid) = (key.to_owned(), user_id.to_owned());
             primary.push(
                 Item::act(
-                    "Message",
+                    crate::core::i18n::t("workspace.menu.member.message"),
                     "message-circle",
                     run(move |this, window, cx| this.message_person(k.clone(), uid.clone(), window, cx)),
                 )
-                .hint("Encrypted"),
+                .hint(crate::core::i18n::t("workspace.menu.member.encrypted")),
             );
         }
         // Mention goes in the message box of the server's channel you're in.
@@ -298,7 +315,7 @@ impl FuwaApp {
         if here && !f.username.is_empty() {
             let text = format!("@{} ", f.username);
             primary.push(Item::act(
-                "Mention",
+                crate::core::i18n::t("workspace.menu.member.mention"),
                 "at-sign",
                 run(move |this, window, cx| {
                     let text = text.clone();
@@ -310,6 +327,37 @@ impl FuwaApp {
             ));
         }
         let mut manage = Vec::new();
+        if f.me && server.is_some() {
+            manage.push(Item::act(
+                crate::core::i18n::t("workspace.menu.member.editServerProfile"),
+                "id-card",
+                run(|this, window, cx| {
+                    this.open_settings(window, cx);
+                    if let Some(view) = &this.settings {
+                        view.update(cx, |view, cx| {
+                            view.page = crate::ui::settings::Page::ServerProfiles;
+                            cx.notify();
+                        });
+                    }
+                }),
+            ));
+        }
+        if let (Some(sv), true) = (server, f.rename) {
+            let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
+            manage.push(Item::act(
+                crate::core::i18n::t("workspace.menu.member.nickname"),
+                "pencil",
+                run(move |this, window, cx| {
+                    let dialog = Dialog::Moderate {
+                        key: k.clone(),
+                        server: s.clone(),
+                        user_id: uid.clone(),
+                        action: Action::Nickname,
+                    };
+                    this.open_dialog(dialog, window, cx)
+                }),
+            ));
+        }
         if let (Some(sv), Some(member)) = (server, &f.member)
             && !f.roles.is_empty()
         {
@@ -352,33 +400,37 @@ impl FuwaApp {
                     .keep_open()
                 })
                 .collect();
-            manage.push(Item::sub("Roles", "shield", items).hint(if count > 0 {
-                count.to_string()
-            } else {
-                String::new()
-            }));
+            manage.push(
+                Item::sub(crate::core::i18n::t("workspace.menu.member.roles"), "shield", items).hint(if count > 0 {
+                    count.to_string()
+                } else {
+                    String::new()
+                }),
+            );
         }
         let mut moderate = Vec::new();
         if let Some(sv) = server {
             for permission in &f.allowed {
+                let ending = *permission == P::TimeOutMembers && f.timed_out;
                 let (label, glyph, action) = match permission {
-                    P::TimeOutMembers => ("Time out", "hourglass", Action::TimeOut(3_600)),
-                    P::KickMembers => ("Kick", "door-open", Action::Kick),
-                    _ => ("Ban", "gavel", Action::Ban(0)),
+                    P::TimeOutMembers if ending => {
+                        ("workspace.menu.member.endTimeout", "timer-off", Action::TimeOut(3_600))
+                    }
+                    P::TimeOutMembers => ("workspace.menu.member.timeout", "hourglass", Action::TimeOut(3_600)),
+                    P::KickMembers => ("workspace.menu.member.kick", "door-open", Action::Kick),
+                    _ => ("workspace.menu.member.ban", "gavel", Action::Ban(0)),
                 };
                 let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
-                moderate.push(
-                    Item::act(
-                        label,
-                        glyph,
-                        run(move |this, window, cx| {
-                            let dialog =
-                                Dialog::Moderate { key: k.clone(), server: s.clone(), user_id: uid.clone(), action };
-                            this.open_dialog(dialog, window, cx)
-                        }),
-                    )
-                    .danger(),
+                let item = Item::act(
+                    crate::core::i18n::t(label),
+                    glyph,
+                    run(move |this, window, cx| {
+                        let dialog =
+                            Dialog::Moderate { key: k.clone(), server: s.clone(), user_id: uid.clone(), action };
+                        this.open_dialog(dialog, window, cx)
+                    }),
                 );
+                moderate.push(if ending { item } else { item.danger() });
             }
         }
         let mut friend = Vec::new();
@@ -390,23 +442,35 @@ impl FuwaApp {
                 Item::act(label, glyph, run(move |this, _, cx| this.friend_act(&k, &uid, act, cx)))
             };
             match state {
-                0 => friend.push(item("Add friend", "user-plus", Act::Request)),
-                OUTGOING => friend.push(item("Cancel request", "x", Act::Remove)),
+                0 => friend.push(item(&crate::core::i18n::t("dms-calls.friends.add"), "user-plus", Act::Request)),
+                OUTGOING => friend.push(item(
+                    &crate::core::i18n::t("dms-calls.friends.actions.cancelRequest"),
+                    "x",
+                    Act::Remove,
+                )),
                 INCOMING => {
-                    friend.push(item("Accept request", "user-check", Act::Accept));
-                    friend.push(item("Decline request", "x", Act::Remove));
+                    friend.push(item(
+                        &crate::core::i18n::t("dms-calls.friends.actions.accept"),
+                        "user-check",
+                        Act::Accept,
+                    ));
+                    friend.push(item(&crate::core::i18n::t("dms-calls.friends.actions.decline"), "x", Act::Remove));
                 }
-                FRIEND => friend.push(item("Remove friend", "user-minus", Act::Remove)),
+                FRIEND => {
+                    friend.push(item(&crate::core::i18n::t("dms-calls.friends.remove"), "user-minus", Act::Remove))
+                }
                 _ => {}
             }
             if state == BLOCKED {
-                friend.push(item("Unblock", "shield-off", Act::Unblock));
+                friend.push(item(&crate::core::i18n::t("dms-calls.friends.unblock"), "shield-off", Act::Unblock));
             } else {
-                friend.push(item("Block", "ban", Act::Block).danger().confirm(
-                    format!("Block @{}?", f.username),
-                    "They can't message you, call you or send you requests, and they aren't told.",
-                    "Block",
-                ));
+                friend.push(
+                    item(&crate::core::i18n::t("dms-calls.friends.page.block"), "ban", Act::Block).danger().confirm(
+                        format!("Block @{}?", f.username),
+                        "They can't message you, call you or send you requests, and they aren't told.",
+                        "Block",
+                    ),
+                );
             }
         }
         let _ = cx;
@@ -446,7 +510,7 @@ impl FuwaApp {
             );
         }
         if access.has_in(channel, P::CreateInvite) || access.has(P::CreateInvite) {
-            primary.push(self.invite_item(key, server));
+            primary.push(self.invite_item(key, server, channel));
         }
         primary.push(Item::act(
             "Copy link",
@@ -621,7 +685,7 @@ impl FuwaApp {
             );
         }
         if invite {
-            primary.push(self.invite_item(key, server));
+            primary.push(self.invite_item(key, server, ""));
         }
         let mut notifications = self.notification_items(key, server, "");
         {
@@ -644,6 +708,22 @@ impl FuwaApp {
                 run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
             ));
         }
+        // Your nickname and card in this server, on the Server profiles page.
+        let s = server.to_owned();
+        manage.push(Item::act(
+            t("workspace.menu.server.editProfile"),
+            "id-card",
+            run(move |this, window, cx| {
+                this.open_settings(window, cx);
+                if let Some(view) = &this.settings {
+                    let s = s.clone();
+                    view.update(cx, |v, cx| {
+                        v.servers.server = Some(s);
+                        v.choose(crate::ui::settings::Page::ServerProfiles, None, cx);
+                    });
+                }
+            }),
+        ));
         let mut danger = Vec::new();
         if !access.owner {
             let (k, s) = (key.to_owned(), server.to_owned());
@@ -658,34 +738,109 @@ impl FuwaApp {
                 .danger(),
             );
         }
-        Built::of(vec![primary, notifications, manage, developer, danger])
+        // Your folders sit with the server's own settings, before its ID and Leave (rail.rs).
+        let folder = self.rail_server_items(key, server);
+        Built::of(vec![primary, notifications, manage, folder, developer, danger])
     }
 
     /// Makes an invite to the server, then shows it.
-    fn invite_item(&self, key: &str, server: &str) -> Item {
-        let (k, s) = (key.to_owned(), server.to_owned());
-        Item::act(
-            "Invite people",
-            "user-plus",
-            run(move |this, window, cx| {
-                let (core, k, s) = (this.core.clone(), k.clone(), s.clone());
-                let server = s.clone();
-                let rx = core.spawn({
-                    let core = core.clone();
-                    async move { core.create_invite(&k, &s).await }
-                });
-                cx.spawn_in(window, async move |this, cx| {
-                    let Ok(result) = rx.await else { return };
-                    let _ = this.update_in(cx, |this, window, cx| match result {
-                        Ok(link) => this.open_dialog(Dialog::Invite { link: Some(link), server }, window, cx),
-                        Err(err) => {
-                            this.toast("circle-alert", "Couldn't make an invite".into(), err.message, None, None, cx)
-                        }
-                    });
-                })
-                .detach();
-            }),
-        )
+    /// The web's server dropdown (ChannelSidebar's ServerMenu), in its order:
+    /// invite and what you manage, then rules, welcome and notifications,
+    /// then the ID and leaving.
+    fn server_header_items(&self, key: &str, server: &str, developer: Vec<Item>) -> Built {
+        let Some((access, rules, welcome, onboarding)) = self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            let sv = i.server(server)?;
+            Some((i.access(server), sv.has_rules, sv.has_welcome_screen, sv.has_onboarding))
+        }) else {
+            return Built::of(Vec::new());
+        };
+        let mut manage = Vec::new();
+        if access.has(P::CreateInvite) || access.channels.keys().any(|c| access.has_in(c, P::CreateInvite)) {
+            manage.push(self.invite_item(key, server, ""));
+        }
+        if crate::ui::server_settings::can_open(&access) {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            manage.push(Item::act(
+                "Server settings",
+                "settings",
+                run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
+            ));
+        }
+        if access.has(P::ManageChannels) {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            manage.push(Item::act(
+                "Create channel",
+                "plus",
+                run(move |this, window, cx| {
+                    let dialog = Dialog::CreateChannel {
+                        key: k.clone(),
+                        server: s.clone(),
+                        parent: String::new(),
+                        kind: pb::ChannelType::Text,
+                    };
+                    this.open_dialog(dialog, window, cx)
+                }),
+            ));
+        }
+        let mut about = Vec::new();
+        if rules {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            about.push(Item::act(
+                "Rules",
+                "scroll-text",
+                run(move |this, window, cx| {
+                    this.open_dialog(Dialog::Rules { key: k.clone(), server: s.clone() }, window, cx)
+                }),
+            ));
+        }
+        if welcome || onboarding {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            about.push(Item::act(
+                if onboarding { "Channels & roles" } else { "Welcome screen" },
+                "party-popper",
+                run(move |this, window, cx| {
+                    if onboarding {
+                        this.open_onboarding(&k, &s, cx)
+                    } else {
+                        this.open_dialog(Dialog::Welcome { key: k.clone(), server: s.clone() }, window, cx)
+                    }
+                }),
+            ));
+        }
+        about.extend(self.notification_items(key, server, ""));
+        {
+            let menu = Menu::Server { key: key.to_owned(), server: server.to_owned() };
+            about.push(Item::act(
+                "Notification settings",
+                "bell-ring",
+                run(move |this, _, cx| {
+                    this.menu = Some(menu.clone());
+                    cx.notify();
+                }),
+            ));
+        }
+        about.extend(self.live_tile_menu_items(key, server));
+        let mut danger = Vec::new();
+        if !access.owner {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            danger.push(
+                Item::act(
+                    "Leave server",
+                    "door-open",
+                    run(move |this, window, cx| {
+                        this.open_dialog(Dialog::LeaveServer { key: k.clone(), server: s.clone() }, window, cx)
+                    }),
+                )
+                .danger(),
+            );
+        }
+        Built::of(vec![manage, about, developer, danger])
+    }
+
+    fn invite_item(&self, key: &str, server: &str, channel: &str) -> Item {
+        let (k, s, c) = (key.to_owned(), server.to_owned(), channel.to_owned());
+        Item::act("Invite people", "user-plus", run(move |this, window, cx| this.open_invite(&k, &s, &c, window, cx)))
     }
 
     /// Mute (or unmute) a server or channel for a while, and, for a channel, what it notifies about.

@@ -15,11 +15,12 @@ use gpui_kit::{
 };
 
 use crate::core::attachments::{self, Family, Look, MAX_FILES};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::overlay::scrim;
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha, corner, radius_xl};
 use crate::ui::widgets::{icon, icon_button};
 
 /// The most room one picture takes in a message.
@@ -32,6 +33,8 @@ pub struct Staged {
     id: u64,
     name: String,
     size: i64,
+    /// Where it is on disk, to send again if it didn't go.
+    path: PathBuf,
     /// A picture, shown from disk while it uploads.
     preview: Option<PathBuf>,
     state: Upload,
@@ -51,6 +54,15 @@ pub struct Files {
     next: u64,
 }
 
+/// The files waiting to go, summed up for the send button.
+#[derive(Default, Clone, Copy)]
+pub struct FilesState {
+    pub uploading: bool,
+    pub broken: bool,
+    pub share: f32,
+    pub any: bool,
+}
+
 fn family_icon(family: Family) -> (&'static str, gpui_kit::Rgba) {
     let tint = rgb;
     match family {
@@ -68,12 +80,12 @@ fn family_icon(family: Family) -> (&'static str, gpui_kit::Rgba) {
 }
 
 /// A file's icon in its family's tint.
-fn badge(name: &str, size: f32) -> impl IntoElement {
+pub(crate) fn badge(name: &str, size: f32) -> impl IntoElement {
     let (glyph, tint) = family_icon(attachments::family_of(&attachments::clean_name(name)));
     div()
         .size(px(size))
         .flex_none()
-        .rounded(corner(12.0))
+        .rounded(if size >= 40.0 { crate::ui::theme::radius_xl() } else { crate::ui::theme::radius_lg() })
         .flex()
         .items_center()
         .justify_center()
@@ -118,9 +130,11 @@ pub(crate) fn attachments_view(
                     .id(SharedString::from(format!("pic|{mid}|{n}")))
                     .w(px(w))
                     .h(px(h))
-                    .rounded(corner(12.0))
+                    .rounded(crate::ui::theme::radius_xl())
                     .overflow_hidden()
-                    .bg(alpha(p.foreground, 0.06))
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(alpha(p.muted, 0.6))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.92))
                     .on_mouse_down(gpui_kit::MouseButton::Right, {
@@ -134,6 +148,7 @@ pub(crate) fn attachments_view(
                     .child(
                         img(SharedString::from(file.url.clone()))
                             .size_full()
+                            .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
                             .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
                             .with_loading({
                                 let bg = alpha(p.foreground, 0.04);
@@ -171,13 +186,14 @@ fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<Fuw
         .flex()
         .items_center()
         .gap(px(12.0))
-        .w(px(360.0))
+        .w(px(448.0))
         .max_w_full()
-        .p(px(10.0))
-        .rounded(corner(14.0))
-        .bg(p.card)
+        .p(px(12.0))
+        .rounded(crate::ui::theme::radius_2xl())
+        .bg(crate::ui::theme::mix(p.chat_surface.into(), p.card, 0.7))
         .border_1()
         .border_color(p.border)
+        .shadow(crate::ui::polls::shadow_sm())
         .child(badge(&file.filename, 40.0))
         .child(
             div()
@@ -196,7 +212,7 @@ fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<Fuw
         )
         .child(
             icon_button(SharedString::from(format!("save|{id}")), "download", p)
-                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Save").build(window, cx))
+                .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
                 .on_click(move |_, _, cx| {
                     let _ =
                         this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
@@ -224,9 +240,8 @@ impl FuwaApp {
     }
 
     pub(crate) fn attach_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        icon_button("attach", "paperclip", p)
-            .size(px(36.0))
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Attach files").build(window, cx))
+        crate::ui::widgets::tool_button("attach", "paperclip", false, p)
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.files.attach")).build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx)))
             .into_any_element()
     }
@@ -277,19 +292,41 @@ impl FuwaApp {
                 name,
                 size,
                 preview: picture.then(|| path.clone()),
+                path: path.clone(),
                 state: Upload::Uploading,
             });
-            let (core, (key, server, _)) = (self.core.clone(), place.clone());
-            self.run(cx, async move { core.upload_attachment(&key, &server, &path).await }, move |this, result, cx| {
-                if let Some(s) = this.files.staged.iter_mut().find(|s| s.id == id) {
-                    s.state = match result {
-                        Ok(file) => Upload::Ready(file),
-                        Err(problem) => Upload::Failed(problem.message),
-                    };
-                }
-                cx.notify();
-            });
+            self.upload_staged(id, path, cx);
         }
+        cx.notify();
+    }
+
+    /// Sends a staged file up (again).
+    fn upload_staged(&mut self, id: u64, path: PathBuf, cx: &mut Context<Self>) {
+        let Some((key, server, _)) = self.files.place.clone() else { return };
+        let core = self.core.clone();
+        self.run(cx, async move { core.upload_attachment(&key, &server, &path).await }, move |this, result, cx| {
+            if let Some(s) = this.files.staged.iter_mut().find(|s| s.id == id) {
+                s.state = match result {
+                    Ok(file) => Upload::Ready(file),
+                    Err(problem) => {
+                        // Said as a sentence, like the web's.
+                        let mut why = problem.message;
+                        if let Some(first) = why.get(..1) {
+                            why = first.to_uppercase() + &why[1..];
+                        }
+                        Upload::Failed(why)
+                    }
+                };
+            }
+            cx.notify();
+        });
+    }
+
+    fn retry_file(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(s) = self.files.staged.iter_mut().find(|s| s.id == id) else { return };
+        s.state = Upload::Uploading;
+        let path = s.path.clone();
+        self.upload_staged(id, path, cx);
         cx.notify();
     }
 
@@ -325,6 +362,22 @@ impl FuwaApp {
             .collect())
     }
 
+    /// How the files waiting here are going: still uploading, any broken, and
+    /// how much of them is up (0 to 1, by files, since uploads don't report bytes).
+    pub(crate) fn files_state(&self) -> FilesState {
+        if !self.has_files() {
+            return FilesState::default();
+        }
+        let staged = &self.files.staged;
+        let up = staged.iter().filter(|s| matches!(s.state, Upload::Ready(_))).count();
+        FilesState {
+            uploading: staged.iter().any(|s| matches!(s.state, Upload::Uploading)),
+            broken: staged.iter().any(|s| matches!(s.state, Upload::Failed(_))),
+            share: up as f32 / staged.len() as f32,
+            any: true,
+        }
+    }
+
     /// Clears files that were for somewhere else.
     pub(crate) fn forget_files_elsewhere(&mut self) {
         if self.files.place.is_some() && self.files.place != self.files_place() {
@@ -332,102 +385,286 @@ impl FuwaApp {
         }
     }
 
-    /// The files waiting to go, above the message box.
+    /// The files going with the next message, inside the composer above the
+    /// box (the web's `StagedTray`): a card each, with how its upload is going.
     pub(crate) fn file_tray(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.has_files() {
             return None;
         }
-        let mut tray = div().flex().flex_wrap().gap(px(8.0)).pb(px(8.0));
+        let mut tray = div().flex().gap(px(8.0)).mx(px(-4.0)).px(px(4.0)).pt(px(4.0)).pb(px(8.0));
         for s in &self.files.staged {
-            let id = s.id;
-            let face: AnyElement = match &s.preview {
-                Some(path) => img(path.clone())
-                    .size(px(44.0))
-                    .rounded(corner(10.0))
-                    .object_fit(ObjectFit::Cover)
-                    .into_any_element(),
-                None => badge(&s.name, 44.0).into_any_element(),
-            };
-            let (line, color) = match &s.state {
-                Upload::Uploading => ("Uploading…".to_owned(), p.muted_foreground),
-                Upload::Ready(_) => (attachments::format_bytes(s.size), p.muted_foreground),
-                Upload::Failed(why) => (why.clone(), p.destructive),
-            };
-            tray = tray.child(motion::rise(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .w(px(220.0))
-                    .p(px(8.0))
-                    .rounded(corner(14.0))
-                    .bg(alpha(p.foreground, 0.05))
-                    .border_1()
-                    .border_color(if matches!(s.state, Upload::Failed(_)) { p.destructive } else { p.border })
-                    .child(face)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .truncate()
-                                    .child(attachments::short_name(&s.name, 26)),
-                            )
-                            .child(div().text_xs().truncate().text_color(color).child(line)),
-                    )
-                    .when(matches!(s.state, Upload::Uploading), |el| {
-                        el.child(icon("loader-circle").size(px(14.0)).text_color(p.muted_foreground).with_animation(
-                            SharedString::from(format!("file-up|{id}")),
-                            Animation::new(Duration::from_millis(900)).repeat(),
-                            |el, t| el.rotate(gpui_kit::percentage(t)),
-                        ))
-                    })
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("file-drop|{id}")))
-                            .absolute()
-                            .top(px(-6.0))
-                            .right(px(-6.0))
-                            .size(px(20.0))
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(p.card)
-                            .border_1()
-                            .border_color(p.border)
-                            .cursor_pointer()
-                            .hover(|s| s.text_color(p.destructive))
-                            .on_click(cx.listener(move |this, _, _, cx| this.remove_file(id, cx)))
-                            .child(icon("x").size(px(12.0))),
-                    ),
-                SharedString::from(format!("file-rise|{id}")),
-                Duration::ZERO,
-                8.0,
-            ));
+            tray = tray.child(self.staged_card(s, p, cx));
         }
-        Some(tray.into_any_element())
+        Some(
+            div()
+                .id("staged-tray")
+                .overflow_x_scroll()
+                .child(motion::rise(tray, "staged-tray-rise", Duration::ZERO, 8.0))
+                .into_any_element(),
+        )
     }
 
-    /// Lets files be dropped on the composer.
+    fn staged_card(&self, s: &Staged, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let id = s.id;
+        let failed = match &s.state {
+            Upload::Failed(why) => Some(why.clone()),
+            _ => None,
+        };
+        let done = matches!(s.state, Upload::Ready(_));
+        let uploading = matches!(s.state, Upload::Uploading);
+        let shown = s.preview.is_some();
+        let white = gpui_kit::rgb(0xffffff);
+        let tip = failed.clone().unwrap_or_else(|| {
+            t_with(
+                "chat.files.nameAndSize",
+                &[("name", Arg::Str(&s.name)), ("size", Arg::Str(&attachments::format_bytes(s.size)))],
+            )
+        });
+        let mut card = div()
+            .id(SharedString::from(format!("staged|{id}")))
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .h(px(96.0))
+            .w(px(144.0))
+            .overflow_hidden()
+            .rounded(radius_xl())
+            .border_1()
+            .border_color(if failed.is_some() { alpha(p.destructive, 0.6) } else { p.border.into() })
+            .bg(if failed.is_some() { alpha(p.destructive, 0.05) } else { alpha(p.muted, 0.4) })
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx));
+        card = match &s.preview {
+            Some(path) => card.child(
+                img(path.clone())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .rounded(radius_xl())
+                    .object_fit(ObjectFit::Cover)
+                    .opacity(if done { 1.0 } else { 0.6 }),
+            ),
+            None => card
+                .child(div().flex_1().flex().items_center().justify_center().pt(px(4.0)).child(badge(&s.name, 40.0))),
+        };
+        let mut caption = div().relative().mt_auto().px(px(8.0)).pb(px(6.0));
+        if shown {
+            caption = caption.pt(px(16.0)).text_color(white).bg(gpui_kit::linear_gradient(
+                0.0,
+                gpui_kit::linear_color_stop(gpui_kit::hsla(0.0, 0.0, 0.0, 0.7), 0.0),
+                gpui_kit::linear_color_stop(gpui_kit::hsla(0.0, 0.0, 0.0, 0.0), 1.0),
+            ));
+        }
+        caption = caption
+            .child(
+                div()
+                    .truncate()
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::BOLD)
+                    .child(attachments::short_name(&s.name, 22)),
+            )
+            .child(
+                div()
+                    .truncate()
+                    .text_size(px(10.4))
+                    .line_height(px(14.0))
+                    .text_color(if failed.is_some() {
+                        p.destructive.into()
+                    } else if shown {
+                        alpha(white, 0.75)
+                    } else {
+                        p.muted_foreground.into()
+                    })
+                    .child(failed.clone().unwrap_or_else(|| attachments::format_bytes(s.size))),
+            );
+        card = card.child(caption);
+        // How it's going: uploads don't count their bytes here, so a bar
+        // sweeps along the bottom until it's up (the web's fills).
+        if uploading {
+            card =
+                card.child(div().absolute().bottom_0().left_0().h(px(4.0)).w(px(48.0)).bg(p.primary).with_animation(
+                    SharedString::from(format!("staged-bar|{id}")),
+                    Animation::new(Duration::from_millis(1200)).repeat(),
+                    |el, t| el.left(px(-48.0 + t * 192.0)),
+                ));
+        }
+        if done {
+            // A check pops in and fades once it's up.
+            card = card.child(motion::once(
+                div()
+                    .absolute()
+                    .top(px(6.0))
+                    .left(px(6.0))
+                    .size(px(20.0))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(p.primary)
+                    .text_color(p.primary_foreground)
+                    .child(icon("check").size(px(12.0))),
+                SharedString::from(format!("staged-done|{id}")),
+                Duration::from_millis(1100),
+                |el, t| {
+                    let opacity = if t < 0.4 { (t / 0.25).min(1.0) } else { 1.0 - (t - 0.4) / 0.6 };
+                    el.opacity(opacity.clamp(0.0, 1.0))
+                },
+            ));
+        }
+        let round = |name: &str, glyph: &str, hover: gpui_kit::Rgba| {
+            div()
+                .id(SharedString::from(format!("{name}|{id}")))
+                .size(px(24.0))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(alpha(p.card, 0.9))
+                .text_color(p.foreground)
+                .shadow(vec![gpui_kit::BoxShadow {
+                    color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.08),
+                    offset: gpui_kit::point(px(0.0), px(1.0)),
+                    blur_radius: px(2.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                }])
+                .cursor_pointer()
+                .hover(move |s| s.text_color(hover))
+                .child(icon(glyph).size(px(14.0)))
+        };
+        let buttons = div()
+            .absolute()
+            .top(px(4.0))
+            .right(px(4.0))
+            .flex()
+            .gap(px(4.0))
+            .when(failed.is_some(), |el| {
+                let name = s.name.clone();
+                el.child(
+                    round("staged-retry", "rotate-cw", p.primary)
+                        .tooltip(move |window, cx| {
+                            crate::ui::overlay::Tip::new(t_with("chat.files.retry", &[("name", Arg::Str(&name))]))
+                                .build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| this.retry_file(id, cx))),
+                )
+            })
+            .child({
+                let name = s.name.clone();
+                round("staged-remove", "x", p.destructive)
+                    .tooltip(move |window, cx| {
+                        crate::ui::overlay::Tip::new(t_with("chat.files.remove", &[("name", Arg::Str(&name))]))
+                            .build(window, cx)
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| this.remove_file(id, cx)))
+            });
+        motion::rise(card.child(buttons), SharedString::from(format!("staged-rise|{id}")), Duration::ZERO, 10.0)
+            .into_any_element()
+    }
+
+    /// While files are dragged over the window: a sheet over everything saying
+    /// where they'll go (the web's `DropOverlay`); dropping them anywhere adds
+    /// them to the next message. It's always there, unseen, until a drag of
+    /// files passes over it.
+    pub(crate) fn drop_overlay(&self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let gate = self.send_gate()?;
+        if !gate.can_attach || gate.pending || gate.timed_out() || !gate.can_send || self.dialog.is_some() {
+            return None;
+        }
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return None };
+        let name = self
+            .core
+            .shared
+            .read(|s| s.instance(&key).and_then(|i| i.channel(&server, &channel).map(|c| c.name.clone())))?;
+        let size = window.viewport_size();
+        let sheet = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(12.0))
+            .max_w(px(384.0))
+            .px(px(40.0))
+            .py(px(32.0))
+            .rounded(crate::ui::theme::radius_3xl())
+            .border_2()
+            .border_dashed()
+            .border_color(alpha(p.primary, 0.6))
+            .bg(p.card)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.25),
+                offset: gpui_kit::point(px(0.0), px(25.0)),
+                blur_radius: px(50.0),
+                spread_radius: px(-12.0),
+                inset: false,
+            }])
+            .child(
+                div()
+                    .size(px(56.0))
+                    .rounded(crate::ui::theme::radius_2xl())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(alpha(p.primary, 0.15))
+                    .text_color(p.primary)
+                    .child(icon("upload").size(px(28.0)).with_animation(
+                        "drop-bob",
+                        Animation::new(Duration::from_millis(1200)).repeat(),
+                        |el, t| {
+                            let y = -6.0 * (t * std::f32::consts::PI).sin();
+                            el.transform(gpui_kit::Transformation::translate(gpui_kit::point(px(0.0), px(y))))
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(18.0))
+                    .line_height(px(28.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(p.foreground)
+                    .text_center()
+                    .child(t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))])),
+            )
+            .child(div().text_sm().text_color(p.muted_foreground).text_center().child(t("chat.files.dropNote")));
+        let shade = alpha(p.background, 0.6);
+        Some(
+            gpui_kit::deferred(
+                gpui_kit::anchored().position(gpui_kit::point(px(0.0), px(0.0))).child(
+                    div()
+                        .id("drop-overlay")
+                        .w(size.width)
+                        .h(size.height)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p(px(24.0))
+                        .opacity(0.0)
+                        .drag_over::<ExternalPaths>(move |s, _, _, _| s.opacity(1.0).bg(shade))
+                        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                            cx.stop_propagation();
+                            this.add_files(paths.paths().to_vec(), cx)
+                        }))
+                        .child(sheet),
+                ),
+            )
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// Tints the composer while files are dragged over it (the overlay takes the drop).
     pub(crate) fn droppable<E: InteractiveElement + gpui_kit::Styled + 'static>(
         &self,
         el: E,
         p: &Palette,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> E {
         if !self.can_attach() {
             return el;
         }
         let (bg, border) = (alpha(p.primary, 0.08), p.primary);
         el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(bg).border_color(border))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.add_files(paths.paths().to_vec(), cx)))
     }
 
     /// Asks where to save a file, then saves it there.
@@ -509,9 +746,7 @@ impl FuwaApp {
                                 )
                                 .child(
                                     icon_button("picture-save", "download", &p)
-                                        .tooltip(|window, cx| {
-                                            gpui_kit::component::tooltip::Tooltip::new("Save").build(window, cx)
-                                        })
+                                        .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.save_file(
                                                 key.clone(),

@@ -13,12 +13,13 @@ use gpui_kit::{
 };
 
 use crate::core::dms::now_ms;
+use crate::core::i18n::t;
 use crate::core::timestamps::{self, Style};
 use crate::ui::app::FuwaApp;
 use crate::ui::chat::Row;
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, icon_button, pal, primary_button};
+use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
+use crate::ui::widgets::{icon, pal, primary_button};
 
 /// Where a timestamp's node points, in the Markdown handed to the text view.
 pub const SCHEME: &str = "fuwa-time:";
@@ -126,7 +127,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
     ) -> Option<gpui_kit::component::text::InlineElement> {
         let time = node.data::<Time>()?;
         let p = pal(cx);
-        let full = timestamps::full(time.seconds);
+        let full = timestamps::format_clock(time.seconds, Style::DayDateTime, 0, crate::ui::text::twelve_hours());
         Some(gpui_kit::component::text::InlineElement::new(
             div()
                 .id(SharedString::from(format!("time|{}|{}", time.seconds, time.style.letter())))
@@ -139,8 +140,8 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
                     let (bg, fg) = (alpha(p.primary, 0.15), p.primary);
                     move |s| s.bg(bg).text_color(fg)
                 })
-                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(full.clone()).build(window, cx))
-                .child(timestamps::format(time.seconds, time.style, now_ms())),
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(full.clone()).build(window, cx))
+                .child(timestamps::format_clock(time.seconds, time.style, now_ms(), crate::ui::text::twelve_hours())),
         ))
     }
 }
@@ -151,6 +152,8 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
 pub struct TimePicker {
     date: Entity<InputState>,
     time: Entity<InputState>,
+    /// Which field has the focus (0 the date, 1 the time), for its ring.
+    focus: Option<u8>,
     _subs: Vec<Subscription>,
 }
 
@@ -160,6 +163,19 @@ fn from_fields(date: &str, time: &str) -> Option<i64> {
     let time = NaiveTime::parse_from_str(time.trim(), "%H:%M").ok()?;
     // A time the clocks skip (moving forward an hour) has no moment; one they repeat takes the first.
     Local.from_local_datetime(&date.and_time(time)).earliest().map(|at| at.timestamp())
+}
+
+/// A style's name, from the translations.
+fn style_name(style: Style) -> &'static str {
+    match style {
+        Style::ShortTime => "chattools.timestamp.style.shortTime",
+        Style::LongTime => "chattools.timestamp.style.longTime",
+        Style::ShortDate => "chattools.timestamp.style.shortDate",
+        Style::LongDate => "chattools.timestamp.style.longDate",
+        Style::DateTime => "chattools.timestamp.style.dateTime",
+        Style::DayDateTime => "chattools.timestamp.style.dayDateTime",
+        Style::Relative => "chattools.timestamp.style.relative",
+    }
 }
 
 /// One-tap times: in an hour, tonight, tomorrow morning, in a week (those still to come).
@@ -175,10 +191,10 @@ fn quick_picks(now_ms: i64) -> Vec<(&'static str, i64)> {
     let soon = now + chrono::Duration::hours(1);
     let week = now + chrono::Duration::days(7);
     [
-        ("In an hour", Some(soon.timestamp() - i64::from(soon.second()))),
-        ("Tonight", at(0, 20, 0)),
-        ("Tomorrow morning", at(1, 9, 0)),
-        ("In a week", Some(week.timestamp() - i64::from(week.second()))),
+        ("chattools.timestamp.inAnHour", Some(soon.timestamp() - i64::from(soon.second()))),
+        ("chattools.timestamp.tonight", at(0, 20, 0)),
+        ("chattools.timestamp.tomorrowMorning", at(1, 9, 0)),
+        ("chattools.timestamp.inAWeek", Some(week.timestamp() - i64::from(week.second()))),
     ]
     .into_iter()
     .filter_map(|(label, at)| Some((label, at?)))
@@ -189,10 +205,8 @@ fn quick_picks(now_ms: i64) -> Vec<(&'static str, i64)> {
 impl FuwaApp {
     pub(crate) fn timestamp_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.time_picker.is_some();
-        icon_button("time-open", "calendar-clock", p)
-            .size(px(36.0))
-            .when(open, |el| el.bg(alpha(p.primary, 0.12)).text_color(p.primary))
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Insert a timestamp").build(window, cx))
+        crate::ui::widgets::tool_button("time-open", "calendar-clock", open, p)
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.insert")).build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.time_picker.is_some() {
                     this.close_time_picker(window, cx);
@@ -218,16 +232,27 @@ impl FuwaApp {
         let time = cx.new(|cx| InputState::new(window, cx).placeholder("HH:MM").default_value(time_value));
         let subs = [&date, &time]
             .into_iter()
-            .map(|input| {
-                cx.subscribe_in(input, window, |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+            .enumerate()
+            .map(|(n, input)| {
+                cx.subscribe_in(input, window, move |this: &mut Self, _, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => cx.notify(),
                     InputEvent::PressEnter { .. } => this.insert_timestamp(window, cx),
-                    _ => {}
+                    InputEvent::Focus | InputEvent::Blur => {
+                        if let Some(picker) = &mut this.time_picker {
+                            let focused = matches!(event, InputEvent::Focus);
+                            if focused {
+                                picker.focus = Some(n as u8);
+                            } else if picker.focus == Some(n as u8) {
+                                picker.focus = None;
+                            }
+                        }
+                        cx.notify()
+                    }
                 })
             })
             .collect();
         date.update(cx, |s, cx| s.focus(window, cx));
-        self.time_picker = Some(TimePicker { date, time, _subs: subs });
+        self.time_picker = Some(TimePicker { date, time, focus: Some(0), _subs: subs });
         self.time_tick(cx);
         cx.notify();
     }
@@ -261,7 +286,15 @@ impl FuwaApp {
         let Some(seconds) = self.picked(cx) else { return };
         let token = timestamps::token(seconds, self.time_style);
         self.time_picker = None;
-        self.composer.update(cx, |state, cx| {
+        // A secure channel's thread has a box of its own.
+        let input = if crate::ui::secure_threads::time_in_thread()
+            && matches!(self.target(), Some(crate::ui::app::Target::Secure { .. }))
+        {
+            self.threads.reply.clone()
+        } else {
+            self.composer.clone()
+        };
+        input.update(cx, |state, cx| {
             state.focus(window, cx);
             state.replace(format!("{token} "), window, cx);
         });
@@ -269,135 +302,216 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// The picker (the web's `TimestampPicker` panel), above the composer's
+    /// timestamp button: the day and time with one-tap picks, how it should
+    /// read, and the token that goes in.
     pub(crate) fn time_picker_panel(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let picker = self.time_picker.as_ref()?;
         let now = now_ms();
         let picked = self.picked(cx);
         let chosen = self.time_style;
 
-        let mut quick = div().flex().flex_wrap().gap(px(6.0));
-        for (label, at) in quick_picks(now) {
+        let field = |input: &Entity<InputState>, focused: bool| {
+            div()
+                .h(px(36.0))
+                .flex()
+                .items_center()
+                .rounded(radius_xl())
+                // Opaque, so the focus ring (a shadow) stays outside it as on the web.
+                .bg(crate::ui::theme::mix(p.card, p.muted, 0.6))
+                .when(focused, |el| {
+                    el.shadow(vec![gpui_kit::BoxShadow {
+                        color: alpha(p.primary, 0.4),
+                        offset: gpui_kit::point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(2.0),
+                        inset: false,
+                    }])
+                })
+                .child(div().flex_1().min_w_0().child(Input::new(input).appearance(false).text_sm()))
+        };
+        let fields = div()
+            .mt(px(10.0))
+            .flex()
+            .gap(px(8.0))
+            .child(div().flex_1().min_w_0().child(field(&picker.date, picker.focus == Some(0))))
+            .child(div().w(px(118.0)).flex_none().child(field(&picker.time, picker.focus == Some(1))));
+
+        let mut quick = div().mt(px(8.0)).pb(px(2.0)).flex().gap(px(6.0)).overflow_hidden();
+        for (n, (label, at)) in quick_picks(now).into_iter().enumerate() {
             let lit = picked == Some(at);
-            quick = quick.child(
+            let (muted, fg) = (p.muted, p.foreground);
+            quick = quick.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("time-quick|{label}")))
+                    .flex_none()
                     .px(px(10.0))
-                    .h(px(28.0))
-                    .flex()
-                    .items_center()
+                    .py(px(4.0))
                     .rounded_full()
+                    .border_1()
                     .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
+                    .whitespace_nowrap()
                     .cursor_pointer()
-                    .bg(if lit { alpha(p.primary, 0.18) } else { alpha(p.foreground, 0.06) })
-                    .text_color(if lit { p.primary } else { p.foreground })
-                    .hover(|s| s.bg(alpha(p.primary, 0.12)))
+                    .when(lit, |el| {
+                        el.border_color(alpha(p.primary, 0.5)).bg(alpha(p.primary, 0.15)).text_color(p.primary)
+                    })
+                    .when(!lit, |el| {
+                        el.border_color(p.border)
+                            .text_color(p.muted_foreground)
+                            .hover(move |s| s.bg(muted).text_color(fg))
+                    })
+                    .active(|s| s.opacity(0.85))
                     .on_click(cx.listener(move |this, _, window, cx| this.set_picked(at, window, cx)))
-                    .child(label),
-            );
+                    .child(t(label)),
+                SharedString::from(format!("time-quick-in|{n}")),
+                Duration::from_millis(40 + 30 * n as u64),
+                4.0,
+            ));
         }
 
-        let field = |label: &'static str, input: &Entity<InputState>| {
-            div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child(label))
-                .child(Input::new(input))
-        };
-        let fields = div().flex().gap(px(8.0)).child(field("DATE", &picker.date)).child(field("TIME", &picker.time));
+        let top = div()
+            .border_b_1()
+            .border_color(p.border)
+            .px(px(12.0))
+            .pt(px(12.0))
+            .pb(px(10.0))
+            .child(
+                div()
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child(t("chattools.timestamp.insert")),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("chattools.timestamp.about")),
+            )
+            .child(fields)
+            .child(quick);
 
-        let mut styles = div().flex().flex_col().gap(px(2.0));
-        for style in Style::ALL {
+        let mut styles = div().p(px(6.0)).flex().flex_col();
+        for (n, style) in Style::ALL.into_iter().enumerate() {
             let lit = style == chosen;
-            styles = styles.child(
+            styles = styles.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("time-style|{}", style.letter())))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
                     .px(px(10.0))
-                    .h(px(32.0))
-                    .rounded(corner(10.0))
+                    .py(px(6.0))
+                    .rounded(radius_xl())
                     .cursor_pointer()
                     .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
-                    .hover(|s| s.bg(alpha(p.primary, 0.08)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, e: &gpui_kit::ClickEvent, window, cx| {
                         this.time_style = style;
+                        // A double click puts it in straight away.
+                        if e.click_count() >= 2 {
+                            this.insert_timestamp(window, cx);
+                        }
                         cx.notify();
                     }))
-                    .child(div().w(px(130.0)).flex_none().text_xs().text_color(p.muted_foreground).child(style.name()))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_sm()
-                            .font_weight(if lit { FontWeight::BOLD } else { FontWeight::NORMAL })
-                            .child(picked.map(|s| timestamps::format(s, style, now)).unwrap_or_else(|| "—".into())),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_sm()
+                                    .line_height(px(20.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .when(lit, |el| el.text_color(p.primary))
+                                    .child(
+                                        picked
+                                            .map(|s| {
+                                                timestamps::format_clock(s, style, now, crate::ui::text::twelve_hours())
+                                            })
+                                            .unwrap_or_else(|| t("chattools.timestamp.pickDateTime")),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.2))
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(t(style_name(style))),
+                            ),
                     )
-                    .when(lit, |el| el.child(icon("check").size(px(15.0)).text_color(p.primary))),
-            );
+                    .when(lit, |el| el.child(icon("check").size(px(16.0)).text_color(p.primary))),
+                SharedString::from(format!("time-style-in|{n}")),
+                Duration::from_millis(60 + 25 * n as u64),
+                0.0,
+            ));
         }
 
         let footer = div()
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .pt(px(4.0))
+            .gap(px(8.0))
+            .border_t_1()
+            .border_color(p.border)
+            .bg(alpha(p.muted, 0.3))
+            .px(px(12.0))
+            .py(px(8.0))
             .child(
                 div()
+                    .id("time-token")
                     .flex_1()
                     .min_w_0()
                     .truncate()
+                    .font_family("monospace")
                     .text_xs()
-                    .text_color(if picked.is_some() { p.muted_foreground } else { p.destructive })
-                    .child(match picked {
-                        Some(s) => timestamps::token(s, chosen),
-                        None => "Write the date as 2026-10-04 and the time as 21:30.".into(),
-                    }),
+                    .text_color(p.muted_foreground)
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.sent")).build(window, cx))
+                    .child(picked.map(|s| timestamps::token(s, chosen)).unwrap_or_else(|| " ".into())),
             )
             .child(
-                primary_button("time-insert", "Insert", p)
-                    .h(px(34.0))
-                    .text_sm()
+                primary_button("time-insert", t("chattools.timestamp.insertButton"), p)
+                    .h(px(32.0))
+                    .px(px(14.0))
+                    .rounded(radius_xl())
+                    .text_xs()
                     .when(picked.is_none(), |el| el.opacity(0.5))
                     .on_click(cx.listener(|this, _, window, cx| this.insert_timestamp(window, cx))),
             );
 
-        let body = card(p)
-            .w(px(400.0))
-            .rounded(corner(18.0))
-            .p(px(14.0))
+        let body = div()
+            .w(px(336.0))
             .flex()
             .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(icon("calendar-clock").size(px(18.0)).text_color(p.primary))
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child("Insert a timestamp"))
-                    .child(
-                        div().ml_auto().text_xs().text_color(p.muted_foreground).child("On each reader's own clock"),
-                    ),
-            )
-            .child(quick)
-            .child(fields)
+            .overflow_hidden()
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.25),
+                offset: gpui_kit::point(px(0.0), px(25.0)),
+                blur_radius: px(50.0),
+                spread_radius: px(-12.0),
+                inset: false,
+            }])
+            .child(top)
             .child(styles)
             .child(footer);
+        // Its right edge on the button's: the emoji button and the rest come after it.
+        let right = self.tool_right(crate::ui::composer::Tool::Timestamp);
         Some(
             div()
                 .id("time-panel")
                 .absolute()
-                .right(px(20.0))
+                .right(px(right))
                 .bottom(gpui_kit::relative(1.0))
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
                     this.close_time_picker(window, cx);
                 }))
-                .child(motion::rise(body.mb(px(-8.0)), "time-panel-rise", Duration::ZERO, 12.0))
+                .child(motion::rise(body.mb(px(-1.0)), "time-panel-rise", Duration::ZERO, 8.0))
                 .into_any_element(),
         )
     }

@@ -7,10 +7,13 @@
 //! a version the window watches, so the window redraws after every change.
 
 pub mod account;
+pub mod account_settings;
+pub mod accounts;
 pub mod api;
 pub mod arrange;
 pub mod attachments;
 pub mod backgrounds;
+pub mod backup;
 pub mod calls;
 pub mod commands;
 pub mod compat;
@@ -24,8 +27,11 @@ pub mod i18n;
 pub mod instance_admin;
 pub mod instance_manage;
 pub mod instance_servers;
+pub mod invites;
+pub mod join;
 pub mod keybinds;
 pub mod linked;
+pub mod live_tiles;
 pub mod moderation;
 pub mod notifications;
 pub mod onboarding;
@@ -33,12 +39,20 @@ pub mod permissions;
 pub mod pins;
 pub mod polls;
 pub mod presence;
+pub mod profile_effects;
 pub mod profile_items;
+pub mod providers;
+pub mod qr;
+pub mod rail;
 pub mod reports;
+pub mod sealed_files;
 pub mod search;
 pub mod secrets;
+pub mod secure_threads;
 pub mod server_admin;
+pub mod server_pages;
 pub mod shared;
+pub mod sounds;
 pub mod sso;
 pub mod store;
 mod sync;
@@ -213,6 +227,8 @@ pub struct Core {
     games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Whether you've stepped away, which goes out with this app's presence.
     pub idle: Arc<presence::Idle>,
+    /// The accounts kept on each instance, by its key (`accounts.rs`).
+    kept: Mutex<HashMap<String, Vec<config::SavedAccount>>>,
 }
 
 /// Messages per page, as the web app reads them.
@@ -231,6 +247,7 @@ impl Core {
         let (notices_tx, notices) = mpsc::unbounded_channel();
         let prefs = config::load_prefs(&paths);
         i18n::set_language(prefs.language.as_deref());
+        sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
@@ -262,6 +279,7 @@ impl Core {
             games,
             games_listener: Mutex::new(None),
             idle: presence::Idle::new(),
+            kept: Mutex::new(HashMap::new()),
         });
         core.listen_for_games(game_activity);
         let idle = core.idle.clone();
@@ -272,6 +290,7 @@ impl Core {
             }
         });
         for saved in config::load_instances(&core.paths, &core.secrets) {
+            core.kept.lock().insert(instance_key(&saved.url), saved.accounts);
             core.add_instance(&saved.url, saved.token);
         }
         // The anonymous reports go out a minute after starting, then every ten.
@@ -332,6 +351,7 @@ impl Core {
         if language_changed {
             i18n::set_language(prefs.language.as_deref());
         }
+        sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         reports::set_enabled(prefs.share_reports);
         self.listen_for_games(prefs.game_activity);
         self.games.set_answers(prefs.game_answers.clone());
@@ -435,7 +455,11 @@ impl Core {
                 s.order
                     .iter()
                     .filter_map(|key| {
-                        engines.get(key).map(|e| SavedInstance { url: e.api.url.clone(), token: e.api.token() })
+                        engines.get(key).map(|e| SavedInstance {
+                            url: e.api.url.clone(),
+                            token: e.api.token(),
+                            accounts: self.kept.lock().get(key).cloned().unwrap_or_default(),
+                        })
                     })
                     .collect()
             })
@@ -490,6 +514,7 @@ impl Core {
         if let Some(engine) = self.engines.lock().remove(key) {
             engine.stop();
         }
+        self.kept.lock().remove(key);
         self.set_prefs(|p| {
             p.forget_searches(key);
             p.recent_gifs.remove(key);
@@ -621,6 +646,9 @@ impl Core {
             p.recent_gifs.remove(key);
         });
         let url = api.url.clone();
+        if let Some(me) = &me {
+            self.forget_account(key, &me.id);
+        }
         self.add_instance(&url, None);
         if let Some(me) = me {
             let _ = vault::wipe(&vault::Vault::dir_for(&self.paths.vaults, key, &me.id));
@@ -635,6 +663,9 @@ impl Core {
             if let Some(dms) = engine.dms.lock().take() {
                 dms.stop();
             }
+        }
+        if let Some(me) = &me {
+            self.forget_account(key, &me.id);
         }
         self.persist();
         if let Some(me) = me {
@@ -1026,27 +1057,37 @@ impl Core {
 
     pub async fn send_dm(&self, key: &str, id: &str, content: Content) -> Result<(), DmError> {
         let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
-        // A new message shows dimmed until it's sent; an edit changes the one already there.
-        let text = match &content {
-            Content::Text { text, .. } => Some(text.clone()),
-            Content::Edit { .. } | Content::Voice(_) => None,
+        // A new message shows dimmed until it's sent, and stays (with why) if it can't be; an edit changes the one already there.
+        let (text, thread, in_channel) = match &content {
+            Content::Text { text, .. } => (Some(text.clone()), 0, false),
+            Content::Reply { text, thread, in_channel, files } if files.is_empty() => {
+                (Some(text.clone()), *thread, *in_channel)
+            }
+            Content::Edit { .. }
+            | Content::Voice(_)
+            | Content::Files { .. }
+            | Content::Reply { .. }
+            | Content::Lock { .. } => (None, 0, false),
         };
+        let nonce = crate::core::dms::new_nonce();
         if let Some(text) = &text {
-            self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
+            let pending = crate::core::dms::DmPending {
+                nonce,
+                text: text.clone(),
+                created_at: crate::core::dms::now_ms(),
+                failed: None,
+                thread,
+                in_channel,
+            };
+            self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(pending));
         }
         let feature = if text.is_some() { "dm.send" } else { "message.edit" };
         let result = engine.send(id, content).await;
         if result.is_ok() {
             reports::used(feature);
         }
-        if let Some(text) = text {
-            self.shared.instance(key, |i| {
-                if let Some(list) = i.dms.sending.get_mut(id)
-                    && let Some(at) = list.iter().position(|t| *t == text)
-                {
-                    list.remove(at);
-                }
-            });
+        if text.is_some() {
+            self.shared.instance(key, |i| crate::core::dms::settle_pending(&mut i.dms, id, nonce, &result));
         }
         result
     }

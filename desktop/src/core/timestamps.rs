@@ -98,7 +98,24 @@ fn local(ms: i64) -> Option<DateTime<Local>> {
 
 /// A timestamp as its style shows it, on this computer's clock.
 pub fn format(seconds: i64, style: Style, now_ms: i64) -> String {
+    format_clock(seconds, style, now_ms, false)
+}
+
+/// The same on a 12 hour clock when `twelve`, written as the web's English
+/// `Intl` formats do ("10:00 AM", "10/07/2026", "October 7, 2026 at 10:00 AM").
+pub fn format_clock(seconds: i64, style: Style, now_ms: i64, twelve: bool) -> String {
     let Some(at) = local(seconds.saturating_mul(1000)) else { return token(seconds, style) };
+    if twelve {
+        return match style {
+            Style::ShortTime => at.format("%-I:%M %p").to_string(),
+            Style::LongTime => at.format("%-I:%M:%S %p").to_string(),
+            Style::ShortDate => at.format("%m/%d/%Y").to_string(),
+            Style::LongDate => at.format("%B %-d, %Y").to_string(),
+            Style::DateTime => at.format("%B %-d, %Y at %-I:%M %p").to_string(),
+            Style::DayDateTime => at.format("%A, %B %-d, %Y at %-I:%M %p").to_string(),
+            Style::Relative => relative(seconds.saturating_mul(1000), now_ms),
+        };
+    }
     match style {
         Style::ShortTime => at.format("%H:%M").to_string(),
         Style::LongTime => at.format("%H:%M:%S").to_string(),

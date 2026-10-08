@@ -247,7 +247,7 @@ impl Core {
         });
     }
 
-    fn put_member(&self, key: &str, server_id: &str, member: pb::Member) {
+    pub(crate) fn put_member(&self, key: &str, server_id: &str, member: pb::Member) {
         let Some(user_id) = member.user.as_ref().map(|u| u.id.clone()) else { return };
         self.shared.instance(key, |i| {
             if let Some(list) = i.members.get_mut(server_id)

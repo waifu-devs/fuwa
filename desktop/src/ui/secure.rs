@@ -2,7 +2,8 @@
 //! encrypted between the devices of the people who can see it. It reads and
 //! writes through this device's encryption (`core/dms.rs`), like a direct
 //! message, and never through the server's messages. The web's
-//! `chat/SecureChannelView.tsx`.
+//! `chat/SecureChannelView.tsx`; the list, its lines and the composer are a
+//! conversation's (`ui/dm_view.rs`).
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
@@ -10,32 +11,28 @@ use std::time::Duration;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use crate::core::dms::{DmMember, DmState, SECURE_BROKEN};
+use crate::core::dms::{DmMember, DmState, DmStatus, SECURE_BROKEN};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::store::InstanceState;
 use crate::core::vault::{Item, ItemKind};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp};
-use crate::ui::chat::Blocked;
+use crate::ui::chat::Row;
+use crate::ui::dm_view::{Composer, Earlier, Trust, seal, trust_pill};
 use crate::ui::motion;
-use crate::ui::overlay::scrim;
-use crate::ui::server_settings::roles::switch;
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, card, error_line, icon, icon_button, pal, primary_button};
+use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon, pal};
 
 /// What a secure channel can't do, said once: the server can't read it, so nothing that needs to can work.
 const CANT: [(&str, &str); 4] = [
-    ("shield-off", "AutoMod can't check messages here"),
-    ("search-x", "Search can't find them"),
-    ("bot-off", "Bots, agents and webhooks can't post or read"),
-    ("image-off", "Links stay links: no previews or inline pictures"),
+    ("shield-off", "chat.secure.cant.automod"),
+    ("search-x", "chat.secure.cant.search"),
+    ("bot-off", "chat.secure.cant.bots"),
+    ("image-off", "chat.secure.cant.links"),
 ];
-
-const LATER_OFF: &str = "People added later only see what's sent after they join";
-const LATER_ON: &str =
-    "People added later get recent messages from members' devices, each checked against its sender's signature";
 
 /// Starting a channel's encryption over: asked once, then running.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -55,179 +52,187 @@ pub fn name_hint(kind: pb::ChannelType) -> &'static str {
     }
 }
 
-/// The kinds of channel someone can make, with what each is for.
-pub const KINDS: [(pb::ChannelType, &str, &str, &str); 5] = [
-    (pb::ChannelType::Text, "hash", "Text", "Messages, links, Markdown"),
-    (pb::ChannelType::Announcement, "megaphone", "Announcements", "News people follow"),
-    (pb::ChannelType::Secure, "shield-check", "Secure", "End-to-end encrypted: not even the server can read it"),
-    (pb::ChannelType::Voice, "volume-2", "Voice", "Talk, hang out, play together"),
-    (pb::ChannelType::Category, "folder", "Category", "Groups channels"),
-];
-
-/// What the top of a secure channel says about it.
-pub fn beginning(shares_history: bool) -> String {
-    format!(
-        "This is a secure channel. Messages here are end-to-end encrypted: only the people in this channel can read \
-         them, on their own devices. Not this fuwa server, and not whoever runs it. That means AutoMod, search, link \
-         previews, bots and agents don't work here. {}",
-        if shares_history {
-            "People added later get recent messages, passed on by members' devices."
-        } else {
-            "People who join later only see messages sent after they join."
-        }
-    )
+/// The top of a secure channel's list: its title, and how it's kept private
+/// (with `{secure}` for the words in bold).
+pub fn beginning(name: &str, shares_history: bool) -> Row {
+    let about = t_with("chat.secure.beginning.about", &[("secure", Arg::Str("{secure}"))]);
+    let history = t(if shares_history { "chat.secure.beginning.history" } else { "chat.secure.beginning.noHistory" });
+    Row::Start {
+        icon: "shield-check",
+        title: t_with("chat.beginning.title", &[("channel", Arg::Str(name))]),
+        body: format!("{about} {history}"),
+        shared: None,
+    }
 }
 
-/// The top of a secure channel: a shield with a lock that pops into place, and how it's kept private.
+/// The top of a secure channel (the web's `SecureBeginning`): a shield with a
+/// lock that pops into place, its title, and how it's kept private.
 pub fn start(title: String, body: String, p: &Palette) -> Div {
-    let green = p.success;
+    let s = seal(p);
+    let card: gpui_kit::Hsla = p.card.into();
+    let badge = motion::once(
+        div().absolute().right(px(-6.0)).bottom(px(-6.0)).size(px(28.0)).flex().items_center().justify_center(),
+        "secure-start-badge",
+        Duration::from_millis(900),
+        move |el, t| {
+            let k = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
+            let pop = if k < 1.0 { 1.0 - (1.0 - k).powi(3) + (k * std::f32::consts::PI).sin() * 0.12 } else { 1.0 };
+            el.child(
+                div()
+                    .size(px(28.0 * pop))
+                    .rounded_full()
+                    .bg(s.green)
+                    .shadow(vec![gpui_kit::BoxShadow {
+                        color: card,
+                        offset: gpui_kit::point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(4.0 * pop.min(1.0)),
+                        inset: false,
+                    }])
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(gpui_kit::white())
+                    .child(icon("lock-keyhole").size(px(14.0 * pop))),
+            )
+        },
+    );
+    let note = crate::ui::text::hint_line(&body, &[("secure", &t("chat.secure.beginning.secureChannel"))], p);
     div()
-        .px(px(20.0))
-        .pt(px(32.0))
+        .px(px(16.0))
+        .pt(px(40.0 + crate::ui::dm_view::fit()))
         .pb(px(16.0))
         .flex()
         .flex_col()
-        .gap(px(10.0))
+        .items_start()
         .child(
             div()
                 .relative()
                 .size(px(64.0))
-                .rounded(corner(18.0))
+                .rounded(radius_2xl())
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(alpha(green, 0.15))
-                .text_color(green)
+                .bg(gpui_kit::Hsla { a: 0.15, ..s.green })
+                .text_color(s.icon)
                 .child(icon("shield-check").size(px(32.0)))
-                .child(
-                    div().absolute().right(px(-6.0)).bottom(px(-6.0)).child(motion::rise(
-                        div()
-                            .size(px(28.0))
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(green)
-                            .border_4()
-                            .border_color(p.chat_surface)
-                            .text_color(gpui_kit::white())
-                            .child(icon("lock-keyhole").size(px(13.0))),
-                        "secure-start-lock",
-                        Duration::from_millis(450),
-                        10.0,
-                    )),
-                ),
+                .child(badge),
         )
-        .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title))
         .child(
             div()
-                .max_w(px(620.0))
+                .mt(px(12.0))
+                .text_size(px(30.0))
+                .line_height(px(36.0))
+                .font_weight(FontWeight::EXTRA_BOLD)
+                .child(title),
+        )
+        .child(
+            div()
+                .mt(px(12.0))
+                .w_full()
+                .max_w(px(576.0))
                 .flex()
                 .items_start()
                 .gap(px(8.0))
                 .px(px(12.0))
                 .py(px(10.0))
-                .rounded(corner(16.0))
-                .bg(alpha(green, 0.1))
+                .rounded(radius_2xl())
+                .bg(gpui_kit::Hsla { a: 0.1, ..s.green })
                 .text_sm()
-                .child(icon("lock-keyhole").size(px(16.0)).flex_none().mt(px(2.0)).text_color(green))
-                .child(div().flex_1().min_w_0().child(body)),
+                .line_height(px(20.0))
+                .text_color(s.note)
+                .child(icon("lock-keyhole").size(px(16.0)).flex_none().mt(px(2.0)).text_color(s.icon))
+                .child(div().flex_1().min_w_0().child(note)),
         )
 }
 
-/// What changed about the channel's devices, in words, from the commit itself (not from the server).
-pub fn channel_line(item: &Item, name_of: &dyn Fn(&str) -> String, me: &str, shared: bool) -> (&'static str, String) {
-    let name = |id: &str| if id == me { "you".to_owned() } else { name_of(id) };
-    let whose = |id: &str| if id == me { "your".to_owned() } else { format!("{}'s", name_of(id)) };
-    let by = capital(&name(&item.sender_id));
+/// What changed about the channel's devices, in words, from the commit itself
+/// (not from the server): the web's `channelLine`.
+pub fn channel_line(item: &Item, name_of: &dyn Fn(&str) -> String, me: &str, earlier: Earlier) -> String {
+    let mine = item.sender_id == me;
+    let capital = |text: String| {
+        let mut chars = text.chars();
+        chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+    };
+    let sender = name_of(&item.sender_id);
+    // A line about what the sender did: theirs by name, or yours.
+    let said = |theirs: &str, yours: &str, values: &[(&str, &str)]| {
+        let mut args: Vec<(&str, Arg)> = values.iter().map(|(k, v)| (*k, Arg::Str(v))).collect();
+        if mine {
+            capital(t_with(yours, &args))
+        } else {
+            args.push(("name", Arg::Str(&sender)));
+            capital(t_with(theirs, &args))
+        }
+    };
     match item.kind {
-        ItemKind::Joined if shared => (
-            "shield-check",
-            "This device joined the channel. The messages above were passed on by a member's device.".into(),
-        ),
         ItemKind::Joined => {
-            ("shield-check", "This device joined the channel. Messages from before it can't be read here.".into())
+            return t(match earlier {
+                Earlier::Shared => "chat.secure.line.joinedShared",
+                Earlier::Backup => "chat.secure.line.joinedBackup",
+                Earlier::Restorable => "chat.secure.line.joinedRestorable",
+                Earlier::None => "chat.secure.line.joined",
+            });
         }
         ItemKind::Unreadable => {
-            ("lock-keyhole", format!("A message from {} couldn't be opened on this device.", name(&item.sender_id)))
-        }
-        ItemKind::Setting if item.content == "on" => (
-            "messages-square",
-            format!(
-                "{by} turned on sharing earlier messages: people added from now on get recent history, passed on by members' devices."
-            ),
-        ),
-        ItemKind::Setting => (
-            "messages-square",
-            format!(
-                "{by} turned off sharing earlier messages: people added from now on only see what's sent after they join."
-            ),
-        ),
-        ItemKind::Reset => (
-            "rotate-ccw-key",
-            format!(
-                "{by} started this channel's encryption over. What came before stays on the devices that already read it."
-            ),
-        ),
-        _ => {
-            let devices = |list: &[crate::core::vault::DeviceRef]| -> Vec<String> {
-                let mut counts: BTreeMap<usize, (String, usize)> = BTreeMap::new();
-                let mut order: Vec<&str> = Vec::new();
-                for d in list {
-                    match order.iter().position(|u| *u == d.user_id) {
-                        Some(n) => counts.get_mut(&n).expect("counted").1 += 1,
-                        None => {
-                            counts.insert(order.len(), (d.user_id.clone(), 1));
-                            order.push(&d.user_id);
-                        }
-                    }
-                }
-                counts
-                    .into_values()
-                    .map(|(user, n)| {
-                        format!("{} {}", whose(&user), if n == 1 { "device".into() } else { format!("{n} devices") })
-                    })
-                    .collect()
-            };
-            let (added, removed) = (devices(&item.added), devices(&item.removed));
-            let alone = item.added.len() == 1 && item.added[0].user_id == item.sender_id && item.removed.is_empty();
-            let text = if item.seq == 1 {
-                if added.is_empty() {
-                    format!("{by} started this secure channel.")
-                } else {
-                    format!("{by} started this secure channel and added {}.", list(&added))
-                }
-            } else if alone {
-                format!("{by} came in on a new device.")
+            return if mine {
+                t("chat.secure.line.unreadableMine")
             } else {
-                let parts: Vec<String> = [
-                    (!added.is_empty()).then(|| format!("added {}", list(&added))),
-                    (!removed.is_empty()).then(|| format!("removed {}", list(&removed))),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
-                if parts.is_empty() {
-                    format!("{by} refreshed the channel's keys.")
-                } else {
-                    format!("{by} {}.", parts.join(", and "))
-                }
+                t_with("chat.secure.line.unreadable", &[("name", Arg::Str(&sender))])
             };
-            ("laptop", text)
         }
+        ItemKind::Setting if item.content == "on" => {
+            return said("chat.secure.line.historyOn", "chat.secure.line.historyOnMine", &[]);
+        }
+        ItemKind::Setting => return said("chat.secure.line.historyOff", "chat.secure.line.historyOffMine", &[]),
+        ItemKind::Thread if item.content == "locked" => {
+            return said("chat.secure.line.locked", "chat.secure.line.lockedMine", &[]);
+        }
+        ItemKind::Thread => return said("chat.secure.line.unlocked", "chat.secure.line.unlockedMine", &[]),
+        ItemKind::Reset => return said("chat.secure.line.reset", "chat.secure.line.resetMine", &[]),
+        _ => {}
     }
-}
-
-fn capital(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
-}
-
-fn list(parts: &[String]) -> String {
-    match parts {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    let devices = |list: &[crate::core::vault::DeviceRef]| -> String {
+        let mut order: Vec<&str> = Vec::new();
+        for d in list {
+            if !order.contains(&d.user_id.as_str()) {
+                order.push(&d.user_id);
+            }
+        }
+        let parts: Vec<String> = order
+            .into_iter()
+            .map(|user| {
+                let count = Arg::Num(list.iter().filter(|d| d.user_id == user).count() as i64);
+                if user == me {
+                    t_with("chat.secure.line.yourDevices", &[("count", count)])
+                } else {
+                    t_with("chat.secure.line.theirDevices", &[("count", count), ("name", Arg::Str(&name_of(user)))])
+                }
+            })
+            .collect();
+        crate::core::shared::list_names(parts.iter().map(String::as_str))
+    };
+    let (added, removed) = (devices(&item.added), devices(&item.removed));
+    let alone = item.added.len() == 1 && item.added[0].user_id == item.sender_id && item.removed.is_empty();
+    if item.seq == 1 {
+        return if added.is_empty() {
+            said("chat.secure.line.startedAlone", "chat.secure.line.startedAloneMine", &[])
+        } else {
+            said("chat.secure.line.started", "chat.secure.line.startedMine", &[("added", &added)])
+        };
+    }
+    if alone {
+        return said("chat.secure.line.newDevice", "chat.secure.line.newDeviceMine", &[]);
+    }
+    match (added.is_empty(), removed.is_empty()) {
+        (false, false) => said(
+            "chat.secure.line.addedRemoved",
+            "chat.secure.line.addedRemovedMine",
+            &[("added", &added), ("removed", &removed)],
+        ),
+        (false, true) => said("chat.secure.line.added", "chat.secure.line.addedMine", &[("added", &added)]),
+        (true, false) => said("chat.secure.line.removed", "chat.secure.line.removedMine", &[("removed", &removed)]),
+        (true, true) => said("chat.secure.line.refreshed", "chat.secure.line.refreshedMine", &[]),
     }
 }
 
@@ -278,7 +283,14 @@ fn people(i: &InstanceState, server: &str, members: &[DmMember]) -> Vec<(String,
 }
 
 impl FuwaApp {
-    /// A secure channel's header: its shield, name and topic, and the pill that says who can read it.
+    /// A secure channel's rows, from what this device opened (its threads' replies stay in their threads).
+    pub(crate) fn secure_rows(&self, i: &InstanceState, key: &str, server: &str, channel: &str) -> Vec<Row> {
+        self.secure_list(i, key, server, channel, None)
+    }
+
+    /// A secure channel's header (the web's `SecureHeader`): its shield, name
+    /// and topic, the connection when it isn't live, the bell, and the pill
+    /// that says who can read it.
     pub(crate) fn secure_header(
         &mut self,
         key: &str,
@@ -287,119 +299,207 @@ impl FuwaApp {
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> Div {
-        let green = p.success;
+        let s = seal(p);
         let dialog = Dialog::Secure { key: key.to_owned(), server: server.to_owned(), channel: channel.id.clone() };
+        let connection = self.core.shared.read(|st| st.instance(key).map(|i| i.connection));
+        let offline = connection.filter(|c| *c != crate::core::store::Connection::Live);
+        // Threads show once encryption runs here.
+        let ready = self.core.shared.read(|st| st.instance(key).is_some_and(|i| i.dms.status == DmStatus::Ready));
         div()
             .h(px(56.0))
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .px(px(20.0))
+            .gap(px(8.0))
+            .px(px(16.0))
             .border_b_1()
             .border_color(p.border)
-            .child(motion::slide_in(
+            .child(motion::rise(
                 div()
                     .flex()
+                    .min_w_0()
+                    .flex_shrink(1.0)
                     .items_center()
                     .gap(px(8.0))
-                    .child(icon("shield-check").size(px(20.0)).text_color(green))
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(channel.name.clone())),
+                    .child(icon("shield-check").size(px(20.0)).text_color(s.icon))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(16.0))
+                            .line_height(px(24.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(channel.name.clone()),
+                    ),
                 SharedString::from(format!("secure-title-{}", channel.id)),
+                Duration::ZERO,
                 10.0,
             ))
             .when(!channel.topic.is_empty(), |el| {
-                el.child(div().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
+                el.child(div().flex_none().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
                     div()
-                        .flex_1()
                         .min_w_0()
+                        .flex_shrink(1.0)
+                        .truncate()
                         .text_sm()
+                        .line_height(px(20.0))
                         .text_color(p.muted_foreground)
-                        .whitespace_nowrap()
-                        .text_ellipsis()
                         .child(channel.topic.clone()),
                 )
             })
-            .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
-            .child(motion::rise(
-                div()
-                    .id("secure-pill")
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .h(px(28.0))
-                    .px(px(10.0))
-                    .rounded_full()
-                    .bg(alpha(green, 0.13))
-                    .text_color(green)
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(alpha(green, 0.22)))
-                    .active(|s| s.top(px(1.0)))
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("See who can read this channel").build(window, cx)
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx)))
-                    .child(icon("lock-keyhole").size(px(14.0)))
-                    .child("End-to-end encrypted"),
-                "secure-pill-in",
-                Duration::from_millis(120),
-                6.0,
-            ))
+            .child(div().flex_1())
+            .when_some(offline, |el, c| {
+                el.child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .px(px(10.0))
+                        .py(px(4.0))
+                        .rounded_full()
+                        .bg(p.muted)
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .child(crate::ui::widgets::conn_dot(c, p))
+                        .child(crate::ui::instance_home::connection_label(c)),
+                )
+            })
+            .child(self.bell_button(key, server, &channel.id, cx))
+            .when(ready, |el| el.child(self.secure_threads_button(&channel.id, p, cx)))
+            .child(
+                trust_pill("secure-pill", Trust::Encrypted, t("chat.secure.encrypted"), p)
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.secure.seeWho")).build(window, cx))
+                    .on_click(cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx))),
+            )
     }
 
-    /// Why you can't write in a secure channel right now, if you can't: on top
-    /// of a channel's usual reasons, this device's encryption getting ready,
-    /// or the channel's being broken (which someone who manages it can fix).
-    pub(crate) fn secure_blocked(
-        &self,
+    /// Under a secure channel's header: what was said and the composer once
+    /// encryption runs here, or why it doesn't yet (the web's `NotReady`).
+    pub(crate) fn secure_body(
+        &mut self,
         key: &str,
         server: &str,
-        channel_id: &str,
-        usual: Option<Blocked>,
-    ) -> Option<Blocked> {
-        let (status, problem, joining, broken, can_reset, can_send) = self.core.shared.read(|s| {
-            let i = s.instance(key)?;
+        channel: &pb::Channel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = pal(cx);
+        let (status, problem, me, broken, can_send, can_reset, can_attach) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(key) else { return (DmStatus::Off, None, false, false, false, false, false) };
             let access = i.access(server);
-            Some((
+            (
                 i.dms.status,
                 i.dms.problem.clone(),
-                i.dms.joining.contains(channel_id),
-                i.dms.blocked.get(channel_id).is_some_and(|b| b == SECURE_BROKEN),
-                access.has_in(channel_id, pb::Permission::ManageChannels),
-                access.has_in(channel_id, pb::Permission::SendMessages),
-            ))
-        })?;
-        let text = |t: &str| Some(Blocked { text: t.to_owned(), action: None });
-        if status == crate::core::dms::DmStatus::Failed {
-            return text(problem.as_deref().unwrap_or("Encrypted messages aren't available here."));
+                i.me.is_some(),
+                i.dms.blocked.get(&channel.id).is_some_and(|b| b == SECURE_BROKEN),
+                access.has_in(&channel.id, pb::Permission::SendMessages),
+                access.has_in(&channel.id, pb::Permission::ManageChannels),
+                access.has_in(&channel.id, pb::Permission::SendMessages)
+                    && access.has_in(&channel.id, pb::Permission::AttachFiles),
+            )
+        });
+        if status != DmStatus::Ready || !me {
+            return match status {
+                DmStatus::Failed => crate::ui::dm_view::unavailable(
+                    &problem.unwrap_or_else(|| t("chat.secure.unavailable")),
+                    "shield-off",
+                    &p,
+                ),
+                _ => crate::ui::dm_view::starting(&p, window),
+            };
         }
-        if !status.is_ready() {
-            return text("Encrypted messages are still getting ready on this device…");
-        }
-        if broken {
-            let dialog =
-                Dialog::Secure { key: key.to_owned(), server: server.to_owned(), channel: channel_id.to_owned() };
-            return Some(Blocked {
-                text: SECURE_BROKEN.to_owned(),
-                action: can_reset.then_some(("Start encryption over", dialog)),
-            });
-        }
-        if joining {
-            return text("Unlocking the channel on this device…");
-        }
-        match usual {
-            Some(_) if !can_send => text("You don't have permission to send messages in this channel."),
-            other => other,
-        }
+        let action = (broken && can_reset).then(|| {
+            self.reset_button("secure-reset-composer", key, server, &channel.id, false, &p, cx).into_any_element()
+        });
+        let composer = self.encrypted_composer(
+            Composer {
+                key: key.to_owned(),
+                id: channel.id.clone(),
+                promise: t("chat.secure.promise"),
+                locked: (!can_send && !broken).then(|| t("chat.secure.noPermission")),
+                action,
+                files: can_attach,
+                thread: None,
+            },
+            window,
+            cx,
+        );
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(self.fitted_list(window, cx))
+            .child(composer)
+            .into_any_element()
     }
 
-    /// How a secure channel is kept private: what the server can't do, and
-    /// every person (and how many devices) that can read it. Someone who
-    /// manages the channel can turn history sharing on or off, or start its
-    /// encryption over.
+    /// Starts the channel's encryption over (Manage Channels), after asking once (the web's `ResetButton`).
+    #[allow(clippy::too_many_arguments)]
+    fn reset_button(
+        &self,
+        id: &'static str,
+        key: &str,
+        server: &str,
+        channel: &str,
+        in_dialog: bool,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let asking = self.secure_reset == Reset::Ask;
+        let busy = self.secure_reset == Reset::Busy;
+        let (fg, bg, hover) = if asking {
+            (p.destructive, alpha(p.destructive, 0.12), alpha(p.destructive, 0.2))
+        } else {
+            (p.primary, alpha(p.primary, 0.0), alpha(p.primary, 0.1))
+        };
+        let (k, s, c) = (key.to_owned(), server.to_owned(), channel.to_owned());
+        let glyph: AnyElement = if busy {
+            gpui_kit::AnimationExt::with_animation(
+                icon("loader").size(px(14.0)),
+                "secure-reset-spin",
+                gpui_kit::Animation::new(Duration::from_millis(1000)).repeat(),
+                |el, t| el.rotate(gpui_kit::percentage(t)),
+            )
+            .into_any_element()
+        } else {
+            icon("rotate-ccw-key").size(px(14.0)).into_any_element()
+        };
+        div()
+            .id(id)
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .px(px(12.0))
+            .py(px(6.0))
+            .rounded(radius_xl())
+            .text_xs()
+            .line_height(px(16.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(fg)
+            .bg(bg)
+            .hover(move |st| st.bg(hover))
+            .cursor_pointer()
+            .active(|st| st.top(px(1.0)))
+            .when(busy, |el| el.opacity(0.5))
+            .on_click(
+                cx.listener(move |this, _, _, cx| this.reset_secure(k.clone(), s.clone(), c.clone(), in_dialog, cx)),
+            )
+            .child(glyph)
+            .child(motion::slide_in(
+                div().child(t(if asking { "chat.secure.resetAsk" } else { "chat.secure.reset" })),
+                SharedString::from(format!("{id}-{asking}")),
+                4.0,
+            ))
+    }
+
+    /// How a secure channel is kept private (the web's `SecureChannelDialog`):
+    /// what the server can't do, and every person (and how many devices) that
+    /// can read it. Someone who manages the channel can turn history sharing
+    /// on or off, or start its encryption over.
     pub(crate) fn render_secure(
         &mut self,
         key: &str,
@@ -409,7 +509,7 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = pal(cx);
-        let green = p.success;
+        let s = seal(&p);
         let me = self.core.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())));
         let me = me.unwrap_or_default();
         let (name, rows, verified, shares, can_reset) = self.core.shared.read(|s| {
@@ -418,7 +518,7 @@ impl FuwaApp {
             let rows: Vec<(String, usize, String, Option<pb::User>)> = people(i, server, &members)
                 .into_iter()
                 .map(|(id, n)| {
-                    let shown = if id == me { "You".to_owned() } else { i.display_name(Some(server), &id) };
+                    let shown = if id == me { t("chat.secure.dialog.you") } else { i.display_name(Some(server), &id) };
                     let user = i.users.get(&id).cloned();
                     (id, n, shown, user)
                 })
@@ -431,36 +531,38 @@ impl FuwaApp {
                 i.access(server).has_in(channel_id, pb::Permission::ManageChannels),
             )
         });
-        let lines = CANT.iter().copied().chain([("user-plus", if shares { LATER_ON } else { LATER_OFF })]);
+        let later = if shares { "chat.secure.later.on" } else { "chat.secure.later.off" };
+        let lines = CANT.iter().copied().chain([("user-plus", later)]);
         let cant = div()
             .flex()
             .flex_col()
             .gap(px(6.0))
             .p(px(12.0))
-            .rounded(corner(16.0))
+            .rounded(radius_2xl())
             .border_1()
             .border_color(p.border)
-            .bg(alpha(p.muted, 0.4));
-        let cant = cant.children(lines.enumerate().map(|(n, (glyph, text))| {
-            motion::rise(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .text_sm()
-                    .text_color(p.muted_foreground)
-                    .child(icon(glyph).size(px(16.0)).flex_none())
-                    .child(div().flex_1().min_w_0().child(text)),
-                SharedString::from(format!("secure-cant-{n}")),
-                Duration::from_millis(100 + 40 * n as u64),
-                6.0,
-            )
-        }));
+            .bg(alpha(p.muted, 0.4))
+            .text_sm()
+            .line_height(px(20.0))
+            .children(lines.enumerate().map(|(n, (glyph, text))| {
+                motion::slide_in(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .text_color(p.muted_foreground)
+                        .child(icon(glyph).size(px(16.0)))
+                        .child(div().flex_1().min_w_0().child(t(text))),
+                    SharedString::from(format!("secure-cant-{n}")),
+                    -8.0 - 2.0 * n as f32,
+                )
+            }));
         let count = rows.len();
-        let mut list = div().flex().flex_col();
+        let mut list = div().id("secure-people").max_h(px(256.0)).overflow_y_scroll().mx(px(-4.0)).px(px(4.0));
         for (n, (id, devices, shown, user)) in rows.into_iter().enumerate() {
             let ok = verified.contains(&id);
             let hover = alpha(p.muted, 0.6);
+            let devices = Arg::Num(devices as i64);
             list = list.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("secure-person-{id}")))
@@ -469,8 +571,8 @@ impl FuwaApp {
                     .gap(px(12.0))
                     .px(px(8.0))
                     .py(px(6.0))
-                    .rounded(corner(12.0))
-                    .hover(move |s| s.bg(hover))
+                    .rounded(radius_xl())
+                    .hover(move |st| st.bg(hover))
                     .child(avatar(user.as_ref(), 32.0, &p))
                     .child(
                         div()
@@ -483,190 +585,153 @@ impl FuwaApp {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
+                                    .text_size(px(16.0))
+                                    .line_height(px(24.0))
                                     .font_weight(FontWeight::BOLD)
                                     .child(div().min_w_0().truncate().child(shown))
-                                    .when(ok, |el| el.child(icon("badge-check").size(px(16.0)).text_color(green))),
+                                    .when(ok, |el| el.child(icon("badge-check").size(px(16.0)).text_color(s.green))),
                             )
-                            .child(div().text_xs().text_color(p.muted_foreground).child(format!(
-                                "{}{}",
-                                if devices == 1 { "1 device".to_owned() } else { format!("{devices} devices") },
-                                if ok { " · verified in your direct messages" } else { "" }
-                            ))),
+                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(if ok {
+                                t_with("chat.secure.dialog.devicesVerified", &[("count", devices)])
+                            } else {
+                                t_with("chat.secure.dialog.devices", &[("count", devices)])
+                            })),
                     ),
                 SharedString::from(format!("secure-person-in-{n}")),
                 Duration::from_millis(30 * n.min(10) as u64),
                 6.0,
             ));
         }
-        let (k, s, c) = (key.to_owned(), server.to_owned(), channel_id.to_owned());
+        let (k, sv, c) = (key.to_owned(), server.to_owned(), channel_id.to_owned());
         let history = can_reset.then(|| {
-            let (k, s, c) = (k.clone(), s.clone(), c.clone());
+            let (k, sv, c) = (k.clone(), sv.clone(), c.clone());
+            let hover = alpha(p.muted, 0.4);
+            let saving = self.secure_saving;
+            let (k2, sv2, c2) = (k.clone(), sv.clone(), c.clone());
             div()
+                .id("secure-history-row")
+                .mt(px(16.0))
                 .flex()
                 .items_start()
                 .gap(px(12.0))
                 .px(px(12.0))
                 .py(px(10.0))
-                .rounded(corner(16.0))
+                .rounded(radius_2xl())
                 .border_1()
                 .border_color(p.border)
-                .child(icon("messages-square").size(px(16.0)).flex_none().mt(px(2.0)).text_color(p.muted_foreground))
+                .cursor_pointer()
+                .hover(move |st| st.bg(hover))
+                .when(!saving, |el| {
+                    el.on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_secure_history(k2.clone(), sv2.clone(), c2.clone(), !shares, cx)
+                    }))
+                })
+                .child(icon("rotate-ccw-clock").size(px(16.0)).mt(px(2.0)).text_color(p.muted_foreground))
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .gap(px(2.0))
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Share earlier messages with people added later"))
-                        .child(div().text_xs().text_color(p.muted_foreground).child(
-                            "The device that adds someone passes on recent messages, still end-to-end encrypted. Each one is \
-                             checked against the signature of the device that sent it, so nobody can change or make one up. \
-                             Turning it on doesn't send anything to people already here.",
-                        )),
+                        .child(
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .font_weight(FontWeight::BOLD)
+                                .child(t("chat.secure.dialog.shareHistory")),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .line_height(px(16.0))
+                                .text_color(p.muted_foreground)
+                                .child(t("chat.secure.dialog.shareHistoryAbout")),
+                        )
+                        .when_some(self.dialog_error.clone(), |el, e| {
+                            el.child(div().mt(px(4.0)).text_xs().text_color(p.destructive).child(e))
+                        }),
                 )
-                .child(switch("secure-history".into(), shares, self.secure_saving, cx, move |this, on, cx| {
-                    this.set_secure_history(k.clone(), s.clone(), c.clone(), on, cx)
-                }))
+                .child(crate::ui::dm_dialogs::web_switch(
+                    "secure-history",
+                    shares,
+                    saving,
+                    &p,
+                    window,
+                    cx,
+                    move |this, on, cx| this.set_secure_history(k.clone(), sv.clone(), c.clone(), on, cx),
+                ))
         });
         let reset = can_reset.then(|| {
-            let asking = self.secure_reset == Reset::Ask;
-            let busy = self.secure_reset == Reset::Busy;
-            let color = if asking { p.destructive } else { p.primary };
             div()
+                .mt(px(12.0))
                 .flex()
                 .items_center()
                 .gap(px(12.0))
                 .px(px(12.0))
                 .py(px(10.0))
-                .rounded(corner(16.0))
+                .rounded(radius_2xl())
                 .border_1()
                 .border_dashed()
                 .border_color(p.border)
-                .child(div().flex_1().min_w_0().text_xs().text_color(p.muted_foreground).child(
-                    "If the channel's encryption stops working for everyone, start it over. Messages already read stay on \
-                     the devices that read them.",
-                ))
                 .child(
                     div()
-                        .id("secure-reset")
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .h(px(32.0))
-                        .px(px(12.0))
-                        .rounded(corner(12.0))
+                        .flex_1()
+                        .min_w_0()
                         .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(color)
-                        .when(asking, |el| el.bg(alpha(color, 0.12)))
-                        .hover(move |st| st.bg(alpha(color, 0.18)))
-                        .cursor_pointer()
-                        .active(|st| st.top(px(1.0)))
-                        .when(busy, |el| el.opacity(0.7))
-                        .on_click(cx.listener(move |this, _, _, cx| this.reset_secure(k.clone(), s.clone(), c.clone(), cx)))
-                        .child(icon(if busy { "loader-circle" } else { "rotate-ccw-key" }).size(px(14.0)))
-                        .child(motion::slide_in(
-                            div().child(if asking { "Start over for everyone?" } else { "Start encryption over" }),
-                            SharedString::from(format!("secure-reset-{asking}")),
-                            4.0,
-                        )),
+                        .line_height(px(16.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("chat.secure.dialog.resetAbout")),
                 )
+                .child(self.reset_button("secure-reset", key, server, channel_id, true, &p, cx))
         });
-        let panel = card(&p)
-            .w(px(500.0))
-            .p(px(24.0))
+        // "Who can read it {count}": the words around the count, which is muted.
+        let template = t_with("chat.secure.dialog.whoCanRead", &[("count", Arg::Str("\u{1}"))]);
+        let (before, after) = template.split_once('\u{1}').unwrap_or((template.as_str(), ""));
+        let who_before = (!before.trim().is_empty()).then(|| div().child(before.trim().to_owned()));
+        let who_after = (!after.trim().is_empty()).then(|| div().child(after.trim().to_owned()));
+        let body = div()
             .flex()
             .flex_col()
-            .gap(px(14.0))
+            .child(div().mb(px(16.0)).flex().justify_center().child(crate::ui::dm_dialogs::padlock("secure", &p)))
+            .child(crate::ui::dm_dialogs::dialog_header(
+                t_with("chat.secure.dialog.title", &[("channel", Arg::Str(&name))]).into_any_element(),
+                Some(t("chat.secure.dialog.description").into_any_element()),
+                &p,
+            ))
+            .child(cant)
             .child(
                 div()
+                    .mt(px(20.0))
+                    .mb(px(8.0))
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
                     .flex()
-                    .items_start()
-                    .gap(px(14.0))
-                    .child(motion::rise(
-                        div()
-                            .size(px(48.0))
-                            .flex_none()
-                            .rounded(corner(16.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(alpha(green, 0.15))
-                            .text_color(green)
-                            .child(icon("lock-keyhole").size(px(24.0))),
-                        "secure-padlock",
-                        Duration::from_millis(80),
-                        12.0,
-                    ))
+                    .gap(px(4.0))
+                    .children(who_before)
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::EXTRA_BOLD)
-                                    .child(format!("#{name} is end-to-end encrypted")),
-                            )
-                            .child(div().text_sm().text_color(p.muted_foreground).child(
-                                "Messages are locked on the sender's device and only open on the devices below. This fuwa \
-                                 server keeps and passes along what it can't read.",
-                            )),
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(p.muted_foreground)
+                            .child(t_with("chat.secure.dialog.peopleCount", &[("count", Arg::Num(count as i64))])),
                     )
-                    .child(icon_button("secure-close", "x", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))),
+                    .children(who_after),
             )
+            .child(list)
             .child(
-                // Everything between the title and Done scrolls when the window is short.
                 div()
-                    .id("secure-body")
-                    .max_h(window.viewport_size().height - px(300.0))
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .child(cant)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_sm()
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .child("Who can read it")
-                        .child(div().text_color(p.muted_foreground).font_weight(FontWeight::BOLD).child(format!("· {count}"))),
-                )
-                .child(list)
-                .child(div().text_xs().text_color(p.muted_foreground).child(
-                    "Who's in it follows the channel's permissions. Compare safety numbers in a direct message to verify \
-                     someone's devices.",
-                ))
-                .when_some(history, |el, h| el.child(h))
-                .when_some(reset, |el, r| el.child(r))
+                    .mt(px(16.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("chat.secure.dialog.whoNote")),
             )
-            .when_some(error_line(self.dialog_error.as_deref(), &p), |el, e| el.child(e))
-            .child(
-                div().flex().justify_end().child(
-                    primary_button("secure-done", "Done", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
-                ),
-            );
-        motion::fade_in(
-            scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                motion::rise(
-                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                    "dialog-secure",
-                    Duration::ZERO,
-                    24.0,
-                ),
-            ),
-            "dialog-fade-secure",
-            Duration::from_millis(180),
-        )
-        .into_any_element()
+            .children(history)
+            .children(reset)
+            .when_some(self.dialog_error.clone().filter(|_| !can_reset), |el, e| {
+                el.child(div().mt(px(8.0)).text_xs().text_color(p.destructive).child(e))
+            });
+        crate::ui::dm_dialogs::dialog_shell("secure", 512.0, body, window, cx)
     }
 
     fn set_secure_history(&mut self, key: String, server: String, channel: String, on: bool, cx: &mut Context<Self>) {
@@ -684,7 +749,7 @@ impl FuwaApp {
     }
 
     /// Starts the channel's encryption over (Manage Channels), after asking once.
-    fn reset_secure(&mut self, key: String, server: String, channel: String, cx: &mut Context<Self>) {
+    fn reset_secure(&mut self, key: String, server: String, channel: String, in_dialog: bool, cx: &mut Context<Self>) {
         match self.secure_reset {
             Reset::Busy => return,
             Reset::Idle => {
@@ -711,11 +776,13 @@ impl FuwaApp {
                 self.run(
                     cx,
                     async move { core.reset_secure_channel(&key, &server, &channel, write).await },
-                    |this, result, cx| {
+                    move |this, result, cx| {
                         this.secure_reset = Reset::Idle;
                         match result {
                             Ok(()) => {
-                                this.dialog = None;
+                                if in_dialog {
+                                    this.dialog = None;
+                                }
                                 this.toast(
                                     "rotate-ccw-key",
                                     "Encryption started over".into(),
@@ -762,19 +829,19 @@ mod tests {
             DeviceRef { user_id: "u2".into(), device_id: "c".into() },
         ];
         assert_eq!(
-            channel_line(&started, &names, "me", false).1,
+            channel_line(&started, &names, "me", Earlier::None),
             "You started this secure channel and added your device and Yuki's 2 devices."
         );
         let mut new_device = item(ItemKind::Devices, 5, "u3");
         new_device.added = vec![DeviceRef { user_id: "u3".into(), device_id: "z".into() }];
-        assert_eq!(channel_line(&new_device, &names, "me", false).1, "Rin came in on a new device.");
+        assert_eq!(channel_line(&new_device, &names, "me", Earlier::None), "Rin came in on a new device.");
         let mut removed = item(ItemKind::Devices, 6, "u2");
         removed.removed = vec![DeviceRef { user_id: "u3".into(), device_id: "z".into() }];
-        assert_eq!(channel_line(&removed, &names, "me", false).1, "Yuki removed Rin's device.");
+        assert_eq!(channel_line(&removed, &names, "me", Earlier::None), "Yuki removed Rin's device.");
         let mut on = item(ItemKind::Setting, 7, "me");
         on.content = "on".into();
-        assert!(channel_line(&on, &names, "me", false).1.starts_with("You turned on sharing earlier messages"));
-        assert!(channel_line(&item(ItemKind::Joined, 8, "me"), &names, "me", true).1.contains("passed on"));
+        assert!(channel_line(&on, &names, "me", Earlier::None).starts_with("You turned on sharing earlier messages"));
+        assert!(channel_line(&item(ItemKind::Joined, 8, "me"), &names, "me", Earlier::Shared).contains("passed on"));
     }
 
     #[test]

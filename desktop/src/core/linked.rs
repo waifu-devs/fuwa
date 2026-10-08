@@ -93,7 +93,7 @@ async fn handle(req: Request<Incoming>, tx: mpsc::Sender<Returned>) -> Result<Re
     let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_default();
     let response = match req.uri().path() {
         // Where the instance hands a sign-in back: waifu.dev's, or single sign-on's.
-        "/auth/waifu/callback" | "/auth/sso/done" => page(PAGE),
+        "/auth/waifu/callback" | "/auth/sso/done" | "/auth/provider/done" => page(PAGE),
         "/returned" => {
             let (code, state) = (get("code"), get("state"));
             let problem = if get("error_description").is_empty() { get("error") } else { get("error_description") };
@@ -189,6 +189,7 @@ mod tests {
         };
         assert_eq!(get(format!("{origin}/auth/waifu/callback")).await, StatusCode::OK);
         assert_eq!(get(format!("{origin}/auth/sso/done")).await, StatusCode::OK);
+        assert_eq!(get(format!("{origin}/auth/provider/done")).await, StatusCode::OK);
         // Someone else's sign-in is ignored; ours comes through.
         assert_eq!(get(format!("{origin}/returned?code=x&state=other")).await, StatusCode::NO_CONTENT);
         assert_eq!(get(format!("{origin}/returned?code=abc&state=mine")).await, StatusCode::NO_CONTENT);

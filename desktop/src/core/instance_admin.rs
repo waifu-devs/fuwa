@@ -24,8 +24,9 @@ pub const MAX_CUSTOM: usize = 8;
 pub struct Known {
     pub name: &'static str,
     pub host: &'static str,
+    /// A catalog key, like the hints and key help.
     pub blurb: &'static str,
-    /// (id, label, hint); the first is the default.
+    /// (id, label, hint's catalog key); the first is the default.
     pub models: &'static [(&'static str, &'static str, &'static str)],
     pub key_help: &'static str,
     /// The hue its badge is drawn in.
@@ -43,25 +44,24 @@ pub fn known(id: &str) -> Option<&'static Known> {
 static JEV: Known = Known {
     name: "TypeSafe Jev",
     host: "api.typesafe.ai",
-    blurb: "A decision model that answers yes-or-no questions about a text with a calibrated probability. Text only, \
-            run in the US.",
-    models: &[("jev-latest", "Jev", "The current release"), ("jev-preview", "Jev preview", "The next release, early")],
-    key_help: "An API key from your TypeSafe account. Billed per word read, by TypeSafe.",
+    blurb: "instancesettings.moderation.jevBlurb",
+    models: &[
+        ("jev-latest", "Jev", "instancesettings.moderation.jevLatest"),
+        ("jev-preview", "Jev preview", "instancesettings.moderation.jevPreview"),
+    ],
+    key_help: "instancesettings.moderation.jevKeyHelp",
     hue: 0.6,
 };
 
 static CLEF: Known = Known {
     name: "Cloudflare Clef",
     host: "api.cloudflare.com",
-    blurb: "Cloudflare's open decision models on Workers AI, answering the same questions as Jev. Runs on \
-            Cloudflare's network.",
+    blurb: "instancesettings.moderation.clefBlurb",
     models: &[
-        ("@cf/cloudflare/clef", "Clef", "Most accurate"),
-        ("@cf/cloudflare/clef-flash", "Clef flash", "Fastest, cheapest"),
+        ("@cf/cloudflare/clef", "Clef", "instancesettings.moderation.clefModel"),
+        ("@cf/cloudflare/clef-flash", "Clef flash", "instancesettings.moderation.clefFlash"),
     ],
-    key_help: "An API token with Workers AI Read, either an account token (Manage Account, Account API Tokens) \
-               or a user token (My Profile, API Tokens), and your account id from the dashboard's sidebar. Billed \
-               by Cloudflare.",
+    key_help: "instancesettings.moderation.clefKeyHelp",
     hue: 0.07,
 };
 
@@ -87,28 +87,37 @@ pub fn host_of(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
-/// What a provider's card needs before it can be tried or turned on, as words, or `None` when it's ready.
-/// A saved key stays with its address: a custom one moved somewhere new needs it typed again.
-pub fn missing_for(p: &pb::AutoModProviderSettings, saved: Option<&pb::AutoModProviderSettings>) -> Option<String> {
+/// What a provider's card needs before it can be tried or turned on, as a catalog key (the web's
+/// `missingKey`), or `None` when it's ready. A saved key stays with its address: a custom one moved
+/// somewhere new needs it typed again.
+pub fn missing_for(
+    p: &pb::AutoModProviderSettings,
+    saved: Option<&pb::AutoModProviderSettings>,
+) -> Option<&'static str> {
     let moved = is_custom(p) && saved.is_some_and(|s| s.url.trim() != p.url.trim());
     let has_key = (p.api_key_set && !moved) || !p.api_key.trim().is_empty();
     if is_custom(p) {
-        let mut need = Vec::new();
-        if p.name.trim().is_empty() {
-            need.push("a name");
-        }
-        if host_of(&p.url).is_none() {
-            need.push("an https address");
-        }
-        if !p.header.trim().is_empty() && !has_key {
-            need.push("the key");
-        }
-        return (!need.is_empty()).then(|| format!("Add {} to test it and turn it on.", need.join(" and ")));
+        let name = p.name.trim().is_empty();
+        let address = host_of(&p.url).is_none();
+        let key = !p.header.trim().is_empty() && !has_key;
+        return match (name, address, key) {
+            (false, false, false) => None,
+            (true, false, false) => Some("instancesettings.moderation.addName"),
+            (false, true, false) => Some("instancesettings.moderation.addAddress"),
+            (false, false, true) => Some("instancesettings.moderation.addKey"),
+            (true, true, false) => Some("instancesettings.moderation.addNameAddress"),
+            (true, false, true) => Some("instancesettings.moderation.addNameKey"),
+            (false, true, true) => Some("instancesettings.moderation.addAddressKey"),
+            (true, true, true) => Some("instancesettings.moderation.addAll"),
+        };
     }
     let clef = p.id == "cloudflare-clef";
     let ready = has_key && (!clef || p.account_id.trim().len() == 32);
-    (!ready)
-        .then(|| format!("Add the {} to test it and turn it on.", if clef { "token and account id" } else { "key" }))
+    (!ready).then_some(if clef {
+        "instancesettings.moderation.addTokenAccount"
+    } else {
+        "instancesettings.moderation.addKey"
+    })
 }
 
 /// Whether a custom provider's saved key no longer goes with its address.
@@ -135,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 47] = [
+pub const PATHS: [&str; 55] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -167,6 +176,11 @@ pub const PATHS: [&str; 47] = [
     "voice_message_bytes_per_day",
     "poll_votes_per_minute",
     "commands_per_minute",
+    "pins_per_channel",
+    "pins_per_conversation",
+    "live_tiles_per_channel",
+    "live_tile_updates_per_minute",
+    "live_tile_publish_ms",
     "telemetry",
     "web",
     "calls",
@@ -183,6 +197,9 @@ pub const PATHS: [&str; 47] = [
     "shared_remote_people",
     "shared_remote_file_bytes_per_day",
     "shared_file_fetches_in_flight",
+    "gifs",
+    "provider_accounts",
+    "sign_in_providers",
 ];
 
 /// A default cap, or `None` for one that isn't there.
@@ -218,6 +235,14 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "shared_remote_people" => s.shared_remote_people,
         "shared_remote_file_bytes_per_day" => s.shared_remote_file_bytes_per_day,
         "shared_file_fetches_in_flight" => s.shared_file_fetches_in_flight,
+        "pins_per_channel" => s.pins_per_channel,
+        "pins_per_conversation" => s.pins_per_conversation,
+        "live_tiles_per_channel" => s.live_tiles_per_channel,
+        "live_tile_updates_per_minute" => s.live_tile_updates_per_minute,
+        "live_tile_publish_ms" => s.live_tile_publish_ms,
+        "gifs.gif_bytes" => s.gifs.as_ref().and_then(|g| g.gif_bytes),
+        "gifs.searches_per_minute" => s.gifs.as_ref().and_then(|g| g.searches_per_minute),
+        "gifs.provider_calls_per_day" => s.gifs.as_ref().and_then(|g| g.provider_calls_per_day),
         _ => limit(s, path),
     }
 }
@@ -241,6 +266,14 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "shared_remote_people" => &mut s.shared_remote_people,
         "shared_remote_file_bytes_per_day" => &mut s.shared_remote_file_bytes_per_day,
         "shared_file_fetches_in_flight" => &mut s.shared_file_fetches_in_flight,
+        "pins_per_channel" => &mut s.pins_per_channel,
+        "pins_per_conversation" => &mut s.pins_per_conversation,
+        "live_tiles_per_channel" => &mut s.live_tiles_per_channel,
+        "live_tile_updates_per_minute" => &mut s.live_tile_updates_per_minute,
+        "live_tile_publish_ms" => &mut s.live_tile_publish_ms,
+        "gifs.gif_bytes" => &mut s.gifs.get_or_insert_with(Default::default).gif_bytes,
+        "gifs.searches_per_minute" => &mut s.gifs.get_or_insert_with(Default::default).searches_per_minute,
+        "gifs.provider_calls_per_day" => &mut s.gifs.get_or_insert_with(Default::default).provider_calls_per_day,
         _ => {
             let l = s.default_limits.get_or_insert_with(Default::default);
             match path {
@@ -290,6 +323,9 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "automod_providers" => prints(a) != prints(b),
         "federation" => a.federation != b.federation,
         "federation_blocked_hosts" => hosts(&a.federation_blocked_hosts) != hosts(&b.federation_blocked_hosts),
+        "gifs" => gif_print(a) != gif_print(b),
+        "provider_accounts" => provider_accounts(a) != provider_accounts(b),
+        "sign_in_providers" => sign_in_print(a) != sign_in_print(b),
         _ => cap(a, path) != cap(b, path),
     }
 }
@@ -299,6 +335,50 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
 pub fn hosts<S: AsRef<str>>(list: &[S]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     list.iter().map(|h| h.as_ref().trim().to_lowercase()).filter(|h| !h.is_empty() && seen.insert(h.clone())).collect()
+}
+
+/// The setting a cap is saved under: a GIF cap goes with the rest of GIFs.
+pub fn saved_as(path: &str) -> &str {
+    if path.starts_with("gifs.") { "gifs" } else { path }
+}
+
+/// GIF search as the web compares it: the key is never sent back, so an empty one keeps the saved.
+fn gif_print(s: &pb::InstanceSettings) -> (i32, String, String, Option<i64>, Option<i64>, Option<i64>) {
+    let g = s.gifs.clone().unwrap_or_default();
+    let rating = if g.rating.is_empty() { "pg-13".to_owned() } else { g.rating.clone() };
+    (g.provider, g.api_key.trim().to_owned(), rating, g.gif_bytes, g.searches_per_minute, g.provider_calls_per_day)
+}
+
+/// Whether newcomers get accounts by signing in with Google, X or Twitch (open unless set).
+pub fn provider_accounts(s: &pb::InstanceSettings) -> i32 {
+    if s.provider_accounts == 0 { pb::ProviderAccounts::Open as i32 } else { s.provider_accounts }
+}
+
+/// The sign-in providers fuwa knows, in the order they show: (id, name, where an admin makes an app).
+pub const SIGN_IN_PROVIDERS: [(&str, &str, &str); 3] = [
+    ("google", "Google", "https://console.cloud.google.com/apis/credentials"),
+    ("x", "X", "https://developer.x.com/en/portal/dashboard"),
+    ("twitch", "Twitch", "https://dev.twitch.tv/console/apps"),
+];
+
+/// A sign-in provider's settings, or a switched-off blank one when none are saved.
+pub fn sign_in_setting(s: &pb::InstanceSettings, id: &str) -> pb::SignInProviderSetting {
+    s.sign_in_providers
+        .iter()
+        .find(|p| p.id == id)
+        .cloned()
+        .unwrap_or_else(|| pb::SignInProviderSetting { id: id.to_owned(), ..Default::default() })
+}
+
+/// The sign-in providers as the web compares them: a secret is never sent back.
+fn sign_in_print(s: &pb::InstanceSettings) -> Vec<(bool, String, String)> {
+    SIGN_IN_PROVIDERS
+        .iter()
+        .map(|(id, _, _)| {
+            let p = sign_in_setting(s, id);
+            (p.enabled, p.client_id.trim().to_owned(), p.client_secret.trim().to_owned())
+        })
+        .collect()
 }
 
 /// The settings that differ between a draft and what's saved, as the API names them.
@@ -339,6 +419,9 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "automod_providers" => into.automod_providers = from.automod_providers.clone(),
         "federation" => into.federation = from.federation,
         "federation_blocked_hosts" => into.federation_blocked_hosts = from.federation_blocked_hosts.clone(),
+        "gifs" => into.gifs = Some(from.gifs.clone().unwrap_or_default()),
+        "provider_accounts" => into.provider_accounts = from.provider_accounts,
+        "sign_in_providers" => into.sign_in_providers = from.sign_in_providers.clone(),
         _ => set_cap(into, path, cap(from, path)),
     }
 }
@@ -443,17 +526,9 @@ pub fn per_minute_label(n: Option<i64>) -> String {
     n.map_or_else(|| "no limit".to_owned(), |n| format!("{} a minute", group_digits(n)))
 }
 
-/// Where a count cap starts when it's switched on: the web's placeholder.
-pub fn starting_cap(path: &str) -> i64 {
-    match path {
-        "poll_votes_per_minute" => 30,
-        "commands_per_minute" => 20,
-        "shared_file_fetches_in_flight" => 8,
-        "shared_remote_sends_per_minute" => 120,
-        "shared_remote_people" => 500,
-        "voice_message_seconds" => 300,
-        _ => 100,
-    }
+/// Where a count cap starts when it's switched on with nothing typed: 100, as on the web.
+pub fn starting_cap(_path: &str) -> i64 {
+    100
 }
 
 /// A size cap in words: "no limit" when it's off.
@@ -489,6 +564,13 @@ impl Core {
         rpc!(api.admin(), get_federation(pb::GetFederationRequest {})).await
     }
 
+    /// Replaces this instance's federation key; the old one vouches for the new. Gives the new fingerprint.
+    pub async fn rotate_federation_key(&self, key: &str) -> Result<String, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.admin(), rotate_federation_key(pb::RotateFederationKeyRequest {})).await?;
+        Ok(res.fingerprint)
+    }
+
     /// Reaches another instance with a signed greeting and back, pinning its key here.
     pub async fn check_instance(&self, key: &str, address: &str) -> Result<pb::CheckInstanceResponse, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
@@ -521,6 +603,16 @@ impl Core {
         )
         .await?;
         res.config.ok_or_else(|| Problem::new(Code::Internal, "The instance sent no settings."))
+    }
+
+    /// Asks a GIF provider, saved or not, for a few trending GIFs, from the instance.
+    pub async fn test_gif_provider(
+        &self,
+        key: &str,
+        settings: pb::GifSettings,
+    ) -> Result<pb::TestGifProviderResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.gifs(), test_gif_provider(pb::TestGifProviderRequest { settings: Some(settings) })).await
     }
 
     /// Asks a provider, saved or not, about [`SAMPLE`]. The text goes to the provider's host, from the instance.
@@ -583,31 +675,25 @@ mod tests {
     #[test]
     fn cards_say_what_they_still_need() {
         let jev = pb::AutoModProviderSettings { id: "typesafe-jev".into(), ..Default::default() };
-        assert_eq!(missing_for(&jev, None).as_deref(), Some("Add the key to test it and turn it on."));
+        assert_eq!(missing_for(&jev, None), Some("instancesettings.moderation.addKey"));
         let typed = pb::AutoModProviderSettings { api_key: "k".into(), ..jev.clone() };
         assert_eq!(missing_for(&typed, None), None);
         let clef =
             pb::AutoModProviderSettings { id: "cloudflare-clef".into(), api_key_set: true, ..Default::default() };
-        assert_eq!(
-            missing_for(&clef, None).as_deref(),
-            Some("Add the token and account id to test it and turn it on.")
-        );
+        assert_eq!(missing_for(&clef, None), Some("instancesettings.moderation.addTokenAccount"));
         let clef = pb::AutoModProviderSettings { account_id: "0123456789abcdef0123456789abcdef".into(), ..clef };
         assert_eq!(missing_for(&clef, None), None);
 
         assert_eq!(missing_for(&custom("https://a.example/"), None), None);
         let nameless = pb::AutoModProviderSettings { name: " ".into(), ..custom("ftp://a") };
-        assert_eq!(
-            missing_for(&nameless, None).as_deref(),
-            Some("Add a name and an https address to test it and turn it on.")
-        );
+        assert_eq!(missing_for(&nameless, None), Some("instancesettings.moderation.addNameAddress"));
         // A saved key stays with the address it was saved for.
         let saved =
             pb::AutoModProviderSettings { api_key_set: true, header: "X-Key".into(), ..custom("https://a.example/") };
         assert_eq!(missing_for(&saved, Some(&saved)), None);
         let moved_away = pb::AutoModProviderSettings { url: "https://b.example/".into(), ..saved.clone() };
         assert!(moved(&moved_away, Some(&saved)));
-        assert_eq!(missing_for(&moved_away, Some(&saved)).as_deref(), Some("Add the key to test it and turn it on."));
+        assert_eq!(missing_for(&moved_away, Some(&saved)), Some("instancesettings.moderation.addKey"));
     }
 
     #[test]

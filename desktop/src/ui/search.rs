@@ -13,10 +13,11 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, Focusable as _, FontWeight,
-    HighlightStyle, InteractiveElement as _, IntoElement, Keystroke, ParentElement as _, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, StyledText, Window, div, px,
+    InteractiveElement as _, IntoElement, Keystroke, ParentElement as _, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use crate::core::i18n::t;
 use crate::core::keybinds;
 use crate::core::search::{self, FilterKey};
 use crate::core::store::user_name;
@@ -25,8 +26,8 @@ use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::keys::fuzzy;
 use crate::ui::motion;
 use crate::ui::text::{ms_of, when};
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, card, icon, icon_button, pal};
+use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon, icon_button, pal};
 
 /// The search field and its suggestions, and the results panel while it's open.
 pub struct Search {
@@ -559,17 +560,15 @@ impl FuwaApp {
             .map(|c| keybinds::label(&c));
         let field = div()
             .w_full()
-            .h(px(34.0))
+            .h(px(36.0))
             .flex()
             .items_center()
             .gap(px(6.0))
-            .pl(px(10.0))
-            .pr(px(6.0))
+            .px(px(12.0))
             .rounded_full()
             .border_1()
             .border_color(if focused { alpha(p.primary, 0.5) } else { p.border.into() })
             .bg(if focused { alpha(p.background, 1.0) } else { alpha(p.background, 0.6) })
-            .when(focused, |el| el.shadow_sm())
             .child(icon("search").size(px(16.0)).text_color(if focused { p.primary } else { p.muted_foreground }))
             .child(div().flex_1().min_w_0().child(Input::new(&self.search.field).appearance(false).small()))
             .when(typed, |el| {
@@ -598,11 +597,12 @@ impl FuwaApp {
                         div()
                             .flex_none()
                             .px(px(6.0))
-                            .rounded(corner(6.0))
+                            .rounded(crate::ui::theme::radius_md())
                             .border_1()
                             .border_color(p.border)
                             .bg(p.muted)
-                            .text_xs()
+                            .text_size(px(10.4))
+                            .line_height(px(15.6))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
                             .child(combo),
@@ -612,7 +612,8 @@ impl FuwaApp {
         // Gives way to the channel's name and marks when the header is short of room.
         let mut wrap = div()
             .relative()
-            .w(px(if focused || typed { 260.0 } else { 200.0 }))
+            // The web's `w-44 lg:w-56`: 224px from 1024px wide.
+            .w(px(if window.viewport_size().width >= px(1024.0) { 224.0 } else { 176.0 }))
             .min_w(px(120.0))
             .flex_shrink(1.0)
             .child(field);
@@ -638,10 +639,12 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .justify_between()
+                    // A group's `py-1`, and its title's `px-2 pb-1 text-[0.7rem]`.
                     .px(px(8.0))
-                    .pt(px(6.0))
+                    .pt(px(4.0))
                     .pb(px(4.0))
-                    .text_xs()
+                    .text_size(px(11.2))
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.muted_foreground)
                     .child(group.title.to_uppercase())
@@ -653,7 +656,7 @@ impl FuwaApp {
                                 .rounded(corner(4.0))
                                 .cursor_pointer()
                                 .hover(|s| s.text_color(p.foreground))
-                                .child("Clear")
+                                .child(t("chattools.search.clearRecent"))
                                 .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let place = clear_place.clone();
@@ -683,13 +686,16 @@ impl FuwaApp {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
+                        .group("suggestion")
                         .px(px(8.0))
                         .py(px(6.0))
-                        .rounded(corner(12.0))
+                        .rounded(radius_xl())
                         .text_sm()
+                        .line_height(px(20.0))
                         .cursor_pointer()
+                        .text_color(if lit { p.foreground.into() } else { alpha(p.foreground, 0.9) })
                         .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
-                        .hover(|s| s.bg(alpha(p.primary, 0.08)))
+                        .when(!lit, |el| el.hover(|s| s.bg(alpha(p.primary, 0.08))))
                         // Picking with the mouse mustn't take focus from the field first.
                         .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                         .on_click(
@@ -708,7 +714,7 @@ impl FuwaApp {
                                     div()
                                         .flex_none()
                                         .max_w(px(180.0))
-                                        .font_weight(FontWeight::BOLD)
+                                        .when(item.open || item.user.is_some(), |el| el.font_weight(FontWeight::BOLD))
                                         .truncate()
                                         .child(item.label.clone()),
                                 )
@@ -726,8 +732,11 @@ impl FuwaApp {
                         })
                         .when_some(forget, |el, query| {
                             el.child(
+                                // Shown on hover only, as the web's.
                                 icon_button(SharedString::from(format!("forget|{query}")), "x", &p)
-                                    .size(px(22.0))
+                                    .size(px(24.0))
+                                    .invisible()
+                                    .group_hover("suggestion", |s| s.visible())
                                     .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -740,14 +749,26 @@ impl FuwaApp {
                         }),
                 );
             }
+            list = list.child(div().h(px(4.0)).flex_none());
         }
         // Drawn after the messages below it, so it sits over them.
-        gpui_kit::deferred(div().absolute().top(px(40.0)).right(px(0.0)).w(px(320.0)).child(motion::rise(
-            card(&p).p(px(0.0)).shadow_lg().occlude().child(list),
-            "search-suggestions-in",
-            Duration::ZERO,
-            -6.0,
-        )))
+        gpui_kit::deferred(
+            div().absolute().top(px(45.0)).right(px(0.0)).w(px(320.0)).child(motion::rise(
+                // `rounded-2xl border bg-popover shadow-xl`.
+                div()
+                    .rounded(radius_2xl())
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.card)
+                    .text_color(p.foreground)
+                    .shadow(crate::ui::settings_controls::shadow_xl())
+                    .occlude()
+                    .child(list),
+                "search-suggestions-in",
+                Duration::ZERO,
+                -6.0,
+            )),
+        )
         .with_priority(1)
     }
 
@@ -770,7 +791,7 @@ impl FuwaApp {
         let run = self.search.run;
 
         let heading: AnyElement = if panel.loading && !panel.more {
-            div().text_color(p.muted_foreground).child("Searching…").into_any_element()
+            div().text_color(p.muted_foreground).child(t("chattools.search.searching")).into_any_element()
         } else if panel.error.is_some() || panel.request.is_none() {
             div().child("Search").into_any_element()
         } else {
@@ -792,15 +813,37 @@ impl FuwaApp {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .px(px(14.0))
-            .h(px(56.0))
+            .px(px(12.0))
+            .py(px(10.0))
             .border_b_1()
             .border_color(p.border)
-            .child(div().flex_1().min_w_0().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(heading))
             .child(
-                icon_button("search-close", "x", &p)
-                    .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx))),
-            );
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_base()
+                    .line_height(px(24.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child(heading),
+            )
+            .child({
+                // `size-8 rounded-full`, muted until hovered.
+                let (bg, fg) = (p.muted, p.foreground);
+                div()
+                    .id("search-close")
+                    .size(px(32.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .text_color(p.muted_foreground)
+                    .hover(move |s| s.bg(bg).text_color(fg))
+                    .active(|s| s.opacity(0.8))
+                    .child(icon("x").size(px(16.0)))
+                    .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx)))
+            });
 
         let mut body = div()
             .id("search-results")
@@ -838,12 +881,12 @@ impl FuwaApp {
         if panel.loading && !panel.more {
             body = body.child(skeleton(5, &p));
         } else if let Some(error) = &panel.error {
-            body = body.child(empty("search-x", "Couldn't search", error, &p));
+            body = body.child(empty("search-x", &t("chattools.search.failed"), error, &p));
         } else if panel.results.is_empty() && panel.request.is_some() {
             body = body.child(if panel.cursor.is_empty() {
-                empty("search-x", "Nothing found", "Try other words, or fewer filters.", &p)
+                empty("search-x", &t("chattools.search.nothingFound"), &t("chattools.search.tryOther"), &p)
             } else {
-                empty("search-x", "Nothing in the newest messages", "Older ones haven't been searched yet.", &p)
+                empty("search-x", &t("chattools.search.nothingNewest"), &t("chattools.search.olderNotSearched"), &p)
             });
         }
         if !(panel.loading && !panel.more) && panel.error.is_none() {
@@ -890,7 +933,7 @@ impl FuwaApp {
                             .text_color(p.muted_foreground)
                             .cursor_pointer()
                             .hover(|s| s.bg(alpha(p.primary, 0.1)).text_color(p.primary))
-                            .child("Look further back")
+                            .child(t("chattools.search.further"))
                             .on_click(cx.listener(|this, _, _, cx| this.more_results(cx))),
                     ),
                 );
@@ -900,14 +943,15 @@ impl FuwaApp {
         Some(
             motion::slide_in(
                 div()
-                    .w(px(400.0))
+                    // `surface-side w-[24rem] border-l`.
+                    .w(px(384.0))
                     .h_full()
                     .flex_none()
                     .flex()
                     .flex_col()
                     .border_l_1()
                     .border_color(p.border)
-                    .bg(p.background)
+                    .bg(p.side_surface)
                     .child(header)
                     .child(body),
                 "search-panel-in",
@@ -949,11 +993,17 @@ impl FuwaApp {
                 .unwrap_or_else(|| "Someone".into()),
         };
         let stamp = when(ms_of(message.created_at.as_ref()));
-        let (text, hits) = readable(&message.content, &search::byte_ranges(&message.content, &result.highlights), look);
-        let lit = HighlightStyle {
-            background_color: Some(alpha(p.primary, 0.28)),
-            font_weight: Some(FontWeight::BOLD),
-            ..Default::default()
+        // The message as chat draws it (Markdown, mentions, emoji, timestamps), the words found lit up.
+        let text = if message.content.trim().is_empty() {
+            String::new()
+        } else {
+            let marked = mark_hits(&message.content, &search::byte_ranges(&message.content, &result.highlights));
+            hits_as_markdown(&crate::ui::mentions::mention_links(
+                &crate::ui::timestamps::timestamp_nodes(&crate::ui::text::hard_breaks(
+                    &crate::ui::text::images_as_links(&marked),
+                )),
+                &look.mentions.with(&message.emojis),
+            ))
         };
         let open = message.clone();
         let id = message.id.clone();
@@ -981,21 +1031,45 @@ impl FuwaApp {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
                     .child(
                         div()
                             .flex()
                             .items_baseline()
                             .gap(px(8.0))
-                            .child(div().text_sm().font_weight(FontWeight::EXTRA_BOLD).truncate().child(name))
-                            .child(div().flex_none().text_xs().text_color(p.muted_foreground).child(stamp)),
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .line_height(px(20.0))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .truncate()
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(11.2))
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(stamp),
+                            ),
                     )
                     .when(!text.is_empty(), |el| {
+                        // `line-clamp-6 text-sm`.
                         el.child(
-                            div()
-                                .text_sm()
-                                .line_clamp(6)
-                                .child(StyledText::new(text).with_highlights(hits.into_iter().map(|r| (r, lit)))),
+                            div().text_sm().line_height(px(20.0)).max_h(px(120.0)).overflow_hidden().child(
+                                gpui_kit::base::TextView::markdown(
+                                    SharedString::from(format!("result-md|{run}|{}", message.id)),
+                                    text,
+                                )
+                                .markdown_extensions(markdown_extensions())
+                                .style(crate::ui::chat::chat_markdown(&p))
+                                .on_link_click(|url, _, _, cx| {
+                                    if !url.starts_with("fuwa:") {
+                                        crate::ui::text::open_link(url, cx)
+                                    }
+                                })
+                                .w_full(),
+                            ),
                         )
                     })
                     .when(!message.attachments.is_empty(), |el| {
@@ -1042,7 +1116,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .invisible()
                     .group_hover("result", |s| s.visible())
-                    .child("Jump")
+                    .child(t("chattools.search.jump"))
                     .child(icon("arrow-right").size(px(12.0))),
             );
         if n < STAGGER_ROWS {
@@ -1066,7 +1140,8 @@ struct Look {
     names: std::collections::HashMap<String, String>,
     users: std::collections::HashMap<String, pb::User>,
     channels: std::collections::HashMap<String, String>,
-    roles: std::collections::HashMap<String, String>,
+    /// How chat draws mentions, roles and emoji here.
+    mentions: crate::ui::mentions::Look,
 }
 
 impl Look {
@@ -1081,91 +1156,114 @@ impl Look {
         for c in i.channels.get(server).into_iter().flatten() {
             look.channels.insert(c.id.clone(), c.name.clone());
         }
-        for r in i.roles.get(server).into_iter().flatten() {
-            look.roles.insert(r.id.clone(), r.name.clone());
-        }
+        look.mentions = crate::ui::mentions::Look::of(i, server);
         look
     }
 }
 
-/// A message's text as words to read in a result: on one line, without
-/// formatting marks, roles and server emoji by name, timestamps as they read here.
-/// The matches move with the text.
-fn readable(text: &str, hits: &[Range<usize>], look: &Look) -> (String, Vec<Range<usize>>) {
-    let mut out = String::with_capacity(text.len());
-    let mut moved: Vec<Range<usize>> = Vec::new();
-    let mut hit = hits.iter().peekable();
-    let mut open: Option<usize> = None;
-    let mut i = 0;
-    let mut space = false;
-    while i < text.len() {
-        // Matches start and end where the text does.
-        if let Some(r) = hit.peek()
-            && open.is_none()
-            && r.start == i
-        {
-            open = Some(out.len());
-        }
-        if let (Some(start), Some(r)) = (open, hit.peek())
-            && r.end <= i
-        {
-            moved.push(start..out.len());
-            open = None;
-            hit.next();
+/// Where a match starts and ends while the text goes through chat's steps (the web's `MARK_OPEN`, `MARK_CLOSE`).
+const OPEN: char = '\u{E000}';
+const CLOSE: char = '\u{E001}';
+
+/// Marks the matches in a message's text (the web's `markRanges`); [`hits_as_markdown`]
+/// turns the marks into what [`HitPlugin`] draws lit up (`remarkSearchHits`).
+/// A match inside code, a link, a mention or any other token is left as it
+/// is, so marking never changes what's shown or where a link goes.
+fn mark_hits(text: &str, hits: &[Range<usize>]) -> String {
+    let mut out = String::with_capacity(text.len() + hits.len() * 16);
+    let mut at = 0;
+    let mut hits: Vec<&Range<usize>> = hits.iter().filter(|r| r.start < r.end && r.end <= text.len()).collect();
+    hits.sort_by_key(|r| r.start);
+    for r in hits {
+        if r.start < at || !text.is_char_boundary(r.start) || !text.is_char_boundary(r.end) {
             continue;
         }
-        let rest = &text[i..];
-        let inside = open.is_some() || hits.iter().any(|r| r.start > i && r.start < i + token_len(rest));
-        // A token is replaced only when no match falls inside it.
-        if !inside && let Some((shown, len)) = token(rest, look) {
-            out.push_str(&shown);
-            i += len;
-            space = false;
+        let word = &text[r.clone()];
+        // The whole word it's in, out to the spaces either side.
+        let from = text[..r.start].rfind(char::is_whitespace).map_or(0, |i| i + 1);
+        let to = text[r.end..].find(char::is_whitespace).map_or(text.len(), |i| r.end + i);
+        let around = &text[from..to];
+        let in_code = text[..r.start].matches('`').count() % 2 == 1;
+        let risky = in_code
+            || around.contains("://")
+            || around.contains(['<', '>', '@', '`', '[', ']', '(', ')', '\\', '|', '!', '#'])
+            || word.contains(['*', '_', '~', ':']);
+        if risky {
             continue;
         }
-        let c = rest.chars().next().unwrap_or(' ');
-        if matches!(c, '*' | '~' | '`') {
-            // Formatting marks, which a result doesn't draw.
-        } else if c.is_whitespace() {
-            if !space && !out.is_empty() {
-                out.push(' ');
-            }
-            space = true;
-        } else {
-            out.push(c);
-            space = false;
+        out.push_str(&text[at..r.start]);
+        out.push(OPEN);
+        out.push_str(word);
+        out.push(CLOSE);
+        at = r.end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// The marks [`mark_hits`] made, as `![word](fuwa-hit:)`, once chat's other steps are done.
+fn hits_as_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + OPEN.len_utf8()..];
+        let Some(end) = after.find(CLOSE) else {
+            rest = after;
+            continue;
+        };
+        out.push_str("![");
+        out.push_str(&after[..end]);
+        out.push_str("](fuwa-hit:)");
+        rest = &after[end + CLOSE.len_utf8()..];
+    }
+    out.push_str(&rest.replace(CLOSE, ""));
+    out
+}
+
+/// Chat's Markdown plugins and the search matches.
+fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
+    crate::ui::emoji::markdown_extensions().plugin(HitPlugin).parser_revision(4)
+}
+
+/// A match in a result: `mark.search-hit`, the primary at 26% behind the text as it was.
+struct HitPlugin;
+
+impl gpui_kit::component::text::MarkdownPlugin for HitPlugin {
+    fn name(&self) -> &str {
+        "fuwa-hit"
+    }
+
+    fn parse(
+        &self,
+        node: &gpui_kit::component::text::markdown_ast::Node,
+        _: &gpui_kit::component::text::MarkdownParseContext<'_>,
+    ) -> Option<gpui_kit::component::text::MarkdownNode> {
+        let gpui_kit::component::text::markdown_ast::Node::Image(image) = node else { return None };
+        if image.url != "fuwa-hit:" {
+            return None;
         }
-        i += c.len_utf8();
+        let text = image.alt.clone();
+        Some(
+            gpui_kit::component::text::MarkdownNode::new("fuwa-hit", SharedString::from(text.clone()))
+                .text(text.clone())
+                .markdown(text),
+        )
     }
-    if let Some(start) = open {
-        moved.push(start..out.len());
-    }
-    let trimmed = out.trim_end().len();
-    out.truncate(trimmed);
-    let moved = moved.into_iter().filter(|r| r.end <= out.len() && r.start < r.end).collect();
-    (out, moved)
-}
 
-/// How long the token at the start of `rest` is, if one's there.
-fn token_len(rest: &str) -> usize {
-    if rest.starts_with('<') { rest.find('>').map_or(0, |e| e + 1) } else { 0 }
-}
-
-/// A role, server emoji or timestamp token at the start of `rest`: what it reads as, and its length.
-fn token(rest: &str, look: &Look) -> Option<(String, usize)> {
-    if !rest.starts_with('<') {
-        return None;
+    fn render_inline(
+        &self,
+        node: &gpui_kit::component::text::MarkdownNode,
+        _: &gpui_kit::component::text::InlineRenderContext,
+        _: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Option<gpui_kit::component::text::InlineElement> {
+        let text = node.data::<SharedString>()?.clone();
+        let p = pal(cx);
+        Some(gpui_kit::component::text::InlineElement::new(
+            div().px(px(1.4)).rounded(px(3.5)).bg(alpha(p.primary, 0.26)).child(text).into_any_element(),
+        ))
     }
-    if let Some((seconds, style, len)) = crate::core::timestamps::token_at(rest) {
-        return Some((crate::core::timestamps::format(seconds, style, crate::core::dms::now_ms()), len));
-    }
-    if let Some((name, _, len)) = crate::core::emoji::token_at(rest) {
-        return Some((format!(":{name}:"), len));
-    }
-    let end = rest.find('>')?;
-    let id = rest.strip_prefix("<@&")?.get(..end - 3)?;
-    let name = look.roles.get(&id.to_uppercase()).map(String::as_str).unwrap_or("deleted-role");
-    Some((format!("@{name}"), end + 1))
 }
 
 /// 12345 → "12,345".
@@ -1215,7 +1313,7 @@ pub(crate) fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
 }
 
 /// What the list shows when there's nothing to list.
-pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement {
+pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -> impl IntoElement + use<> {
     motion::rise(
         div()
             .flex()
@@ -1250,15 +1348,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn results_read_as_words_and_keep_their_highlights() {
-        let mut look = Look::default();
-        look.roles.insert("01J0000000000000000000000A".into(), "mods".into());
-        let text = "hey <@&01J0000000000000000000000A>\n\nbring   **cake** <:blob:01J0000000000000000000000B>";
-        let cake = text.find("cake").unwrap();
-        let hit = cake..cake + 4;
-        let (shown, hits) = readable(text, std::slice::from_ref(&hit), &look);
-        assert_eq!(shown, "hey @mods bring cake :blob:");
-        assert_eq!(hits.iter().map(|r| &shown[r.clone()]).collect::<Vec<_>>(), vec!["cake"]);
+    fn matches_are_marked_only_where_marking_changes_nothing_else() {
+        let text = "the cake is `the lie` at https://the.example and @the <@&01J0> **the**";
+        let hits: Vec<Range<usize>> = text.match_indices("the").map(|(i, w)| i..i + w.len()).collect();
+        let marked = hits_as_markdown(&mark_hits(text, &hits));
+        assert!(marked.starts_with("![the](fuwa-hit:) cake is `the lie` at https://the.example and @the"));
+        assert!(marked.ends_with("**![the](fuwa-hit:)**"));
         assert_eq!(group_digits(10000), "10,000");
         assert_eq!(group_digits(999), "999");
     }

@@ -23,9 +23,9 @@ use crate::pb;
 use crate::ui::app::FuwaApp;
 use crate::ui::chat::{Built, Row};
 use crate::ui::motion;
-use crate::ui::text::{ms_of, when};
+use crate::ui::text::ms_of;
 use crate::ui::theme::{Palette, alpha, corner, mix};
-use crate::ui::widgets::{avatar, icon, icon_button, pal};
+use crate::ui::widgets::{avatar, icon, pal};
 
 /// How long the threads search waits for typing to stop.
 const SEARCH_PAUSE: Duration = Duration::from_millis(250);
@@ -150,6 +150,9 @@ impl FuwaApp {
 
     /// Opens the thread under a message of the open channel beside it.
     pub(crate) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(crate::ui::app::Target::Secure { .. }) = self.target() {
+            return self.open_secure_thread(&id, window, cx);
+        }
         let Some(crate::ui::app::Target::Channel { key, server, channel }) = self.target() else { return };
         let open = Open { key: key.clone(), server: server.clone(), channel: channel.clone(), id: id.clone() };
         if self.threads.open.as_ref() == Some(&open) {
@@ -327,6 +330,9 @@ impl FuwaApp {
     // ───────────────────────── Replying ─────────────────────────
 
     pub(crate) fn send_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(crate::ui::app::Target::Secure { .. }) = self.target() {
+            return self.send_secure_reply(window, cx);
+        }
         let Some(open) = self.threads.open.clone() else { return };
         let text = self.threads.reply.read(cx).value().trim().to_owned();
         if text.is_empty() || self.thread_blocked().is_some() {
@@ -429,81 +435,114 @@ pub(crate) fn replies_row(
     p: &Palette,
     this: &gpui_kit::WeakEntity<FuwaApp>,
 ) -> impl IntoElement {
+    use crate::core::i18n::{Arg, t, t_with};
     let (this, open) = (this.clone(), id.to_owned());
-    let word = if r.count == 1 { "reply" } else { "replies" };
-    div()
-        .id(SharedString::from(format!("replies|{id}")))
-        .group("replies")
-        .mt(px(6.0))
-        .max_w(px(480.0))
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(8.0))
-        .py(px(5.0))
-        .rounded(corner(12.0))
-        .border_1()
-        .border_color(gpui_kit::transparent_black())
-        .cursor_pointer()
-        .hover(|s| s.bg(p.card).border_color(p.border))
-        .on_click(move |_, window, cx| {
-            let open = open.clone();
-            let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
-        })
-        .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
-            div()
-                .when(n > 0, |el| el.ml(px(-6.0)))
-                .rounded_full()
-                .border_2()
-                .border_color(p.chat_surface)
-                .child(avatar(Some(u), 20.0, p))
-        })))
-        .child(
-            div()
-                .flex_none()
-                .text_sm()
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.primary)
-                .child(format!("{} {word}", r.count)),
-        )
-        .when(r.new > 0, |el| {
-            el.child(motion::rise(
+    let last = if r.archived {
+        t("chat.threads.archived")
+    } else {
+        let time = crate::ui::text::ago(r.last_at, crate::core::dms::now_ms());
+        t_with("chat.threads.lastReply", &[("time", Arg::Str(&time))])
+    };
+    let (hover_bg, hover_border) = (alpha(p.card, 0.7), p.border);
+    motion::rise(
+        div()
+            .id(SharedString::from(format!("replies|{id}")))
+            .group("replies")
+            .mt(px(4.0))
+            .ml(px(-6.0))
+            .max_w_full()
+            .flex()
+            .flex_none()
+            .self_start()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(6.0))
+            .py(px(4.0))
+            .rounded(crate::ui::theme::radius_xl())
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .text_xs()
+            .line_height(px(16.0))
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg).border_color(hover_border))
+            .active(|s| s.opacity(0.9))
+            .on_click(move |_, window, cx| {
+                let open = open.clone();
+                let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
+            })
+            // Up to three faces, overlapping, each in a ring of the page's colour.
+            .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
+                div().relative().size(px(20.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
+                    div()
+                        .absolute()
+                        .left(px(-2.0))
+                        .top(px(-2.0))
+                        .size(px(24.0))
+                        .rounded_full()
+                        .bg(p.background)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(avatar(Some(u), 20.0, p)),
+                )
+            })))
+            .child(
                 div()
                     .flex_none()
-                    .px(px(6.0))
-                    .rounded_full()
-                    .bg(p.primary)
-                    .text_color(p.primary_foreground)
-                    .text_xs()
                     .font_weight(FontWeight::BOLD)
-                    .child(format!("{} new", r.new)),
-                SharedString::from(format!("replies-new|{id}|{}", r.new)),
-                Duration::ZERO,
-                4.0,
-            ))
-        })
-        .when(r.locked, |el| el.child(icon("lock").size(px(13.0)).text_color(p.muted_foreground)))
-        .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted_foreground).child(if r.archived {
-            "Archived".to_owned()
-        } else if r.count == 0 {
-            "No replies yet".to_owned()
-        } else {
-            format!("Last reply {}", when(r.last_at))
-        }))
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(p.muted_foreground)
-                .opacity(0.0)
-                .group_hover("replies", |s| s.opacity(1.0))
-                .child("View thread")
-                .child(icon("chevron-right").size(px(14.0))),
-        )
+                    .text_color(p.primary)
+                    .child(t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(r.count)))])),
+            )
+            .when(r.new > 0, |el| {
+                el.child(motion::rise(
+                    div()
+                        .flex_none()
+                        .px(px(6.0))
+                        .rounded_full()
+                        .bg(p.primary)
+                        .text_color(p.primary_foreground)
+                        .text_size(px(10.4))
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .child(if r.new > 99 {
+                            t("chat.threads.newMany")
+                        } else {
+                            t_with("chat.threads.newCount", &[("count", Arg::Num(i64::from(r.new)))])
+                        }),
+                    SharedString::from(format!("replies-new|{id}|{}", r.new)),
+                    Duration::ZERO,
+                    4.0,
+                ))
+            })
+            .when(r.locked, |el| el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground)))
+            // The last reply, or "View thread" while hovered, in one place.
+            .child(
+                div()
+                    .relative()
+                    .min_w_0()
+                    .text_color(p.muted_foreground)
+                    .child(
+                        div()
+                            .truncate()
+                            .relative()
+                            .top(px(0.0))
+                            .group_hover("replies", |s| s.opacity(0.0).top(px(-4.0)))
+                            .child(last),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(4.0))
+                            .whitespace_nowrap()
+                            .opacity(0.0)
+                            .group_hover("replies", |s| s.opacity(1.0).top(px(0.0)))
+                            .child(t("chat.threads.view")),
+                    ),
+            ),
+        SharedString::from(format!("replies-in|{id}")),
+        Duration::ZERO,
+        4.0,
+    )
 }
 
 /// Under a reply also sent to the channel: where else it is. In the channel
@@ -516,13 +555,13 @@ pub(crate) fn also_note(
 ) -> impl IntoElement {
     let el = div()
         .id(SharedString::from(format!("also|{id}")))
-        .mb(px(2.0))
         .flex()
         .items_center()
         .gap(px(4.0))
-        .text_xs()
-        .text_color(p.muted_foreground)
-        .child(icon("corner-down-right").size(px(13.0)));
+        .text_size(px(11.2))
+        .line_height(px(18.2))
+        .font_weight(FontWeight::BOLD)
+        .text_color(p.muted_foreground);
     match thread {
         Some(thread) => {
             let (this, thread) = (this.clone(), thread.to_owned());
@@ -532,9 +571,10 @@ pub(crate) fn also_note(
                     let thread = thread.clone();
                     let _ = this.update(cx, |this, cx| this.open_thread(thread, window, cx));
                 })
-                .child("Replied in a thread")
+                .child(icon("corner-down-right").size(px(12.0)))
+                .child(crate::core::i18n::t("chat.threads.repliedInThread"))
         }
-        None => el.child("Also sent to the channel"),
+        None => el.child(crate::core::i18n::t("chat.threads.alsoSent")),
     }
 }
 
@@ -564,82 +604,90 @@ impl FuwaApp {
             ))
         })?;
 
+        use crate::core::i18n::{Arg, t, t_with};
+        // The web's `PanelButton`: 32px and round, a 16px icon, the primary at 10% while on.
+        let panel_button = |id: &'static str, glyph: &'static str, label: String, on: bool| {
+            let hover = p.muted;
+            div()
+                .id(id)
+                .size(px(32.0))
+                .flex_none()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_color(if on { p.primary } else { p.muted_foreground })
+                .when(on, |el| el.bg(alpha(p.primary, 0.1)))
+                .hover(move |s| s.bg(hover))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+                .child(icon(glyph).size(px(16.0)))
+        };
+        let where_key = match (archived, locked) {
+            (true, true) => "chat.threads.whereArchivedLocked",
+            (true, false) => "chat.threads.whereArchived",
+            (false, true) => "chat.threads.whereLocked",
+            (false, false) => "chat.threads.where",
+        };
         let header = div()
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .pl(px(16.0))
-            .pr(px(10.0))
+            .gap(px(8.0))
+            .px(px(12.0))
             .h(px(56.0))
             .border_b_1()
             .border_color(p.border)
-            .child(icon("messages-square").size(px(18.0)).text_color(p.primary))
+            .child(icon("messages-square").size(px(20.0)).text_color(p.primary))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .flex()
-                    .items_baseline()
-                    .gap(px(6.0))
-                    .child(div().flex_none().text_lg().font_weight(FontWeight::EXTRA_BOLD).child("Thread"))
-                    .child(div().min_w_0().truncate().text_sm().text_color(p.muted_foreground).child(format!(
-                        "#{name}{}{}",
-                        if archived { " · archived" } else { "" },
-                        if locked { " · locked" } else { "" }
-                    ))),
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(16.0))
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("chat.threads.thread")),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t_with(where_key, &[("channel", Arg::Str(&name))])),
+                    ),
             )
             .when_some(following, |el, following| {
+                let label = if following { t("chat.threads.unfollow") } else { t("chat.threads.follow") };
                 el.child(
-                    icon_button("thread-follow", if following { "bell-ring" } else { "bell" }, &p)
-                        .when(following, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
-                        .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(if following {
-                                "Stop following"
-                            } else {
-                                "Follow this thread"
-                            })
-                            .build(window, cx)
-                        })
+                    panel_button("thread-follow", if following { "bell" } else { "bell-off" }, label, following)
                         .on_click(cx.listener(move |this, _, _, cx| this.follow_open_thread(!following, cx))),
                 )
             })
             .when(manage, |el| {
+                let label = if locked { t("chat.threads.unlock") } else { t("chat.threads.lock") };
                 el.child(
-                    icon_button("thread-lock", if locked { "lock" } else { "lock-open" }, &p)
-                        .when(locked, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
-                        .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(if locked {
-                                "Unlock thread"
-                            } else {
-                                "Lock thread"
-                            })
-                            .build(window, cx)
-                        })
+                    panel_button("thread-lock", if locked { "lock" } else { "lock-open" }, label, locked)
                         .on_click(cx.listener(move |this, _, _, cx| this.lock_open_thread(!locked, cx))),
                 )
             })
             .when(pins_here, |el| {
-                el.child(
-                    icon_button("thread-pins", "pin", &p)
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(crate::core::i18n::t("chattools.pins.button"))
-                                .build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.open_thread_pins(cx))),
-                )
+                let open = self.pins.as_ref().is_some_and(|p| p.of_thread(&open.id));
+                el.child(self.pins_button("thread-pins", open, cx))
             })
             .child(
-                icon_button("thread-jump", "arrow-up-right", &p)
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Jump to the message").build(window, cx)
-                    })
+                panel_button("thread-jump", "corner-up-left", t("chat.threads.jump"), false)
                     .on_click(cx.listener(|this, _, window, cx| this.jump_to_thread_message(window, cx))),
             )
-            .child(icon_button("thread-close", "x", &p).on_click(cx.listener(|this, _, window, cx| {
-                this.close_thread(cx);
-                this.composer.update(cx, |state, cx| state.focus(window, cx));
-            })));
+            .child(panel_button("thread-close", "x", t("chat.threads.close"), false).on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.close_thread(cx);
+                    this.composer.update(cx, |state, cx| state.focus(window, cx));
+                },
+            )));
 
         // New replies keep the panel at the bottom, as the channel does.
         let len = self.threads.rows.len();
@@ -659,26 +707,35 @@ impl FuwaApp {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.threads.scroll)
-            .flex()
-            .flex_col()
-            .pb(px(12.0))
-            .when(loading, |el| el.child(crate::ui::sidebar::loading_rows(&p)))
-            .when(!loading, |el| {
-                el.children(rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, cx)))
-            });
+            .child(
+                // Short threads sit at the bottom, by the box, as the channel's messages do.
+                div()
+                    .min_h_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .pt(px(12.0))
+                    .pb(px(12.0))
+                    .when(loading, |el| el.child(crate::ui::chat_rows::skeleton(2, &p)))
+                    .when(!loading, |el| {
+                        el.children(
+                            rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, cx)),
+                        )
+                    }),
+            );
 
         let reply = self.reply_box(&p, window, cx);
         Some(
             motion::slide_in(
                 div()
-                    .w(px(420.0))
+                    .w(px(440.0))
                     .h_full()
                     .flex_none()
                     .flex()
                     .flex_col()
                     .border_l_1()
                     .border_color(p.border)
-                    .bg(p.chat_surface)
+                    .bg(p.side_surface)
                     .child(header)
                     .child(body)
                     .child(reply),
@@ -722,46 +779,59 @@ impl FuwaApp {
         let ring = motion::follow("thread-reply-ring", if focused { 1.0 } else { 0.0 }, window, cx);
         let ready = motion::follow("thread-reply-send", if typed { 1.0 } else { 0.0 }, window, cx);
         let also = self.threads.also;
+        // The web's composer card (`.composer`), lit while focused.
         div()
             .flex_none()
-            .px(px(12.0))
+            .px(px(16.0))
             .pb(px(12.0))
             .flex()
             .flex_col()
-            .gap(px(6.0))
+            .gap(px(4.0))
             .child(
                 div()
                     .flex()
                     .items_end()
                     .gap(px(8.0))
-                    .pl(px(14.0))
-                    .pr(px(6.0))
-                    .py(px(6.0))
-                    .rounded(corner(16.0))
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .rounded(crate::ui::theme::radius_2xl())
                     .bg(p.card)
                     .border_1()
-                    .border_color(mix(p.border, p.primary, ring))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .py(px(4.0))
-                            .child(Textarea::new(&self.threads.reply).appearance(false)),
-                    )
+                    .border_color(mix(p.border, mix(p.border, p.primary, 0.6).into(), ring))
+                    .shadow(vec![
+                        gpui_kit::BoxShadow {
+                            color: alpha(p.primary, 0.14 * ring),
+                            offset: gpui_kit::point(px(0.0), px(0.0)),
+                            blur_radius: px(0.0),
+                            spread_radius: px(4.0),
+                            inset: false,
+                        },
+                        gpui_kit::BoxShadow {
+                            color: alpha(p.primary, ring),
+                            offset: gpui_kit::point(px(0.0), px(12.0)),
+                            blur_radius: px(30.0),
+                            spread_radius: px(-18.0),
+                            inset: false,
+                        },
+                    ])
+                    .child(div().flex_1().min_w_0().ml(px(-10.0)).my(px(-2.0)).child(
+                        Textarea::new(&self.threads.reply).appearance(false).text_size(px(15.2)).line_height(px(24.0)),
+                    ))
                     .child(
                         div()
                             .id("thread-send")
-                            .size(px(32.0))
+                            .size(px(36.0))
+                            .mb(px(2.0))
                             .flex_none()
-                            .rounded(corner(10.0))
+                            .rounded(crate::ui::theme::radius_xl())
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(mix(p.muted, p.primary, ready))
+                            .bg(alpha(p.primary, ready))
                             .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
                             .cursor_pointer()
                             .on_click(cx.listener(|this, _, window, cx| this.send_reply(window, cx)))
-                            .child(icon("send").size(px(16.0))),
+                            .child(icon("send-horizontal").size(px(18.0))),
                     ),
             )
             .when_some(channel, |el, name| {
@@ -772,8 +842,9 @@ impl FuwaApp {
                         .items_center()
                         .gap(px(6.0))
                         .px(px(4.0))
-                        .text_xs()
-                        .text_color(if also { p.foreground } else { p.muted_foreground })
+                        .text_size(px(11.2))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.threads.also = !this.threads.also;
@@ -794,7 +865,10 @@ impl FuwaApp {
                                     el.child(icon("check").size(px(11.0)).text_color(p.primary_foreground))
                                 }),
                         )
-                        .child(format!("Also send to #{name}")),
+                        .child(crate::core::i18n::t_with(
+                            "chat.composer.alsoSend",
+                            &[("channel", crate::core::i18n::Arg::Str(&name))],
+                        )),
                 )
             })
             .into_any_element()
@@ -812,127 +886,221 @@ impl FuwaApp {
         self.jump_to_message(&open.key, &open.server, message, window, cx);
     }
 
-    /// The channel's threads, behind the header's Threads button.
+    /// The channel's threads, behind the header's Threads button (`ThreadList`).
     pub(crate) fn threads_list_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::core::i18n::{Arg, t, t_with};
         let listing = self.threads.listing.as_ref()?;
         let p = pal(cx);
-        let hours = self.core.shared.read(|s| {
-            s.instance(&listing.key)
-                .and_then(|i| i.server(&listing.server))
-                .map(|s| s.thread_archive_hours)
-                .unwrap_or(0)
+        let (hours, channel_name) = self.core.shared.read(|s| {
+            let i = s.instance(&listing.key);
+            (
+                i.and_then(|i| i.server(&listing.server)).map(|s| s.thread_archive_hours).unwrap_or(0),
+                i.and_then(|i| i.channel(&listing.server, &listing.channel))
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default(),
+            )
         });
         let archived = listing.archived;
-        let tab = |id: &'static str, label: &'static str, on: bool, value: bool, cx: &mut Context<Self>| {
-            div()
-                .id(id)
-                .px(px(12.0))
-                .py(px(4.0))
-                .rounded_full()
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .cursor_pointer()
-                .when(on, |el| el.bg(alpha(p.primary, 0.14)).text_color(p.primary))
-                .when(!on, |el| el.text_color(p.muted_foreground).hover(|s| s.bg(p.muted)))
-                .on_click(cx.listener(move |this, _, _, cx| this.show_archived_threads(value, cx)))
-                .child(label)
-        };
+        let hover = p.muted;
         let header = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(8.0))
-            .pl(px(16.0))
-            .pr(px(10.0))
+            .px(px(12.0))
             .h(px(56.0))
             .border_b_1()
             .border_color(p.border)
-            .child(icon("messages-square").size(px(18.0)).text_color(p.primary))
-            .child(div().flex_1().text_lg().font_weight(FontWeight::EXTRA_BOLD).child("Threads"))
-            .child(icon_button("threads-close", "x", &p).on_click(cx.listener(|this, _, _, cx| {
-                this.threads.listing = None;
-                cx.notify();
-            })));
+            .child(icon("messages-square").size(px(20.0)).text_color(p.primary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(16.0))
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("chat.threads.threads")),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t_with("chat.threads.where", &[("channel", Arg::Str(&channel_name))])),
+                    ),
+            )
+            .child(
+                div()
+                    .id("threads-close")
+                    .size(px(32.0))
+                    .flex_none()
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .text_color(p.muted_foreground)
+                    .hover(move |s| s.bg(hover))
+                    .tooltip(|window, cx| {
+                        crate::ui::overlay::Tip::new(crate::core::i18n::t("chat.threads.closeList")).build(window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.threads.listing = None;
+                        cx.notify();
+                    }))
+                    .child(icon("x").size(px(16.0))),
+            );
+        // Open and Archived, the picked one on a card that glides.
+        let tab = |id: &'static str, glyph: &'static str, label: String, value: bool, cx: &mut Context<Self>| {
+            let on = archived == value;
+            div()
+                .id(id)
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(4.0))
+                .py(px(6.0))
+                .rounded(crate::ui::theme::radius_lg())
+                .cursor_pointer()
+                .text_color(if on { p.foreground } else { p.muted_foreground })
+                .when(on, |el| el.bg(p.card).shadow(crate::ui::polls::shadow_sm()))
+                .on_click(cx.listener(move |this, _, _, cx| this.show_archived_threads(value, cx)))
+                .child(icon(glyph).size(px(14.0)))
+                .child(label)
+        };
         let tools = div()
             .flex_none()
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .px(px(12.0))
-            .pt(px(10.0))
-            .pb(px(6.0))
-            .child(Input::new(&self.threads.query).prefix(icon("search").size(px(14.0)).text_color(p.muted_foreground)))
+            .p(px(12.0))
+            .border_b_1()
+            .border_color(p.border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(10.0))
+                    .h(px(34.0))
+                    .overflow_hidden()
+                    .rounded(crate::ui::theme::radius_xl())
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.card)
+                    .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
+                    .child(
+                        div().flex_1().min_w_0().ml(px(-10.0)).child(Input::new(&self.threads.query).appearance(false)),
+                    ),
+            )
             .when(hours > 0, |el| {
-                el.child(div().flex().gap(px(4.0)).child(tab("threads-open", "Open", !archived, false, cx)).child(tab(
-                    "threads-archived",
-                    "Archived",
-                    archived,
-                    true,
-                    cx,
-                )))
+                el.child(
+                    div()
+                        .flex()
+                        .p(px(2.0))
+                        .rounded(crate::ui::theme::radius_xl())
+                        .bg(p.muted)
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .font_weight(FontWeight::BOLD)
+                        .child(tab("threads-open", "messages-square", t("chat.threads.open"), false, cx))
+                        .child(tab("threads-archived", "archive", t("chat.threads.archived"), true, cx)),
+                )
             });
 
         let listing = self.threads.listing.as_ref()?;
-        let (users, unread) = self
-            .core
-            .shared
-            .read(|s| s.instance(&listing.key).map(|i| (i.users.clone(), i.thread_unread.clone())))
-            .unwrap_or_default();
+        let users = self.core.shared.read(|s| s.instance(&listing.key).map(|i| i.users.clone())).unwrap_or_default();
         let searched = !listing.query.is_empty();
-        let mut body = div().id("threads-list").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().pb(px(12.0));
-        if listing.loading && listing.items.is_empty() {
-            body = body.child(crate::ui::search::skeleton(4, &p));
-        } else if let Some(error) = &listing.error {
-            body = body.child(crate::ui::search::empty("circle-alert", "Couldn't load threads", error, &p));
-        } else if listing.items.is_empty() && listing.after.is_empty() {
+        let mut body = div().id("threads-list").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().p(px(8.0));
+        if let Some(error) = &listing.error {
+            body = body.child(div().p(px(12.0)).text_sm().text_color(p.destructive).child(error.clone()));
+        } else if !listing.loading && listing.items.is_empty() && listing.after.is_empty() {
             let (title, line) = match (searched, archived) {
-                (true, _) => ("No threads found", "Try other words."),
-                (false, true) => ("No archived threads", "Threads quiet for a while end up here."),
-                (false, false) => ("No threads yet", "Hover a message and pick Reply in thread to start one."),
-            };
-            body = body.child(crate::ui::search::empty("messages-square", title, line, &p));
-        } else {
-            for (n, m) in listing.items.iter().enumerate() {
-                let new = unread.get(&m.id).copied().unwrap_or(0);
-                body = body.child(self.thread_list_row(m, n, &users, new, &p, cx));
-            }
-            if listing.loading {
-                body = body.child(crate::ui::search::skeleton(1, &p));
-            } else if !listing.after.is_empty() {
-                body = body.child(
-                    div().flex().justify_center().py(px(10.0)).child(
-                        div()
-                            .id("threads-more")
-                            .px(px(16.0))
-                            .py(px(6.0))
-                            .rounded_full()
-                            .bg(p.muted)
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(p.muted_foreground)
-                            .cursor_pointer()
-                            .hover(|s| s.bg(alpha(p.primary, 0.1)).text_color(p.primary))
-                            .child(if searched && listing.items.is_empty() {
-                                "Search older threads"
-                            } else {
-                                "Show more"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.fetch_threads(true, cx))),
+                (true, _) => (t("chat.threads.noMatches"), t("chat.threads.tryOtherWords")),
+                (false, true) if hours >= 48 => (
+                    t("chat.threads.noArchived"),
+                    t_with(
+                        "chat.threads.archivedHintDays",
+                        &[("count", Arg::Num(((hours as f64) / 24.0).round() as i64))],
                     ),
-                );
-            }
+                ),
+                (false, true) => (
+                    t("chat.threads.noArchived"),
+                    t_with("chat.threads.archivedHintHours", &[("count", Arg::Num(i64::from(hours)))]),
+                ),
+                (false, false) => (t("chat.threads.none"), t("chat.threads.noneHint")),
+            };
+            body = body.child(motion::rise(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(24.0))
+                    .py(px(48.0))
+                    .text_center()
+                    .child(
+                        div()
+                            .size(px(48.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(alpha(p.primary, 0.1))
+                            .text_color(p.primary)
+                            .child(icon("messages-square").size(px(24.0))),
+                    )
+                    .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
+                    .child(div().text_xs().text_color(p.muted_foreground).child(line)),
+                "threads-none",
+                Duration::ZERO,
+                8.0,
+            ));
+        }
+        for (n, m) in listing.items.iter().enumerate() {
+            body = body.child(self.thread_list_row(m, n, &users, &p, cx));
+        }
+        if listing.loading {
+            body = body.child(div().m(px(8.0)).h(px(64.0)).rounded(crate::ui::theme::radius_xl()).bg(p.muted));
+        } else if !listing.after.is_empty() {
+            let primary = alpha(p.primary, 0.1);
+            body = body.child(
+                div().flex().justify_center().my(px(8.0)).child(
+                    div()
+                        .id("threads-more")
+                        .px(px(12.0))
+                        .py(px(4.0))
+                        .rounded_full()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.primary)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(primary))
+                        .child(if listing.items.is_empty() {
+                            t("chat.threads.searchOlder")
+                        } else {
+                            t("chat.threads.showMore")
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.fetch_threads(true, cx))),
+                ),
+            );
         }
         Some(
             motion::slide_in(
                 div()
-                    .w(px(360.0))
+                    .w(px(440.0))
                     .h_full()
                     .flex_none()
                     .flex()
                     .flex_col()
                     .border_l_1()
                     .border_color(p.border)
-                    .bg(p.background)
+                    .bg(p.side_surface)
                     .child(header)
                     .child(tools)
                     .child(body),
@@ -943,92 +1111,116 @@ impl FuwaApp {
         )
     }
 
+    /// One thread in the list (`ThreadRow`): who started it, what it says, and how its replies are going.
     fn thread_list_row(
         &self,
         m: &pb::Message,
         n: usize,
         users: &std::collections::HashMap<String, pb::User>,
-        new: u32,
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use crate::core::i18n::{Arg, t_with};
         let p = *p;
         let author = match &m.webhook {
             Some(w) => w.name.clone(),
             None => users.get(&m.author_id).map(crate::core::store::user_name).unwrap_or_else(|| "Someone".into()),
         };
-        let t = m.thread.clone().unwrap_or_default();
-        let last = ms_of(t.last_reply_at.as_ref());
+        let summary = m.thread.clone().unwrap_or_default();
         let now = crate::core::dms::now_ms();
-        let first_line =
-            m.content.lines().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(140).collect::<String>();
-        let preview = if first_line.is_empty() {
-            if m.attachments.is_empty() { "A message".to_owned() } else { "A file".to_owned() }
+        // Previews show text, not Markdown's marks.
+        let plain =
+            m.content.replace(['*', '_', '~', '`', '>', '#'], "").split_whitespace().collect::<Vec<_>>().join(" ");
+        let preview = if plain.is_empty() {
+            m.embeds.first().map(|e| e.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "…".to_owned())
         } else {
-            first_line
+            plain
         };
+        let last = crate::ui::text::ago(ms_of(summary.last_reply_at.as_ref()), now);
         let open = m.clone();
-        let word = if t.reply_count == 1 { "reply" } else { "replies" };
+        let hover = alpha(p.muted, 0.7);
+        let faces: Vec<pb::User> =
+            summary.participant_ids.iter().take(3).filter_map(|id| users.get(id).cloned()).collect();
         motion::rise(
             div()
                 .id(SharedString::from(format!("thread-row|{}", m.id)))
-                .mx(px(8.0))
-                .mb(px(6.0))
-                .px(px(12.0))
-                .py(px(10.0))
-                .rounded(corner(14.0))
-                .border_1()
-                .border_color(gpui_kit::transparent_black())
-                .bg(alpha(p.card, 0.6))
-                .cursor_pointer()
-                .hover(|s| s.bg(p.card).border_color(p.border))
-                .on_click(cx.listener(move |this, _, window, cx| this.open_listed(open.clone(), window, cx)))
                 .flex()
-                .flex_col()
-                .gap(px(4.0))
+                .gap(px(10.0))
+                .p(px(10.0))
+                .rounded(crate::ui::theme::radius_xl())
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .on_click(cx.listener(move |this, _, window, cx| this.open_listed(open.clone(), window, cx)))
+                .child(avatar(users.get(&m.author_id), 32.0, &p))
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(avatar(users.get(&m.author_id), 20.0, &p))
-                        .child(div().min_w_0().truncate().text_sm().font_weight(FontWeight::EXTRA_BOLD).child(author))
-                        .when(t.locked, |el| el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground))),
-                )
-                .child(div().text_sm().line_clamp(2).child(preview))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_xs()
-                        .text_color(p.muted_foreground)
+                        .flex_col()
                         .child(
                             div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(p.primary)
-                                .child(format!("{} {word}", t.reply_count)),
+                                .flex()
+                                .items_baseline()
+                                .gap(px(8.0))
+                                .child(div().min_w_0().truncate().text_sm().font_weight(FontWeight::BOLD).child(author))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(px(11.2))
+                                        .text_color(p.muted_foreground)
+                                        .child(crate::ui::text::ago(ms_of(m.created_at.as_ref()), now)),
+                                ),
                         )
-                        .when(new > 0, |el| {
-                            el.child(
-                                div()
-                                    .px(px(6.0))
-                                    .rounded_full()
-                                    .bg(p.primary)
-                                    .text_color(p.primary_foreground)
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(format!("{new} new")),
-                            )
-                        })
-                        .child("·")
-                        .child(if last > 0 && last <= now {
-                            format!("Last reply {}", when(last))
-                        } else {
-                            String::new()
-                        }),
+                        .child(
+                            div()
+                                .text_sm()
+                                .line_height(px(20.0))
+                                .line_clamp(2)
+                                .text_color(p.muted_foreground)
+                                .child(preview),
+                        )
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .text_xs()
+                                .line_height(px(16.0))
+                                .child(div().flex().flex_none().children(faces.iter().enumerate().map(|(n, u)| {
+                                    div().relative().size(px(16.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
+                                        div()
+                                            .absolute()
+                                            .left(px(-2.0))
+                                            .top(px(-2.0))
+                                            .size(px(20.0))
+                                            .rounded_full()
+                                            .bg(p.background)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(avatar(Some(u), 16.0, &p)),
+                                    )
+                                })))
+                                .child(div().font_weight(FontWeight::BOLD).text_color(p.primary).child(t_with(
+                                    "chat.threads.replies",
+                                    &[("count", Arg::Num(i64::from(summary.reply_count)))],
+                                )))
+                                .when(summary.locked, |el| {
+                                    el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground))
+                                })
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(p.muted_foreground)
+                                        .child(t_with("chat.threads.lastAgo", &[("time", Arg::Str(&last))])),
+                                ),
+                        ),
                 ),
             SharedString::from(format!("thread-row-in|{}", m.id)),
-            Duration::from_millis(25 * n.min(10) as u64),
+            Duration::from_millis(25 * n.min(8) as u64),
             8.0,
         )
         .into_any_element()

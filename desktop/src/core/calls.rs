@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use ring::hkdf::{HKDF_SHA256, KeyType, Salt};
 
-use crate::pb;
+use crate::core::Core;
+use crate::core::api::{CALL_TIMEOUT, Problem};
+use crate::{pb, rpc};
 
 /// The MLS exporter label a conversation's call secret comes from.
 pub const CALL_LABEL: &str = "fuwa call v1";
@@ -124,6 +126,273 @@ pub fn frame_epoch(sealed: &[u8]) -> Option<u32> {
     Some(u32::from_be_bytes(sealed[at..at + 4].try_into().ok()?))
 }
 
+/// A direct-message call's sealing: everyone's key at the conversation's
+/// current epoch, the web's FrameCrypto (frames.worker.ts).
+pub struct Frames {
+    me: String,
+    epoch: u64,
+    secret: Vec<u8>,
+    keys: HashMap<String, FrameKey>,
+}
+
+/// What opening a frame found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Opened {
+    Plain(Vec<u8>),
+    /// Sealed at an epoch newer than the secret here: catch up to it.
+    Newer(u32),
+    /// Not one of ours, or tampered with: dropped.
+    Dropped,
+}
+
+impl Frames {
+    pub fn new(me: &str, epoch: u64, secret: Vec<u8>) -> Self {
+        Self { me: me.to_owned(), epoch, secret, keys: HashMap::new() }
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// The conversation moved on to a new epoch, with a new secret.
+    pub fn set_secret(&mut self, epoch: u64, secret: Vec<u8>) {
+        if epoch != self.epoch || secret != self.secret {
+            self.epoch = epoch;
+            self.secret = secret;
+            self.keys.clear();
+        }
+    }
+
+    fn key(&mut self, sender: &str) -> Option<&FrameKey> {
+        if !self.keys.contains_key(sender) {
+            let key = FrameKey::new(self.epoch, &self.secret, sender)?;
+            self.keys.insert(sender.to_owned(), key);
+        }
+        self.keys.get(sender)
+    }
+
+    /// Seals a frame of your own sound.
+    pub fn seal(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
+        let me = self.me.clone();
+        self.key(&me)?.seal(frame)
+    }
+
+    /// Opens a frame from `sender` (a stream id: their account id).
+    pub fn open(&mut self, sender: &str, sealed: &[u8]) -> Opened {
+        match frame_epoch(sealed) {
+            Some(epoch) if u64::from(epoch) > self.epoch => Opened::Newer(epoch),
+            Some(epoch) if u64::from(epoch) == self.epoch => match self.key(sender).and_then(|k| k.open(sealed)) {
+                Some(plain) => Opened::Plain(plain),
+                None => Opened::Dropped,
+            },
+            _ => Opened::Dropped,
+        }
+    }
+}
+
+/// How long a call has gone on: 4:07, or 1:02:33 (the web's call-clock.ts).
+pub fn clock(seconds: u64) -> String {
+    let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
+// ───────────────────────── Moderating, recordings ─────────────────────────
+
+fn missing() -> Problem {
+    Problem::new(tonic::Code::NotFound, "That instance isn't here.")
+}
+
+/// A recording's files, as the web's Recordings.tsx names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Part {
+    Sound,
+    Camera,
+    Screen,
+}
+
+impl Part {
+    pub const ALL: [Part; 3] = [Part::Sound, Part::Camera, Part::Screen];
+
+    pub fn bytes(self, track: &pb::RecordingTrack) -> i64 {
+        match self {
+            Part::Sound => track.size_bytes,
+            Part::Camera => track.camera_bytes,
+            Part::Screen => track.screen_bytes,
+        }
+    }
+
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Part::Sound => ".opus",
+            Part::Camera => " camera.webm",
+            Part::Screen => " screen.webm",
+        }
+    }
+
+    fn wire(self) -> pb::RecordingPart {
+        match self {
+            Part::Sound => pb::RecordingPart::Unspecified,
+            Part::Camera => pb::RecordingPart::Camera,
+            Part::Screen => pb::RecordingPart::Screen,
+        }
+    }
+
+    /// The files a person has in a recording.
+    pub fn of(track: &pb::RecordingTrack) -> Vec<Part> {
+        Part::ALL.into_iter().filter(|p| p.bytes(track) > 0).collect()
+    }
+}
+
+/// Characters no file system takes in a name, as the web's `safe`.
+pub fn safe_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut bad = false;
+    for c in name.chars() {
+        if "\\/:*?\"<>|".contains(c) {
+            if !bad {
+                out.push('-');
+            }
+            bad = true;
+        } else {
+            out.push(c);
+            bad = false;
+        }
+    }
+    let out = out.trim().to_owned();
+    if out.is_empty() { "someone".into() } else { out }
+}
+
+/// CRC-32 as zip uses it.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for b in bytes {
+        crc ^= u32::from(*b);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 { 0xedb8_8320 ^ (crc >> 1) } else { crc >> 1 };
+        }
+    }
+    crc ^ 0xffff_ffff
+}
+
+/// Files as they are (stored, not compressed: Opus doesn't shrink) as one
+/// zip, byte for byte the web's lib/zip.ts. `when` is (year, month, day,
+/// hour, minute, second).
+pub fn zip(files: &[(String, Vec<u8>)], when: (u32, u32, u32, u32, u32, u32)) -> Vec<u8> {
+    let (y, mo, d, h, mi, s) = when;
+    let time = ((h << 11) | (mi << 5) | (s >> 1)) as u16;
+    let date = (((y.max(1980) - 1980) << 9) | (mo << 5) | d) as u16;
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in files {
+        let offset = out.len() as u32;
+        let name = name.as_bytes();
+        let crc = crc32(data);
+        let len = data.len() as u32;
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0x0800u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&time.to_le_bytes());
+        out.extend_from_slice(&date.to_le_bytes());
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name);
+        out.extend_from_slice(data);
+
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&0x0800u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&time.to_le_bytes());
+        central.extend_from_slice(&date.to_le_bytes());
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&len.to_le_bytes());
+        central.extend_from_slice(&len.to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0u8; 12]);
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name);
+    }
+    let start = out.len() as u32;
+    let size = central.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&[0u8; 4]);
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&start.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+impl Core {
+    /// Mutes, deafens, stops the video of or disconnects someone in a voice
+    /// channel, for everyone (Mute members, Move members).
+    pub async fn moderate_voice(&self, key: &str, request: pb::ModerateVoiceRequest) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.calls(), moderate_voice(request)).await?;
+        Ok(())
+    }
+
+    /// A voice channel's recordings on the server, and how much they take.
+    pub async fn recordings(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+    ) -> Result<pb::ListRecordingsResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let request = pb::ListRecordingsRequest { server_id: server_id.into(), channel_id: channel_id.into() };
+        rpc!(api.calls(), list_recordings(request)).await
+    }
+
+    pub async fn delete_recording(&self, key: &str, server_id: &str, recording_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let request = pb::DeleteRecordingRequest { server_id: server_id.into(), recording_id: recording_id.into() };
+        rpc!(api.calls(), delete_recording(request)).await?;
+        Ok(())
+    }
+
+    /// One person's file in a recording, as it is, telling how far along it is (0 to 1).
+    pub async fn download_recording(
+        &self,
+        key: &str,
+        server_id: &str,
+        recording_id: &str,
+        track: &pb::RecordingTrack,
+        part: Part,
+        progress: impl Fn(f32) + Send,
+    ) -> Result<Vec<u8>, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let request = pb::DownloadRecordingRequest {
+            server_id: server_id.into(),
+            recording_id: recording_id.into(),
+            user_id: track.user_id.clone(),
+            part: part.wire() as i32,
+        };
+        let late = || Problem::new(tonic::Code::DeadlineExceeded, "The instance took too long to answer.");
+        let mut stream = tokio::time::timeout(CALL_TIMEOUT, api.calls().download_recording(request))
+            .await
+            .map_err(|_| late())?
+            .map_err(Problem::from)?
+            .into_inner();
+        let total = part.bytes(track).max(1) as f32;
+        let mut data = Vec::new();
+        while let Some(chunk) =
+            tokio::time::timeout(CALL_TIMEOUT, stream.message()).await.map_err(|_| late())?.map_err(Problem::from)?
+        {
+            data.extend_from_slice(&chunk.data);
+            progress((data.len() as f32 / total).min(0.98));
+        }
+        Ok(data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +431,38 @@ mod tests {
         tampered[0] ^= 1;
         assert!(key.open(&tampered).is_none());
         assert!(key.open(b"short").is_none());
+    }
+
+    #[test]
+    fn frames_open_between_two_people() {
+        let mut alice = Frames::new("a", 2, secret());
+        let mut bob = Frames::new("b", 2, secret());
+        let sealed = alice.seal(b"hi").unwrap();
+        assert_eq!(bob.open("a", &sealed), Opened::Plain(b"hi".to_vec()));
+        assert_eq!(bob.open("b", &sealed), Opened::Dropped, "only under the sender's own key");
+        alice.set_secret(3, secret());
+        let newer = alice.seal(b"later").unwrap();
+        assert_eq!(bob.open("a", &newer), Opened::Newer(3));
+        bob.set_secret(3, secret());
+        assert_eq!(bob.open("a", &newer), Opened::Plain(b"later".to_vec()));
+        assert_eq!(bob.open("a", &sealed), Opened::Dropped, "an old epoch's frame");
+    }
+
+    #[test]
+    fn zips_like_the_web() {
+        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+        let z = zip(&[("a.opus".into(), b"hello".to_vec())], (2026, 10, 3, 9, 41, 0));
+        assert_eq!(&z[..4], &[0x50, 0x4b, 0x03, 0x04]);
+        assert_eq!(z.len(), 30 + 6 + 5 + 46 + 6 + 22);
+        assert_eq!(safe_name("a/b: c"), "a-b- c");
+        assert_eq!(safe_name("  "), "someone");
+    }
+
+    #[test]
+    fn clocks_read_like_the_web() {
+        assert_eq!(clock(0), "0:00");
+        assert_eq!(clock(247), "4:07");
+        assert_eq!(clock(3753), "1:02:33");
     }
 
     #[test]
