@@ -18,17 +18,19 @@ pub enum Group {
     Navigation,
     Messages,
     Chat,
+    Voice,
     App,
 }
 
 impl Group {
-    pub const ALL: [Group; 4] = [Group::Navigation, Group::Messages, Group::Chat, Group::App];
+    pub const ALL: [Group; 5] = [Group::Navigation, Group::Messages, Group::Chat, Group::Voice, Group::App];
 
     pub fn name(self) -> &'static str {
         match self {
             Group::Navigation => "Navigation",
             Group::Messages => "Messages",
             Group::Chat => "Chat",
+            Group::Voice => "Voice",
             Group::App => "App",
         }
     }
@@ -58,7 +60,7 @@ const fn action(
     Action { id, label, group, combo, while_typing, repeats }
 }
 
-pub const ACTIONS: [Action; 15] = [
+pub const ACTIONS: [Action; 19] = [
     action("quickSwitcher", "Find a server or channel", Group::Navigation, Some("Mod+K"), true, false),
     action("searchServer", "Search this server's messages", Group::Navigation, Some("Mod+F"), true, false),
     action("previousServer", "Previous server", Group::Navigation, Some("Mod+Alt+ArrowUp"), true, true),
@@ -71,6 +73,10 @@ pub const ACTIONS: [Action; 15] = [
     action("focusComposer", "Start typing a message", Group::Chat, Some("Tab"), false, false),
     action("insertTimestamp", "Insert a timestamp", Group::Chat, Some("Alt+Shift+T"), true, false),
     action("toggleMembers", "Show or hide members", Group::Chat, Some("Mod+U"), true, false),
+    action("toggleMute", "Mute or unmute yourself", Group::Voice, Some("Mod+Shift+M"), true, false),
+    action("toggleDeafen", "Deafen or undeafen yourself", Group::Voice, Some("Mod+Shift+D"), true, false),
+    action("pushToTalk", "Push to talk (hold)", Group::Voice, None, true, false),
+    action("toggleRecording", "Record the call, or stop and save it", Group::Voice, None, true, false),
     action("openSettings", "Open settings", Group::App, Some("Mod+Comma"), true, false),
     action("shortcuts", "Show keyboard shortcuts", Group::App, Some("Mod+Slash"), true, false),
     action("toggleStreamer", "Turn streamer mode on or off", Group::App, None, true, false),
