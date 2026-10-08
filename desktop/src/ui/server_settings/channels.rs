@@ -4,7 +4,8 @@
 //! what in it. The web's `settings/server/Channels.tsx` and
 //! `ChannelPermissions.tsx`.
 
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 
 use super::roles::{dot, group_name, member_name, permission_here, permission_name, role_color};
 use gpui_kit::{Render, Stateful};
@@ -169,7 +170,7 @@ impl Channels {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.server.channels.namePlaceholder")));
         let topic = cx.new(|cx| {
-            TextareaState::new(window, cx).auto_grow(3, 6).placeholder(t("desktop.server.channels.topicPlaceholder"))
+            TextareaState::new(window, cx).auto_grow(2, 6).placeholder(t("desktop.server.channels.topicPlaceholder"))
         });
         let slow = cx.new(|_| SliderState::new().min(0.0).max((SLOW.len() - 1) as f32).step(1.0).default_value(0.0));
         let subscriptions = vec![
@@ -828,17 +829,21 @@ impl ServerSettingsView {
             });
         let renamed = (!will_be.is_empty() && will_be != typed.trim())
             .then(|| t_with("desktop.server.channels.savedAs", &[("name", Arg::Str(&will_be))]));
-        out = out.child(form_row(
-            &if category {
-                t("serversettings.channels.categoryName")
-            } else {
-                t("serversettings.channels.channelName")
-            },
-            renamed,
-            name_box,
-            false,
-            p,
-        ));
+        out = out.child(
+            form_row(
+                &if category {
+                    t("serversettings.channels.categoryName")
+                } else {
+                    t("serversettings.channels.channelName")
+                },
+                renamed,
+                name_box,
+                false,
+                p,
+            )
+            // The first row sits right under the tabs, as the web's does.
+            .pt(px(0.0)),
+        );
 
         if texty(channel) {
             out = out.child(form_row(
@@ -847,9 +852,9 @@ impl ServerSettingsView {
                 crate::ui::instance_home::focus_ring(
                     div()
                         .w_full()
-                        .min_h(px(80.0))
-                        .px(px(12.0))
-                        .py(px(8.0))
+                        .min_h(px(62.0))
+                        // The box keeps its own padding, so this brings the words to the web's 12 and 8.
+                        .px(px(2.0))
                         .rounded(radius_xl())
                         .border_1()
                         .border_color(p.border)
@@ -954,7 +959,7 @@ impl ServerSettingsView {
                     .items_center()
                     .gap(px(12.0))
                     .child(snail)
-                    .child(div().flex_1().min_w_0().px(px(8.0)).child(Slider::new(&self.channels.slow)))
+                    .child(div().flex_1().min_w_0().px(px(8.0)).child(self.slow_slider(seconds, p, cx)))
                     .child(
                         div()
                             .min_w(px(80.0))
@@ -965,7 +970,7 @@ impl ServerSettingsView {
                             .whitespace_nowrap()
                             .child(slow_label(seconds)),
                     ),
-                true,
+                false,
                 p,
             ));
         }
@@ -1062,6 +1067,7 @@ impl ServerSettingsView {
                 move |s| s.bg(red),
             )
             .text_color(p.destructive)
+            .font_weight(FontWeight::MEDIUM)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.channels.confirming = true;
                 cx.notify();
@@ -1774,6 +1780,88 @@ impl ServerSettingsView {
             );
         }
         out
+    }
+}
+
+impl ServerSettingsView {
+    /// Slow mode's slider, the web's `ui/slider.tsx`: a muted track filling with the primary,
+    /// a ringed thumb, and the stops worth knowing under it, each a click away.
+    fn slow_slider(&mut self, seconds: i32, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.channels.slow.clone();
+        let at = slow_index(seconds);
+        let last = (SLOW.len() - 1) as f32;
+        let frac = at as f32 / last;
+        let thumb = SliderThumb::new(&state)
+            .absolute()
+            .top(px(-6.0))
+            .left(gpui_kit::relative(frac))
+            .ml(px(-10.0))
+            .size(px(20.0))
+            .rounded_full()
+            .border(px(3.0))
+            .border_color(p.primary)
+            .bg(p.background)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: hsla(0.0, 0.0, 0.0, 0.1),
+                offset: point(px(0.0), px(4.0)),
+                blur_radius: px(6.0),
+                spread_radius: px(-1.0),
+                inset: false,
+            }])
+            .cursor_pointer();
+        let track =
+            SliderTrack::new(&state).relative().w_full().h(px(20.0)).flex().items_center().cursor_pointer().child(
+                SliderIndicator::new(&state)
+                    .relative()
+                    .w_full()
+                    .h(px(8.0))
+                    .rounded_full()
+                    .bg(p.muted)
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(gpui_kit::relative(frac))
+                            .rounded_full()
+                            .bg(p.primary),
+                    )
+                    .child(thumb),
+            );
+        let mut marks = div().relative().mt(px(6.0)).h(px(16.0)).text_size(px(11.2)).text_color(p.muted_foreground);
+        for stop in [0usize, 4, 7, 11, 13] {
+            let label = if stop == 0 { t("serversettings.shared.off") } else { slow_short(SLOW[stop]) };
+            let on = stop == at;
+            let fg = p.foreground;
+            marks = marks.child(
+                div().absolute().top_0().left(gpui_kit::relative(stop as f32 / last)).child(
+                    div()
+                        .id(SharedString::from(format!("slow-mark-{stop}")))
+                        .relative()
+                        .left(px(-30.0))
+                        .w(px(60.0))
+                        .flex()
+                        .justify_center()
+                        .whitespace_nowrap()
+                        .cursor_pointer()
+                        .when(on, |el| el.font_weight(FontWeight::BOLD).text_color(p.primary))
+                        .when(!on, |el| el.hover(move |s| s.text_color(fg)))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.channels.slowmode = Some(SLOW[stop]);
+                            this.channels.slow.update(cx, |s, cx| s.set_value(stop as f32, window, cx));
+                            cx.notify();
+                        }))
+                        .child(label),
+                ),
+            );
+        }
+        div()
+            .pt(px(28.0))
+            .pb(px(4.0))
+            .child(BaseSlider::new(&state).relative().w_full().child(track))
+            .child(marks)
+            .into_any_element()
     }
 }
 

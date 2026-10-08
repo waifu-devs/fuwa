@@ -117,8 +117,6 @@ impl ServerSettingsView {
         if open {
             let mut list = div()
                 .id(SharedString::from(format!("{id}-menu")))
-                .absolute()
-                .top(px(below))
                 .w(px(width))
                 .max_h(px(288.0))
                 .overflow_y_scroll()
@@ -134,8 +132,7 @@ impl ServerSettingsView {
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.pages.menu = None;
                     cx.notify();
-                }))
-                .map(|el| if right { el.right_0() } else { el.left_0() });
+                }));
             for (n, item) in items.into_iter().enumerate() {
                 list = list.child(match item {
                     Item::Label(text) => div()
@@ -203,14 +200,24 @@ impl ServerSettingsView {
                     }
                 });
             }
+            // A point under the trigger the menu hangs from, drawn over everything and kept in the
+            // window; laid out apart, so opening it never moves the row it's in.
+            let corner = if right { gpui_kit::Anchor::TopRight } else { gpui_kit::Anchor::TopLeft };
             wrap = wrap.child(
-                gpui_kit::deferred(motion::rise(
-                    list,
-                    SharedString::from(format!("{id}-menu-in")),
-                    Duration::ZERO,
-                    -4.0,
-                ))
-                .with_priority(1),
+                div().absolute().top(px(below)).map(|el| if right { el.right_0() } else { el.left_0() }).child(
+                    gpui_kit::deferred(
+                        gpui_kit::anchored()
+                            .anchor(corner)
+                            .snap_to_window_with_margin(gpui_kit::Edges::all(px(8.0)))
+                            .child(motion::rise(
+                                list,
+                                SharedString::from(format!("{id}-menu-in")),
+                                Duration::ZERO,
+                                -4.0,
+                            )),
+                    )
+                    .with_priority(1),
+                ),
             );
         }
         wrap.into_any_element()

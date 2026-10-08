@@ -817,10 +817,12 @@ impl Render for ServerSettingsView {
         let scrolls = f32::from(self.scroll.max_offset().y) > 0.5;
         let bar = self.bar.take();
         let (inline_bar, floating_bar) = if scrolls { (None, bar) } else { (bar, None) };
+        // The column, and the close button's 4rem beside it (kept clear, as the web's sticky one is).
         let content = div()
-            .w(px(inner - 64.0))
+            .w(px(main.max(inner)))
             .flex_none()
             .px(px(40.0))
+            .pr(px(40.0 + 64.0 + (main.max(inner) - inner)))
             .pt(px(64.0))
             .pb(px(if floating_bar.is_some() { 96.0 } else { 16.0 }))
             .flex()

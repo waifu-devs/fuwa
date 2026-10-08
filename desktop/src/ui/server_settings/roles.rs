@@ -1221,6 +1221,7 @@ impl ServerSettingsView {
                             move |s| s.bg(red),
                         )
                         .text_color(destructive)
+                        .font_weight(FontWeight::MEDIUM)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.roles.confirming = true;
                             cx.notify();
