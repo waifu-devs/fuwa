@@ -857,7 +857,13 @@
     `components/HostedBadge.tsx` shows "Hosted by Waifu Devs" for those alone,
     reached over https, on the welcome screen, the instance home and sidebar,
     and invite pages. Only the address decides it, never anything an instance
-    says about itself.
+    says about itself. The same check shows Waifu Devs' terms and privacy
+    policy (`src/legal/*.md`, English only, at `/terms` and `/privacy` through
+    `pages/Legal.tsx`): a "Terms · Privacy" footer on the welcome page and
+    "By continuing, you agree to..." under the ways in
+    (`components/LegalLinks.tsx`; the desktop's `agreement` in
+    `ui/connect.rs`). Any other instance shows none of it. A change to what
+    fuwa.chat keeps or who it shares with belongs in `privacy.md` too.
 - `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
   Railway project ("fuwa"): the published image, a volume at `/data`, the
   domain. Its `SPLIT` setting turns it into a directory (on that volume),

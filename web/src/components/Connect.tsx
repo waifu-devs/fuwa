@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
 import { HostedBadge } from "@/components/HostedBadge";
+import { LegalAgreement } from "@/components/LegalLinks";
 import { ProviderMark } from "@/components/ProviderMarks";
 import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -260,7 +261,10 @@ export function Account({
       <div className="flex flex-col gap-4">
         <Header url={url} node={node} onBack={onBack} />
         {others ? (
-          <ProviderButtons url={url} node={node} returnTo={returnTo} />
+          <>
+            <ProviderButtons url={url} node={node} returnTo={returnTo} />
+            <LegalAgreement url={url} />
+          </>
         ) : (
           <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
             {t("connect.account.noSignIns")}
@@ -344,6 +348,7 @@ export function Account({
         {action.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
         {tab === "sign-in" ? t("connect.account.signIn") : t("connect.account.signUp")}
       </MotionButton>
+      <LegalAgreement url={url} />
     </form>
   );
 }
