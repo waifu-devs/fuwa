@@ -69,26 +69,13 @@ pub fn cover(iw: f32, ih: f32, w: f32, h: f32, focus: (i32, i32)) -> (f32, f32, 
     (-(sw - w) * fx, -(sh - h) * fy, sw, sh)
 }
 
-/// The banner, `w`×`h`, fading into `under` at the bottom when given.
+/// The banner, `w`×`h`, fading into `under` at the bottom when given. A
+/// rounded card it sits in clips it to its corners.
 pub fn server_banner(
     server: &pb::Server,
     w: f32,
     h: f32,
     under: Option<Hsla>,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    server_banner_round(server, w, h, under, 0.0, window, cx)
-}
-
-/// [`server_banner`] with its top corners rounded by `top`, for the top of a
-/// card (GPUI doesn't clip children to a rounded parent).
-pub fn server_banner_round(
-    server: &pb::Server,
-    w: f32,
-    h: f32,
-    under: Option<Hsla>,
-    top: f32,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -134,10 +121,10 @@ pub fn server_banner_round(
             };
             el.child(motion::fade_in(div().absolute().inset_0().child(moving), "banner-in", Duration::from_millis(600)))
         }
-        None => el.child(gradient(server, w, h, top, still, window)),
+        None => el.child(gradient(server, w, h, still, window)),
     };
     // Keeps a close button readable over a bright picture, and fades into the card below.
-    el.child(div().absolute().top_0().left_0().right_0().h(px(56.0)).rounded_t(px(top)).bg(linear_gradient(
+    el.child(div().absolute().top_0().left_0().right_0().h(px(56.0)).bg(linear_gradient(
         180.0,
         linear_color_stop(hsla(0.0, 0.0, 0.0, 0.35), 0.0),
         linear_color_stop(hsla(0.0, 0.0, 0.0, 0.0), 1.0),
@@ -154,7 +141,7 @@ pub fn server_banner_round(
 
 /// A server without a banner: its accent and hue, two soft lights drifting
 /// over them and a faint dot grid (the web's `Gradient` in `join/Banner.tsx`).
-fn gradient(server: &pb::Server, w: f32, h: f32, top: f32, still: bool, window: &Window) -> AnyElement {
+fn gradient(server: &pb::Server, w: f32, h: f32, still: bool, window: &Window) -> AnyElement {
     let a = accent(server);
     let rgb: gpui_kit::Rgba = a.into();
     // color-mix(accent 85%, black), the accent at 45%, then the hue 50° on.
@@ -164,12 +151,12 @@ fn gradient(server: &pb::Server, w: f32, h: f32, top: f32, still: bool, window: 
     let base = div()
         .absolute()
         .inset_0()
-        .child(div().absolute().inset_0().rounded_t(px(top)).bg(linear_gradient(
+        .child(div().absolute().inset_0().bg(linear_gradient(
             120.0,
             linear_color_stop(dark, 0.0),
             linear_color_stop(a, 0.45),
         )))
-        .child(div().absolute().inset_0().rounded_t(px(top)).bg(linear_gradient(
+        .child(div().absolute().inset_0().bg(linear_gradient(
             120.0,
             linear_color_stop(Hsla { a: 0.0, ..a }, 0.45),
             linear_color_stop(other, 1.0),

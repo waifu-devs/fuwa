@@ -118,8 +118,6 @@ impl ServerSettingsView {
         let overlay = div()
             .absolute()
             .inset_0()
-            // GPUI doesn't clip to rounded corners, so the shade rounds its own.
-            .map(|el| if phone { el.rounded(px(31.0)) } else { el.rounded(radius_3xl()) })
             .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
             .flex()
             .map(|el| if phone { el.items_end() } else { el.items_center().justify_center().p(px(32.0 * scale)) })

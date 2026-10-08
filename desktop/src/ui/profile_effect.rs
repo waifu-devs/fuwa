@@ -180,8 +180,7 @@ pub fn mini_card(user_id: &str, accent: i32, width: f32, p: &Palette) -> gpui_ki
         .border_color(p.border)
         .bg(p.card)
         .shadow(crate::ui::settings_controls::shadow_sm())
-        // Children aren't clipped to the card's corners: the banner rounds its own.
-        .child(banner(div().absolute().top_0().left_0().right_0().h(px(card_h * 0.28)).rounded_t(radius_xl())))
+        .child(banner(div().absolute().top_0().left_0().right_0().h(px(card_h * 0.28))))
         .child(
             banner(div())
                 .absolute()
