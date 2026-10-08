@@ -5,11 +5,13 @@ import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
 import { VideoView } from "@/components/calls/Video";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
+import { Segmented } from "@/components/settings/account/common";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
 import { type Key, useI18n } from "@/i18n/react";
+import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { actionById, bindingOf } from "@/lib/keybinds";
 import { setPrefs, usePrefs, type InputMode } from "@/lib/prefs";
 import { cue, play } from "@/lib/sounds";
@@ -319,11 +321,46 @@ export function Voice() {
             <CameraTest />
           </div>
         </PrefSetting>
+        <PrefSetting id="camera-quality" title={t("appsettings.voice.cameraQuality")} hint={t("appsettings.voice.cameraQualityHint")} keys={["cameraHeight", "cameraFps"]} delay={0.2}>
+          <CameraQuality />
+        </PrefSetting>
         <PrefSetting id="call-sounds" title={t("appsettings.voice.callSounds")} keys={["sounds"]} delay={0.2}>
           <SoundRow label={t("appsettings.voice.cues")} hint={t("appsettings.voice.cuesHint")} playLabel={t("appsettings.voice.playCues")} on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />
           <SoundRow label={t("appsettings.voice.ringtone")} hint={t("appsettings.voice.ringtoneHint")} playLabel={t("appsettings.voice.playRingtone")} on={p.sounds.ring} onChange={(ring) => setPrefs((x) => ({ sounds: { ...x.sounds, ring } }))} preview={() => play("ring", true)} />
         </PrefSetting>
       </motion.div>
+    </div>
+  );
+}
+
+/** How sharp and smooth your camera goes out: its tallest picture and its frame rate, "Best" by default. */
+function CameraQuality() {
+  const { t } = useI18n();
+  const height = usePrefs((x) => x.cameraHeight);
+  const fps = usePrefs((x) => x.cameraFps);
+  const best = t("appsettings.voice.best");
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">{t("appsettings.voice.cameraResolution")}</span>
+        <Segmented
+          label={t("appsettings.voice.cameraResolution")}
+          value={height}
+          onChange={(cameraHeight) => setPrefs({ cameraHeight })}
+          options={HEIGHTS.map((h) => ({ value: h, label: h ? t("appsettings.voice.heightValue", { height: h }) : best }))}
+          className="flex w-full max-w-md"
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">{t("appsettings.voice.cameraFps")}</span>
+        <Segmented
+          label={t("appsettings.voice.cameraFps")}
+          value={fps}
+          onChange={(cameraFps) => setPrefs({ cameraFps })}
+          options={FRAME_RATES.map((f) => ({ value: f, label: f ? t("appsettings.voice.fpsValue", { fps: f }) : best }))}
+          className="flex w-full max-w-md"
+        />
+      </div>
     </div>
   );
 }

@@ -695,6 +695,8 @@ impl FuwaApp {
         // Hanging up closes the popped-out cameras and lets go of every picture.
         // A moderator turning your camera off reaches you at once, not at the next keep.
         self.core.watch_video_moderation();
+        // A new ceiling on cameras (yours, the instance's, the server's) reopens yours at it.
+        self.core.watch_camera_ceiling();
         let in_call = self.core.call().is_some();
         if std::mem::replace(&mut self.calls.in_call, in_call) && !in_call {
             self.close_pop_outs(cx);

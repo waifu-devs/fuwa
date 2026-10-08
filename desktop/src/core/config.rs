@@ -371,6 +371,11 @@ pub struct Prefs {
     pub video_device: String,
     /// Your own camera shows mirrored to you.
     pub mirror_video: bool,
+    /// The tallest your camera goes out in calls, one of `ceiling::HEIGHTS`;
+    /// 0 is the best it gives (the web's `cameraHeight`).
+    pub camera_height: u32,
+    /// The most frames a second it sends, one of `ceiling::FRAME_RATES`; 0 is the best.
+    pub camera_fps: u32,
     pub popout_name: bool,
     pub popout_glow: bool,
     pub popout_fit: PopoutFit,
@@ -456,6 +461,8 @@ impl Default for Prefs {
             user_volumes: Default::default(),
             video_device: String::new(),
             mirror_video: true,
+            camera_height: 0,
+            camera_fps: 0,
             popout_name: true,
             popout_glow: true,
             popout_fit: PopoutFit::Cover,
@@ -533,6 +540,12 @@ impl Prefs {
         self.zoom = self.zoom.clamp(80, 150);
         self.text_scale = f32::from(self.zoom) / 100.0;
         self.chat_font_size = self.chat_font_size.clamp(12, 20);
+        if !crate::core::voice::ceiling::HEIGHTS.contains(&self.camera_height) {
+            self.camera_height = 0;
+        }
+        if !crate::core::voice::ceiling::FRAME_RATES.contains(&self.camera_fps) {
+            self.camera_fps = 0;
+        }
         self.saturation = self.saturation.min(100);
         self.volume = self.volume.min(100);
         self.input_volume = self.input_volume.min(200);

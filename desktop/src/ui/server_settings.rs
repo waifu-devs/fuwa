@@ -307,7 +307,7 @@ impl Page {
                 "webhook webhooks integration apps bot bots agent agents ci github feed rss alerts post api discord"
             }
             Page::Shared => "share connect slack connect other server guest home code external partner",
-            Page::Recordings => "record recording call voice video camera screen webm",
+            Page::Recordings => "record recording call voice video camera screen webm quality resolution fps",
             Page::Usage => "storage members messages",
             Page::Limits => "caps members channels storage",
             Page::Applications => "apply review approve reject let in turn down pending waiting",
@@ -380,7 +380,14 @@ impl Page {
                 s("agents", "settings.nav.agents", "bot add username"),
                 s("webhooks", "serversettings.nav.webhooks", "address url token"),
             ],
-            Page::Recordings => vec![s("record-video", "serversettings.nav.recordVideo", "camera screen share webm")],
+            Page::Recordings => vec![
+                s(
+                    "camera-quality",
+                    "serversettings.camera.title",
+                    "camera resolution frame rate fps ceiling 1080p 720p",
+                ),
+                s("record-video", "serversettings.nav.recordVideo", "camera screen share webm"),
+            ],
             _ => Vec::new(),
         }
     }
@@ -619,7 +626,10 @@ impl ServerSettingsView {
             Page::Invites => self.load_invites(cx),
             Page::Bans => self.load_bans(cx),
             Page::AuditLog => self.load_audit(false, cx),
-            Page::Recordings => self.recordings.draft = None,
+            Page::Recordings => {
+                self.recordings.draft = None;
+                self.recordings.camera = None;
+            }
             _ => {}
         }
         cx.notify();
@@ -719,8 +729,12 @@ impl Render for ServerSettingsView {
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
             allowed.retain(|pg| *pg != Page::ProfileItems);
         }
-        // Instances from before video in recordings have nothing to choose.
-        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
+        // Instances from before video in recordings and camera ceilings have nothing to choose.
+        if !self
+            .core
+            .shared
+            .read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings") || i.has("camera-quality")))
+        {
             allowed.retain(|pg| *pg != Page::Recordings);
         }
         // Requests waiting on this server's approval, counted on the menu once the list is read.
@@ -1231,6 +1245,8 @@ fn field_label(field: &str) -> String {
         "mention_limit" => t("serversettings.audit.field.mentionLimit"),
         "actions" => t("serversettings.audit.field.actions"),
         "record_video" => t("serversettings.audit.field.recordVideo"),
+        "camera_max_height" => t("serversettings.audit.field.cameraMaxHeight"),
+        "camera_max_fps" => t("serversettings.audit.field.cameraMaxFps"),
         other => other.to_owned(),
     }
 }
@@ -1248,6 +1264,15 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
                 t("serversettings.audit.value.soundVideo")
             } else {
                 t("serversettings.audit.value.soundOnly")
+            }
+        }
+        "camera_max_height" | "camera_max_fps" => {
+            let n = raw.parse::<u32>().unwrap_or(0);
+            let none = t("serversettings.camera.none");
+            if field == "camera_max_height" {
+                crate::ui::settings_voice::height_label(n, &none)
+            } else {
+                crate::ui::settings_voice::fps_label(n, &none)
             }
         }
         "role" => match raw {

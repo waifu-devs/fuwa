@@ -56,6 +56,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0032_pins.sql"),
     include_str!("../migrations/server/0033_live_tiles.sql"),
     include_str!("../migrations/server/0034_profile_items.sql"),
+    include_str!("../migrations/server/0035_camera_ceiling.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -875,7 +876,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
                 sso, sso_required, sso_recheck_days, region, thread_archive_hours,
-                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding, record_video, live_tiles
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding, record_video, live_tiles,
+                camera_max_height, camera_max_fps
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -909,6 +911,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
                 record_video: r.get(26)?,
                 live_tiles: Some(live_tile_kinds(r.get::<Option<String>>(27)?.as_deref(), r.get(8)?)),
+                camera_max_height: r.get::<Option<i32>>(28)?.unwrap_or(0),
+                camera_max_fps: r.get::<Option<i32>>(29)?.unwrap_or(0),
             })
         },
     )

@@ -127,6 +127,13 @@ message GetCallSettingsResponse {
   // Servers may have their recordings keep video too
   // (InstanceSettings.call_recording_video, Server.record_video).
   bool recording_video = 5;
+  // The ceiling on cameras in this instance's calls
+  // (InstanceSettings.camera_max_height and camera_max_fps): the tallest
+  // picture in pixels and the most frames a second. 0 for none. Apps send
+  // the lowest of this, the server's (Server.camera_max_height) and the
+  // person's own choice.
+  uint32 camera_max_height = 6;
+  uint32 camera_max_fps = 7;
 }
 
 message JoinVoiceRequest {

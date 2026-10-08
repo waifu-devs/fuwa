@@ -292,7 +292,10 @@ function useSettingsGroups(instanceKey: string, server: Server, can: (id: string
       icon: VideoIcon,
       description: t("serversettings.nav.recordingsAbout"),
       keywords: "record recording call voice video camera screen webm",
-      settings: [{ id: "record-video", label: t("serversettings.nav.recordVideo"), keywords: "camera screen share webm" }],
+      settings: [
+        { id: "camera-quality", label: t("serversettings.nav.cameraQuality"), keywords: "camera video resolution frame rate fps 1080p 720p ceiling" },
+        { id: "record-video", label: t("serversettings.nav.recordVideo"), keywords: "camera screen share webm" },
+      ],
     },
     { id: "usage", label: t("serversettings.nav.usage"), icon: ChartColumnIcon, description: t("serversettings.nav.usageAbout"), keywords: "storage members messages" },
     {

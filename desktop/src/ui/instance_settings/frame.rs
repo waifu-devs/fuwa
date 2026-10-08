@@ -157,6 +157,8 @@ pub(super) fn groups(name: &str, items_here: bool) -> Vec<Group> {
                 "instancesettings.nav.callRecordingsKeep",
                 "retention expire delete days old recordings",
             ),
+            entry("camera-height", "instancesettings.calls.cameraHeight", "camera video resolution quality 1080p 720p"),
+            entry("camera-fps", "instancesettings.calls.cameraFps", "camera video frame rate fps smooth"),
             entry("ice-urls", "instancesettings.nav.iceUrls", "ice nat relay firewall"),
             entry("turn-secret", "instancesettings.nav.turnSecret", "coturn relay password"),
         ]),

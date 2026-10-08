@@ -6,6 +6,7 @@ import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError, type FuwaError } from "@/fuwa/errors";
 import { engine, onLeaveAccount } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
+import { type Ceiling, ceilingOf } from "@/lib/camera-quality";
 import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
 import { DEFAULT_SHARE, screenEncodings, shareQuality, type ShareQuality } from "@/lib/screen-share";
 import { cue } from "@/lib/sounds";
@@ -19,10 +20,11 @@ import { getCalls, sameTarget, setCalls, type CallTarget } from "./state";
 import {
   cameraProblem,
   clearRemoteVideos,
-  ENCODINGS,
+  encodingsFor,
   getVideos,
   onWantsChange,
   openCamera,
+  ownCeiling,
   isScreen,
   openScreen,
   ownerOf,
@@ -60,6 +62,7 @@ const KEEP_MS = 5_000;
 const GRACE_MS = 2_500;
 const CHANNEL = "fuwa";
 const full = () => tr("workspace.calls.recordingsFull");
+const ceilingKey = (c: Ceiling) => `${c.height}@${c.fps}`;
 
 type Signal =
   | { type: "offer" | "answer"; sdp: string }
@@ -168,14 +171,22 @@ class Session {
     this.applyMute();
     this.unwatch = watchQuality(() => this.pc);
     this.unwant = onWantsChange(() => this.sayLayers());
-    // Another camera picked in settings while yours is on: switch to it.
+    // Another camera picked in settings while yours is on, or another
+    // ceiling (yours, or the server's): open it again to match.
     let device = getPrefs().videoDevice;
-    this.unprefs = subscribePrefs(() => {
-      if (getPrefs().videoDevice === device) return;
+    let ceiling = ceilingKey(this.ceiling());
+    const changed = () => {
+      const now = ceilingKey(this.ceiling());
+      if (getPrefs().videoDevice === device && now === ceiling) return;
       device = getPrefs().videoDevice;
+      ceiling = now;
       if (this.camera) void this.reopenCamera();
+    };
+    this.unprefs = subscribePrefs(changed);
+    this.unmoderated = store.subscribe(() => {
+      this.watchModeration();
+      changed();
     });
-    this.unmoderated = store.subscribe(() => this.watchModeration());
     await this.connect();
     this.keeper = setInterval(() => void this.keep(), KEEP_MS);
   }
@@ -242,7 +253,7 @@ class Session {
     // The camera's place is there from the start, empty until it's on, so
     // turning it on and off never needs a new offer. Nobody gets it until
     // its first frame.
-    const video = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: ENCODINGS.map((e) => ({ ...e })) });
+    const video = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: encodingsFor(this.camera, this.ceiling()) });
     this.video = video;
     this.frames?.send(video.sender, this.me, "video");
     preferVp8(video);
@@ -366,9 +377,37 @@ class Session {
     }, 120);
   }
 
+  /**
+   * The lowest of the ceilings on your camera here (lib/camera-quality.ts):
+   * yours, the instance's and, in a voice channel, its server's.
+   */
+  private ceiling(): Ceiling {
+    const t = this.target;
+    const server = t.kind === "voice" ? store.get().instances[t.instance]?.servers.find((s) => s.id === t.serverId) : undefined;
+    const instance = this.settings && { height: this.settings.cameraMaxHeight, fps: this.settings.cameraMaxFps };
+    return ceilingOf(ownCeiling(), instance, server && { height: server.cameraMaxHeight, fps: server.cameraMaxFps });
+  }
+
+  /** Fits the camera's encodings to the track it now sends: its size, frame rate and the bitrates for them. */
+  private async fitEncodings() {
+    const sender = this.video?.sender;
+    if (!sender || !this.camera) return;
+    const want = encodingsFor(this.camera, this.ceiling());
+    const params = sender.getParameters();
+    if (!params.encodings?.length) return;
+    for (const encoding of params.encodings) {
+      const fit = want.find((w) => w.rid === encoding.rid);
+      if (!fit) continue;
+      encoding.maxBitrate = fit.maxBitrate;
+      encoding.maxFramerate = fit.maxFramerate;
+      encoding.scaleResolutionDownBy = fit.scaleResolutionDownBy;
+    }
+    await sender.setParameters(params).catch(() => {});
+  }
+
   private async reopenCamera() {
     try {
-      const track = await openCamera();
+      const track = await openCamera(this.ceiling());
       if (this.stopped || !this.camera) return track.stop();
       this.camera.stop();
       this.camera = track;
@@ -377,6 +416,7 @@ class Session {
       };
       setLocalVideo(track);
       await this.video?.sender.replaceTrack(track).catch(() => {});
+      await this.fitEncodings();
     } catch (err) {
       toast(cameraProblem(err));
     }
@@ -385,7 +425,7 @@ class Session {
   /** Turns your camera on or off, without a new offer: its place in the connection stays. */
   async setCamera(on: boolean) {
     if (on && !this.camera) {
-      const track = await openCamera();
+      const track = await openCamera(this.ceiling());
       if (this.stopped || !getCalls().selfVideo) return track.stop();
       this.camera = track;
       // Unplugged, or taken away in the browser's own controls.
@@ -398,6 +438,7 @@ class Session {
     }
     setLocalVideo(this.camera);
     await this.video?.sender.replaceTrack(this.camera).catch(() => {});
+    await this.fitEncodings();
   }
 
   /**

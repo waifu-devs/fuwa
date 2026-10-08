@@ -1569,3 +1569,57 @@ async fn voice_channels_record_on_the_server() {
     instance.app.shutdown.cancel();
     let _ = instance.serving.await;
 }
+
+#[tokio::test]
+async fn cameras_have_the_ceilings_the_instance_and_server_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+
+    // No ceiling anywhere unless someone sets one: apps send their best.
+    let settings = c.calls.get_call_settings(authed(&juan, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!((settings.camera_max_height, settings.camera_max_fps), (0, 0));
+    let mut changed = (*instance.app.settings()).clone();
+    changed.camera_max_height = Some(720);
+    changed.camera_max_fps = Some(30);
+    instance.app.replace_settings(changed);
+    let settings = c.calls.get_call_settings(authed(&mika, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!((settings.camera_max_height, settings.camera_max_fps), (720, 30));
+
+    let request = pb::CreateServerRequest { name: "Studio".into(), discoverable: true, ..Default::default() };
+    let server = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap();
+    assert_eq!((server.camera_max_height, server.camera_max_fps), (0, 0));
+    let sid = server.id;
+    let request = pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() };
+    c.servers.join_server(authed(&mika, request)).await.unwrap();
+    let ceiling = |height, fps| pb::UpdateServerRequest {
+        server_id: sid.clone(),
+        camera_max_height: height,
+        camera_max_fps: fps,
+        ..Default::default()
+    };
+    let denied = c.servers.update_server(authed(&mika, ceiling(Some(480), None))).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied, "only for people who manage the server");
+    for (height, fps) in [(Some(100), None), (Some(4320), None), (None, Some(500)), (None, Some(-1))] {
+        let refused = c.servers.update_server(authed(&juan, ceiling(height, fps))).await.unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument, "{height:?} {fps:?}");
+    }
+    let updated = c.servers.update_server(authed(&juan, ceiling(Some(480), Some(15)))).await.unwrap().into_inner();
+    let server = updated.server.unwrap();
+    assert_eq!((server.camera_max_height, server.camera_max_fps), (480, 15));
+    // Leaving one out keeps it; 0 takes it off.
+    let updated = c.servers.update_server(authed(&juan, ceiling(Some(0), None))).await.unwrap().into_inner();
+    let server = updated.server.unwrap();
+    assert_eq!((server.camera_max_height, server.camera_max_fps), (0, 15));
+    let request = pb::GetServerRequest { server_id: sid.clone() };
+    let seen = c.servers.get_server(authed(&mika, request)).await.unwrap().into_inner().server.unwrap();
+    assert_eq!((seen.camera_max_height, seen.camera_max_fps), (0, 15), "members see it");
+    let request = pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() };
+    let entries = c.servers.list_audit_log(authed(&juan, request)).await.unwrap().into_inner().entries;
+    assert!(entries.iter().any(|e| e.changes.iter().any(|ch| ch.field == "camera_max_fps")));
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}

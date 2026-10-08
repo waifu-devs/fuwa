@@ -289,6 +289,15 @@ impl ServerService for Api {
                 if req.record_video == Some(true) && !self.app.settings().call_recording_video {
                     return Err(Error::FailedPrecondition("this instance doesn't let servers record video".into()));
                 }
+                let ceiling = |n: Option<i32>, range: std::ops::RangeInclusive<i64>| {
+                    n.is_some_and(|n| n != 0 && !range.contains(&i64::from(n)))
+                };
+                if ceiling(req.camera_max_height, crate::settings::CAMERA_HEIGHTS) {
+                    return Err(Error::invalid("cameras can be held to 144 to 2160 pixels tall, or 0 for no ceiling"));
+                }
+                if ceiling(req.camera_max_fps, crate::settings::CAMERA_FPS) {
+                    return Err(Error::invalid("cameras can be held to 1 to 120 frames a second, or 0 for no ceiling"));
+                }
                 if req.thread_archive_hours.is_some_and(|hours| !(0..=MAX_THREAD_ARCHIVE_HOURS).contains(&hours)) {
                     return Err(Error::invalid("threads are archived after at most a year"));
                 }
@@ -343,6 +352,13 @@ impl ServerService for Api {
                         if let Some(on) = req.record_video {
                             conn.execute("UPDATE server SET record_video = ?1", [on]).await?;
                         }
+                        if let Some(height) = req.camera_max_height {
+                            conn.execute("UPDATE server SET camera_max_height = ?1", [Some(height).filter(|n| *n != 0)])
+                                .await?;
+                        }
+                        if let Some(fps) = req.camera_max_fps {
+                            conn.execute("UPDATE server SET camera_max_fps = ?1", [Some(fps).filter(|n| *n != 0)]).await?;
+                        }
                         if let Some(tiles) = &req.live_tiles {
                             conn.execute("UPDATE server SET live_tiles = ?1", [stored_tile_kinds(tiles)]).await?;
                         }
@@ -370,6 +386,8 @@ impl ServerService for Api {
                             )
                             .change("accent_color", color_label(before.accent_color), color_label(server.accent_color))
                             .change("record_video", before.record_video, server.record_video)
+                            .change("camera_max_height", before.camera_max_height, server.camera_max_height)
+                            .change("camera_max_fps", before.camera_max_fps, server.camera_max_fps)
                             .change("live_tiles", tile_kinds_label(&before.live_tiles), tile_kinds_label(&server.live_tiles));
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;

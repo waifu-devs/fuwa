@@ -70,9 +70,31 @@ someone's camera to the others once its first frame arrives, so a camera
 nobody turned on costs nobody anything.
 
 Cameras are VP8 (the media part takes only Opus and VP8, so every app can
-show every other's), at up to 720p and 30 frames a second, sent in three
-sizes at once (simulcast): "l" a quarter (150 kbit/s at most), "m" half
-(500 kbit/s) and "h" full (1.5 Mbit/s). Each viewer gets one size of each
+show every other's), as sharp and smooth as the camera gives, up to 1080p
+and 60 frames a second, sent in three sizes at once (simulcast): "l" a
+quarter at up to 15 frames a second, "m" half at up to 30 and "h" all of it.
+Each size's bitrate follows the pixels it has and its frame rate,
+`max(150 kbit/s, pixels × 1.65 × (fps / 30)^0.6)` bits a second: 720p30 is
+about 1.5 Mbit/s, 1080p60 about 5.2, and every size of a 1080p60 camera
+together about 6.3, inside the 2 MiB a second the media part lets one
+camera send. Apps size the encodings from what the camera actually gives,
+so one that only does 720p30 sends that.
+
+Three ceilings can hold cameras lower, and apps send the lowest of them:
+the person's own (Resolution and Frame rate under Camera quality in Voice &
+video settings, "Best" unless changed), the instance's
+(`InstanceSettings.camera_max_height` and `camera_max_fps`,
+`FUWA_CAMERA_MAX_HEIGHT` and `FUWA_CAMERA_MAX_FPS`, on the Calls page; apps
+read it from `GetCallSettings`) and, in a server's voice channels, the
+server's (`Server.camera_max_height` and `camera_max_fps`, set by someone
+with MANAGE_SERVER under Calls & recordings, audited). None is set unless
+someone sets it. A ceiling changing while a camera is on opens it again at
+the new one. The math is `web/src/lib/camera-quality.ts` and the desktop's
+`core/voice/ceiling.rs`, number for number. The ceilings are what apps keep
+to, like the encodings themselves: the media part enforces only its byte
+budget per camera.
+
+Each viewer gets one size of each
 camera: the app says which over the data channel, by the track's mid,
 `{"type":"layers","layers":{"<mid>":"h"|"m"|"l"|"off"}}`, and picks it
 from how tall it shows that camera (`web/src/calls/video.ts`): up to 240
@@ -260,7 +282,7 @@ most half of a bridge's queue, so sound always gets through.
 ### Pop-out windows and clean feeds
 
 Any tile pops out into a window of its own: that one person's camera, edge
-to edge, at the size the window needs (full 720p for a big window), or their
+to edge, at the size the window needs (all of it for a big window), or their
 avatar on their color while their camera is off. Nothing else shows unless
 the mouse moves: the name, a glow while they talk, filling or fitting the
 window, each remembered. The window's title is `<name> · fuwa camera` and
@@ -418,7 +440,7 @@ and one of the screen's sound, receive the
 others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
 1500 bytes a frame, far above any Opus voice, and so is each program's.
-Each camera is capped at 1 MB a second, all its sizes together, and 512 KB
+Each camera is capped at 2 MB a second, all its sizes together (room for 1080p at 60), and 512 KB
 a frame; each shared screen at 2 MB a second (room for 1440p at 60 and its
 keyframes) and 512 KB a frame. A call holds at most 99 people, programs included.
 

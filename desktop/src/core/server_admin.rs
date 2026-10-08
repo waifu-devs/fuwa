@@ -32,6 +32,10 @@ pub struct ServerPatch {
     pub accent_color: Option<i32>,
     /// Recordings on the server keep cameras and shared screens too.
     pub record_video: Option<bool>,
+    /// The ceiling on cameras in its voice channels: the tallest picture
+    /// and the most frames a second, 0 for none.
+    pub camera_max_height: Option<i32>,
+    pub camera_max_fps: Option<i32>,
 }
 
 /// Someone's account by id, from a list a call sent along.
@@ -58,6 +62,8 @@ impl Core {
                 banner_focus_y: patch.banner_focus.map(|(_, y)| y),
                 accent_color: patch.accent_color,
                 record_video: patch.record_video,
+                camera_max_height: patch.camera_max_height,
+                camera_max_fps: patch.camera_max_fps,
                 ..Default::default()
             })
         )

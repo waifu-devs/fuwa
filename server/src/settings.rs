@@ -66,6 +66,8 @@ pub const FIELDS: &[&str] = &[
     "live_tiles_per_channel",
     "live_tile_updates_per_minute",
     "live_tile_publish_ms",
+    "camera_max_height",
+    "camera_max_fps",
 ];
 
 /// The settings in force.
@@ -107,6 +109,11 @@ pub struct Settings {
     /// Instances this one won't talk to, by host name.
     pub federation_blocked_hosts: Vec<String>,
     pub call_recordings_keep_days: Option<i64>,
+    /// The tallest camera picture apps send in calls, in pixels; `None` for
+    /// no ceiling (each app's best).
+    pub camera_max_height: Option<i64>,
+    /// The most camera frames a second apps send; `None` for no ceiling.
+    pub camera_max_fps: Option<i64>,
     /// Live streams (apps and tabs) one account may hold open at once;
     /// `None` for no limit. A protective default (docs/capacity.md).
     pub streams_per_account: Option<i64>,
@@ -168,6 +175,8 @@ impl Settings {
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
+            camera_max_height: config.camera_max_height,
+            camera_max_fps: config.camera_max_fps,
             streams_per_account: config.streams_per_account.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             shared_file_fetches_in_flight: config
                 .shared_file_fetches_in_flight
@@ -336,6 +345,8 @@ impl Settings {
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
+            camera_max_height: self.camera_max_height,
+            camera_max_fps: self.camera_max_fps,
             streams_per_account: self.streams_per_account,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
@@ -465,6 +476,8 @@ impl Settings {
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
+            "camera_max_height" => Value::from(from.camera_max_height),
+            "camera_max_fps" => Value::from(from.camera_max_fps),
             "streams_per_account" => Value::from(from.streams_per_account),
             "shared_file_fetches_in_flight" => Value::from(from.shared_file_fetches_in_flight),
             "live_tiles_per_channel" => Value::from(from.live_tiles_per_channel),
@@ -566,6 +579,8 @@ impl Settings {
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
+            "camera_max_height" => Value::from(self.camera_max_height),
+            "camera_max_fps" => Value::from(self.camera_max_fps),
             "streams_per_account" => Value::from(self.streams_per_account),
             "shared_file_fetches_in_flight" => Value::from(self.shared_file_fetches_in_flight),
             "live_tiles_per_channel" => Value::from(limits.live_tiles_per_channel),
@@ -670,6 +685,24 @@ impl Settings {
                         ));
                     }
                     days => days,
+                }
+            }
+            "camera_max_height" => {
+                self.camera_max_height = match cap(field, value)? {
+                    Some(n) if !CAMERA_HEIGHTS.contains(&n) => {
+                        return Err(Error::invalid(
+                            "camera_max_height must be 144 to 2160 pixels, or unset for no ceiling",
+                        ));
+                    }
+                    height => height,
+                }
+            }
+            "camera_max_fps" => {
+                self.camera_max_fps = match cap(field, value)? {
+                    Some(n) if !CAMERA_FPS.contains(&n) => {
+                        return Err(Error::invalid("camera_max_fps must be 1 to 120, or unset for no ceiling"));
+                    }
+                    fps => fps,
                 }
             }
             "streams_per_account" => {
@@ -863,6 +896,11 @@ fn origins(value: &Value) -> Result<Vec<String>> {
     Ok(origins)
 }
 
+/// The camera ceilings an instance or a server may set: the tallest
+/// picture, in pixels, and the most frames a second.
+pub const CAMERA_HEIGHTS: std::ops::RangeInclusive<i64> = 144..=2160;
+pub const CAMERA_FPS: std::ops::RangeInclusive<i64> = 1..=120;
+
 fn cap(field: &str, value: &Value) -> Result<Option<i64>> {
     match value {
         Value::Null => Ok(None),
@@ -1030,6 +1068,14 @@ mod tests {
         assert!(s.set_json("call_recordings_keep_days", &Value::from(0)).is_err());
         assert!(s.set_json("call_recordings_keep_days", &Value::from(30)).is_ok());
         assert!(s.set_json("call_recordings_keep_days", &Value::Null).is_ok());
+        assert!(s.set_json("camera_max_height", &Value::from(100)).is_err());
+        assert!(s.set_json("camera_max_height", &Value::from(4320)).is_err());
+        assert!(s.set_json("camera_max_height", &Value::from(720)).is_ok());
+        assert_eq!(s.camera_max_height, Some(720));
+        assert!(s.set_json("camera_max_fps", &Value::from(0)).is_err());
+        assert!(s.set_json("camera_max_fps", &Value::from(30)).is_ok());
+        assert!(s.set_json("camera_max_fps", &Value::Null).is_ok());
+        assert_eq!(s.camera_max_fps, None, "unset is no ceiling");
         assert_eq!(s.streams_per_account(), Some(crate::streams::PER_ACCOUNT), "a protective default");
         assert!(s.set_json("streams_per_account", &Value::from(0)).is_err());
         assert!(s.set_json("streams_per_account", &Value::from(8)).is_ok());

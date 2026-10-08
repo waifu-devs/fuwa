@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore, type RefObject } from "react";
 import { i18n, type Key } from "@/i18n/i18n";
+import { cameraEncodings, type Ceiling, ceilingOf, widthFor } from "@/lib/camera-quality";
 import { getPrefs } from "@/lib/prefs";
 import { shareBox, wantsMotion, type ShareQuality, type ShareSurface } from "@/lib/screen-share";
 
@@ -104,7 +105,7 @@ const wantsChanged = () => {
   for (const l of wantListeners) l();
 };
 
-/** The size that fits a picture this tall on screen (in device pixels): a camera is 720 tall at most, a screen 1080. */
+/** The size that fits a picture this tall on screen (in device pixels): cameras are 1080 tall at most, screens up to 1440. */
 export function layerFor(heightPx: number): Layer {
   if (heightPx <= 0) return "off";
   if (heightPx <= 240) return "l";
@@ -144,23 +145,53 @@ export function useLayerFor(userId: string | undefined, ref: RefObject<HTMLEleme
 
 // ───────────────────────── Your camera ─────────────────────────
 
-/** Opens the camera picked in Voice & video settings, at up to 720p and 30 frames a second. */
-export async function openCamera(): Promise<MediaStreamTrack> {
+/**
+ * Opens the camera picked in Voice & video settings, as sharp and smooth as
+ * it goes under `ceiling` (lib/camera-quality.ts): your own choice unless
+ * a call says otherwise.
+ */
+export async function openCamera(ceiling: Ceiling = ceilingOf(ownCeiling())): Promise<MediaStreamTrack> {
   if (!navigator.mediaDevices?.getUserMedia) throw new DOMException("No camera API", "NotSupportedError");
   const device = getPrefs().videoDevice;
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      deviceId: device ? { exact: device } : undefined,
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30, max: 30 },
-    },
+  const ask = (most: boolean) =>
+    navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        deviceId: device ? { exact: device } : undefined,
+        width: { ideal: widthFor(ceiling.height) },
+        height: most ? { ideal: ceiling.height, max: ceiling.height } : { ideal: ceiling.height },
+        frameRate: most ? { ideal: ceiling.fps, max: ceiling.fps } : { ideal: ceiling.fps },
+      },
+    });
+  // A browser that can't scale this camera down to the ceiling gives the
+  // nearest it has instead, and the encodings scale it down on the way out.
+  const stream = await ask(true).catch((err: unknown) => {
+    if (err instanceof DOMException && err.name === "OverconstrainedError") return ask(false);
+    throw err;
   });
   const track = stream.getVideoTracks()[0];
   if (!track) throw new DOMException("No camera", "NotFoundError");
   track.contentHint = "motion";
   return track;
+}
+
+/** The ceiling you picked in Voice & video settings. */
+export const ownCeiling = (): Ceiling => ({ height: getPrefs().cameraHeight, fps: getPrefs().cameraFps });
+
+/**
+ * The encodings for a camera track as it came: its own size and frame rate
+ * (a camera may give less than asked), never above `ceiling`.
+ */
+export function encodingsFor(track: MediaStreamTrack | null, ceiling: Ceiling): RTCRtpEncodingParameters[] {
+  const got = track?.getSettings() ?? {};
+  const height = Math.min(got.height || ceiling.height, ceiling.height);
+  const width = got.width && got.height ? Math.round((got.width * height) / got.height) : widthFor(height);
+  // A camera taller than the ceiling is scaled down to it in every size.
+  const over = got.height && got.height > height ? got.height / height : 1;
+  return cameraEncodings(width, height, Math.min(Math.round(got.frameRate || ceiling.fps), ceiling.fps)).map((e) => ({
+    ...e,
+    scaleResolutionDownBy: (e.scaleResolutionDownBy ?? 1) * over,
+  }));
 }
 
 /** Why the camera didn't open, in words. */
@@ -172,16 +203,6 @@ export function cameraProblem(err: unknown): string {
   if (name === "NotSupportedError" || (typeof navigator !== "undefined" && !navigator.mediaDevices)) return tr("workspace.calls.camera.noHttps");
   return tr("workspace.calls.camera.failed");
 }
-
-/**
- * The three sizes a camera goes out in, smallest first (as browsers want
- * them): a quarter, half and full, each with a ceiling on its bitrate.
- */
-export const ENCODINGS: RTCRtpEncodingParameters[] = [
-  { rid: "l", scaleResolutionDownBy: 4, maxBitrate: 150_000, maxFramerate: 15 },
-  { rid: "m", scaleResolutionDownBy: 2, maxBitrate: 500_000, maxFramerate: 30 },
-  { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 1_500_000, maxFramerate: 30 },
-];
 
 // ───────────────────────── Your screen ─────────────────────────
 
