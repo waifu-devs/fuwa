@@ -7,6 +7,7 @@ time, so fuwa keeps its own copy of the crates that needed changing:
 - `gpui-pre`: the framework (scene, window, styles, elements).
 - `gpui-pre-wgpu`: the Linux renderer (WGSL).
 - `gpui-pre-apple`: the macOS renderer (Metal).
+- `gpui-pre-macos`: the macOS platform, for its text system (Core Text).
 - `gpui-pre-windows`: the Windows renderer (Direct3D 11, HLSL).
 
 They were copied from crates.io unchanged in one commit ("vendor gpui-pre
@@ -62,6 +63,17 @@ space. Hitboxes remember the transform, so hovering and clicking follow it
   the web.
 - Antialiasing widths are in the element's own pixels, which matters only far
   from a scale of 1.
+
+**Synthetic italic.** The app's font (M PLUS Rounded 1c) has no italic face,
+and GPUI fell back to the upright one, so `*em*` stood up straight where a
+browser slants it. Asked for italic of a family without one, the text systems
+now hand out a second font id for the upright face that's drawn leaning 14°,
+as browsers do: Linux skews the outline in swash's rasterizer (its image
+placement grows to hold it), macOS draws a copy of the CTFont with a skew
+matrix and widens the raster bounds by the slant, and Windows asks DirectWrite
+to simulate oblique (`DWRITE_FONT_SIMULATIONS_OBLIQUE`), which it didn't
+before since layout asked for the upright face's own style. Shaping uses the
+upright face, so widths don't change. (`gpui-pre-macos` is vendored for this.)
 
 ## Checking the renderers
 

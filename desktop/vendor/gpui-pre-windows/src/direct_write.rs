@@ -487,7 +487,20 @@ impl DirectWriteState {
         for index in 0..total_number {
             let res = maybe!({
                 let font_face_ref = unsafe { font.GetFontFaceReference(index).log_err()? };
-                let font_face = unsafe { font_face_ref.CreateFontFace().log_err()? };
+                let mut font_face = unsafe { font_face_ref.CreateFontFace().log_err()? };
+                // Italic asked of a family without one: DirectWrite slants the upright
+                // face, as browsers do, when asked to simulate it.
+                if style != FontStyle::Normal
+                    && unsafe { font_face.GetStyle() } == DWRITE_FONT_STYLE_NORMAL
+                {
+                    let simulations =
+                        unsafe { font_face_ref.GetSimulations() } | DWRITE_FONT_SIMULATIONS_OBLIQUE;
+                    font_face = unsafe {
+                        font_face_ref
+                            .CreateFontFaceWithSimulations(simulations)
+                            .log_err()?
+                    };
+                }
                 let direct_write_features =
                     unsafe { Self::generate_font_features(factory, features).log_err()? };
                 let fallbacks = fallbacks.as_ref().and_then(|fallbacks| {
@@ -541,7 +554,7 @@ impl DirectWriteState {
                         &font_info.font_family_h,
                         collection,
                         font_info.font_face.GetWeight(),
-                        font_info.font_face.GetStyle(),
+                        drawn_style(&font_info.font_face),
                         DWRITE_FONT_STRETCH_NORMAL,
                         font_size.as_f32(),
                         &components.locale,
@@ -600,7 +613,7 @@ impl DirectWriteState {
                     font_size.as_f32()
                 };
                 text_layout.SetFontSize(font_size, text_range)?;
-                text_layout.SetFontStyle(font_info.font_face.GetStyle(), text_range)?;
+                text_layout.SetFontStyle(drawn_style(&font_info.font_face), text_range)?;
                 text_layout.SetFontWeight(font_info.font_face.GetWeight(), text_range)?;
                 text_layout.SetTypography(&font_info.features, text_range)?;
 
@@ -1718,6 +1731,17 @@ impl<'a> StringIndexConverter<'a> {
     }
 }
 
+/// The style a face is drawn in: oblique when DirectWrite slants it.
+fn drawn_style(font_face: &IDWriteFontFace3) -> DWRITE_FONT_STYLE {
+    unsafe {
+        if (font_face.GetSimulations() & DWRITE_FONT_SIMULATIONS_OBLIQUE).0 != 0 {
+            DWRITE_FONT_STYLE_OBLIQUE
+        } else {
+            font_face.GetStyle()
+        }
+    }
+}
+
 fn font_style_to_dwrite(style: FontStyle) -> DWRITE_FONT_STYLE {
     match style {
         FontStyle::Normal => DWRITE_FONT_STYLE_NORMAL,
@@ -1771,7 +1795,7 @@ fn font_face_to_font(font_face: &IDWriteFontFace3, locale: &HSTRING) -> Option<F
     let localized_family_name = unsafe { font_face.GetFamilyNames().log_err() }?;
     let family_name = get_name(localized_family_name, locale).log_err()?;
     let weight = unsafe { font_face.GetWeight() };
-    let style = unsafe { font_face.GetStyle() };
+    let style = drawn_style(font_face);
     Some(Font {
         family: family_name.into(),
         features: FontFeatures::default(),

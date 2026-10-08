@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 use std::{borrow::Cow, ops::Range, sync::Arc};
 use swash::{
     scale::{Render, ScaleContext, Source, StrikeWith},
-    zeno::{Format, Vector},
+    zeno::{Angle, Format, Transform, Vector},
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -57,6 +57,8 @@ struct CosmicTextSystemState {
     /// Caches the `FontId`s associated with a specific family to avoid iterating the font database
     /// for every font face in a family.
     font_ids_by_family_cache: HashMap<FontKey, SmallVec<[FontId; 4]>>,
+    /// The slanted stand-in for each upright face asked for in italic.
+    oblique_font_ids: HashMap<FontId, FontId>,
     system_font_fallback: String,
     missing_glyph_sink: Option<Arc<dyn MissingGlyphSink>>,
 }
@@ -68,7 +70,13 @@ struct LoadedFont {
     /// resolved at load time so `layout_line` shares one chain across faces.
     /// `Arc` keeps clone cheap on the per-run hot path.
     user_fallback_chain: Arc<[(FontId, SharedString)]>,
+    /// Italic was asked of a family with no italic face, so this upright face
+    /// is slanted when its glyphs are drawn, as browsers do.
+    synthetic_oblique: bool,
 }
+
+/// How far a synthetic oblique leans, as browsers slant a face with no italic.
+const SYNTHETIC_OBLIQUE_DEGREES: f32 = 14.0;
 
 struct FontMatchProperties {
     primary_family_name: SharedString,
@@ -108,6 +116,7 @@ impl CosmicTextSystem {
             .face(font.font.id())
             .context("font face not found")?;
         let style = match face.style {
+            _ if font.synthetic_oblique => gpui::FontStyle::Oblique,
             cosmic_text::Style::Normal => gpui::FontStyle::Normal,
             cosmic_text::Style::Italic => gpui::FontStyle::Italic,
             cosmic_text::Style::Oblique => gpui::FontStyle::Oblique,
@@ -139,6 +148,7 @@ impl CosmicTextSystem {
             loaded_fonts: Vec::new(),
             loaded_font_ids_by_key: HashMap::default(),
             font_ids_by_family_cache: HashMap::default(),
+            oblique_font_ids: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
         }))
@@ -158,6 +168,7 @@ impl CosmicTextSystem {
             loaded_fonts: Vec::new(),
             loaded_font_ids_by_key: HashMap::default(),
             font_ids_by_family_cache: HashMap::default(),
+            oblique_font_ids: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
         }))
@@ -204,8 +215,17 @@ impl PlatformTextSystem for CosmicTextSystem {
         };
 
         let ix = find_best_match(font, candidates, &state)?;
+        let font_id = candidates[ix];
 
-        Ok(candidates[ix])
+        // Italic asked of a family without one: the upright face, slanted.
+        let wants_italic = matches!(
+            font.style,
+            gpui::FontStyle::Italic | gpui::FontStyle::Oblique
+        );
+        if wants_italic && !state.is_italic(font_id) {
+            return Ok(state.oblique_font_id(font_id));
+        }
+        Ok(font_id)
     }
 
     fn prewarm_fonts(&self, font_ids: &[FontId]) {
@@ -284,6 +304,38 @@ impl PlatformTextSystem for CosmicTextSystem {
 }
 
 impl CosmicTextSystemState {
+    fn is_italic(&self, font_id: FontId) -> bool {
+        self.font_system
+            .db()
+            .face(self.loaded_font(font_id).font.id())
+            .is_some_and(|face| {
+                matches!(
+                    face.style,
+                    cosmic_text::Style::Italic | cosmic_text::Style::Oblique
+                )
+            })
+    }
+
+    /// A second id for an upright face whose glyphs are drawn slanted. Shaping
+    /// tags each glyph with the id it was asked for, so the slant follows them.
+    fn oblique_font_id(&mut self, upright: FontId) -> FontId {
+        if let Some(&font_id) = self.oblique_font_ids.get(&upright) {
+            return font_id;
+        }
+        let loaded = &self.loaded_fonts[upright.0];
+        let oblique = LoadedFont {
+            font: Arc::clone(&loaded.font),
+            features: loaded.features.clone(),
+            is_known_emoji_font: loaded.is_known_emoji_font,
+            user_fallback_chain: Arc::clone(&loaded.user_fallback_chain),
+            synthetic_oblique: true,
+        };
+        let font_id = FontId(self.loaded_fonts.len());
+        self.loaded_fonts.push(oblique);
+        self.oblique_font_ids.insert(upright, font_id);
+        font_id
+    }
+
     fn loaded_font(&self, font_id: FontId) -> &LoadedFont {
         &self.loaded_fonts[font_id.0]
     }
@@ -432,6 +484,7 @@ impl CosmicTextSystemState {
                 features: cosmic_features.clone(),
                 is_known_emoji_font: check_is_known_emoji_font(&postscript_name),
                 user_fallback_chain: Arc::clone(&user_fallback_chain),
+                synthetic_oblique: false,
             });
             self.loaded_font_ids_by_key.insert(key, font_id);
         }
@@ -534,6 +587,13 @@ impl CosmicTextSystemState {
         };
 
         let mut renderer = Render::new(sources);
+        if loaded_font.synthetic_oblique && !params.is_emoji {
+            // Leans the outline right as it rises; the image's placement grows to hold it.
+            renderer.transform(Some(Transform::skew(
+                Angle::from_degrees(SYNTHETIC_OBLIQUE_DEGREES),
+                Angle::from_degrees(0.0),
+            )));
+        }
         if params.subpixel_rendering {
             // There seems to be a bug in Swash where the B and R values are swapped.
             renderer
@@ -581,6 +641,7 @@ impl CosmicTextSystemState {
                 features: CosmicFontFeatures::new(),
                 is_known_emoji_font: check_is_known_emoji_font(&face.post_script_name),
                 user_fallback_chain: Arc::from(Vec::new()),
+                synthetic_oblique: false,
             });
 
             Ok(font_id)
