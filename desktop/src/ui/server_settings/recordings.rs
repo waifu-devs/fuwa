@@ -206,7 +206,8 @@ impl ServerSettingsView {
             .child(div().text_xs().text_color(p.muted_foreground).child(t("serversettings.recordings.preview")))
             .child(list);
 
-        crate::ui::settings_controls::with_preview(setting.pb(px(20.0)), preview, self.wide, p)
+        let setting = self.mark("record-video", setting.pb(px(20.0)), p);
+        crate::ui::settings_controls::with_preview(setting, preview, self.wide, p)
     }
 
     fn server_record_video(&self) -> bool {

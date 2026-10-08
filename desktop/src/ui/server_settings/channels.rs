@@ -951,7 +951,7 @@ impl ServerSettingsView {
                 } else {
                     icon("snail").size(px(20.0)).into_any_element()
                 });
-            out = out.child(form_row(
+            let row = form_row(
                 &t("serversettings.nav.slowmode"),
                 Some(t("serversettings.channels.slowmodeHint")),
                 div()
@@ -972,7 +972,8 @@ impl ServerSettingsView {
                     ),
                 false,
                 p,
-            ));
+            );
+            out = out.child(self.mark("slowmode", row, p));
         }
 
         // Deleting, behind a confirmation.
@@ -1862,6 +1863,13 @@ impl ServerSettingsView {
             .child(BaseSlider::new(&state).relative().w_full().child(track))
             .child(marks)
             .into_any_element()
+    }
+}
+
+impl ServerSettingsView {
+    /// Opens the channel editor's Permissions tab (search jumping to a channel's permissions).
+    pub(super) fn channels_tab_permissions(&mut self) {
+        self.channels.tab = Tab::Permissions;
     }
 }
 

@@ -385,23 +385,35 @@ impl ServerSettingsView {
             .flex_col()
             .gap(px(32.0))
             .child(stage)
-            .child(section(
-                "banner",
-                t("serversettings.welcome.banner"),
-                t("serversettings.welcome.bannerHint"),
-                banner_part,
+            .child(self.mark(
+                "banner-picture",
+                div().child(section(
+                    "banner",
+                    t("serversettings.welcome.banner"),
+                    t("serversettings.welcome.bannerHint"),
+                    banner_part,
+                )),
+                p,
             ))
-            .child(section(
-                "welcome",
-                t("serversettings.welcome.screen"),
-                t("serversettings.welcome.screenHint"),
-                div().flex().flex_col().child(toggle).child(words).child(suggested).into_any_element(),
+            .child(self.mark(
+                "welcome-enabled",
+                div().child(section(
+                    "welcome",
+                    t("serversettings.welcome.screen"),
+                    t("serversettings.welcome.screenHint"),
+                    div().flex().flex_col().child(toggle).child(words).child(suggested).into_any_element(),
+                )),
+                p,
             ))
-            .child(section(
-                "onboarding",
-                t("serversettings.nav.onboarding"),
-                t("serversettings.welcome.onboardingHint"),
-                steps,
+            .child(self.mark(
+                "onboarding-enabled",
+                div().child(section(
+                    "onboarding",
+                    t("serversettings.nav.onboarding"),
+                    t("serversettings.welcome.onboardingHint"),
+                    steps,
+                )),
+                p,
             ))
             .into_any_element()
     }

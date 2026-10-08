@@ -454,6 +454,8 @@ pub struct ServerSettingsView {
     glow: Option<(&'static str, u32)>,
     /// A setting to scroll to once its page is on screen.
     scroll_to: Option<&'static str>,
+    /// When search asked for `scroll_to`, to give up on one that never shows.
+    scroll_since: Option<Instant>,
     /// Where each search target was drawn, for scrolling to it.
     places: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     scroll: ScrollHandle,
@@ -567,6 +569,7 @@ impl ServerSettingsView {
             focused_once: false,
             glow: None,
             scroll_to: None,
+            scroll_since: None,
             places: Rc::new(RefCell::new(HashMap::new())),
             scroll: ScrollHandle::new(),
             column: 792.0,
@@ -759,10 +762,12 @@ impl Render for ServerSettingsView {
             Page::Integrations => {
                 let mut both = div().flex().flex_col().gap(px(32.0));
                 if access.has(P::ManageServer) {
-                    both = both.child(self.agents_page(&p, window, cx));
+                    let agents = self.agents_page(&p, window, cx);
+                    both = both.child(self.mark("agents", div().child(agents), &p));
                 }
                 if access.has(P::ManageWebhooks) {
-                    both = both.child(self.webhooks_page(&p, window, cx));
+                    let hooks = self.webhooks_page(&p, window, cx);
+                    both = both.child(self.mark("webhooks", div().child(hooks), &p));
                 }
                 both.into_any_element()
             }
@@ -793,6 +798,10 @@ impl Render for ServerSettingsView {
                     let most = f32::from(self.scroll.max_offset().y);
                     self.scroll.set_offset(point(px(0.0), px(-target.clamp(0.0, most.max(0.0)))));
                     self.scroll_to = None;
+                }
+                // Looked for a moment and it isn't on the page (a role or channel not picked yet).
+                None if self.scroll_since.is_some_and(|at| at.elapsed() > Duration::from_millis(1500)) => {
+                    self.scroll_to = None
                 }
                 None => window.request_animation_frame(),
             }
@@ -875,6 +884,9 @@ impl Render for ServerSettingsView {
             .id("server-settings")
             .absolute()
             .inset_0()
+            // At least the window, so the menu's surface runs down the whole side however short it is.
+            .min_w(px(width))
+            .min_h(window.viewport_size().height)
             .occlude()
             .flex()
             // The page's surface, out to the window's edge past the close button (the web's
@@ -889,7 +901,7 @@ impl Render for ServerSettingsView {
                     .id("server-settings-menu")
                     .flex_none()
                     .w(px(aside))
-                    .h_full()
+                    .h(window.viewport_size().height)
                     .flex()
                     .justify_end()
                     .bg(p.side_surface)
@@ -902,7 +914,7 @@ impl Render for ServerSettingsView {
                 div()
                     .id("server-settings-body")
                     .flex_1()
-                    .h_full()
+                    .h(window.viewport_size().height)
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .child(content),

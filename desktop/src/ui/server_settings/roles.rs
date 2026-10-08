@@ -1680,6 +1680,13 @@ impl Render for RoleDrag {
     }
 }
 
+impl ServerSettingsView {
+    /// Opens a tab of the role editor (search jumping to a role's permissions or members).
+    pub(super) fn roles_tab(&mut self, tab: RoleTab) {
+        self.roles.tab = tab;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

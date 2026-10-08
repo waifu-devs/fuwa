@@ -42,6 +42,20 @@ impl ServerSettingsView {
             self.open(page, cx);
         }
         if let Some(id) = setting {
+            // Settings that are a tab open it; those that share a block light the block up.
+            match id {
+                "role-permissions" => self.roles_tab(super::roles::RoleTab::Permissions),
+                "role-members" => self.roles_tab(super::roles::RoleTab::Members),
+                "channel-permissions" => self.channels_tab_permissions(),
+                _ => {}
+            }
+            let id = match id {
+                "banner-focus" | "accent-color" => "banner-picture",
+                "welcome-description" | "welcome-channels" => "welcome-enabled",
+                "onboarding-steps" => "onboarding-enabled",
+                other => other,
+            };
+            self.scroll_since = Some(Instant::now());
             let n = self.glow.map_or(0, |(_, n)| n + 1);
             self.glow = Some((id, n));
             self.scroll_to = Some(id);

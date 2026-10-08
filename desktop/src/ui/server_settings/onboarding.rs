@@ -706,18 +706,7 @@ impl ServerSettingsView {
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .pb(px(18.0))
-            .border_b_1()
-            .border_color(p.border)
-            .child(
-                div().child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcome.banner"))).child(
-                    div()
-                        .text_sm()
-                        .line_height(px(20.0))
-                        .text_color(p.muted_foreground)
-                        .child(t("serversettings.welcome.bannerHint")),
-                ),
-            )
+            // Its heading is the page's "Banner and color" section, as on the web.
             .child(buttons)
             .child(focal)
             .child(accent_part)
