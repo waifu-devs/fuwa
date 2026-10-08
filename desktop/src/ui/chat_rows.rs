@@ -212,7 +212,7 @@ pub(crate) fn tool(
 /// The card the tools sit in, over the message's top right corner. It keeps
 /// the row lit while the pointer is on it, as the web's does.
 pub(crate) fn tools_frame(id: &str, ctx: &Rc<RowCtx>, p: &Palette) -> Stateful<Div> {
-    let (this, row) = (ctx.this.clone(), id.to_owned());
+    let (this, row) = (ctx.this.clone(), hover_key(id, ctx));
     div()
         .id(SharedString::from(format!("tools|{id}")))
         .absolute()
@@ -234,11 +234,32 @@ pub(crate) fn tools_frame(id: &str, ctx: &Rc<RowCtx>, p: &Palette) -> Stateful<D
 
 /// Whether a row's tools show: it's hovered, or its card is, or it's asking something.
 pub(crate) fn tools_shown(id: &str, ctx: &RowCtx) -> bool {
-    ctx.hover.as_deref() == Some(id) || ctx.deleting.as_deref() == Some(id)
+    ctx.hover.as_deref() == Some(hover_key(id, ctx).as_str()) || ctx.deleting.as_deref() == Some(id)
+}
+
+/// What a hovered row is known by: a message shown both in its channel and
+/// in the thread panel beside it lights only where the pointer is.
+pub(crate) fn hover_key(id: &str, ctx: &RowCtx) -> String {
+    match &ctx.thread {
+        Some(thread) => format!("{thread}>{id}"),
+        None => id.to_owned(),
+    }
 }
 
 /// The "Delete?" a row asks before it goes: the question, yes and no.
 pub(crate) fn confirm_delete(id: &str, keep_label: String, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElement {
+    confirm_delete_as(id, &t("chat.messages.deleteAsk"), keep_label, ctx, p)
+}
+
+/// The same, asking `question` (an encrypted message's "Delete for both of you?").
+pub(crate) fn confirm_delete_as(
+    id: &str,
+    question: &str,
+    keep_label: String,
+    ctx: &Rc<RowCtx>,
+    p: &Palette,
+) -> AnyElement {
+    let question = question.to_owned();
     let (yes, no) = (ctx.this.clone(), ctx.this.clone());
     let (a, b) = (id.to_owned(), id.to_owned());
     motion::slide_in(
@@ -246,14 +267,7 @@ pub(crate) fn confirm_delete(id: &str, keep_label: String, ctx: &Rc<RowCtx>, p: 
             .flex()
             .items_center()
             .gap(px(2.0))
-            .child(
-                div()
-                    .px(px(8.0))
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.destructive)
-                    .child(t("chat.messages.deleteAsk")),
-            )
+            .child(div().px(px(8.0)).text_xs().font_weight(FontWeight::BOLD).text_color(p.destructive).child(question))
             .child(tool(format!("del-yes|{id}"), "check", t("chat.messages.delete"), true, p).on_click(
                 move |_, _, cx| {
                     let _ = yes.update(cx, |this, cx| {

@@ -40,6 +40,9 @@ pub enum ItemKind {
     Reset,
     /// Someone turned a secure channel's history sharing on ("on") or off ("off"), in `content`.
     Setting,
+    /// Someone locked ("locked") or unlocked ("unlocked") the thread under the
+    /// message `thread` names, in `content` (`core/secure_threads.rs`).
+    Thread,
 }
 
 /// A secure channel message as its sender's device signed it (a
@@ -103,6 +106,40 @@ pub struct Item {
     /// A voice message: what's needed to fetch, open and draw it (the text is empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<VoiceFile>,
+    /// Files sent with a text, sealed on the sender's device (`core/sealed_files.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<FileRef>,
+    /// In a secure channel: the record of the message this replies under, as a thread (0: none).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub thread: i64,
+    /// A thread reply its author also sent to the channel.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_channel: bool,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// A file inside an encrypted message, sealed in chunks: what fetching, opening and showing it takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileRef {
+    pub media_id: String,
+    #[serde(with = "bytes")]
+    pub key: Vec<u8>,
+    #[serde(with = "bytes")]
+    pub sha256: Vec<u8>,
+    /// The stored (sealed) bytes.
+    pub size: i64,
+    pub chunk_bytes: u32,
+    /// Its name, cleaned.
+    pub name: String,
+    /// What the sender said it is: a hint, never trusted for showing it.
+    pub content_type: String,
+    pub width: u32,
+    pub height: u32,
+    /// Its size before padding, as the sender said (0: unknown).
+    pub file_size: i64,
 }
 
 /// A voice message's sealed file and what was said about it.
@@ -137,6 +174,9 @@ impl Item {
             edit_signed: None,
             shared_by: String::new(),
             voice: None,
+            files: Vec::new(),
+            thread: 0,
+            in_channel: false,
         }
     }
 }
@@ -151,6 +191,12 @@ pub struct Note {
     /// The safety number you checked with the other person, if you did.
     #[serde(default)]
     pub verified: String,
+    /// In a secure channel: the threads you follow (true) or stopped following (false) by hand.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub follows: HashMap<i64, bool>,
+    /// The last reply you saw in each thread, by the thread's message's record.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub thread_read: HashMap<i64, i64>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -492,7 +538,7 @@ mod tests {
         vault
             .write(Change {
                 device: Some(vec![1, 2, 3]),
-                notes: vec![("c".into(), Note { cursor: 2, read: 0, verified: String::new() })],
+                notes: vec![("c".into(), Note { cursor: 2, read: 0, verified: String::new(), ..Default::default() })],
                 items: vec![("c".into(), item.clone()), ("c".into(), Item::new(1, ItemKind::Joined, 1, "u1", "d1"))],
                 sent: vec![("h".into(), b"hi".to_vec())],
                 forget_sent: vec![],

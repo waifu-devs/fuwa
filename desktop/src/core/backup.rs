@@ -224,6 +224,7 @@ fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
         (ItemKind::Devices, _) => pb::BackupItemKind::Devices,
         (ItemKind::Reset, _) => pb::BackupItemKind::Reset,
         (ItemKind::Setting, _) => pb::BackupItemKind::Setting,
+        (ItemKind::Thread, _) => pb::BackupItemKind::Thread,
         _ => return None,
     };
     let device = |d: &DeviceRef| pb::BackupDevice { user_id: d.user_id.clone(), device_id: d.device_id.clone() };
@@ -256,7 +257,10 @@ fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
             waveform: v.waveform.clone(),
             reply_to_sequence: i.reply_to,
         }),
-        ..Default::default()
+        files: if i.deleted { Vec::new() } else { crate::core::sealed_files::to_sealed(&i.files) },
+        thread_sequence: i.thread,
+        in_channel: i.in_channel,
+        locked: i.kind == ItemKind::Thread && i.content == "locked",
     })
 }
 
@@ -266,10 +270,16 @@ fn from_backup(b: pb::BackupItem) -> Option<(String, Item)> {
         pb::BackupItemKind::Devices => ItemKind::Devices,
         pb::BackupItemKind::Reset => ItemKind::Reset,
         pb::BackupItemKind::Setting => ItemKind::Setting,
-        // Thread locks are the web's; this app doesn't keep them yet.
+        pb::BackupItemKind::Thread => ItemKind::Thread,
         _ => return None,
     };
     if b.conversation_id.is_empty() || b.sequence <= 0 {
+        return None;
+    }
+    // Thread replies and locks only exist in secure channels, whose lines are signed (a deleted
+    // reply keeps its thread but not its signed copy); a device takes a lock only signed.
+    let threaded = b.thread_sequence > 0 && (b.signed.is_some() || b.deleted);
+    if kind == ItemKind::Thread && !(b.thread_sequence > 0 && b.signed.is_some()) {
         return None;
     }
     let voice = (b.kind == pb::BackupItemKind::Voice as i32 && !b.deleted)
@@ -298,10 +308,20 @@ fn from_backup(b: pb::BackupItem) -> Option<(String, Item)> {
     item.added = b.added.into_iter().map(device).collect();
     item.removed = b.removed.into_iter().map(device).collect();
     if !b.deleted {
+        item.files = crate::core::sealed_files::files_of(&b.files);
+    }
+    if !b.deleted {
         item.signed = from_signed(b.signed);
         item.edit_signed = from_signed(b.edit_signed);
     }
     item.shared_by = b.shared_by;
+    if threaded {
+        item.thread = b.thread_sequence;
+        item.in_channel = b.in_channel;
+    }
+    if kind == ItemKind::Thread {
+        item.content = if b.locked { "locked" } else { "unlocked" }.into();
+    }
     item.voice = voice;
     Some((b.conversation_id, item))
 }

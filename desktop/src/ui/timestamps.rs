@@ -288,7 +288,15 @@ impl FuwaApp {
         let Some(seconds) = self.picked(cx) else { return };
         let token = timestamps::token(seconds, self.time_style);
         self.time_picker = None;
-        self.composer.update(cx, |state, cx| {
+        // A secure channel's thread has a box of its own.
+        let input = if crate::ui::secure_threads::time_in_thread()
+            && matches!(self.target(), Some(crate::ui::app::Target::Secure { .. }))
+        {
+            self.threads.reply.clone()
+        } else {
+            self.composer.clone()
+        };
+        input.update(cx, |state, cx| {
             state.focus(window, cx);
             state.replace(format!("{token} "), window, cx);
         });

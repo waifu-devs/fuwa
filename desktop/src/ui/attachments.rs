@@ -80,7 +80,7 @@ fn family_icon(family: Family) -> (&'static str, gpui_kit::Rgba) {
 }
 
 /// A file's icon in its family's tint.
-fn badge(name: &str, size: f32) -> impl IntoElement {
+pub(crate) fn badge(name: &str, size: f32) -> impl IntoElement {
     let (glyph, tint) = family_icon(attachments::family_of(&attachments::clean_name(name)));
     div()
         .size(px(size))

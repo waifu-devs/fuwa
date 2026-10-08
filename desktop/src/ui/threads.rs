@@ -150,6 +150,9 @@ impl FuwaApp {
 
     /// Opens the thread under a message of the open channel beside it.
     pub(crate) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(crate::ui::app::Target::Secure { .. }) = self.target() {
+            return self.open_secure_thread(&id, window, cx);
+        }
         let Some(crate::ui::app::Target::Channel { key, server, channel }) = self.target() else { return };
         let open = Open { key: key.clone(), server: server.clone(), channel: channel.clone(), id: id.clone() };
         if self.threads.open.as_ref() == Some(&open) {
@@ -327,6 +330,9 @@ impl FuwaApp {
     // ───────────────────────── Replying ─────────────────────────
 
     pub(crate) fn send_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(crate::ui::app::Target::Secure { .. }) = self.target() {
+            return self.send_secure_reply(window, cx);
+        }
         let Some(open) = self.threads.open.clone() else { return };
         let text = self.threads.reply.read(cx).value().trim().to_owned();
         if text.is_empty() || self.thread_blocked().is_some() {

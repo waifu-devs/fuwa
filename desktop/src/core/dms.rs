@@ -35,6 +35,7 @@ use crate::core::Shared;
 use crate::core::api::{Api, Problem};
 use crate::core::calls;
 use crate::core::history::{self, Candidate, LogKind, Logged};
+use crate::core::secure_threads;
 use crate::core::vault::{Change, DeviceRef, Item, ItemKind, Note, Signed, Vault, VoiceFile, sha256_hex};
 use crate::pb;
 use crate::rpc;
@@ -105,14 +106,36 @@ pub struct DmState {
     pub blocked: HashMap<String, String>,
     /// Conversations this device is still joining.
     pub joining: HashSet<String>,
-    /// Messages on their way, per conversation.
-    pub sending: HashMap<String, Vec<String>>,
+    /// Messages on their way, per conversation, and those that couldn't go.
+    pub sending: HashMap<String, Vec<DmPending>>,
     /// The calls going on, per conversation.
     pub calls: HashMap<String, pb::DmCall>,
     /// Per secure channel: whether earlier messages are passed on to people added later.
     pub secure_history: HashMap<String, bool>,
     /// Per conversation, once opened: its pins (`pins`).
     pub pins: HashMap<String, crate::core::pins::DmPinList>,
+    /// Per secure channel: the threads you follow or stopped following, and
+    /// what you've seen in each (`secure_threads.rs`).
+    pub thread_notes: HashMap<String, Note>,
+}
+
+/// A message being encrypted and sent, or one that couldn't be (the web's `PendingMessage`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DmPending {
+    pub nonce: u64,
+    pub text: String,
+    pub created_at: i64,
+    /// Why it didn't go, once it didn't.
+    pub failed: Option<String>,
+    /// In a secure channel: the thread it replies in (0: none), and whether it goes to the channel too.
+    pub thread: i64,
+    pub in_channel: bool,
+}
+
+/// A number for a message on its way, unique while the app runs.
+pub fn new_nonce() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Something a person can be told about why sending didn't work.
@@ -160,6 +183,23 @@ pub enum Content {
     },
     /// A voice message whose sealed file is already uploaded.
     Voice(pb::DirectMessageVoice),
+    /// A text with files, sealed and uploaded already (`core/sealed_files.rs`).
+    Files {
+        text: String,
+        files: Vec<pb::SealedFile>,
+    },
+    /// A secure channel's thread reply (with files, if any), and whether it goes to the channel too.
+    Reply {
+        text: String,
+        thread: i64,
+        in_channel: bool,
+        files: Vec<pb::SealedFile>,
+    },
+    /// A moderator locking or unlocking the thread under a secure channel's message.
+    Lock {
+        parent: i64,
+        locked: bool,
+    },
 }
 
 impl Content {
@@ -167,6 +207,9 @@ impl Content {
     fn media_ids(&self) -> Vec<String> {
         match self {
             Content::Voice(v) => v.file.iter().map(|f| f.media_id.clone()).collect(),
+            Content::Files { files, .. } | Content::Reply { files, .. } => {
+                files.iter().map(|f| f.media_id.clone()).collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -184,6 +227,19 @@ fn content_of(content: &Content) -> pb::DirectMessageContent {
             Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone() })
         }
         Content::Voice(voice) => Body::Voice(voice.clone()),
+        Content::Files { text, files } => {
+            Body::Text(pb::DirectMessageText { content: text.clone(), files: files.clone(), ..Default::default() })
+        }
+        Content::Reply { text, thread, in_channel, files } => Body::Text(pb::DirectMessageText {
+            content: text.clone(),
+            thread_sequence: *thread,
+            in_channel: *in_channel,
+            files: files.clone(),
+            ..Default::default()
+        }),
+        Content::Lock { parent, locked } => {
+            Body::Thread(pb::ThreadChange { parent_sequence: *parent, locked: *locked })
+        }
     };
     pb::DirectMessageContent { body: Some(body) }
 }
@@ -206,6 +262,22 @@ fn voice_file(voice: &pb::DirectMessageVoice) -> Option<VoiceFile> {
     })
 }
 
+/// A thread reply's place, from what its sender wrote (nothing for a line that isn't one).
+fn thread_fields(item: &mut Item, text: &pb::DirectMessageText) {
+    if text.thread_sequence > 0 {
+        item.thread = text.thread_sequence;
+        item.in_channel = text.in_channel;
+    }
+}
+
+/// A thread lock change, as an item.
+fn lock_item(seq: i64, at: i64, sender: &str, device: &str, change: &pb::ThreadChange) -> Item {
+    let mut item = Item::new(seq, ItemKind::Thread, at, sender, device);
+    item.thread = change.parent_sequence;
+    item.content = if change.locked { "locked" } else { "unlocked" }.into();
+    item
+}
+
 fn encode(content: &Content) -> Vec<u8> {
     content_of(content).encode_to_vec()
 }
@@ -220,20 +292,6 @@ pub fn now_ms() -> i64 {
 
 fn clip(text: &str) -> String {
     text.chars().take(MAX_DM).collect()
-}
-
-/// What a text shows: its words, and a line saying files came with it (they
-/// open in the web app for now).
-fn text_line(text: &pb::DirectMessageText) -> String {
-    if text.files.is_empty() {
-        return clip(&text.content);
-    }
-    let files = match text.files.len() {
-        1 => "A file".to_string(),
-        n => format!("{n} files"),
-    };
-    let line = format!("{files} came with this message, open it in the web app to see them");
-    clip(&if text.content.is_empty() { line } else { format!("{}\n{line}", text.content) })
 }
 
 fn is_precondition(p: &Problem) -> bool {
@@ -926,9 +984,37 @@ impl DmEngine {
                     }
                 }
             }
+            let channel = room.server().is_some();
+            let mut lines = Vec::new();
+            if channel {
+                // A thread goes with its message: replies under a deleted one are dropped here (and only here).
+                lines = inner.vault.items(id)?.clone();
+                for (c, i) in &change.items {
+                    if c == id {
+                        match lines.iter_mut().find(|l| l.seq == i.seq) {
+                            Some(l) => *l = i.clone(),
+                            None => lines.push(i.clone()),
+                        }
+                    }
+                }
+                let seqs = secure_threads::by_seq(&lines);
+                let gone = secure_threads::orphaned(&lines, &seqs);
+                for i in &gone {
+                    change.items.push((id.to_owned(), i.clone()));
+                }
+            }
             change.notes.push((id.to_owned(), note.clone()));
             inner.save(change)?;
+            let seqs = secure_threads::by_seq(&lines);
             for item in fresh {
+                // A reply kept to its thread only reaches you if you follow the thread.
+                let parent = if channel { secure_threads::thread_of(&item, &seqs) } else { 0 };
+                if parent != 0
+                    && !item.in_channel
+                    && !secure_threads::following(Some(&note), parent, &lines, &self.me.id)
+                {
+                    continue;
+                }
                 self.notify(&room, &item);
             }
             if rejoin {
@@ -981,6 +1067,7 @@ impl DmEngine {
             {
                 before.deleted = true;
                 before.content.clear();
+                before.files.clear();
                 // The signed copies hold the words too.
                 before.signed = None;
                 before.edit_signed = None;
@@ -1095,8 +1182,12 @@ impl DmEngine {
         match content.body {
             Some(Body::Text(text)) => {
                 let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
-                item.content = text_line(&text);
+                item.content = clip(&text.content);
+                item.files = crate::core::sealed_files::files_of(&text.files);
                 item.reply_to = text.reply_to_sequence;
+                if room.server().is_some() {
+                    thread_fields(&mut item, &text);
+                }
                 item.signed = signed;
                 let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
                 if !had && sender_id != self.me.id {
@@ -1129,6 +1220,12 @@ impl DmEngine {
                 if !had && sender_id != self.me.id {
                     fresh.push(item.clone());
                 }
+                change.items.push((id, item));
+            }
+            // Whether a lock counts (only from someone with Manage Messages) is worked out where threads are shown.
+            Some(Body::Thread(lock)) if room.server().is_some() && signed.is_some() => {
+                let mut item = lock_item(seq, at, sender_id, device_id, &lock);
+                item.signed = signed;
                 change.items.push((id, item));
             }
             // Anything else is from a newer app: there's nothing to show for it here.
@@ -1194,7 +1291,10 @@ impl DmEngine {
                 continue;
             }
             let Some(o) = open_signed(&id, &entry.payload, &entry.signature, &entry.signature_key) else { continue };
-            if matches!(o.payload.content.as_ref().and_then(|c| c.body.as_ref()), Some(Body::Text(_) | Body::Edit(_))) {
+            if matches!(
+                o.payload.content.as_ref().and_then(|c| c.body.as_ref()),
+                Some(Body::Text(_) | Body::Edit(_) | Body::Thread(_))
+            ) {
                 opened.push((entry.sequence, o, fuwa_e2ee::device_id(&entry.signature_key)));
             }
         }
@@ -1233,8 +1333,19 @@ impl DmEngine {
                         continue;
                     }
                     let mut item = Item::new(*seq, ItemKind::Text, at, sender, device);
-                    item.content = text_line(text);
+                    item.content = clip(&text.content);
+                    item.files = crate::core::sealed_files::files_of(&text.files);
                     item.reply_to = text.reply_to_sequence;
+                    thread_fields(&mut item, text);
+                    item.signed = Some(o.signed.clone());
+                    item.shared_by = by.to_owned();
+                    change.items.push((id.clone(), item));
+                }
+                Some(Body::Thread(lock)) => {
+                    if inner.known(change, &id, *seq)?.is_some() {
+                        continue;
+                    }
+                    let mut item = lock_item(*seq, at, sender, device, lock);
                     item.signed = Some(o.signed.clone());
                     item.shared_by = by.to_owned();
                     change.items.push((id.clone(), item));
@@ -1316,7 +1427,9 @@ impl DmEngine {
         let since = all.iter().filter(|i| i.kind == ItemKind::Setting).map(|i| i.seq).max().unwrap_or(0);
         let mut items: Vec<&Item> = all
             .iter()
-            .filter(|i| i.kind == ItemKind::Text && !i.deleted && i.signed.is_some() && i.seq > since)
+            .filter(|i| {
+                matches!(i.kind, ItemKind::Text | ItemKind::Thread) && !i.deleted && i.signed.is_some() && i.seq > since
+            })
             .collect();
         items.sort_by_key(|i| std::cmp::Reverse(i.seq));
         let mut entries: Vec<pb::SharedEntry> = Vec::new();
@@ -1598,18 +1711,23 @@ impl DmEngine {
     }
 
     async fn forget_deleted(&self, id: &str, seq: i64) {
+        let secure = self.secure.lock().contains_key(id);
         {
             let mut inner = self.inner.lock().await;
-            let before = inner.vault.items(id).ok().and_then(|items| items.iter().find(|i| i.seq == seq).cloned());
-            if let Some(mut before) = before
+            let mut all = inner.vault.items(id).map(|i| i.clone()).unwrap_or_default();
+            if let Some(before) = all.iter_mut().find(|i| i.seq == seq)
                 && !before.deleted
             {
-                before.deleted = true;
-                before.content.clear();
                 // The signed copies hold the words too.
-                before.signed = None;
-                before.edit_signed = None;
-                let _ = inner.vault.write(Change { items: vec![(id.to_owned(), before)], ..Change::default() });
+                let gone = secure_threads::emptied(before);
+                *before = gone.clone();
+                let mut items = vec![(id.to_owned(), gone)];
+                // In a secure channel the line's thread goes with it, on this device only.
+                if secure {
+                    let seqs = secure_threads::by_seq(&all);
+                    items.extend(secure_threads::orphaned(&all, &seqs).into_iter().map(|i| (id.to_owned(), i)));
+                }
+                let _ = inner.vault.write(Change { items, ..Change::default() });
             }
         }
         self.refresh(id).await;
@@ -1650,6 +1768,31 @@ impl DmEngine {
         self.refresh(id).await;
     }
 
+    /// Follows a secure channel's thread by hand, or stops (kept on this device only).
+    pub async fn follow_thread(&self, id: &str, parent: i64, on: bool) {
+        {
+            let mut inner = self.inner.lock().await;
+            let mut note = inner.vault.note(id);
+            note.follows.insert(parent, on);
+            let _ = inner.vault.write(Change { notes: vec![(id.to_owned(), note)], ..Change::default() });
+        }
+        self.refresh(id).await;
+    }
+
+    /// Notes that you've seen a secure channel's thread up to `seq`.
+    pub async fn mark_thread_read(&self, id: &str, parent: i64, seq: i64) {
+        {
+            let mut inner = self.inner.lock().await;
+            let mut note = inner.vault.note(id);
+            if note.thread_read.get(&parent).copied().unwrap_or(0) >= seq {
+                return;
+            }
+            note.thread_read.insert(parent, seq);
+            let _ = inner.vault.write(Change { notes: vec![(id.to_owned(), note)], ..Change::default() });
+        }
+        self.refresh(id).await;
+    }
+
     // ───────────────────────── Showing it ─────────────────────────
 
     /// Puts what this app knows about a conversation or secure channel in the store.
@@ -1673,12 +1816,15 @@ impl DmEngine {
             return;
         }
         let looking = self.shared.is_focused(&self.key, id);
+        // Replies kept to their threads count in their threads, not the channel.
+        let seqs = secure_threads::by_seq(&items);
         let unread = if looking {
             0
         } else {
             items
                 .iter()
                 .filter(|i| i.kind == ItemKind::Text && !i.deleted && i.sender_id != self.me.id && i.seq > note.read)
+                .filter(|i| !secure || secure_threads::in_channel(i, &seqs))
                 .count() as u32
         };
         let shown: Vec<DmMember> = members
@@ -1708,6 +1854,7 @@ impl DmEngine {
             self.shared.instance(&self.key, |i| {
                 i.dms.items.insert(id.to_owned(), items);
                 i.dms.members.insert(id.to_owned(), shown);
+                i.dms.thread_notes.insert(id.to_owned(), note.clone());
                 i.unread.insert(id.to_owned(), unread);
             });
         }
@@ -1921,4 +2068,96 @@ fn rand_unit() -> f64 {
     let mut b = [0u8; 4];
     let _ = getrandom::fill(&mut b);
     f64::from(u32::from_le_bytes(b)) / f64::from(u32::MAX)
+}
+
+/// Once a message has gone (it leaves the list) or hasn't (it stays, saying why).
+pub fn settle_pending(dms: &mut DmState, id: &str, nonce: u64, result: &Result<()>) {
+    let Some(list) = dms.sending.get_mut(id) else { return };
+    match result {
+        Ok(()) => list.retain(|p| p.nonce != nonce),
+        Err(err) => {
+            if let Some(p) = list.iter_mut().find(|p| p.nonce == nonce) {
+                p.failed = Some(err.0.clone());
+            }
+        }
+    }
+    if list.is_empty() {
+        dms.sending.remove(id);
+    }
+}
+
+impl crate::core::Core {
+    /// Lets go of a message that didn't send.
+    pub fn dismiss_dm(&self, key: &str, id: &str, nonce: u64) {
+        self.shared.instance(key, |i| {
+            if let Some(list) = i.dms.sending.get_mut(id) {
+                list.retain(|p| p.nonce != nonce);
+            }
+        });
+    }
+
+    /// Sends again a message that didn't go.
+    pub async fn retry_dm(&self, key: &str, id: &str, nonce: u64) -> Result<()> {
+        let text = self.shared.read(|s| {
+            s.instance(key)?
+                .dms
+                .sending
+                .get(id)?
+                .iter()
+                .find(|p| p.nonce == nonce)
+                .map(|p| (p.text.clone(), p.thread, p.in_channel))
+        });
+        let Some((text, thread, in_channel)) = text else { return Ok(()) };
+        self.dismiss_dm(key, id, nonce);
+        let content = if thread > 0 {
+            Content::Reply { text, thread, in_channel, files: Vec::new() }
+        } else {
+            Content::Text { text, reply_to: 0 }
+        };
+        self.send_dm(key, id, content).await
+    }
+
+    /// Locks or unlocks a secure channel's thread: a signed line only devices read, counted from people with Manage Messages.
+    pub async fn lock_secure_thread(&self, key: &str, id: &str, parent: i64, locked: bool) -> Result<()> {
+        self.send_dm(key, id, Content::Lock { parent, locked }).await
+    }
+
+    /// Follows a secure channel's thread by hand, or stops (kept on this device only).
+    pub async fn follow_secure_thread(&self, key: &str, id: &str, parent: i64, on: bool) -> Result<()> {
+        let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
+        engine.follow_thread(id, parent, on).await;
+        Ok(())
+    }
+
+    /// Notes that you've seen a secure channel's thread up to `seq`.
+    pub async fn mark_secure_thread_read(&self, key: &str, id: &str, parent: i64, seq: i64) {
+        if let Some(engine) = self.dm_engine(key) {
+            engine.mark_thread_read(id, parent, seq).await;
+        }
+    }
+
+    /// Every device these people are signed in on, as the instance lists them (for the encryption dialog).
+    pub async fn devices_of(&self, key: &str, user_ids: Vec<String>) -> Result<Vec<pb::Device>> {
+        let api = self.api(key).ok_or_else(|| DmError("That instance isn't here.".into()))?;
+        let req = pb::ListDevicesRequest { user_ids };
+        Ok(rpc!(api.dms(), list_devices(req)).await?.devices)
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+
+    #[test]
+    fn a_message_that_went_leaves_and_one_that_didnt_says_why() {
+        let mut dms = DmState::default();
+        let pending =
+            |nonce| DmPending { nonce, text: "hi".into(), created_at: 0, failed: None, thread: 0, in_channel: false };
+        dms.sending.insert("c".into(), vec![pending(1), pending(2)]);
+        settle_pending(&mut dms, "c", 1, &Ok(()));
+        settle_pending(&mut dms, "c", 2, &Err(DmError("nope".into())));
+        let list = &dms.sending["c"];
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].failed.as_deref(), Some("nope"));
+    }
 }
