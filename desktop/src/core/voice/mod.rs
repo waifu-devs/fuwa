@@ -1,5 +1,5 @@
-//! Calls in the desktop app, sound only for now: voice channels and calls in
-//! direct messages. Join for a place and a session on the media part, keep
+//! Calls in the desktop app: voice channels and calls in direct messages,
+//! with sound, cameras and shared screens. Join for a place and a session on the media part, keep
 //! the place every few seconds, and rejoin with the same session when the
 //! connection drops or the media part restarts, the way
 //! web/src/calls/engine.ts does. One call at a time; joining another leaves
@@ -8,12 +8,16 @@
 //!
 //! [`link`] is the connection, [`sound`] the Opus and mixing between it
 //! and the devices, [`devices`] the microphone and speakers, [`quality`]
-//! how the connection is doing.
+//! how the connection is doing, [`video`] the cameras and screens coming in
+//! and [`vp8`] their pictures.
 
+pub mod access;
 pub mod devices;
 pub mod link;
 pub mod quality;
 pub mod sound;
+pub mod video;
+pub mod vp8;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -27,6 +31,7 @@ use self::devices::{Devices, Listener, Trouble};
 use self::link::{Happened, Link, Signal};
 use self::quality::Quality;
 use self::sound::{FRAME, Microphone, Mixer, Pipe};
+use self::video::{Videos, Watcher, layer_for, owner_of};
 use super::Core;
 use super::api::{Api, Problem};
 use super::calls::{Frames, Opened};
@@ -52,6 +57,10 @@ const SECRET_EVERY: Duration = Duration::from_secs(4);
 /// How long after connecting newcomers start getting a cue (the first
 /// sound from everyone already there isn't anyone joining).
 const SETTLED: Duration = Duration::from_millis(1500);
+/// How long the sizes asked of cameras wait, so a burst of resizes is one message.
+const LAYERS_AFTER: Duration = Duration::from_millis(120);
+/// How often a feed whose decoder lost its place asks for a keyframe.
+const KEYFRAME_ASK: Duration = Duration::from_millis(500);
 
 /// Where a call is at, for the call panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +82,10 @@ pub struct CallView {
     pub status: Status,
     pub self_mute: bool,
     pub self_deaf: bool,
+    /// Your camera is on.
+    pub self_video: bool,
+    /// You're sharing your screen.
+    pub self_stream: bool,
     /// You're recording the call's sound to a file on this computer.
     pub self_record: bool,
     /// You're recording the voice channel on the server.
@@ -138,6 +151,10 @@ impl Ended {
 struct Selves {
     mute: bool,
     deaf: bool,
+    /// The camera is on.
+    video: bool,
+    /// Sharing a screen.
+    stream: bool,
     /// Recording on this computer.
     record: bool,
     /// Recording the voice channel on the server.
@@ -209,9 +226,16 @@ pub struct Voice {
     notices: Mutex<Vec<String>>,
     volumes: Arc<Mutex<Volumes>>,
     push: Arc<Mutex<Push>>,
+    /// Cameras and shared screens: their pictures, and what the windows want.
+    videos: Arc<Videos>,
 }
 
 impl Core {
+    /// Cameras and shared screens in the call, for the window.
+    pub fn videos(&self) -> &Arc<Videos> {
+        &self.voice.videos
+    }
+
     /// The call you're in, if any.
     pub fn call(&self) -> Option<CallView> {
         self.voice.view.lock().clone()
@@ -327,6 +351,8 @@ impl Core {
             status: Status::Connecting,
             self_mute: selves.mute,
             self_deaf: selves.deaf,
+            self_video: false,
+            self_stream: false,
             self_record: false,
             server_record: false,
             server_recordings: false,
@@ -341,8 +367,9 @@ impl Core {
         let target = Target { instance: instance.to_string(), place, me };
         let core = Arc::downgrade(self);
         let volumes = (self.voice.volumes.clone(), self.voice.push.clone());
+        let videos = self.voice.videos.clone();
         self.runtime.spawn(async move {
-            let ended = run(core.clone(), id, api, target, sound, commands_rx, selves_rx, volumes).await;
+            let ended = run(core.clone(), id, api, target, sound, commands_rx, selves_rx, volumes, videos).await;
             if let Some(core) = core.upgrade() {
                 core.finish(id, ended);
             }
@@ -474,6 +501,8 @@ impl Core {
         if let Some(view) = self.voice.view.lock().as_mut() {
             view.self_mute = selves.mute;
             view.self_deaf = selves.deaf;
+            view.self_video = selves.video;
+            view.self_stream = selves.stream;
             view.self_record = selves.record;
             view.server_record = selves.server_record;
         }
@@ -632,6 +661,7 @@ async fn run(
     mut commands: mpsc::UnboundedReceiver<Command>,
     selves: watch::Receiver<Selves>,
     (volumes, push): (Arc<Mutex<Volumes>>, Arc<Mutex<Push>>),
+    videos: Arc<Videos>,
 ) -> Option<Ended> {
     let view = |f: &dyn Fn(&mut CallView)| {
         if let Some(core) = core.upgrade() {
@@ -696,6 +726,8 @@ async fn run(
                     offer,
                     self_mute: now.mute || now.deaf,
                     self_deaf: now.deaf,
+                    self_video: now.video,
+                    self_stream: now.stream,
                     self_record: now.record,
                     server_record: now.server_record,
                     session_id: session.clone(),
@@ -717,6 +749,8 @@ async fn run(
                     offer,
                     self_mute: now.mute || now.deaf,
                     self_deaf: now.deaf,
+                    self_video: now.video,
+                    self_stream: now.stream,
                     self_record: now.record,
                     session_id: session.clone(),
                     ..Default::default()
@@ -751,6 +785,7 @@ async fn run(
                             frames: &mut frames,
                             secrets: &mut secrets,
                             recorder: &mut recorder,
+                            videos: &videos,
                         };
                         call.drive(&mut link).await
                     }
@@ -860,17 +895,65 @@ struct Running<'a> {
     frames: &'a mut Option<Frames>,
     secrets: &'a mut Option<Secrets>,
     recorder: &'a mut Option<Recorder>,
+    videos: &'a Arc<Videos>,
 }
 
 impl Running<'_> {
     /// Runs one connection until it ends, you leave, or the call does.
     async fn drive(&mut self, link: &mut Link) -> (Outcome, Option<Instant>) {
         let mut connected = None;
-        let outcome = self.drive_until(link, &mut connected).await;
+        let mut watchers = HashMap::new();
+        let outcome = self.drive_until(link, &mut connected, &mut watchers).await;
+        // The others' cameras go with the connection; yours stay.
+        drop(watchers);
+        let me = self.target.me.clone();
+        self.videos.forget_all_but(|feed| owner_of(feed) == me);
         (outcome, connected)
     }
 
-    async fn drive_until(&mut self, link: &mut Link, connected: &mut Option<Instant>) -> Outcome {
+    /// A frame of someone's camera or screen: opened in a direct message's
+    /// call, then handed to its feed's decoder.
+    fn seen(
+        &mut self,
+        link: &mut Link,
+        watchers: &mut HashMap<String, (Watcher, Option<Instant>)>,
+        feed: String,
+        frame: Vec<u8>,
+        contiguous: bool,
+    ) -> bool {
+        let frame = match self.frames.as_mut() {
+            None => frame,
+            Some(frames) => match frames.open_video(owner_of(&feed), &frame) {
+                Opened::Plain(plain) => plain,
+                Opened::Newer(epoch) => {
+                    if let Some(s) = self.secrets.as_ref() {
+                        let _ = s.want.send(u64::from(epoch));
+                    }
+                    return false;
+                }
+                Opened::Dropped => return false,
+            },
+        };
+        let new = !watchers.contains_key(&feed);
+        if new {
+            let Some(watcher) = Watcher::start(feed.clone(), self.videos.clone()) else { return false };
+            watchers.insert(feed.clone(), (watcher, None));
+        }
+        let Some((watcher, asked)) = watchers.get_mut(&feed) else { return false };
+        let kept = watcher.give(frame, contiguous);
+        if (!kept || watcher.waiting()) && asked.is_none_or(|at| at.elapsed() >= KEYFRAME_ASK) {
+            *asked = Some(Instant::now());
+            link.ask_keyframe(&feed);
+        }
+        new
+    }
+
+    async fn drive_until(
+        &mut self,
+        link: &mut Link,
+        connected: &mut Option<Instant>,
+        watchers: &mut HashMap<String, (Watcher, Option<Instant>)>,
+    ) -> Outcome {
         let started = Instant::now();
         let Ok(mut microphone) = Microphone::new() else {
             return Outcome::Ended(Ended::Refused("Opus didn't start.".into()));
@@ -893,10 +976,24 @@ impl Running<'_> {
         let mut out = [0.0f32; FRAME];
         let mut quality = Quality::default();
         let mut heard: HashSet<String> = HashSet::new();
+        let mut wanted = self.videos.wanted_changes();
+        // Until it's said, the media part sends the smallest size.
+        let mut layers_due: Option<Instant> = Some(Instant::now());
         loop {
             let wake = link.poll(&mut happened).await;
             for event in happened.drain(..) {
                 match event {
+                    Happened::Seen { feed, frame, contiguous } => {
+                        // A new feed: say what size of it to send.
+                        if self.seen(link, watchers, feed, frame, contiguous) {
+                            layers_due.get_or_insert_with(|| Instant::now() + LAYERS_AFTER);
+                        }
+                    }
+                    Happened::Unseen(feed) => {
+                        watchers.remove(&feed);
+                        self.videos.forget(&feed);
+                    }
+                    Happened::KeyframeAsked { .. } => {}
                     Happened::Heard(who, packet) => {
                         // Someone new in a call that's been going a moment: a cue.
                         if heard.insert(who.clone())
@@ -960,10 +1057,24 @@ impl Running<'_> {
             if connected.is_none() && started.elapsed() > FIRST_CONNECT {
                 return Outcome::Rejoin { soon: false };
             }
-            let sleep = tokio::time::sleep_until(tokio::time::Instant::from_std(wake));
+            // New cameras, or windows showing them at another size.
+            let mut layers_wake = wake;
+            if let Some(due) = layers_due {
+                if Instant::now() >= due {
+                    let videos = self.videos.clone();
+                    layers_due = (!link.say_layers(|feed| layer_for(videos.wanted(feed))))
+                        .then(|| Instant::now() + LAYERS_AFTER);
+                } else {
+                    layers_wake = wake.min(due);
+                }
+            }
+            let sleep = tokio::time::sleep_until(tokio::time::Instant::from_std(layers_wake.min(wake)));
             tokio::select! {
                 packet = link.packet() => link.receive(packet),
                 _ = sleep => link.tick(),
+                Ok(()) = wanted.changed() => {
+                    layers_due.get_or_insert_with(|| Instant::now() + LAYERS_AFTER);
+                }
                 _ = tick.tick() => self.tick(link, &mut microphone, &mut mixer, &mut out, &mut trouble_seen),
                 kept = kept.recv() => match kept {
                     Some(Kept::Gone) => return Outcome::Ended(Ended::Disconnected),
@@ -1126,6 +1237,8 @@ async fn keep(
                     channel_id: channel_id.clone(),
                     self_mute: now.mute || now.deaf,
                     self_deaf: now.deaf,
+                    self_video: now.video,
+                    self_stream: now.stream,
                     self_record: now.record,
                     server_record: now.server_record,
                     ..Default::default()
@@ -1152,6 +1265,8 @@ async fn keep(
                     session_id: session_id.clone(),
                     self_mute: now.mute || now.deaf,
                     self_deaf: now.deaf,
+                    self_video: now.video,
+                    self_stream: now.stream,
                     self_record: now.record,
                     ..Default::default()
                 };

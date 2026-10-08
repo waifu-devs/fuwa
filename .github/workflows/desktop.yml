@@ -70,6 +70,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-packager@0.11.8
+      # libvpx (VP8 for cameras) is linked in statically, fetched prebuilt by
+      # shiguredo_libvpx and checked against its SHA-256: nothing to install
+      # on any system. On Linux it's named for an Ubuntu release, so the one
+      # built on 24.04 is picked whatever ubuntu-latest is.
+      - name: Which libvpx build
+        if: runner.os == 'Linux'
+        run: echo "LIBVPX_TARGET=ubuntu-24.04_x86_64" >> "$GITHUB_ENV"
       - run: cargo build --release --locked --bin fuwa-desktop
       - run: cargo packager --release --formats ${{ matrix.formats }}
       - name: Name them for the release

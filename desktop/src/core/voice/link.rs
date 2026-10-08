@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::ChannelId;
 use str0m::format::Codec;
-use str0m::media::{Direction, MediaKind, MediaTime, Mid};
+use str0m::media::{Direction, KeyframeRequestKind, MediaKind, MediaTime, Mid, Rid, Simulcast, SimulcastLayer};
 use str0m::net::{Protocol, Receive, TcpType};
 use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -33,6 +33,8 @@ const MOST_PACKET: usize = 2000;
 pub const MOST_STREAMS: usize = 64;
 /// How often the connection's stats are read, as the web's quality.ts does.
 const STATS_EVERY: Duration = Duration::from_secs(2);
+/// The sizes a camera or screen goes out in, smallest first.
+pub const SIZES: [&str; 3] = ["l", "m", "h"];
 /// How long reaching the media part over TCP may take.
 const TCP_CONNECT: Duration = Duration::from_secs(4);
 
@@ -55,6 +57,21 @@ pub enum Happened {
     Heard(String, Vec<u8>),
     /// A stream ended, so its sound can be let go.
     Gone(String),
+    /// A whole frame of someone's camera or shared screen, by its feed;
+    /// `contiguous` is false when something was lost before it.
+    Seen {
+        feed: String,
+        frame: Vec<u8>,
+        contiguous: bool,
+    },
+    /// A camera or screen's track ended.
+    Unseen(String),
+    /// The media part asks for a keyframe of one of ours: which track
+    /// (camera or screen) and which size.
+    KeyframeAsked {
+        screen: bool,
+        rid: Option<String>,
+    },
     Signal(Signal),
     Connected,
     /// The connection broke; `for_good` when ICE gave up.
@@ -79,6 +96,13 @@ struct TcpPath {
 pub struct Link {
     rtc: Rtc,
     microphone: Mid,
+    /// The camera's place, and the shared screen's after it: the media part
+    /// takes an app's first video track as its camera, the second as its
+    /// screen. Both are empty until something's on them.
+    camera: Mid,
+    screen: Mid,
+    /// When the first frame of video went out, for the 90 kHz clock.
+    filming_since: Option<Instant>,
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
     udp: Option<Arc<UdpSocket>>,
@@ -90,6 +114,10 @@ pub struct Link {
     tasks: Vec<JoinHandle<()>>,
     /// Whose stream each received track is.
     streams: HashMap<Mid, String>,
+    /// Whose camera or screen each received video track is (its feed).
+    videos: HashMap<Mid, String>,
+    /// The layers last said for each video track.
+    layers: HashMap<Mid, &'static str>,
     sent: u64,
     /// The worst jitter the received sound had since the last stats, in ms.
     jitter: u32,
@@ -147,18 +175,37 @@ fn route_to(remote: SocketAddr) -> Option<IpAddr> {
 }
 
 impl Link {
-    /// A connection that sends the microphone and opens the data channel,
-    /// and the offer for JoinVoice.
+    /// A connection that sends the microphone, has places for a camera and
+    /// a shared screen (each in three sizes) and opens the data channel, and
+    /// the offer for JoinVoice.
     pub fn offer() -> (Self, String) {
-        let mut rtc = Rtc::builder().set_stats_interval(Some(STATS_EVERY)).build(Instant::now());
+        // Opus and VP8 only: all the media part takes.
+        let mut rtc = Rtc::builder()
+            .clear_codecs()
+            .enable_opus(true, false)
+            .enable_vp8(true)
+            .set_stats_interval(Some(STATS_EVERY))
+            .build(Instant::now());
         let mut change = rtc.sdp_api();
         let microphone = change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None);
+        let mut video = || {
+            let mut simulcast = Simulcast::new();
+            for size in SIZES {
+                simulcast.add_send_layer(SimulcastLayer::new(size));
+            }
+            change.add_media(MediaKind::Video, Direction::SendOnly, None, None, Some(simulcast))
+        };
+        let camera = video();
+        let screen = video();
         change.add_channel("fuwa".into());
         let (offer, pending) = change.apply().expect("an offer with a track and a channel");
         let (packets_in, packets) = mpsc::channel(512);
         let link = Self {
             rtc,
             microphone,
+            camera,
+            screen,
+            filming_since: None,
             channel: None,
             pending: Some(pending),
             udp: None,
@@ -168,6 +215,8 @@ impl Link {
             packets_in,
             tasks: Vec::new(),
             streams: HashMap::new(),
+            videos: HashMap::new(),
+            layers: HashMap::new(),
             sent: 0,
             jitter: 0,
         };
@@ -217,7 +266,8 @@ impl Link {
                 continue;
             };
             self.rtc.add_local_candidate(candidate);
-            let (out, outgoing) = mpsc::channel(256);
+            // Room for a keyframe or two of every size at once.
+            let (out, outgoing) = mpsc::channel(1024);
             self.tasks.push(tokio::spawn(serve_tcp(stream, local, remote, outgoing, self.packets_in.clone())));
             self.tcp.push(TcpPath { local, remote, out });
         }
@@ -310,6 +360,51 @@ impl Link {
         self.sent += 1;
     }
 
+    /// Sends a frame of the camera (or the shared screen) in one of its
+    /// sizes, taken at `taken`.
+    pub fn film(&mut self, screen: bool, rid: &str, taken: Instant, frame: Vec<u8>) {
+        let since = *self.filming_since.get_or_insert(taken);
+        let ticks = taken.saturating_duration_since(since).as_micros() as u64 * 9 / 100;
+        let time = MediaTime::new(ticks, str0m::media::Frequency::NINETY_KHZ);
+        let mid = if screen { self.screen } else { self.camera };
+        let Some(writer) = self.rtc.writer(mid) else { return };
+        let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Vp8).map(|p| p.pt()) else {
+            return;
+        };
+        let _ = writer.rid(Rid::from(rid)).write(pt, Instant::now(), time, frame);
+    }
+
+    /// The feeds of the cameras and screens coming in.
+    pub fn feeds(&self) -> impl Iterator<Item = &str> {
+        self.videos.values().map(String::as_str)
+    }
+
+    /// Tells the media part which size of each camera and screen to send,
+    /// by `layer(feed)`, when anything changed. False while the data
+    /// channel isn't open yet, so it's said again later.
+    pub fn say_layers(&mut self, layer: impl Fn(&str) -> &'static str) -> bool {
+        if self.channel.is_none() {
+            return false;
+        }
+        let now: HashMap<Mid, &'static str> = self.videos.iter().map(|(mid, feed)| (*mid, layer(feed))).collect();
+        if now == self.layers {
+            return true;
+        }
+        let layers: serde_json::Map<String, serde_json::Value> =
+            now.iter().map(|(mid, layer)| (mid.to_string(), serde_json::Value::from(*layer))).collect();
+        self.say(&serde_json::json!({ "type": "layers", "layers": layers }));
+        self.layers = now;
+        true
+    }
+
+    /// Asks whoever sends a feed for a keyframe, when its decoder lost its place.
+    pub fn ask_keyframe(&mut self, feed: &str) {
+        let Some(mid) = self.videos.iter().find(|(_, f)| f.as_str() == feed).map(|(m, _)| *m) else { return };
+        if let Some(mut writer) = self.rtc.writer(mid) {
+            let _ = writer.request_keyframe(None, KeyframeRequestKind::Pli);
+        }
+    }
+
     fn say(&mut self, json: &serde_json::Value) {
         let Some(id) = self.channel else { return };
         if let Some(mut channel) = self.rtc.channel(id) {
@@ -347,6 +442,22 @@ impl Link {
                     Some("closed") => happened.push(Happened::Signal(Signal::Closed)),
                     _ => {}
                 }
+            }
+            Event::MediaAdded(added) if added.kind == MediaKind::Video && added.direction == Direction::RecvOnly => {
+                if self.videos.len() >= MOST_STREAMS {
+                    return;
+                }
+                if let Some(media) = self.rtc.media(added.mid) {
+                    self.videos.insert(added.mid, media.stream_id().to_string());
+                }
+            }
+            Event::MediaData(data) if self.videos.contains_key(&data.mid) => {
+                let feed = self.videos[&data.mid].clone();
+                happened.push(Happened::Seen { feed, frame: data.data.to_vec(), contiguous: data.contiguous });
+            }
+            Event::KeyframeRequest(request) if request.mid == self.camera || request.mid == self.screen => {
+                let rid = request.rid.map(|r| r.to_string());
+                happened.push(Happened::KeyframeAsked { screen: request.mid == self.screen, rid });
             }
             Event::MediaAdded(added) if added.kind == MediaKind::Audio && added.mid != self.microphone => {
                 if self.streams.len() >= MOST_STREAMS {
@@ -410,6 +521,18 @@ impl Link {
         for mid in gone {
             if let Some(who) = self.streams.remove(&mid) {
                 happened.push(Happened::Gone(who));
+            }
+        }
+        let gone: Vec<Mid> = self
+            .videos
+            .keys()
+            .filter(|mid| rtc.media(**mid).is_none_or(|m| m.direction() == Direction::Inactive))
+            .copied()
+            .collect();
+        for mid in gone {
+            self.layers.remove(&mid);
+            if let Some(feed) = self.videos.remove(&mid) {
+                happened.push(Happened::Unseen(feed));
             }
         }
     }
@@ -539,7 +662,9 @@ mod tests {
         let (_, offer) = Link::offer();
         assert!(offer.contains("m=audio") && offer.contains("a=sendonly") && offer.contains("opus"));
         assert!(offer.contains("m=application"), "the data channel");
-        assert!(!offer.contains("m=video"), "sound only");
+        assert_eq!(offer.matches("m=video").count(), 2, "a camera's place and a screen's");
+        assert!(offer.contains("a=simulcast:send l;m;h"), "{offer}");
+        assert!(offer.contains("VP8") && !offer.contains("H264"), "VP8 only");
         assert!(!offer.contains("a=candidate"), "none of this computer's addresses");
     }
 }

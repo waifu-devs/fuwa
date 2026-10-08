@@ -73,6 +73,47 @@ pub(crate) struct CallsUi {
     pub ptt_key: Option<String>,
     /// The settings the call last heard (volumes, push to talk).
     pub applied: Option<Applied>,
+    /// Cameras and screens popped out into windows of their own, by `Popped::key`.
+    pub popouts: std::collections::HashMap<String, gpui_kit::AnyWindowHandle>,
+    /// Whether a call was going on at the last change, to notice it ending.
+    pub in_call: bool,
+}
+
+impl FuwaApp {
+    /// Pops someone's camera (or screen) out into a window of its own, or
+    /// brings the one already open to the front.
+    pub(crate) fn pop_out(&mut self, popped: crate::ui::popout::Popped, cx: &mut Context<Self>) {
+        let key = popped.key();
+        if let Some(handle) = self.calls.popouts.get(&key) {
+            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+                return;
+            }
+            self.calls.popouts.remove(&key);
+        }
+        let (w, h) = if popped.screen { (960.0, 540.0) } else { (640.0, 360.0) };
+        let bounds = gpui_kit::Bounds::centered(None, gpui_kit::size(px(w), px(h)), cx);
+        let options = gpui_kit::WindowOptions {
+            window_bounds: Some(gpui_kit::WindowBounds::Windowed(bounds)),
+            window_min_size: Some(gpui_kit::size(px(160.0), px(90.0))),
+            titlebar: Some(gpui_kit::TitlebarOptions { title: Some("fuwa".into()), ..Default::default() }),
+            app_id: Some("fuwa".into()),
+            ..Default::default()
+        };
+        let core = self.core.clone();
+        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| crate::ui::popout::PopOut::new(core, popped, window, cx))
+        });
+        if let Ok((handle, _)) = opened {
+            self.calls.popouts.insert(key, handle);
+        }
+    }
+
+    /// Hanging up closes every popped-out camera.
+    pub(crate) fn close_pop_outs(&mut self, cx: &mut Context<Self>) {
+        for (_, handle) in self.calls.popouts.drain() {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+    }
 }
 
 /// What `CallsUi::applied` keeps: push to talk's mode, its delay, the input

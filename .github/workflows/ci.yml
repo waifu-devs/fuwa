@@ -117,6 +117,10 @@ jobs:
     defaults:
       run:
         working-directory: desktop
+    env:
+      # libvpx comes prebuilt for named Ubuntu releases; this one's runs on
+      # any newer one, so ubuntu-latest moving on doesn't break the build.
+      LIBVPX_TARGET: ubuntu-24.04_x86_64
     steps:
       - uses: actions/checkout@v4
       - name: What GPUI needs on Linux

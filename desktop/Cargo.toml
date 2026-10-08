@@ -24,6 +24,18 @@ path = "src/lib.rs"
 [dependencies]
 cpal = "0.18"
 opus = "0.4"
+# Cameras and shared screens in calls are VP8, through libvpx: a static
+# build, fetched prebuilt for each system (checked against its SHA-256), so
+# installers need no libvpx of their own.
+shiguredo_libvpx = "=2026.1.0"
+# The camera: V4L2, AVFoundation or Media Foundation.
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
+# MJPEG frames from cameras that send only those.
+zune-jpeg = "0.5"
+# Screens and windows to share; X11 only on Linux (Wayland would need PipeWire).
+zed-scap = { version = "=0.0.8-zed", default-features = false, features = ["x11"] }
+# Pictures handed to GPUI as they're decoded.
+image = { version = "0.25", default-features = false }
 str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 anyhow = "1"
 base64 = "0.22"
@@ -65,6 +77,13 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+
+# Asking macOS for the microphone and camera (core/voice/access.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString"] }
 
 [build-dependencies]
 protoc-bin-vendored = "3"
