@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use super::access::{self, Access, Device};
 use super::ceiling::{self, Ceiling};
 use super::video::Videos;
-use super::vp8::{self, Encoder, Layout, Picture, Size, Yuv};
+use super::vp8::{self, Encoder, Layout, Picture, Share, Size, Yuv};
 
 /// Set, a test pattern stands in for the camera and the screen.
 pub const FAKE_VIDEO: &str = "FUWA_DESKTOP_FAKE_VIDEO";
@@ -32,8 +32,9 @@ pub const FAKE_VIDEO: &str = "FUWA_DESKTOP_FAKE_VIDEO";
 pub enum Source {
     /// A camera by name, "" for the first one.
     Camera(String),
-    /// A screen or window to share (`Screen::id`), or the main screen.
-    Screen(Option<u32>),
+    /// A screen or window to share (`Screen::id`), or the main screen, as
+    /// sharp and smooth as asked.
+    Screen(Option<u32>, Share),
     /// A moving test pattern instead of a camera or screen; `seed` tints it.
     Pattern { screen: bool, seed: u32 },
 }
@@ -124,7 +125,12 @@ impl Sending {
         out: Option<mpsc::Sender<Filmed>>,
         failed: impl Fn(Failure) + Send + 'static,
     ) -> Self {
-        let screen = matches!(source, Source::Screen(_) | Source::Pattern { screen: true, .. });
+        let screen = matches!(source, Source::Screen(..) | Source::Pattern { screen: true, .. });
+        let sizes = match &source {
+            Source::Screen(_, share) => vp8::screen_sizes(*share),
+            Source::Pattern { screen: true, .. } => vp8::SCREEN,
+            _ => ceiling.sizes(),
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let keyframes = Arc::new([AtomicBool::new(true), AtomicBool::new(true), AtomicBool::new(true)]);
         let latest = Arc::new(Latest::default());
@@ -133,7 +139,7 @@ impl Sending {
             let _ = std::thread::Builder::new().name("fuwa-video-take".into()).spawn(move || {
                 let result = match source {
                     Source::Camera(name) => take_camera(&name, ceiling, &stop, &latest),
-                    Source::Screen(id) => take_screen(id, &stop, &latest),
+                    Source::Screen(id, share) => take_screen(id, share, &stop, &latest),
                     Source::Pattern { screen, seed } => take_pattern(screen, seed, ceiling, &stop, &latest),
                 };
                 if let Err(failure) = result
@@ -146,7 +152,6 @@ impl Sending {
         {
             let (stop, keyframes, videos, feed) = (stop.clone(), keyframes.clone(), videos.clone(), feed.clone());
             let _ = std::thread::Builder::new().name("fuwa-video-out".into()).spawn(move || {
-                let sizes = if screen { vp8::SCREEN } else { ceiling.sizes() };
                 encode(screen, sizes, &stop, &latest, &keyframes, &videos, &feed, &mirror, out.as_ref());
             });
         }
@@ -429,19 +434,88 @@ pub fn open_screen_settings() {
     }
 }
 
-fn take_screen(id: Option<u32>, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
+/// The screen or window by its id, as the system has it now.
+fn target_of(id: u32) -> Option<zed_scap::Target> {
+    zed_scap::get_all_targets().unwrap_or_default().into_iter().find(|t| match t {
+        zed_scap::Target::Display(d) => d.id == id,
+        zed_scap::Target::Window(w) => w.id == id,
+    })
+}
+
+/// A captured frame's size, pixels and how they're laid out; None for YUV frames.
+fn pixels(frame: &zed_scap::frame::Frame) -> Option<(u32, u32, &[u8], Layout)> {
     use zed_scap::frame::Frame;
+    let (w, h, data, layout) = match frame {
+        Frame::BGRA(f) => (f.width, f.height, &f.data, Layout::BGRA),
+        Frame::BGRx(f) => (f.width, f.height, &f.data, Layout::BGRA),
+        Frame::BGR0(f) => (f.width, f.height, &f.data, Layout::BGRA),
+        Frame::RGBx(f) => (f.width, f.height, &f.data, Layout::RGBA),
+        Frame::XBGR(f) => (f.width, f.height, &f.data, Layout::XBGR),
+        Frame::RGB(f) => (f.width, f.height, &f.data, Layout::RGB),
+        Frame::YUVFrame(_) => return None,
+    };
+    Some((w.max(1) as u32, h.max(1) as u32, data.as_slice(), layout))
+}
+
+/// How long a thumbnail waits for its frame (a minimized window never sends one).
+const THUMBNAIL_WAIT: Duration = Duration::from_secs(2);
+
+/// One small picture of a screen or window, `width` wide at most, for
+/// picking what to share. Taken on a thread of its own and given up on
+/// after [`THUMBNAIL_WAIT`]; a capture that's still waiting then stops as
+/// soon as its frame comes. Never asks for access: None without it.
+pub fn thumbnail(id: u32, width: u32) -> Option<Picture> {
+    if std::env::var_os(FAKE_VIDEO).is_some() {
+        let mut yuv = Yuv::new(320, 180);
+        draw_pattern(&mut yuv, 0, true, 0);
+        let mut picture = Picture { width: yuv.width, height: yuv.height, bgra: Vec::new() };
+        vp8::yuv_to_bgra(&yuv, false, &mut picture.bgra);
+        return Some(picture);
+    }
+    if !zed_scap::is_supported() || !zed_scap::has_permission() {
+        return None;
+    }
+    let target = target_of(id)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("fuwa-screen-thumbnail".into())
+        .spawn(move || {
+            let options = zed_scap::capturer::Options {
+                fps: 5,
+                show_cursor: false,
+                target: Some(target),
+                output_type: zed_scap::frame::FrameType::BGRAFrame,
+                ..Default::default()
+            };
+            let Ok(mut capturer) = zed_scap::capturer::Capturer::build(options) else { return };
+            capturer.start_capture();
+            let picture = capturer.get_next_frame().ok().and_then(|frame| {
+                let (w, h, data, layout) = pixels(&frame)?;
+                let stride = data.len() / h as usize;
+                if stride < w as usize * layout.bytes {
+                    return None;
+                }
+                let (tw, th) = vp8::fit(w, h, width, width * 3 / 4);
+                let mut yuv = Yuv::new(tw, th);
+                vp8::from_rgb(data, stride, w, h, layout, &mut yuv);
+                let mut picture = Picture { width: yuv.width, height: yuv.height, bgra: Vec::new() };
+                vp8::yuv_to_bgra(&yuv, false, &mut picture.bgra);
+                Some(picture)
+            });
+            capturer.stop_capture();
+            let _ = tx.send(picture);
+        })
+        .ok()?;
+    rx.recv_timeout(THUMBNAIL_WAIT).ok().flatten()
+}
+
+fn take_screen(id: Option<u32>, share: Share, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
     if screen_access() != Access::Allowed {
         return Err(Failure::Blocked);
     }
-    let target = id.and_then(|id| {
-        zed_scap::get_all_targets().unwrap_or_default().into_iter().find(|t| match t {
-            zed_scap::Target::Display(d) => d.id == id,
-            zed_scap::Target::Window(w) => w.id == id,
-        })
-    });
+    let target = id.and_then(target_of);
     let options = zed_scap::capturer::Options {
-        fps: 30,
+        fps: share.fps,
         show_cursor: true,
         target,
         output_type: zed_scap::frame::FrameType::BGRAFrame,
@@ -456,21 +530,13 @@ fn take_screen(id: Option<u32>, stop: &AtomicBool, latest: &Latest) -> Result<()
         }
         let Ok(frame) = capturer.get_next_frame() else { break Err(Failure::Failed) };
         let taken = Instant::now();
-        let (w, h, data, layout) = match &frame {
-            Frame::BGRA(f) => (f.width, f.height, &f.data, Layout::BGRA),
-            Frame::BGRx(f) => (f.width, f.height, &f.data, Layout::BGRA),
-            Frame::BGR0(f) => (f.width, f.height, &f.data, Layout::BGRA),
-            Frame::RGBx(f) => (f.width, f.height, &f.data, Layout::RGBA),
-            Frame::XBGR(f) => (f.width, f.height, &f.data, Layout::XBGR),
-            Frame::RGB(f) => (f.width, f.height, &f.data, Layout::RGB),
-            Frame::YUVFrame(_) => continue,
-        };
-        let (w, h) = (w.max(1) as u32, h.max(1) as u32);
+        let Some((w, h, data, layout)) = pixels(&frame) else { continue };
         let stride = if h > 0 { data.len() / h as usize } else { 0 };
         if stride < w as usize * layout.bytes {
             continue;
         }
-        let (fw, fh) = vp8::fit(w, h, vp8::SCREEN_MOST.0, vp8::SCREEN_MOST.1);
+        let (most_w, most_h) = share.most();
+        let (fw, fh) = vp8::fit(w, h, most_w, most_h);
         yuv.resize(fw, fh);
         vp8::from_rgb(data, stride, w, h, layout, &mut yuv);
         yuv = latest.put(yuv, taken);

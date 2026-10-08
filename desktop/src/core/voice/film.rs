@@ -101,7 +101,8 @@ impl Core {
     }
 
     /// Shares a screen or window (`target`, from `capture::screens`; None
-    /// for the main screen) in the call you're in, or stops.
+    /// for the main screen) in the call you're in, or stops; as sharp and
+    /// smooth as the share settings in prefs say.
     pub fn set_screen(self: &Arc<Self>, on: bool, target: Option<u32>) {
         self.set_video(true, on, target);
     }
@@ -155,7 +156,8 @@ impl Core {
         } else if self.pattern() {
             Source::Pattern { screen, seed: Self::seed(me) }
         } else {
-            Source::Screen(target)
+            let prefs = self.prefs();
+            Source::Screen(target, super::vp8::Share::new(prefs.share_height, prefs.share_fps))
         };
         let (core, id) = (Arc::downgrade(self), active.id);
         *slot = Some(Sending::start(

@@ -542,9 +542,12 @@
     features an instance has that this build doesn't), `updates.rs` (the app updating itself:
     the latest release through an instance, installed only when newer, its
     `SHA256SUMS` signed by a key in `desktop/release-keys.txt` and the file
-    matching it; the checked download waits beside the program or AppImage
-    and replaces it only when the person presses "Restart to update", never
-    by itself, and it says how to get it where it can't). It runs on its own
+    matching it; the checked download waits and takes the app's place only
+    when the person presses "Restart to update", never by itself: the
+    program or AppImage swapped, a macOS app swapped whole from the
+    release's `.app.zip`, the `.deb` installed through pkexec and dpkg once
+    the window has gone; then the app starts again, and it says how to get
+    it where it can't). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,

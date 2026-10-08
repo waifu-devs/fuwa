@@ -1,11 +1,11 @@
-import { CheckIcon, CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
+import { CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { setRecording, setScreenSound, setServerRecording, shareScreen, toggleCamera, toggleRecording, toggleScreen, toggleScreenQuiet } from "@/calls/engine";
+import { setRecording, setScreenSound, setServerRecording, toggleCamera, toggleRecording, toggleScreen, toggleScreenQuiet } from "@/calls/engine";
 import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/state";
-import { canShareScreen, canShareSound, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
+import { canShareScreen, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
 import { store, useFuwa } from "@/fuwa/store";
 import { hue } from "@/components/icons-utils";
@@ -19,6 +19,7 @@ import { i18n } from "@/i18n/i18n";
 import { type I18n, useI18n } from "@/i18n/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useSpeaking, VoiceAvatar } from "./parts";
+import { ScreenShareDialog } from "./ScreenShareDialog";
 
 /**
  * Cameras and shared screens in calls: a <video> per feed, the camera and
@@ -166,73 +167,40 @@ export function CameraButton({ size = "sm", className }: { size?: "sm" | "lg"; c
 
 /**
  * Shares your screen in the call you're in, or stops. Not on phones, which
- * can't. Where the instance passes a screen's sound on, starting opens a
- * menu: with its sound, or the picture only (the choice is remembered, and
- * the keyboard shortcut uses it). Browsers that can't share sound say so there.
+ * can't. Starting opens the share dialog (what, how sharp and smooth, its
+ * sound); the keyboard shortcut goes straight on with the last choices.
  */
 export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; className?: string }) {
   const on = useCalls((s) => s.selfStream);
   const target = useCalls((s) => s.call?.target);
-  const offered = useCalls((s) => s.screenSoundOffered);
-  const withSound = usePrefs((p) => p.shareSound);
   const may = useMayFilm(target);
+  const [picking, setPicking] = useState(false);
   const { t } = useI18n();
   if (!canShareScreen()) return null;
   const label = t(!may ? "dms-calls.calls.video.screenNotAllowed" : on ? "dms-calls.calls.video.screenStop" : "dms-calls.calls.video.screenShare");
   const Icon = on ? MonitorXIcon : MonitorUpIcon;
-  const menu = offered && may && !on;
-  const button = (
-    <button
-      type="button"
-      onClick={menu ? undefined : () => void toggleScreen()}
-      disabled={!may}
-      aria-pressed={on}
-      aria-label={label}
-      title={label}
-      className={cn(
-        "group relative grid shrink-0 place-items-center transition active:scale-90 disabled:pointer-events-none disabled:opacity-40",
-        callButtonClass(size, on, "bg-primary text-primary-foreground hover:brightness-110"),
-        className,
-      )}
-    >
-      <motion.span key={String(on)} initial={{ scale: 0.5, y: on ? 6 : -4 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="grid place-items-center">
-        <Icon className={cn(iconSize(size), "transition-transform", on ? "group-hover:scale-110" : "group-hover:-translate-y-0.5")} />
-      </motion.span>
-    </button>
-  );
-  if (!menu) return button;
-  return <ScreenShareMenu trigger={button} withSound={withSound} />;
-}
-
-/** Starting a screen share: with its sound, or the picture only. */
-function ScreenShareMenu({ trigger, withSound }: { trigger: ReactNode; withSound: boolean }) {
-  const { t } = useI18n();
-  const sound = canShareSound();
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="center" className="w-72">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("dms-calls.calls.video.screenShare")}</DropdownMenuLabel>
-        <DropdownMenuItem disabled={!sound} onSelect={() => void shareScreen(true)} className="items-start gap-2.5 py-2">
-          <Volume2Icon className="mt-0.5" />
-          <span className="min-w-0">
-            <span className="block font-bold">{t("dms-calls.calls.video.withSound")}</span>
-            <span className="block text-xs text-muted-foreground">
-              {sound ? t("dms-calls.calls.video.withSoundText") : t("dms-calls.calls.video.noSoundHere")}
-            </span>
-          </span>
-          {sound && withSound && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void shareScreen(false)} className="items-start gap-2.5 py-2">
-          <MonitorIcon className="mt-0.5" />
-          <span className="min-w-0">
-            <span className="block font-bold">{t("dms-calls.calls.video.pictureOnly")}</span>
-            <span className="block text-xs text-muted-foreground">{t("dms-calls.calls.video.pictureOnlyText")}</span>
-          </span>
-          {(!sound || !withSound) && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <button
+        type="button"
+        onClick={() => (on ? void toggleScreen() : setPicking(true))}
+        disabled={!may}
+        aria-pressed={on}
+        aria-haspopup={on ? undefined : "dialog"}
+        aria-label={label}
+        title={label}
+        className={cn(
+          "group relative grid shrink-0 place-items-center transition active:scale-90 disabled:pointer-events-none disabled:opacity-40",
+          callButtonClass(size, on, "bg-primary text-primary-foreground hover:brightness-110"),
+          className,
+        )}
+      >
+        <motion.span key={String(on)} initial={{ scale: 0.5, y: on ? 6 : -4 }} animate={{ scale: 1, y: 0 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="grid place-items-center">
+          <Icon className={cn(iconSize(size), "transition-transform", on ? "group-hover:scale-110" : "group-hover:-translate-y-0.5")} />
+        </motion.span>
+      </button>
+      <ScreenShareDialog open={picking && may && !on} onOpenChange={setPicking} />
+    </>
   );
 }
 

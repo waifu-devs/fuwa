@@ -38,7 +38,7 @@ impl FuwaApp {
         let Some(call) = self.core.call() else {
             self.calls.ticking = None;
             self.calls.mic_missing = false;
-            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. } | CallPop::Screens { .. })) {
+            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. })) {
                 self.calls.pop = None;
             }
             return None;

@@ -3,6 +3,7 @@ import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { isTag } from "@/i18n/core";
+import { DEFAULT_SHARE, SHARE_SURFACES, shareQuality, type ShareFps, type ShareHeight, type ShareSurface } from "@/lib/screen-share";
 import { applyTheme, BUILTIN_THEMES, isDark, type Theme } from "@/lib/themes";
 
 /**
@@ -102,6 +103,10 @@ export type Prefs = {
   popoutFit: PopoutFit;
   /** Sharing a screen brings its sound too, where the browser can. */
   shareSound: boolean;
+  /** What the browser's screen picker opens on, and how sharp and smooth a share goes out. */
+  shareSurface: ShareSurface;
+  shareHeight: ShareHeight;
+  shareFps: ShareFps;
 };
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -158,6 +163,9 @@ export const DEFAULT_PREFS: Prefs = {
   popoutGlow: true,
   popoutFit: "cover",
   shareSound: true,
+  shareSurface: "monitor",
+  shareHeight: DEFAULT_SHARE.height,
+  shareFps: DEFAULT_SHARE.fps,
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -222,6 +230,9 @@ function sanitize(p: Prefs): Prefs {
     cameraHeight: (HEIGHTS as readonly unknown[]).includes(p.cameraHeight) ? (p.cameraHeight as number) : d.cameraHeight,
     cameraFps: (FRAME_RATES as readonly unknown[]).includes(p.cameraFps) ? (p.cameraFps as number) : d.cameraFps,
     popoutFit: oneOf(p.popoutFit, ["cover", "contain"], d.popoutFit),
+    shareSurface: oneOf(p.shareSurface, SHARE_SURFACES, d.shareSurface),
+    shareHeight: shareQuality(p.shareHeight, p.shareFps).height,
+    shareFps: shareQuality(p.shareHeight, p.shareFps).fps,
     inputVolume: clamp(p.inputVolume, 0, 200, d.inputVolume),
     outputVolume: clamp(p.outputVolume, 0, 200, d.outputVolume),
     inputMode: oneOf(p.inputMode, ["voice", "ptt"], d.inputMode),

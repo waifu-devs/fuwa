@@ -738,6 +738,9 @@ pub const MAX_FRAME: usize = 1500;
 /// what apps send for 1080p at 60 frames a second in three sizes (about
 /// 6 Mbit/s, docs/calls.md), keyframes and all.
 const MAX_VIDEO_BYTES_PER_SECOND: usize = 2 * 1024 * 1024;
+/// A shared screen one person may send a second, every size together: the
+/// apps' sharpest choice (1440p at 60, about 7 Mbit/s) with room for keyframes.
+const MAX_SCREEN_BYTES_PER_SECOND: usize = 2 * 1024 * 1024;
 /// The largest frame of camera passed on (a 1080p keyframe is about 200 KB).
 const MAX_VIDEO_FRAME: usize = 512 * 1024;
 /// A camera size that hasn't come for this long isn't being sent.
@@ -1021,7 +1024,7 @@ impl Client {
     fn within_budget(&mut self, source: Source, len: usize) -> bool {
         let (most, per_second, spent) = match source {
             Source::Camera => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.filmed),
-            Source::Screen => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.shown),
+            Source::Screen => (MAX_VIDEO_FRAME, MAX_SCREEN_BYTES_PER_SECOND, &mut self.shown),
             Source::Microphone => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.sent),
             Source::ScreenSound => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.played),
         };

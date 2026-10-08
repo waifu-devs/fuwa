@@ -194,6 +194,8 @@ pub enum Dialog {
         key: String,
         server: String,
     },
+    /// Starting a screen share in the call you're in (`ui/screen_share.rs`).
+    ShareScreen,
 }
 
 /// A small menu hanging under a bell, or over your name.
@@ -1589,6 +1591,7 @@ impl FuwaApp {
         match dialog {
             Dialog::CreateServer { .. } => self.create_server_now(window, cx),
             Dialog::Apply { .. } | Dialog::Application { .. } => {}
+            Dialog::ShareScreen => self.start_share(cx),
             Dialog::JoinInvite { key } => {
                 self.dialog_busy = true;
                 cx.notify();
