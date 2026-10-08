@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore, type RefObject } from "react";
 import { i18n, type Key } from "@/i18n/i18n";
 import { getPrefs } from "@/lib/prefs";
+import { shareBox, wantsMotion, type ShareQuality, type ShareSurface } from "@/lib/screen-share";
 
 /** A sentence in the app's language now. */
 const tr = (key: Key) => i18n().t(key);
@@ -192,31 +193,44 @@ export type SharedScreen = {
   silent: string | null;
 };
 
+/** How to share: with its sound or not, what the picker opens on, how sharp and smooth. */
+export type ScreenAsk = { sound: boolean; surface: ShareSurface; quality: ShareQuality };
+
 /**
- * Asks the browser for a screen, window or tab to share, at up to 1080p,
- * and with `sound` what it plays too. The sound is left as it is (no echo
+ * Asks the browser for a screen, window or tab to share, at the size and
+ * frame rate asked for (`surface` is only where its picker opens), and with
+ * `sound` what it plays too. The sound is left as it is (no echo
  * cancelling or noise suppression, which are for voices and spoil music),
  * and never includes this page's own sound, so nobody hears the call back.
  */
-export async function openScreen(sound: boolean): Promise<SharedScreen> {
+export async function openScreen({ sound, surface, quality }: ScreenAsk): Promise<SharedScreen> {
   if (!navigator.mediaDevices?.getDisplayMedia) throw new DOMException("No screen sharing", "NotSupportedError");
   const asking = sound && canShareSound();
+  const box = shareBox(quality.height);
   const stream = await navigator.mediaDevices.getDisplayMedia({
     audio: asking
       ? ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false, restrictOwnAudio: true } as MediaTrackConstraints)
       : false,
-    video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } },
+    video: {
+      width: { ideal: box.width, max: box.width },
+      height: { ideal: box.height, max: box.height },
+      frameRate: { ideal: quality.fps, max: quality.fps },
+      displaySurface: surface,
+    } as MediaTrackConstraints,
     // Chrome offers the whole system's sound for a whole screen where it can.
     ...(asking ? { systemAudio: "include" } : {}),
+    // Tabs, windows and screens all stay offered; `surface` only picks where the picker opens.
+    selfBrowserSurface: "exclude",
+    surfaceSwitching: "include",
   } as DisplayMediaStreamOptions);
   const video = stream.getVideoTracks()[0];
   if (!video) throw new DOMException("No screen", "NotFoundError");
-  // Text stays sharp; motion gives way first.
-  video.contentHint = "detail";
+  // Text stays sharp, motion gives way first; at 60 it's the other way round (games, video).
+  video.contentHint = wantsMotion(quality) ? "motion" : "detail";
   const audio = stream.getAudioTracks()[0] ?? null;
   if (audio) audio.contentHint = "music";
-  const surface = (video.getSettings() as MediaTrackSettings & { displaySurface?: string }).displaySurface;
-  const silent = !sound || audio ? null : !canShareSound() ? noSoundHere() : silentBecause(surface);
+  const shared = (video.getSettings() as MediaTrackSettings & { displaySurface?: string }).displaySurface;
+  const silent = !sound || audio ? null : !canShareSound() ? noSoundHere() : silentBecause(shared);
   return { video, audio, silent };
 }
 
@@ -230,12 +244,18 @@ function silentBecause(surface: string | undefined): string {
   return tr("workspace.calls.screen.system");
 }
 
-/** Whether this browser can share sound with a screen at all: Chrome and Edge can; Firefox and Safari share pictures only. */
-export const canShareSound = () => {
+/** Chrome, Edge and the like. */
+const chromium = () => {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
   return /Chrome|Chromium|Edg\//.test(ua) && !/Firefox|FxiOS/.test(ua);
 };
+
+/** Whether this browser can share sound with a screen at all: Chrome and Edge can; Firefox and Safari share pictures only. */
+export const canShareSound = chromium;
+
+/** Whether this browser's picker opens where it's asked to (Chrome and Edge); Firefox and Safari choose for themselves. */
+export const canPickSurface = chromium;
 
 /** Whether this browser can share a screen at all (phones can't). */
 export const canShareScreen = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && !/Android|iPhone|iPad/.test(navigator.userAgent);
@@ -247,13 +267,3 @@ export function screenProblem(err: unknown): string | null {
   if (name === "NotSupportedError") return tr("workspace.calls.screen.unsupported");
   return tr("workspace.calls.screen.failed");
 }
-
-/**
- * A shared screen's three sizes: a quarter for thumbnails, half, and full
- * for reading it, with more bits than a camera, since text needs them.
- */
-export const SCREEN_ENCODINGS: RTCRtpEncodingParameters[] = [
-  { rid: "l", scaleResolutionDownBy: 4, maxBitrate: 200_000, maxFramerate: 5 },
-  { rid: "m", scaleResolutionDownBy: 2, maxBitrate: 700_000, maxFramerate: 15 },
-  { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 2_500_000, maxFramerate: 30 },
-];

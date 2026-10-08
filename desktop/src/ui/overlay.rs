@@ -303,7 +303,8 @@ impl FuwaApp {
             | Dialog::Safety { .. }
             | Dialog::Poll { .. }
             | Dialog::PollVoters { .. }
-            | Dialog::Picture { .. } => unreachable!("drawn on its own"),
+            | Dialog::Picture { .. }
+            | Dialog::ShareScreen => unreachable!("drawn on its own"),
         };
         let danger = matches!(
             dialog,
@@ -379,6 +380,7 @@ impl FuwaApp {
             Dialog::Picture { .. } => "picture",
             Dialog::Apply { .. } => "apply",
             Dialog::Application { .. } => "application",
+            Dialog::ShareScreen => "share",
         };
         Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx))))
     }

@@ -367,6 +367,7 @@ impl FuwaApp {
                 ("channel", self.create_channel_panel(key, server, parent, *kind, &p, window, cx))
             }
             Dialog::Rules { key, server } => ("rules", self.rules_panel(key, server, &p, window, cx)),
+            Dialog::ShareScreen => ("share", self.share_panel(&p, window, cx)),
             _ => return None,
         };
         let panel =

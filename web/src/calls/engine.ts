@@ -7,6 +7,7 @@ import { toFuwaError, type FuwaError } from "@/fuwa/errors";
 import { engine, onLeaveAccount } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
 import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
+import { DEFAULT_SHARE, screenEncodings, shareQuality, type ShareQuality } from "@/lib/screen-share";
 import { cue } from "@/lib/sounds";
 import { reportTiming, reportUsage } from "@/lib/reports";
 import { toast } from "@/lib/ui";
@@ -25,7 +26,7 @@ import {
   isScreen,
   openScreen,
   ownerOf,
-  SCREEN_ENCODINGS,
+  type ScreenAsk,
   screenProblem,
   setLocalScreen,
   setLocalVideo,
@@ -89,6 +90,8 @@ class Session {
   private camera: MediaStreamTrack | null = null;
   private video: RTCRtpTransceiver | null = null;
   private screen: MediaStreamTrack | null = null;
+  /** How sharp and smooth the shared screen goes out: the last share's choice. */
+  private screenQuality: ShareQuality = DEFAULT_SHARE;
   private screenVideo: RTCRtpTransceiver | null = null;
   /** The shared screen's sound, and its place in the connection. */
   private screenAudio: MediaStreamTrack | null = null;
@@ -246,7 +249,7 @@ class Session {
     if (this.camera) void video.sender.replaceTrack(this.camera).catch(() => {});
     // The screen's place comes second, the same way: the media server
     // takes an app's first video track as its camera, the second as its screen.
-    const screenVideo = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: SCREEN_ENCODINGS.map((e) => ({ ...e })) });
+    const screenVideo = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: screenEncodings(this.screenQuality) });
     this.screenVideo = screenVideo;
     this.frames?.send(screenVideo.sender, this.me, "video");
     preferVp8(screenVideo);
@@ -438,10 +441,11 @@ class Session {
    * sound goes too, where the browser and the instance can; where they
    * can't, it says why rather than sharing in silence without a word.
    */
-  async setScreen(on: boolean, sound = false) {
+  async setScreen(on: boolean, ask: ScreenAsk = { sound: false, surface: "monitor", quality: DEFAULT_SHARE }) {
+    const sound = ask.sound;
     if (on && !this.screen) {
       const offered = !!this.settings?.screenSound;
-      const shared = await openScreen(sound && offered);
+      const shared = await openScreen({ ...ask, sound: sound && offered });
       if (this.stopped || !getCalls().selfStream) {
         shared.video.stop();
         shared.audio?.stop();
@@ -449,6 +453,7 @@ class Session {
       }
       this.screen = shared.video;
       this.screenAudio = shared.audio;
+      this.screenQuality = ask.quality;
       const track = shared.video;
       // Stopped in the browser's own "Stop sharing" bar.
       track.onended = () => {
@@ -467,6 +472,7 @@ class Session {
     setLocalScreen(this.screen);
     setCalls(() => ({ screenSound: this.screenAudio ? this.screenAudio.enabled : null }));
     await Promise.all([
+      this.screen && this.screenVideo ? tune(this.screenVideo.sender, screenEncodings(this.screenQuality)) : null,
       this.screenVideo?.sender.replaceTrack(this.screen).catch(() => {}),
       this.screenSound?.sender.replaceTrack(this.screenAudio).catch(() => {}),
     ]);
@@ -703,6 +709,22 @@ function preferOpus(transceiver: RTCRtpTransceiver) {
   }
 }
 
+/**
+ * Sets a sender's sizes to these caps (by rid), keeping the rest: a share's
+ * frame rate and bitrates as picked, with no new offer. Where the browser
+ * won't, the share goes on at the caps it had.
+ */
+async function tune(sender: RTCRtpSender, caps: RTCRtpEncodingParameters[]) {
+  const params = sender.getParameters();
+  if (!params.encodings?.length) return;
+  for (const encoding of params.encodings) {
+    const cap = caps.find((c) => c.rid === encoding.rid) ?? caps[caps.length - 1];
+    encoding.maxBitrate = cap.maxBitrate;
+    encoding.maxFramerate = cap.maxFramerate;
+  }
+  await sender.setParameters(params).catch(() => {});
+}
+
 /** VP8 first: the media server takes only Opus and VP8, so every app can show every camera. */
 function preferVp8(transceiver: RTCRtpTransceiver) {
   const codecs = typeof RTCRtpSender !== "undefined" ? RTCRtpSender.getCapabilities?.("video")?.codecs : undefined;
@@ -807,6 +829,7 @@ export const toggleCamera = () => setCamera(!getCalls().selfVideo);
 
 /** Shares your screen in the call you're in, or stops. */
 export async function setScreen(on: boolean) {
+  const p = getPrefs();
   const s = session;
   if (!s || getCalls().selfStream === on) return;
   if (on && s.videoSuppressed) return void toast(tr("workspace.calls.noScreenHere"));
@@ -814,7 +837,7 @@ export async function setScreen(on: boolean) {
   if (on) reportUsage("call.screen_share");
   setCalls(() => ({ selfStream: on }));
   try {
-    await s.setScreen(on, getPrefs().shareSound);
+    await s.setScreen(on, { sound: p.shareSound, surface: p.shareSurface, quality: shareQuality(p.shareHeight, p.shareFps) });
     cue(on ? "unmute" : "mute");
   } catch (err) {
     setCalls(() => ({ selfStream: false }));
@@ -826,9 +849,13 @@ export async function setScreen(on: boolean) {
 
 export const toggleScreen = () => setScreen(!getCalls().selfStream);
 
-/** Starts sharing your screen, with its sound or without (and remembers which you like). */
-export async function shareScreen(sound: boolean) {
-  setPrefs({ shareSound: sound });
+/**
+ * Starts sharing your screen as picked: with its sound or without, where
+ * the browser's picker opens, how sharp and smooth (remembered for next
+ * time and for the keyboard shortcut).
+ */
+export async function shareScreen(ask: ScreenAsk) {
+  setPrefs({ shareSound: ask.sound, shareSurface: ask.surface, shareHeight: ask.quality.height, shareFps: ask.quality.fps });
   await setScreen(true);
 }
 

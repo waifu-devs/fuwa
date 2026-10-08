@@ -376,6 +376,9 @@ pub struct Prefs {
     pub popout_fit: PopoutFit,
     /// Sharing a screen brings its sound too.
     pub share_sound: bool,
+    /// How sharp and smooth a shared screen goes out (`voice::vp8::Share`).
+    pub share_height: u32,
+    pub share_fps: u32,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -457,6 +460,8 @@ impl Default for Prefs {
             popout_glow: true,
             popout_fit: PopoutFit::Cover,
             share_sound: true,
+            share_height: crate::core::voice::vp8::Share::DEFAULT.height,
+            share_fps: crate::core::voice::vp8::Share::DEFAULT.fps,
         }
     }
 }
@@ -507,6 +512,8 @@ impl Prefs {
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        let share = crate::core::voice::vp8::Share::new(self.share_height, self.share_fps);
+        (self.share_height, self.share_fps) = (share.height, share.fps);
         let over = self.shaders_trying.len().saturating_sub(crate::core::effects::status::MAX_TRYING);
         self.shaders_trying.drain(..over);
         self.shaders_trying.retain(|id| (1..=8).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric()));
