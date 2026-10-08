@@ -1,0 +1,16 @@
+{
+  "profileItems.namePlaceholder": "El nombre de su archivo",
+  "profileItems.addHint": "Una decoración es una imagen cuadrada, transparente en el centro, que se dibuja alrededor del avatar. Un GIF se mueve. Un efecto es un archivo .json en el formato de efectos de perfil.",
+  "profileItems.chooseEffect": "Elige un archivo de efecto",
+  "profileItems.notJson": "Eso no es un archivo JSON.",
+  "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto.",
+  "profileItems.decoration": "Decoración",
+  "profileItems.effect": "Efecto",
+  "profileItems.none": "Aún no hay nada. Añade una decoración o un efecto.",
+  "profileItems.delete": "Eliminar",
+  "profileItems.deleteAsk": "¿Eliminar {name}? Se quita a todos los que lo llevan.",
+  "profileItems.decorationsOff": "Esta instancia tiene las decoraciones de avatar desactivadas, así que por ahora no se ve ninguna.",
+  "profileItems.effectLabel": "Efecto de perfil",
+  "profileItems.noDecoration": "Ninguna",
+  "profileItems.inServers": "Tu perfil en los servidores"
+}

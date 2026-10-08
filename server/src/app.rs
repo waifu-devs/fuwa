@@ -448,6 +448,7 @@ impl App {
             .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::command_service_server::CommandServiceServer::new(api.clone()))
             .add_service(crate::pb::live_tile_service_server::LiveTileServiceServer::new(api.clone()))
+            .add_service(crate::pb::profile_item_service_server::ProfileItemServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -594,6 +595,8 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         mcp: settings.mcp,
         profile_effects: settings.profile_effects,
+        profile_decorations: settings.profile_decorations,
+        profile_items_at: None,
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),

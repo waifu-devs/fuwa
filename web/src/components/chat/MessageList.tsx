@@ -65,6 +65,7 @@ import { encodeEmoji, useCatalog } from "@/lib/emoji-catalog";
 import { RoleName } from "@/components/RoleName";
 import { joinLine } from "@/components/chat/join-line";
 import { UserAvatar } from "@/components/Icons";
+import { AvatarDecoration } from "@/components/ProfileDecoration";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { useContextMenu } from "@/components/ContextMenu";
 import { useMemberMenu } from "@/components/menus/member";
@@ -786,8 +787,9 @@ export function MessageLine({
       <div className="w-10 shrink-0">
         {first ? (
           card(
-            <button type="button" aria-label={t("chat.author.openProfile")} className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95" {...menu}>
+            <button type="button" aria-label={t("chat.author.openProfile")} className="relative mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95" {...menu}>
               <UserAvatar user={author} />
+              {!app && <AvatarDecoration instanceKey={instanceKey} user={author} member={member} />}
             </button>,
           )
         ) : date ? (

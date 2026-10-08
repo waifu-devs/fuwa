@@ -268,6 +268,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         agent: None,
         pinned: false,
         can_pin: false,
+        decoration: None,
         owner: false,
         enc: Some(Rc::new(enc)),
         sig: 0,

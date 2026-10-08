@@ -110,6 +110,24 @@ pub fn avatar(user: Option<&pb::User>, size: f32, _p: &Palette) -> Div {
     }
 }
 
+/// An avatar with the decoration someone wears (docs/profile-items.md): its
+/// picture centred over the avatar at 1.2 times its size, catching nothing.
+/// The picture is always an upload on the instance (`InstanceState::decoration_url`).
+pub fn decorated(avatar: Div, size: f32, decoration: Option<&str>) -> Div {
+    let el = div().relative().size(px(size)).flex_none().child(avatar);
+    match decoration.filter(|url| !url.is_empty()) {
+        None => el,
+        Some(url) => el.child(
+            img(SharedString::from(url.to_owned()))
+                .absolute()
+                .left(px(-size * 0.1))
+                .top(px(-size * 0.1))
+                .size(px(size * 1.2))
+                .object_fit(ObjectFit::Contain),
+        ),
+    }
+}
+
 /// A server's icon: its picture, or its initials on its color. Round until
 /// it's open or hovered, then a rounded square, like Discord's.
 pub fn server_icon(server: &pb::Server, size: f32, radius: f32, _p: &Palette) -> Div {
@@ -173,6 +191,11 @@ pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
     // The web's .conn-dot (0.55rem) with its 2px ring in the rail's dark color.
     let ring = crate::ui::theme::mix(p.background, gpui_kit::rgb(0x000000), 0.25);
     div().size(px(12.8)).rounded_full().bg(color).border_2().border_color(ring)
+}
+
+/// The same in the destructive color, for deleting and other things that can't be undone.
+pub fn danger_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
+    filled_button(id, label, p.destructive, gpui_kit::rgb(0xffffff), p)
 }
 
 /// A filled button in the primary color, with a glow on hover and a dip on press.

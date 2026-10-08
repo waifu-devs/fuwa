@@ -39,6 +39,8 @@ pub struct ProfilePatch {
     /// When the status clears by itself (unix ms), sent with `status`; None keeps it until changed.
     pub status_expires_at: Option<i64>,
     pub effect: Option<String>,
+    /// The decoration around your avatar (docs/profile-items.md): an item's id, or "" for none.
+    pub decoration_id: Option<String>,
 }
 
 /// A picture's type, from its name, as the instance wants it said.
@@ -305,6 +307,7 @@ impl Core {
                     nanos: (ms.rem_euclid(1000) * 1_000_000) as i32,
                 }),
                 effect: patch.effect,
+                decoration_id: patch.decoration_id,
             })
         )
         .await?;

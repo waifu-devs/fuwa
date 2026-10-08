@@ -20,6 +20,7 @@ import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { PresenceService } from "@/gen/fuwa/v1/presence_pb";
+import { ProfileItemService } from "@/gen/fuwa/v1/profile_item_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
 import { SearchService } from "@/gen/fuwa/v1/search_pb";
 import { SecureChannelService } from "@/gen/fuwa/v1/secure_pb";
@@ -57,6 +58,7 @@ export type Api = {
   shared: Client<typeof SharedChannelService>;
   search: Client<typeof SearchService>;
   liveTiles: Client<typeof LiveTileService>;
+  profileItems: Client<typeof ProfileItemService>;
 };
 
 /**
@@ -99,5 +101,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     shared: createClient(SharedChannelService, transport),
     search: createClient(SearchService, transport),
     liveTiles: createClient(LiveTileService, transport),
+    profileItems: createClient(ProfileItemService, transport),
   };
 }

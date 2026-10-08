@@ -386,6 +386,7 @@ impl SettingsView {
             effect: (d.effect != base.effect).then(|| d.effect.clone()),
             status: status_changed.then(|| d.status.trim().to_owned()),
             status_expires_at: if status_changed { clears_at(self.account.clear, base.expires) } else { None },
+            decoration_id: None,
         };
         self.account.saving = true;
         self.account.error = None;

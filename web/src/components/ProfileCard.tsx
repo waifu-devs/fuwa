@@ -11,6 +11,7 @@ import { Private } from "@/components/Private";
 import { AppBadge } from "@/components/AppBadge";
 import { ActivityCards, PresenceDot } from "@/components/Presence";
 import { ProfileEffect } from "@/components/ProfileEffect";
+import { AvatarDecoration, useEffectsOn, useWornEffect } from "@/components/ProfileDecoration";
 import { colorCss, displayName, hueOf, isAgent, shownStatus, toDate } from "@/lib/format";
 import { useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
@@ -26,7 +27,9 @@ const PlainText = ({ children, className }: { children: string; className?: stri
  * color), avatar, name, pronouns, status and bio, and how long they've been
  * around. The same card opens from the member list and messages, and shows
  * your own while you edit it. Their profile effect, if they picked one, plays
- * over it (others' only while the viewer lets them).
+ * over it (others' only while the viewer lets them), and their decoration
+ * sits around their avatar. Opened from a server, their profile there (the
+ * member's effect and decoration) shows instead of their own.
  */
 export function ProfileCard({
   user,
@@ -54,7 +57,7 @@ export function ProfileCard({
   loading?: boolean;
   /** A live preview while you type: text changes in place instead of sliding. */
   editing?: boolean;
-  /** Where they're seen, for their presence: their dot and what they're doing. */
+  /** Where they're seen, for their presence (their dot and what they're doing) and the instance's and server's profile items. */
   instanceKey?: string;
   className?: string;
 }) {
@@ -65,11 +68,14 @@ export function ProfileCard({
   const since = profile?.createdAt ? toDate(profile.createdAt) : null;
   const joined = member?.joinedAt ? toDate(member.joinedAt) : null;
   const othersEffects = usePrefs((p) => p.othersEffects);
-  const effect = me || othersEffects ? profile?.effect : undefined;
+  const effectsOn = useEffectsOn(instanceKey);
+  const worn = useWornEffect(instanceKey, profile?.effect, member);
+  // Without an instance to ask, only the effects the app ships with play.
+  const effect = (me || othersEffects) && (effectsOn || !instanceKey) ? worn : undefined;
 
   return (
     <div className={cn("relative overflow-hidden rounded-3xl border bg-card shadow-xl", className)}>
-      {effect && <ProfileEffect key={effect} effect={effect} seed={user.id} color={accent === undefined ? `hsl(${hueOf(user.id)} 85% 72%)` : colorCss(accent)} />}
+      {effect && <ProfileEffect key={effect.id} effect={effect} seed={user.id} color={accent === undefined ? `hsl(${hueOf(user.id)} 85% 72%)` : colorCss(accent)} />}
       <ProfileBanner userId={user.id} bannerUrl={profile?.bannerUrl} accent={accent} />
       <div className="relative px-4 pb-4">
         <div className="-mt-11 flex items-end gap-2">
@@ -81,6 +87,7 @@ export function ProfileCard({
           >
             <span className="relative block">
               <UserAvatar user={user} className="size-20 text-3xl ring-4 ring-card" />
+              <AvatarDecoration instanceKey={instanceKey} user={user} member={member} />
               {instanceKey && <PresenceDot instanceKey={instanceKey} userId={user.id} className="absolute right-0.5 bottom-0.5 size-5 ring-[5px]" />}
             </span>
           </motion.span>

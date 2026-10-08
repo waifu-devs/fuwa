@@ -6,7 +6,7 @@ import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSetti
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
-import type { CommandArgument } from "@/gen/fuwa/v1/types_pb";
+import type { CommandArgument, ProfileItem, ProfileItemKind } from "@/gen/fuwa/v1/types_pb";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -388,7 +388,7 @@ export const forget = (key: string) =>
   });
 
 export type ProfilePatch = Partial<
-  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect">
+  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect" | "decorationId">
 > & { statusExpiresAt?: Date | null };
 
 /** Changes your profile; only the fields given change. */
@@ -653,6 +653,17 @@ export const setNickname = (key: string, serverId: string, nickname: string, use
     const { member } = yield* call((signal) =>
       api(key).servers.updateMember({ serverId, userId, nickname }, { signal }),
     );
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+/** What changes on your own profile in a server; unset fields stay. Empty effect or decoration shows your own. */
+export type ServerProfilePatch = { nickname?: string; effect?: string; decorationId?: string };
+
+/** Changes your profile in a server: nickname, effect and decoration, in one call. */
+export const updateServerProfile = (key: string, serverId: string, patch: ServerProfilePatch) =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) => api(key).servers.updateMember({ serverId, ...patch }, { signal }));
     storeMember(key, serverId, member);
     return member!;
   });
@@ -1679,6 +1690,68 @@ export const deleteEmoji = (key: string, serverId: string, emojiId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).emojis.deleteEmoji({ serverId, emojiId }, { signal }));
     storeEmojis(key, serverId, (list) => list.filter((e) => e.id !== emojiId));
+    return true;
+  });
+
+// ───────────────────────── Profile items (docs/profile-items.md) ─────────────────────────
+
+/** Changes the instance's list (no `serverId`) or a server's, ahead of the event or the Node saying so. */
+const storeProfileItems = (key: string, serverId: string, fn: (list: ProfileItem[]) => ProfileItem[]) =>
+  updateInstance(key, (i) =>
+    serverId
+      ? { ...i, serverProfileItems: { ...i.serverProfileItems, [serverId]: fn(i.serverProfileItems[serverId] ?? []) } }
+      : { ...i, profileItems: fn(i.profileItems) },
+  );
+
+const withItem = (item: ProfileItem | undefined) => (list: ProfileItem[]) =>
+  !item ? list : list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item];
+
+/** The instance's profile items, listed again (the settings page asks when it opens). */
+export const loadInstanceProfileItems = (key: string) =>
+  Effect.gen(function* () {
+    const { items } = yield* call((signal) => api(key).profileItems.listInstanceProfileItems({}, { signal }));
+    storeProfileItems(key, "", () => items);
+    return items;
+  });
+
+export type NewItem = { kind: ProfileItemKind; name: string; description: string; effect?: string; pictureUrl?: string };
+
+/** Adds a profile item: the instance's (no `serverId`, admins) or a server's (Manage Server). */
+export const createProfileItem = (key: string, serverId: string, item: NewItem) =>
+  Effect.gen(function* () {
+    const fresh = { kind: item.kind, name: item.name, description: item.description, effect: item.effect ?? "", pictureUrl: item.pictureUrl ?? "" };
+    const res = yield* call((signal): Promise<{ item?: ProfileItem }> =>
+      serverId
+        ? api(key).profileItems.createServerProfileItem({ serverId, item: fresh }, { signal })
+        : api(key).profileItems.createInstanceProfileItem({ item: fresh }, { signal }),
+    );
+    storeProfileItems(key, serverId, withItem(res.item));
+    return res.item!;
+  });
+
+export type ItemChange = { name?: string; description?: string; effect?: string };
+
+/** Renames an item, changes its line, or replaces an effect's spec. */
+export const updateProfileItem = (key: string, serverId: string, itemId: string, change: ItemChange) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal): Promise<{ item?: ProfileItem }> =>
+      serverId
+        ? api(key).profileItems.updateServerProfileItem({ serverId, itemId, change }, { signal })
+        : api(key).profileItems.updateInstanceProfileItem({ itemId, change }, { signal }),
+    );
+    storeProfileItems(key, serverId, withItem(res.item));
+    return res.item!;
+  });
+
+/** Deletes an item, taking it off everyone wearing it. */
+export const deleteProfileItem = (key: string, serverId: string, itemId: string) =>
+  Effect.gen(function* () {
+    yield* call((signal): Promise<unknown> =>
+      serverId
+        ? api(key).profileItems.deleteServerProfileItem({ serverId, itemId }, { signal })
+        : api(key).profileItems.deleteInstanceProfileItem({ itemId }, { signal }),
+    );
+    storeProfileItems(key, serverId, (list) => list.filter((x) => x.id !== itemId));
     return true;
   });
 

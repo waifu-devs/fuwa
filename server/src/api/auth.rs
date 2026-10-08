@@ -316,10 +316,32 @@ impl Api {
             }
             None => None,
         };
-        let effect = req.effect.as_deref().map(effect_id).transpose()?;
-        if effect.as_deref().is_some_and(|effect| !effect.is_empty()) && !self.app.settings().profile_effects {
+        let settings = self.app.settings();
+        let node = self.app.node()?;
+        // A built-in effect's id, or one of the instance's.
+        let effect = match req.effect.as_deref().map(str::trim) {
+            Some(id) if !id.is_empty() && node.has_profile_item(id, pb::ProfileItemKind::Effect).await? => {
+                Some(id.to_string())
+            }
+            Some(id) => Some(effect_id(id)?),
+            None => None,
+        };
+        if effect.as_deref().is_some_and(|effect| !effect.is_empty()) && !settings.profile_effects {
             return Err(Error::FailedPrecondition("profile effects are off on this instance".into()));
         }
+        let decoration = match req.decoration_id.as_deref().map(str::trim) {
+            Some("") => Some(String::new()),
+            Some(id) => {
+                if !settings.profile_decorations {
+                    return Err(Error::FailedPrecondition("decorations are off on this instance".into()));
+                }
+                if !node.has_profile_item(id, pb::ProfileItemKind::Decoration).await? {
+                    return Err(Error::NotFound("decoration"));
+                }
+                Some(id.to_string())
+            }
+            None => None,
+        };
         // Pictures from other sites come through the instance, so nobody
         // who looks at them is seen by that site.
         let avatar_url = req
@@ -362,8 +384,12 @@ impl Api {
             },
             status,
             effect,
+            decoration,
         };
-        let shows_everywhere = change.display_name.is_some() || change.avatar_url.is_some() || change.status.is_some();
+        let shows_everywhere = change.display_name.is_some()
+            || change.avatar_url.is_some()
+            || change.status.is_some()
+            || change.decoration.is_some();
         let old_avatar = account.avatar_url.clone();
         self.keep_picture(new_avatar.as_deref(), None).await;
         self.keep_picture(new_banner.as_deref(), None).await;
@@ -385,11 +411,17 @@ impl Api {
         Ok((user, profile))
     }
 
-    /// A profile as apps get it: without its effect while the instance has
-    /// profile effects off (the pick stays saved for when they're back on).
+    /// A profile as apps get it: without its effect or decoration while the
+    /// instance has them off (the picks stay saved for when they're back on).
     fn shown_profile(&self, mut profile: pb::Profile) -> pb::Profile {
-        if !self.app.settings().profile_effects {
+        let settings = self.app.settings();
+        if !settings.profile_effects {
             profile.effect.clear();
+        }
+        if !settings.profile_decorations
+            && let Some(user) = profile.user.as_mut()
+        {
+            user.decoration_id.clear();
         }
         profile
     }

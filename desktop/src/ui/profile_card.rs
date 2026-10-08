@@ -214,6 +214,8 @@ struct Facts {
     /// Roles you may hand out, highest first, when you have Manage Roles.
     assignable: Vec<pb::Role>,
     moderation: Vec<P>,
+    /// The decoration around their avatar here, its picture's link (docs/profile-items.md).
+    decoration: Option<String>,
 }
 
 impl FuwaApp {
@@ -254,6 +256,7 @@ impl FuwaApp {
                     held: Vec::new(),
                     assignable: Vec::new(),
                     moderation: Vec::new(),
+                    decoration: None,
                 };
             };
             let member = server.and_then(|sid| {
@@ -284,7 +287,9 @@ impl FuwaApp {
                 }
                 _ => (Vec::new(), Vec::new(), Vec::new()),
             };
+            let decoration = i.decoration_url(server, member.as_ref(), user.as_ref()).map(str::to_owned);
             Facts {
+                decoration,
                 can_message: !me && !agent && matches!(i.dms.status, DmStatus::Ready | DmStatus::Starting),
                 can_friend: !me && !agent && i.friends.status == crate::core::friends::FriendsStatus::Ready,
                 presence: i.people.as_ref().map(|people| people.get(user_id).cloned()),
@@ -538,7 +543,13 @@ impl FuwaApp {
             .relative()
             .child(div().absolute().left(px(-1.0)).top(px(-1.0)).size(px(88.0)).rounded_full().bg(p.card))
             .child(
-                div().absolute().left(px(3.0)).top(px(3.0)).size(px(80.0)).child(avatar(user, 80.0, &p)).children(dot),
+                div()
+                    .absolute()
+                    .left(px(3.0))
+                    .top(px(3.0))
+                    .size(px(80.0))
+                    .child(crate::ui::widgets::decorated(avatar(user, 80.0, &p), 80.0, f.decoration.as_deref()))
+                    .children(dot),
             );
         let picture = motion::rise(
             div().child(picture),

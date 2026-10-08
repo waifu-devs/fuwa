@@ -313,6 +313,33 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        if self.instance_has("profile-items") {
+            page = page.child(self.setting(
+                "profile-decorations",
+                &t("instancesettings.nav.profileDecorations"),
+                None,
+                &["profile_decorations"],
+                &t(if defaults.profile_decorations {
+                    "instancesettings.shared.on"
+                } else {
+                    "instancesettings.shared.off"
+                }),
+                8,
+                self.toggle(
+                    "profile-decorations",
+                    draft.profile_decorations,
+                    false,
+                    &t("instancesettings.signUps.decorationsLabel"),
+                    &t("instancesettings.signUps.decorationsHint"),
+                    p,
+                    window,
+                    cx,
+                    |d, on| d.profile_decorations = on,
+                ),
+                p,
+                cx,
+            ));
+        }
         if self.instance_has("rich-presence") {
             page = page.child(self.setting(
                 "rich-presence",

@@ -27,6 +27,17 @@
   Ogg Opus files, `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
   tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
   instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
+- `agents/fuwafuwa/`: @fuwafuwa, fuwa.chat's feedback agent, built on the SDK
+  from npm (its own pnpm package; Node 24 runs its TypeScript as is). Mentioned
+  with feedback, it posts it in a team channel (`FEEDBACK_CHANNEL`). Every few
+  hours triage (`src/triage.ts`) sends what's waiting there to Claude, which
+  groups it into new issues, comments on open `feedback` issues or nothing to
+  file; `checkPlan` checks the plan before anything reaches GitHub, and each
+  post is then edited with what happened, which is all the state it keeps.
+  `src/feedback.ts` (pure) decides what goes out: people's words, no ids,
+  pings or names. Its service `fuwafuwa` in `.railway/railway.ts` is built by
+  Railway from this repository (its Dockerfile, on master, once checks pass);
+  fuwa's image and redeploys don't include it.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
@@ -228,6 +239,20 @@
     Web: `lib/live-tiles.ts` (pure: which tiles, ranking),
     `lib/live-tiles-store.ts` (each person's switches, on the device) and
     `components/LiveTiles.tsx`.
+  - `profile_items.rs` and `api/profile_items.rs` (`ProfileItemService`,
+    docs/profile-items.md): profile effects and avatar decorations the
+    instance offers (node.db's `profile_items`, instance admins; worn on
+    the profile: `Profile.effect`, `User.decoration_id`, which servers'
+    `users` copies carry) and a server offers (its file's `profile_items`,
+    Manage Server; worn on the member's server profile, `members.profile_effect`
+    and `profile_decoration`, set through `UpdateMember`). Effects are specs
+    checked by `check_effect`; decorations are uploads
+    (`MEDIA_PURPOSE_DECORATION`). Profiles and members name items by id and
+    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`);
+    deleting an item takes it off its wearers in the same write. Web:
+    `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
+    `components/settings/ProfileItems.tsx` (both settings dialogs) and
+    `settings/account/DecorationPicker.tsx`.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts

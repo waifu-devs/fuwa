@@ -1,0 +1,25 @@
+{
+  "name": "fuwafuwa",
+  "private": true,
+  "description": "@fuwafuwa, the agent on fuwa.chat that takes feedback about fuwa and files GitHub issues for it.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@waifu-devs/fuwa": "^0.2.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

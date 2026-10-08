@@ -56,7 +56,7 @@ fn entry(id: &'static str, key: &str, keywords: &'static str) -> (&'static str, 
 }
 
 /// The menu: the instance's settings, then what an admin manages (the web's `settingsGroups`).
-pub(super) fn groups(name: &str) -> Vec<Group> {
+pub(super) fn groups(name: &str, items_here: bool) -> Vec<Group> {
     let instance = vec![
         Section::new(
             Page::General,
@@ -224,7 +224,7 @@ pub(super) fn groups(name: &str) -> Vec<Group> {
             entry("gif-caps", "instancesettings.nav.gifCaps", "size limit rate searches per day"),
         ]),
     ];
-    let manage = vec![
+    let mut manage = vec![
         Section::new(
             Page::Accounts,
             "users",
@@ -252,6 +252,19 @@ pub(super) fn groups(name: &str) -> Vec<Group> {
             entry("announcement-ends", "instancesettings.nav.announcementEnds", "expire end"),
         ]),
     ];
+    // Profile items, on instances that have them, sit between Servers and Announcement.
+    if items_here {
+        manage.insert(
+            2,
+            Section::new(
+                Page::ProfileItems,
+                "sparkles",
+                t("serversettings.nav.profileItems"),
+                t("instancesettings.nav.profileItemsAbout"),
+                "profile effect effects decoration decorations avatar frame card sparkles",
+            ),
+        );
+    }
     vec![
         Group { label: t("instancesettings.nav.instance"), sections: instance },
         Group { label: t("instancesettings.nav.manage"), sections: manage },
@@ -322,7 +335,7 @@ impl InstanceSettingsView {
     /// Enter in the search: the first thing it found.
     pub(super) fn pick_first(&mut self, cx: &mut Context<Self>) {
         let query = self.query.read(cx).value().to_string();
-        let groups = groups(&self.name());
+        let groups = groups(&self.name(), self.instance_has("profile-items"));
         let first = search(&groups, &query)
             .and_then(|results| results.first().map(|(s, settings)| (s.page, settings.first().map(|x| x.0))));
         if let Some((page, setting)) = first {

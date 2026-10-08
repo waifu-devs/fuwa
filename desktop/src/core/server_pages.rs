@@ -208,6 +208,7 @@ impl Core {
                 server_id: server_id.into(),
                 user_id: user_id.into(),
                 nickname: Some(nickname.into()),
+                ..Default::default()
             })
         )
         .await?;

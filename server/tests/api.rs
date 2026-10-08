@@ -82,6 +82,7 @@ struct Clients {
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
     shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
     live_tiles: pb::live_tile_service_client::LiveTileServiceClient<Channel>,
+    profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -104,7 +105,8 @@ async fn clients(instance: &Instance) -> Clients {
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
         shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
-        live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel),
+        live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel.clone()),
+        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel),
     }
 }
 
@@ -1788,6 +1790,7 @@ async fn profiles_nicknames_and_notification_settings() {
         server_id: server.id.clone(),
         user_id: user.into(),
         nickname: Some(nickname.into()),
+        ..Default::default()
     };
     let own = c.servers.update_member(authed(&mika, nick("", "  Mika ✨ "))).await.unwrap().into_inner();
     assert_eq!(own.member.unwrap().nickname, "Mika ✨");
@@ -6585,6 +6588,7 @@ async fn timed_out_members_only_read() {
                 server_id: sid.clone(),
                 user_id: mod_user.id.clone(),
                 nickname: Some("loud".into()),
+                ..Default::default()
             },
         ))
         .await;
@@ -7236,6 +7240,282 @@ async fn profile_effects_save_and_hide_while_off() {
         .unwrap();
     let back = c.auth.get_profile(authed(&admin, get())).await.unwrap().into_inner().profile.unwrap();
     assert_eq!(back.effect, "sakura");
+    instance.stop().await;
+}
+
+const PETALS: &str = r##"{"layers":[{"shape":"petal","motion":"fall","phase":"idle","count":6,"from":"top","size":[12,20],"duration":[5000,8000],"colors":["#ffb7c5","primary"]}]}"##;
+
+fn new_effect(name: &str) -> pb::NewProfileItem {
+    pb::NewProfileItem {
+        kind: pb::ProfileItemKind::Effect as i32,
+        name: name.into(),
+        effect: PETALS.into(),
+        ..Default::default()
+    }
+}
+
+fn new_decoration(name: &str, picture_url: &str) -> pb::NewProfileItem {
+    pb::NewProfileItem {
+        kind: pb::ProfileItemKind::Decoration as i32,
+        name: name.into(),
+        picture_url: picture_url.into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn instance_profile_items_are_worn_and_taken_off_when_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.profile_decorations);
+    assert!(node.profile_items_at.is_none());
+
+    // Only admins add them, and only specs in the format.
+    let create = |item| pb::CreateInstanceProfileItemRequest { item: Some(item) };
+    let refused = c.profile_items.create_instance_profile_item(authed(&mika, create(new_effect("Petals")))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let bad = pb::NewProfileItem { effect: r#"{"layers":[{"shape":"cube"}]}"#.into(), ..new_effect("Cubes") };
+    let refused = c.profile_items.create_instance_profile_item(authed(&admin, create(bad))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let petals = c
+        .profile_items
+        .create_instance_profile_item(authed(&admin, create(new_effect("Petals"))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    let spec: serde_json::Value = serde_json::from_str(&petals.effect).unwrap();
+    assert_eq!(spec["id"], petals.id.to_lowercase());
+    assert_eq!(spec["name"], "Petals");
+    let picture = upload(&mut c, &instance, &admin, pb::MediaPurpose::Decoration, png(240, 1)).await;
+    let ring = c
+        .profile_items
+        .create_instance_profile_item(authed(&admin, create(new_decoration("Ring", &picture))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    assert_eq!(ring.picture_url, picture);
+    // A picture someone else uploaded can't be used.
+    let theirs = upload(&mut c, &instance, &mika, pb::MediaPurpose::Decoration, png(240, 2)).await;
+    let refused =
+        c.profile_items.create_instance_profile_item(authed(&admin, create(new_decoration("X", &theirs)))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+
+    let listed = c
+        .profile_items
+        .list_instance_profile_items(authed(&mika, pb::ListInstanceProfileItemsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .items;
+    assert_eq!(listed.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), [petals.id.as_str(), ring.id.as_str()]);
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.profile_items_at.is_some());
+
+    // Worn: the effect by its id, the decoration on the user everywhere.
+    let wear = pb::UpdateProfileRequest {
+        effect: Some(petals.id.clone()),
+        decoration_id: Some(ring.id.clone()),
+        ..Default::default()
+    };
+    let worn = c.auth.update_profile(authed(&mika, wear)).await.unwrap().into_inner();
+    assert_eq!(worn.profile.as_ref().unwrap().effect, petals.id);
+    assert_eq!(worn.user.unwrap().decoration_id, ring.id);
+    // Not an effect, or no such thing.
+    let wrong = pb::UpdateProfileRequest { decoration_id: Some(petals.id.clone()), ..Default::default() };
+    assert_eq!(c.auth.update_profile(authed(&mika, wrong)).await.unwrap_err().code(), Code::NotFound);
+    let wrong = pb::UpdateProfileRequest { effect: Some(ring.id.clone()), ..Default::default() };
+    assert_eq!(c.auth.update_profile(authed(&mika, wrong)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Members of a server see the decoration on the copy of mika it keeps.
+    let lounge = create_server(&mut c, &admin, "Lounge", true).await;
+    join(&mut c, &mika, &lounge.id).await;
+    let members = c
+        .servers
+        .list_members(authed(&admin, pb::ListMembersRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let seen = members.iter().find(|m| m.user.as_ref().unwrap().id == mika_user.id).unwrap();
+    assert_eq!(seen.user.as_ref().unwrap().decoration_id, ring.id);
+
+    // Renamed: the spec follows the name.
+    let change = pb::ProfileItemChange { name: Some("Sakura".into()), ..Default::default() };
+    let renamed = c
+        .profile_items
+        .update_instance_profile_item(authed(
+            &admin,
+            pb::UpdateInstanceProfileItemRequest { item_id: petals.id.clone(), change: Some(change) },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    let spec: serde_json::Value = serde_json::from_str(&renamed.effect).unwrap();
+    assert_eq!(spec["name"], "Sakura");
+
+    // Decorations off: hidden on the profile, refused, kept.
+    let off = pb::InstanceSettings { profile_decorations: false, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(off, &["profile_decorations"], &[]))).await.unwrap();
+    let get = || pb::GetProfileRequest { user_id: mika_user.id.clone() };
+    let hidden = c.auth.get_profile(authed(&mika, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(hidden.user.unwrap().decoration_id.is_empty());
+    let again = pb::UpdateProfileRequest { decoration_id: Some(ring.id.clone()), ..Default::default() };
+    assert_eq!(c.auth.update_profile(authed(&mika, again)).await.unwrap_err().code(), Code::FailedPrecondition);
+    c.admin
+        .update_settings(authed(&admin, settings_update(Default::default(), &[], &["profile_decorations"])))
+        .await
+        .unwrap();
+
+    // Deleted: off everyone, and its picture gone.
+    for item_id in [&petals.id, &ring.id] {
+        c.profile_items
+            .delete_instance_profile_item(authed(
+                &admin,
+                pb::DeleteInstanceProfileItemRequest { item_id: item_id.clone() },
+            ))
+            .await
+            .unwrap();
+    }
+    let gone = c.auth.get_profile(authed(&mika, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(gone.effect.is_empty());
+    assert!(gone.user.unwrap().decoration_id.is_empty());
+    assert_eq!(fetch(&instance, &picture).await.0, reqwest::StatusCode::NOT_FOUND);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn server_profile_items_are_worn_in_that_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let lounge = create_server(&mut c, &owner, "Lounge", true).await;
+    let other = create_server(&mut c, &owner, "Other", true).await;
+    join(&mut c, &mika, &lounge.id).await;
+    join(&mut c, &mika, &other.id).await;
+    let mut events = c
+        .events
+        .subscribe(authed(
+            &mika,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: lounge.id.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let create =
+        |server_id: &str, item| pb::CreateServerProfileItemRequest { server_id: server_id.into(), item: Some(item) };
+    // Members can't add them.
+    let refused =
+        c.profile_items.create_server_profile_item(authed(&mika, create(&lounge.id, new_effect("Petals")))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let petals = c
+        .profile_items
+        .create_server_profile_item(authed(&owner, create(&lounge.id, new_effect("Petals"))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    assert_eq!(petals.server_id, lounge.id);
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Decoration, png(240, 3)).await;
+    let ring = c
+        .profile_items
+        .create_server_profile_item(authed(&owner, create(&lounge.id, new_decoration("Ring", &picture))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    // Members hear of every change, with the whole list.
+    let heard = loop {
+        if let Some(pb::event::Payload::ProfileItemsUpdated(update)) = next_event(&mut events).await.payload
+            && update.items.len() == 2
+        {
+            break update.items;
+        }
+    };
+    assert_eq!(heard[1].id, ring.id);
+    let usage = c
+        .servers
+        .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .usage
+        .unwrap();
+    assert_eq!(usage.attachment_bytes, ring.size);
+
+    // Worn in the lounge, and only the lounge's.
+    let wear = |server_id: &str, effect: &str, decoration: &str| pb::UpdateMemberRequest {
+        server_id: server_id.into(),
+        effect: Some(effect.into()),
+        decoration_id: Some(decoration.into()),
+        ..Default::default()
+    };
+    let member = c
+        .servers
+        .update_member(authed(&mika, wear(&lounge.id, &petals.id, &ring.id)))
+        .await
+        .unwrap()
+        .into_inner()
+        .member
+        .unwrap();
+    assert_eq!((member.effect.as_str(), member.decoration_id.as_str()), (petals.id.as_str(), ring.id.as_str()));
+    let refused = c.servers.update_member(authed(&mika, wear(&other.id, &petals.id, ""))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound);
+    let refused = c.servers.update_member(authed(&mika, wear(&other.id, "", &ring.id))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound);
+    // A built-in effect works anywhere.
+    c.servers.update_member(authed(&mika, wear(&other.id, "sakura", ""))).await.unwrap();
+
+    // The owner can clear mika's, never pick for them.
+    let mut theirs = wear(&lounge.id, "sakura", "");
+    theirs.user_id = mika_user.id.clone();
+    let refused = c.servers.update_member(authed(&owner, theirs)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+
+    // Deleting it takes it off, and frees its room.
+    c.profile_items
+        .delete_server_profile_item(authed(
+            &owner,
+            pb::DeleteServerProfileItemRequest { server_id: lounge.id.clone(), item_id: ring.id.clone() },
+        ))
+        .await
+        .unwrap();
+    let members = c
+        .servers
+        .list_members(authed(&owner, pb::ListMembersRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let seen = members.iter().find(|m| m.user.as_ref().unwrap().id == mika_user.id).unwrap();
+    assert_eq!((seen.effect.as_str(), seen.decoration_id.as_str()), (petals.id.as_str(), ""));
+    let usage = c
+        .servers
+        .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .usage
+        .unwrap();
+    assert_eq!(usage.attachment_bytes, 0);
+    assert_eq!(fetch(&instance, &picture).await.0, reqwest::StatusCode::NOT_FOUND);
     instance.stop().await;
 }
 

@@ -234,6 +234,8 @@ pub struct Msg {
     pub pinned: bool,
     /// You may pin it or unpin it.
     pub can_pin: bool,
+    /// The decoration around the author's avatar, its picture's link (docs/profile-items.md).
+    pub decoration: Option<SharedString>,
     /// Its author owns the server: a crown by the name.
     pub owner: bool,
     /// In a conversation or a secure channel: what its encryption adds.
@@ -348,7 +350,7 @@ impl FuwaApp {
         let look = Look::of(i, &server);
         let mut kept = Built::default();
         // Each author as shown (name, colour, badge, picture), looked up once.
-        type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>)>;
+        type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>, Option<SharedString>)>;
         let mut authors: HashMap<String, Author> = HashMap::new();
         let mut author = |id: &str| -> Author {
             authors
@@ -359,6 +361,7 @@ impl FuwaApp {
                         i.name_color(&server, id).map(|c| rgb(c).into()),
                         is_agent(i.users.get(id)).then_some("AGENT"),
                         i.users.get(id).cloned(),
+                        i.decoration_of(Some(&server), id).map(|u| SharedString::from(u.to_owned())),
                     ))
                 })
                 .clone()
@@ -476,10 +479,10 @@ impl FuwaApp {
             }
             let hook = m.webhook.as_ref();
             let who: Author = match hook {
-                Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)))),
+                Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)), None)),
                 None => author(&m.author_id),
             };
-            let (author_name, color, badge, user) = &*who;
+            let (author_name, color, badge, user, decoration) = &*who;
             let editing = self.editing.as_deref() == Some(m.id.as_str()) && thread.is_some() == self.edit_in_thread;
             let from = shared::foreign_server(m, &server).cloned();
             let keep_out = keeps_out && from.is_some() && hook.is_none();
@@ -524,6 +527,7 @@ impl FuwaApp {
             m.gif.as_ref().map(|g| (&g.url, g.width, g.height, g.provider)).hash(&mut h);
             (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
             user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
+            decoration.hash(&mut h);
             (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
@@ -576,6 +580,7 @@ impl FuwaApp {
                     agent: agent.clone(),
                     pinned,
                     can_pin,
+                    decoration: decoration.clone(),
                     owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
                     enc: None,
                     sig,
@@ -624,6 +629,7 @@ impl FuwaApp {
                 agent: None,
                 pinned: false,
                 can_pin: false,
+                decoration: None,
                 owner: me == owner_id,
                 enc: None,
                 sig: 0,
@@ -1799,7 +1805,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                         .on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
                         .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
                 })
-                .child(avatar(m.user.as_ref(), 40.0, p))
+                .child(crate::ui::widgets::decorated(avatar(m.user.as_ref(), 40.0, p), 40.0, m.decoration.as_deref()))
                 .into_any_element(),
         )
     } else {

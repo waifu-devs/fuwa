@@ -51,7 +51,7 @@ pub enum MembersEvent {
 enum Item {
     /// A role shown apart (or "Members" for everyone else), its color and how many are in it.
     Heading(String, Option<u32>, usize),
-    Member(Row),
+    Member(Box<Row>),
 }
 
 struct Row {
@@ -65,6 +65,8 @@ struct Row {
     owner: bool,
     /// Their custom status, for under their name when they're doing nothing.
     status_text: Option<String>,
+    /// The decoration around their avatar, its picture's link (docs/profile-items.md).
+    decoration: Option<SharedString>,
     /// Their dot; None on an instance without presence.
     status: Option<pb::PresenceStatus>,
     /// What they're doing, for under their name.
@@ -116,7 +118,7 @@ impl MembersView {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
                 Item::Member(r) => {
                     (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
-                    (r.owner, &r.status_text, &r.user.username).hash(&mut h);
+                    (r.owner, &r.status_text, &r.user.username, &r.decoration).hash(&mut h);
                     (r.status.map(|s| s as i32), &r.activity).hash(&mut h);
                 }
             }
@@ -180,6 +182,7 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
             mine: user.id == me,
             owner: !owner.is_empty() && user.id == owner,
             status_text: crate::ui::presence::custom_status(&user, now),
+            decoration: i.decoration_url(Some(server), Some(m), Some(&user)).map(|u| SharedString::from(u.to_owned())),
             user,
         })
         .map(|row| (m, row))
@@ -197,16 +200,16 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
     let mut out = Vec::new();
     for (role, list) in groups.into_iter().filter(|(_, l)| !l.is_empty()) {
         out.push(Item::Heading(role.name.clone(), role.color.map(|c| c as u32), list.len()));
-        out.extend(list.into_iter().map(Item::Member));
+        out.extend(list.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     if !rest.is_empty() {
         let label = if people.is_some() { "chat.members.online" } else { "chat.members.members" };
         out.push(Item::Heading(t(label), None, rest.len()));
-        out.extend(rest.into_iter().map(Item::Member));
+        out.extend(rest.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     if !offline.is_empty() {
         out.push(Item::Heading(t("chat.members.offline"), None, offline.len()));
-        out.extend(offline.into_iter().map(Item::Member));
+        out.extend(offline.into_iter().map(|row| Item::Member(Box::new(row))));
     }
     (out, ends)
 }
@@ -338,12 +341,14 @@ fn member_row(
                 .child(crate::ui::profile_card::mark(&user.id, crate::ui::profile_card::Side::Left)),
         )
         .child(
-            div().relative().flex_none().mr(px(6.0)).child(avatar(Some(user), 32.0, p)).when_some(
-                row.status.filter(|s| *s != pb::PresenceStatus::Offline),
-                |el, status| {
+            div()
+                .relative()
+                .flex_none()
+                .mr(px(6.0))
+                .child(crate::ui::widgets::decorated(avatar(Some(user), 32.0, p), 32.0, row.decoration.as_deref()))
+                .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
                     el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, opaque(p.side_surface).into(), p))
-                },
-            ),
+                }),
         )
         .child(
             div()

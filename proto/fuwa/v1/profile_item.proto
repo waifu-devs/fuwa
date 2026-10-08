@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Profile effects and avatar decorations an instance or a server offers,
+// beyond the effects the apps ship with (docs/profile-items.md).
+//
+// The instance's are for everyone on it: people wear them on their profile
+// (UpdateProfileRequest.effect and decoration_id). A server's are for its
+// members, worn on their profile in that server
+// (UpdateMemberRequest.effect and decoration_id), where they show instead
+// of their own.
+//
+// Profiles and members name what they wear by id; apps keep each list and
+// draw from it. The instance's list changes when Node.profile_items_at
+// does, a server's with every ProfileItemsUpdated event.
+service ProfileItemService {
+  // The instance's, oldest first. Anyone signed in.
+  rpc ListInstanceProfileItems(ListInstanceProfileItemsRequest) returns (ListInstanceProfileItemsResponse);
+  // Instance admins. A decoration's picture is an upload of the caller's
+  // (MEDIA_PURPOSE_DECORATION, without a server).
+  rpc CreateInstanceProfileItem(CreateInstanceProfileItemRequest) returns (CreateInstanceProfileItemResponse);
+  rpc UpdateInstanceProfileItem(UpdateInstanceProfileItemRequest) returns (UpdateInstanceProfileItemResponse);
+  // Takes it off everyone wearing it, and deletes its picture.
+  rpc DeleteInstanceProfileItem(DeleteInstanceProfileItemRequest) returns (DeleteInstanceProfileItemResponse);
+
+  // The server's, oldest first. Any member.
+  rpc ListServerProfileItems(ListServerProfileItemsRequest) returns (ListServerProfileItemsResponse);
+  // MANAGE_SERVER. A decoration's picture is uploaded for the server
+  // (MEDIA_PURPOSE_DECORATION with its server_id) and counts against its
+  // attachment cap.
+  rpc CreateServerProfileItem(CreateServerProfileItemRequest) returns (CreateServerProfileItemResponse);
+  // MANAGE_SERVER.
+  rpc UpdateServerProfileItem(UpdateServerProfileItemRequest) returns (UpdateServerProfileItemResponse);
+  // MANAGE_SERVER. Takes it off every member wearing it, and deletes its
+  // picture.
+  rpc DeleteServerProfileItem(DeleteServerProfileItemRequest) returns (DeleteServerProfileItemResponse);
+}
+
+// What a new item is. Exactly one of effect and picture_url, for its kind.
+message NewProfileItem {
+  ProfileItemKind kind = 1;
+  // 1 to 40 characters.
+  string name = 2;
+  // Up to 120 characters.
+  string description = 3;
+  // An effect's spec, as JSON (docs/profile-effects.md, "The format"). Its
+  // own id, name and description are replaced by the item's.
+  string effect = 4;
+  // A decoration's picture: the `media.url` of an upload of yours.
+  string picture_url = 5;
+}
+
+// What changes; unset fields stay. A decoration's picture can't change:
+// add another instead.
+message ProfileItemChange {
+  optional string name = 1;
+  optional string description = 2;
+  // Effects only.
+  optional string effect = 3;
+}
+
+message ListInstanceProfileItemsRequest {}
+
+message ListInstanceProfileItemsResponse {
+  repeated ProfileItem items = 1;
+}
+
+message CreateInstanceProfileItemRequest {
+  NewProfileItem item = 1;
+}
+
+message CreateInstanceProfileItemResponse {
+  ProfileItem item = 1;
+}
+
+message UpdateInstanceProfileItemRequest {
+  string item_id = 1;
+  ProfileItemChange change = 2;
+}
+
+message UpdateInstanceProfileItemResponse {
+  ProfileItem item = 1;
+}
+
+message DeleteInstanceProfileItemRequest {
+  string item_id = 1;
+}
+
+message DeleteInstanceProfileItemResponse {}
+
+message ListServerProfileItemsRequest {
+  string server_id = 1;
+}
+
+message ListServerProfileItemsResponse {
+  repeated ProfileItem items = 1;
+}
+
+message CreateServerProfileItemRequest {
+  string server_id = 1;
+  NewProfileItem item = 2;
+}
+
+message CreateServerProfileItemResponse {
+  ProfileItem item = 1;
+}
+
+message UpdateServerProfileItemRequest {
+  string server_id = 1;
+  string item_id = 2;
+  ProfileItemChange change = 3;
+}
+
+message UpdateServerProfileItemResponse {
+  ProfileItem item = 1;
+}
+
+message DeleteServerProfileItemRequest {
+  string server_id = 1;
+  string item_id = 2;
+}
+
+message DeleteServerProfileItemResponse {}

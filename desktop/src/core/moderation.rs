@@ -158,7 +158,12 @@ impl Core {
             Action::Nickname => {
                 let res = rpc!(
                     api.servers(),
-                    update_member(pb::UpdateMemberRequest { server_id: server, user_id: user, nickname: Some(reason) })
+                    update_member(pb::UpdateMemberRequest {
+                        server_id: server,
+                        user_id: user,
+                        nickname: Some(reason),
+                        ..Default::default()
+                    })
                 )
                 .await?;
                 if let Some(member) = res.member {

@@ -22,6 +22,7 @@ mod node;
 mod pins;
 mod polls;
 mod presence;
+mod profile_items;
 mod providers;
 mod roles;
 mod search;

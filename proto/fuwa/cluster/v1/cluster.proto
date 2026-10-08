@@ -273,6 +273,7 @@ message Account {
   bool disabled = 12;
   // Whether it signs in with a password.
   bool has_password = 13;
+  string decoration_id = 14;
 }
 
 message AuthenticateRequest {

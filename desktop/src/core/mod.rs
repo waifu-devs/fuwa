@@ -40,6 +40,7 @@ pub mod pins;
 pub mod polls;
 pub mod presence;
 pub mod profile_effects;
+pub mod profile_items;
 pub mod providers;
 pub mod qr;
 pub mod rail;

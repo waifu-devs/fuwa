@@ -163,6 +163,7 @@ impl Core {
                 server_id: server_id.into(),
                 user_id: me.unwrap_or_default(),
                 nickname: Some(nickname.into()),
+                ..Default::default()
             })
         )
         .await?

@@ -133,6 +133,7 @@ pub(crate) enum Page {
     Roles,
     Channels,
     Emoji,
+    ProfileItems,
     Integrations,
     Shared,
     Recordings,
@@ -148,7 +149,7 @@ pub(crate) enum Page {
 }
 
 /// Every page, in the web's menu order (`serverSettingsTabs.ts`).
-const ALL: [Page; 21] = [
+const ALL: [Page; 22] = [
     Page::Overview,
     Page::Access,
     Page::Sso,
@@ -158,6 +159,7 @@ const ALL: [Page; 21] = [
     Page::Roles,
     Page::Channels,
     Page::Emoji,
+    Page::ProfileItems,
     Page::Integrations,
     Page::Shared,
     Page::Recordings,
@@ -190,6 +192,7 @@ impl Page {
                 access.channels.keys().any(|c| access.has_in(c, P::ManageChannels) || access.has_in(c, P::ManageRoles))
             }
             Page::Emoji => access.has(P::ManageEmoji),
+            Page::ProfileItems => manage,
             Page::Integrations => access.has(P::ManageWebhooks) || manage,
             Page::Usage => admin || manage,
             Page::Limits => admin,
@@ -218,6 +221,7 @@ impl Page {
             Page::Roles => "shield",
             Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
+            Page::ProfileItems => "sparkles",
             Page::Integrations => "webhook",
             Page::Shared => "link-2",
             Page::Recordings => "video",
@@ -253,6 +257,7 @@ impl Page {
             Page::Roles => "roles",
             Page::Channels => "channels",
             Page::Emoji => "emoji",
+            Page::ProfileItems => "profileItems",
             Page::Integrations => "integrations",
             Page::Shared => "shared",
             Page::Recordings => "recordings",
@@ -296,6 +301,7 @@ impl Page {
             Page::Roles => "permissions admin moderator rank color hoist mention everyone",
             Page::Channels => "reorder drag category topic slowmode slow mode private permissions overwrites",
             Page::Emoji => "emoji emote custom sticker upload",
+            Page::ProfileItems => "profile items effects decorations avatar frame sparkle wear",
             Page::Integrations => {
                 "webhook webhooks integration apps bot bots agent agents ci github feed rss alerts post api discord"
             }
@@ -415,6 +421,8 @@ fn search(shown: &[Page], query: &str) -> Option<Vec<Found>> {
 }
 
 pub struct ServerSettingsView {
+    /// The Profile items page, made when first opened.
+    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     core: Arc<Core>,
     pub key: String,
     pub server: String,
@@ -535,6 +543,7 @@ impl ServerSettingsView {
         subscriptions.extend(channel_subscriptions);
         subscriptions.extend(shared_subscriptions);
         Self {
+            profile_items: None,
             core,
             key,
             server,
@@ -702,6 +711,10 @@ impl Render for ServerSettingsView {
             return div().into_any_element();
         };
         let mut allowed = pages(&access, admin);
+        // Nor anything to offer before profile items.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
+            allowed.retain(|pg| *pg != Page::ProfileItems);
+        }
         // Instances from before video in recordings have nothing to choose.
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("video-recordings"))) {
             allowed.retain(|pg| *pg != Page::Recordings);
@@ -759,6 +772,23 @@ impl Render for ServerSettingsView {
             Page::Roles => self.roles_page(&p, window, cx),
             Page::Channels => self.channels_page(&p, window, cx),
             Page::Emoji => self.emoji_page(&p, window, cx),
+            Page::ProfileItems => {
+                let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+                self.profile_items
+                    .get_or_insert_with(|| {
+                        cx.new(|cx| {
+                            crate::ui::profile_items::ProfileItemsView::new(
+                                core,
+                                key,
+                                crate::core::profile_items::Scope::Server(sid),
+                                window,
+                                cx,
+                            )
+                        })
+                    })
+                    .clone()
+                    .into_any_element()
+            }
             Page::Integrations => {
                 let mut both = div().flex().flex_col().gap(px(32.0));
                 if access.has(P::ManageServer) {
@@ -1574,6 +1604,29 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::EmojiDelete => t_with(
             "serversettings.audit.s.emojiDelete",
             &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&emoji_before))],
+        ),
+        A::ProfileItemCreate => t_with(
+            "serversettings.audit.s.profileItemCreate",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate if only("name") => t_with(
+            "serversettings.audit.s.renamed",
+            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
+        ),
+        A::ProfileItemUpdate => {
+            let name = if change("name").is_some() {
+                after.clone()
+            } else {
+                format!("**{}**", t("serversettings.audit.aProfileItem"))
+            };
+            t_with(
+                "serversettings.audit.s.profileItemUpdate",
+                &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))],
+            )
+        }
+        A::ProfileItemDelete => t_with(
+            "serversettings.audit.s.profileItemDelete",
+            &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))],
         ),
         A::WebhookCreate => t_with(
             "serversettings.audit.s.webhookCreate",

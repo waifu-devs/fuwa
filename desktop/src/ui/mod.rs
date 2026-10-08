@@ -50,6 +50,7 @@ mod polls;
 mod presence;
 mod profile_card;
 mod profile_effect;
+mod profile_items;
 mod rail;
 mod recordings;
 mod sealed_files;

@@ -103,6 +103,10 @@ pub struct InstanceState {
     pub rail: Option<crate::core::rail::RailLayout>,
     /// Ways to sign in added to your account lately, newest first (`GetMe`), for the sign-in notice.
     pub recent_sign_ins: Vec<pb::SignInMethod>,
+    /// The instance's profile items (effects and decorations), oldest first.
+    pub profile_items: Vec<pb::ProfileItem>,
+    /// Per server, the profile items it offers, oldest first.
+    pub server_items: HashMap<String, Vec<pb::ProfileItem>>,
 }
 
 impl InstanceState {
@@ -140,6 +144,8 @@ impl InstanceState {
             live_tiles: HashMap::new(),
             rail: None,
             recent_sign_ins: Vec::new(),
+            profile_items: Vec::new(),
+            server_items: HashMap::new(),
         }
     }
 
@@ -330,6 +336,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.voice.remove(server_id);
     i.live_tiles.remove(server_id);
     i.emojis.remove(server_id);
+    i.server_items.remove(server_id);
     i.shared.remove(server_id);
     i.synced.remove(server_id);
     i.followed.remove(server_id);
@@ -542,6 +549,9 @@ pub fn apply_event(
         }
         Payload::EmojisUpdated(p) => {
             i.emojis.insert(sid.to_owned(), p.emojis.clone());
+        }
+        Payload::ProfileItemsUpdated(p) => {
+            i.server_items.insert(sid.to_owned(), p.items.clone());
         }
         Payload::RoleDeleted(p) => {
             // The server takes it from everyone and every channel without saying so for each.

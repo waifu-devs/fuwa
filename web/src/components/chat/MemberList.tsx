@@ -8,6 +8,7 @@ import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
+import { AvatarDecoration } from "@/components/ProfileDecoration";
 import { CopyId } from "@/components/CopyId";
 import { Count } from "@/components/motion";
 import { Private } from "@/components/Private";
@@ -221,6 +222,7 @@ const MemberRow = memo(function MemberRow({
         <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" {...menu}>
           <span className="relative shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95">
             <UserAvatar user={m.user} className="size-8" />
+            <AvatarDecoration instanceKey={instanceKey} user={m.user} member={m} />
             {tracked && <PresenceDot instanceKey={instanceKey} userId={m.user?.id} hideOffline className="absolute -right-0.5 -bottom-0.5" />}
           </span>
           <span className="min-w-0 flex-1">

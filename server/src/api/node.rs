@@ -7,6 +7,10 @@ use crate::pb::{self, node_service_server::NodeService};
 impl NodeService for Api {
     async fn get_node(&self, request: Request<pb::GetNodeRequest>) -> Result<Response<pb::GetNodeResponse>, Status> {
         let mut node = self.app.node_info();
+        // Apps list the instance's profile items again when this moves.
+        if let Ok(node_db) = self.app.node() {
+            node.profile_items_at = node_db.profile_items_at().await.ok().flatten().map(crate::id::timestamp);
+        }
         // Only the instance's admins hear that it's behind.
         if let Some(versions) = node.versions.as_mut()
             && versions.newer_release.is_some()

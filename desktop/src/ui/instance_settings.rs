@@ -72,13 +72,14 @@ enum Page {
     Gifs,
     Accounts,
     Servers,
+    ProfileItems,
     Announcement,
 }
 
 impl Page {
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
-        matches!(self, Page::Accounts | Page::Servers | Page::Announcement)
+        matches!(self, Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement)
     }
 }
 
@@ -149,6 +150,8 @@ enum Tried {
 }
 
 pub struct InstanceSettingsView {
+    /// The Profile items page, made when first opened.
+    profile_items: Option<Entity<crate::ui::profile_items::ProfileItemsView>>,
     core: Arc<Core>,
     pub key: String,
     page: Page,
@@ -235,6 +238,7 @@ impl InstanceSettingsView {
             _ => {}
         }));
         let mut view = Self {
+            profile_items: None,
             core,
             key,
             page: Page::General,
@@ -783,7 +787,7 @@ impl Render for InstanceSettingsView {
         let inner = main.min(960.0);
         self.column = inner - 64.0 - 80.0;
 
-        let groups = frame::groups(&self.name());
+        let groups = frame::groups(&self.name(), self.instance_has("profile-items"));
         let menu = self.menu(&groups, &p, window, cx);
         let (label, about) = groups
             .iter()
@@ -797,6 +801,23 @@ impl Render for InstanceSettingsView {
                 Page::Accounts => self.accounts_page(&p, window, cx),
                 Page::Servers => self.servers_page(&p, window, cx),
                 Page::Announcement => self.announcement_page(&p, window, cx),
+                Page::ProfileItems => {
+                    let (core, key) = (self.core.clone(), self.key.clone());
+                    self.profile_items
+                        .get_or_insert_with(|| {
+                            cx.new(|cx| {
+                                crate::ui::profile_items::ProfileItemsView::new(
+                                    core,
+                                    key,
+                                    crate::core::profile_items::Scope::Instance,
+                                    window,
+                                    cx,
+                                )
+                            })
+                        })
+                        .clone()
+                        .into_any_element()
+                }
                 _ => div().into_any_element(),
             }
         } else if let Some(error) = &self.load_error {
@@ -824,7 +845,7 @@ impl Render for InstanceSettingsView {
                 Page::Moderation => self.moderation_page(&p, window, cx),
                 Page::Federation => self.federation_page(&p, window, cx),
                 Page::Gifs => self.gifs_page(&p, window, cx),
-                Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
+                Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement => div().into_any_element(),
             }
         };
 
