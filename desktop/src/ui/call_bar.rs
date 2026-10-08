@@ -14,12 +14,12 @@ use gpui_kit::{
 
 use crate::core::calls::clock;
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::voice::access;
 use crate::core::voice::devices::Trouble;
 use crate::core::voice::{CallView, Status};
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::call_parts::{
-    CallPop, Side, Size, amber, camera_button, green, hang_up_button, ping_color, screen_button, signal, voice_avatar,
-    voice_flags,
+    CallPop, Side, Size, amber, green, hang_up_button, ping_color, signal, voice_avatar, voice_flags,
 };
 use crate::ui::motion;
 use crate::ui::theme::{alpha, radius_lg, radius_md};
@@ -38,7 +38,7 @@ impl FuwaApp {
         let Some(call) = self.core.call() else {
             self.calls.ticking = None;
             self.calls.mic_missing = false;
-            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. })) {
+            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. } | CallPop::Screens { .. })) {
                 self.calls.pop = None;
             }
             return None;
@@ -128,13 +128,37 @@ impl FuwaApp {
             (false, true) => Some(t("desktop.voice.noSpeakers")),
             (false, false) => None,
         };
+        // The system won't let the camera or screen start (macOS's privacy settings).
+        let video_trouble = call.video_trouble.as_ref().map(|(screen, _)| *screen);
+        let trouble = trouble.or_else(|| {
+            video_trouble
+                .map(|screen| t(if screen { "desktop.video.screenBlocked" } else { "desktop.video.cameraBlocked" }))
+        });
+        let allow = video_trouble.filter(|_| access::has_settings()).map(|screen| {
+            div()
+                .id("call-allow-video")
+                .ml(px(18.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.primary)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .child(t("desktop.video.openPrivacy"))
+                .on_click(move |_, _, _| {
+                    if screen {
+                        crate::core::voice::capture::open_screen_settings();
+                    } else {
+                        access::open_settings(access::Device::Camera);
+                    }
+                })
+        });
         let warn: gpui_kit::Rgba = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };
         let leave = if dm { t("dms-calls.calls.dm.hangUp") } else { t("dms-calls.calls.controls.disconnect") };
         let buttons = div()
             .flex()
             .gap(px(6.0))
-            .child(camera_button("panel-camera", Size::Sm, true, &p).h(px(32.0)))
-            .child(screen_button("panel-screen", Size::Sm, true, &p).h(px(32.0)))
+            .child(self.camera_button("panel", Size::Sm, true, cx))
+            .child(self.screen_button("panel", Size::Sm, true, window, cx))
             .when_some(self.record_button("panel", Size::Sm, true, window, cx), |el, b| el.child(b));
         let body = div()
             .flex()
@@ -172,7 +196,8 @@ impl FuwaApp {
                     Duration::ZERO,
                     6.0,
                 ))
-            });
+            })
+            .children(allow);
         let panel = div().flex_none().border_t_1().border_color(p.border).bg(alpha(p.background, 0.6)).child(body);
         let id = SharedString::from(format!("call-bar|{}|{}{}", call.instance, call.channel_id, call.conversation_id));
         Some(motion::rise(panel, id, Duration::ZERO, 12.0).into_any_element())

@@ -8,11 +8,13 @@
 //!
 //! [`link`] is the connection, [`sound`] the Opus and mixing between it
 //! and the devices, [`devices`] the microphone and speakers, [`quality`]
-//! how the connection is doing, [`video`] the cameras and screens coming in
-//! and [`vp8`] their pictures.
+//! how the connection is doing, [`video`] the cameras and screens coming in,
+//! [`capture`] yours going out, and [`vp8`] their pictures.
 
 pub mod access;
+pub mod capture;
 pub mod devices;
+mod film;
 pub mod link;
 pub mod quality;
 pub mod sound;
@@ -21,12 +23,14 @@ pub mod vp8;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 use tonic::Code;
 
+use self::capture::{Failure, Filmed, Sending};
 use self::devices::{Devices, Listener, Trouble};
 use self::link::{Happened, Link, Signal};
 use self::quality::Quality;
@@ -99,6 +103,13 @@ pub struct CallView {
     /// The microphone or speakers that couldn't open.
     pub trouble: Vec<Trouble>,
     pub quality: Quality,
+    /// The channel doesn't allow cameras or shared screens (no VIDEO there).
+    pub video_suppress: bool,
+    /// A moderator turned your camera and screen off in this server.
+    pub video_off: bool,
+    /// Why your camera or screen couldn't start, when the system's settings
+    /// are in the way: (a screen, why).
+    pub video_trouble: Option<(bool, Failure)>,
 }
 
 impl CallView {
@@ -172,6 +183,10 @@ struct Active {
     microphone: Listener,
     commands: mpsc::UnboundedSender<Command>,
     selves: watch::Sender<Selves>,
+    /// Your camera and shared screen while they're on, and where their frames go.
+    camera: Option<Sending>,
+    screen: Option<Sending>,
+    filmed: mpsc::Sender<Filmed>,
 }
 
 /// Where a call is.
@@ -228,7 +243,18 @@ pub struct Voice {
     push: Arc<Mutex<Push>>,
     /// Cameras and shared screens: their pictures, and what the windows want.
     videos: Arc<Videos>,
+    /// Your own camera shows mirrored to you.
+    mirror: Arc<AtomicBool>,
+    /// A test pattern stands in for the camera and screen.
+    pattern: AtomicBool,
+    /// The camera checked in settings, outside a call.
+    camera_test: Mutex<Option<Sending>>,
+    /// Why the camera check stopped by itself, if it did.
+    camera_test_failed: Mutex<Option<Failure>>,
 }
+
+/// The feed the camera check in settings shows.
+pub const CAMERA_TEST: &str = "camera-test";
 
 impl Core {
     /// Cameras and shared screens in the call, for the window.
@@ -325,6 +351,8 @@ impl Core {
         };
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let (selves_tx, selves_rx) = watch::channel(selves);
+        // A few frames of each size; more waits for the next keyframe.
+        let (filmed, filmed_rx) = mpsc::channel(32);
         let sound = match pipes {
             Some((microphone, speakers)) => Sound { microphone, speakers, devices: None },
             None => {
@@ -337,7 +365,8 @@ impl Core {
             Some(devices) => devices.listener(),
             None => Listener::detached(!selves.mute && !selves.deaf),
         };
-        *self.voice.active.lock() = Some(Active { id, microphone, commands, selves: selves_tx });
+        *self.voice.active.lock() =
+            Some(Active { id, microphone, commands, selves: selves_tx, camera: None, screen: None, filmed });
         *self.voice.ended.lock() = None;
         let (server_id, channel_id, conversation_id) = match &place {
             Place::Voice { server_id, channel_id } => (server_id.clone(), channel_id.clone(), String::new()),
@@ -360,6 +389,9 @@ impl Core {
             speaking: HashSet::new(),
             trouble: vec![],
             quality: Quality::default(),
+            video_suppress: false,
+            video_off: false,
+            video_trouble: None,
         });
         self.apply_volumes();
         self.shared.update(|_| ());
@@ -369,7 +401,8 @@ impl Core {
         let volumes = (self.voice.volumes.clone(), self.voice.push.clone());
         let videos = self.voice.videos.clone();
         self.runtime.spawn(async move {
-            let ended = run(core.clone(), id, api, target, sound, commands_rx, selves_rx, volumes, videos).await;
+            let ended =
+                run(core.clone(), id, api, target, sound, commands_rx, selves_rx, volumes, (videos, filmed_rx)).await;
             if let Some(core) = core.upgrade() {
                 core.finish(id, ended);
             }
@@ -661,7 +694,7 @@ async fn run(
     mut commands: mpsc::UnboundedReceiver<Command>,
     selves: watch::Receiver<Selves>,
     (volumes, push): (Arc<Mutex<Volumes>>, Arc<Mutex<Push>>),
-    videos: Arc<Videos>,
+    (videos, mut filmed): (Arc<Videos>, mpsc::Receiver<Filmed>),
 ) -> Option<Ended> {
     let view = |f: &dyn Fn(&mut CallView)| {
         if let Some(core) = core.upgrade() {
@@ -671,6 +704,11 @@ async fn run(
     let stopped = |why: String| {
         if let Some(core) = core.upgrade() {
             core.server_record_stopped(id, why);
+        }
+    };
+    let video_state = |state: pb::VoiceState| {
+        if let Some(core) = core.upgrade() {
+            core.video_state(id, &state);
         }
     };
     let say = |what: Option<Cue>, text: Option<String>| {
@@ -731,14 +769,13 @@ async fn run(
                     self_record: now.record,
                     server_record: now.server_record,
                     session_id: session.clone(),
-                    ..Default::default()
                 };
                 tokio::select! {
                     joined = rpc!(api.calls(), join_voice(request)) => joined.map(|j| {
                         if j.recordings_full && now.server_record {
                             stopped(t("workspace.calls.recordingsFull"));
                         }
-                        (j.session_id, j.answer)
+                        (j.session_id, j.answer, j.state)
                     }),
                     Some(Command::Leave) = commands.recv() => break None,
                 }
@@ -753,17 +790,19 @@ async fn run(
                     self_stream: now.stream,
                     self_record: now.record,
                     session_id: session.clone(),
-                    ..Default::default()
                 };
                 tokio::select! {
-                    joined = rpc!(api.calls(), join_dm_call(request)) => joined.map(|j| (j.session_id, j.answer)),
+                    joined = rpc!(api.calls(), join_dm_call(request)) => joined.map(|j| (j.session_id, j.answer, j.state)),
                     Some(Command::Leave) = commands.recv() => break None,
                 }
             }
         };
         let soon = match joined {
-            Ok((session_id, answer)) => {
+            Ok((session_id, answer, state)) => {
                 session = session_id;
+                if let Some(state) = state {
+                    video_state(state);
+                }
                 let connecting = tokio::select! {
                     connected = link.connect(&answer) => connected,
                     Some(Command::Leave) = commands.recv() => break None,
@@ -786,6 +825,9 @@ async fn run(
                             secrets: &mut secrets,
                             recorder: &mut recorder,
                             videos: &videos,
+                            filmed: &mut filmed,
+                            video_state: &video_state,
+                            core: &core,
                         };
                         call.drive(&mut link).await
                     }
@@ -896,6 +938,9 @@ struct Running<'a> {
     secrets: &'a mut Option<Secrets>,
     recorder: &'a mut Option<Recorder>,
     videos: &'a Arc<Videos>,
+    filmed: &'a mut mpsc::Receiver<Filmed>,
+    video_state: &'a (dyn Fn(pb::VoiceState) + Sync),
+    core: &'a std::sync::Weak<Core>,
 }
 
 impl Running<'_> {
@@ -993,7 +1038,7 @@ impl Running<'_> {
                         watchers.remove(&feed);
                         self.videos.forget(&feed);
                     }
-                    Happened::KeyframeAsked { .. } => {}
+                    Happened::KeyframeAsked { screen, rid } => self.keyframe(screen, rid.as_deref()),
                     Happened::Heard(who, packet) => {
                         // Someone new in a call that's been going a moment: a cue.
                         if heard.insert(who.clone())
@@ -1026,6 +1071,9 @@ impl Running<'_> {
                     }
                     Happened::Connected => {
                         broken_since = None;
+                        // Every camera starts each viewer on a keyframe of each size.
+                        self.keyframe(false, None);
+                        self.keyframe(true, None);
                         if connected.is_none() {
                             *connected = Some(Instant::now());
                             reports::timing("call.connect", started.elapsed());
@@ -1076,7 +1124,9 @@ impl Running<'_> {
                     layers_due.get_or_insert_with(|| Instant::now() + LAYERS_AFTER);
                 }
                 _ = tick.tick() => self.tick(link, &mut microphone, &mut mixer, &mut out, &mut trouble_seen),
+                Some(filmed) = self.filmed.recv() => self.film(link, filmed),
                 kept = kept.recv() => match kept {
+                    Some(Kept::State(state)) => (self.video_state)(*state),
                     Some(Kept::Gone) => return Outcome::Ended(Ended::Disconnected),
                     Some(Kept::Lost) => return Outcome::Rejoin { soon: true },
                     Some(Kept::Stopped(why)) => (self.stopped)(why),
@@ -1085,6 +1135,32 @@ impl Running<'_> {
                 Some(Command::Leave) = self.commands.recv() => return Outcome::Left,
             }
         }
+    }
+
+    /// Asks your camera (or screen) for a keyframe of one size, or of all.
+    fn keyframe(&self, screen: bool, rid: Option<&str>) {
+        let Some(core) = self.core.upgrade() else { return };
+        let active = core.voice.active.lock();
+        let sending = active.as_ref().and_then(|a| if screen { a.screen.as_ref() } else { a.camera.as_ref() });
+        if let Some(sending) = sending {
+            sending.keyframe(rid);
+        }
+    }
+
+    /// A frame of your camera or screen goes out, sealed in a direct message's call.
+    fn film(&mut self, link: &mut Link, filmed: Filmed) {
+        let now = *self.selves.borrow();
+        if !link.is_connected() || !(if filmed.screen { now.stream } else { now.video }) {
+            return;
+        }
+        let frame = match self.frames.as_mut() {
+            Some(frames) => match frames.seal_video(&filmed.frame) {
+                Some(sealed) => sealed,
+                None => return,
+            },
+            None => filmed.frame,
+        };
+        link.film(filmed.screen, filmed.rid, filmed.taken, frame);
     }
 
     /// 20 ms of the call: the microphone out, everyone else mixed in, who's speaking.
@@ -1207,6 +1283,8 @@ impl Drop for AbortOnDrop {
 }
 
 enum Kept {
+    /// How the instance has you now (VIDEO taken away, a moderator's doing).
+    State(Box<pb::VoiceState>),
     /// The place is gone for good.
     Gone,
     /// The media part lost the place (it restarted): join again.
@@ -1229,6 +1307,7 @@ async fn keep(
             changed = selves.changed() => if changed.is_err() { return },
         }
         let now = *selves.borrow_and_update();
+        let told = kept.clone();
         let result = match &place {
             Place::Voice { server_id, channel_id } => {
                 let request = pb::KeepVoiceRequest {
@@ -1241,11 +1320,11 @@ async fn keep(
                     self_stream: now.stream,
                     self_record: now.record,
                     server_record: now.server_record,
-                    ..Default::default()
                 };
                 rpc!(api.calls(), keep_voice(request)).await.map(|kept| {
-                    // RECORD went away, or the instance stopped recording on the server.
                     let state = kept.state.unwrap_or_default();
+                    let _ = told.try_send(Kept::State(Box::new(state.clone())));
+                    // RECORD went away, or the instance stopped recording on the server.
                     (now.server_record && !state.server_record).then(|| {
                         if state.record_suppress {
                             t("workspace.calls.noRecordAnyMore")
@@ -1268,9 +1347,11 @@ async fn keep(
                     self_video: now.video,
                     self_stream: now.stream,
                     self_record: now.record,
-                    ..Default::default()
                 };
-                rpc!(api.calls(), keep_dm_call(request)).await.map(|_| None)
+                rpc!(api.calls(), keep_dm_call(request)).await.map(|kept| {
+                    let _ = told.try_send(Kept::State(Box::new(kept.state.unwrap_or_default())));
+                    None
+                })
             }
         };
         match result {

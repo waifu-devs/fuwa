@@ -77,6 +77,8 @@ pub(crate) struct CallsUi {
     pub popouts: std::collections::HashMap<String, gpui_kit::AnyWindowHandle>,
     /// Whether a call was going on at the last change, to notice it ending.
     pub in_call: bool,
+    /// What can be shared, read when the screen button's list opens.
+    pub screens: Vec<crate::core::voice::capture::Screen>,
 }
 
 impl FuwaApp {
@@ -129,6 +131,8 @@ pub(crate) enum CallPop {
     Connection,
     /// Recording on this computer or on the server; `from` names the button.
     Record { from: String },
+    /// What to share; `from` names the button.
+    Screens { from: String },
 }
 
 /// The two sizes call buttons come in: the call panel's and the stage's.
@@ -367,32 +371,189 @@ pub(crate) fn hang_up_button(id: impl Into<SharedString>, size: Size, label: Str
         .child(icon("phone-off").size(px(size.icon())))
 }
 
-/// The web's `CameraButton`. The desktop app's calls are sound only, so it's
-/// there, as on the web where a camera isn't allowed, but can't be pressed.
-pub(crate) fn camera_button(id: impl Into<SharedString>, size: Size, grow: bool, p: &Palette) -> Stateful<Div> {
-    let label = t("desktop.voice.noCamera");
-    let fg = if size == Size::Sm { p.muted_foreground.into() } else { p.foreground.into() };
-    let bg = (size == Size::Lg).then(|| p.muted.into());
-    let hover_bg = bg.unwrap_or(gpui_kit::transparent_black());
-    call_button_frame(id.into(), size, bg, fg, hover_bg, fg, label)
-        .when(grow, |el| el.flex_1())
-        .opacity(0.4)
-        .cursor_default()
-        .child(icon("video-off").size(px(size.icon())))
+/// Whether you may turn your camera on or share your screen in the call
+/// you're in: VIDEO in a voice channel, always in a conversation.
+pub(crate) fn may_film(app: &FuwaApp, call: &CallView) -> bool {
+    if call.is_dm() {
+        return true;
+    }
+    app.core.shared.read(|s| {
+        s.instance(&call.instance)
+            .is_some_and(|i| i.access(&call.server_id).has_in(&call.channel_id, pb::Permission::Video))
+    })
 }
 
-/// The web's `ScreenButton`, likewise there but not pressable: the desktop
-/// app doesn't share screens yet.
-pub(crate) fn screen_button(id: impl Into<SharedString>, size: Size, grow: bool, p: &Palette) -> Stateful<Div> {
-    let label = t("desktop.voice.noScreen");
-    let fg = if size == Size::Sm { p.muted_foreground.into() } else { p.foreground.into() };
-    let bg = (size == Size::Lg).then(|| p.muted.into());
-    let hover_bg = bg.unwrap_or(gpui_kit::transparent_black());
-    call_button_frame(id.into(), size, bg, fg, hover_bg, fg, label)
-        .when(grow, |el| el.flex_1())
-        .opacity(0.4)
-        .cursor_default()
-        .child(icon("monitor-up").size(px(size.icon())))
+/// A camera or screen button's colors: `on` in its own color.
+fn film_colors(on: bool, on_bg: Rgba, on_fg: gpui_kit::Hsla, size: Size, p: &Palette) -> FrameColors {
+    match (on, size) {
+        (true, _) => (Some(on_bg.into()), on_fg, alpha(on_bg, 0.9), on_fg),
+        (false, Size::Sm) => (None, p.muted_foreground.into(), p.muted.into(), p.foreground.into()),
+        (false, Size::Lg) => (Some(p.muted.into()), p.foreground.into(), alpha(p.muted, 0.7), p.foreground.into()),
+    }
+}
+
+type FrameColors = (Option<gpui_kit::Hsla>, gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla);
+
+impl FuwaApp {
+    /// The web's `CameraButton`: your camera on (green) or off, greyed where
+    /// you may not turn it on.
+    pub(crate) fn camera_button(&self, tag: &str, size: Size, grow: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let Some(call) = self.core.call() else { return div().into_any_element() };
+        let on = call.self_video;
+        let may = may_film(self, &call);
+        let label = t(if !may {
+            "dms-calls.calls.video.cameraNotAllowed"
+        } else if on {
+            "dms-calls.calls.video.cameraOff"
+        } else {
+            "dms-calls.calls.video.cameraOn"
+        });
+        let (bg, fg, hover_bg, hover_fg) = film_colors(on, green(), gpui_kit::white(), size, &p);
+        let glyph = icon(if on { "video" } else { "video-off" }).size(px(size.icon()));
+        let glyph = motion::once(
+            div().child(glyph),
+            SharedString::from(format!("camera-glyph|{tag}|{on}")),
+            Duration::from_millis(260),
+            |el, t| el.opacity(t),
+        );
+        call_button_frame(SharedString::from(format!("camera|{tag}")), size, bg, fg, hover_bg, hover_fg, label)
+            .when(grow, |el| el.flex_1())
+            .when(!may, |el| el.opacity(0.4).cursor_default())
+            .when(may, |el| {
+                el.on_click(cx.listener(move |this, _, _, cx| {
+                    this.core.set_camera(!on);
+                    cx.notify();
+                }))
+            })
+            .child(glyph)
+            .into_any_element()
+    }
+
+    /// The web's `ScreenButton`: starts sharing through a list of what can be
+    /// shared, or stops.
+    pub(crate) fn screen_button(
+        &mut self,
+        tag: &str,
+        size: Size,
+        grow: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = pal(cx);
+        let Some(call) = self.core.call() else { return div().into_any_element() };
+        let on = call.self_stream;
+        let may = may_film(self, &call);
+        let label = t(if !may {
+            "dms-calls.calls.video.screenNotAllowed"
+        } else if on {
+            "dms-calls.calls.video.screenStop"
+        } else {
+            "dms-calls.calls.video.screenShare"
+        });
+        let (bg, fg, hover_bg, hover_fg) = film_colors(on, p.primary, p.primary_foreground.into(), size, &p);
+        let pop = CallPop::Screens { from: tag.to_owned() };
+        let open = self.calls.pop.as_ref() == Some(&pop);
+        let button =
+            call_button_frame(SharedString::from(format!("screen|{tag}")), size, bg, fg, hover_bg, hover_fg, label)
+                .when(grow, |el| el.flex_1())
+                .when(!may, |el| el.opacity(0.4).cursor_default())
+                .when(may, |el| {
+                    el.on_click(cx.listener(move |this, _, _, cx| {
+                        if on {
+                            this.core.set_screen(false, None);
+                        } else {
+                            // What can be shared, read as the list opens.
+                            this.calls.screens = crate::core::voice::capture::screens();
+                            this.toggle_call_pop(pop.clone(), cx);
+                        }
+                        cx.notify();
+                    }))
+                })
+                .child(icon(if on { "monitor-x" } else { "monitor-up" }).size(px(size.icon())));
+        let mut holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
+        if open && !on {
+            holder = holder.child(self.hang(self.screens_card(window, cx), Side::AboveCenter));
+        }
+        holder.into_any_element()
+    }
+
+    /// The screens and windows to share, as a menu (the system's own picker,
+    /// on the web).
+    fn screens_card(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let mut list = div().id("screens-list").max_h(px(320.0)).overflow_y_scroll().flex().flex_col();
+        for screen in &self.calls.screens {
+            let hover = alpha(p.primary, 0.1);
+            let id = screen.id;
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("share|{}|{}", screen.display, screen.id)))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .px(px(8.0))
+                    .py(px(8.0))
+                    .rounded(radius_md())
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .child(
+                        icon(if screen.display { "monitor" } else { "app-window" })
+                            .size(px(16.0))
+                            .text_color(p.muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(screen.name.clone()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.calls.pop = None;
+                        this.core.set_screen(true, Some(id));
+                        cx.notify();
+                    })),
+            );
+        }
+        if self.calls.screens.is_empty() {
+            list = list.child(
+                div()
+                    .px(px(8.0))
+                    .py(px(8.0))
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("desktop.video.nothingToShare")),
+            );
+        }
+        div()
+            .w(px(320.0))
+            .rounded(radius_xl())
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card)
+            .p(px(4.0))
+            .shadow(shadow_xl())
+            .occlude()
+            .child(
+                div()
+                    .px(px(8.0))
+                    .py(px(6.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(p.muted_foreground)
+                    .child(t("dms-calls.calls.video.screenShare")),
+            )
+            .child(list)
+            .into_any_element()
+    }
 }
 
 /// Whether you may record in the call you're in: RECORD in a voice channel, always in a conversation.

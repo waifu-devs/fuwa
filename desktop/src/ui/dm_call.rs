@@ -18,9 +18,7 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
-use crate::ui::call_parts::{
-    CallPop, Side, Size, camera_button, green, hang_up_button, person_avatar, screen_button, voice_avatar,
-};
+use crate::ui::call_parts::{CallPop, Side, Size, green, hang_up_button, person_avatar, voice_avatar};
 use crate::ui::motion;
 use crate::ui::popout::Popped;
 use crate::ui::settings_controls::shadow_xl;
@@ -271,8 +269,8 @@ impl FuwaApp {
                 .items_center()
                 .gap(px(8.0))
                 .child(self.mute_buttons("dm", Size::Lg, cx))
-                .child(camera_button("dm-camera", Size::Lg, false, &p))
-                .child(screen_button("dm-screen", Size::Lg, false, &p))
+                .child(self.camera_button("dm", Size::Lg, false, cx))
+                .child(self.screen_button("dm", Size::Lg, false, window, cx))
                 .when_some(self.record_button("dm", Size::Lg, false, window, cx), |el, b| el.child(b))
                 .child(hang_up_button("dm-hang-up", Size::Lg, t("dms-calls.calls.dm.hangUp"), &p).on_click(
                     cx.listener(|this, _, _, cx| {
@@ -364,7 +362,8 @@ impl FuwaApp {
         let name = crate::core::store::user_name(user);
         let group = format!("dm-tile|{}", user.id);
         let feed = crate::core::voice::video::feed_of(&user.id, false);
-        let camera = video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, window, cx));
+        let camera =
+            video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius_2xl(), window, cx));
         let tile = div()
             .relative()
             .w_full()
@@ -421,7 +420,11 @@ impl FuwaApp {
                         &group,
                         p,
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| this.pop_out(popped.clone(), cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        // Not the tile under it too.
+                        cx.stop_propagation();
+                        this.pop_out(popped.clone(), cx)
+                    })),
                 )
             })
             .into_any_element()
@@ -455,7 +458,7 @@ impl FuwaApp {
             .border_1()
             .border_color(p.border)
             .bg(gpui_kit::black())
-            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, window, cx))
+            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, radius_2xl(), window, cx))
             .child(
                 div()
                     .absolute()
@@ -494,7 +497,11 @@ impl FuwaApp {
                     &group,
                     p,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| this.pop_out(popped.clone(), cx))),
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not the tile under it too.
+                    cx.stop_propagation();
+                    this.pop_out(popped.clone(), cx)
+                })),
             )
             .into_any_element()
     }

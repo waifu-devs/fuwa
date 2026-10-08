@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::{
     AnyElement, App, Div, FontWeight, Global, InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _,
-    RenderImage, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div,
-    px,
+    Pixels, RenderImage, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, StyledImage as _,
+    Window, div, px,
 };
 
 use crate::core::Core;
@@ -126,12 +126,24 @@ pub(crate) fn clear(window: &mut Window, cx: &mut App) {
 
 /// A feed playing over whatever is under it (the person's avatar): once its
 /// first picture is in, the picture `fit` to the box on black, faded in.
-/// It asks for its size from the start, or no picture would come.
-pub(crate) fn feed_view(core: &Core, feed: &str, fit: ObjectFit, window: &mut Window, cx: &mut App) -> AnyElement {
+/// It asks for its size from the start, or no picture would come. Its
+/// corners are `radius` round, as its tile's (pictures aren't clipped to them).
+pub(crate) fn feed_view(
+    core: &Core,
+    feed: &str,
+    fit: ObjectFit,
+    radius: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let image = picture(core, feed, window, cx);
     let shown = image.map(|image| {
-        let el =
-            div().absolute().inset_0().bg(gpui_kit::black()).child(gpui_kit::img(image).size_full().object_fit(fit));
+        let el = div()
+            .absolute()
+            .inset_0()
+            .rounded(radius)
+            .bg(gpui_kit::black())
+            .child(gpui_kit::img(image).size_full().rounded(radius).object_fit(fit));
         motion::once(el, SharedString::from(format!("video-in|{feed}")), Duration::from_millis(350), |el, t| {
             el.opacity(t)
         })

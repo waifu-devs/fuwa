@@ -20,8 +20,7 @@ use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::call_parts::{
-    CallPop, Side, Size, camera_button, green, hang_up_button, in_voice, red, screen_button, toggle_icon, voice_avatar,
-    voice_flags,
+    CallPop, Side, Size, green, hang_up_button, in_voice, red, toggle_icon, voice_avatar, voice_flags,
 };
 use crate::ui::motion;
 use crate::ui::popout::Popped;
@@ -280,8 +279,8 @@ impl FuwaApp {
                 .items_center()
                 .gap(px(8.0))
                 .child(self.mute_buttons("stage", Size::Lg, cx))
-                .child(camera_button("stage-camera", Size::Lg, false, &p))
-                .child(screen_button("stage-screen", Size::Lg, false, &p))
+                .child(self.camera_button("stage", Size::Lg, false, cx))
+                .child(self.screen_button("stage", Size::Lg, false, window, cx))
                 .when_some(self.record_button("stage", Size::Lg, false, window, cx), |el, b| el.child(b))
                 .child(hang_up_button("stage-leave", Size::Lg, t("dms-calls.calls.controls.disconnect"), &p).on_click(
                     cx.listener(|this, _, _, cx| {
@@ -555,7 +554,8 @@ impl FuwaApp {
             })
             .child(voice_flags(state, p));
         let feed = crate::core::voice::video::feed_of(&state.user_id, false);
-        let camera = video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, window, cx));
+        let camera =
+            video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius, window, cx));
         let tile = div()
             .id(SharedString::from(tag.clone()))
             .relative()
@@ -605,7 +605,11 @@ impl FuwaApp {
                     &group,
                     p,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| this.pop_out(popped.clone(), cx))),
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not the tile under it too.
+                    cx.stop_propagation();
+                    this.pop_out(popped.clone(), cx)
+                })),
             );
         }
         if open {
@@ -657,7 +661,7 @@ impl FuwaApp {
             .border_1()
             .border_color(p.border)
             .bg(gpui_kit::black())
-            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, window, cx))
+            .child(crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Contain, radius_3xl(), window, cx))
             .child(
                 div()
                     .absolute()
@@ -690,7 +694,11 @@ impl FuwaApp {
             &group,
             p,
         )
-        .on_click(cx.listener(move |this, _, _, cx| this.pop_out(popped.clone(), cx)));
+        .on_click(cx.listener(move |this, _, _, cx| {
+            // Not the tile under it too.
+            cx.stop_propagation();
+            this.pop_out(popped.clone(), cx)
+        }));
         motion::rise(
             div().relative().group(SharedString::from(group.clone())).child(tile).child(button),
             SharedString::from(format!("screen-in|{}", state.user_id)),

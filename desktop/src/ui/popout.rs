@@ -160,7 +160,7 @@ impl Render for PopOut {
                 36.0,
             )));
         if on {
-            root = root.child(video::feed_view(&self.core, &feed_of(&p.user, p.screen), fit, window, cx));
+            root = root.child(video::feed_view(&self.core, &feed_of(&p.user, p.screen), fit, px(0.0), window, cx));
         }
         if prefs.popout_glow && speaking {
             root =

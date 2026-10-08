@@ -187,7 +187,7 @@ pub fn from_nv12(src: &[u8], width: u32, height: u32, out: &mut Yuv) {
     let (luma, chroma) = src.split_at((sw * sh).min(src.len()));
     let mut u = vec![0u8; sw.div_ceil(2) * sh.div_ceil(2)];
     let mut v = u.clone();
-    for (n, pair) in chroma.chunks_exact(2).take(u.len()).enumerate() {
+    for (n, pair) in chroma.as_chunks::<2>().0.iter().take(u.len()).enumerate() {
         u[n] = pair[0];
         v[n] = pair[1];
     }

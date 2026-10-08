@@ -522,8 +522,11 @@
     `server_admin.rs`
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
-    frame encryption, byte for byte the web app's; the call itself comes
-    with the app's sound), `reports.rs` (the anonymous reports: panics, also
+    frame encryption, byte for byte the web app's; the call itself is
+    `voice/`: str0m, Opus, and VP8 through libvpx for cameras and screens,
+    `voice/capture.rs` taking and encoding yours in three simulcast sizes,
+    `voice/video.rs` decoding others' and the sizes asked of them, drawn by
+    `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md), `reports.rs` (the anonymous reports: panics, also
     written to `crashes.txt` in the config folder so a crash is sent next
     time, failed and timed `rpc!` calls, startup, catching up, slow frames
     and a few feature counts, sent every 10 minutes through

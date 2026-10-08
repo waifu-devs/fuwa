@@ -1,8 +1,7 @@
 # Calls
 
 Voice channels in community servers and calls in direct messages, with
-sound, cameras and shared screens. The desktop app has voice channels with
-sound; its cameras, shared screens and direct-message calls come later.
+sound, cameras and shared screens, in the web app and the desktop app alike.
 
 ## The parts
 
@@ -361,8 +360,8 @@ WebRTC's encoded transforms (`RTCRtpScriptTransform`, or Chrome's
   on the conversation and try again.
 
 The desktop app's core (`desktop/src/core/calls.rs`) seals and opens frames
-of sound the same way, checked against a frame the web app sealed; it has no
-camera yet.
+of sound and camera the same way, checked against frames the web app's
+worker code sealed.
 
 What the server sees of a direct-message call: that it's happening, who's in
 it and since when, their mute, deafen, camera and shared screen on or off, the size and
@@ -371,8 +370,8 @@ sound or the pictures.
 
 ## The desktop app
 
-Voice channels, sound only (`desktop/src/core/voice`). It's the web app's
-call in Rust: str0m as the WebRTC client (the library the media part runs),
+Voice channels and direct-message calls, with cameras and shared screens
+(`desktop/src/core/voice`). It's the web app's call in Rust: str0m as the WebRTC client (the library the media part runs),
 Opus at 48 kHz in 20 ms frames, and cpal for the system's default
 microphone and speakers at whatever rate they run, resampled to and from
 48 kHz on a thread of their own. It joins, keeps its place every 5 s (and at
@@ -427,8 +426,29 @@ over HTTPS with a media-only key ([self-hosting.md](self-hosting.md#the-media-pa
 volume-less media service, deploys overlap, so the restart above is the only
 interruption.
 
-## Next
+### Cameras and screens on the desktop
 
-- **The rest of the desktop app's calls**: direct-message calls (with the
-  frame encryption it already has), picking the microphone and speakers,
-  then cameras, with each person's camera in a native window of its own.
+The desktop app's offer has the same empty camera and screen places, each
+with the three simulcast sizes (str0m's simulcast send layers, rids l, m
+and h). Pictures are VP8 through libvpx (the `shiguredo_libvpx` crate: a
+static libvpx, fetched prebuilt for each system and checked against its
+SHA-256, so installers carry nothing extra; on Linux it's named for an
+Ubuntu release, which `LIBVPX_TARGET` picks where the build machine isn't
+one). Cameras come through nokhwa (V4L2, AVFoundation, Media Foundation),
+screens and windows through scap (X11, ScreenCaptureKit, Windows Graphics
+Capture; not Wayland yet), each taken on a thread of its own and encoded on
+another in three sizes at the web's sizes, frame rates and bitrates (CBR,
+real time). Only the newest picture waits for the encoder, a full queue to
+the connection makes that size wait for a keyframe, and keyframes are sent
+when the media part asks (FIR, PLI) and whenever the connection is new.
+macOS asks before the camera (`core/voice/access.rs`) and the screen; a
+refusal says so with a way to System Settings. `FUWA_DESKTOP_FAKE_VIDEO=1`
+sends a moving test pattern instead, for machines with neither.
+
+Coming in, each feed gets a decoding thread that leaves only its latest
+picture (as BGRA) for the window: one the window didn't take yet is written
+over, its buffer reused, and a frame that can't wait is dropped and a
+keyframe asked for. Each window says how tall it draws each feed as it
+paints (only what's in sight), and the call asks for the size that fits, or
+"off", as the web's `video.ts` does. Popped-out feeds are windows of their
+own. The desktop doesn't share a screen's sound yet.

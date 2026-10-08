@@ -484,13 +484,13 @@ impl FuwaApp {
         })
         .detach();
 
-        // A new picture of a camera or screen: drawn on the next frame, only
+        // while a call goes on or the camera is being checked.
         // while a call goes on.
         let mut pictures = core.videos().changes();
         cx.spawn_in(window, async move |this, cx| {
             while pictures.changed().await.is_ok() {
                 let going = this.update(cx, |this, cx| {
-                    if this.core.call().is_some() {
+                    if this.core.call().is_some() || this.core.camera_testing().0 {
                         cx.notify();
                     }
                 });
@@ -691,6 +691,8 @@ impl FuwaApp {
         self.sync_list(cx);
         self.sync_thread(cx);
         // Hanging up closes the popped-out cameras and lets go of every picture.
+        // A moderator turning your camera off reaches you at once, not at the next keep.
+        self.core.watch_video_moderation();
         let in_call = self.core.call().is_some();
         if std::mem::replace(&mut self.calls.in_call, in_call) && !in_call {
             self.close_pop_outs(cx);

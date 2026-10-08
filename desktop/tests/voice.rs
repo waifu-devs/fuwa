@@ -49,7 +49,7 @@ fn wait<T: Send + 'static>(core: &Arc<Core>, future: impl Future<Output = T> + S
     futures::executor::block_on(core.spawn(future)).unwrap()
 }
 
-fn until(what: &str, check: impl Fn() -> bool) {
+fn until(what: &str, mut check: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !check() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
@@ -257,4 +257,129 @@ fn muting_while_rejoining_closes_the_microphone() {
     assert_eq!(alice.microphone_open(), Some(true));
     alice.set_self_deaf(true);
     assert_eq!(alice.microphone_open(), Some(false), "deafened closes it too");
+}
+
+/// Waits for a picture of `feed` `width` wide (the media part switches
+/// sizes on the next keyframe) and gives its height and a sample of it.
+fn picture(core: &Core, feed: &str, width: u32) -> (u32, u32, [u8; 3]) {
+    let mut got = None;
+    until(&format!("a picture of {feed} {width} wide"), || {
+        got = core.videos().take(feed).filter(|p| p.width == width);
+        got.is_some()
+    });
+    let p = got.unwrap();
+    assert_eq!(p.bgra.len(), (p.width * p.height * 4) as usize);
+    // The test pattern's background, a third of the way down, at the left.
+    let at = ((p.height / 3 * p.width + 4) * 4) as usize;
+    (p.width, p.height, [p.bgra[at], p.bgra[at + 1], p.bgra[at + 2]])
+}
+
+/// Says that a window shows `feed` this tall, as the window would.
+fn show(core: &Core, feed: &str, height: u32) {
+    core.videos().want(1, std::collections::HashMap::from([(feed.to_owned(), height)]));
+}
+
+/// Cameras and shared screens between two copies of the app, through the
+/// media part: Alice's goes out in three sizes, Bob gets the one that fits
+/// how big he shows it, and sees her picture as she sent it.
+#[test]
+fn two_people_see_each_other_in_a_voice_channel() {
+    let Setup { key, server, voice, alice, bob, _homes, _instance, .. } = setup("127.0.0.1");
+    let id_of = |core: &Core| core.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    let (alice_id, bob_id) = (id_of(&alice), id_of(&bob));
+    for core in [&alice, &bob] {
+        core.use_test_pattern();
+        let pipes = (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
+        core.join_voice_with(&key, &server.id, &voice.id, Some(pipes));
+    }
+    for core in [&alice, &bob] {
+        until("connected", || core.call().is_some_and(|c| c.status == Status::Connected));
+    }
+
+    // Alice turns her camera on: the instance shows it, and Bob, showing it
+    // big, gets the full size (the pattern is 640×360).
+    show(&bob, &alice_id, 720);
+    alice.set_camera(true);
+    assert!(alice.call().unwrap().self_video);
+    until("Alice's camera shown on", || shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| v.self_video));
+    let (w, h, color) = picture(&bob, &alice_id, 640);
+    assert_eq!((w, h), (640, 360), "the full size");
+    let (w2, h2, again) = picture(&bob, &alice_id, 640);
+    assert_eq!((w2, h2), (640, 360));
+    for (a, b) in color.iter().zip(again) {
+        assert!(a.abs_diff(b) < 24, "a steady picture: {color:?} {again:?}");
+    }
+
+    // Showing it small, he gets a quarter.
+    show(&bob, &alice_id, 200);
+    until("the small size", || bob.videos().take(&alice_id).is_some_and(|p| (p.width, p.height) == (160, 90)));
+    // Half.
+    show(&bob, &alice_id, 400);
+    until("half", || bob.videos().take(&alice_id).is_some_and(|p| (p.width, p.height) == (320, 180)));
+    // Not showing it at all, nothing comes.
+    show(&bob, &alice_id, 0);
+    std::thread::sleep(Duration::from_millis(600));
+    let _ = bob.videos().take(&alice_id);
+    let seq = bob.videos().seq(&alice_id);
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(bob.videos().seq(&alice_id) <= seq + 1, "stopped");
+
+    // Her own preview, mirrored or not, comes from her camera at the size she shows it.
+    show(&alice, &alice_id, 200);
+    assert_eq!(picture(&alice, &alice_id, 160).1, 90);
+
+    // A shared screen is a feed of its own, at up to 1080p.
+    show(&bob, &format!("{alice_id}-screen"), 1080);
+    alice.set_screen(true, None);
+    until("Alice shown sharing", || shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| v.self_stream));
+    assert_eq!(picture(&bob, &format!("{alice_id}-screen"), 1280).1, 720);
+
+    // Bob's camera goes the other way.
+    show(&alice, &bob_id, 720);
+    bob.set_camera(true);
+    assert_eq!(picture(&alice, &bob_id, 640).1, 360);
+
+    // Turning it off shows it off.
+    alice.set_camera(false);
+    alice.set_screen(false, None);
+    until("Alice's camera shown off", || {
+        shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| !v.self_video && !v.self_stream)
+    });
+}
+
+/// In a direct message's call, cameras are sealed end to end, the web's
+/// way (core/calls.rs checks the format): Bob opens Alice's frames with the
+/// conversation's secret, and the media part only ever had ciphertext.
+#[test]
+fn cameras_in_direct_messages_are_sealed_and_open_for_the_other_person() {
+    use fuwa_desktop::core::dms::Content;
+    let Setup { key, alice, bob, _homes, _instance, .. } = setup("127.0.0.1");
+    let id_of = |core: &Core| core.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    let (alice_id, bob_id) = (id_of(&alice), id_of(&bob));
+    let conversation = {
+        let (core, key, bob_id) = (alice.clone(), key.clone(), bob_id.clone());
+        wait(&alice, async move { core.open_conversation(&key, &bob_id).await }).unwrap()
+    };
+    {
+        let (core, key, id) = (alice.clone(), key.clone(), conversation.clone());
+        let content = Content::Text { text: "call?".into(), reply_to: 0 };
+        wait(&alice, async move { core.send_dm(&key, &id, content).await }).unwrap();
+    }
+    until_store(&bob, "the message", |s| {
+        s.instance(&key).unwrap().dms.items.get(&conversation).is_some_and(|items| !items.is_empty())
+    });
+    for core in [&alice, &bob] {
+        core.use_test_pattern();
+        core.join_dm_call(&key, &conversation);
+    }
+    for core in [&alice, &bob] {
+        until("connected", || core.call().is_some_and(|c| c.status == Status::Connected));
+    }
+    show(&bob, &alice_id, 720);
+    alice.set_camera(true);
+    let (w, h, _) = picture(&bob, &alice_id, 640);
+    assert_eq!((w, h), (640, 360), "opened and decoded");
+    show(&alice, &format!("{bob_id}-screen"), 720);
+    bob.set_screen(true, None);
+    assert_eq!(picture(&alice, &format!("{bob_id}-screen"), 1280).1, 720);
 }
