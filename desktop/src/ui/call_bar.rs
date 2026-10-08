@@ -14,6 +14,7 @@ use gpui_kit::{
 
 use crate::core::calls::clock;
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::voice::access;
 use crate::core::voice::devices::Trouble;
 use crate::core::voice::{CallView, Status};
 use crate::ui::app::{FuwaApp, Nav};
@@ -116,18 +117,31 @@ impl FuwaApp {
             })
             .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(where_))
             .when(connected, |el| el.child(div().ml_auto().flex_none().pl(px(8.0)).child(clock(seconds))));
-        let no_mic = call.trouble.contains(&Trouble::NoMicrophone);
+        let blocked = call.trouble.contains(&Trouble::MicrophoneBlocked);
+        let no_mic = blocked || call.trouble.contains(&Trouble::NoMicrophone);
         if no_mic && !self.calls.mic_missing && !call.self_mute {
             self.core.mute_for_no_microphone();
         }
         self.calls.mic_missing = no_mic;
-        let trouble = match (call.trouble.contains(&Trouble::NoMicrophone), call.trouble.contains(&Trouble::NoSpeakers))
-        {
+        let trouble = match (no_mic, call.trouble.contains(&Trouble::NoSpeakers)) {
+            _ if blocked => Some(t("desktop.voice.micBlocked")),
             (true, true) => Some(t("desktop.voice.noDevices")),
             (true, false) => Some(t("workspace.calls.mic.notFound")),
             (false, true) => Some(t("desktop.voice.noSpeakers")),
             (false, false) => None,
         };
+        let allow = (blocked && access::has_settings()).then(|| {
+            div()
+                .id("call-allow-mic")
+                .ml(px(18.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.primary)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .child(t("desktop.voice.openPrivacy"))
+                .on_click(|_, _, _| access::open_settings(access::Device::Microphone))
+        });
         let warn: gpui_kit::Rgba = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };
         let leave = if dm { t("dms-calls.calls.dm.hangUp") } else { t("dms-calls.calls.controls.disconnect") };
         let buttons = div()
@@ -172,7 +186,8 @@ impl FuwaApp {
                     Duration::ZERO,
                     6.0,
                 ))
-            });
+            })
+            .when_some(allow, |el, allow| el.child(allow));
         let panel = div().flex_none().border_t_1().border_color(p.border).bg(alpha(p.background, 0.6)).child(body);
         let id = SharedString::from(format!("call-bar|{}|{}{}", call.instance, call.channel_id, call.conversation_id));
         Some(motion::rise(panel, id, Duration::ZERO, 12.0).into_any_element())

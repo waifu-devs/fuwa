@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- macOS shows these when it asks; without them it never asks and the app gets silence. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>fuwa uses your microphone for calls and voice messages.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>fuwa uses your camera when you turn it on in a call.</string>
+</dict>
+</plist>

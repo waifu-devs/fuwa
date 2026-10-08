@@ -523,7 +523,9 @@
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
     frame encryption, byte for byte the web app's; the call itself comes
-    with the app's sound), `reports.rs` (the anonymous reports: panics, also
+    with the app's sound; `voice/access.rs` asks macOS for the microphone
+    and camera, which it allows only to a bundle whose Info.plist says why,
+    `desktop/packaging/macos/`), `reports.rs` (the anonymous reports: panics, also
     written to `crashes.txt` in the config folder so a crash is sent next
     time, failed and timed `rpc!` calls, startup, catching up, slow frames
     and a few feature counts, sent every 10 minutes through

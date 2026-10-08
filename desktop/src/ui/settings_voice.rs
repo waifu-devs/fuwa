@@ -5,6 +5,7 @@
 //! sound only and send the microphone as it is, so the camera and the
 //! browser's sound processing say so instead of pretending.
 
+use crate::core::voice::access;
 use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -42,6 +43,8 @@ pub(crate) struct VoiceForm {
     devices: Option<(Vec<String>, Vec<String>)>,
     pub mic: Option<MicTest>,
     mic_failed: bool,
+    /// The mic test failed because the system won't let the app use the microphone.
+    mic_blocked: bool,
 }
 
 /// -100..0 dB as a share of a meter.
@@ -234,6 +237,7 @@ impl SettingsView {
         let testing = self.voice.mic.is_some();
         if let Some(mic) = &self.voice.mic {
             if mic.failed.load(std::sync::atomic::Ordering::Relaxed) {
+                self.voice.mic_blocked = mic.blocked.load(std::sync::atomic::Ordering::Relaxed);
                 self.voice.mic = None;
                 self.voice.mic_failed = true;
             } else {
@@ -290,13 +294,38 @@ impl SettingsView {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.voice.mic = if this.voice.mic.is_some() { None } else { Some(MicTest::start(&device)) };
                         this.voice.mic_failed = false;
+                        this.voice.mic_blocked = false;
                         cx.notify();
                     })),
                 ),
             )
             .child(meter)
-            .when(self.voice.mic_failed, |el| {
+            .when(self.voice.mic_failed && !self.voice.mic_blocked, |el| {
                 el.child(div().text_sm().text_color(p.destructive).child(t("desktop.voice.micFailed")))
+            })
+            .when(self.voice.mic_blocked, |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(8.0))
+                        .child(div().text_sm().text_color(p.destructive).child(t("desktop.voice.micBlocked")))
+                        .when(access::has_settings(), |el| {
+                            el.child(
+                                button(
+                                    "mic-allow",
+                                    t("desktop.voice.openPrivacy"),
+                                    Some("settings"),
+                                    Look::Outline,
+                                    false,
+                                    p,
+                                )
+                                .rounded(radius_xl())
+                                .on_click(|_, _, _| access::open_settings(access::Device::Microphone)),
+                            )
+                        }),
+                )
             });
 
         let mode_at = if prefs.input_mode == InputMode::Voice { 0 } else { 1 };
