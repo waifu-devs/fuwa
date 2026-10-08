@@ -372,7 +372,9 @@ impl FuwaApp {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
-                                    .text_sm()
+                                    .text_xs()
+                                    .line_height(px(16.0))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(p.muted_foreground)
                                     .child(icon("message-circle-heart").size(px(16.0)).text_color(tint))
                                     .child(format!("Goes to {name}")),
@@ -685,7 +687,7 @@ impl FuwaApp {
         let (glyph, label) = match step.map(|s| s.kind) {
             None => ("party-popper", "Start exploring"),
             Some(RULES) => ("check", "Agree"),
-            Some(SAY_HELLO) => ("send-horizontal", "Send"),
+            Some(SAY_HELLO) => ("send", "Send"),
             Some(_) if last => ("arrow-right", "Finish"),
             Some(_) => ("arrow-right", "Next"),
         };
