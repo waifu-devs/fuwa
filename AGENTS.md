@@ -523,7 +523,8 @@
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
     frame encryption, byte for byte the web app's; the call itself is
-    `voice/`: str0m, Opus, and VP8 through libvpx for cameras and screens,
+    `voice/`: str0m, Opus, and VP8 through libvpx for cameras and screens
+    (prebuilt by shiguredo_libvpx, or vcpkg's on Windows through `voice/libvpx.rs`),
     `voice/capture.rs` taking and encoding yours in three simulcast sizes,
     `voice/video.rs` decoding others' and the sizes asked of them, drawn by
     `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md), `reports.rs` (the anonymous reports: panics, also

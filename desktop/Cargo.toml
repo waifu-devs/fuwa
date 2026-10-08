@@ -24,10 +24,6 @@ path = "src/lib.rs"
 [dependencies]
 cpal = "0.18"
 opus = "0.4"
-# Cameras and shared screens in calls are VP8, through libvpx: a static
-# build, fetched prebuilt for each system (checked against its SHA-256), so
-# installers need no libvpx of their own.
-shiguredo_libvpx = "=2026.1.0"
 # The camera: V4L2, AVFoundation or Media Foundation.
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
 # MJPEG frames from cameras that send only those.
@@ -85,10 +81,30 @@ objc2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString"] }
 
+# Cameras and shared screens in calls are VP8, through libvpx: a static
+# build, fetched prebuilt for each system (checked against its SHA-256), so
+# installers need no libvpx of their own.
+[target.'cfg(not(windows))'.dependencies]
+shiguredo_libvpx = { version = "=2026.1.0", optional = true }
+# The same calls on a libvpx found on the system, for trying Windows' path elsewhere.
+env-libvpx-sys = { version = "=5.1.3", features = ["generate"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
 # zed-scap asks for windows-capture 1, but 1.5 changed Settings::new; held
 # at the last one it builds with.
-[target.'cfg(windows)'.dependencies]
 windows-capture = "=1.4.4"
+# The prebuilt libvpx above is built with MinGW, which MSVC can't link; on
+# Windows it's vcpkg's (VPX_LIB_DIR and friends, see desktop.yml), with
+# bindings made from its headers.
+env-libvpx-sys = { version = "=5.1.3", features = ["generate"] }
+
+[features]
+default = ["prebuilt-libvpx"]
+prebuilt-libvpx = ["dep:shiguredo_libvpx"]
+# Windows' libvpx path (core/voice/libvpx.rs) on another system, against its
+# libvpx, instead of the prebuilt one (both name their library vpx):
+# --no-default-features --features system-libvpx.
+system-libvpx = ["dep:env-libvpx-sys"]
 
 [build-dependencies]
 protoc-bin-vendored = "3"

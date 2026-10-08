@@ -70,13 +70,31 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-packager@0.11.8
-      # libvpx (VP8 for cameras) is linked in statically, fetched prebuilt by
-      # shiguredo_libvpx and checked against its SHA-256: nothing to install
-      # on any system. On Linux it's named for an Ubuntu release, so the one
-      # built on 24.04 is picked whatever ubuntu-latest is.
+      # libvpx (VP8 for cameras) is linked in statically. On Linux and macOS
+      # shiguredo_libvpx fetches it prebuilt and checks its SHA-256; on Linux
+      # it's named for an Ubuntu release, so the one built on 24.04 is picked
+      # whatever ubuntu-latest is.
       - name: Which libvpx build
         if: runner.os == 'Linux'
         run: echo "LIBVPX_TARGET=ubuntu-24.04_x86_64" >> "$GITHUB_ENV"
+      # Its Windows build is MinGW's, which MSVC can't link, so there it's
+      # vcpkg's, static with the C runtime Rust links (-static-md), and the
+      # bindings are made from its headers with the runner's LLVM.
+      - name: libvpx from vcpkg
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install libvpx:x64-windows-static-md
+          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          # env-libvpx-sys links libvpx.lib; vcpkg names it vpx.lib.
+          cp "$root/lib/vpx.lib" "$root/lib/libvpx.lib"
+          version=$(vcpkg list libvpx:x64-windows-static-md | awk '{print $2}' | cut -d'#' -f1)
+          {
+            echo "VPX_LIB_DIR=$root/lib"
+            echo "VPX_INCLUDE_DIR=$root/include"
+            echo "VPX_VERSION=$version"
+            echo "VPX_STATIC=1"
+            echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
+          } >> "$GITHUB_ENV"
       - run: cargo build --release --locked --bin fuwa-desktop
       - run: cargo packager --release --formats ${{ matrix.formats }}
       - name: Name them for the release

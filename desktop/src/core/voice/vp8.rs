@@ -6,7 +6,11 @@
 //! Pictures in between are I420: full-size luma, then the two chroma
 //! planes at half the width and height, packed tight, as libvpx takes them.
 
+#[cfg(not(any(windows, feature = "system-libvpx")))]
 use shiguredo_libvpx as vpx;
+
+#[cfg(any(windows, feature = "system-libvpx"))]
+pub use super::libvpx::{Decoder, Encoder};
 
 /// A picture in I420, packed: Y, then U, then V.
 #[derive(Clone, Debug, Default)]
@@ -299,12 +303,14 @@ pub struct Encoded {
 
 /// A VP8 encoder for one size, at a steady bitrate, made for calls: as
 /// fast as it must be, no frames held back.
+#[cfg(not(any(windows, feature = "system-libvpx")))]
 pub struct Encoder {
     inner: vpx::Encoder,
     pub width: u32,
     pub height: u32,
 }
 
+#[cfg(not(any(windows, feature = "system-libvpx")))]
 impl Encoder {
     pub fn new(width: u32, height: u32, bitrate: u32, fps: u32, screen: bool) -> Result<Self, String> {
         let codec = vpx::CodecConfig::Vp8(vpx::Vp8Config {
@@ -349,10 +355,12 @@ impl Encoder {
 // ───────────────────────── Decoding ─────────────────────────
 
 /// A VP8 decoder that hands back pictures as BGRA.
+#[cfg(not(any(windows, feature = "system-libvpx")))]
 pub struct Decoder {
     inner: vpx::Decoder,
 }
 
+#[cfg(not(any(windows, feature = "system-libvpx")))]
 impl Decoder {
     pub fn new() -> Result<Self, String> {
         let inner = vpx::Decoder::new(vpx::DecoderConfig::new(vpx::DecoderCodec::Vp8)).map_err(|e| e.to_string())?;

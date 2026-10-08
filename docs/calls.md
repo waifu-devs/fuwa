@@ -434,7 +434,10 @@ and h). Pictures are VP8 through libvpx (the `shiguredo_libvpx` crate: a
 static libvpx, fetched prebuilt for each system and checked against its
 SHA-256, so installers carry nothing extra; on Linux it's named for an
 Ubuntu release, which `LIBVPX_TARGET` picks where the build machine isn't
-one). Cameras come through nokhwa (V4L2, AVFoundation, Media Foundation),
+one). Its Windows build is MinGW's, which MSVC can't link, so on Windows
+it's vcpkg's libvpx through `env-libvpx-sys` (`voice/libvpx.rs`, set up as
+the prebuilt one is; CI runs it on Linux with `--no-default-features
+--features system-libvpx`). Cameras come through nokhwa (V4L2, AVFoundation, Media Foundation),
 screens and windows through scap (X11, ScreenCaptureKit, Windows Graphics
 Capture; not Wayland yet), each taken on a thread of its own and encoded on
 another in three sizes at the web's sizes, frame rates and bitrates (CBR,

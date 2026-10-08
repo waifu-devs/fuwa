@@ -15,6 +15,8 @@ pub mod access;
 pub mod capture;
 pub mod devices;
 mod film;
+#[cfg(any(windows, feature = "system-libvpx"))]
+mod libvpx;
 pub mod link;
 pub mod quality;
 pub mod sound;
