@@ -267,7 +267,8 @@ pub fn fit(width: u32, height: u32, most_w: u32, most_h: u32) -> (u32, u32) {
 
 // ───────────────────────── Encoding ─────────────────────────
 
-/// One of the simulcast sizes: its rid, how much smaller than full, and its caps.
+/// One of the simulcast sizes: its rid, how much smaller than full, and its
+/// caps (a camera's bitrate is 0: it comes from the picture's size).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Size {
     pub rid: &'static str,
@@ -276,13 +277,6 @@ pub struct Size {
     pub fps: u32,
 }
 
-/// A camera's three sizes, smallest first, as the web's `ENCODINGS`.
-pub const CAMERA: [Size; 3] = [
-    Size { rid: "l", divide: 4, bitrate: 150_000, fps: 15 },
-    Size { rid: "m", divide: 2, bitrate: 500_000, fps: 30 },
-    Size { rid: "h", divide: 1, bitrate: 1_500_000, fps: 30 },
-];
-
 /// A shared screen's three sizes, with more bits for text (`SCREEN_ENCODINGS`).
 pub const SCREEN: [Size; 3] = [
     Size { rid: "l", divide: 4, bitrate: 200_000, fps: 5 },
@@ -290,8 +284,7 @@ pub const SCREEN: [Size; 3] = [
     Size { rid: "h", divide: 1, bitrate: 2_500_000, fps: 30 },
 ];
 
-/// A camera goes out at up to 720p, a screen at up to 1080p.
-pub const CAMERA_MOST: (u32, u32) = (1280, 720);
+/// A screen goes out at up to 1080p.
 pub const SCREEN_MOST: (u32, u32) = (1920, 1080);
 
 /// One frame out of the encoder.

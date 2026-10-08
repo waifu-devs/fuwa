@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { isTag } from "@/i18n/core";
@@ -90,6 +91,9 @@ export type Prefs = {
   userVolumes: Record<string, number>;
   /** The camera, this browser's device id; "" is the system default. */
   videoDevice: string;
+  /** The tallest your camera goes out, in pixels, and its most frames a second; 0 is the best it can (lib/camera-quality.ts). */
+  cameraHeight: number;
+  cameraFps: number;
   /** Your own camera shows mirrored to you, as a mirror would (others always see it the right way round). */
   mirrorVideo: boolean;
   /** Popped-out cameras: the name under the picture, a glow while they talk, and filling the window or fitting in it. */
@@ -147,6 +151,8 @@ export const DEFAULT_PREFS: Prefs = {
   autoGainControl: true,
   userVolumes: {},
   videoDevice: "",
+  cameraHeight: 0,
+  cameraFps: 0,
   mirrorVideo: true,
   popoutName: true,
   popoutGlow: true,
@@ -213,6 +219,8 @@ function sanitize(p: Prefs): Prefs {
     inputDevice: typeof p.inputDevice === "string" ? p.inputDevice : "",
     outputDevice: typeof p.outputDevice === "string" ? p.outputDevice : "",
     videoDevice: typeof p.videoDevice === "string" ? p.videoDevice : "",
+    cameraHeight: (HEIGHTS as readonly unknown[]).includes(p.cameraHeight) ? (p.cameraHeight as number) : d.cameraHeight,
+    cameraFps: (FRAME_RATES as readonly unknown[]).includes(p.cameraFps) ? (p.cameraFps as number) : d.cameraFps,
     popoutFit: oneOf(p.popoutFit, ["cover", "contain"], d.popoutFit),
     inputVolume: clamp(p.inputVolume, 0, 200, d.inputVolume),
     outputVolume: clamp(p.outputVolume, 0, 200, d.outputVolume),

@@ -1,7 +1,9 @@
 //! Your camera and your shared screen, going out (the web's `openCamera`,
 //! `openScreen` and the encodings in calls/video.ts): pictures taken on a
 //! thread of their own, then encoded in three sizes at once (simulcast "l",
-//! "m" and "h") on another, at the web's sizes and bitrates. Only the newest
+//! "m" and "h") on another, at the web's sizes and bitrates. A camera goes
+//! out at the best it gives up to a [`Ceiling`] (yours, the instance's and
+//! the server's, the lowest of each), its bitrates from the pixels it has. Only the newest
 //! picture waits for the encoder, so a slow moment drops pictures rather
 //! than delaying them. Your own preview comes from the same pictures.
 //!
@@ -18,6 +20,7 @@ use parking_lot::{Condvar, Mutex};
 use tokio::sync::mpsc;
 
 use super::access::{self, Access, Device};
+use super::ceiling::{self, Ceiling};
 use super::video::Videos;
 use super::vp8::{self, Encoder, Layout, Picture, Size, Yuv};
 
@@ -89,8 +92,11 @@ impl Latest {
 /// A camera or screen going out while it's on. Dropping it stops it.
 pub struct Sending {
     pub screen: bool,
+    /// What it was opened from, and for: a new camera or ceiling means opening it again.
+    pub source: Source,
+    pub ceiling: Ceiling,
     stop: Arc<AtomicBool>,
-    /// Sizes asked for a keyframe, by [`vp8::CAMERA`]'s order.
+    /// Sizes asked for a keyframe, smallest first ("l", "m", "h").
     keyframes: Arc<[AtomicBool; 3]>,
     videos: Arc<Videos>,
     feed: String,
@@ -106,9 +112,12 @@ impl Drop for Sending {
 impl Sending {
     /// Starts taking pictures from `source` and encoding them into `out`.
     /// `feed` is your own (for the preview), `mirror` whether it shows
-    /// mirrored to you, and `failed` hears it if the source stops.
+    /// mirrored to you, `ceiling` the most a camera sends (screens have
+    /// their own), and `failed` hears it if the source stops.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         source: Source,
+        ceiling: Ceiling,
         feed: String,
         videos: Arc<Videos>,
         mirror: Arc<AtomicBool>,
@@ -120,12 +129,12 @@ impl Sending {
         let keyframes = Arc::new([AtomicBool::new(true), AtomicBool::new(true), AtomicBool::new(true)]);
         let latest = Arc::new(Latest::default());
         {
-            let (stop, latest) = (stop.clone(), latest.clone());
+            let (stop, latest, source) = (stop.clone(), latest.clone(), source.clone());
             let _ = std::thread::Builder::new().name("fuwa-video-take".into()).spawn(move || {
                 let result = match source {
-                    Source::Camera(name) => take_camera(&name, &stop, &latest),
+                    Source::Camera(name) => take_camera(&name, ceiling, &stop, &latest),
                     Source::Screen(id) => take_screen(id, &stop, &latest),
-                    Source::Pattern { screen, seed } => take_pattern(screen, seed, &stop, &latest),
+                    Source::Pattern { screen, seed } => take_pattern(screen, seed, ceiling, &stop, &latest),
                 };
                 if let Err(failure) = result
                     && !stop.load(Ordering::Relaxed)
@@ -137,15 +146,16 @@ impl Sending {
         {
             let (stop, keyframes, videos, feed) = (stop.clone(), keyframes.clone(), videos.clone(), feed.clone());
             let _ = std::thread::Builder::new().name("fuwa-video-out".into()).spawn(move || {
-                encode(screen, &stop, &latest, &keyframes, &videos, &feed, &mirror, out.as_ref());
+                let sizes = if screen { vp8::SCREEN } else { ceiling.sizes() };
+                encode(screen, sizes, &stop, &latest, &keyframes, &videos, &feed, &mirror, out.as_ref());
             });
         }
-        Self { screen, stop, keyframes, videos, feed }
+        Self { screen, source, ceiling, stop, keyframes, videos, feed }
     }
 
     /// The media part asked for a keyframe: of one size, or (None) of all.
     pub fn keyframe(&self, rid: Option<&str>) {
-        for (n, size) in vp8::CAMERA.iter().enumerate() {
+        for (n, size) in vp8::SCREEN.iter().enumerate() {
             if rid.is_none_or(|r| r == size.rid) {
                 self.keyframes[n].store(true, Ordering::Relaxed);
             }
@@ -158,6 +168,7 @@ impl Sending {
 #[allow(clippy::too_many_arguments)]
 fn encode(
     screen: bool,
+    sizes: [Size; 3],
     stop: &AtomicBool,
     latest: &Latest,
     keyframes: &[AtomicBool; 3],
@@ -166,7 +177,6 @@ fn encode(
     mirror: &AtomicBool,
     out: Option<&mpsc::Sender<Filmed>>,
 ) {
-    let sizes: [Size; 3] = if screen { vp8::SCREEN } else { vp8::CAMERA };
     let mut encoders: [Option<Encoder>; 3] = [None, None, None];
     let mut last: [Option<Instant>; 3] = [None; 3];
     let (mut half, mut quarter) = (Yuv::default(), Yuv::default());
@@ -197,7 +207,10 @@ fn encode(
             }
             last[n] = Some(taken);
             if encoders[n].as_ref().is_none_or(|e| (e.width, e.height) != (yuv.width, yuv.height)) {
-                encoders[n] = Encoder::new(yuv.width, yuv.height, size.bitrate, size.fps, screen).ok();
+                // A camera's bits follow the pixels it really has.
+                let bitrate =
+                    if screen { size.bitrate } else { ceiling::bitrate_for(yuv.width * yuv.height, size.fps) };
+                encoders[n] = Encoder::new(yuv.width, yuv.height, bitrate, size.fps, screen).ok();
                 keyframes[n].store(true, Ordering::Relaxed);
             }
             let Some(encoder) = encoders[n].as_mut() else { continue };
@@ -253,7 +266,7 @@ fn camera_access(stop: &AtomicBool) -> Result<(), Failure> {
     }
 }
 
-fn take_camera(name: &str, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
+fn take_camera(name: &str, ceiling: Ceiling, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
     use nokhwa::utils::{ApiBackend, CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
     camera_access(stop)?;
     #[cfg(target_os = "macos")]
@@ -271,9 +284,12 @@ fn take_camera(name: &str, stop: &AtomicBool, latest: &Latest) -> Result<(), Fai
     // nokhwa's Closest only looks at the one frame format it's given, so
     // each is asked for in turn: MJPEG where the camera has it (most USB
     // ones), else what it sends raw (YUYV for every Mac camera). Any format
-    // at all comes last, for cameras without 1280x720.
+    // at all comes last, for cameras without anything close to the ceiling.
+    let (most_w, most_h) = ceiling.ask();
     let asks = FORMATS
-        .map(|f| RequestedFormatType::Closest(CameraFormat::new(Resolution::new(1280, 720), f, 30)))
+        .map(|f| {
+            RequestedFormatType::Closest(CameraFormat::new(Resolution::new(most_w, most_h), f, ceiling.fps.max(1)))
+        })
         .into_iter()
         .chain([RequestedFormatType::None]);
     let mut camera = None;
@@ -311,12 +327,12 @@ fn take_camera(name: &str, stop: &AtomicBool, latest: &Latest) -> Result<(), Fai
         let taken = Instant::now();
         let (w, h) = (buffer.resolution().width(), buffer.resolution().height());
         let bytes = buffer.buffer();
-        let (fw, fh) = vp8::fit(w, h, vp8::CAMERA_MOST.0, vp8::CAMERA_MOST.1);
+        let (fw, fh) = vp8::fit(w, h, most_w, most_h);
         yuv.resize(fw, fh);
         match buffer.source_frame_format() {
             FrameFormat::MJPEG => {
                 let Some((jw, jh)) = decode_jpeg(bytes, &mut rgb) else { continue };
-                let (fw, fh) = vp8::fit(jw, jh, vp8::CAMERA_MOST.0, vp8::CAMERA_MOST.1);
+                let (fw, fh) = vp8::fit(jw, jh, most_w, most_h);
                 yuv.resize(fw, fh);
                 vp8::from_rgb(&rgb, jw as usize * 3, jw, jh, Layout::RGB, &mut yuv);
             }
@@ -467,8 +483,13 @@ fn take_screen(id: Option<u32>, stop: &AtomicBool, latest: &Latest) -> Result<()
 
 /// A test pattern, for machines without a camera or a screen to share: a
 /// tinted background, bars, and a square going round, 30 times a second.
-fn take_pattern(screen: bool, seed: u32, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
-    let (w, h) = if screen { (1280, 720) } else { (640, 360) };
+fn take_pattern(screen: bool, seed: u32, ceiling: Ceiling, stop: &AtomicBool, latest: &Latest) -> Result<(), Failure> {
+    let (w, h) = if screen {
+        (1280, 720)
+    } else {
+        let (most_w, most_h) = ceiling.ask();
+        vp8::fit(640, 360, most_w, most_h)
+    };
     let mut yuv = Yuv::new(w, h);
     let started = Instant::now();
     let mut n = 0u64;

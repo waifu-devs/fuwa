@@ -13,6 +13,7 @@
 
 pub mod access;
 pub mod capture;
+pub mod ceiling;
 pub mod devices;
 mod film;
 #[cfg(any(windows, feature = "system-libvpx"))]
@@ -65,6 +66,9 @@ const SECRET_EVERY: Duration = Duration::from_secs(4);
 const SETTLED: Duration = Duration::from_millis(1500);
 /// How long the sizes asked of cameras wait, so a burst of resizes is one message.
 const LAYERS_AFTER: Duration = Duration::from_millis(120);
+/// How often the instance's call settings are read again during a call, for
+/// a new ceiling on cameras.
+const SETTINGS_EVERY: Duration = Duration::from_secs(60);
 /// How often a feed whose decoder lost its place asks for a keyframe.
 const KEYFRAME_ASK: Duration = Duration::from_millis(500);
 
@@ -98,6 +102,9 @@ pub struct CallView {
     pub server_record: bool,
     /// The instance records voice channels on the server.
     pub server_recordings: bool,
+    /// The instance's ceiling on cameras (0s for none), read when the call
+    /// starts and every minute after.
+    pub instance_camera: ceiling::Ceiling,
     /// When sound first went through.
     pub since: Option<Instant>,
     /// Who's speaking now, by account id (yours too).
@@ -387,6 +394,7 @@ impl Core {
             self_record: false,
             server_record: false,
             server_recordings: false,
+            instance_camera: ceiling::Ceiling::NONE,
             since: None,
             speaking: HashSet::new(),
             trouble: vec![],
@@ -402,6 +410,24 @@ impl Core {
         let core = Arc::downgrade(self);
         let volumes = (self.voice.volumes.clone(), self.voice.push.clone());
         let videos = self.voice.videos.clone();
+        // The instance's ceiling on cameras can change during the call.
+        let watcher = Arc::downgrade(self);
+        self.runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(SETTINGS_EVERY).await;
+                let Some(core) = watcher.upgrade() else { return };
+                if core.voice.active.lock().as_ref().is_none_or(|a| a.id != id) {
+                    return;
+                }
+                let Some(api) = core.call().and_then(|v| core.api(&v.instance)) else { return };
+                drop(core);
+                let Ok(settings) = rpc!(api.calls(), get_call_settings(pb::GetCallSettingsRequest {})).await else {
+                    continue;
+                };
+                let Some(core) = watcher.upgrade() else { return };
+                core.call_view(id, |v| v.instance_camera = instance_camera(&settings));
+            }
+        });
         self.runtime.spawn(async move {
             let ended =
                 run(core.clone(), id, api, target, sound, commands_rx, selves_rx, volumes, (videos, filmed_rx)).await;
@@ -558,6 +584,7 @@ impl Core {
                     || before.trouble != view.trouble
                     || before.quality != view.quality
                     || before.server_recordings != view.server_recordings
+                    || before.instance_camera != view.instance_camera
                     || before.since != view.since
             }
             None => false,
@@ -649,6 +676,11 @@ async fn first_secret(core: &std::sync::Weak<Core>, target: &Target) -> Result<O
     Ok(Some(Secrets { latest, want, _task: AbortOnDrop(task) }))
 }
 
+/// The instance's ceiling on cameras, from its call settings.
+fn instance_camera(settings: &pb::GetCallSettingsResponse) -> ceiling::Ceiling {
+    ceiling::Ceiling { height: settings.camera_max_height, fps: settings.camera_max_fps }
+}
+
 /// The call's sound, recorded on this computer while you ask: what you hear
 /// and what you say, together, as Opus.
 struct Recorder {
@@ -732,8 +764,11 @@ async fn run(
         if !settings.enabled {
             return Some(Ended::Refused(t("workspace.calls.switchedOff")));
         }
-        let recordings = settings.recordings;
-        view(&|v| v.server_recordings = recordings);
+        let (recordings, camera) = (settings.recordings, instance_camera(settings));
+        view(&|v| {
+            v.server_recordings = recordings;
+            v.instance_camera = camera;
+        });
     }
     let secrets = tokio::select! {
         secrets = first_secret(&core, &target) => secrets,

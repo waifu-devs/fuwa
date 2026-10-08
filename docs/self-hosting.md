@@ -297,6 +297,13 @@ off unless you set `FUWA_CALL_RECORDING_VIDEO=on` (or Video in recordings on
 the Calls page); each server then chooses, and an hour of one person's
 camera is around 100 MB, so set a cap first.
 
+Cameras go out at the best each one gives, up to 1080p at 60 frames a
+second (about 6 Mbit/s up from each person with a camera on, and the same
+down for each big tile watching it). To hold every call lower, set
+`FUWA_CAMERA_MAX_HEIGHT=720` and `FUWA_CAMERA_MAX_FPS=30` (or Camera
+resolution and Camera frame rate on the Calls page); servers can go lower
+still for their own voice channels.
+
 On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
 `FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`. Calls then go over
 TCP on the proxy's random port: they work, but networks that block unusual

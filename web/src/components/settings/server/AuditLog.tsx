@@ -160,6 +160,8 @@ const FIELD: Record<string, Key> = {
   min_account_age_seconds: "serversettings.nav.accountAge",
   thread_archive_hours: "serversettings.audit.field.threadArchive",
   record_video: "serversettings.audit.field.recordVideo",
+  camera_max_height: "serversettings.audit.field.cameraMaxHeight",
+  camera_max_fps: "serversettings.audit.field.cameraMaxFps",
   applications: "serversettings.nav.applyToJoin",
   linked_only: "serversettings.nav.linkedOnly",
   rules: "serversettings.nav.rules",
@@ -461,6 +463,8 @@ function value(lang: Lang, field: string, raw: string, users: Record<string, Use
   if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : t("serversettings.shared.never");
   if (field === "min_account_age_seconds") return raw === "0" ? t("serversettings.access.age.any") : formatDuration(lang, Number(raw));
   if (field === "thread_archive_hours") return raw === "0" ? t("serversettings.shared.never") : formatDuration(lang, Number(raw) * 3600);
+  if (field === "camera_max_height") return raw === "0" ? t("serversettings.camera.none") : t("appsettings.voice.heightValue", { height: Number(raw) });
+  if (field === "camera_max_fps") return raw === "0" ? t("serversettings.camera.none") : t("appsettings.voice.fpsValue", { fps: Number(raw) });
   if (field === "record_video") return raw === "true" ? t("serversettings.audit.value.soundVideo") : t("serversettings.audit.value.soundOnly");
   return raw || t("serversettings.audit.value.nothing");
 }

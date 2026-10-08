@@ -2,9 +2,11 @@ import { KeyRoundIcon, RadioTowerIcon, ServerIcon } from "lucide-react";
 import { m as motion } from "motion/react";
 import type { InstanceConfig, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import { usePrivateField } from "@/components/Private";
+import { Segmented } from "@/components/settings/account/common";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n/react";
+import { CEILING_FRAME_RATES, CEILING_HEIGHTS } from "@/lib/camera-quality";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
 
@@ -27,6 +29,10 @@ export function CallSettings({
   const { t } = useI18n();
   const on = (value: boolean) => t(value ? "instancesettings.shared.on" : "instancesettings.shared.off");
   const privateField = usePrivateField();
+  // A ceiling set by hand to something the buttons don't offer still reads right in the default.
+  const height = (n: bigint | number | undefined) =>
+    n ? t("appsettings.voice.heightValue", { height: Number(n) }) : t("instancesettings.calls.noCeiling");
+  const fps = (n: bigint | number | undefined) => (n ? t("appsettings.voice.fpsValue", { fps: Number(n) }) : t("instancesettings.calls.noCeiling"));
   const startup = config.startup;
   const media = startup?.mediaPort
     ? startup.mediaAddresses.length
@@ -103,6 +109,38 @@ export function CallSettings({
         {...resetter("call_recordings_keep_days")}
       >
         <Cap label={t("instancesettings.calls.daysLabel")} value={draft.callRecordingsKeepDays} onChange={(v) => patch((d) => (d.callRecordingsKeepDays = v))} />
+      </Setting>
+      <Setting
+        id="camera-height"
+        title={t("instancesettings.calls.cameraHeight")}
+        hint={t("instancesettings.calls.cameraHeightHint")}
+        delay={0.035}
+        defaultLabel={height(defaults.cameraMaxHeight)}
+        {...resetter("camera_max_height")}
+      >
+        <Segmented
+          label={t("instancesettings.calls.cameraHeight")}
+          value={Number(draft.cameraMaxHeight ?? 0)}
+          onChange={(n) => patch((d) => (d.cameraMaxHeight = n ? BigInt(n) : undefined))}
+          options={CEILING_HEIGHTS.map((n) => ({ value: n, label: height(n) }))}
+          className="flex w-full max-w-md"
+        />
+      </Setting>
+      <Setting
+        id="camera-fps"
+        title={t("instancesettings.calls.cameraFps")}
+        hint={t("instancesettings.calls.cameraFpsHint")}
+        delay={0.038}
+        defaultLabel={fps(defaults.cameraMaxFps)}
+        {...resetter("camera_max_fps")}
+      >
+        <Segmented
+          label={t("instancesettings.calls.cameraFps")}
+          value={Number(draft.cameraMaxFps ?? 0)}
+          onChange={(n) => patch((d) => (d.cameraMaxFps = n ? BigInt(n) : undefined))}
+          options={CEILING_FRAME_RATES.map((n) => ({ value: n, label: fps(n) }))}
+          className="flex w-full max-w-md"
+        />
       </Setting>
       <Setting
         id="ice-urls"

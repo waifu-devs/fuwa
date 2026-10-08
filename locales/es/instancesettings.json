@@ -328,6 +328,11 @@
   "calls.videoHint": "Los administradores de cada servidor lo eligen en Grabaciones, en sus ajustes. Un archivo WebM por cámara y por pantalla, junto al sonido: una hora de cámara ocupa varias veces el espacio del sonido, con los mismos límites de Límites. Si lo desactivas, se desactiva en todos los servidores y terminan las grabaciones que están filmando ahora.",
   "calls.keepHint": "Las grabaciones terminadas más antiguas que esto se eliminan solas, con sus archivos y copias. Desactivado, se guardan hasta que alguien las elimine.",
   "calls.untilDeleted": "hasta que se eliminen",
+  "calls.cameraHeight": "Resolución de cámara",
+  "calls.cameraHeightHint": "La imagen de cámara más alta que alguien envía en las llamadas de esta instancia. Sin límite, las apps envían lo mejor que da la cámara, hasta 1080p. Los servidores pueden poner uno más bajo en sus canales de voz.",
+  "calls.cameraFps": "Imágenes por segundo de cámara",
+  "calls.cameraFpsHint": "Las imágenes por segundo de cámara que alguien envía como mucho. Sin límite, las apps envían hasta 60.",
+  "calls.noCeiling": "Sin límite",
   "calls.days": {
     "one": "{count} día",
     "other": "{count} días"

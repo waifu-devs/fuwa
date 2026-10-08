@@ -5,11 +5,15 @@ import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { getRecordingVideo, run, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
+import { Segmented } from "@/components/settings/account/common";
 import { Choice, SaveBar, WithPreview } from "@/components/settings/controls";
+import { CEILING_FRAME_RATES, CEILING_HEIGHTS } from "@/lib/camera-quality";
 import { useI18n } from "@/i18n/react";
 
 /**
- * What recordings on the server keep: everyone's sound, or their cameras
+ * Calls on the server: a ceiling on cameras in its voice channels (none
+ * unless someone sets one, so everyone sends their best), then what
+ * recordings on the server keep: everyone's sound, or their cameras
  * and shared screens too, where the instance lets servers keep video.
  * Changing it ends the recording going on; the next starts when someone
  * presses Record.
@@ -17,8 +21,12 @@ import { useI18n } from "@/i18n/react";
 export function RecordingSettings({ instanceKey, server }: { instanceKey: string; server: Server }) {
   const { t } = useI18n();
   const [video, setVideo] = useState(server.recordVideo);
+  const [height, setHeight] = useState(server.cameraMaxHeight);
+  const [fps, setFps] = useState(server.cameraMaxFps);
   const save = useAction(updateServer);
   const changed = video !== server.recordVideo;
+  const count = [changed, height !== server.cameraMaxHeight, fps !== server.cameraMaxFps].filter(Boolean).length;
+  const none = t("serversettings.camera.none");
   // Until the instance says, it may: saving would say if not.
   const [allowed, setAllowed] = useState(true);
   useEffect(() => {
@@ -28,6 +36,32 @@ export function RecordingSettings({ instanceKey, server }: { instanceKey: string
   return (
     <WithPreview preview={<FilesPreview video={video} />}>
       <div className="flex flex-col">
+        <div data-setting="camera-quality" className="flex flex-col gap-3 pb-6">
+          <span>
+            <span className="block font-extrabold">{t("serversettings.camera.title")}</span>
+            <span className="block text-sm text-muted-foreground">{t("serversettings.camera.hint")}</span>
+          </span>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-bold">{t("serversettings.camera.resolution")}</span>
+            <Segmented
+              label={t("serversettings.camera.resolution")}
+              value={height}
+              onChange={setHeight}
+              options={CEILING_HEIGHTS.map((n) => ({ value: n, label: n ? t("appsettings.voice.heightValue", { height: n }) : none }))}
+              className="flex w-full max-w-md"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-bold">{t("serversettings.camera.fps")}</span>
+            <Segmented
+              label={t("serversettings.camera.fps")}
+              value={fps}
+              onChange={setFps}
+              options={CEILING_FRAME_RATES.map((n) => ({ value: n, label: n ? t("appsettings.voice.fpsValue", { fps: n }) : none }))}
+              className="flex w-full max-w-md"
+            />
+          </div>
+        </div>
         <div data-setting="record-video" className="flex flex-col gap-3 pb-5">
           <span>
             <span className="block font-extrabold">{t("serversettings.recordings.title")}</span>
@@ -64,12 +98,20 @@ export function RecordingSettings({ instanceKey, server }: { instanceKey: string
         </div>
       </div>
       <SaveBar
-        count={changed ? 1 : 0}
+        count={count}
         saving={save.pending}
         error={save.error}
-        onSave={() => void save.go(instanceKey, server.id, { recordVideo: video })}
+        onSave={() =>
+          void save.go(instanceKey, server.id, {
+            ...(changed ? { recordVideo: video } : {}),
+            ...(height !== server.cameraMaxHeight ? { cameraMaxHeight: height } : {}),
+            ...(fps !== server.cameraMaxFps ? { cameraMaxFps: fps } : {}),
+          })
+        }
         onDiscard={() => {
           setVideo(server.recordVideo);
+          setHeight(server.cameraMaxHeight);
+          setFps(server.cameraMaxFps);
           save.setError(null);
         }}
       />

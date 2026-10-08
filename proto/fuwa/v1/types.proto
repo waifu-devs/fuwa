@@ -557,6 +557,12 @@ message Server {
   // decides them: someone with MANAGE_SERVER's choice, or when nobody chose,
   // every kind but voice rooms in servers of 500 members or more.
   LiveTileSettings live_tiles = 29;
+  // A ceiling on cameras in its voice channels, below the instance's
+  // (GetCallSettingsResponse.camera_max_height): the tallest picture in
+  // pixels and the most frames a second, 0 for none. Set by someone with
+  // MANAGE_SERVER, for servers whose members' connections can't take more.
+  int32 camera_max_height = 30;
+  int32 camera_max_fps = 31;
 }
 
 // The kinds of live tiles: small cards above a server's channel list about

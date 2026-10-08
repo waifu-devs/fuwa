@@ -328,6 +328,11 @@
   "calls.videoHint": "Each server's admins choose it under Recordings in their settings. A WebM file per camera and screen, next to the sound: an hour of a camera takes several times the room of the sound, against the same caps under Limits. Turning this off turns it off in every server and ends the recordings filming now.",
   "calls.keepHint": "Finished recordings older than this delete themselves, files and copies included. Off keeps them until someone deletes them.",
   "calls.untilDeleted": "until deleted",
+  "calls.cameraHeight": "Camera resolution",
+  "calls.cameraHeightHint": "The tallest camera picture anyone sends in this instance's calls. Without a ceiling, apps send the best the camera gives, up to 1080p. Servers can set a lower one for their voice channels.",
+  "calls.cameraFps": "Camera frame rate",
+  "calls.cameraFpsHint": "The most camera frames a second anyone sends. Without a ceiling, apps send up to 60.",
+  "calls.noCeiling": "No ceiling",
   "calls.days": {
     "one": "{count} day",
     "other": "{count} days"

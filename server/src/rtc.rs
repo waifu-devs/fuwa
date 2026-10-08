@@ -735,8 +735,9 @@ const MAX_BYTES_PER_SECOND: usize = 80 * 1024;
 /// plus the encryption trailer in direct-message calls.
 pub const MAX_FRAME: usize = 1500;
 /// Camera one person may send a second, every size together: well above
-/// what browsers send for 1080p in three sizes (about 4 Mbit/s).
-const MAX_VIDEO_BYTES_PER_SECOND: usize = 1024 * 1024;
+/// what apps send for 1080p at 60 frames a second in three sizes (about
+/// 6 Mbit/s, docs/calls.md), keyframes and all.
+const MAX_VIDEO_BYTES_PER_SECOND: usize = 2 * 1024 * 1024;
 /// The largest frame of camera passed on (a 1080p keyframe is about 200 KB).
 const MAX_VIDEO_FRAME: usize = 512 * 1024;
 /// A camera size that hasn't come for this long isn't being sent.

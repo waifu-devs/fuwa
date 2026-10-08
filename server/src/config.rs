@@ -91,6 +91,11 @@ pub struct Config {
     /// FUWA_CALL_RECORDINGS_KEEP_DAYS: days a finished server recording is
     /// kept before it deletes itself. Unset (default): until someone does.
     pub call_recordings_keep_days: Option<i64>,
+    /// FUWA_CAMERA_MAX_HEIGHT and FUWA_CAMERA_MAX_FPS: the ceiling on
+    /// cameras in calls, the tallest picture in pixels and the most frames a
+    /// second. Unset (default): none, so apps send the best they can.
+    pub camera_max_height: Option<i64>,
+    pub camera_max_fps: Option<i64>,
     /// FUWA_ICE_URLS: STUN and TURN servers apps reach the media part
     /// through (comma-separated stun:, turn: and turns: URLs). None by default.
     pub ice_urls: Vec<String>,
@@ -542,6 +547,20 @@ impl Config {
                 format!("FUWA_CALL_RECORDINGS_KEEP_DAYS must be a whole number of days, 1 or more, got {value:?}")
             })?),
         };
+        let ceiling = |key: &str, range: std::ops::RangeInclusive<i64>| -> Result<Option<i64>, String> {
+            match get(key).as_deref().map(str::trim) {
+                None | Some("" | "unlimited" | "none") => Ok(None),
+                Some(value) => value.parse::<i64>().ok().filter(|n| range.contains(n)).map(Some).ok_or_else(|| {
+                    format!(
+                        "{key} must be {} to {}, or unset for no ceiling, got {value:?}",
+                        range.start(),
+                        range.end()
+                    )
+                }),
+            }
+        };
+        let camera_max_height = ceiling("FUWA_CAMERA_MAX_HEIGHT", crate::settings::CAMERA_HEIGHTS)?;
+        let camera_max_fps = ceiling("FUWA_CAMERA_MAX_FPS", crate::settings::CAMERA_FPS)?;
         let list = |key: &str| -> Vec<String> {
             get(key).unwrap_or_default().split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect()
         };
@@ -660,6 +679,8 @@ impl Config {
             federation,
             federation_allow_private,
             call_recordings_keep_days,
+            camera_max_height,
+            camera_max_fps,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             automod_providers: automod_providers(&get)?,
@@ -962,6 +983,12 @@ mod tests {
         assert_eq!(config.limits.recording_bytes, Some(20_000_000_000));
         assert_eq!(config.call_recordings_keep_days, Some(30));
         assert!(config.limits.any());
+        assert_eq!((config.camera_max_height, config.camera_max_fps), (None, None), "no ceiling unless set");
+        let config = super::tests::config(&[("FUWA_CAMERA_MAX_HEIGHT", "720"), ("FUWA_CAMERA_MAX_FPS", "30")]).unwrap();
+        assert_eq!((config.camera_max_height, config.camera_max_fps), (Some(720), Some(30)));
+        assert!(
+            super::tests::config(&[("FUWA_CAMERA_MAX_HEIGHT", "10")]).unwrap_err().contains("FUWA_CAMERA_MAX_HEIGHT")
+        );
     }
 
     #[test]

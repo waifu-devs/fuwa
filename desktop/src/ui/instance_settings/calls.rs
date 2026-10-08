@@ -1,19 +1,36 @@
-//! Calls: whether they're on, recordings kept on the server, and how apps get
-//! through firewalls to the instance's media server (the web's `instance/Calls.tsx`).
+//! Calls: whether they're on, recordings kept on the server, the ceiling on
+//! cameras (the tallest picture and the most frames a second apps send; a
+//! server can set a lower one), and how apps get through firewalls to the
+//! instance's media server (the web's `instance/Calls.tsx`).
 
 use crate::ui::instance_home::{focus_ring, has_focus};
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{AnyElement, Context, FontWeight, IntoElement as _, ParentElement as _, Styled as _, Window, div, px};
 
-use super::controls::{area_box, input_box};
+use super::controls::{area_box, input_box, segmented};
 use super::general::hidden;
 use super::{HIDDEN_ADDRESS, InstanceSettingsView};
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::voice::ceiling::{CEILING_FRAME_RATES, CEILING_HEIGHTS};
 use crate::ui::motion;
 use crate::ui::server_settings::amber;
+use crate::ui::settings_voice::{fps_label, height_label};
 use crate::ui::theme::{Palette, radius_2xl};
 use crate::ui::widgets::icon;
+
+/// The choices for a camera ceiling, with the one set now added (in order)
+/// when it isn't among them; 0 is none.
+fn ceiling_choices(list: &[u32], now: Option<i64>) -> Vec<u32> {
+    let mut out = list.to_vec();
+    if let Some(now) = now.and_then(|n| u32::try_from(n).ok())
+        && !out.contains(&now)
+    {
+        let at = out.iter().skip(1).position(|&n| n < now).map_or(out.len(), |i| i + 1);
+        out.insert(at, now);
+    }
+    out
+}
 
 /// "on" or "off", as a setting's default.
 fn on_off(on: bool) -> String {
@@ -173,6 +190,57 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        let none = t("instancesettings.calls.noCeiling");
+        let heights = ceiling_choices(&CEILING_HEIGHTS, draft.camera_max_height);
+        let list = heights.clone();
+        let height_pick = segmented(
+            "icam-height",
+            heights.iter().map(|&h| height_label(h, &none)).collect(),
+            heights.iter().position(|&h| Some(i64::from(h)) == draft.camera_max_height).unwrap_or(0),
+            p,
+            window,
+            cx,
+            move |this, n, _, cx| {
+                let h = list[n];
+                this.patch(cx, |d| d.camera_max_height = (h > 0).then_some(i64::from(h)));
+            },
+        );
+        page = page.child(self.setting(
+            "camera-height",
+            &t("instancesettings.calls.cameraHeight"),
+            Some(&t("instancesettings.calls.cameraHeightHint")),
+            &["camera_max_height"],
+            &height_label(defaults.camera_max_height.unwrap_or(0).max(0) as u32, &none),
+            3,
+            div().flex().child(height_pick),
+            p,
+            cx,
+        ));
+        let rates = ceiling_choices(&CEILING_FRAME_RATES, draft.camera_max_fps);
+        let list = rates.clone();
+        let fps_pick = segmented(
+            "icam-fps",
+            rates.iter().map(|&f| fps_label(f, &none)).collect(),
+            rates.iter().position(|&f| Some(i64::from(f)) == draft.camera_max_fps).unwrap_or(0),
+            p,
+            window,
+            cx,
+            move |this, n, _, cx| {
+                let f = list[n];
+                this.patch(cx, |d| d.camera_max_fps = (f > 0).then_some(i64::from(f)));
+            },
+        );
+        page = page.child(self.setting(
+            "camera-fps",
+            &t("instancesettings.calls.cameraFps"),
+            Some(&t("instancesettings.calls.cameraFpsHint")),
+            &["camera_max_fps"],
+            &fps_label(defaults.camera_max_fps.unwrap_or(0).max(0) as u32, &none),
+            3,
+            div().flex().child(fps_pick),
+            p,
+            cx,
+        ));
         let ice = self.areas.get("ice_urls").cloned();
         let ice_default =
             if defaults.ice_urls.is_empty() { t("instancesettings.shared.none") } else { defaults.ice_urls.join(", ") };
@@ -182,7 +250,7 @@ impl InstanceSettingsView {
             Some(&t("instancesettings.calls.iceHint")),
             &["ice_urls"],
             if hide { HIDDEN_ADDRESS } else { &ice_default },
-            3,
+            4,
             div().map(|el| {
                 match (ice, hide) {
                     (_, true) => el.child(hidden(p)),
@@ -211,7 +279,7 @@ impl InstanceSettingsView {
                 } else {
                     "instancesettings.shared.none"
                 }),
-                4,
+                5,
                 focus_ring(
                     input_box(Input::new(secret).appearance(false), Some("key-round"), p),
                     has_focus(secret, window, cx),
@@ -222,5 +290,17 @@ impl InstanceSettingsView {
             ));
         }
         page.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ceiling_choices;
+
+    #[test]
+    fn a_ceiling_set_elsewhere_is_one_more_choice() {
+        assert_eq!(ceiling_choices(&[0, 1080, 720, 480, 360], None), [0, 1080, 720, 480, 360]);
+        assert_eq!(ceiling_choices(&[0, 1080, 720, 480, 360], Some(2160)), [0, 2160, 1080, 720, 480, 360]);
+        assert_eq!(ceiling_choices(&[0, 60, 30, 24, 15], Some(20)), [0, 60, 30, 24, 20, 15]);
     }
 }

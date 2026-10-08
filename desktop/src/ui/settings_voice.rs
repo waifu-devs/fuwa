@@ -19,7 +19,7 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::sounds::{self, MicTest, Sound};
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_app::pref;
-use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, toggle};
+use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, segmented, toggle};
 use crate::ui::settings_menu::Item;
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
@@ -34,6 +34,7 @@ pub(crate) fn voice_settings() -> Vec<(&'static str, String, &'static str)> {
         ("sensitivity", t("appsettings.voice.sensitivity"), "threshold gate noise"),
         ("processing", t("appsettings.voice.processing"), "echo noise suppression gain"),
         ("camera", t("appsettings.voice.camera"), "video webcam mirror preview"),
+        ("camera-quality", t("appsettings.voice.cameraQuality"), "resolution frame rate fps 1080p 720p hd"),
         ("call-sounds", t("appsettings.voice.callSounds"), "ring ringtone join leave"),
     ]
 }
@@ -59,6 +60,22 @@ impl Drop for CameraCheck {
     fn drop(&mut self) {
         self.0.camera_test(false);
     }
+}
+
+/// A camera height in words ("720p"), `zero` for 0 ("Best", "No ceiling").
+pub(crate) fn height_label(height: u32, zero: &str) -> String {
+    if height == 0 {
+        return zero.to_owned();
+    }
+    t_with("appsettings.voice.heightValue", &[("height", Arg::Num(i64::from(height)))])
+}
+
+/// A frame rate in words ("30 fps"), `zero` for 0.
+pub(crate) fn fps_label(fps: u32, zero: &str) -> String {
+    if fps == 0 {
+        return zero.to_owned();
+    }
+    t_with("appsettings.voice.fpsValue", &[("fps", Arg::Num(i64::from(fps)))])
 }
 
 /// -100..0 dB as a share of a meter.
@@ -538,6 +555,7 @@ impl SettingsView {
                     this.core.apply_mirror();
                 },
             ));
+        let quality = self.camera_quality(prefs, p, window, cx);
         let volume = prefs.volume;
         let out = prefs.output_device.clone();
         let sound_row = |id: &'static str,
@@ -677,6 +695,17 @@ impl SettingsView {
                 camera.into_any_element(),
             ),
             (
+                "camera-quality",
+                t("appsettings.voice.cameraQuality"),
+                Some(t("appsettings.voice.cameraQualityHint")),
+                Badge::pref(prefs.camera_height != d.camera_height || prefs.camera_fps != d.camera_fps, |pr| {
+                    let d = Prefs::default();
+                    pr.camera_height = d.camera_height;
+                    pr.camera_fps = d.camera_fps;
+                }),
+                quality,
+            ),
+            (
                 "call-sounds",
                 t("appsettings.voice.callSounds"),
                 None,
@@ -704,6 +733,66 @@ impl SettingsView {
         }
         let _ = Duration::ZERO;
         list.into_any_element()
+    }
+}
+
+impl SettingsView {
+    /// How sharp and smooth your camera goes out: a resolution and a frame
+    /// rate, "Best" first (the instance or the server may hold it lower).
+    fn camera_quality(
+        &mut self,
+        prefs: &Prefs,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::core::voice::ceiling::{FRAME_RATES, HEIGHTS};
+        let best = t("appsettings.voice.best");
+        let row = |label: String, glyph: &'static str, body: AnyElement| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .child(icon(glyph).size(px(14.0)))
+                        .child(tracked(label.to_uppercase(), WIDE)),
+                )
+                .child(div().flex().child(body))
+        };
+        let heights = segmented(
+            "camera-height",
+            HEIGHTS.iter().map(|&h| (height_label(h, &best), None)).collect(),
+            HEIGHTS.iter().position(|&h| h == prefs.camera_height).unwrap_or(0),
+            76.0,
+            p,
+            window,
+            cx,
+            |this: &mut Self, n, cx| this.set(cx, move |pr| pr.camera_height = HEIGHTS[n]),
+        );
+        let rates = segmented(
+            "camera-fps",
+            FRAME_RATES.iter().map(|&f| (fps_label(f, &best), None)).collect(),
+            FRAME_RATES.iter().position(|&f| f == prefs.camera_fps).unwrap_or(0),
+            76.0,
+            p,
+            window,
+            cx,
+            |this: &mut Self, n, cx| this.set(cx, move |pr| pr.camera_fps = FRAME_RATES[n]),
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(row(t("appsettings.voice.cameraResolution"), "video", heights))
+            .child(row(t("appsettings.voice.cameraFps"), "gauge", rates))
+            .into_any_element()
     }
 }
 

@@ -107,6 +107,10 @@ message UpdateServerRequest {
   // Which kinds of live tiles show. Leaving `customized` false goes back to
   // the default (Server.live_tiles).
   optional LiveTileSettings live_tiles = 17;
+  // Server.camera_max_height and camera_max_fps: 144 to 2160 and 1 to 120,
+  // or 0 for no ceiling.
+  optional int32 camera_max_height = 18;
+  optional int32 camera_max_fps = 19;
 }
 
 message UpdateServerResponse {

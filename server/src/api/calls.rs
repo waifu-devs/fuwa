@@ -950,6 +950,8 @@ impl CallService for Api {
                     recordings: enabled && settings.call_recordings,
                     screen_sound: enabled,
                     recording_video: enabled && settings.call_recordings && settings.call_recording_video,
+                    camera_max_height: settings.camera_max_height.map_or(0, |n| u32::try_from(n).unwrap_or(0)),
+                    camera_max_fps: settings.camera_max_fps.map_or(0, |n| u32::try_from(n).unwrap_or(0)),
                 })
             }
             .await,
