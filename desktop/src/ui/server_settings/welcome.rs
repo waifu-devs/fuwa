@@ -6,7 +6,6 @@
 use crate::ui::emoji::InColor as _;
 use gpui_kit::component::input::Textarea;
 
-use super::roles::switch;
 use super::*;
 use crate::ui::overlay::{emoji_tile, welcome_emoji};
 
@@ -49,7 +48,7 @@ impl Welcome {
     pub(super) fn new(window: &mut Window, cx: &mut Context<ServerSettingsView>) -> (Self, Vec<Subscription>) {
         let description = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(3, 6)
+                .auto_grow(2, 6)
                 .placeholder(t("serversettings.welcomeScreen.wordsPlaceholder"))
         });
         let subscriptions = vec![cx.subscribe(&description, |_: &mut ServerSettingsView, _, e: &InputEvent, cx| {
@@ -257,42 +256,59 @@ impl ServerSettingsView {
 
         let enabled = self.welcome.enabled;
         let length = self.welcome.description.read(cx).value().chars().count();
-        let toggle = div()
-            .flex()
-            .items_center()
-            .gap(px(16.0))
-            .py(px(18.0))
-            .border_b_1()
-            .border_color(p.border)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.nav.welcomeEnabled")))
-                    .child(
-                        div().text_sm().text_color(p.muted_foreground).child(t("desktop.server.welcome.enabledHint")),
-                    ),
-            )
-            .child(switch("welcome-on".into(), enabled, false, cx, |this, on, cx| {
-                this.welcome.enabled = on;
-                cx.notify();
-            }));
+        // The web's `Toggle` (`text-sm` label, `text-xs` hint) over a rule.
+        let toggle = div().pb(px(20.0)).border_b_1().border_color(alpha(p.border, 0.7)).child(
+            crate::ui::settings_controls::toggle(
+                "welcome-on",
+                &t("serversettings.nav.welcomeEnabled"),
+                Some(&t("serversettings.welcomeScreen.enabledHint")),
+                enabled,
+                false,
+                p,
+                window,
+                cx,
+                |this: &mut Self, on, cx| {
+                    this.welcome.enabled = on;
+                    cx.notify();
+                },
+            ),
+        );
 
         let words = div()
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .py(px(18.0))
+            .py(px(20.0))
             .border_b_1()
-            .border_color(p.border)
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcomeScreen.words")))
-            .child(Textarea::new(&self.welcome.description))
+            .border_color(alpha(p.border, 0.7))
+            .child(
+                div()
+                    .text_sm()
+                    .line_height(px(14.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child(t("serversettings.welcomeScreen.words")),
+            )
+            .child(crate::ui::instance_home::focus_ring(
+                div()
+                    .w_full()
+                    .min_h(px(62.0))
+                    // The box keeps its own padding, so this brings the words to the web's 12 and 8.
+                    .px(px(2.0))
+                    .rounded(crate::ui::theme::radius_xl())
+                    .border_1()
+                    .border_color(p.border)
+                    .text_sm()
+                    .child(Textarea::new(&self.welcome.description).appearance(false)),
+                super::pages::focused(&self.welcome.description, window, cx),
+                p,
+            ))
             .child(
                 div()
                     .flex()
                     .justify_between()
                     .gap(px(12.0))
                     .text_sm()
+                    .line_height(px(20.0))
                     .text_color(p.muted_foreground)
                     .child(t_with(
                         "serversettings.welcomeScreen.markdown",
@@ -320,43 +336,40 @@ impl ServerSettingsView {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .py(px(18.0))
+            .py(px(20.0))
             .child(
                 div()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.welcomeScreen.channels")))
-                    .child(div().text_sm().text_color(p.muted_foreground).child(t_with(
-                        "desktop.server.welcome.channelsHint",
+                    .child(
+                        div()
+                            .line_height(px(24.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("serversettings.welcomeScreen.channels")),
+                    )
+                    .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(t_with(
+                        "serversettings.welcomeScreen.channelsHint",
                         &[("max", Arg::Num(MAX_CHANNELS as i64))],
                     ))),
             )
             .child(list);
         if count < MAX_CHANNELS && !unused.is_empty() {
             let first = unused[0].id.clone();
-            let hover = alpha(p.primary, 0.4);
             suggested = suggested.child(
-                div()
-                    .id("welcome-add")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(8.0))
-                    .h(px(40.0))
-                    .rounded(corner(12.0))
-                    .border_1()
+                div().flex().child(
+                    crate::ui::settings_controls::button(
+                        "welcome-add",
+                        t("serversettings.welcomeScreen.addChannel"),
+                        Some("plus"),
+                        crate::ui::settings_controls::Look::Outline,
+                        false,
+                        p,
+                    )
+                    .rounded(crate::ui::theme::radius_xl())
                     .border_dashed()
-                    .border_color(p.border)
-                    .cursor_pointer()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.muted_foreground)
-                    .hover(move |s| s.border_color(hover))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("plus").size(px(15.0)))
-                    .child(t("serversettings.welcomeScreen.addChannel"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.add_welcome_row(first.clone(), String::new(), "", window, cx);
                         cx.notify();
                     })),
+                ),
             );
         }
 

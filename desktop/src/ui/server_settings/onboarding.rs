@@ -929,27 +929,23 @@ impl ServerSettingsView {
             )
         });
         let enabled = self.onboard.enabled;
-        let toggle = div()
-            .flex()
-            .items_center()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.enabled")))
-                    .child(
-                        div()
-                            .text_sm()
-                            .line_height(px(20.0))
-                            .text_color(p.muted_foreground)
-                            .child(t("serversettings.onboarding.enabledHint")),
-                    ),
-            )
-            .child(switch("onboarding-on".into(), enabled, false, cx, |this, on, cx| {
-                this.onboard.enabled = on;
-                cx.notify();
-            }));
+        // The web's `Toggle` over a rule.
+        let toggle = div().pb(px(20.0)).border_b_1().border_color(alpha(p.border, 0.7)).child(
+            crate::ui::settings_controls::toggle(
+                "onboarding-on",
+                &t("serversettings.onboarding.enabled"),
+                Some(&t("serversettings.onboarding.enabledHint")),
+                enabled,
+                false,
+                p,
+                window,
+                cx,
+                |this: &mut Self, on, cx| {
+                    this.onboard.enabled = on;
+                    cx.notify();
+                },
+            ),
+        );
 
         let count = self.onboard.steps.len();
         let mut list = div().flex().flex_col().gap(px(10.0));
@@ -970,54 +966,47 @@ impl ServerSettingsView {
                     continue;
                 }
                 let first = first_text.clone();
-                let hover = alpha(p.primary, 0.4);
                 adds = adds.child(
-                    div()
-                        .id(SharedString::from(format!("onb-add-{kind}")))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .h(px(36.0))
-                        .px(px(14.0))
-                        .rounded(corner(12.0))
-                        .border_1()
-                        .border_dashed()
-                        .border_color(p.border)
-                        .cursor_pointer()
-                        .text_sm()
-                        .line_height(px(20.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(p.muted_foreground)
-                        .hover(move |s| s.border_color(hover))
-                        .active(|s| s.top(px(1.0)))
-                        .child(icon(glyph).size(px(15.0)))
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.add_step(onb::new_step(kind, first.as_deref()), window, cx);
-                            cx.notify();
-                        })),
+                    crate::ui::settings_controls::button(
+                        SharedString::from(format!("onb-add-{kind}")),
+                        "",
+                        Some("plus"),
+                        crate::ui::settings_controls::Look::Outline,
+                        false,
+                        p,
+                    )
+                    .rounded(radius_xl())
+                    .border_dashed()
+                    .child(icon(glyph).size(px(16.0)).text_color(p.muted_foreground))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.add_step(onb::new_step(kind, first.as_deref()), window, cx);
+                        cx.notify();
+                    })),
                 );
             }
         }
-        div()
+        let steps = div()
             .flex()
             .flex_col()
-            .gap(px(14.0))
-            .py(px(18.0))
-            .border_t_1()
-            .border_color(p.border)
-            .child(toggle)
+            .gap(px(12.0))
+            .py(px(20.0))
             .child(
                 div()
-                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.onboarding.steps")))
+                    .child(
+                        div()
+                            .line_height(px(24.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("serversettings.onboarding.steps")),
+                    )
                     .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(t_with(
-                        "desktop.server.onboarding.stepsHint",
+                        "serversettings.onboarding.stepsHint",
                         &[("max", Arg::Num(onb::MAX_STEPS as i64))],
                     ))),
             )
             .child(list)
-            .child(adds)
-            .into_any_element()
+            .child(adds);
+        div().flex().flex_col().child(toggle).child(steps).into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
