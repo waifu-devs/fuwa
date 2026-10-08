@@ -268,10 +268,34 @@ fn take_camera(name: &str, stop: &AtomicBool, latest: &Latest) -> Result<(), Fai
         FrameFormat::RAWBGR,
         FrameFormat::GRAY,
     ];
-    let wanted = CameraFormat::new(Resolution::new(1280, 720), FrameFormat::MJPEG, 30);
-    let format = RequestedFormat::with_formats(RequestedFormatType::Closest(wanted), &FORMATS);
-    let mut camera = nokhwa::Camera::new(info.index().clone(), format).map_err(|_| Failure::Busy)?;
-    camera.open_stream().map_err(|_| Failure::Busy)?;
+    // nokhwa's Closest only looks at the one frame format it's given, so
+    // each is asked for in turn: MJPEG where the camera has it (most USB
+    // ones), else what it sends raw (YUYV for every Mac camera). Any format
+    // at all comes last, for cameras without 1280x720.
+    let asks = FORMATS
+        .map(|f| RequestedFormatType::Closest(CameraFormat::new(Resolution::new(1280, 720), f, 30)))
+        .into_iter()
+        .chain([RequestedFormatType::None]);
+    let mut camera = None;
+    let mut last = None;
+    for ask in asks {
+        match nokhwa::Camera::new(info.index().clone(), RequestedFormat::with_formats(ask, &FORMATS)) {
+            Ok(opened) => {
+                camera = Some(opened);
+                break;
+            }
+            Err(why) if in_use(&why) => return Err(Failure::Busy),
+            Err(why) => last = Some(why),
+        }
+    }
+    let Some(mut camera) = camera else {
+        tracing::warn!(error = ?last, "no camera format would open");
+        return Err(Failure::Failed);
+    };
+    camera.open_stream().map_err(|why| {
+        tracing::warn!(error = %why, "camera wouldn't start");
+        if in_use(&why) { Failure::Busy } else { Failure::Failed }
+    })?;
     let mut yuv = Yuv::default();
     let mut rgb = Vec::new();
     let mut misses = 0;
@@ -315,6 +339,14 @@ fn take_camera(name: &str, stop: &AtomicBool, latest: &Latest) -> Result<(), Fai
     }
     let _ = camera.stop_stream();
     Ok(())
+}
+
+/// Whether the camera wouldn't open because another app has it, which the
+/// backends say only in words ("Already in use" on macOS, EBUSY's "busy"
+/// on Linux).
+fn in_use(why: &nokhwa::NokhwaError) -> bool {
+    let text = why.to_string().to_lowercase();
+    text.contains("in use") || text.contains("busy")
 }
 
 /// An MJPEG frame as packed RGB in `out`, giving its size.
