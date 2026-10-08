@@ -101,6 +101,9 @@ pub struct Link {
     /// screen. Both are empty until something's on them.
     camera: Mid,
     screen: Mid,
+    /// The shared screen's sound, where the instance takes it: the media
+    /// part takes an app's second audio track as its screen's sound.
+    screen_sound: Option<Mid>,
     /// When the first frame of video went out, for the 90 kHz clock.
     filming_since: Option<Instant>,
     channel: Option<ChannelId>,
@@ -119,6 +122,8 @@ pub struct Link {
     /// The layers last said for each video track.
     layers: HashMap<Mid, &'static str>,
     sent: u64,
+    /// The screen's sound's frames so far, sent or skipped.
+    sound_sent: u64,
     /// The worst jitter the received sound had since the last stats, in ms.
     jitter: u32,
 }
@@ -176,9 +181,9 @@ fn route_to(remote: SocketAddr) -> Option<IpAddr> {
 
 impl Link {
     /// A connection that sends the microphone, has places for a camera and
-    /// a shared screen (each in three sizes) and opens the data channel, and
-    /// the offer for JoinVoice.
-    pub fn offer() -> (Self, String) {
+    /// a shared screen (each in three sizes) and, with `screen_sound`, the
+    /// screen's sound, and opens the data channel; and the offer for JoinVoice.
+    pub fn offer(screen_sound: bool) -> (Self, String) {
         // Opus and VP8 only: all the media part takes.
         let mut rtc = Rtc::builder()
             .clear_codecs()
@@ -197,6 +202,8 @@ impl Link {
         };
         let camera = video();
         let screen = video();
+        let screen_sound =
+            screen_sound.then(|| change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None));
         change.add_channel("fuwa".into());
         let (offer, pending) = change.apply().expect("an offer with a track and a channel");
         let (packets_in, packets) = mpsc::channel(512);
@@ -205,6 +212,7 @@ impl Link {
             microphone,
             camera,
             screen,
+            screen_sound,
             filming_since: None,
             channel: None,
             pending: Some(pending),
@@ -218,6 +226,7 @@ impl Link {
             videos: HashMap::new(),
             layers: HashMap::new(),
             sent: 0,
+            sound_sent: 0,
             jitter: 0,
         };
         (link, offer.to_sdp_string())
@@ -360,6 +369,24 @@ impl Link {
         self.sent += 1;
     }
 
+    /// Whether the connection has a place for the screen's sound.
+    pub fn has_screen_sound(&self) -> bool {
+        self.screen_sound.is_some()
+    }
+
+    /// 20 ms of the shared screen's sound: sent, encoded, or skipped
+    /// (None) while there's none, so the timestamps keep the gaps.
+    pub fn share_sound(&mut self, packet: Option<Vec<u8>>) {
+        let time = MediaTime::new(self.sound_sent * 960, str0m::media::Frequency::FORTY_EIGHT_KHZ);
+        self.sound_sent += 1;
+        let (Some(mid), Some(packet)) = (self.screen_sound, packet) else { return };
+        let Some(writer) = self.rtc.writer(mid) else { return };
+        let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Opus).map(|p| p.pt()) else {
+            return;
+        };
+        let _ = writer.write(pt, Instant::now(), time, packet);
+    }
+
     /// Sends a frame of the camera (or the shared screen) in one of its
     /// sizes, taken at `taken`.
     pub fn film(&mut self, screen: bool, rid: &str, taken: Instant, frame: Vec<u8>) {
@@ -459,7 +486,7 @@ impl Link {
                 let rid = request.rid.map(|r| r.to_string());
                 happened.push(Happened::KeyframeAsked { screen: request.mid == self.screen, rid });
             }
-            Event::MediaAdded(added) if added.kind == MediaKind::Audio && added.mid != self.microphone => {
+            Event::MediaAdded(added) if added.kind == MediaKind::Audio && !self.ours(added.mid) => {
                 if self.streams.len() >= MOST_STREAMS {
                     return;
                 }
@@ -467,7 +494,7 @@ impl Link {
                     self.streams.insert(added.mid, media.stream_id().to_string());
                 }
             }
-            Event::MediaData(data) if data.mid != self.microphone => {
+            Event::MediaData(data) if !self.ours(data.mid) => {
                 let who = match self.streams.get(&data.mid) {
                     Some(who) => who.clone(),
                     None if self.streams.len() >= MOST_STREAMS => return,
@@ -498,6 +525,11 @@ impl Link {
             }
             _ => {}
         }
+    }
+
+    /// Whether a track is one this app sends (its microphone or screen's sound).
+    fn ours(&self, mid: Mid) -> bool {
+        mid == self.microphone || Some(mid) == self.screen_sound
     }
 
     /// The answer to one of the media part's offers, without this
@@ -634,7 +666,7 @@ mod tests {
     /// connects from.
     #[test]
     fn answers_to_the_media_parts_offers_keep_this_computers_addresses_out() {
-        let (mut link, offer) = Link::offer();
+        let (mut link, offer) = Link::offer(true);
         let mut media = Rtc::builder().set_ice_lite(true).build(Instant::now());
         media.add_local_candidate(Candidate::host("203.0.113.7:50000".parse().unwrap(), "udp").unwrap());
         let answer = media.sdp_api().accept_offer(SdpOffer::from_sdp_string(&offer).unwrap()).unwrap();
@@ -659,12 +691,28 @@ mod tests {
 
     #[test]
     fn the_offer_sends_a_microphone_and_opens_the_data_channel() {
-        let (_, offer) = Link::offer();
+        let (_, offer) = Link::offer(false);
         assert!(offer.contains("m=audio") && offer.contains("a=sendonly") && offer.contains("opus"));
+        assert_eq!(offer.matches("m=audio").count(), 1, "the microphone alone");
         assert!(offer.contains("m=application"), "the data channel");
         assert_eq!(offer.matches("m=video").count(), 2, "a camera's place and a screen's");
         assert!(offer.contains("a=simulcast:send l;m;h"), "{offer}");
         assert!(offer.contains("VP8") && !offer.contains("H264"), "VP8 only");
         assert!(!offer.contains("a=candidate"), "none of this computer's addresses");
+    }
+
+    /// Where the instance takes a screen's sound, it's the second audio
+    /// track, after the microphone: the one the media part takes for it.
+    #[test]
+    fn the_offer_has_a_place_for_the_screens_sound_where_the_instance_takes_it() {
+        let (link, offer) = Link::offer(true);
+        assert_eq!(offer.matches("m=audio").count(), 2, "{offer}");
+        let mids: Vec<&str> = offer
+            .split("m=")
+            .filter(|m| m.starts_with("audio"))
+            .filter_map(|m| m.lines().find_map(|l| l.strip_prefix("a=mid:")))
+            .collect();
+        assert_eq!(mids, [link.microphone.to_string(), link.screen_sound.unwrap().to_string()]);
+        assert!(link.has_screen_sound());
     }
 }

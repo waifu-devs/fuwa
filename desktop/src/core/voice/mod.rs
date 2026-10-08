@@ -9,7 +9,8 @@
 //! [`link`] is the connection, [`sound`] the Opus and mixing between it
 //! and the devices, [`devices`] the microphone and speakers, [`quality`]
 //! how the connection is doing, [`video`] the cameras and screens coming in,
-//! [`capture`] yours going out, and [`vp8`] their pictures.
+//! [`capture`] yours going out, [`vp8`] their pictures, and
+//! [`screen_sound`] what your shared screen plays.
 
 pub mod access;
 pub mod capture;
@@ -20,6 +21,7 @@ mod film;
 mod libvpx;
 pub mod link;
 pub mod quality;
+pub mod screen_sound;
 pub mod sound;
 pub mod video;
 pub mod vp8;
@@ -37,8 +39,9 @@ use self::capture::{Failure, Filmed, Sending};
 use self::devices::{Devices, Listener, Trouble};
 use self::link::{Happened, Link, Signal};
 use self::quality::Quality;
+use self::screen_sound::ScreenSound;
 use self::sound::{FRAME, Microphone, Mixer, Pipe};
-use self::video::{Videos, Watcher, layer_for, owner_of};
+use self::video::{Videos, Watcher, is_screen, layer_for, owner_of};
 use super::Core;
 use super::api::{Api, Problem};
 use super::calls::{Frames, Opened};
@@ -71,6 +74,9 @@ const LAYERS_AFTER: Duration = Duration::from_millis(120);
 const SETTINGS_EVERY: Duration = Duration::from_secs(60);
 /// How often a feed whose decoder lost its place asks for a keyframe.
 const KEYFRAME_ASK: Duration = Duration::from_millis(500);
+/// How long a shared screen's sound may go unheard before it counts as
+/// stopped: its track stays open after the share ends, but nothing comes.
+const SCREEN_SOUND_GONE: Duration = Duration::from_millis(1500);
 
 /// Where a call is at, for the call panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,6 +125,15 @@ pub struct CallView {
     /// Why your camera or screen couldn't start, when the system's settings
     /// are in the way: (a screen, why).
     pub video_trouble: Option<(bool, Failure)>,
+    /// The instance passes a shared screen's sound on (read as the call starts).
+    pub screen_sound_offered: bool,
+    /// Your shared screen brings this computer's sound: whether it goes out
+    /// now (its sound button turns it off for everyone). None without sound.
+    pub screen_sound: Option<bool>,
+    /// Whose shared screens' sound is coming, by account id.
+    pub screen_sounds: HashSet<String>,
+    /// Shared screens you turned the sound off for, for yourself, by account id.
+    pub quiet_screens: HashSet<String>,
 }
 
 impl CallView {
@@ -195,6 +210,8 @@ struct Active {
     /// Your camera and shared screen while they're on, and where their frames go.
     camera: Option<Sending>,
     screen: Option<Sending>,
+    /// This computer's sound, while your shared screen brings it.
+    screen_sound: Option<Arc<ScreenSound>>,
     filmed: mpsc::Sender<Filmed>,
 }
 
@@ -216,11 +233,31 @@ struct Volumes {
     /// and for `release` after.
     ptt: bool,
     release: Duration,
+    /// Shared screens whose sound you turned off, by account id.
+    quiet_screens: HashSet<String>,
 }
 
 impl Default for Volumes {
     fn default() -> Self {
-        Self { people: HashMap::new(), output: 1.0, input: 1.0, ptt: false, release: Duration::ZERO }
+        Self {
+            people: HashMap::new(),
+            output: 1.0,
+            input: 1.0,
+            ptt: false,
+            release: Duration::ZERO,
+            quiet_screens: HashSet::new(),
+        }
+    }
+}
+
+impl Volumes {
+    /// How loud each stream plays: people as set, quiet screens not at all.
+    fn gains(&self) -> HashMap<String, f32> {
+        let mut gains = self.people.clone();
+        for id in &self.quiet_screens {
+            gains.insert(video::feed_of(id, true), 0.0);
+        }
+        gains
     }
 }
 
@@ -327,7 +364,19 @@ impl Core {
 
     /// Starts the call in a direct message's conversation, or joins the one going on.
     pub fn join_dm_call(self: &Arc<Self>, instance: &str, conversation_id: &str) {
-        self.join(instance, Place::Dm { conversation_id: conversation_id.into() }, None);
+        self.join_dm_call_with(instance, conversation_id, None);
+    }
+
+    /// [`Core::join_dm_call`] with sound from and to these instead of the
+    /// devices: for the tests.
+    #[doc(hidden)]
+    pub fn join_dm_call_with(
+        self: &Arc<Self>,
+        instance: &str,
+        conversation_id: &str,
+        pipes: Option<(Arc<Pipe>, Arc<Pipe>)>,
+    ) {
+        self.join(instance, Place::Dm { conversation_id: conversation_id.into() }, pipes);
     }
 
     fn join(self: &Arc<Self>, instance: &str, place: Place, pipes: Option<(Arc<Pipe>, Arc<Pipe>)>) {
@@ -374,8 +423,16 @@ impl Core {
             Some(devices) => devices.listener(),
             None => Listener::detached(!selves.mute && !selves.deaf),
         };
-        *self.voice.active.lock() =
-            Some(Active { id, microphone, commands, selves: selves_tx, camera: None, screen: None, filmed });
+        *self.voice.active.lock() = Some(Active {
+            id,
+            microphone,
+            commands,
+            selves: selves_tx,
+            camera: None,
+            screen: None,
+            screen_sound: None,
+            filmed,
+        });
         *self.voice.ended.lock() = None;
         let (server_id, channel_id, conversation_id) = match &place {
             Place::Voice { server_id, channel_id } => (server_id.clone(), channel_id.clone(), String::new()),
@@ -402,7 +459,12 @@ impl Core {
             video_suppress: false,
             video_off: false,
             video_trouble: None,
+            screen_sound_offered: false,
+            screen_sound: None,
+            screen_sounds: HashSet::new(),
+            quiet_screens: HashSet::new(),
         });
+        self.voice.volumes.lock().quiet_screens.clear();
         self.apply_volumes();
         self.shared.update(|_| ());
         reports::used(if matches!(place, Place::Dm { .. }) { "call.join_dm" } else { "call.join_voice" });
@@ -522,13 +584,31 @@ impl Core {
             .iter()
             .filter_map(|(key, v)| key.strip_prefix(&prefix).map(|id| (id.to_owned(), f32::from(*v) / 100.0)))
             .collect();
-        *self.voice.volumes.lock() = Volumes {
+        let mut volumes = self.voice.volumes.lock();
+        *volumes = Volumes {
             people,
             output: f32::from(prefs.output_volume) / 100.0,
             input: f32::from(prefs.input_volume) / 100.0,
             ptt: prefs.input_mode == super::config::InputMode::Ptt,
             release: Duration::from_millis(u64::from(prefs.ptt_release)),
+            quiet_screens: std::mem::take(&mut volumes.quiet_screens),
         };
+    }
+
+    /// Turns someone's shared screen's sound off for you, or back on (the
+    /// web's `toggleScreenQuiet`): for this call only.
+    pub fn toggle_screen_quiet(&self, user_id: &str) {
+        let quiet = {
+            let mut volumes = self.voice.volumes.lock();
+            if !volumes.quiet_screens.remove(user_id) {
+                volumes.quiet_screens.insert(user_id.to_owned());
+            }
+            volumes.quiet_screens.clone()
+        };
+        if let Some(view) = self.voice.view.lock().as_mut() {
+            view.quiet_screens = quiet;
+        }
+        self.shared.update(|_| ());
     }
 
     /// Push to talk's key went down or up (the web's `setPushing`).
@@ -586,6 +666,8 @@ impl Core {
                     || before.server_recordings != view.server_recordings
                     || before.instance_camera != view.instance_camera
                     || before.since != view.since
+                    || before.screen_sound_offered != view.screen_sound_offered
+                    || before.screen_sounds != view.screen_sounds
             }
             None => false,
         };
@@ -764,12 +846,16 @@ async fn run(
         if !settings.enabled {
             return Some(Ended::Refused(t("workspace.calls.switchedOff")));
         }
-        let (recordings, camera) = (settings.recordings, instance_camera(settings));
+        let (recordings, camera, screen_sound) =
+            (settings.recordings, instance_camera(settings), settings.screen_sound);
         view(&|v| {
             v.server_recordings = recordings;
             v.instance_camera = camera;
+            v.screen_sound_offered = screen_sound;
         });
     }
+    // An instance that doesn't take a screen's sound gets no place for it in the offer.
+    let screen_sound = settings.as_ref().is_some_and(|s| s.screen_sound);
     let secrets = tokio::select! {
         secrets = first_secret(&core, &target) => secrets,
         Some(Command::Leave) = commands.recv() => return None,
@@ -791,7 +877,7 @@ async fn run(
     let started = Instant::now();
     let mut ever_connected = false;
     let ended = loop {
-        let (mut link, offer) = Link::offer();
+        let (mut link, offer) = Link::offer(screen_sound);
         let now = *selves.borrow();
         let joined = match &target.place {
             Place::Voice { server_id, channel_id } => {
@@ -904,6 +990,7 @@ async fn run(
         view(&|v| {
             v.status = if ever_connected { Status::Reconnecting } else { Status::Connecting };
             v.speaking.clear();
+            v.screen_sounds.clear();
             v.quality = Quality::default();
         });
         // Jitter keeps everyone from arriving at the next media part at once.
@@ -1040,6 +1127,7 @@ impl Running<'_> {
         let Ok(mut microphone) = Microphone::new() else {
             return Outcome::Ended(Ended::Refused("Opus didn't start.".into()));
         };
+        let mut screen_sound = screen_sound::Encoder::new().ok();
         let mut mixer = Mixer::default();
         let (kept_tx, mut kept) = mpsc::channel(4);
         let keeper = tokio::spawn(keep(
@@ -1058,6 +1146,8 @@ impl Running<'_> {
         let mut out = [0.0f32; FRAME];
         let mut quality = Quality::default();
         let mut heard: HashSet<String> = HashSet::new();
+        // Shared screens' sound, by its stream, and when a packet last came.
+        let mut screens_heard: HashMap<String, Instant> = HashMap::new();
         let mut wanted = self.videos.wanted_changes();
         // Until it's said, the media part sends the smallest size.
         let mut layers_due: Option<Instant> = Some(Instant::now());
@@ -1077,11 +1167,16 @@ impl Running<'_> {
                     }
                     Happened::KeyframeAsked { screen, rid } => self.keyframe(screen, rid.as_deref()),
                     Happened::Heard(who, packet) => {
-                        // Someone new in a call that's been going a moment: a cue.
-                        if heard.insert(who.clone())
-                            && !who.ends_with("-screen")
-                            && connected.is_some_and(|at| at.elapsed() > SETTLED)
-                        {
+                        if is_screen(&who) {
+                            // A shared screen's sound coming: its sound button shows.
+                            if screens_heard.insert(who.clone(), Instant::now()).is_none() {
+                                let owner = owner_of(&who).to_owned();
+                                (self.view)(&|v| {
+                                    v.screen_sounds.insert(owner.clone());
+                                });
+                            }
+                        } else if heard.insert(who.clone()) && connected.is_some_and(|at| at.elapsed() > SETTLED) {
+                            // Someone new in a call that's been going a moment: a cue.
                             (self.say)(Some(Cue::SomeoneJoined), None);
                         }
                         if self.selves.borrow().deaf {
@@ -1089,7 +1184,8 @@ impl Running<'_> {
                         }
                         match self.frames.as_mut() {
                             None => mixer.hear(&who, &packet),
-                            Some(frames) => match frames.open(&who, &packet) {
+                            // A screen's sound is sealed by its sharer, like their voice.
+                            Some(frames) => match frames.open(owner_of(&who), &packet) {
                                 Opened::Plain(plain) => mixer.hear(&who, &plain),
                                 Opened::Newer(epoch) => {
                                     if let Some(s) = self.secrets.as_ref() {
@@ -1102,7 +1198,12 @@ impl Running<'_> {
                     }
                     Happened::Gone(who) => {
                         mixer.forget(&who);
-                        if heard.remove(&who) && !who.ends_with("-screen") {
+                        if screens_heard.remove(&who).is_some() {
+                            let owner = owner_of(&who).to_owned();
+                            (self.view)(&|v| {
+                                v.screen_sounds.remove(&owner);
+                            });
+                        } else if heard.remove(&who) {
                             (self.say)(Some(Cue::SomeoneLeft), None);
                         }
                     }
@@ -1160,7 +1261,24 @@ impl Running<'_> {
                 Ok(()) = wanted.changed() => {
                     layers_due.get_or_insert_with(|| Instant::now() + LAYERS_AFTER);
                 }
-                _ = tick.tick() => self.tick(link, &mut microphone, &mut mixer, &mut out, &mut trouble_seen),
+                _ = tick.tick() => {
+                    self.tick(link, &mut microphone, &mut mixer, &mut out, &mut trouble_seen);
+                    self.share_sound(link, screen_sound.as_mut());
+                    // Screens whose sound stopped coming: their buttons go.
+                    let quiet: Vec<String> = screens_heard
+                        .iter()
+                        .filter(|(_, at)| at.elapsed() > SCREEN_SOUND_GONE)
+                        .map(|(who, _)| who.clone())
+                        .collect();
+                    for who in quiet {
+                        screens_heard.remove(&who);
+                        mixer.forget(&who);
+                        let owner = owner_of(&who).to_owned();
+                        (self.view)(&|v| {
+                            v.screen_sounds.remove(&owner);
+                        });
+                    }
+                }
                 Some(filmed) = self.filmed.recv() => self.film(link, filmed),
                 kept = kept.recv() => match kept {
                     Some(Kept::State(state)) => (self.video_state)(*state),
@@ -1200,6 +1318,29 @@ impl Running<'_> {
         link.film(filmed.screen, filmed.rid, filmed.taken, frame);
     }
 
+    /// 20 ms of your shared screen's sound out while it brings sound,
+    /// sealed in a direct message's call: silence while it's turned off or
+    /// nothing plays (as a browser's disabled track sends), so the others
+    /// know it's still there; skipped without sound.
+    fn share_sound(&mut self, link: &mut Link, encoder: Option<&mut screen_sound::Encoder>) {
+        if !link.has_screen_sound() {
+            return;
+        }
+        let sound = self.core.upgrade().and_then(|c| c.voice.active.lock().as_ref()?.screen_sound.clone());
+        let packet = sound
+            .filter(|_| self.selves.borrow().stream && link.is_connected())
+            .and_then(|sound| {
+                // Taken whether it goes or not, so it never falls behind.
+                let frame = sound.frame().filter(|_| sound.is_on());
+                encoder?.encode(&frame.unwrap_or([0.0; FRAME]))
+            })
+            .and_then(|packet| match self.frames.as_mut() {
+                Some(frames) => frames.seal(&packet),
+                None => Some(packet),
+            });
+        link.share_sound(packet);
+    }
+
     /// 20 ms of the call: the microphone out, everyone else mixed in, who's speaking.
     fn tick(
         &mut self,
@@ -1211,7 +1352,7 @@ impl Running<'_> {
     ) {
         let now = *self.selves.borrow();
         let volumes = self.volumes.lock().clone();
-        mixer.set_gains(&volumes.people);
+        mixer.set_gains(&volumes.gains());
         if let (Some(frames), Some(secrets)) = (self.frames.as_mut(), self.secrets.as_mut())
             && secrets.latest.has_changed().unwrap_or(false)
         {

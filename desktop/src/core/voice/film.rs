@@ -10,6 +10,7 @@ use std::sync::atomic::Ordering;
 
 use super::capture::{FAKE_VIDEO, Failure, Sending, Source};
 use super::ceiling::Ceiling;
+use super::screen_sound::{self, Missing, ScreenSound};
 use super::video::feed_of;
 use super::{CAMERA_TEST, CallView, Cue};
 use crate::core::Core;
@@ -97,17 +98,79 @@ impl Core {
     /// Turns your camera on or off in the call you're in. Its place in the
     /// connection stays either way, so it needs no new offer.
     pub fn set_camera(self: &Arc<Self>, on: bool) {
-        self.set_video(false, on, None);
+        self.set_video(false, on, None, false);
     }
 
     /// Shares a screen or window (`target`, from `capture::screens`; None
     /// for the main screen) in the call you're in, or stops; as sharp and
-    /// smooth as the share settings in prefs say.
-    pub fn set_screen(self: &Arc<Self>, on: bool, target: Option<u32>) {
-        self.set_video(true, on, target);
+    /// smooth as the share settings in prefs say, and with `sound` what this
+    /// computer plays too, where the instance passes it on.
+    pub fn set_screen(self: &Arc<Self>, on: bool, target: Option<u32>, sound: bool) {
+        self.set_video(true, on, target, sound);
     }
 
-    fn set_video(self: &Arc<Self>, screen: bool, on: bool, target: Option<u32>) {
+    /// Turns your shared screen's sound off for everyone, or back on,
+    /// without stopping the share (the web's `setScreenSound`).
+    pub fn set_screen_sound(&self, on: bool) {
+        let Some(sound) = self.voice.active.lock().as_ref().and_then(|a| a.screen_sound.clone()) else { return };
+        sound.set_on(on);
+        if let Some(view) = self.voice.view.lock().as_mut() {
+            view.screen_sound = Some(on);
+        }
+        self.shared.update(|_| ());
+    }
+
+    /// Starts taking this computer's sound for the screen being shared, off
+    /// the window's thread: the system takes a moment to set it up.
+    fn open_screen_sound(self: &Arc<Self>) {
+        let Some(id) = self.voice.active.lock().as_ref().map(|a| a.id) else { return };
+        let fake = self.pattern();
+        let core = Arc::downgrade(self);
+        self.runtime.spawn_blocking(move || {
+            let opened = screen_sound::open(fake);
+            if let Some(core) = core.upgrade() {
+                core.screen_sound_opened(id, opened);
+            }
+        });
+    }
+
+    /// The sound is ready, or isn't coming and the share goes on without it, saying why.
+    fn screen_sound_opened(&self, id: u64, opened: Result<ScreenSound, Missing>) {
+        let opened = {
+            let mut active = self.voice.active.lock();
+            // Stopped sharing (or left) while it was opening: it goes.
+            let Some(active) = active.as_mut().filter(|a| a.id == id && a.screen.is_some()) else { return };
+            opened.map(|sound| active.screen_sound = Some(Arc::new(sound)))
+        };
+        match opened {
+            Ok(()) => {
+                crate::core::reports::used("call.screen_sound");
+                if let Some(view) = self.voice.view.lock().as_mut() {
+                    view.screen_sound = Some(true);
+                }
+                self.shared.update(|_| ());
+            }
+            Err(missing) => {
+                crate::core::reports::used("call.screen_sound_missing");
+                if missing == Missing::Failed {
+                    crate::core::reports::error("screen_sound", missing.label());
+                }
+                self.notice(missing.message());
+            }
+        }
+    }
+
+    /// Your screen stopped: its sound goes with it.
+    fn drop_screen_sound(&self) {
+        if let Some(active) = self.voice.active.lock().as_mut() {
+            active.screen_sound = None;
+        }
+        if let Some(view) = self.voice.view.lock().as_mut() {
+            view.screen_sound = None;
+        }
+    }
+
+    fn set_video(self: &Arc<Self>, screen: bool, on: bool, target: Option<u32>, sound: bool) {
         let Some(view) = self.call() else { return };
         if (if screen { view.self_stream } else { view.self_video }) == on {
             return;
@@ -134,8 +197,15 @@ impl Core {
             *(if screen { &mut active.screen } else { &mut active.camera }) = None;
             false
         };
+        if screen && !on {
+            self.drop_screen_sound();
+        }
         if on {
             crate::core::reports::used(if screen { "call.screen_share" } else { "call.camera" });
+        }
+        // Where the instance passes it on: the share dialog says when it doesn't.
+        if on && screen && sound && view.screen_sound_offered {
+            self.open_screen_sound();
         }
         if let Some(view) = self.voice.view.lock().as_mut() {
             view.video_trouble = None;
@@ -188,6 +258,9 @@ impl Core {
                 active.camera = None;
             }
         }
+        if screen {
+            self.drop_screen_sound();
+        }
         self.set_selves(|s| if screen { s.stream = false } else { s.video = false });
         if failure == Failure::Blocked {
             if let Some(view) = self.voice.view.lock().as_mut() {
@@ -227,7 +300,7 @@ impl Core {
                     (false, false) => "workspace.calls.mod.allOff",
                 }));
                 self.set_camera(false);
-                self.set_screen(false, None);
+                self.set_screen(false, None, false);
             }
         }
         if state.video_suppress && view.self_video && !moderated {
@@ -236,7 +309,7 @@ impl Core {
         }
         if state.video_suppress && view.self_stream && !moderated {
             self.notice(t("workspace.calls.noScreenAnyMore"));
-            self.set_screen(false, None);
+            self.set_screen(false, None, false);
         }
     }
 

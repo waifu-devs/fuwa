@@ -457,7 +457,7 @@ impl FuwaApp {
                 .when(may, |el| {
                     el.on_click(cx.listener(move |this, _, window, cx| {
                         if on {
-                            this.core.set_screen(false, None);
+                            this.core.set_screen(false, None, false);
                         } else {
                             this.open_share_picker(window, cx);
                         }

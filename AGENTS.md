@@ -526,6 +526,10 @@
     `voice/`: str0m, Opus, and VP8 through libvpx for cameras and screens
     (prebuilt by shiguredo_libvpx, or vcpkg's on Windows through `voice/libvpx.rs`),
     `voice/capture.rs` taking and encoding yours in three simulcast sizes,
+    `voice/screen_sound/` what a shared screen plays (everything but the
+    app's own sound: WASAPI process loopback, ScreenCaptureKit, or each
+    PulseAudio/PipeWire stream but this process's), sent as the second
+    audio track,
     `voice/video.rs` decoding others' and the sizes asked of them, drawn by
     `ui/video.rs` and popped out by `ui/popout.rs`; docs/calls.md;
     `voice/access.rs` asks macOS for the microphone and camera, which it

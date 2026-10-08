@@ -157,11 +157,15 @@ is end-to-end encrypted like the voice. Programs and server recordings get
 voices only, never a screen's sound (a recording with video keeps the
 screen's picture, not its sound).
 
-The share dialog asks whether the sound goes too (the desktop app shares the
-picture only for now). The sound goes as it is, no
+The share dialog asks whether the sound goes too. The sound goes as it is, no
 echo cancelling or noise suppression, which spoil music, at up to 128 kbit/s,
-and the browser is asked to leave the page's own sound out, so nobody hears
-the call back. While sharing, the sound button on your screen turns its sound
+and the app's own sound is left out, so nobody hears the call back: the
+browser is asked to leave the page's out, and the desktop app shares
+everything the computer plays but itself (WASAPI's process loopback on
+Windows 10 version 2004 and later, ScreenCaptureKit on macOS 13 and later,
+and on Linux each app's stream but its own through PulseAudio or PipeWire,
+mixed in the app; `desktop/src/core/voice/screen_sound/`). On the desktop
+the sound is the whole computer's whatever is shared, a window too. While sharing, the sound button on your screen turns its sound
 off for everyone and back on, without stopping the share; on someone else's
 screen it turns it off for you. Browsers differ, and the app says which case
 you hit rather than sharing in silence: Firefox and Safari share pictures
