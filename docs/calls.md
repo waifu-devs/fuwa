@@ -101,10 +101,22 @@ next keep, and the media part passes the screen on only while it does.
 
 The others get it on a stream of its own, named for its person and
 `-screen` (`<account id>-screen`), which is how apps tell it from the
-camera. A screen goes out at up to 1080p and 30 frames a second, in the
-same three sizes as a camera with more bits (200 kbit/s, 700 kbit/s and 2.5
-Mbit/s, since text needs them), marked as detail so browsers keep text
-sharp and drop frames first, and switches sizes the same way. VIDEO covers
+camera. A screen goes out in the same three sizes as a camera with more
+bits, since text needs them, and switches sizes the same way. The person
+sharing picks how sharp and how smooth: the full size at up to 720p, 1080p
+(the default) or 1440p, at 15, 30 (the default) or 60 frames a second. The
+quarter size stays at 5 frames a second and 200 kbit/s and the half at 15
+and 700 kbit/s (1 Mbit/s at 1440p); the full size gets from 1.2 Mbit/s
+(720p at 15) to 6 Mbit/s (1440p at 60), the table in the web's
+`lib/screen-share.ts` and the desktop's `vp8::screen_sizes`, so either app
+sends the same. Below 60 a share is marked as detail, so browsers keep text
+sharp and drop frames first; at 60 as motion, for games and video.
+
+Both apps ask before sharing, in a dialog: what to share (on the desktop,
+every screen and window as a small picture of it, each taken from one
+frame; on the web, whether the browser's own picker opens on screens,
+windows or tabs, where Chrome and Edge let it), the size and frame rate,
+and the sound. The choices are kept for next time and for the shortcut. VIDEO covers
 screens too, and in direct messages a screen is end-to-end encrypted like
 a camera.
 
@@ -123,8 +135,8 @@ is end-to-end encrypted like the voice. Programs and server recordings get
 voices only, never a screen's sound (a recording with video keeps the
 screen's picture, not its sound).
 
-The web app asks before sharing: with its sound, or the picture only (it
-remembers, and the shortcut uses the choice). The sound goes as it is, no
+The share dialog asks whether the sound goes too (the desktop app shares the
+picture only for now). The sound goes as it is, no
 echo cancelling or noise suppression, which spoil music, at up to 128 kbit/s,
 and the browser is asked to leave the page's own sound out, so nobody hears
 the call back. While sharing, the sound button on your screen turns its sound
@@ -407,7 +419,8 @@ others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
 1500 bytes a frame, far above any Opus voice, and so is each program's.
 Each camera is capped at 1 MB a second, all its sizes together, and 512 KB
-a frame, and so is each shared screen. A call holds at most 99 people, programs included.
+a frame; each shared screen at 2 MB a second (room for 1440p at 60 and its
+keyframes) and 512 KB a frame. A call holds at most 99 people, programs included.
 
 ## Hosting the media part
 

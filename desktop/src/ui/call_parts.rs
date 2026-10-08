@@ -77,8 +77,8 @@ pub(crate) struct CallsUi {
     pub popouts: std::collections::HashMap<String, gpui_kit::AnyWindowHandle>,
     /// Whether a call was going on at the last change, to notice it ending.
     pub in_call: bool,
-    /// What can be shared, read when the screen button's list opens.
-    pub screens: Vec<crate::core::voice::capture::Screen>,
+    /// The share dialog: what can be shared, their pictures, what's picked.
+    pub picker: crate::ui::screen_share::SharePicker,
 }
 
 impl FuwaApp {
@@ -131,8 +131,6 @@ pub(crate) enum CallPop {
     Connection,
     /// Recording on this computer or on the server; `from` names the button.
     Record { from: String },
-    /// What to share; `from` names the button.
-    Screens { from: String },
 }
 
 /// The two sizes call buttons come in: the call panel's and the stage's.
@@ -430,14 +428,14 @@ impl FuwaApp {
             .into_any_element()
     }
 
-    /// The web's `ScreenButton`: starts sharing through a list of what can be
-    /// shared, or stops.
+    /// The web's `ScreenButton`: starts sharing through the share dialog
+    /// (`ui/screen_share.rs`), or stops.
     pub(crate) fn screen_button(
         &mut self,
         tag: &str,
         size: Size,
         grow: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = pal(cx);
@@ -452,107 +450,23 @@ impl FuwaApp {
             "dms-calls.calls.video.screenShare"
         });
         let (bg, fg, hover_bg, hover_fg) = film_colors(on, p.primary, p.primary_foreground.into(), size, &p);
-        let pop = CallPop::Screens { from: tag.to_owned() };
-        let open = self.calls.pop.as_ref() == Some(&pop);
         let button =
             call_button_frame(SharedString::from(format!("screen|{tag}")), size, bg, fg, hover_bg, hover_fg, label)
                 .when(grow, |el| el.flex_1())
                 .when(!may, |el| el.opacity(0.4).cursor_default())
                 .when(may, |el| {
-                    el.on_click(cx.listener(move |this, _, _, cx| {
+                    el.on_click(cx.listener(move |this, _, window, cx| {
                         if on {
                             this.core.set_screen(false, None);
                         } else {
-                            // What can be shared, read as the list opens.
-                            this.calls.screens = crate::core::voice::capture::screens();
-                            this.toggle_call_pop(pop.clone(), cx);
+                            this.open_share_picker(window, cx);
                         }
                         cx.notify();
                     }))
                 })
                 .child(icon(if on { "monitor-x" } else { "monitor-up" }).size(px(size.icon())));
-        let mut holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
-        if open && !on {
-            holder = holder.child(self.hang(self.screens_card(window, cx), Side::AboveCenter));
-        }
+        let holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
         holder.into_any_element()
-    }
-
-    /// The screens and windows to share, as a menu (the system's own picker,
-    /// on the web).
-    fn screens_card(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = pal(cx);
-        let mut list = div().id("screens-list").max_h(px(320.0)).overflow_y_scroll().flex().flex_col();
-        for screen in &self.calls.screens {
-            let hover = alpha(p.primary, 0.1);
-            let id = screen.id;
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("share|{}|{}", screen.display, screen.id)))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .px(px(8.0))
-                    .py(px(8.0))
-                    .rounded(radius_md())
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
-                    .child(
-                        icon(if screen.display { "monitor" } else { "app-window" })
-                            .size(px(16.0))
-                            .text_color(p.muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_sm()
-                            .line_height(px(20.0))
-                            .font_weight(FontWeight::BOLD)
-                            .child(screen.name.clone()),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.calls.pop = None;
-                        this.core.set_screen(true, Some(id));
-                        cx.notify();
-                    })),
-            );
-        }
-        if self.calls.screens.is_empty() {
-            list = list.child(
-                div()
-                    .px(px(8.0))
-                    .py(px(8.0))
-                    .text_sm()
-                    .line_height(px(20.0))
-                    .text_color(p.muted_foreground)
-                    .child(t("desktop.video.nothingToShare")),
-            );
-        }
-        div()
-            .w(px(320.0))
-            .rounded(radius_xl())
-            .border_1()
-            .border_color(p.border)
-            .bg(p.card)
-            .p(px(4.0))
-            .shadow(shadow_xl())
-            .occlude()
-            .child(
-                div()
-                    .px(px(8.0))
-                    .py(px(6.0))
-                    .text_xs()
-                    .line_height(px(16.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(p.muted_foreground)
-                    .child(t("dms-calls.calls.video.screenShare")),
-            )
-            .child(list)
-            .into_any_element()
     }
 }
 

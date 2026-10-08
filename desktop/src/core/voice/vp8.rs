@@ -283,16 +283,67 @@ pub const CAMERA: [Size; 3] = [
     Size { rid: "h", divide: 1, bitrate: 1_500_000, fps: 30 },
 ];
 
-/// A shared screen's three sizes, with more bits for text (`SCREEN_ENCODINGS`).
-pub const SCREEN: [Size; 3] = [
-    Size { rid: "l", divide: 4, bitrate: 200_000, fps: 5 },
-    Size { rid: "m", divide: 2, bitrate: 700_000, fps: 15 },
-    Size { rid: "h", divide: 1, bitrate: 2_500_000, fps: 30 },
-];
+/// A shared screen's three sizes at the default quality, with more bits for text.
+pub const SCREEN: [Size; 3] = screen_sizes(Share::DEFAULT);
 
-/// A camera goes out at up to 720p, a screen at up to 1080p.
+/// How sharp and smooth a shared screen goes out (the web's `lib/screen-share.ts`):
+/// the full size's height at most (16:9 fits in it) and its frame rate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Share {
+    pub height: u32,
+    pub fps: u32,
+}
+
+impl Share {
+    pub const HEIGHTS: [u32; 3] = [720, 1080, 1440];
+    pub const FPS: [u32; 3] = [15, 30, 60];
+    /// What sharing used before there was a choice: 1080p at 30.
+    pub const DEFAULT: Self = Self { height: 1080, fps: 30 };
+
+    /// A saved choice read back, anything unknown as the default.
+    pub fn new(height: u32, fps: u32) -> Self {
+        Self {
+            height: if Self::HEIGHTS.contains(&height) { height } else { Self::DEFAULT.height },
+            fps: if Self::FPS.contains(&fps) { fps } else { Self::DEFAULT.fps },
+        }
+    }
+
+    /// The box the full size fits in.
+    pub fn most(self) -> (u32, u32) {
+        (self.height * 16 / 9, self.height)
+    }
+
+    /// About how much upload it takes, in Mbit/s, every size together.
+    pub fn mbps(self) -> f32 {
+        let bits: u32 = screen_sizes(self).iter().map(|s| s.bitrate).sum();
+        (bits / 100_000) as f32 / 10.0
+    }
+}
+
+/// A shared screen's three sizes: a quarter for thumbnails, half, and full
+/// at the frame rate picked, with the web's bitrates (`screenEncodings`).
+pub const fn screen_sizes(share: Share) -> [Size; 3] {
+    let top = match (share.height, share.fps) {
+        (720, 15) => 1_200_000,
+        (720, 30) => 1_800_000,
+        (720, _) => 2_800_000,
+        (1440, 15) => 3_000_000,
+        (1440, 30) => 4_500_000,
+        (1440, _) => 6_000_000,
+        (_, 15) => 1_800_000,
+        (_, 30) => 2_500_000,
+        (_, _) => 4_000_000,
+    };
+    let middle = if share.height == 1440 { 1_000_000 } else { 700_000 };
+    [
+        Size { rid: "l", divide: 4, bitrate: 200_000, fps: 5 },
+        Size { rid: "m", divide: 2, bitrate: middle, fps: 15 },
+        Size { rid: "h", divide: 1, bitrate: top, fps: share.fps },
+    ]
+}
+
+/// A camera goes out at up to 720p (a screen as its `Share` says).
 pub const CAMERA_MOST: (u32, u32) = (1280, 720);
-pub const SCREEN_MOST: (u32, u32) = (1920, 1080);
 
 /// One frame out of the encoder.
 #[derive(Clone, Debug)]
@@ -410,6 +461,23 @@ pub fn keyframe_size(frame: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_shares_match_the_web() {
+        assert_eq!(SCREEN.map(|s| (s.bitrate, s.fps)), [(200_000, 5), (700_000, 15), (2_500_000, 30)]);
+        assert_eq!(screen_sizes(Share { height: 1440, fps: 60 })[2].bitrate, 6_000_000);
+        assert_eq!(screen_sizes(Share { height: 720, fps: 15 })[2].bitrate, 1_200_000);
+        for height in Share::HEIGHTS {
+            for fps in Share::FPS {
+                let sizes = screen_sizes(Share { height, fps });
+                assert!(sizes.iter().map(|s| s.bitrate).sum::<u32>() <= 7_500_000);
+                assert_eq!(sizes[2].fps, fps);
+            }
+        }
+        assert_eq!(Share::DEFAULT.mbps(), 3.4);
+        assert_eq!(Share::new(4320, 7), Share::DEFAULT);
+        assert_eq!(Share { height: 1440, fps: 60 }.most(), (2560, 1440));
+    }
 
     /// A picture with something in it: a gradient, and a bright square.
     fn pattern(w: u32, h: u32) -> Yuv {

@@ -56,6 +56,7 @@ mod profile_effect;
 mod profile_items;
 mod rail;
 mod recordings;
+mod screen_share;
 mod sealed_files;
 mod search;
 mod secure;
