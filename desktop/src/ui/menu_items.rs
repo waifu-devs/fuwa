@@ -229,6 +229,10 @@ impl FuwaApp {
             member: Option<pb::Member>,
             roles: Vec<pb::Role>,
             allowed: Vec<P>,
+            /// You may change their nickname.
+            rename: bool,
+            /// Timed out now.
+            timed_out: bool,
             /// Where you stand with them, when this instance has friends.
             friend: Option<i32>,
         }
@@ -260,12 +264,18 @@ impl FuwaApp {
                 }
                 _ => (Vec::new(), Vec::new()),
             };
+            let rename = server.is_some_and(|sv| member.is_some() && i.can_rename(sv, user_id));
+            let timed_out = member
+                .as_ref()
+                .is_some_and(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()).is_some());
             Some(Facts {
                 me,
                 agent: crate::ui::widgets::is_agent(user.as_ref()),
                 dms: matches!(i.dms.status, crate::core::dms::DmStatus::Ready | crate::core::dms::DmStatus::Starting),
                 username: user.map(|u| u.username).unwrap_or_default(),
                 member,
+                rename,
+                timed_out,
                 roles,
                 allowed,
                 friend: matches!(
@@ -280,7 +290,7 @@ impl FuwaApp {
         {
             let (k, uid, sv) = (key.to_owned(), user_id.to_owned(), server.map(str::to_owned));
             primary.push(Item::act(
-                "Profile",
+                crate::core::i18n::t("workspace.menu.member.profile"),
                 "user-round",
                 run(move |this, window, cx| {
                     let dialog = Dialog::Profile { key: k.clone(), user_id: uid.clone(), server: sv.clone() };
@@ -292,11 +302,11 @@ impl FuwaApp {
             let (k, uid) = (key.to_owned(), user_id.to_owned());
             primary.push(
                 Item::act(
-                    "Message",
+                    crate::core::i18n::t("workspace.menu.member.message"),
                     "message-circle",
                     run(move |this, window, cx| this.message_person(k.clone(), uid.clone(), window, cx)),
                 )
-                .hint("Encrypted"),
+                .hint(crate::core::i18n::t("workspace.menu.member.encrypted")),
             );
         }
         // Mention goes in the message box of the server's channel you're in.
@@ -304,7 +314,7 @@ impl FuwaApp {
         if here && !f.username.is_empty() {
             let text = format!("@{} ", f.username);
             primary.push(Item::act(
-                "Mention",
+                crate::core::i18n::t("workspace.menu.member.mention"),
                 "at-sign",
                 run(move |this, window, cx| {
                     let text = text.clone();
@@ -316,6 +326,37 @@ impl FuwaApp {
             ));
         }
         let mut manage = Vec::new();
+        if f.me && server.is_some() {
+            manage.push(Item::act(
+                crate::core::i18n::t("workspace.menu.member.editServerProfile"),
+                "id-card",
+                run(|this, window, cx| {
+                    this.open_settings(window, cx);
+                    if let Some(view) = &this.settings {
+                        view.update(cx, |view, cx| {
+                            view.page = crate::ui::settings::Page::ServerProfiles;
+                            cx.notify();
+                        });
+                    }
+                }),
+            ));
+        }
+        if let (Some(sv), true) = (server, f.rename) {
+            let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
+            manage.push(Item::act(
+                crate::core::i18n::t("workspace.menu.member.nickname"),
+                "pencil",
+                run(move |this, window, cx| {
+                    let dialog = Dialog::Moderate {
+                        key: k.clone(),
+                        server: s.clone(),
+                        user_id: uid.clone(),
+                        action: Action::Nickname,
+                    };
+                    this.open_dialog(dialog, window, cx)
+                }),
+            ));
+        }
         if let (Some(sv), Some(member)) = (server, &f.member)
             && !f.roles.is_empty()
         {
@@ -358,33 +399,37 @@ impl FuwaApp {
                     .keep_open()
                 })
                 .collect();
-            manage.push(Item::sub("Roles", "shield", items).hint(if count > 0 {
-                count.to_string()
-            } else {
-                String::new()
-            }));
+            manage.push(
+                Item::sub(crate::core::i18n::t("workspace.menu.member.roles"), "shield", items).hint(if count > 0 {
+                    count.to_string()
+                } else {
+                    String::new()
+                }),
+            );
         }
         let mut moderate = Vec::new();
         if let Some(sv) = server {
             for permission in &f.allowed {
+                let ending = *permission == P::TimeOutMembers && f.timed_out;
                 let (label, glyph, action) = match permission {
-                    P::TimeOutMembers => ("Time out", "hourglass", Action::TimeOut(3_600)),
-                    P::KickMembers => ("Kick", "door-open", Action::Kick),
-                    _ => ("Ban", "gavel", Action::Ban(0)),
+                    P::TimeOutMembers if ending => {
+                        ("workspace.menu.member.endTimeout", "timer-off", Action::TimeOut(3_600))
+                    }
+                    P::TimeOutMembers => ("workspace.menu.member.timeout", "hourglass", Action::TimeOut(3_600)),
+                    P::KickMembers => ("workspace.menu.member.kick", "door-open", Action::Kick),
+                    _ => ("workspace.menu.member.ban", "gavel", Action::Ban(0)),
                 };
                 let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
-                moderate.push(
-                    Item::act(
-                        label,
-                        glyph,
-                        run(move |this, window, cx| {
-                            let dialog =
-                                Dialog::Moderate { key: k.clone(), server: s.clone(), user_id: uid.clone(), action };
-                            this.open_dialog(dialog, window, cx)
-                        }),
-                    )
-                    .danger(),
+                let item = Item::act(
+                    crate::core::i18n::t(label),
+                    glyph,
+                    run(move |this, window, cx| {
+                        let dialog =
+                            Dialog::Moderate { key: k.clone(), server: s.clone(), user_id: uid.clone(), action };
+                        this.open_dialog(dialog, window, cx)
+                    }),
                 );
+                moderate.push(if ending { item } else { item.danger() });
             }
         }
         let mut friend = Vec::new();
@@ -396,23 +441,35 @@ impl FuwaApp {
                 Item::act(label, glyph, run(move |this, _, cx| this.friend_act(&k, &uid, act, cx)))
             };
             match state {
-                0 => friend.push(item("Add friend", "user-plus", Act::Request)),
-                OUTGOING => friend.push(item("Cancel request", "x", Act::Remove)),
+                0 => friend.push(item(&crate::core::i18n::t("dms-calls.friends.add"), "user-plus", Act::Request)),
+                OUTGOING => friend.push(item(
+                    &crate::core::i18n::t("dms-calls.friends.actions.cancelRequest"),
+                    "x",
+                    Act::Remove,
+                )),
                 INCOMING => {
-                    friend.push(item("Accept request", "user-check", Act::Accept));
-                    friend.push(item("Decline request", "x", Act::Remove));
+                    friend.push(item(
+                        &crate::core::i18n::t("dms-calls.friends.actions.accept"),
+                        "user-check",
+                        Act::Accept,
+                    ));
+                    friend.push(item(&crate::core::i18n::t("dms-calls.friends.actions.decline"), "x", Act::Remove));
                 }
-                FRIEND => friend.push(item("Remove friend", "user-minus", Act::Remove)),
+                FRIEND => {
+                    friend.push(item(&crate::core::i18n::t("dms-calls.friends.remove"), "user-minus", Act::Remove))
+                }
                 _ => {}
             }
             if state == BLOCKED {
-                friend.push(item("Unblock", "shield-off", Act::Unblock));
+                friend.push(item(&crate::core::i18n::t("dms-calls.friends.unblock"), "shield-off", Act::Unblock));
             } else {
-                friend.push(item("Block", "ban", Act::Block).danger().confirm(
-                    format!("Block @{}?", f.username),
-                    "They can't message you, call you or send you requests, and they aren't told.",
-                    "Block",
-                ));
+                friend.push(
+                    item(&crate::core::i18n::t("dms-calls.friends.page.block"), "ban", Act::Block).danger().confirm(
+                        format!("Block @{}?", f.username),
+                        "They can't message you, call you or send you requests, and they aren't told.",
+                        "Block",
+                    ),
+                );
             }
         }
         let _ = cx;

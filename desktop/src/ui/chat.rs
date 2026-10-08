@@ -1887,7 +1887,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     .when(author.is_some(), |el| el.cursor_pointer().hover(|s| s.underline()))
                     .when_some(author.clone(), |el, id| {
                         let ctx = ctx.clone();
-                        el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                        el.child(crate::ui::profile_card::mark(&id, crate::ui::profile_card::Side::Right))
+                            .on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
                             .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
                     })
                     .child(m.name.clone()),
@@ -2034,7 +2035,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .when(author.is_some(), |el| el.cursor_pointer().active(|s| s.opacity(0.9)))
                 .when_some(author, |el, id| {
                     let ctx = ctx.clone();
-                    el.on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
+                    el.child(crate::ui::profile_card::mark(&id, crate::ui::profile_card::Side::Right))
+                        .on_mouse_down(MouseButton::Right, person_menu(&ctx, id.clone()))
                         .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
                 })
                 .child(avatar(m.user.as_ref(), 40.0, p))

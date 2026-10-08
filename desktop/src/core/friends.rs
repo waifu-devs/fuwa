@@ -47,7 +47,7 @@ pub struct FriendsState {
     pub settings: Option<pb::FriendSettings>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
     Online,
     All,

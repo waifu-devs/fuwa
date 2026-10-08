@@ -568,6 +568,7 @@ pub fn status_label(status: pb::PresenceStatus) -> &'static str {
 
 /// The dot for a status: green, amber, red with a bar, or grey with a hole.
 /// `ring` cuts it out of what it sits on (your picture); `under` is the color behind it.
+#[allow(dead_code)]
 pub fn status_dot(
     status: pb::PresenceStatus,
     size: f32,

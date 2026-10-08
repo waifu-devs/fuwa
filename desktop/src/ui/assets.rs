@@ -16,6 +16,8 @@ const OWN: &[(&str, &[u8])] = &[
     // Lucide's play and pause filled in, as the web's voice messages draw them (`fill-current`).
     ("fuwa/play-filled.svg", include_bytes!("../../assets/fuwa/play-filled.svg")),
     ("fuwa/pause-filled.svg", include_bytes!("../../assets/fuwa/pause-filled.svg")),
+    // An idle presence dot with its bite cut out, as the web's mask leaves it (no ring, the picture shows through).
+    ("fuwa/idle.svg", include_bytes!("../../assets/fuwa/idle.svg")),
 ];
 
 /// A sign-in provider's mark, by its id.

@@ -158,6 +158,13 @@ pub fn role_names() -> bool {
     ROLE_NAMES.load(Ordering::Relaxed)
 }
 
+/// Whether a role's color shows as a dot beside names instead (the Role colors setting's "beside").
+static ROLE_BESIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn role_beside() -> bool {
+    ROLE_BESIDE.load(Ordering::Relaxed)
+}
+
 pub fn chat_font() -> f32 {
     CHAT_FONT.load(Ordering::Relaxed) as f32
 }
@@ -257,6 +264,7 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     let dark = p.dark;
     CHAT_FONT.store(u32::from(prefs.chat_font_size.clamp(12, 20)), Ordering::Relaxed);
     ROLE_NAMES.store(prefs.role_colors == crate::core::config::RoleColors::Names, Ordering::Relaxed);
+    ROLE_BESIDE.store(prefs.role_colors == crate::core::config::RoleColors::Beside, Ordering::Relaxed);
     CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
     crate::ui::text::set_clock(prefs.clock);
     cx.set_global(CurrentBackdrop(backdrop));

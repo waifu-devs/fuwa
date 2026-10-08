@@ -78,7 +78,10 @@ impl FuwaApp {
             return Some(el);
         }
         if let Dialog::Profile { key, user_id, server } = &dialog {
-            return Some(self.render_profile(key, user_id, server.as_deref(), cx));
+            return Some(self.render_profile_card(key, user_id, server.as_deref(), window, cx));
+        }
+        if let Dialog::Moderate { key, server, user_id, action } = &dialog {
+            return Some(self.render_moderate(key, server, user_id, *action, window, cx));
         }
         if let Dialog::Welcome { key, server } = &dialog {
             return Some(self.render_welcome(key, server, window, cx));
@@ -371,7 +374,6 @@ impl FuwaApp {
                     self.rules.as_ref().map(|_| if busy { "Agreeing…" } else { "I agree" }),
                 )
             }
-            Dialog::Moderate { key, server, user_id, action } => self.moderate_parts(key, server, user_id, *action, cx),
             Dialog::AllowGame { name, .. } => (
                 "gamepad-2",
                 format!("{name} wants to show what you're playing"),
@@ -380,6 +382,7 @@ impl FuwaApp {
                 Some("Allow"),
             ),
             Dialog::Profile { .. }
+            | Dialog::Moderate { .. }
             | Dialog::CreateServer { .. }
             | Dialog::Apply { .. }
             | Dialog::Application { .. }
@@ -497,200 +500,6 @@ impl FuwaApp {
             )
             .into_any_element(),
         )
-    }
-
-    /// Someone's card: a band in their color, their picture over it, their
-    /// names, pronouns and bio, and a button to message them.
-    fn render_profile(&mut self, key: &str, user_id: &str, server: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
-        let p = pal(cx);
-        let (user, nickname, me, roles, presence) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(key) else { return (None, String::new(), false, Vec::new(), None) };
-            let member = server.and_then(|sid| {
-                i.members.get(sid)?.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id)).cloned()
-            });
-            let roles: Vec<(String, Option<u32>)> = match (server, &member) {
-                (Some(sid), Some(m)) => i
-                    .roles
-                    .get(sid)
-                    .into_iter()
-                    .flatten()
-                    .filter(|r| m.role_ids.contains(&r.id))
-                    .map(|r| (r.name.clone(), r.color.map(|c| c as u32)))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            (
-                i.users.get(user_id).cloned(),
-                member.map(|m| m.nickname).unwrap_or_default(),
-                i.me.as_ref().is_some_and(|m| m.id == user_id),
-                roles,
-                // None on an instance without presence: no dot then.
-                i.people.as_ref().map(|people| people.get(user_id).cloned()),
-            )
-        });
-        let profile = self.profile.clone().filter(|pr| pr.user.as_ref().is_some_and(|u| u.id == user_id));
-        let user = profile.as_ref().and_then(|pr| pr.user.clone()).or(user);
-        let name = if nickname.is_empty() {
-            user.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| "Someone".into())
-        } else {
-            nickname
-        };
-        let accent = profile
-            .as_ref()
-            .and_then(|pr| pr.accent_color)
-            .map(|c| gpui_kit::Hsla::from(gpui_kit::rgb(c as u32)))
-            .unwrap_or_else(|| crate::ui::widgets::hue_color(user_id, p.dark));
-        let streamer = self.prefs.streamer_mode;
-        let status = user.as_ref().map(|u| u.status.clone()).unwrap_or_default();
-        let mut info = div().px(px(20.0)).pb(px(20.0)).flex().flex_col().gap(px(10.0)).child(
-            div()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(name))
-                        .when(crate::ui::widgets::is_agent(user.as_ref()), |el| {
-                            el.child(crate::ui::widgets::app_badge("profile-badge", "AGENT", &p))
-                        }),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(6.0))
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .when(!streamer || !me, |el| {
-                            el.child(format!("@{}", user.as_ref().map(|u| u.username.as_str()).unwrap_or("")))
-                        })
-                        .when_some(
-                            profile.as_ref().map(|pr| pr.pronouns.clone()).filter(|x| !x.is_empty()),
-                            |el, pronouns| el.child("·").child(pronouns),
-                        ),
-                ),
-        );
-        if !status.is_empty() {
-            info = info.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(corner(12.0))
-                    .bg(p.secondary)
-                    .text_sm()
-                    .child(icon("message-circle-heart").size(px(14.0)).text_color(p.primary))
-                    .child(status),
-            );
-        }
-        let activities = presence.clone().flatten().map(|pr| pr.activities).unwrap_or_default();
-        if !activities.is_empty() {
-            let now = crate::core::dms::now_ms();
-            let leaving = self.profile_leaving.clone();
-            info = info.children(crate::ui::presence::activity_cards(&activities, leaving.as_deref(), now, &p, cx));
-            // A running timer counts: drawn again each second while the card is open.
-            let timed = activities.iter().any(|a| a.started_at.is_some() || a.ends_at.is_some());
-            if timed && self.profile_tick.is_none() {
-                self.profile_tick = Some(cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(Duration::from_secs(1)).await;
-                    let _ = this.update(cx, |this, cx| {
-                        this.profile_tick = None;
-                        cx.notify();
-                    });
-                }));
-            }
-        }
-        if let Some(bio) = profile.as_ref().map(|pr| pr.bio.clone()).filter(|b| !b.is_empty()) {
-            info = info.child(
-                div().flex().flex_col().gap(px(4.0)).child(section_title("About", &p)).child(
-                    crate::ui::text::markdown("profile-bio", crate::ui::text::images_as_links(&bio))
-                        .selectable(true)
-                        .w_full(),
-                ),
-            );
-        } else if profile.is_none() {
-            info = info.child(div().h(px(14.0)).w(px(180.0)).rounded_full().bg(alpha(p.muted_foreground, 0.12)));
-        }
-        if !roles.is_empty() {
-            info = info.child(div().flex().flex_col().gap(px(6.0)).child(section_title("Roles", &p)).child(
-                div().flex().flex_wrap().gap(px(6.0)).children(roles.into_iter().map(|(role, color)| {
-                    let dot =
-                        color.map(|c| gpui_kit::Hsla::from(gpui_kit::rgb(c))).unwrap_or(p.muted_foreground.into());
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .px(px(10.0))
-                        .h(px(26.0))
-                        .rounded_full()
-                        .bg(p.secondary)
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .child(div().size(px(10.0)).rounded_full().bg(dot))
-                        .child(role)
-                })),
-            ));
-        }
-        if let Some(buttons) = server.and_then(|sid| self.moderation_buttons(key, sid, user_id, &p, cx)) {
-            info = info.child(buttons);
-        }
-        // Agents have no friends and no private messages.
-        let person = !me && !crate::ui::widgets::is_agent(user.as_ref());
-        if let Some(buttons) = person.then(|| self.profile_friend_buttons(key, user_id, &p, cx)).flatten() {
-            info = info.child(buttons);
-        }
-        // Someone you blocked can't be written to until you unblock them.
-        let blocked = self.core.shared.read(|s| {
-            s.instance(key).is_some_and(|i| {
-                crate::core::friends::state_with(&i.friends.list, user_id, crate::core::dms::now_ms())
-                    == crate::core::friends::BLOCKED
-            })
-        });
-        if person && !blocked {
-            info = info.child(
-                primary_button("profile-message", "Message", &p)
-                    .w_full()
-                    .child(icon("lock").size(px(14.0)))
-                    .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx))),
-            );
-        }
-        let panel = card(&p)
-            .w(px(380.0))
-            .overflow_hidden()
-            .child(div().h(px(96.0)).rounded_t(corner(20.0)).bg(accent))
-            .child(
-                div().px(px(20.0)).mt(px(-44.0)).mb(px(10.0)).child(
-                    div()
-                        .relative()
-                        .size(px(88.0))
-                        .rounded_full()
-                        .border_4()
-                        .border_color(p.card)
-                        .bg(p.card)
-                        .child(crate::ui::widgets::avatar(user.as_ref(), 80.0, &p))
-                        .when_some(presence.as_ref(), |el, pr| {
-                            let status = crate::ui::presence::shown(pr.as_ref());
-                            el.child(crate::ui::presence::avatar_dot(status, 24.0, p.card, &p))
-                        }),
-                ),
-            )
-            .child(info);
-        motion::fade_in(
-            scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                motion::rise(
-                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                    SharedString::from(format!("profile-{user_id}")),
-                    Duration::ZERO,
-                    24.0,
-                ),
-            ),
-            "dialog-fade-profile",
-            Duration::from_millis(160),
-        )
-        .into_any_element()
     }
 
     /// A server's welcome screen: its icon and name, a few words, and the
