@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "fuwa-desktop"
-version = "0.3.1"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -3199,7 +3199,7 @@ dependencies = [
 
 [[package]]
 name = "fuwa-e2ee"
-version = "0.3.1"
+version = "0.3.3"
 dependencies = [
  "openmls",
  "openmls_basic_credential",
@@ -3211,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "fuwa-server"
-version = "0.3.1"
+version = "0.3.3"
 dependencies = [
  "argon2",
  "axum",

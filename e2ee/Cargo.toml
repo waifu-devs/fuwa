@@ -1,6 +1,6 @@
 [package]
 name = "fuwa-e2ee"
-version = "0.3.1"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.91"
 description = "End-to-end encryption for fuwa's direct messages (MLS, RFC 9420), shared by the server and every client"
