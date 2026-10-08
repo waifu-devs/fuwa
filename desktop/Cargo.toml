@@ -85,6 +85,11 @@ objc2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString"] }
 
+# zed-scap asks for windows-capture 1, but 1.5 changed Settings::new; held
+# at the last one it builds with.
+[target.'cfg(windows)'.dependencies]
+windows-capture = "=1.4.4"
+
 [build-dependencies]
 protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
