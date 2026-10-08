@@ -423,8 +423,12 @@ release, holding apps on the one they have; the signature has no date, so
 that isn't caught yet. The release notes it passes on aren't signed, so the
 app shows them as plain text, saying where they came from. Only https
 instances are asked, or plain http on this computer or a local network. The
-checked download waits beside the app until the person presses "Restart to update"; quitting without pressing
-it starts the same version again. People can turn "Download updates in the
+checked download waits until the person presses "Restart to update", which
+puts it in place and starts the app again: the bare program, the AppImage and
+the Windows install are swapped for the new program, a macOS app for the new
+`.app` (from the release's `.app.zip`), and the `.deb` is installed by dpkg
+after the person gives their password. Quitting without pressing it starts
+the same version again. People can turn "Download updates in the
 background" off in the app's settings (Updates); it then only says a new
 version is out.
 

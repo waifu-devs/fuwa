@@ -2,7 +2,8 @@ name: Desktop installers
 
 # The desktop app (desktop/) for each system, ready to install:
 #   Linux    fuwa-desktop-<version>-x86_64-linux.deb and .AppImage
-#   macOS    fuwa-desktop-<version>-aarch64-macos.dmg
+#   macOS    fuwa-desktop-<version>-aarch64-macos.dmg, and the app zipped
+#            (.app.zip), which the installed app updates itself from
 #   Windows  fuwa-desktop-<version>-x86_64-windows-setup.exe
 # and the bare program for each, as before. cargo-packager does the packing,
 # from [package.metadata.packager] in desktop/Cargo.toml. They aren't signed
@@ -47,7 +48,7 @@ jobs:
             runner: macos-latest
             file: aarch64-macos
             exe: ""
-            formats: dmg
+            formats: app,dmg
           - name: Windows (x64)
             runner: windows-latest
             file: x86_64-windows
@@ -110,11 +111,14 @@ jobs:
           for f in target/packages/*.AppImage; do cp "$f" "dist/$base.AppImage"; done
           for f in target/packages/*.dmg; do cp "$f" "dist/$base.dmg"; done
           for f in target/packages/*-setup.exe; do cp "$f" "dist/$base-setup.exe"; done
+          # The whole app, signature and all, for apps already installed to
+          # swap themselves for (desktop/src/core/updates.rs).
+          for f in target/packages/*.app; do ditto -c -k --sequesterRsrc --keepParent "$f" "dist/$base.app.zip"; done
           ls -la dist
           # Each system gets its installer, or this fails.
           case "${{ runner.os }}" in
             Linux) test -f "dist/$base.deb" && test -f "dist/$base.AppImage" ;;
-            macOS) test -f "dist/$base.dmg" ;;
+            macOS) test -f "dist/$base.dmg" && test -f "dist/$base.app.zip" ;;
             Windows) test -f "dist/$base-setup.exe" ;;
           esac
       - uses: actions/upload-artifact@v4

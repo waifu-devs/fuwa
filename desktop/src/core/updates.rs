@@ -17,15 +17,20 @@
 //! that isn't newer than this app is never installed, so nobody can hand an
 //! older, signed build back.
 //!
-//! Nothing is ever forced: a checked download only waits beside the program
-//! (the bare program, or the AppImage). It replaces it when you press
-//! "Restart to update", which checks it once more first; quit without
-//! pressing it and the same version starts next time, with the download
-//! still waiting for you. Where the app can't replace itself (installed by
-//! a package manager, a folder it can't write, a computer there's no build
-//! for, or a release that isn't signed) it says a new version is out and
-//! where to get it. "Download updates in the background" off only stops it
-//! fetching by itself.
+//! Nothing is ever forced: a checked download only waits (beside the bare
+//! program, the AppImage or the macOS app, or in the cache folder for the
+//! .deb). It takes the app's place when you press "Restart to update",
+//! which checks it once more first: a program or AppImage is swapped for
+//! the new one, a macOS app is unpacked and swapped whole (its signature
+//! covers all of it), and the .deb is installed by dpkg once you give your
+//! password (pkexec), after the window has gone. The app then starts again
+//! on the new version. Quit without pressing it and the same version starts
+//! next time, with the download still waiting for you. Where the app can't
+//! replace itself (installed some other way under /usr or /opt, a folder it
+//! can't write, a macOS app run from where it was downloaded, a computer
+//! there's no build for, or a release that isn't signed) it says a new
+//! version is out and where to get it. "Download updates in the background"
+//! off only stops it fetching by itself.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -72,11 +77,12 @@ pub enum Manual {
     Unsigned,
     /// There's no build of the app for this computer in the release.
     NoBuild,
-    /// A package manager put the app here (the .deb); it updates it.
+    /// Something other than our .deb put the app here, or there's no pkexec
+    /// to ask for the password; the package manager updates it.
     Package,
-    /// A macOS app bundle, signed as a whole: swapping the program inside it
-    /// would break its signature, so the new one comes from the release page.
-    Bundle,
+    /// A macOS app still running from the disk image or from where it was
+    /// downloaded (macOS runs those from a read-only copy).
+    Move,
     /// The app can't write where it's installed.
     ReadOnly,
     /// A build made from source, which updates by building again.
@@ -96,7 +102,9 @@ impl Manual {
             Manual::Package => {
                 "Your package manager installed fuwa, so update it there, or take the new .deb from the release page."
             }
-            Manual::Bundle => "Download the new fuwa.app from the release page and drag it over this one.",
+            Manual::Move => {
+                "Move fuwa to your Applications folder and open it from there, and it can update itself. Or download the new version from the release page."
+            }
             Manual::ReadOnly => {
                 "fuwa can't write to the folder it's installed in. Download the new version from the release page."
             }
@@ -154,7 +162,7 @@ static STAGED: Mutex<Option<Staged>> = Mutex::new(None);
 
 struct Staged {
     file: PathBuf,
-    target: PathBuf,
+    target: Target,
     sha256: [u8; 32],
 }
 
@@ -208,11 +216,15 @@ pub enum Verdict {
 
 /// Which build this computer takes: its name in a release after the
 /// version, as `release.yml` names them. None where there's no build.
-pub fn build_name(appimage: bool) -> Option<&'static str> {
+pub fn build_name(install: Install) -> Option<&'static str> {
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Some(if appimage { "x86_64-linux.AppImage" } else { "x86_64-linux" })
+        Some(match install {
+            Install::AppImage => "x86_64-linux.AppImage",
+            Install::Deb => "x86_64-linux.deb",
+            Install::Program | Install::Bundle => "x86_64-linux",
+        })
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        Some("aarch64-macos")
+        Some(if install == Install::Bundle { "aarch64-macos.app.zip" } else { "aarch64-macos" })
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         Some("x86_64-windows.exe")
     } else {
@@ -291,12 +303,38 @@ pub fn newer(latest: &str, running: &str) -> bool {
     }
 }
 
+/// How this app was installed, which decides what an update replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Install {
+    /// The bare program, swapped for the new one.
+    Program,
+    /// An AppImage, swapped for the new one.
+    AppImage,
+    /// A macOS app, swapped whole: its signature covers everything in it.
+    Bundle,
+    /// Our .deb, installed over by dpkg through pkexec.
+    Deb,
+}
+
 /// Where the new version goes, or why it can't.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
-    /// The file replaced: the program, or the AppImage it runs from.
+    /// What's replaced: the program, the AppImage, the .app, or the program
+    /// the .deb installed.
     pub file: PathBuf,
-    pub appimage: bool,
+    pub install: Install,
+}
+
+impl Target {
+    /// Where the download waits: beside what it replaces (so putting it in
+    /// place is a rename on the same disk), or in the cache folder for the
+    /// .deb, which dpkg installs from anywhere.
+    fn waiting(&self) -> PathBuf {
+        match self.install {
+            Install::Deb => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("fuwa").join("update.deb"),
+            _ => hidden(&self.file, "update"),
+        }
+    }
 }
 
 /// Remembers the program this app runs as. Called once at startup, before
@@ -311,12 +349,16 @@ pub fn remember_program() {
         }
         std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok())
     });
-    // What a Windows update left behind, once the new program is surely there:
-    // if both renames failed, the old copy is all there is.
+    // What an update left behind, once the new program is surely there: if
+    // both renames failed, the old copy is all there is.
     if let Some(Some(program)) = PROGRAM.get()
         && program.is_file()
     {
         let _ = std::fs::remove_file(old_copy(program));
+        if let Some(bundle) = bundle_of(program) {
+            let _ = std::fs::remove_dir_all(hidden(&bundle, "old"));
+            let _ = std::fs::remove_dir_all(hidden(&bundle, "new"));
+        }
     }
 }
 
@@ -330,28 +372,68 @@ fn target() -> Result<Target, Manual> {
         return Err(Manual::Development);
     }
     let file = program().ok_or(Manual::ReadOnly)?;
-    let appimage = std::env::var_os("APPIMAGE").is_some_and(|a| Path::new(&a) == file);
-    if cfg!(target_os = "linux") && !appimage && (file.starts_with("/usr") || file.starts_with("/opt")) {
+    if std::env::var_os("APPIMAGE").is_some_and(|a| Path::new(&a) == file) {
+        return writable(file, Install::AppImage);
+    }
+    if cfg!(target_os = "macos")
+        && let Some(bundle) = bundle_of(&file)
+    {
+        if translocated(&bundle) {
+            return Err(Manual::Move);
+        }
+        return writable(bundle, Install::Bundle);
+    }
+    if cfg!(target_os = "linux") && (file.starts_with("/usr") || file.starts_with("/opt")) {
+        if Path::new(PKEXEC).is_file() && from_deb(&file) {
+            return Ok(Target { file, install: Install::Deb });
+        }
         return Err(Manual::Package);
     }
-    if in_bundle(&file) {
-        return Err(Manual::Bundle);
-    }
+    writable(file, Install::Program)
+}
+
+/// `file` as the target, when a file can be made beside it.
+fn writable(file: PathBuf, install: Install) -> Result<Target, Manual> {
     let dir = file.parent().ok_or(Manual::ReadOnly)?;
-    // Can a file be made beside it?
     let probe = dir.join(format!(".fuwa-update-probe-{}", std::process::id()));
     match std::fs::File::create(&probe) {
         Ok(_) => {
             let _ = std::fs::remove_file(&probe);
-            Ok(Target { file, appimage })
+            Ok(Target { file, install })
         }
         Err(_) => Err(Manual::ReadOnly),
     }
 }
 
-/// Whether the program runs from inside a macOS app bundle.
-fn in_bundle(program: &Path) -> bool {
-    program.ancestors().any(|dir| dir.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("app")))
+/// The macOS app bundle the program runs from (`<x>.app/Contents/MacOS/<program>`).
+fn bundle_of(program: &Path) -> Option<PathBuf> {
+    let macos = program.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && bundle.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("app")))
+    .then(|| bundle.to_path_buf())
+}
+
+/// Whether macOS runs the app from a read-only copy: opened straight from
+/// its disk image, or from where it was downloaded (App Translocation).
+fn translocated(bundle: &Path) -> bool {
+    bundle.starts_with("/Volumes") || bundle.to_string_lossy().contains("/AppTranslocation/")
+}
+
+const PKEXEC: &str = "/usr/bin/pkexec";
+const DPKG: &str = "/usr/bin/dpkg";
+
+/// Whether dpkg installed `program`, so a new .deb can go over it.
+fn from_deb(program: &Path) -> bool {
+    std::process::Command::new("dpkg-query")
+        .arg("-S")
+        .arg(program)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|out| out.status.success() && !out.stdout.is_empty())
 }
 
 /// Whether the app may ask an instance about updates: over https, or plain
@@ -386,18 +468,35 @@ fn old_copy(program: &Path) -> PathBuf {
     program.with_file_name(name)
 }
 
-/// The file being downloaded, beside the one it replaces (so moving it in
-/// is one rename on the same disk).
-fn partial(target: &Path) -> PathBuf {
+/// A hidden file beside `target`, named after it: `.<name>.<what>`.
+fn hidden(target: &Path, what: &str) -> PathBuf {
     let mut name = std::ffi::OsString::from(".");
     name.push(target.file_name().unwrap_or_default());
-    name.push(".update");
+    name.push(".");
+    name.push(what);
     target.with_file_name(name)
+}
+
+/// Puts `new` in place of `target` (a file or a folder) by renaming the old
+/// one aside first, and back if the new one won't go in. Windows won't
+/// replace a running program, but lets it be renamed; a macOS app is a folder.
+fn swap(new: &Path, target: &Path, old: &Path) -> std::io::Result<()> {
+    if old.is_dir() {
+        let _ = std::fs::remove_dir_all(old);
+    } else {
+        let _ = std::fs::remove_file(old);
+    }
+    std::fs::rename(target, old)?;
+    if let Err(err) = std::fs::rename(new, target) {
+        let _ = std::fs::rename(old, target);
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Puts a checked download in place of `target`, all at once: the running
 /// app keeps the old file open until it quits, and the next start runs the
-/// new one. Windows won't replace a running program, but lets it be renamed.
+/// new one.
 pub fn put_in_place(new: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -405,16 +504,56 @@ pub fn put_in_place(new: &Path, target: &Path) -> std::io::Result<()> {
         std::fs::set_permissions(new, std::fs::Permissions::from_mode(0o755))?;
     }
     if cfg!(windows) {
-        let old = old_copy(target);
-        let _ = std::fs::remove_file(&old);
-        std::fs::rename(target, &old)?;
-        if let Err(err) = std::fs::rename(new, target) {
-            let _ = std::fs::rename(&old, target);
-            return Err(err);
-        }
-        return Ok(());
+        return swap(new, target, &old_copy(target));
     }
     std::fs::rename(new, target)
+}
+
+/// Unpacks a checked `.app.zip` beside `bundle` and swaps it in whole. The
+/// running app's files stay where they were renamed to until it quits; the
+/// next start clears them away.
+fn put_bundle_in_place(zip: &Path, bundle: &Path) -> std::io::Result<()> {
+    let unpacked = hidden(bundle, "new");
+    let _ = std::fs::remove_dir_all(&unpacked);
+    // ditto keeps what a signed app needs (its symlinks, modes and signature).
+    let status = std::process::Command::new("/usr/bin/ditto")
+        .args(["-x", "-k"])
+        .arg(zip)
+        .arg(&unpacked)
+        .stdin(std::process::Stdio::null())
+        .status()?;
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&unpacked);
+        return Err(std::io::Error::other("couldn't unpack the app"));
+    }
+    let new = std::fs::read_dir(&unpacked)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "app") && path.is_dir())
+        .ok_or_else(|| std::io::Error::other("no app in the download"))?;
+    let swapped = swap(&new, bundle, &hidden(bundle, "old"));
+    let _ = std::fs::remove_dir_all(&unpacked);
+    if swapped.is_ok() {
+        let _ = std::fs::remove_file(zip);
+    }
+    swapped
+}
+
+/// Starts the .deb's install once this app has gone: pkexec asks for the
+/// password, dpkg installs it, and the app starts again either way, on
+/// whichever version is then installed (still the old one if the password
+/// was refused, with the download still waiting).
+fn install_deb(deb: &Path, program: &Path) -> std::io::Result<()> {
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!(r#"{PKEXEC} {DPKG} -i "$0" && rm -f "$0"; exec "$@""#))
+        .arg(deb)
+        .arg(program)
+        .args(std::env::args_os().skip(1))
+        .env(AFTER_UPDATE, "1")
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 
 /// The SHA-256 of a file, or None when it can't be read.
@@ -426,28 +565,41 @@ fn sha256_of(path: &Path) -> Option<[u8; 32]> {
 }
 
 /// What the person chose with "Restart to update": the waiting download,
-/// checked once more, takes the program's place, and the program starts
-/// again, waiting for this one to let go of the app lock. The window quits
-/// right after.
+/// checked once more, takes the app's place, and the app starts again,
+/// waiting for this one to let go of the app lock. The window quits right
+/// after.
 pub fn restart() -> std::io::Result<()> {
     let program = program().ok_or_else(|| std::io::Error::other("no program"))?;
     if let Some(staged) = STAGED.lock().take() {
-        let failed = if sha256_of(&staged.file) != Some(staged.sha256) {
+        if sha256_of(&staged.file) != Some(staged.sha256) {
             let _ = std::fs::remove_file(&staged.file);
-            Some(("update_hash_bad", "The download changed after it was checked, so it was thrown away."))
-        } else if put_in_place(&staged.file, &staged.target).is_err() {
-            Some(("update_apply_failed", "The new version couldn't be put in place; it'll try again later."))
-        } else {
-            None
+            return Err(not_updated(
+                "update_hash_bad",
+                "The download changed after it was checked, so it was thrown away.",
+            ));
+        }
+        let placed = match staged.target.install {
+            // The new app is at the same place, so `program` is in it.
+            Install::Bundle => put_bundle_in_place(&staged.file, &staged.target.file),
+            Install::Deb => return install_deb(&staged.file, &program),
+            Install::Program | Install::AppImage => put_in_place(&staged.file, &staged.target.file),
         };
-        if let Some((kind, what)) = failed {
-            tracing::warn!("{what}");
-            reports::error(kind, "core/updates.rs");
-            *STATUS.lock() = Status::Failed { what };
-            return Err(std::io::Error::other("not updated"));
+        if placed.is_err() {
+            return Err(not_updated(
+                "update_apply_failed",
+                "The new version couldn't be put in place; it'll try again later.",
+            ));
         }
     }
     std::process::Command::new(program).args(std::env::args_os().skip(1)).env(AFTER_UPDATE, "1").spawn().map(|_| ())
+}
+
+/// Says why "Restart to update" didn't, on the Updates page.
+fn not_updated(kind: &'static str, what: &'static str) -> std::io::Error {
+    tracing::warn!("{what}");
+    reports::error(kind, "core/updates.rs");
+    *STATUS.lock() = Status::Failed { what };
+    std::io::Error::other("not updated")
 }
 
 /// Set on the app started by `restart`, so it waits for the old one to quit.
@@ -505,14 +657,13 @@ impl Core {
             return;
         };
         let target = target();
-        let appimage = target.as_ref().is_ok_and(|t| t.appimage);
+        let kind = target.as_ref().map_or(Install::Program, |t| t.install);
         let release = Release {
             page: format!("https://github.com/waifu-devs/fuwa/releases/tag/v{}", manifest.version),
             version: manifest.version.clone(),
             notes: manifest.notes.clone(),
         };
-        let plan = match judge(&manifest, env!("CARGO_PKG_VERSION"), &release_keys(RELEASE_KEYS), build_name(appimage))
-        {
+        let plan = match judge(&manifest, env!("CARGO_PKG_VERSION"), &release_keys(RELEASE_KEYS), build_name(kind)) {
             Verdict::UpToDate => return set(self, Status::UpToDate),
             Verdict::Forged => {
                 reports::error("update_signature_bad", "core/updates.rs");
@@ -528,8 +679,8 @@ impl Core {
             Ok(target) => target,
             Err(why) => return set(self, Status::Available { release, why }),
         };
-        let part = partial(&target.file);
-        let staged = Staged { file: part.clone(), target: target.file.clone(), sha256: plan.sha256 };
+        let part = target.waiting();
+        let staged = Staged { file: part.clone(), target, sha256: plan.sha256 };
         // Fetched and checked on an earlier run, and still waiting.
         if sha256_of(&part) == Some(plan.sha256) {
             *STAGED.lock() = Some(staged);
@@ -542,6 +693,9 @@ impl Core {
         let total = plan.size.unwrap_or(0);
         set(self, Status::Downloading { release: release.clone(), done: 0, total });
         let started = std::time::Instant::now();
+        if let Some(dir) = part.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let fetched = download(self, &url, &plan, &part, &release).await;
         reports::timing("updates.download", started.elapsed());
         let failed = match fetched {
@@ -799,15 +953,43 @@ mod tests {
     }
 
     #[test]
-    fn mac_app_bundles_update_by_hand() {
-        assert!(in_bundle(Path::new("/Applications/fuwa.app/Contents/MacOS/fuwa-desktop")));
-        assert!(!in_bundle(Path::new("/home/a/bin/fuwa-desktop")));
+    fn mac_apps_update_whole() {
+        assert_eq!(
+            bundle_of(Path::new("/Applications/fuwa.app/Contents/MacOS/fuwa-desktop")),
+            Some(PathBuf::from("/Applications/fuwa.app"))
+        );
+        assert_eq!(bundle_of(Path::new("/home/a/bin/fuwa-desktop")), None);
+        assert_eq!(bundle_of(Path::new("/home/a/fuwa.app/fuwa-desktop")), None);
+        assert!(translocated(Path::new("/Volumes/fuwa/fuwa.app")));
+        assert!(translocated(Path::new("/private/var/folders/x/T/AppTranslocation/1234/d/fuwa.app")));
+        assert!(!translocated(Path::new("/Applications/fuwa.app")));
+    }
+
+    #[test]
+    fn a_new_app_folder_takes_the_old_ones_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("fuwa.app");
+        std::fs::create_dir_all(bundle.join("Contents")).unwrap();
+        std::fs::write(bundle.join("Contents/version"), b"old").unwrap();
+        let new = hidden(&bundle, "new").join("fuwa.app");
+        std::fs::create_dir_all(new.join("Contents")).unwrap();
+        std::fs::write(new.join("Contents/version"), b"new").unwrap();
+        let old = hidden(&bundle, "old");
+        std::fs::create_dir_all(&old).unwrap();
+        swap(&new, &bundle, &old).unwrap();
+        assert_eq!(std::fs::read(bundle.join("Contents/version")).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(old.join("Contents/version")).unwrap(),
+            b"old",
+            "the running app's files stay until it quits"
+        );
+        assert!(!new.exists());
     }
 
     #[test]
     fn a_waiting_download_is_known_by_its_hash() {
         let dir = tempfile::tempdir().unwrap();
-        let part = partial(&dir.path().join("fuwa-desktop"));
+        let part = hidden(&dir.path().join("fuwa-desktop"), "update");
         assert_eq!(sha256_of(&part), None, "nothing waiting");
         std::fs::write(&part, b"abc").unwrap();
         let abc = hex32("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").unwrap();
@@ -821,7 +1003,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("fuwa-desktop");
         std::fs::write(&target, b"old").unwrap();
-        let part = partial(&target);
+        let part = hidden(&target, "update");
         assert_eq!(part.file_name().unwrap(), ".fuwa-desktop.update");
         std::fs::write(&part, b"new").unwrap();
         put_in_place(&part, &target).unwrap();
