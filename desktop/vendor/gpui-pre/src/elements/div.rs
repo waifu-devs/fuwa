@@ -3422,23 +3422,46 @@ impl Interactivity {
         style.refine(&self.base_style);
 
         if let Some(focus_handle) = self.tracked_focus_handle.as_ref() {
-            if let Some(in_focus_style) = self.in_focus_style.as_ref()
-                && focus_handle.within_focused(window, cx)
-            {
-                style.refine(in_focus_style);
+            if let Some(in_focus_style) = self.in_focus_style.as_ref() {
+                let on = focus_handle.within_focused(window, cx);
+                style = fade_into(
+                    style,
+                    in_focus_style,
+                    on,
+                    FadeSlot::InFocus,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
 
-            if let Some(focus_style) = self.focus_style.as_ref()
-                && focus_handle.is_focused(window)
-            {
-                style.refine(focus_style);
+            if let Some(focus_style) = self.focus_style.as_ref() {
+                let on = focus_handle.is_focused(window);
+                style = fade_into(
+                    style,
+                    focus_style,
+                    on,
+                    FadeSlot::Focus,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
 
-            if let Some(focus_visible_style) = self.focus_visible_style.as_ref()
-                && focus_handle.is_focused(window)
-                && window.last_input_was_keyboard()
-            {
-                style.refine(focus_visible_style);
+            if let Some(focus_visible_style) = self.focus_visible_style.as_ref() {
+                let on = focus_handle.is_focused(window) && window.last_input_was_keyboard();
+                style = fade_into(
+                    style,
+                    focus_visible_style,
+                    on,
+                    FadeSlot::FocusVisible,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
         }
 
@@ -3653,11 +3676,11 @@ pub struct InteractiveElementState {
     ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
     long_press_tooltip_active: Option<Rc<Cell<bool>>>,
-    /// How far its group hover, hover and active styles have faded in.
-    fades: [Option<StyleFade>; 3],
+    /// How far its focus, group hover, hover and active styles have faded in.
+    fades: [Option<StyleFade>; 6],
 }
 
-/// How long a hover, group hover or active style takes to fade in or out:
+/// How long a hover, focus or active style takes to fade in or out:
 /// CSS's `transition` as Tailwind sets it (150ms, `cubic-bezier(0.4, 0, 0.2, 1)`).
 const STYLE_FADE: Duration = Duration::from_millis(150);
 
@@ -3666,6 +3689,9 @@ enum FadeSlot {
     GroupHover = 0,
     Hover = 1,
     Active = 2,
+    InFocus = 3,
+    Focus = 4,
+    FocusVisible = 5,
 }
 
 /// A style fading in or out, as CSS transitions a `:hover`.
@@ -3758,12 +3784,16 @@ fn fade_into(
             fade.progress(now)
         }
     };
-    let mut target = style.clone();
-    target.refine(refinement);
     let settled = if on { progress >= 1. } else { progress <= 0. };
     if settled {
-        return if on { target } else { style };
+        let mut style = style;
+        if on {
+            style.refine(refinement);
+        }
+        return style;
     }
+    let mut target = style.clone();
+    target.refine(refinement);
     window.request_animation_frame();
     let mut mixed = if on { target.clone() } else { style.clone() };
     mix_styles(&mut mixed, &style, &target, progress);
@@ -4693,6 +4723,24 @@ mod tests {
         MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas, util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
+
+    #[test]
+    fn style_fades_ease_and_mix_like_css() {
+        assert_eq!(ease_standard(0.), 0.);
+        assert!((ease_standard(1.) - 1.).abs() < 1e-4);
+        // cubic-bezier(0.4, 0, 0.2, 1) is past 0.75 by the middle.
+        assert!(ease_standard(0.5) > 0.75 && ease_standard(0.5) < 0.85);
+
+        // Fading in from transparent keeps the color rather than passing through black.
+        let red = Hsla::from(Rgba {
+            r: 1.,
+            g: 0.,
+            b: 0.,
+            a: 1.,
+        });
+        let half = Rgba::from(mix_hsla(red.opacity(0.), red, 0.5));
+        assert!((half.r - 1.).abs() < 1e-3 && half.g.abs() < 1e-3 && (half.a - 0.5).abs() < 1e-3);
+    }
 
     struct GroupHoverTestView {
         render_count: Rc<Cell<usize>>,
