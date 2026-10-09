@@ -384,6 +384,8 @@ impl Core {
         self.listen_for_games(prefs.game_activity);
         self.games.set_answers(prefs.game_answers.clone());
         config::store_prefs(&self.paths, &prefs);
+        // A call going on hears its volumes and microphone processing at once.
+        self.apply_volumes();
         self.shared.update(|_| {});
     }
 

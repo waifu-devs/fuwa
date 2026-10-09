@@ -24,6 +24,7 @@ use crate::core::dms::{Content, DmError};
 use crate::core::reports;
 use crate::core::vault::VoiceFile;
 use crate::core::voice::devices::{Devices, Trouble};
+use crate::core::voice::processing::{Choice, Processing};
 use crate::core::voice::sound::{FRAME, Pipe, RATE};
 use crate::pb;
 use crate::rpc;
@@ -363,13 +364,17 @@ pub struct Recorder {
 const LIVE: usize = 256;
 
 impl Recorder {
-    /// Starts recording; `max_ms` 0 for no cap.
-    pub fn start(max_ms: u64) -> Self {
+    /// Starts recording; `max_ms` 0 for no cap. `processing` is the Voice &
+    /// audio settings' cleaning up, as the web app's recorder asks for it.
+    pub fn start(max_ms: u64, processing: Choice) -> Self {
         let taken = Arc::new(Mutex::new(Taken::default()));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
             let (taken, stop) = (taken.clone(), stop.clone());
-            std::thread::Builder::new().name("fuwa-voice-note".into()).spawn(move || record(taken, stop, max_ms)).ok()
+            std::thread::Builder::new()
+                .name("fuwa-voice-note".into())
+                .spawn(move || record(taken, stop, max_ms, processing))
+                .ok()
         };
         if thread.is_none() {
             taken.lock().progress.no_microphone = true;
@@ -407,7 +412,7 @@ impl Drop for Recorder {
     }
 }
 
-fn record(taken: Arc<Mutex<Taken>>, stop: Arc<AtomicBool>, max_ms: u64) {
+fn record(taken: Arc<Mutex<Taken>>, stop: Arc<AtomicBool>, max_ms: u64, processing: Choice) {
     let encoder = opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip).and_then(|mut e| {
         e.set_bitrate(opus::Bitrate::Bits(BITRATE))?;
         Ok(e)
@@ -419,11 +424,14 @@ fn record(taken: Arc<Mutex<Taken>>, stop: Arc<AtomicBool>, max_ms: u64) {
     taken.lock().pre_skip = encoder.get_lookahead().map(|n| n.clamp(0, i32::from(u16::MAX)) as u16).unwrap_or(312);
     let microphone = Arc::new(Pipe::new(FRAME * 50, 0));
     let devices = Devices::open(microphone.clone(), Arc::new(Pipe::speakers()), true);
+    // Nothing plays while recording, so there's no echo to take out.
+    let mut processing = Processing::new(Choice { echo: false, ..processing });
     let most_frames = if max_ms > 0 { max_ms.div_ceil(20) as usize } else { usize::MAX };
     let started = Instant::now();
     let mut packet = vec![0u8; 4000];
     while !stop.load(Ordering::Relaxed) {
-        while let Some(frame) = microphone.frame() {
+        while let Some(mut frame) = microphone.frame() {
+            processing.clean(&mut frame, 0);
             let level = frame.iter().fold(0f32, |m, s| m.max(s.abs())).min(1.0);
             let Ok(n) = encoder.encode_float(&frame, &mut packet) else { continue };
             let mut t = taken.lock();

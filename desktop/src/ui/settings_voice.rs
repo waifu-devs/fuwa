@@ -2,8 +2,9 @@
 //! microphone and speakers calls use (picked from this computer's devices,
 //! through `core::sounds`), a live mic test against where voice activity
 //! opens, the input mode, sensitivity, the camera (picked, and checked as
-//! others will see it) and call sounds. Desktop calls send the microphone
-//! as it is, so the browser's sound processing says so instead of pretending.
+//! others will see it), the microphone's processing (echo cancellation,
+//! noise suppression, automatic gain: `core::voice::processing`) and call
+//! sounds.
 
 use crate::core::voice::access;
 use std::time::Duration;
@@ -463,8 +464,7 @@ impl SettingsView {
                 window,
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.auto_gain_control = on),
-            ))
-            .child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.voice.noProcessing")));
+            ));
         // The camera: which one, and a look at it as others will see it.
         if self.voice.cameras.is_none() {
             self.voice.cameras = Some(crate::core::voice::capture::cameras());

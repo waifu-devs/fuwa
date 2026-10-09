@@ -20,6 +20,7 @@ mod film;
 #[cfg(any(windows, feature = "system-libvpx"))]
 mod libvpx;
 pub mod link;
+pub mod processing;
 pub mod quality;
 pub mod screen_sound;
 pub mod sound;
@@ -38,6 +39,7 @@ use tonic::Code;
 use self::capture::{Failure, Filmed, Sending};
 use self::devices::{Devices, Listener, Trouble};
 use self::link::{Happened, Link, Signal};
+use self::processing::{Choice, Processing};
 use self::quality::Quality;
 use self::screen_sound::ScreenSound;
 use self::sound::{FRAME, Microphone, Mixer, Pipe};
@@ -235,6 +237,8 @@ struct Volumes {
     release: Duration,
     /// Shared screens whose sound you turned off, by account id.
     quiet_screens: HashSet<String>,
+    /// Echo cancellation, noise suppression and automatic gain.
+    processing: Choice,
 }
 
 impl Default for Volumes {
@@ -246,6 +250,7 @@ impl Default for Volumes {
             ptt: false,
             release: Duration::ZERO,
             quiet_screens: HashSet::new(),
+            processing: Choice { echo: true, noise: true, gain: true },
         }
     }
 }
@@ -592,6 +597,7 @@ impl Core {
             ptt: prefs.input_mode == super::config::InputMode::Ptt,
             release: Duration::from_millis(u64::from(prefs.ptt_release)),
             quiet_screens: std::mem::take(&mut volumes.quiet_screens),
+            processing: Choice::of(&prefs),
         };
     }
 
@@ -1129,6 +1135,7 @@ impl Running<'_> {
         };
         let mut screen_sound = screen_sound::Encoder::new().ok();
         let mut mixer = Mixer::default();
+        let mut processing = Processing::new(self.volumes.lock().processing);
         let (kept_tx, mut kept) = mpsc::channel(4);
         let keeper = tokio::spawn(keep(
             self.api.clone(),
@@ -1262,7 +1269,7 @@ impl Running<'_> {
                     layers_due.get_or_insert_with(|| Instant::now() + LAYERS_AFTER);
                 }
                 _ = tick.tick() => {
-                    self.tick(link, &mut microphone, &mut mixer, &mut out, &mut trouble_seen);
+                    self.tick(link, &mut microphone, &mut processing, &mut mixer, &mut out, &mut trouble_seen);
                     self.share_sound(link, screen_sound.as_mut());
                     // Screens whose sound stopped coming: their buttons go.
                     let quiet: Vec<String> = screens_heard
@@ -1346,6 +1353,7 @@ impl Running<'_> {
         &mut self,
         link: &mut Link,
         microphone: &mut Microphone,
+        processing: &mut Processing,
         mixer: &mut Mixer,
         out: &mut [f32; FRAME],
         trouble_seen: &mut Vec<Trouble>,
@@ -1353,6 +1361,7 @@ impl Running<'_> {
         let now = *self.selves.borrow();
         let volumes = self.volumes.lock().clone();
         mixer.set_gains(&volumes.gains());
+        processing.set(volumes.processing);
         if let (Some(frames), Some(secrets)) = (self.frames.as_mut(), self.secrets.as_mut())
             && secrets.latest.has_changed().unwrap_or(false)
         {
@@ -1367,7 +1376,11 @@ impl Running<'_> {
             let _ = self.sound.microphone.frame();
         }
         let mut said = None;
+        // What's waiting at both ends: echo cancellation's first guess at
+        // how long the speakers take to reach the microphone.
+        let delay = processing::ms_of(self.sound.microphone.len() + FRAME + self.sound.speakers.len());
         if let Some(mut frame) = self.sound.microphone.frame() {
+            processing.clean(&mut frame, delay);
             if volumes.input != 1.0 {
                 for s in frame.iter_mut() {
                     *s = (*s * volumes.input).clamp(-1.0, 1.0);
@@ -1410,6 +1423,7 @@ impl Running<'_> {
             }
             self.sound.speakers.push(out);
         }
+        processing.heard(out);
         self.record(now.record, out, said.as_ref());
         let trouble = self.sound.devices.as_ref().map(|d| d.trouble()).unwrap_or_default();
         if trouble != *trouble_seen {
