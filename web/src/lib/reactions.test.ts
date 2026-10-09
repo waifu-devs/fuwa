@@ -107,6 +107,13 @@ test("a direct message's tally: the latest reaction from a sender for an emoji w
   assert.deepEqual(tallyDm([...lines, ...lines], "a"), tally);
 });
 
+test("an emoji with or without its variation selector is one reaction", () => {
+  const tally = tallyDm([line(1, "a"), reaction(2, "a", 1, "👍"), reaction(3, "b", 1, "👍\uFE0F"), reaction(4, "a", 1, "👍\uFE0F", true)], "a");
+  assert.deepEqual(tally[1]!.map((r) => [r.emoji, r.count, r.me, r.userIds]), [["👍\uFE0F", 1, false, ["b"]]]);
+  const updated = withReactionUpdate([std("👍", 1, true)], std("👍\uFE0F", 2), false);
+  assert.deepEqual(updated, [std("👍", 2, false)]);
+});
+
 test("reactions to lines that aren't messages, or are gone, or aren't one emoji, are left out", () => {
   const lines = [
     line(1, "a", "devices"),

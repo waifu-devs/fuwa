@@ -46,6 +46,7 @@ pub mod profile_items;
 pub mod providers;
 pub mod qr;
 pub mod rail;
+pub mod reactions;
 pub mod reports;
 pub mod sealed_files;
 pub mod search;
@@ -967,7 +968,8 @@ impl Core {
                 }
                 if let Some(parent) = i.thread_parents.get_mut(&message.id) {
                     let summary = message.thread.clone().or_else(|| parent.thread.take());
-                    *parent = pb::Message { thread: summary, ..message };
+                    let reactions = std::mem::take(&mut parent.reactions);
+                    *parent = pb::Message { thread: summary, reactions, ..message };
                 }
             });
         }
@@ -1097,7 +1099,8 @@ impl Core {
             | Content::Voice(_)
             | Content::Files { .. }
             | Content::Reply { .. }
-            | Content::Lock { .. } => (None, 0, false),
+            | Content::Lock { .. }
+            | Content::React { .. } => (None, 0, false),
         };
         let nonce = crate::core::dms::new_nonce();
         if let Some(text) = &text {

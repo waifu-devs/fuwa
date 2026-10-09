@@ -107,6 +107,30 @@ impl FuwaApp {
                     }
                     return Built::of(vec![target, items, danger]);
                 }
+                // React: a few emoji in a row, then the picker.
+                let mut react = Vec::new();
+                if let Some(bits) = m.reactions.as_ref().filter(|b| b.can_add && !m.editing && !m.keeping_out) {
+                    let quick = self
+                        .quick_reactions(bits.standard_only)
+                        .into_iter()
+                        .map(|choice| {
+                            let (id, picked) = (m.id.clone(), choice.clone());
+                            (choice, run(move |this, _, cx| this.react_with(id.clone(), &picked, cx)))
+                        })
+                        .collect::<Vec<_>>();
+                    if !quick.is_empty() {
+                        react.push(Item::emojis(t("chattools.reactions.react"), quick));
+                    }
+                    let (id, standard_only) = (m.id.clone(), bits.standard_only);
+                    react.push(Item::act(
+                        t("chattools.reactions.add"),
+                        "face-slightly-smiling-plus",
+                        run(move |this, window, cx| {
+                            let at = window.mouse_position();
+                            this.open_react_picker(id.clone(), standard_only, at, window, cx);
+                        }),
+                    ));
+                }
                 let can_thread = m.thread.can_thread && !m.editing && !m.keeping_out;
                 let can_edit = m.mine && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
                 let mut primary = Vec::new();
@@ -150,6 +174,22 @@ impl FuwaApp {
                         run(move |this, _, cx| this.toggle_pin(id.clone(), !pinned, in_thread, cx)),
                     ));
                 }
+                if m.reactions.as_ref().is_some_and(|b| b.can_clear && !b.chips.is_empty()) && !m.editing {
+                    let id = m.id.clone();
+                    manage.push(
+                        Item::act(
+                            t("chattools.reactions.clearAll"),
+                            "face-slightly-frowning",
+                            run(move |this, _, cx| this.clear_all_reactions(id.clone(), cx)),
+                        )
+                        .danger()
+                        .confirm(
+                            t("chattools.reactions.clearAll"),
+                            &t("chattools.reactions.clearAllConfirm"),
+                            &t("chattools.reactions.clearAll"),
+                        ),
+                    );
+                }
                 if m.keep_out && !m.editing && !m.keeping_out {
                     let id = m.id.clone();
                     manage.push(
@@ -175,7 +215,7 @@ impl FuwaApp {
                             .danger(),
                     );
                 }
-                Built::of(vec![target, primary, manage, developer, danger])
+                Built::of(vec![target, react, primary, manage, developer, danger])
             }
             MenuOf::Member { key, server, user_id } => {
                 self.member_items(key, server.as_deref(), user_id, copy_id(user_id, "user"), cx)

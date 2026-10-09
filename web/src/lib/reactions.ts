@@ -19,8 +19,15 @@ export type ReactionLike = { emoji: string; emojiId: string; emojiName: string; 
 /** Which emoji: a standard one by its characters, or a server's own by its id. */
 export type EmojiRef = { emoji: string; emojiId: string };
 
+/**
+ * A standard emoji as reactions match it: without variation selectors
+ * (U+FE0F), which emoji lists and keyboards add or leave out, so "👍" and
+ * "👍️" are one reaction (as the instance stores them).
+ */
+export const emojiKey = (emoji: string) => emoji.replace(/\uFE0F/g, "");
+
 /** One key per emoji, for lists and lookups. */
-export const reactionKey = (r: EmojiRef) => (r.emojiId ? `c:${r.emojiId}` : `u:${r.emoji}`);
+export const reactionKey = (r: EmojiRef) => (r.emojiId ? `c:${r.emojiId}` : `u:${emojiKey(r.emoji)}`);
 
 export const sameEmoji = (a: EmojiRef, b: EmojiRef) => reactionKey(a) === reactionKey(b);
 
@@ -125,13 +132,13 @@ export function tallyDm(lines: readonly TallyLine[], me: string): Record<number,
   for (const line of [...lines].sort((a, b) => a.seq - b.seq)) {
     const r = line.reaction;
     if (line.kind !== "reaction" || !r || line.deleted || r.target <= 0 || r.target >= line.seq || !isOneEmoji(r.emoji)) continue;
-    latest.set(`${r.target}\u0000${line.senderId}\u0000${r.emoji}`, { target: r.target, senderId: line.senderId, emoji: r.emoji, seq: line.seq, on: !r.removed });
+    latest.set(`${r.target}\u0000${line.senderId}\u0000${emojiKey(r.emoji)}`, { target: r.target, senderId: line.senderId, emoji: r.emoji, seq: line.seq, on: !r.removed });
   }
   const on = [...latest.values()].filter((v) => v.on && reactable(bySeq.get(v.target))).sort((a, b) => a.seq - b.seq);
   const out: Record<number, DmReaction[]> = {};
   for (const v of on) {
     const list = (out[v.target] ??= []);
-    let reaction = list.find((r) => r.emoji === v.emoji);
+    let reaction = list.find((r) => emojiKey(r.emoji) === emojiKey(v.emoji));
     if (!reaction) list.push((reaction = { emoji: v.emoji, emojiId: "", emojiName: "", animated: false, count: 0, me: false, userIds: [] }));
     reaction.userIds.push(v.senderId);
     reaction.count++;
@@ -146,7 +153,7 @@ export function toggledDm(list: readonly DmReaction[], emoji: string, me: string
   const next = toggled(list, template, on);
   if (next === list) return next;
   return next.map((r) => {
-    if (r.emoji !== emoji) return r;
+    if (emojiKey(r.emoji) !== emojiKey(emoji)) return r;
     const others = r.userIds.filter((id) => id !== me);
     return { ...r, userIds: on ? [...others, me] : others };
   });

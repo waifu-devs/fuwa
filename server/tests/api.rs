@@ -10833,7 +10833,10 @@ async fn members_react_to_messages() {
     assert_eq!(react(&mut c, &mika, &sid, &general, &hello.id, "👍", true).await.unwrap().count, 1);
     let again = react(&mut c, &mika, &sid, &general, &hello.id, "👍", true).await.unwrap();
     assert!(again.count == 1 && again.me);
-    assert_eq!(react(&mut c, &rin, &sid, &general, &hello.id, "👍", true).await.unwrap().count, 2);
+    // The same emoji with a variation selector, as emoji lists write it, is the same reaction,
+    // shown as its first reactor wrote it.
+    let same = react(&mut c, &rin, &sid, &general, &hello.id, "👍\u{FE0F}", true).await.unwrap();
+    assert_eq!((same.emoji.as_str(), same.count), ("👍", 2));
     let custom = format!("id:{}", wave.id);
     let waved = react(&mut c, &rin, &sid, &general, &hello.id, &custom, true).await.unwrap();
     assert_eq!((waved.emoji_name.as_str(), waved.count), ("wave", 1));

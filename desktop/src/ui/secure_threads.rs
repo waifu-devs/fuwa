@@ -144,6 +144,13 @@ impl FuwaApp {
         let manage = access.has_in(channel, pb::Permission::ManageMessages);
         let can_send = access.has_in(channel, pb::Permission::SendMessages);
         let can_start = access.has_in(channel, pb::Permission::CreateThreads);
+        let timed_out = i
+            .my_member(server)
+            .and_then(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()))
+            .is_some();
+        let react = i
+            .has("reactions")
+            .then(|| access.has_in(channel, pb::Permission::AddReactions) && (!timed_out || access.owner));
         let question = t("chat.secure.deleteQuestion");
         let org = organized(i, server, channel);
         let note = i.dms.thread_notes.get(channel);
@@ -214,6 +221,7 @@ impl FuwaApp {
             None,
             &question,
             Some(lines),
+            react,
         );
         if thread.is_some() {
             // The panel draws the thread's message itself.

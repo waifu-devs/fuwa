@@ -27,11 +27,17 @@ fn is_custom(key: &str) -> bool {
     !key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// What a standard emoji is stored and matched by: its characters without
+/// variation selectors, which emoji lists and keyboards add or leave out.
+fn key_of(emoji: &str) -> String {
+    emoji.replace('\u{FE0F}', "")
+}
+
 /// A standard emoji as sent: a few characters, at least one beyond ASCII,
 /// with no letters, spaces or the marks Markdown and mentions use.
 fn standard(value: &str) -> Result<String> {
     let value = value.trim();
-    let fits = !value.is_empty()
+    let fits = !key_of(value).is_empty()
         && value.len() <= MAX_EMOJI_BYTES
         && !value.is_ascii()
         && value.chars().all(|c| {
@@ -47,7 +53,7 @@ async fn named(conn: &turso::Connection, emoji: &str, emoji_id: &str) -> Result<
     match (emoji.is_empty(), emoji_id.is_empty()) {
         (false, true) => {
             let emoji = standard(emoji)?;
-            Ok((emoji.clone(), pb::Reaction { emoji, ..Default::default() }))
+            Ok((key_of(&emoji), pb::Reaction { emoji, ..Default::default() }))
         }
         (true, false) => {
             if !is_custom(emoji_id) {
@@ -77,6 +83,22 @@ async fn count(conn: &turso::Connection, message_id: &str, key: &str) -> Result<
     .unwrap_or(0) as u32)
 }
 
+/// How a standard emoji's reaction to a message is shown: as its first
+/// reactor wrote it, or `fallback` when nobody has reacted with it.
+async fn shown_as(conn: &turso::Connection, message_id: &str, key: &str, fallback: &str) -> Result<String> {
+    if is_custom(key) {
+        return Ok(String::new());
+    }
+    let first = query_one(
+        conn,
+        "SELECT shown FROM reactions WHERE message_id = ?1 AND emoji = ?2 ORDER BY created_at, account_id LIMIT 1",
+        (message_id, key),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    Ok(first.filter(|s| !s.is_empty()).unwrap_or_else(|| fallback.to_string()))
+}
+
 /// Each message's reactions, in the order each emoji was first used, with
 /// `me` for `viewer`. Custom emoji the server no longer has are left out.
 pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mut [pb::Message]) -> Result<()> {
@@ -90,7 +112,9 @@ pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mu
         conn,
         &format!(
             "SELECT r.message_id, r.emoji, count(*), min(r.created_at),
-                    sum(CASE WHEN r.account_id = ?1 THEN 1 ELSE 0 END), e.name, e.animated
+                    sum(CASE WHEN r.account_id = ?1 THEN 1 ELSE 0 END), e.name, e.animated,
+                    (SELECT f.shown FROM reactions f WHERE f.message_id = r.message_id AND f.emoji = r.emoji
+                     ORDER BY f.created_at, f.account_id LIMIT 1)
              FROM reactions r LEFT JOIN emojis e ON e.id = r.emoji
              WHERE r.message_id IN ({placeholders})
              GROUP BY r.message_id, r.emoji
@@ -105,17 +129,19 @@ pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mu
                 r.get::<i64>(4)?,
                 r.get::<Option<String>>(5)?,
                 r.get::<Option<bool>>(6)?,
+                r.get::<Option<String>>(7)?,
             ))
         },
     )
     .await?;
     let mut found: HashMap<String, Vec<pb::Reaction>> = HashMap::new();
-    for (message_id, key, count, mine, name, animated) in rows {
+    for (message_id, key, count, mine, name, animated, shown) in rows {
         let reaction = if is_custom(&key) {
             let Some(name) = name else { continue };
             pb::Reaction { emoji_id: key, emoji_name: name, animated: animated.unwrap_or(false), ..Default::default() }
         } else {
-            pb::Reaction { emoji: key, ..Default::default() }
+            let emoji = shown.filter(|s| !s.is_empty()).unwrap_or(key);
+            pb::Reaction { emoji, ..Default::default() }
         };
         found.entry(message_id).or_default().push(pb::Reaction { count: count as u32, me: mine > 0, ..reaction });
     }
@@ -166,13 +192,20 @@ pub(crate) async fn forget_reactor(
         |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?, r.get::<String>(2)?, r.get::<Option<String>>(3)?)),
     )
     .await?;
+    let mut before = Vec::with_capacity(theirs.len());
+    for (message_id, key, ..) in &theirs {
+        before.push(shown_as(conn, message_id, key, key).await?);
+    }
     conn.execute("DELETE FROM reactions WHERE account_id = ?1", [account_id]).await?;
-    for (message_id, key, channel_id, thread_id) in theirs {
-        let Ok((_, reaction)) =
+    for ((message_id, key, channel_id, thread_id), shown) in theirs.into_iter().zip(before) {
+        let Ok((_, mut reaction)) =
             (if is_custom(&key) { named(conn, "", &key).await } else { named(conn, &key, "").await })
         else {
             continue;
         };
+        if !is_custom(&key) {
+            reaction.emoji = shown_as(conn, &message_id, &key, &shown).await?;
+        }
         let count = count(conn, &message_id, &key).await?;
         events.push(Payload::ReactionUpdated(pb::ReactionUpdated {
             channel_id,
@@ -230,7 +263,9 @@ impl Api {
                     .await?
                     .filter(|m| m.channel_id == channel.id)
                     .ok_or(Error::NotFound("message"))?;
-                let (key, reaction) = named(conn, &req.emoji, &req.emoji_id).await?;
+                let (key, mut reaction) = named(conn, &req.emoji, &req.emoji_id).await?;
+                let sent = std::mem::take(&mut reaction.emoji);
+                let before = shown_as(conn, &message.id, &key, &sent).await?;
                 let had = query_one(
                     conn,
                     "SELECT 1 FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
@@ -241,7 +276,7 @@ impl Api {
                 .is_some();
                 if had == req.reacted {
                     let count = count(conn, &message.id, &key).await?;
-                    return Ok(pb::Reaction { count, me: had, ..reaction });
+                    return Ok(pb::Reaction { count, me: had, emoji: before, ..reaction });
                 }
                 // Every reaction to a message rewrites its row, so two at once
                 // clash and one runs again: the cap holds, and the counts in
@@ -265,8 +300,9 @@ impl Api {
                         }
                     }
                     conn.execute(
-                        "INSERT INTO reactions (message_id, emoji, account_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                        (message.id.as_str(), key.as_str(), account.id.as_str(), now_ms()),
+                        "INSERT INTO reactions (message_id, emoji, account_id, created_at, shown)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        (message.id.as_str(), key.as_str(), account.id.as_str(), now_ms(), sent.as_str()),
                     )
                     .await?;
                 } else {
@@ -277,6 +313,9 @@ impl Api {
                     .await?;
                 }
                 let count = count(conn, &message.id, &key).await?;
+                // Shown as before, even once the last one's gone, so apps
+                // find the chip they have.
+                reaction.emoji = shown_as(conn, &message.id, &key, &before).await?;
                 events.push(Payload::ReactionUpdated(pb::ReactionUpdated {
                     channel_id: channel.id.clone(),
                     message_id: message.id.clone(),
@@ -368,13 +407,14 @@ impl Api {
                 } else {
                     named(conn, &req.emoji, &req.emoji_id).await?
                 };
+                let shown = shown_as(conn, &message.id, &key, &reaction.emoji).await?;
                 let gone = conn
                     .execute(
                         "DELETE FROM reactions WHERE message_id = ?1 AND emoji = ?2",
                         (message.id.as_str(), key.as_str()),
                     )
                     .await?;
-                (gone, reaction.emoji, reaction.emoji_id)
+                (gone, shown, reaction.emoji_id)
             };
             if cleared == 0 {
                 return Ok(());
@@ -413,6 +453,9 @@ mod tests {
             assert!(standard(bad).is_err(), "{bad}");
         }
         assert_eq!(standard(" 👍🏽 ").unwrap(), "👍🏽");
+        assert!(standard("\u{FE0F}").is_err(), "a variation selector alone is nothing");
+        assert_eq!(key_of("👍\u{FE0F}"), key_of("👍"));
+        assert_eq!(key_of("❤\u{FE0F}"), "❤");
     }
 
     #[test]

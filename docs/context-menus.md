@@ -120,4 +120,6 @@ Collapse, as the desktop sidebar doesn't fold them; "Edit server profile" and
 "Change nickname" wait for the desktop's server profiles; and the message box
 keeps the system's own menu (Cut, Copy, Paste, Select all) with Emoji and
 Timestamp added. Shift+F10 and the Menu key open the menu of what the pointer
-is over, or of the open channel or conversation.
+is over, or of the open channel or conversation. A message's `react` row has
+no "See who reacted" (hovering a reaction says who), and the keyboard skips its
+emoji buttons: "Add reaction" is the way in from the keys.

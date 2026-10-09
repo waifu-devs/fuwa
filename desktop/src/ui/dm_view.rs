@@ -267,6 +267,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         thread: ThreadBits::default(),
         agent: None,
         pinned: false,
+        reactions: None,
         can_pin: false,
         decoration: None,
         owner: false,
@@ -295,7 +296,8 @@ pub(crate) struct Lines<'a> {
 /// opened: `start`, then each day's divider, messages and lines, then what's
 /// on its way. `moderate` is Some for a channel (whether you may delete
 /// others' messages there); `pins` is Some in a conversation whose instance
-/// keeps pins; `describe` puts a line in words.
+/// keeps pins; `describe` puts a line in words. `react` is Some where messages
+/// have reactions (whether you may add one).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn encrypted_rows(
     i: &InstanceState,
@@ -308,6 +310,7 @@ pub(crate) fn encrypted_rows(
     pins: Option<&[pb::DmPin]>,
     question: &str,
     lines: Option<Lines>,
+    react: Option<bool>,
 ) -> Vec<Row> {
     let me = i.me.clone();
     let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
@@ -366,6 +369,11 @@ pub(crate) fn encrypted_rows(
             m.can_pin = true;
             m.pinned = pins.iter().any(|p| p.sequence == item.seq);
         }
+        if let Some(can_add) = react.filter(|_| !item.deleted) {
+            let name_of = |u: &str| who(u).name;
+            m.reactions =
+                Some(Rc::new(crate::ui::reactions::ReactBits::encrypted(&item.reactions, &me_id, can_add, &name_of)));
+        }
         if let Some(l) = &lines {
             (l.dress)(item, &mut m);
         }
@@ -421,7 +429,20 @@ impl FuwaApp {
         let describe = |item: &Item| device_line(item, &name_of, &me, earlier);
         let pins = i.has("pins").then(|| i.dms.pins.get(conversation).map(|l| l.pins.as_slice()).unwrap_or_default());
         let question = t("dms-calls.dm.view.deleteQuestion");
-        encrypted_rows(i, conversation, start, &who, &describe, None, self.editing.as_deref(), pins, &question, None)
+        let react = i.has("reactions").then(|| !i.dms.blocked.contains_key(conversation));
+        encrypted_rows(
+            i,
+            conversation,
+            start,
+            &who,
+            &describe,
+            None,
+            self.editing.as_deref(),
+            pins,
+            &question,
+            None,
+            react,
+        )
     }
 }
 
@@ -1662,7 +1683,7 @@ mod tests {
         let who = |_: &str| Who { name: "U".into(), color: None, user: None };
         let start = || Row::Older { loading: false };
         let marks = |pins: Option<&[pb::DmPin]>| {
-            encrypted_rows(&i, "c", start(), &who, &|_| String::new(), None, None, pins, "", None)
+            encrypted_rows(&i, "c", start(), &who, &|_| String::new(), None, None, pins, "", None, None)
                 .iter()
                 .filter_map(|r| match r {
                     Row::Msg(m) => Some((m.id.clone(), m.pinned, m.can_pin)),

@@ -61,6 +61,7 @@ pub(super) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'stati
         A::ProfileItemCreate => ("sparkles", green, "profileItemCreate"),
         A::ProfileItemUpdate => ("sparkles", sky, "profileItemUpdate"),
         A::ProfileItemDelete => ("trash", red, "profileItemDelete"),
+        A::ReactionsClear => ("face-slightly-frowning", red, "reactionsClear"),
         A::WebhookCreate => ("webhook", green, "webhookCreate"),
         A::WebhookUpdate => ("webhook", sky, "webhookUpdate"),
         A::WebhookDelete => ("unplug", red, "webhookDelete"),

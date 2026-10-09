@@ -13,7 +13,10 @@ message, each with its count, the reader's own marked.
 - **Storage**: one row per person, emoji and message in the server file's
   `reactions` table (`server/src/api/reactions.rs`). A standard emoji is
   stored as its characters, a custom one by its id; the two never look alike,
-  since standard emoji have no letters. Reads add each message's up
+  since standard emoji have no letters. Variation selectors (U+FE0F) are
+  left out of the stored emoji, so "👍" and "👍️" are one reaction, shown as
+  its first reactor wrote it (`shown`); apps match chips the same way. Reads
+  add each message's up
   (`reactions::attach`) in the order each emoji was first used, with `me`
   for the reader, and skip custom emoji the server has deleted since.
 - **Who may**: reacting needs `ADD_REACTIONS` in the channel (given wherever

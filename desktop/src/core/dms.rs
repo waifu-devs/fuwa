@@ -200,6 +200,12 @@ pub enum Content {
         parent: i64,
         locked: bool,
     },
+    /// Reacting to the message at `sequence` with a standard emoji, or (`removed`) taking it off.
+    React {
+        sequence: i64,
+        emoji: String,
+        removed: bool,
+    },
 }
 
 impl Content {
@@ -239,6 +245,9 @@ fn content_of(content: &Content) -> pb::DirectMessageContent {
         }),
         Content::Lock { parent, locked } => {
             Body::Thread(pb::ThreadChange { parent_sequence: *parent, locked: *locked })
+        }
+        Content::React { sequence, emoji, removed } => {
+            Body::Reaction(pb::DirectMessageReaction { sequence: *sequence, emoji: emoji.clone(), removed: *removed })
         }
     };
     pb::DirectMessageContent { body: Some(body) }
@@ -1068,6 +1077,7 @@ impl DmEngine {
                 before.deleted = true;
                 before.content.clear();
                 before.files.clear();
+                before.reactions.clear();
                 // The signed copies hold the words too.
                 before.signed = None;
                 before.edit_signed = None;
@@ -1228,8 +1238,22 @@ impl DmEngine {
                 item.signed = signed;
                 change.items.push((id, item));
             }
+            // A reaction: kept on the message it's to, never shown as a line of its own,
+            // counted as unread or notified. In a secure channel only signed ones count.
+            Some(Body::Reaction(r)) if room.server().is_none() || signed.is_some() => {
+                if !crate::core::reactions::valid_emoji(&r.emoji) {
+                    return Ok(());
+                }
+                if let Some(mut target) = inner.known(change, &id, r.sequence)?
+                    && target.kind == ItemKind::Text
+                    && !target.deleted
+                    && crate::core::reactions::mark(&mut target.reactions, sender_id, &r.emoji, seq, r.removed)
+                {
+                    change.items.push((id, target));
+                }
+            }
             // Anything else is from a newer app: there's nothing to show for it here.
-            Some(Body::Signed(_) | Body::History(_) | Body::Thread(_)) | None => {}
+            Some(Body::Signed(_) | Body::History(_) | Body::Thread(_) | Body::Reaction(_)) | None => {}
         }
         Ok(())
     }

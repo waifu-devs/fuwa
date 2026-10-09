@@ -3,7 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import { ReactionSchema, type Message, type Reaction, type User } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine } from "@/e2ee/engine";
 import { i18n } from "@/i18n/i18n";
-import { toggled, toggledDm, type EmojiRef } from "@/lib/reactions";
+import { sameEmoji, toggled, toggledDm, type EmojiRef } from "@/lib/reactions";
 import { reportUsage } from "@/lib/reports";
 import { FuwaError, toFuwaError } from "./errors";
 import { store, updateDms, updateInstance, withMessage, withUsers } from "./store";
@@ -43,7 +43,7 @@ function showMine(instanceKey: string, message: Pick<Message, "id" | "channelId"
 function showCount(instanceKey: string, message: Pick<Message, "id" | "channelId" | "threadId">, reaction: Reaction, on: boolean) {
   updateInstance(instanceKey, (i) =>
     withMessage(i, message.channelId, message.threadId, message.id, (m) => {
-      const at = m.reactions.findIndex((r) => (reaction.emojiId ? r.emojiId === reaction.emojiId : !r.emojiId && r.emoji === reaction.emoji));
+      const at = m.reactions.findIndex((r) => sameEmoji(r, reaction));
       if (reaction.count <= 0) return at === -1 ? m : { ...m, reactions: m.reactions.filter((_, n) => n !== at) };
       const next = { ...reaction, me: on };
       return { ...m, reactions: at === -1 ? [...m.reactions, next] : m.reactions.map((r, n) => (n === at ? next : r)) };
@@ -116,7 +116,7 @@ export async function clearReactions(instanceKey: string, serverId: string, mess
   updateInstance(instanceKey, (i) =>
     withMessage(i, message.channelId, message.threadId, message.id, (m) => ({
       ...m,
-      reactions: emoji ? m.reactions.filter((r) => (emoji.emojiId ? r.emojiId !== emoji.emojiId : r.emojiId || r.emoji !== emoji.emoji)) : [],
+      reactions: emoji ? m.reactions.filter((r) => !sameEmoji(r, emoji)) : [],
     })),
   );
 }

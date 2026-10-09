@@ -598,7 +598,7 @@ async fn reread_shown(core: Arc<Core>, key: String, api: Api, server_id: String)
             store::add_shared_authors(&mut i.users, &res.messages);
             if let Some(loaded) = i.messages.get_mut(&channel_id) {
                 for m in res.messages {
-                    store::upsert_message(&mut loaded.items, m);
+                    store::put_message(&mut loaded.items, m);
                 }
             }
         });

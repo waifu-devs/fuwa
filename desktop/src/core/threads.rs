@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::core::api::Problem;
-use crate::core::store::{self, ChannelMessages, InstanceState, upsert_message};
+use crate::core::store::{self, ChannelMessages, InstanceState};
 use crate::core::{Core, reports};
 use crate::pb;
 use crate::rpc;
@@ -252,7 +252,7 @@ pub(crate) fn put_page(i: &mut InstanceState, at: &str, res: pb::ListMessagesRes
     }
     let entry: &mut ChannelMessages = i.messages.entry(at.to_owned()).or_default();
     for m in res.messages {
-        upsert_message(&mut entry.items, m);
+        store::put_message(&mut entry.items, m);
     }
     if older || fresh {
         entry.has_more = res.has_more;
