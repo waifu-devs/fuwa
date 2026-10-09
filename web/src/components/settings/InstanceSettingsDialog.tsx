@@ -1013,7 +1013,12 @@ function LimitSettings({ draft, defaults, patch, resetter }: TabProps) {
         delay={0.275}
         {...resetter("reactions_per_minute")}
       >
-        <Cap label={t("instancesettings.shared.upTo")} placeholder="60" value={draft.reactionsPerMinute} onChange={(v) => patch((d) => (d.reactionsPerMinute = v))} />
+        <Cap
+          label={t("instancesettings.shared.upTo")}
+          placeholder="60"
+          value={draft.reactionsPerMinute}
+          onChange={(v) => patch((d) => (d.reactionsPerMinute = v))}
+        />
       </Setting>
       <Setting
         id="live-tiles-per-channel"
