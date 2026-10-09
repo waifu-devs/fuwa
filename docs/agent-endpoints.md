@@ -127,7 +127,8 @@ settings, Sign-ups → Agents) decides:
 
 - `public` (the default): `https` at public addresses only. Names are
   checked as they're looked up, like the pictures the instance fetches, so a
-  name can't point the instance at itself or its network.
+  name can't point the instance at itself or its network. The port is 443,
+  80, 8443, or one from 1024 up.
 - `any`: `http` or `https` anywhere, the instance's own machine and network
   included: for an agent running next to a self-hosted instance.
 - `off`: no endpoints. Deliveries wait where they are until it's back on.

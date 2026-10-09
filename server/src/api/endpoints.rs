@@ -173,6 +173,11 @@ pub fn check_url(policy: pb::AgentEndpoints, url: &str) -> std::result::Result<U
     if internal {
         return Err("this instance only sends to public addresses".into());
     }
+    // Web ports only, so a public address's other services (mail, SSH, a
+    // database) can't be knocked on.
+    if !anywhere && !url.port_or_known_default().is_some_and(|port| matches!(port, 80 | 443 | 8443) || port >= 1024) {
+        return Err("an endpoint's link uses port 443, 80, 8443, or one from 1024 up".into());
+    }
     Ok(url)
 }
 
@@ -787,10 +792,34 @@ mod tests {
         assert!(check_url(public, "https://box.internal/").is_err());
         assert!(check_url(public, "https://user:pass@agent.example.com/").is_err());
         assert!(check_url(public, "ftp://agent.example.com/").is_err());
+        assert!(check_url(public, "https://agent.example.com:8443/").is_ok());
+        assert!(check_url(public, "https://agent.example.com:3000/").is_ok());
+        assert!(check_url(public, "https://agent.example.com:80/").is_ok());
+        assert!(check_url(public, "https://agent.example.com:22/").is_err());
+        assert!(check_url(public, "https://agent.example.com:25/").is_err());
+        assert!(check_url(public, "https://agent.example.com:0/").is_err());
         let any = pb::AgentEndpoints::Any;
         assert!(check_url(any, "http://127.0.0.1:3000/").is_ok());
+        assert!(check_url(any, "http://127.0.0.1:22/").is_ok());
         assert!(check_url(any, "ftp://127.0.0.1/").is_err());
         assert!(check_url(pb::AgentEndpoints::Off, "https://agent.example.com/").is_err());
+    }
+
+    #[tokio::test]
+    async fn names_that_point_inside_are_never_reached() {
+        // Past the link's check, a name that resolves to loopback still
+        // isn't connected to.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let sent = client(true).post(format!("http://localhost:{port}/fuwa")).body("{}").send().await;
+        assert!(sent.is_err());
+        let reached = tokio::time::timeout(Duration::from_millis(200), listener.accept()).await;
+        assert!(reached.is_err(), "the endpoint client connected to loopback");
+        // Where anywhere is allowed, the same link connects.
+        let sending = tokio::spawn(client(false).post(format!("http://localhost:{port}/fuwa")).body("{}").send());
+        let reached = tokio::time::timeout(Duration::from_secs(5), listener.accept()).await;
+        sending.abort();
+        assert!(reached.is_ok_and(|accepted| accepted.is_ok()));
     }
 
     #[test]

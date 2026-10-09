@@ -256,6 +256,40 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
     assert_eq!(event["serverId"], server_id.as_str());
     assert_eq!(event["messageCreated"]["message"]["content"], "hello dice");
 
+    // A channel hidden from the agent doesn't reach its endpoint.
+    let staff_id = channels
+        .create_channel(authed(
+            &owner,
+            pb::CreateChannelRequest {
+                server_id: server_id.clone(),
+                name: "staff".into(),
+                r#type: pb::ChannelType::Text as i32,
+                permission_overwrites: vec![pb::PermissionOverwrite {
+                    target_id: agent_id.clone(),
+                    target: pb::OverwriteTarget::Member as i32,
+                    allow: vec![],
+                    deny: vec![pb::Permission::ViewChannels as i32],
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap()
+        .id;
+    let in_staff = pb::SendMessageRequest {
+        server_id: server_id.clone(),
+        channel_id: staff_id,
+        content: "staff only".into(),
+        ..Default::default()
+    };
+    messages.send_message(authed(&owner, in_staff)).await.unwrap();
+    messages.send_message(send("for everyone")).await.unwrap();
+    let event = endpoint.next("messageCreated").await;
+    assert_eq!(event["messageCreated"]["message"]["content"], "for everyone");
+
     // A run comes with its arguments, and the answer posts the reply.
     let interaction_id = commands
         .run_command(authed(
@@ -354,12 +388,27 @@ async fn endpoints_stay_on_public_addresses_unless_allowed() {
         .into_inner();
     let agent_id = made.agent.unwrap().user.unwrap().id;
     let endpoint = endpoint().await;
-    let set = agents
-        .set_agent_endpoint(authed(
-            &owner,
-            pb::SetAgentEndpointRequest { agent_id, url: endpoint.url.clone(), events: vec![] },
-        ))
-        .await;
-    assert_eq!(set.unwrap_err().code(), Code::InvalidArgument);
+    let port = endpoint.url.trim_start_matches("http://127.0.0.1:").trim_end_matches("/fuwa");
+    // Plain http is refused for its scheme; https to an inside address for
+    // where it goes, written however it's written.
+    for url in [
+        endpoint.url.clone(),
+        format!("https://127.0.0.1:{port}/fuwa"),
+        format!("https://[::ffff:127.0.0.1]:{port}/fuwa"),
+        format!("https://[::1]:{port}/fuwa"),
+        "https://169.254.169.254/latest/meta-data/".to_string(),
+    ] {
+        let set = agents
+            .set_agent_endpoint(authed(
+                &owner,
+                pb::SetAgentEndpointRequest { agent_id: agent_id.clone(), url: url.clone(), events: vec![] },
+            ))
+            .await;
+        let refused = set.unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument, "{url}");
+        if url.starts_with("https://") {
+            assert_eq!(refused.message(), "this instance only sends to public addresses", "{url}");
+        }
+    }
     instance.stop().await;
 }
