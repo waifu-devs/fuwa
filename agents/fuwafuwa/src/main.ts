@@ -13,7 +13,7 @@
 // TRIAGE_HOURS       how often triage runs, on the hour from midnight UTC (6; 0 never)
 // TRIAGE_DAYS        how far back it looks for feedback it hasn't handled (14)
 // TRIAGE_NOW         1: also run once right after starting
-// FEEDBACK_PER_HOUR  how much feedback one account may send in an hour (5)
+// FEEDBACK_PER_HOUR  how much feedback one account may send in an hour (5; unlimited for no limit)
 // ANTHROPIC_API_KEY  for Claude, which groups the feedback; without it, no triage
 // ANTHROPIC_MODEL    claude-opus-5-5
 // GITHUB_TOKEN       a fine-grained token with Issues: read and write on GITHUB_REPO;
@@ -36,6 +36,7 @@ import {
   feedbackOfPost,
   handled,
   nextRun,
+  perHourOf,
   teamPost,
   withOutcome,
 } from "./feedback.ts";
@@ -64,7 +65,12 @@ const grouper = env.ANTHROPIC_API_KEY
   : undefined;
 const hours = Number(env.TRIAGE_HOURS || 6);
 const lookbackMs = Number(env.TRIAGE_DAYS || 14) * 24 * 60 * 60_000;
-const pace = new FeedbackPace(Number(env.FEEDBACK_PER_HOUR || 5));
+const perHour = perHourOf(env.FEEDBACK_PER_HOUR);
+if (perHour === undefined) {
+  console.error("Set FEEDBACK_PER_HOUR to a whole number from 1 up, or unlimited.");
+  process.exit(1);
+}
+const pace = new FeedbackPace(perHour);
 
 const HELP =
   "Hi! I take feedback about fuwa. Mention me with what you think, what broke or what you wish it did, " +
@@ -84,8 +90,9 @@ agent.on("mention", async (ctx: MessageContext) => {
   }
   const author = await ctx.author();
   // Per account, never per address: the instance says who wrote it.
-  if (!pace.take(author?.id ?? ctx.message.authorId, Date.now())) {
-    await ctx.reply("Thanks! You've sent me a lot this hour, so I'll take more in a little while.");
+  const turn = pace.take(author?.id ?? ctx.message.authorId, Date.now());
+  if (turn !== "ok") {
+    if (turn === "over") await ctx.reply("Thanks! You've sent me a lot this hour, so I'll take more in a little while.");
     return;
   }
   try {

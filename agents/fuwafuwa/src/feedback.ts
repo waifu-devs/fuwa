@@ -60,32 +60,55 @@ export function forGitHub(text: string): string {
 }
 
 /**
+ * FEEDBACK_PER_HOUR as set: unset or empty is 5, `unlimited` is no limit
+ * (Infinity), a whole number from 1 up is itself. Anything else (0, a typo)
+ * is undefined, for the agent to refuse at start rather than run without
+ * the limit it was meant to have.
+ */
+export function perHourOf(value: string | undefined): number | undefined {
+  const v = (value ?? "").trim();
+  if (!v) return 5;
+  if (v.toLowerCase() === "unlimited") return Infinity;
+  if (!/^[0-9]+$/.test(v)) return undefined;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= 1 ? n : undefined;
+}
+
+/**
  * Each account's feedback in the last hour, so one person can't fill the
  * team's channel (and each triage) on their own. Kept in memory: a restart
  * starts everyone over.
  */
 export class FeedbackPace {
   #perHour: number;
-  #sent = new Map<string, number[]>();
+  #sent = new Map<string, { times: number[]; told: number }>();
 
   constructor(perHour: number) {
     this.#perHour = perHour;
   }
 
-  /** Counts one piece of feedback from `accountId` at `now`; false when it's one too many. */
-  take(accountId: string, now: number): boolean {
+  /**
+   * Counts one piece of feedback from `accountId` at `now`: "ok", or "over"
+   * when it's one too many, or "quiet" when it's over again and the account
+   * was already told within the hour (so a flood isn't answered message for
+   * message).
+   */
+  take(accountId: string, now: number): "ok" | "over" | "quiet" {
+    if (this.#perHour === Infinity) return "ok";
     const since = now - 60 * 60_000;
     if (this.#sent.size > 10_000) {
-      for (const [id, times] of this.#sent) if (times.every((t) => t <= since)) this.#sent.delete(id);
+      for (const [id, e] of this.#sent) if (e.times.every((t) => t <= since) && e.told <= since) this.#sent.delete(id);
     }
-    const times = (this.#sent.get(accountId) ?? []).filter((t) => t > since);
-    if (times.length >= this.#perHour) {
-      this.#sent.set(accountId, times);
-      return false;
+    const entry = this.#sent.get(accountId) ?? { times: [], told: -Infinity };
+    entry.times = entry.times.filter((t) => t > since);
+    this.#sent.set(accountId, entry);
+    if (entry.times.length < this.#perHour) {
+      entry.times.push(now);
+      return "ok";
     }
-    times.push(now);
-    this.#sent.set(accountId, times);
-    return true;
+    if (entry.told > since) return "quiet";
+    entry.told = now;
+    return "over";
   }
 }
 
