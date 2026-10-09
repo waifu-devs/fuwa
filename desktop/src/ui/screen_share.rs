@@ -50,10 +50,14 @@ pub(crate) struct SharePicker {
 }
 
 impl FuwaApp {
-    /// Opens the share dialog: reads what can be shared, picks the first
+    /// Opens the share dialog (or, without access to the screen, says so in
+    /// the call): reads what can be shared, picks the first
     /// screen, and starts taking each one's picture.
     pub(crate) fn open_share_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.calls.pop = None;
+        if !self.core.screen_allowed() {
+            return;
+        }
         let old = std::mem::take(&mut self.calls.picker.pictures);
         for (_, image) in old {
             cx.drop_image(image, Some(window));
