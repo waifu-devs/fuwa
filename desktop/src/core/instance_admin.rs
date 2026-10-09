@@ -144,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 58] = [
+pub const PATHS: [&str; 59] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -155,6 +155,7 @@ pub const PATHS: [&str; 58] = [
     "sso_provider",
     "server_creation",
     "agent_creation",
+    "agent_endpoints",
     "shared_channels",
     "mcp",
     "profile_effects",
@@ -299,6 +300,15 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
     *slot = value;
 }
 
+/// Where agents' endpoints may be, unset read as public addresses only (as the instance reads it).
+pub fn endpoints_of(s: &pb::InstanceSettings) -> i32 {
+    if s.agent_endpoints == pb::AgentEndpoints::Unspecified as i32 {
+        pb::AgentEndpoints::Public as i32
+    } else {
+        s.agent_endpoints
+    }
+}
+
 /// Whether one setting differs between two drafts, read as the web reads it
 /// (trimmed text, blank lines dropped).
 fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bool {
@@ -317,6 +327,7 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         }
         "server_creation" => a.server_creation != b.server_creation,
         "agent_creation" => a.agent_creation != b.agent_creation,
+        "agent_endpoints" => endpoints_of(a) != endpoints_of(b),
         "shared_channels" => a.shared_channels != b.shared_channels,
         "mcp" => a.mcp != b.mcp,
         "profile_effects" => a.profile_effects != b.profile_effects,
@@ -408,6 +419,7 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "sso_provider" => into.sso_provider = from.sso_provider.clone(),
         "server_creation" => into.server_creation = from.server_creation,
         "agent_creation" => into.agent_creation = from.agent_creation,
+        "agent_endpoints" => into.agent_endpoints = from.agent_endpoints,
         "shared_channels" => into.shared_channels = from.shared_channels,
         "mcp" => into.mcp = from.mcp,
         "profile_effects" => into.profile_effects = from.profile_effects,

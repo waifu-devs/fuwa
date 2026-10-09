@@ -180,8 +180,13 @@ async fn stay_in_touch(app: Arc<App>) {
                                 for account_id in &message.sessions_ended {
                                     app.sessions_ended(account_id);
                                 }
+                                for agent_id in &message.agent_endpoints_changed {
+                                    app.agent_endpoint_changed(agent_id);
+                                }
                                 if first {
                                     first = false;
+                                    // Endpoints may have changed while the directory was away.
+                                    app.agent_endpoint_changed("");
                                     backoff.reset();
                                     // Sessions may have ended while the directory was out
                                     // of reach, so streams here ask about theirs again.

@@ -229,6 +229,17 @@ enum AgentCreation {
   AGENT_CREATION_DISABLED = 3;
 }
 
+// Where agents' endpoints may point.
+enum AgentEndpoints {
+  // As AGENT_ENDPOINTS_PUBLIC.
+  AGENT_ENDPOINTS_UNSPECIFIED = 0;
+  // https at public addresses only.
+  AGENT_ENDPOINTS_PUBLIC = 1;
+  // http or https anywhere, this machine and its network included.
+  AGENT_ENDPOINTS_ANY = 2;
+  AGENT_ENDPOINTS_OFF = 3;
+}
+
 // Who may create community servers on an instance.
 enum ServerCreation {
   SERVER_CREATION_UNSPECIFIED = 0;

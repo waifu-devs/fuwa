@@ -84,7 +84,7 @@ fn changes_access(payload: &Payload, account_id: &str) -> bool {
 
 /// One member's view of one server's events: what they can see, worked out
 /// again whenever an event changes it.
-struct View {
+pub(crate) struct View {
     sdb: Arc<ServerDb>,
     account_id: String,
     /// Their member row and roles as last read, for working out their access
@@ -98,12 +98,17 @@ struct View {
 }
 
 impl View {
+    /// A live view for a member as they are now (`ServerDb::member_access`).
+    pub(crate) fn new(sdb: Arc<ServerDb>, account_id: &str, member: pb::Member, access: Access) -> Self {
+        Self { sdb, account_id: account_id.to_string(), member, access, replaying: false }
+    }
+
     /// What the member gets for `event`: nothing if it's about a channel they
     /// can't see; when it changes what they can see, the channels that appear
     /// for them (ChannelCreated) and go (ChannelDeleted), not stored, so
     /// sequence 0. An error when what they can see couldn't be worked out
     /// again: the stream ends rather than go on with what they could before.
-    async fn pass(&mut self, event: &pb::Event) -> Result<Vec<pb::Event>, Status> {
+    pub(crate) async fn pass(&mut self, event: &pb::Event) -> Result<Vec<pb::Event>, Status> {
         let mut out = self.pass_unscrubbed(event).await?;
         let manager = self.access.has(pb::Permission::ManageServer);
         for event in &mut out {

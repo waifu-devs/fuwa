@@ -35,6 +35,9 @@ pub struct Hub {
     /// Sees every event too, so the search indexer knows which servers have
     /// new messages to index (`search::spawn`).
     search: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
+    /// Sees every event too, so agents' endpoints hear of new events in the
+    /// servers they're in (`endpoints::spawn_deliveries`).
+    agents: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
 }
 
 impl Hub {
@@ -72,6 +75,14 @@ impl Hub {
         rx
     }
 
+    /// Every event published from now on, for agents' endpoints. One at a
+    /// time, like [`tap`](Self::tap).
+    pub fn agents_tap(&self) -> mpsc::UnboundedReceiver<Arc<pb::Event>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.agents.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
+        rx
+    }
+
     /// Sends events to everyone following their server. Callers publish in commit
     /// order, so subscribers see each server's events in sequence.
     pub fn publish(&self, events: impl IntoIterator<Item = pb::Event>) {
@@ -79,6 +90,7 @@ impl Hub {
         let mut tap = self.tap.lock().unwrap_or_else(|p| p.into_inner());
         let mut shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
         let mut search = self.search.lock().unwrap_or_else(|p| p.into_inner());
+        let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
         for event in events {
             let server_id = event.server_id.clone();
             let event = Arc::new(event);
@@ -90,6 +102,9 @@ impl Hub {
             }
             if search.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
                 *search = None;
+            }
+            if agents.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
+                *agents = None;
             }
             let idle = match channels.get(&server_id) {
                 None => continue,

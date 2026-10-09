@@ -30,7 +30,7 @@ import {
   type InstanceConfig,
   type InstanceSettings,
 } from "@/gen/fuwa/v1/admin_pb";
-import { AccountKind, AgentCreation, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, AgentCreation, AgentEndpoints, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
 import { getSettings, run, startSsoSignIn, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "sso_provider", get: (s) => providerFingerprint(s.ssoProvider) },
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
+  { path: "agent_endpoints", get: (s) => endpointsOf(s) },
   { path: "shared_channels", get: (s) => s.sharedChannels },
   { path: "mcp", get: (s) => s.mcp },
   { path: "profile_effects", get: (s) => s.profileEffects },
@@ -238,6 +239,7 @@ export function InstanceSettingsDialog({
   const name = inst?.node?.name ?? instanceKey;
   // Profile items (and their switch) only on instances that have them.
   const itemsHere = instanceHas(inst?.node?.versions, "profile-items");
+  const endpointsHere = instanceHas(inst?.node?.versions, "agent-endpoints");
 
   return (
     <SettingsScreen
@@ -247,7 +249,7 @@ export function InstanceSettingsDialog({
       subtitle={t("instancesettings.nav.subtitle")}
       section={tab}
       onSectionChange={setTab}
-      groups={settingsGroups(t, name, itemsHere)}
+      groups={settingsGroups(t, name, itemsHere, endpointsHere)}
       footer={<SaveBar scope="screen" count={changed.length} saving={save.pending} error={save.error} onSave={() => commit(changed, [])} onDiscard={discard} />}
     >
       <SettingsBody
@@ -304,7 +306,7 @@ function SettingsBody({
 }
 
 /** The menu: the instance's settings, then what an admin manages. */
-function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean): SettingsGroup[] {
+function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpointsHere: boolean): SettingsGroup[] {
   return [
     {
       label: t("instancesettings.nav.instance"),
@@ -333,6 +335,7 @@ function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean): Setting
             { id: "server-creation", label: t("instancesettings.nav.serverCreation") },
             { id: "servers-per-account", label: t("instancesettings.nav.serversPerAccount") },
             { id: "agent-creation", label: t("instancesettings.nav.agentCreation"), keywords: "bots integrations" },
+            ...(endpointsHere ? [{ id: "agent-endpoints", label: t("instancesettings.nav.agentEndpoints"), keywords: "webhook url http events serverless" }] : []),
             { id: "mcp", label: t("instancesettings.nav.mcp"), keywords: "mcp claude ai model context protocol" },
             { id: "shared-channels", label: t("serversettings.nav.shared"), keywords: "share connect servers slack connect" },
             { id: "profile-effects", label: t("instancesettings.nav.profileEffects"), keywords: "sparkles petals animation card decoration" },
@@ -451,7 +454,7 @@ function SettingsTab({
     case "general":
       return <GeneralSettings node={inst?.node} config={config} {...props} />;
     case "sign-ups":
-      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} itemsHere={instanceHas(inst?.node?.versions, "profile-items")} {...props} />;
+      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} itemsHere={instanceHas(inst?.node?.versions, "profile-items")} endpointsHere={instanceHas(inst?.node?.versions, "agent-endpoints")} {...props} />;
     case "sso":
       return <SsoSettings instanceKey={instanceKey} url={inst!.url} config={config} saved={saved} changed={changed} test={test} {...props} />;
     case "limits":
@@ -530,7 +533,8 @@ function SignUpSettings({
   resetter,
   hasPasswordHere,
   itemsHere,
-}: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean; itemsHere: boolean }) {
+  endpointsHere,
+}: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean; itemsHere: boolean; endpointsHere: boolean }) {
   const lang = useI18n();
   const { t } = lang;
   return (
@@ -658,6 +662,29 @@ function SignUpSettings({
           ]}
         />
       </Setting>
+      {endpointsHere && (
+        <Setting
+          id="agent-endpoints"
+          title={t("instancesettings.nav.agentEndpoints")}
+          hint={t("instancesettings.signUps.endpointsHint")}
+          defaultLabel={labelOf(t, AGENT_ENDPOINTS_LABEL, endpointsOf(defaults))}
+          delay={0.21}
+          {...resetter("agent_endpoints")}
+        >
+          <Choice
+            value={endpointsOf(draft)}
+            onChange={(v) => patch((d) => (d.agentEndpoints = v))}
+            options={[
+              { value: AgentEndpoints.PUBLIC, label: t("instancesettings.signUps.endpointsPublic"), hint: t("instancesettings.signUps.endpointsPublicHint"), icon: <GlobeIcon className="size-4" /> },
+              { value: AgentEndpoints.ANY, label: t("instancesettings.signUps.endpointsAny"), hint: t("instancesettings.signUps.endpointsAnyHint"), icon: <BuildingIcon className="size-4" /> },
+              { value: AgentEndpoints.OFF, label: t("instancesettings.signUps.endpointsOff"), hint: t("instancesettings.signUps.endpointsOffHint"), icon: <BanIcon className="size-4" /> },
+            ]}
+          />
+          <Notice show={endpointsOf(draft) === AgentEndpoints.ANY && (saved ? endpointsOf(saved) : undefined) !== AgentEndpoints.ANY}>
+            {t("instancesettings.signUps.endpointsAnyNotice")}
+          </Notice>
+        </Setting>
+      )}
       <Setting
         id="mcp"
         title={t("instancesettings.nav.mcp")}
@@ -1129,6 +1156,15 @@ const AGENT_CREATION_LABEL: Record<number, Key> = {
   [AgentCreation.DISABLED]: "instancesettings.shared.nobody",
 };
 
+/** Where agents' endpoints may be; unset reads as public addresses, as the server takes it. */
+const endpointsOf = (s: InstanceSettings) => s.agentEndpoints || AgentEndpoints.PUBLIC;
+
+const AGENT_ENDPOINTS_LABEL: Record<number, Key> = {
+  [AgentEndpoints.PUBLIC]: "instancesettings.shared.publicOnly",
+  [AgentEndpoints.ANY]: "instancesettings.shared.anyAddress",
+  [AgentEndpoints.OFF]: "instancesettings.shared.off",
+};
+
 const CREATION_LABEL: Record<number, Key> = {
   [ServerCreation.EVERYONE]: "instancesettings.shared.everyone",
   [ServerCreation.ADMINS]: "instancesettings.shared.admins",
@@ -1186,6 +1222,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "agent_creation":
         into.agentCreation = from.agentCreation;
+        break;
+      case "agent_endpoints":
+        into.agentEndpoints = from.agentEndpoints;
         break;
       case "telemetry":
         into.telemetry = from.telemetry;

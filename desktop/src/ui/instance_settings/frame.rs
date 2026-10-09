@@ -86,6 +86,11 @@ pub(super) fn groups(name: &str, items_here: bool) -> Vec<Group> {
             entry("server-creation", "instancesettings.nav.serverCreation", ""),
             entry("servers-per-account", "instancesettings.nav.serversPerAccount", ""),
             entry("agent-creation", "instancesettings.nav.agentCreation", "bots integrations"),
+            entry(
+                "agent-endpoints",
+                "instancesettings.nav.agentEndpoints",
+                "agents bots webhook http url events deliveries",
+            ),
             entry("mcp", "instancesettings.nav.mcp", "mcp claude ai model context protocol"),
             entry("shared-channels", "serversettings.nav.shared", "share connect servers slack connect"),
             entry(

@@ -64,6 +64,12 @@ service DirectoryService {
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
   rpc FindAgent(FindAgentRequest) returns (FindAgentResponse);
+  // Agents' endpoints, for the shard delivering their events: those that
+  // are on, with their secrets and the agents' accounts.
+  rpc AgentEndpoints(AgentEndpointsRequest) returns (AgentEndpointsResponse);
+  // How a shard's deliveries to an endpoint went, for its owner to see. A
+  // day of failures turns it off.
+  rpc ReportAgentDelivery(ReportAgentDeliveryRequest) returns (ReportAgentDeliveryResponse);
   // Which of the emoji someone wrote from their other servers they may use:
   // they're a member of the emoji's server, and its picture is that
   // server's emoji here.
@@ -311,6 +317,9 @@ message WatchResponse {
   // Someone joined, or was added to, a server, sent to gateways on their own
   // so streams that follow new servers pick it up at once.
   repeated MembershipJoined joined = 4;
+  // Agents whose endpoint was set, turned off or given a new secret, so
+  // shards drop what they remember of it.
+  repeated string agent_endpoints_changed = 5;
 }
 
 message MembershipJoined {
@@ -556,6 +565,39 @@ message CountOwnedServersResponse {
 
 message FindAgentRequest {
   string username = 1;
+}
+
+message AgentEndpointsRequest {
+  repeated string agent_ids = 1;
+}
+
+message AgentEndpointsResponse {
+  // Only the agents whose endpoint is on.
+  repeated DeliveryEndpoint endpoints = 1;
+}
+
+message DeliveryEndpoint {
+  Account agent = 1;
+  string url = 2;
+  repeated string events = 3;
+  string secret = 4;
+  // Moves on each time the URL is set, so deliveries start again from the
+  // events after it.
+  int64 epoch = 5;
+  // When the URL was set, in unix ms.
+  int64 set_at = 6;
+}
+
+message ReportAgentDeliveryRequest {
+  string agent_id = 1;
+  int64 epoch = 2;
+  // Empty when deliveries go through.
+  string error = 3;
+}
+
+message ReportAgentDeliveryResponse {
+  // The endpoint was turned off (after a day of failures, or by its owner).
+  bool disabled = 1;
 }
 
 message CheckEmojisRequest {

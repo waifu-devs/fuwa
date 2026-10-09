@@ -1836,6 +1836,21 @@ export const addAgent = (key: string, serverId: string, username: string) =>
     Effect.map((r) => r.member!),
   );
 
+/**
+ * An agent's endpoint (docs/agent-endpoints.md): the URL the instance posts
+ * its events to. Made, with its signing secret, the first time it's asked for.
+ */
+export const getAgentEndpoint = (key: string, agentId: string) =>
+  call((signal) => api(key).agents.getAgentEndpoint({ agentId }, { signal })).pipe(Effect.map((r) => r.endpoint!));
+
+/** Sets where the agent's events go (saved only once the URL answers the check), or turns it off with an empty URL. */
+export const setAgentEndpoint = (key: string, agentId: string, url: string, events: string[]) =>
+  call((signal) => api(key).agents.setAgentEndpoint({ agentId, url: url.trim(), events }, { signal })).pipe(Effect.map((r) => r.endpoint!));
+
+/** A new signing secret for the agent's endpoint; the old one stops at once. */
+export const resetAgentEndpointSecret = (key: string, agentId: string) =>
+  call((signal) => api(key).agents.resetAgentEndpointSecret({ agentId }, { signal })).pipe(Effect.map((r) => r.endpoint!));
+
 /** Which of a server's agents may use the instance's MCP endpoint (docs/mcp.md). */
 export const getMcpAccess = (key: string, serverId: string) =>
   call((signal) => api(key).agents.getMcpAccess({ serverId }, { signal })).pipe(Effect.map((r) => r.access!));

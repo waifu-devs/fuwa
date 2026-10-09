@@ -8,6 +8,7 @@ use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::media;
+use crate::node::Account;
 use crate::pb::{self, Permission, message_service_server::MessageService};
 use crate::permissions::{self, Access};
 use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
@@ -830,6 +831,249 @@ async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<V
     users(conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await
 }
 
+impl Api {
+    /// Sends a message as `account`: SendMessage, and an agent's answer to
+    /// an interaction that came back from its endpoint (`endpoints.rs`).
+    pub(crate) async fn send_as(
+        &self,
+        account: Account,
+        mut req: pb::SendMessageRequest,
+    ) -> Result<pb::SendMessageResponse> {
+        let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
+        check_not_timed_out(&member)?;
+        access.require_in(&req.channel_id, Permission::SendMessages)?;
+        if !req.attachments.is_empty() || req.gif.is_some() {
+            access.require_in(&req.channel_id, Permission::AttachFiles)?;
+        }
+        if !req.embeds.is_empty() {
+            access.require_in(&req.channel_id, Permission::EmbedLinks)?;
+        }
+        let poll = match &req.poll {
+            Some(new) => {
+                access.require_in(&req.channel_id, Permission::CreatePolls)?;
+                Some(polls::check(new, now_ms())?)
+            }
+            None => None,
+        };
+        if poll.is_some() && req.gif.is_some() {
+            return Err(Error::invalid("a poll can't carry a GIF"));
+        }
+        // Only GIFs this instance stored and sealed.
+        let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
+        check_content(
+            &req.content,
+            !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some(),
+        )?;
+        check_extras(&mut req.attachments, &req.embeds)?;
+        check_embed_links(&self.app, &mut req.embeds)?;
+        if req.also_send_to_channel && req.thread_id.is_empty() {
+            return Err(Error::invalid("only thread replies are also sent to the channel"));
+        }
+        // Buttons and answers to interactions are agents' (commands.rs).
+        let answering = !req.interaction_id.is_empty();
+        if (answering || !req.components.is_empty()) && account.kind != pb::AccountKind::Agent {
+            return Err(Error::denied("only agents send buttons and answer interactions"));
+        }
+        if answering && !req.thread_id.is_empty() {
+            return Err(Error::invalid("answer an interaction in the channel it came from"));
+        }
+        let components = commands::check_components(&req.components)?;
+        if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
+            if answering || !components.is_empty() {
+                return Err(Error::invalid("buttons and interactions aren't in channels shared between servers yet"));
+            }
+            if poll.is_some() && (!req.attachments.is_empty() || !req.embeds.is_empty()) {
+                return Err(Error::invalid(
+                    "a poll goes without files or link previews in a channel shared from another server",
+                ));
+            }
+            if !req.attachments.is_empty() {
+                // The sender's uploads for this server, which the
+                // channel's home takes and keeps (fetched with a
+                // ticket when it's on another instance).
+                self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
+            }
+            if poll.is_some() && !req.thread_id.is_empty() {
+                return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
+            }
+            if gif.is_some() {
+                return Err(Error::FailedPrecondition(
+                    "GIFs can't be sent in channels shared from another server yet".into(),
+                ));
+            }
+            // Emoji from other servers are for this server's own
+            // channels; this server's own go along, read here
+            // (`shared::own_emojis`).
+            req.emojis.clear();
+            let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
+            return Ok(pb::SendMessageResponse { message: Some(message) });
+        }
+        let emojis =
+            outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis)).await;
+        let limits = sdb.limits(&self.app.settings().limits).await?;
+        if let Some(limit) = limits.storage_bytes
+            && sdb.storage_bytes() >= limit
+        {
+            return Err(Error::ResourceExhausted("this server is out of storage".into()));
+        }
+        let file_bytes = self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
+        if file_bytes > 0
+            && let Some(limit) = limits.attachment_bytes
+            && sdb.usage().await?.attachment_bytes + file_bytes > limit
+        {
+            return Err(Error::ResourceExhausted(format!(
+                "this server is out of room for files ({} in all)",
+                media::size_label(limit)
+            )));
+        }
+        // AutoMod reads the poll, embeds and file names along with the
+        // text, as the message will be stored (names as cleaned above).
+        let draft = pb::Message {
+            content: req.content.clone(),
+            poll: poll.clone(),
+            embeds: req.embeds.clone(),
+            attachments: req.attachments.clone(),
+            ..Default::default()
+        };
+        let reviewed = reviewed_text(&draft).into_owned();
+        let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
+        // The GIF too: providers read its first frame. Then emoji
+        // from other servers, the smallest.
+        pictures.extend(gif.iter().map(|gif| gif.url.clone()));
+        pictures.extend(automod::picture_links(&[], &[], &emojis));
+        // The Smart filter's provider is asked alongside: the message
+        // goes out at once, and its answer is acted on when it comes.
+        let (asked, later) = (
+            None,
+            automod::ask_after(
+                &self.app,
+                &sdb,
+                &member,
+                &access,
+                &req.channel_id,
+                automod::Text { all: &reviewed, content: &req.content },
+                &pictures,
+            )
+            .await,
+        );
+        let message = sdb
+            .write(&account.id, async |conn, events| {
+                let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                if !matches!(
+                    pb::ChannelType::try_from(channel.r#type),
+                    Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
+                ) {
+                    return Err(Error::invalid("messages can only go in text channels"));
+                }
+                let parent = if req.thread_id.is_empty() {
+                    None
+                } else {
+                    Some(threads::check_reply(conn, &sdb.id, &access, &channel, &req.thread_id).await?)
+                };
+                if parent.is_some() && poll.is_some() && channel.shared.is_some() {
+                    return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
+                }
+                if !req.reply_to_id.is_empty() {
+                    let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
+                    if replied.is_none_or(|m| m.channel_id != channel.id) {
+                        return Err(Error::NotFound("message being replied to"));
+                    }
+                }
+                let verdict = automod::review(
+                    conn,
+                    &sdb.id,
+                    &member,
+                    &access,
+                    &channel,
+                    automod::Text { all: &reviewed, content: &req.content },
+                    asked.as_ref(),
+                    events,
+                )
+                .await?;
+                if let Some(why) = verdict.blocked {
+                    return Ok(Err(why));
+                }
+                let now = now_ms();
+                let exempt = access.has_in(&channel.id, Permission::ManageMessages)
+                    || access.has_in(&channel.id, Permission::ManageChannels);
+                if !exempt {
+                    check_slowmode(conn, &channel, &account.id, now).await?;
+                }
+                let (mentions_everyone, mention_role_ids) =
+                    mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
+                let mention_user_ids = mentioned_users(conn, &req.content).await?;
+                let interaction = if answering {
+                    Some(commands::answer(conn, &account.id, &req.interaction_id, &channel.id, now).await?)
+                } else {
+                    None
+                };
+                if (answering || !components.is_empty()) && polls::shared_out(conn, &channel.id).await? {
+                    return Err(Error::invalid(
+                        "buttons and interactions aren't in channels shared between servers yet",
+                    ));
+                }
+                let message = pb::Message {
+                    id: new_id(),
+                    server_id: sdb.id.clone(),
+                    channel_id: channel.id.clone(),
+                    author_id: account.id.clone(),
+                    content: req.content.clone(),
+                    attachments: req.attachments.clone(),
+                    embeds: req.embeds.clone(),
+                    reply_to_id: req.reply_to_id.clone(),
+                    created_at: Some(timestamp(now)),
+                    edited_at: None,
+                    kind: pb::MessageKind::Unspecified as i32,
+                    mentions_everyone,
+                    mention_role_ids,
+                    auto_mod: None,
+                    webhook: None,
+                    shared: None,
+                    emojis: emojis.clone(),
+                    thread_id: req.thread_id.clone(),
+                    thread: None,
+                    also_in_channel: parent.is_some() && req.also_send_to_channel,
+                    poll: poll.clone(),
+                    gif: gif.clone(),
+                    mention_user_ids,
+                    components: components.clone(),
+                    interaction,
+                    pinned_at: None,
+                    reactions: vec![],
+                };
+                // Checked again here, where no other message can take the room meanwhile.
+                if file_bytes > 0
+                    && let Some(limit) = limits.attachment_bytes
+                    && store::usage_count(conn, "attachment_bytes").await? + file_bytes > limit
+                {
+                    return Err(Error::ResourceExhausted(format!(
+                        "this server is out of room for files ({} in all)",
+                        media::size_label(limit)
+                    )));
+                }
+                insert_message(conn, &message, now).await?;
+                events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+                if let Some(parent) = parent {
+                    threads::follow_quietly(conn, &parent.id, &account.id).await?;
+                    if parent.webhook.is_none() {
+                        threads::follow_quietly(conn, &parent.id, &parent.author_id).await?;
+                    }
+                    threads::refresh(conn, &channel.id, &parent.id, events).await?;
+                }
+                Ok(Ok(message))
+            })
+            .await?
+            .map_err(Error::denied)?;
+        for file in &message.attachments {
+            self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
+        }
+        if let Some(checking) = later {
+            checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
+        }
+        Ok(pb::SendMessageResponse { message: Some(message) })
+    }
+}
+
 #[tonic::async_trait]
 impl MessageService for Api {
     async fn send_message(
@@ -839,243 +1083,7 @@ impl MessageService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let mut req = request.into_inner();
-                let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
-                check_not_timed_out(&member)?;
-                access.require_in(&req.channel_id, Permission::SendMessages)?;
-                if !req.attachments.is_empty() || req.gif.is_some() {
-                    access.require_in(&req.channel_id, Permission::AttachFiles)?;
-                }
-                if !req.embeds.is_empty() {
-                    access.require_in(&req.channel_id, Permission::EmbedLinks)?;
-                }
-                let poll = match &req.poll {
-                    Some(new) => {
-                        access.require_in(&req.channel_id, Permission::CreatePolls)?;
-                        Some(polls::check(new, now_ms())?)
-                    }
-                    None => None,
-                };
-                if poll.is_some() && req.gif.is_some() {
-                    return Err(Error::invalid("a poll can't carry a GIF"));
-                }
-                // Only GIFs this instance stored and sealed.
-                let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
-                check_content(
-                    &req.content,
-                    !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some(),
-                )?;
-                check_extras(&mut req.attachments, &req.embeds)?;
-                check_embed_links(&self.app, &mut req.embeds)?;
-                if req.also_send_to_channel && req.thread_id.is_empty() {
-                    return Err(Error::invalid("only thread replies are also sent to the channel"));
-                }
-                // Buttons and answers to interactions are agents' (commands.rs).
-                let answering = !req.interaction_id.is_empty();
-                if (answering || !req.components.is_empty()) && account.kind != pb::AccountKind::Agent {
-                    return Err(Error::denied("only agents send buttons and answer interactions"));
-                }
-                if answering && !req.thread_id.is_empty() {
-                    return Err(Error::invalid("answer an interaction in the channel it came from"));
-                }
-                let components = commands::check_components(&req.components)?;
-                if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
-                    if answering || !components.is_empty() {
-                        return Err(Error::invalid(
-                            "buttons and interactions aren't in channels shared between servers yet",
-                        ));
-                    }
-                    if poll.is_some() && (!req.attachments.is_empty() || !req.embeds.is_empty()) {
-                        return Err(Error::invalid(
-                            "a poll goes without files or link previews in a channel shared from another server",
-                        ));
-                    }
-                    if !req.attachments.is_empty() {
-                        // The sender's uploads for this server, which the
-                        // channel's home takes and keeps (fetched with a
-                        // ticket when it's on another instance).
-                        self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
-                    }
-                    if poll.is_some() && !req.thread_id.is_empty() {
-                        return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
-                    }
-                    if gif.is_some() {
-                        return Err(Error::FailedPrecondition(
-                            "GIFs can't be sent in channels shared from another server yet".into(),
-                        ));
-                    }
-                    // Emoji from other servers are for this server's own
-                    // channels; this server's own go along, read here
-                    // (`shared::own_emojis`).
-                    req.emojis.clear();
-                    let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
-                    return Ok(pb::SendMessageResponse { message: Some(message) });
-                }
-                let emojis =
-                    outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis))
-                        .await;
-                let limits = sdb.limits(&self.app.settings().limits).await?;
-                if let Some(limit) = limits.storage_bytes
-                    && sdb.storage_bytes() >= limit
-                {
-                    return Err(Error::ResourceExhausted("this server is out of storage".into()));
-                }
-                let file_bytes = self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
-                if file_bytes > 0
-                    && let Some(limit) = limits.attachment_bytes
-                    && sdb.usage().await?.attachment_bytes + file_bytes > limit
-                {
-                    return Err(Error::ResourceExhausted(format!(
-                        "this server is out of room for files ({} in all)",
-                        media::size_label(limit)
-                    )));
-                }
-                // AutoMod reads the poll, embeds and file names along with the
-                // text, as the message will be stored (names as cleaned above).
-                let draft = pb::Message {
-                    content: req.content.clone(),
-                    poll: poll.clone(),
-                    embeds: req.embeds.clone(),
-                    attachments: req.attachments.clone(),
-                    ..Default::default()
-                };
-                let reviewed = reviewed_text(&draft).into_owned();
-                let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
-                // The GIF too: providers read its first frame. Then emoji
-                // from other servers, the smallest.
-                pictures.extend(gif.iter().map(|gif| gif.url.clone()));
-                pictures.extend(automod::picture_links(&[], &[], &emojis));
-                // The Smart filter's provider is asked alongside: the message
-                // goes out at once, and its answer is acted on when it comes.
-                let (asked, later) = (
-                    None,
-                    automod::ask_after(
-                        &self.app,
-                        &sdb,
-                        &member,
-                        &access,
-                        &req.channel_id,
-                        automod::Text { all: &reviewed, content: &req.content },
-                        &pictures,
-                    )
-                    .await,
-                );
-                let message = sdb
-                    .write(&account.id, async |conn, events| {
-                        let channel =
-                            load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-                        if !matches!(
-                            pb::ChannelType::try_from(channel.r#type),
-                            Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
-                        ) {
-                            return Err(Error::invalid("messages can only go in text channels"));
-                        }
-                        let parent = if req.thread_id.is_empty() {
-                            None
-                        } else {
-                            Some(threads::check_reply(conn, &sdb.id, &access, &channel, &req.thread_id).await?)
-                        };
-                        if parent.is_some() && poll.is_some() && channel.shared.is_some() {
-                            return Err(Error::invalid("polls stay out of threads in channels shared between servers"));
-                        }
-                        if !req.reply_to_id.is_empty() {
-                            let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
-                            if replied.is_none_or(|m| m.channel_id != channel.id) {
-                                return Err(Error::NotFound("message being replied to"));
-                            }
-                        }
-                        let verdict = automod::review(
-                            conn,
-                            &sdb.id,
-                            &member,
-                            &access,
-                            &channel,
-                            automod::Text { all: &reviewed, content: &req.content },
-                            asked.as_ref(),
-                            events,
-                        )
-                        .await?;
-                        if let Some(why) = verdict.blocked {
-                            return Ok(Err(why));
-                        }
-                        let now = now_ms();
-                        let exempt = access.has_in(&channel.id, Permission::ManageMessages)
-                            || access.has_in(&channel.id, Permission::ManageChannels);
-                        if !exempt {
-                            check_slowmode(conn, &channel, &account.id, now).await?;
-                        }
-                        let (mentions_everyone, mention_role_ids) =
-                            mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
-                        let mention_user_ids = mentioned_users(conn, &req.content).await?;
-                        let interaction = if answering {
-                            Some(commands::answer(conn, &account.id, &req.interaction_id, &channel.id, now).await?)
-                        } else {
-                            None
-                        };
-                        if (answering || !components.is_empty()) && polls::shared_out(conn, &channel.id).await? {
-                            return Err(Error::invalid(
-                                "buttons and interactions aren't in channels shared between servers yet",
-                            ));
-                        }
-                        let message = pb::Message {
-                            id: new_id(),
-                            server_id: sdb.id.clone(),
-                            channel_id: channel.id.clone(),
-                            author_id: account.id.clone(),
-                            content: req.content.clone(),
-                            attachments: req.attachments.clone(),
-                            embeds: req.embeds.clone(),
-                            reply_to_id: req.reply_to_id.clone(),
-                            created_at: Some(timestamp(now)),
-                            edited_at: None,
-                            kind: pb::MessageKind::Unspecified as i32,
-                            mentions_everyone,
-                            mention_role_ids,
-                            auto_mod: None,
-                            webhook: None,
-                            shared: None,
-                            emojis: emojis.clone(),
-                            thread_id: req.thread_id.clone(),
-                            thread: None,
-                            also_in_channel: parent.is_some() && req.also_send_to_channel,
-                            poll: poll.clone(),
-                            gif: gif.clone(),
-                            mention_user_ids,
-                            components: components.clone(),
-                            interaction,
-                            pinned_at: None,
-                            reactions: vec![],
-                        };
-                        // Checked again here, where no other message can take the room meanwhile.
-                        if file_bytes > 0
-                            && let Some(limit) = limits.attachment_bytes
-                            && store::usage_count(conn, "attachment_bytes").await? + file_bytes > limit
-                        {
-                            return Err(Error::ResourceExhausted(format!(
-                                "this server is out of room for files ({} in all)",
-                                media::size_label(limit)
-                            )));
-                        }
-                        insert_message(conn, &message, now).await?;
-                        events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
-                        if let Some(parent) = parent {
-                            threads::follow_quietly(conn, &parent.id, &account.id).await?;
-                            if parent.webhook.is_none() {
-                                threads::follow_quietly(conn, &parent.id, &parent.author_id).await?;
-                            }
-                            threads::refresh(conn, &channel.id, &parent.id, events).await?;
-                        }
-                        Ok(Ok(message))
-                    })
-                    .await?
-                    .map_err(Error::denied)?;
-                for file in &message.attachments {
-                    self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
-                }
-                if let Some(checking) = later {
-                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
-                }
-                Ok(pb::SendMessageResponse { message: Some(message) })
+                self.send_as(account, request.into_inner()).await
             }
             .await,
         )

@@ -466,6 +466,7 @@ impl DirectoryService for Internal {
             let _following = is_shard.then(|| Following::new(app.clone(), shard));
             let mut ended = app.ended_sessions();
             let mut joined = app.joined_servers();
+            let mut endpoints = app.agent_endpoint_changes();
             loop {
                 let (current, automod_providers) = {
                     let settings = settings.borrow_and_update();
@@ -497,6 +498,16 @@ impl DirectoryService for Internal {
                             // Gateways don't check sessions, so theirs carries on.
                             Err(RecvError::Lagged(_)) if is_shard => return,
                             Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => return,
+                        },
+                        // Only shards deliver to agents' endpoints.
+                        changed = endpoints.recv(), if is_shard => match changed {
+                            Ok(agent_id) => cpb::WatchResponse {
+                                agent_endpoints_changed: vec![agent_id.to_string()],
+                                ..Default::default()
+                            },
+                            // Following again, the shard forgets every endpoint it knew.
+                            Err(RecvError::Lagged(_)) => return,
                             Err(RecvError::Closed) => return,
                         },
                         // Only gateways follow new servers for streams.
@@ -757,6 +768,23 @@ impl DirectoryService for Internal {
             },
             None => cpb::FindAgentResponse::default(),
         }))
+    }
+
+    async fn agent_endpoints(
+        &self,
+        request: Request<cpb::AgentEndpointsRequest>,
+    ) -> Result<Response<cpb::AgentEndpointsResponse>, Status> {
+        let endpoints = self.app.agent_endpoints(&request.into_inner().agent_ids).await?;
+        Ok(Response::new(cpb::AgentEndpointsResponse { endpoints }))
+    }
+
+    async fn report_agent_delivery(
+        &self,
+        request: Request<cpb::ReportAgentDeliveryRequest>,
+    ) -> Result<Response<cpb::ReportAgentDeliveryResponse>, Status> {
+        let req = request.into_inner();
+        let disabled = self.app.report_agent_delivery(&req.agent_id, req.epoch, &req.error).await?;
+        Ok(Response::new(cpb::ReportAgentDeliveryResponse { disabled }))
     }
 
     async fn check_emojis(
