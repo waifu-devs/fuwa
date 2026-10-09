@@ -178,7 +178,7 @@ fn app_sections() -> Vec<Section> {
             ("desktop-notifications", t("appsettings.notifications.desktop"), ""),
             ("notify-for", t("appsettings.notifications.notifyFor"), "mentions every message"),
             ("unread-badge", t("appsettings.notifications.unreadBadge"), "badge title favicon"),
-            ("sounds", t("appsettings.notifications.sounds"), "volume audio"),
+            ("sounds", t("appsettings.notifications.sounds"), "volume audio direct message file custom tune"),
         ]),
         Section::new(
             Page::Voice,
@@ -410,6 +410,9 @@ pub struct SettingsView {
     pub(crate) pending: crate::core::reports::Pending,
     /// Why the last friends setting didn't save.
     pub(crate) friends_error: Option<String>,
+    /// The sound whose file is being copied in, and why the last one wasn't taken.
+    pub(crate) sound_busy: Option<crate::core::sounds::Sound>,
+    pub(crate) sound_error: Option<(crate::core::sounds::Sound, String)>,
     pub(crate) sliders: Sliders,
     /// The menu's search.
     query: Entity<InputState>,
@@ -480,6 +483,8 @@ impl SettingsView {
             look,
             pending: Default::default(),
             friends_error: None,
+            sound_busy: None,
+            sound_error: None,
             sliders: Sliders::default(),
             query,
             glow: None,

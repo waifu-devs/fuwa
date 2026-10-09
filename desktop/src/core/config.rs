@@ -51,6 +51,11 @@ impl Paths {
     pub fn lock_file(&self) -> PathBuf {
         self.config.join("app.lock")
     }
+
+    /// Sound files picked for the app's sounds (`core::sounds::import`).
+    pub fn sounds(&self) -> PathBuf {
+        self.config.join("sounds")
+    }
 }
 
 /// An instance you added, with its session token when you're signed in.
@@ -228,6 +233,8 @@ pub enum PopoutFit {
 pub struct Sounds {
     pub message: bool,
     pub mention: bool,
+    /// Direct messages (desktop only for now; they played the mention's sound before).
+    pub dm: bool,
     pub join: bool,
     pub call: bool,
     pub ring: bool,
@@ -235,8 +242,24 @@ pub struct Sounds {
 
 impl Default for Sounds {
     fn default() -> Self {
-        Self { message: true, mention: true, join: false, call: true, ring: true }
+        Self { message: true, mention: true, dm: true, join: false, call: true, ring: true }
     }
+}
+
+/// What one of the app's sounds plays instead of its own tune: a sound file
+/// of yours (`file`, in `Paths::sounds`, with the `name` it had), or another
+/// of the built-in tunes (`tune`, an id in `core::sounds::TUNES`). Plain
+/// strings, so a file from a newer app with names this one doesn't know
+/// still reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SoundPick {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tune: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub file: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
 }
 
 /// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
@@ -342,6 +365,8 @@ pub struct Prefs {
     /// A count of what's unread where the app shows it (the web's tab title).
     pub unread_badge: bool,
     pub sounds: Sounds,
+    /// What each sound plays, by `Sound::id`, when it isn't its own tune.
+    pub sound_picks: std::collections::BTreeMap<String, SoundPick>,
     /// Sound volume, in percent.
     pub volume: u8,
     /// Streamer mode hides addresses and your username.
@@ -443,6 +468,7 @@ impl Default for Prefs {
             role_colors: RoleColors::Names,
             unread_badge: true,
             sounds: Sounds::default(),
+            sound_picks: Default::default(),
             volume: 60,
             streamer_hide_personal: true,
             streamer_mute_sounds: true,
@@ -519,6 +545,7 @@ impl Prefs {
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        self.sound_picks.retain(|_, pick| !pick.tune.is_empty() || !pick.file.is_empty());
         let share = crate::core::voice::vp8::Share::new(self.share_height, self.share_fps);
         (self.share_height, self.share_fps) = (share.height, share.fps);
         let over = self.shaders_trying.len().saturating_sub(crate::core::effects::status::MAX_TRYING);

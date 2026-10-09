@@ -21,9 +21,24 @@ use crate::ui::settings::SettingsView;
 use crate::ui::settings_app::pref;
 use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, segmented, toggle};
 use crate::ui::settings_menu::Item;
+use crate::ui::settings_sounds;
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::icon;
+
+/// The sounds the Call sounds setting picks for.
+const CALL_SOUNDS: [Sound; 10] = [
+    Sound::Ring,
+    Sound::Connect,
+    Sound::Disconnect,
+    Sound::SomeoneJoined,
+    Sound::SomeoneLeft,
+    Sound::Mute,
+    Sound::Unmute,
+    Sound::Deafen,
+    Sound::Undeafen,
+    Sound::Recording,
+];
 
 /// Where the page's settings sit for search (the web's `voiceSettings`).
 pub(crate) fn voice_settings() -> Vec<(&'static str, String, &'static str)> {
@@ -35,7 +50,11 @@ pub(crate) fn voice_settings() -> Vec<(&'static str, String, &'static str)> {
         ("processing", t("appsettings.voice.processing"), "echo noise suppression gain"),
         ("camera", t("appsettings.voice.camera"), "video webcam mirror preview"),
         ("camera-quality", t("appsettings.voice.cameraQuality"), "resolution frame rate fps 1080p 720p hd"),
-        ("call-sounds", t("appsettings.voice.callSounds"), "ring ringtone join leave"),
+        (
+            "call-sounds",
+            t("appsettings.voice.callSounds"),
+            "ring ringtone join leave mute deafen recording cue sound file custom",
+        ),
     ]
 }
 
@@ -556,76 +575,44 @@ impl SettingsView {
                 },
             ));
         let quality = self.camera_quality(prefs, p, window, cx);
-        let volume = prefs.volume;
-        let out = prefs.output_device.clone();
-        let sound_row = |id: &'static str,
-                         label: String,
-                         hint: String,
-                         on: bool,
-                         sound: Sound,
-                         put: fn(&mut Sounds, bool),
-                         _this: &mut Self,
-                         window: &mut Window,
-                         cx: &mut Context<Self>| {
-            let (hover_bg, hover_fg) = (p.primary, p.primary_foreground);
-            let out = out.clone();
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .id(SharedString::from(format!("play-{id}")))
-                        .size(px(36.0))
-                        .flex_none()
-                        .rounded_full()
-                        .bg(p.muted)
-                        .text_color(p.muted_foreground)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-                        .on_click(move |_, _, _| sounds::play(sound, volume, &out))
-                        .child(icon("volume-2").size(px(16.0))),
-                )
-                .child(div().flex_1().min_w_0().child(toggle(
-                    id,
-                    &label,
-                    Some(&hint),
-                    on,
-                    false,
-                    p,
-                    window,
-                    cx,
-                    move |this, v, cx| this.set(cx, |pr| put(&mut pr.sounds, v)),
-                )))
-                .into_any_element()
-        };
-        let _ = &mut *self;
-        let cues = sound_row(
-            "call-cues",
-            t("appsettings.voice.cues"),
-            t("appsettings.voice.cuesHint"),
-            prefs.sounds.call,
-            Sound::Call,
-            |s, v| s.call = v,
-            self,
-            window,
-            cx,
-        );
-        let ring = sound_row(
-            "ringtone",
-            t("appsettings.voice.ringtone"),
-            t("appsettings.voice.ringtoneHint"),
-            prefs.sounds.ring,
+        let ring = self.sound_row(
             Sound::Ring,
-            |s, v| s.ring = v,
-            self,
+            t("appsettings.voice.ringtone"),
+            Some(t("appsettings.voice.ringtoneHint")),
+            Some((prefs.sounds.ring, |s, v| s.ring = v)),
+            false,
+            prefs,
+            p,
             window,
             cx,
         );
-        let call_sounds = div().flex().flex_col().gap(px(12.0)).child(cues).child(ring);
+        let cues = self.sound_row(
+            Sound::Call,
+            t("appsettings.voice.cues"),
+            Some(t("appsettings.voice.cuesHint")),
+            Some((prefs.sounds.call, |s, v| s.call = v)),
+            false,
+            prefs,
+            p,
+            window,
+            cx,
+        );
+        let mut each_cue =
+            div().flex().flex_col().gap(px(8.0)).pl(px(16.0)).ml(px(18.0)).border_l_1().border_color(p.border);
+        for cue in Sound::CUES {
+            each_cue = each_cue.child(self.sound_row(
+                cue,
+                t(&format!("desktop.sounds.cue.{}", cue.id())),
+                None,
+                None,
+                !prefs.sounds.call,
+                prefs,
+                p,
+                window,
+                cx,
+            ));
+        }
+        let call_sounds = div().flex().flex_col().gap(px(12.0)).child(ring).child(cues).child(each_cue);
         let d = Prefs::default();
         let devices_changed = prefs.input_device != d.input_device
             || prefs.output_device != d.output_device
@@ -709,11 +696,17 @@ impl SettingsView {
                 "call-sounds",
                 t("appsettings.voice.callSounds"),
                 None,
-                Badge::pref(prefs.sounds.call != d.sounds.call || prefs.sounds.ring != d.sounds.ring, |pr| {
-                    let d = Sounds::default();
-                    pr.sounds.call = d.call;
-                    pr.sounds.ring = d.ring;
-                }),
+                Badge::pref(
+                    prefs.sounds.call != d.sounds.call
+                        || prefs.sounds.ring != d.sounds.ring
+                        || settings_sounds::picks_changed(prefs, &CALL_SOUNDS),
+                    |pr| {
+                        let d = Sounds::default();
+                        pr.sounds.call = d.call;
+                        pr.sounds.ring = d.ring;
+                        settings_sounds::reset_picks(pr, &CALL_SOUNDS);
+                    },
+                ),
                 call_sounds.into_any_element(),
             ),
         ]);

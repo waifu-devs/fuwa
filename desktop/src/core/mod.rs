@@ -250,6 +250,12 @@ impl Core {
         let prefs = config::load_prefs(&paths);
         i18n::set_language(prefs.language.as_deref());
         sounds::pick_devices(&prefs.input_device, &prefs.output_device);
+        sounds::set_picks(&paths.sounds(), &prefs.sound_picks);
+        {
+            let (dir, picks) = (paths.sounds(), prefs.sound_picks.clone());
+            let _ =
+                std::thread::Builder::new().name("fuwa-sounds-sweep".into()).spawn(move || sounds::sweep(&dir, &picks));
+        }
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
@@ -373,6 +379,7 @@ impl Core {
             i18n::set_language(prefs.language.as_deref());
         }
         sounds::pick_devices(&prefs.input_device, &prefs.output_device);
+        sounds::set_picks(&self.paths.sounds(), &prefs.sound_picks);
         reports::set_enabled(prefs.share_reports);
         self.listen_for_games(prefs.game_activity);
         self.games.set_answers(prefs.game_answers.clone());
