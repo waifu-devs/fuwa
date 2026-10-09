@@ -460,7 +460,17 @@ static PACE: Mutex<Option<HashMap<String, (i64, i64)>>> = Mutex::new(None);
 pub(super) fn pace(server_id: &str, source_id: &str, now: i64, per_minute: Option<i64>) -> Result<()> {
     let Some(per_minute) = per_minute else { return Ok(()) };
     let mut guard = PACE.lock().unwrap_or_else(|e| e.into_inner());
-    let counts = guard.get_or_insert_with(HashMap::new);
+    count_in(guard.get_or_insert_with(HashMap::new), server_id, source_id, now, per_minute)
+}
+
+/// [`pace`] against the counts given.
+fn count_in(
+    counts: &mut HashMap<String, (i64, i64)>,
+    server_id: &str,
+    source_id: &str,
+    now: i64,
+    per_minute: i64,
+) -> Result<()> {
     let minute = now / 60_000;
     if counts.len() > 10_000 {
         counts.retain(|_, (at, _)| *at == minute);
@@ -664,13 +674,18 @@ mod tests {
 
     #[test]
     fn pace_counts_per_app_per_server() {
+        let mut counts = HashMap::new();
+        let mut pace = |server: &str, now: i64| count_in(&mut counts, server, "app", now, 2);
         let now = 7 * 60_000;
-        assert!(pace("s1", "pace-app", now, Some(2)).is_ok());
-        assert!(pace("s1", "pace-app", now + 1, Some(2)).is_ok());
-        assert!(matches!(pace("s1", "pace-app", now + 2, Some(2)), Err(Error::Limited(_, 59_998))));
-        assert!(pace("s2", "pace-app", now + 2, Some(2)).is_ok());
-        assert!(pace("s1", "pace-app", now + 60_000, Some(2)).is_ok());
-        assert!(pace("s1", "pace-unlimited", now, None).is_ok());
+        assert!(pace("s1", now).is_ok());
+        assert!(pace("s1", now + 1).is_ok());
+        assert!(matches!(pace("s1", now + 2), Err(Error::Limited(_, 59_998))));
+        assert!(pace("s2", now + 2).is_ok());
+        assert!(pace("s1", now + 60_000).is_ok());
+        assert!(
+            count_in(&mut counts, "s1", "other", now + 2, 2).is_ok(),
+            "another app in the same server counts apart"
+        );
     }
 
     #[test]
