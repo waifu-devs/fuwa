@@ -8,7 +8,8 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use super::capture::{FAKE_VIDEO, Failure, Sending, Source};
+use super::access::Access;
+use super::capture::{self, FAKE_VIDEO, Failure, Sending, Source};
 use super::ceiling::Ceiling;
 use super::screen_sound::{self, Missing, ScreenSound};
 use super::video::feed_of;
@@ -107,6 +108,20 @@ impl Core {
     /// computer plays too, where the instance passes it on.
     pub fn set_screen(self: &Arc<Self>, on: bool, target: Option<u32>, sound: bool) {
         self.set_video(true, on, target, sound);
+    }
+
+    /// Whether the system lets the app see the screen, asking the first
+    /// time (macOS); when it doesn't, the call says so with the way to its
+    /// settings, as a share that couldn't start would.
+    pub fn screen_allowed(&self) -> bool {
+        if self.pattern() || capture::screen_access() == Access::Allowed {
+            return true;
+        }
+        if let Some(view) = self.voice.view.lock().as_mut() {
+            view.video_trouble = Some((true, Failure::Blocked));
+        }
+        self.shared.update(|_| ());
+        false
     }
 
     /// Turns your shared screen's sound off for everyone, or back on,

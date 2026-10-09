@@ -395,16 +395,12 @@ pub struct Screen {
     pub display: bool,
 }
 
-/// What can be shared: screens first, then windows.
+/// What can be shared: screens first, then windows (none without access).
 pub fn screens() -> Vec<Screen> {
     if std::env::var_os(FAKE_VIDEO).is_some() {
         return vec![Screen { id: 0, name: "Test pattern".into(), display: true }];
     }
-    if !zed_scap::is_supported() {
-        return Vec::new();
-    }
-    let mut out: Vec<Screen> = zed_scap::get_all_targets()
-        .unwrap_or_default()
+    let mut out: Vec<Screen> = all_targets()
         .into_iter()
         .filter_map(|target| match target {
             zed_scap::Target::Display(d) => Some(Screen { id: d.id, name: d.title, display: true }),
@@ -416,6 +412,17 @@ pub fn screens() -> Vec<Screen> {
         .collect();
     out.sort_by_key(|s| !s.display);
     out
+}
+
+/// Every screen and window the system shows the app; none without access.
+/// On macOS scap unwraps ScreenCaptureKit's answer, which is an error when
+/// access is missing or taken away while the app runs: that panic is caught
+/// here, so it never reaches the window's thread (where it can't unwind).
+fn all_targets() -> Vec<zed_scap::Target> {
+    if !zed_scap::is_supported() || !zed_scap::has_permission() {
+        return Vec::new();
+    }
+    std::panic::catch_unwind(zed_scap::get_all_targets).ok().and_then(Result::ok).unwrap_or_default()
 }
 
 /// Whether the system lets the app see the screen: macOS asks the first
@@ -436,7 +443,7 @@ pub fn open_screen_settings() {
 
 /// The screen or window by its id, as the system has it now.
 fn target_of(id: u32) -> Option<zed_scap::Target> {
-    zed_scap::get_all_targets().unwrap_or_default().into_iter().find(|t| match t {
+    all_targets().into_iter().find(|t| match t {
         zed_scap::Target::Display(d) => d.id == id,
         zed_scap::Target::Window(w) => w.id == id,
     })
