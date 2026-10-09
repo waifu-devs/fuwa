@@ -598,7 +598,8 @@
     `settings_shader.rs` the custom shader editor under Background (the
     web's `ShaderEditor.tsx`, over `core/effects`: `custom.rs` the prelude,
     checks and starters word for word the web's, `status.rs` what happened
-    to each shader, kept across restarts in `Prefs::shaders_trying`), `keys.rs` the
+    to each shader, kept across restarts in `Prefs::shaders_trying`; `wgsl.rs` colors its code by the
+    web's rules), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
     the shortcut sheet) over `core/keybinds.rs` (the web's
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
