@@ -376,16 +376,28 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
         _: &mut gpui_kit::Window,
         _: &mut gpui_kit::App,
     ) -> Option<gpui_kit::component::text::InlineElement> {
-        use gpui_kit::{IntoElement as _, ObjectFit, Styled as _, StyledImage as _, img, px};
+        use gpui_kit::{
+            InteractiveElement as _, IntoElement as _, ObjectFit, ParentElement as _, Styled as _, StyledImage as _,
+            div, img, px, radians,
+        };
         let picture = node.data::<Picture>()?;
         let size = context.font_size() * 1.375;
         let alt = node.as_text().to_owned();
+        // It grows and tilts under the pointer (`.markdown .emoji:hover`); where it
+        // sits in the text tells it apart from the same emoji elsewhere in the line.
+        let at = node.source_range().map_or(0, |r| r.start);
         Some(gpui_kit::component::text::InlineElement::new(
-            img(gpui_kit::SharedString::from(picture.url.clone()))
-                .size(size)
+            div()
+                .id(gpui_kit::SharedString::from(format!("emoji|{at}|{}", picture.url)))
+                .flex_none()
                 .mx(px(1.0))
-                .object_fit(ObjectFit::Contain)
-                .with_fallback(move || alt.clone().into_any_element()),
+                .hover(|s| s.scale(1.35).rotate(radians((-6.0f32).to_radians())))
+                .child(
+                    img(gpui_kit::SharedString::from(picture.url.clone()))
+                        .size(size)
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || alt.clone().into_any_element()),
+                ),
         ))
     }
 }

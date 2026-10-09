@@ -231,14 +231,31 @@ impl SettingsView {
             .flex()
             .flex_wrap()
             .gap_x(px(4.0))
-            .child(
-                div().font_weight(FontWeight::BOLD).text_color(if low { p.destructive } else { p.foreground }).child(
-                    t_with(
-                        "accountsettings.security.codesLeft",
-                        &[("count", Arg::Num(i64::from(left))), ("total", Arg::Num(10))],
-                    ),
-                ),
-            )
+            .child({
+                // "4 of 10 left.": the count bold (red when few are left) and rolling as codes
+                // are used, the rest as the hint is.
+                let total = crate::core::i18n::number(10);
+                let text = t_with(
+                    "accountsettings.security.codesLeft",
+                    &[("count", Arg::Num(i64::from(left))), ("total", Arg::Str("\u{E002}"))],
+                );
+                let number = crate::core::i18n::number(i64::from(left));
+                let (before, after) = match text.find(&number) {
+                    Some(at) => (text[..at].to_owned(), text[at + number.len()..].to_owned()),
+                    None => (text.clone(), String::new()),
+                };
+                div()
+                    .flex()
+                    .whitespace_nowrap()
+                    .when(!before.is_empty(), |el| el.child(before.replace('\u{E002}', &total)))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if low { p.destructive } else { p.foreground })
+                            .child(motion::rolling("backup-codes-left", left.max(0) as u64, None, 14.0)),
+                    )
+                    .when(!after.is_empty(), |el| el.child(after.replace('\u{E002}', &total)))
+            })
             .child(if low { t("accountsettings.security.codesLow") } else { t("accountsettings.security.codesEach") })
             .into_any_element();
         let codes_body: AnyElement = if let Some(codes) = self.security.new_codes.clone() {
@@ -1121,6 +1138,7 @@ impl SettingsView {
                 buttons = buttons.child(
                     div()
                         .id(SharedString::from(format!("link-{}", option.id)))
+                        .group(SharedString::from(format!("link-{}", option.id)))
                         .flex()
                         .items_center()
                         .gap(px(10.0))
@@ -1132,12 +1150,18 @@ impl SettingsView {
                         .py(px(10.0))
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
-                        .hover(move |s| s.border_color(hover).top(px(-2.0)))
+                        .hover(move |s| s.border_color(hover).translate_y(px(-2.0)))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.security.asking = Some((true, id.clone(), name.clone()));
                             this.ask(None, window, cx);
                         }))
-                        .child(icon(&format!("brand-{}", option.id)).size(px(16.0)))
+                        .child(
+                            div()
+                                .id("mark")
+                                .group_hover(SharedString::from(format!("link-{}", option.id)), |s| s.scale(1.1))
+                                .child(icon(&format!("brand-{}", option.id)).size(px(16.0))),
+                        )
                         .child(t_with("accountsettings.signIn.link", &[("name", Arg::Str(&option.name))]))
                         .child(icon("link").size(px(14.0)).text_color(p.muted_foreground)),
                 );

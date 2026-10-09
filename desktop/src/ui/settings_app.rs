@@ -14,7 +14,7 @@ use crate::core::config::{Clock, MotionChoice, NotifyFor, Prefs, RoleColors, Sen
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::settings::{Page, SettingsView};
-use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, keycaps, sample, toggle};
+use crate::ui::settings_controls::{At, Badge, IconHover, Look, Opt, button_with, choice, keycaps, sample, toggle};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -399,10 +399,11 @@ impl SettingsView {
             .when(prefs.notifications, |el| {
                 el.child(motion::rise(
                     div().flex().child(
-                        button(
+                        button_with(
                             "notify-test",
                             t("appsettings.notifications.test"),
                             Some("bell-ring"),
+                            IconHover::Turn(12.0),
                             Look::Outline,
                             true,
                             p,

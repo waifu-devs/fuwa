@@ -1,12 +1,10 @@
 //! Writing, beyond typing: the @ list, editing a message in place, and the
 //! keys both take before the text fields see them.
 
-use std::time::Duration;
-
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, ElementId, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, Keystroke,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled, Window, div, px, rgb,
 };
 
 use crate::core::dms::Content;
@@ -21,6 +19,9 @@ use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, icon};
 use crate::ui::{emoji, mentions};
+
+/// A row of the lists over the composer.
+pub(crate) const ABOVE_ROW: f32 = 36.0;
 
 impl FuwaApp {
     /// Takes the keys the @ list and editing use. True when it took the key.
@@ -214,15 +215,23 @@ impl FuwaApp {
     /// The @ list (the web's `MentionPicker`), over the composer: people,
     /// roles and @everyone, or emoji after a colon. The pointer lights a row
     /// as the arrows do.
-    pub(crate) fn picker_list(&self, picker: Picker, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    /// `going` once it has closed, as it leaves ([`motion::kept`]).
+    pub(crate) fn picker_list(
+        &self,
+        picker: Picker,
+        going: Option<f32>,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let emoji = matches!(picker.options.first(), Some(Pick::Emoji(_)));
-        let mut list = div().flex().flex_col().child(Self::above_title(
+        // The lit row's fill glides from row to row (the web's `layoutId="mention-active"`).
+        let lit = Self::above_glide(format!("mention-lit|{}", picker.start), picker.active, p, cx);
+        let mut list = div().relative().flex().flex_col().child(lit).child(Self::above_title(
             if emoji { "face-slightly-smiling" } else { "at-sign" },
             &t(if emoji { "chat.mentionPicker.emoji" } else { "chat.mentionPicker.mention" }),
             p,
         ));
         for (n, pick) in picker.options.iter().enumerate() {
-            let active = n == picker.active;
             let side = |text: String, glyph: Option<&str>| {
                 div()
                     .ml_auto()
@@ -286,7 +295,6 @@ impl FuwaApp {
                     .rounded(radius_xl())
                     .text_sm()
                     .cursor_pointer()
-                    .when(active, |el| el.bg(alpha(p.primary, 0.12)))
                     .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if *hovered
                             && let Some(picker) = &mut this.picker
@@ -302,12 +310,18 @@ impl FuwaApp {
                     .children(sub),
             );
         }
-        Self::above_composer(list, format!("picker-{}", picker.start), p)
+        Self::above_composer(list, format!("picker-{}", picker.start), going, p)
     }
 
     /// A list floating just above the composer, as wide as its box (the web's
     /// `absolute inset-x-0 bottom-full mb-2 rounded-2xl border bg-popover p-1.5 shadow-xl`).
-    pub(crate) fn above_composer(list: gpui_kit::Div, id: impl Into<SharedString>, p: &Palette) -> AnyElement {
+    /// `going` once it has closed: it sinks 6px and shrinks to 98% as it fades.
+    pub(crate) fn above_composer(
+        list: gpui_kit::Div,
+        id: impl Into<SharedString>,
+        going: Option<f32>,
+        p: &Palette,
+    ) -> AnyElement {
         let card = div()
             .mb(px(8.0))
             .overflow_hidden()
@@ -337,8 +351,38 @@ impl FuwaApp {
             .left(px(16.0))
             .right(px(16.0))
             .bottom(gpui_kit::relative(1.0))
-            .child(motion::rise(card, ElementId::Name(id.into()), Duration::ZERO, 8.0))
+            // The web's `origin-bottom`: it grows up out of the box as it rises.
+            .child(motion::pop_in(card, ElementId::Name(id.into()), (0.5, 1.0), 0.97, 8.0))
+            // `exit={{ opacity: 0, y: 6, scale: 0.98 }}`.
+            .when_some(going, |el, t| {
+                crate::ui::chat::closing(
+                    el,
+                    t,
+                    crate::ui::chat::Gone { scale: 0.98, x: 0.0, y: 6.0, origin: (0.5, 1.0) },
+                )
+            })
             .into_any_element()
+    }
+
+    /// The fill behind such a list's lit row (`bg-primary/12`), gliding to
+    /// row `n` of its 36px rows under the title. `id` names the list while
+    /// it's open, so a new one starts where its first row is lit.
+    pub(crate) fn above_glide(id: String, n: usize, p: &Palette, cx: &mut gpui_kit::App) -> AnyElement {
+        // The list's 6px, then the title's 20.
+        let top = 6.0 + 20.0 + n as f32 * ABOVE_ROW;
+        motion::glide(
+            div()
+                .absolute()
+                .left(px(6.0))
+                .right(px(6.0))
+                .h(px(ABOVE_ROW))
+                .rounded(radius_xl())
+                .bg(alpha(p.primary, 0.12)),
+            id,
+            top,
+            cx,
+            |el, top| el.top(px(top)),
+        )
     }
 
     /// Such a list's small title: an icon and a word in capitals.

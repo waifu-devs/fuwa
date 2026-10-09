@@ -534,7 +534,14 @@ impl ServerSettingsView {
                 this.hooks.asking = None;
                 cx.notify();
             }))
-            .child(avatar(Some(&user), 40.0, p))
+            // The picture tips and grows a little under the pointer (`rotate: -8, scale: 1.08`).
+            .child(
+                div()
+                    .id(SharedString::from(format!("hook-face-{id}")))
+                    .flex_none()
+                    .hover(|s| s.rotate(gpui_kit::radians(-8f32.to_radians())).scale(1.08))
+                    .child(avatar(Some(&user), 40.0, p)),
+            )
             .child(
                 div()
                     .flex_1()
@@ -637,6 +644,7 @@ impl ServerSettingsView {
                         .text_color(gpui_kit::white())
                         .bg(shade)
                         .opacity(if busy == Some(Busy::Picture) { 1.0 } else { 0.0 })
+                        .id("hook-pic-shade")
                         .group_hover("hook-pic", |s| s.opacity(1.0))
                         .child(if busy == Some(Busy::Picture) {
                             spinner(format!("hook-pic-spin-{id}"), 20.0, window)

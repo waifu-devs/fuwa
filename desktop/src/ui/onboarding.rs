@@ -417,7 +417,7 @@ impl FuwaApp {
             ));
         }
         if !flow.loading {
-            foot = foot.child(self.onboarding_buttons(tint, &p, cx));
+            foot = foot.child(self.onboarding_buttons(tint, &p, window, cx));
         }
 
         // The banner and the buttons always show; the step scrolls in what's left.
@@ -443,7 +443,7 @@ impl FuwaApp {
             .child(hero)
             .child(div().id("onb-body").max_h(px(room)).overflow_y_scroll().child(body))
             .child(foot);
-        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}))
+        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}, cx))
     }
 
     fn pick_cards(
@@ -492,11 +492,13 @@ impl FuwaApp {
                 .items_center()
                 .justify_center()
                 .when(on, |el| {
-                    el.child(motion::once(
+                    // The tick springs in from nothing, turning upright.
+                    el.child(motion::pop(
                         icon("check").size(px(14.0)).text_color(gpui_kit::white()),
                         SharedString::from(format!("onb-tick-{}", option.id)),
-                        Duration::from_millis(280),
-                        |el, t| el.size(px(14.0 * (0.3 + 0.7 * t))),
+                        0.0,
+                        -45.0,
+                        Duration::ZERO,
                     ))
                 });
             grid = grid.child(motion::rise(
@@ -513,7 +515,9 @@ impl FuwaApp {
                     .border_color(if on { tint } else { p.border.into() })
                     .bg(if on { Hsla { a: 0.12, ..tint } } else { alpha(p.background, 0.6) })
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(Hsla { a: 0.45, ..tint }))
+                    .when(!on, |el| el.hover(move |s| s.border_color(Hsla { a: 0.45, ..tint })))
+                    // `whileTap={{ scale: 0.97 }}`.
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(flow) = this.onboarding.flow.as_mut() {
                             onboarding::toggle(&mut flow.picked, &step_c, &oid);
@@ -639,9 +643,11 @@ impl FuwaApp {
                 let Some(channel) = channels.iter().find(|c| c.id == g.channel_id) else { continue };
                 let (k, sid, cid) = (flow.key.clone(), flow.server.clone(), channel.id.clone());
                 let announcement = channel.r#type == pb::ChannelType::Announcement as i32;
+                let group = SharedString::from(format!("onb-go-{cid}"));
                 list = list.child(motion::rise(
                     div()
-                        .id(SharedString::from(format!("onb-go-{cid}")))
+                        .id(group.clone())
+                        .group(group.clone())
                         .flex()
                         .items_center()
                         .gap(px(12.0))
@@ -651,12 +657,29 @@ impl FuwaApp {
                         .border_color(p.border)
                         .bg(p.secondary)
                         .cursor_pointer()
-                        .hover(move |s| s.border_color(Hsla { a: 0.55, ..tint }).bg(Hsla { a: 0.08, ..tint }))
+                        // `whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }}`.
+                        .hover(move |s| {
+                            s.border_color(Hsla { a: 0.55, ..tint }).bg(Hsla { a: 0.08, ..tint }).translate_y(px(-3.0))
+                        })
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.finish_onboarding_dialog(window, cx);
                             this.open_channel(&k, &sid, &cid, window, cx);
                         }))
-                        .child(emoji_tile(&g.emoji, look, tint, if announcement { "megaphone" } else { "hash" }))
+                        // Its tile grows and tips, and the arrow leans on, as it's hovered.
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("{group}|tile")))
+                                .group_hover(group.clone(), |s| {
+                                    s.scale(1.1).rotate(gpui_kit::radians(-6f32.to_radians()))
+                                })
+                                .child(emoji_tile(
+                                    &g.emoji,
+                                    look,
+                                    tint,
+                                    if announcement { "megaphone" } else { "hash" },
+                                )),
+                        )
                         .child(
                             div()
                                 .flex_1()
@@ -670,7 +693,13 @@ impl FuwaApp {
                                     el.child(div().text_xs().text_color(p.muted_foreground).child(g.note.clone()))
                                 }),
                         )
-                        .child(icon("arrow-right").size(px(16.0)).text_color(p.muted_foreground)),
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("{group}|arrow")))
+                                .text_color(p.muted_foreground)
+                                .group_hover(group.clone(), move |s| s.translate_x(px(4.0)).text_color(tint))
+                                .child(icon("arrow-right").size(px(16.0))),
+                        ),
                     SharedString::from(format!("onb-go-in-{n}")),
                     Duration::from_millis(220 + 60 * n as u64),
                     14.0,
@@ -681,7 +710,7 @@ impl FuwaApp {
         out.into_any_element()
     }
 
-    fn onboarding_buttons(&self, tint: Hsla, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn onboarding_buttons(&self, tint: Hsla, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(flow) = self.onboarding.flow.as_ref() else { return div().into_any_element() };
         let step = flow.steps.get(flow.at);
         let last = flow.at + 1 == flow.steps.len();
@@ -696,8 +725,32 @@ impl FuwaApp {
         let back = flow.at > 0 && step.is_some();
         let skip = step.is_some_and(|s| s.skippable && s.kind != RULES);
         let busy = flow.busy;
+        // The spinner turns while it works; otherwise the arrow leans on (the plane
+        // flies off up and right) as the button's hovered.
+        let glyph: AnyElement = if busy {
+            motion::ambient(
+                icon("loader-circle").size(px(16.0)),
+                "onb-spin",
+                Duration::from_millis(1000),
+                window,
+                |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+            )
+        } else {
+            let send = glyph == "send";
+            div()
+                .id("onb-go-glyph")
+                .when(glyph == "arrow-right" || send, |el| {
+                    el.group_hover("onb-go", move |s| {
+                        let s = s.translate_x(px(2.0));
+                        if send { s.translate_y(px(-2.0)) } else { s }
+                    })
+                })
+                .child(icon(glyph).size(px(16.0)))
+                .into_any_element()
+        };
         let primary = div()
             .id("onb-go")
+            .group("onb-go")
             // `h-10 min-w-32 rounded-xl font-bold text-white shadow-md`.
             .h(px(40.0))
             .min_w(px(128.0))
@@ -717,16 +770,38 @@ impl FuwaApp {
             .hover(move |s| s.bg(Hsla { l: (tint.l * 1.08).min(0.95), ..tint }))
             .on_click(cx.listener(|this, _, window, cx| this.step_do(false, window, cx)))
             .child(motion::slide_in(div().child(label), SharedString::from(format!("onb-label-{label}")), 8.0))
-            .child(icon(if busy { "loader-circle" } else { glyph }).size(px(16.0)));
+            .child(glyph);
         let row = div()
             .flex()
             .items_center()
             .gap(px(8.0))
             .when(back, |el| {
-                el.child(
-                    crate::ui::widgets::icon_button("onb-back", "arrow-left", p)
-                        .on_click(cx.listener(|this, _, _, cx| this.step_back(cx))),
-                )
+                // A ghost `size-10 rounded-xl` button, popping in from the second step on.
+                let hover = p.accent;
+                el.child(motion::pop_in(
+                    div()
+                        .id("onb-back")
+                        .group("onb-back")
+                        .size(px(40.0))
+                        .flex_none()
+                        .rounded(crate::ui::theme::radius_xl())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(|this, _, _, cx| this.step_back(cx)))
+                        .child(
+                            div()
+                                .id("onb-back-arrow")
+                                .group_hover("onb-back", |s| s.translate_x(px(-2.0)))
+                                .child(icon("arrow-left").size(px(16.0))),
+                        ),
+                    "onb-back-in",
+                    (0.5, 0.5),
+                    0.8,
+                    0.0,
+                ))
             })
             .child(div().flex_1())
             .when(skip, |el| {

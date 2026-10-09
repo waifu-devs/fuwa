@@ -222,6 +222,7 @@ impl Built {
 }
 
 /// The open menu.
+#[derive(Clone)]
 pub(crate) struct ContextMenu {
     pub of: MenuOf,
     at: Point<Pixels>,
@@ -551,6 +552,7 @@ impl FuwaApp {
                 panel,
                 &p,
                 cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
+                cx,
             ));
         }
         let scroll = self.context.as_ref().map(|m| m.scroll.clone()).unwrap_or_default();
@@ -569,25 +571,29 @@ impl FuwaApp {
                     .position(at + gpui_kit::point(px(0.0), px(2.0)))
                     .snap_to_window_with_margin(gpui_kit::Edges::all(px(EDGE)))
                     .child(
-                        div()
-                            .id("context-menu")
-                            .relative()
-                            .occlude()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                            .child(pop(
-                                menu_card(&p).child(
-                                    // Taller than the window, the items scroll.
-                                    div()
-                                        .id("ctx-scroll")
-                                        .max_h(px(tallest(window) - 2.0))
-                                        .overflow_y_scroll()
-                                        .track_scroll(&scroll)
-                                        .child(body),
-                                ),
-                                SharedString::from(format!("ctx|{id}")),
-                            ))
-                            .children(sub),
+                        crate::ui::overlay::leaving_pose(
+                            div().id("context-menu").transform_origin(0.0, 0.0),
+                            0.0,
+                            0.95,
+                            cx,
+                        )
+                        .relative()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                        .child(pop(
+                            menu_card(&p).child(
+                                // Taller than the window, the items scroll.
+                                div()
+                                    .id("ctx-scroll")
+                                    .max_h(px(tallest(window) - 2.0))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&scroll)
+                                    .child(body),
+                            ),
+                            SharedString::from(format!("ctx|{id}")),
+                        ))
+                        .children(sub),
                     ),
             );
         Some(layer.into_any_element())
@@ -629,8 +635,20 @@ impl FuwaApp {
             }
             let is_sub = matches!(item.kind, Kind::Sub(_));
             let open = sub.is_some_and(|(o, _)| o == ix);
-            let row =
-                row(item, false, open, p).id(SharedString::from(format!("ctx-item|{ix}"))).when(item.enabled(), |el| {
+            // The chevron turns a quarter while its submenu is open.
+            let turn = if is_sub {
+                motion::follow(
+                    SharedString::from(format!("ctx-turn|{id}|{ix}")),
+                    if open { 1.0 } else { 0.0 },
+                    window,
+                    cx,
+                )
+            } else {
+                0.0
+            };
+            let row = row(item, &format!("{id}|{ix}"), turn, p).id(SharedString::from(format!("ctx-item|{ix}"))).when(
+                item.enabled(),
+                |el| {
                     el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = &mut this.context
                             && *hovered
@@ -647,7 +665,8 @@ impl FuwaApp {
                         }
                     }))
                     .on_click(cx.listener(move |this, _, window, cx| this.pick_item(ix, None, false, window, cx)))
-                });
+                },
+            );
             // Items enter one after another, the first ten.
             let delay = Duration::from_millis(12 * ix.min(10) as u64);
             list =
@@ -663,6 +682,7 @@ impl FuwaApp {
             let left = room > SUB_WIDTH + 12.0;
             let mut col = div()
                 .id("ctx-sub-list")
+                .relative()
                 .w(px(SUB_WIDTH - 2.0))
                 .max_h(px(384.0_f32.min(tallest(window) - 2.0)))
                 .overflow_y_scroll()
@@ -670,24 +690,43 @@ impl FuwaApp {
                 .px(px(PAD))
                 .flex()
                 .flex_col();
+            // Its own highlight, gliding the same way.
+            if let Some(n) = sub_active.filter(|n| *n < items.len()) {
+                let y = motion::follow(
+                    SharedString::from(format!("ctx-sub-hl|{id}|{ix}")),
+                    PAD + n as f32 * ROW,
+                    window,
+                    cx,
+                );
+                col = col.child(
+                    div()
+                        .absolute()
+                        .left(px(PAD))
+                        .right(px(PAD))
+                        .top(px(y))
+                        .h(px(ROW))
+                        .rounded(radius_sm())
+                        .bg(if items[n].danger { alpha(p.destructive, 0.1) } else { p.accent.into() }),
+                );
+            }
             for (n, item) in items.iter().enumerate() {
-                let on = sub_active == Some(n);
-                col = col.child(row(item, on, false, p).id(SharedString::from(format!("ctx-sub|{ix}|{n}"))).when(
-                    item.enabled(),
-                    |el| {
-                        el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                            if let Some(menu) = &mut this.context
-                                && *hovered
-                            {
-                                menu.sub = Some((ix, Some(n)));
-                                cx.notify();
-                            }
-                        }))
-                        .on_click(
-                            cx.listener(move |this, _, window, cx| this.pick_item(ix, Some(n), false, window, cx)),
-                        )
-                    },
-                ));
+                col = col.child(
+                    row(item, &format!("{id}|{ix}|{n}"), 0.0, p)
+                        .id(SharedString::from(format!("ctx-sub|{ix}|{n}")))
+                        .when(item.enabled(), |el| {
+                            el.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                if let Some(menu) = &mut this.context
+                                    && *hovered
+                                {
+                                    menu.sub = Some((ix, Some(n)));
+                                    cx.notify();
+                                }
+                            }))
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| this.pick_item(ix, Some(n), false, window, cx)),
+                            )
+                        }),
+                );
             }
             // Level with its item: the card's border where the item's highlight starts, moved up
             // as far as it takes to stay in the window.
@@ -720,20 +759,31 @@ impl FuwaApp {
 
 /// An item's line, as the web's dropdown items draw it (`px-2 py-1.5 gap-2
 /// text-sm`, a 16px icon in the muted color): checkbox items keep the icon's
-/// place for their tick (`pl-8`), and a lit item sits on the accent.
-fn row(item: &Item, lit: bool, open: bool, p: &Palette) -> gpui_kit::Div {
+/// place for their tick (`pl-8`); the highlight under the lit one is drawn
+/// apart, so it can glide. `turn` is how far a submenu's chevron has turned
+/// toward open, from 0 to 1; `key` names its tick's pop.
+fn row(item: &Item, key: &str, turn: f32, p: &Palette) -> gpui_kit::Div {
     let fg: Hsla = if item.danger { p.destructive.into() } else { p.foreground.into() };
     let check = matches!(item.kind, Kind::Check { .. });
     let on = matches!(item.kind, Kind::Check { on: true, .. });
     let glyph: AnyElement = if check {
-        // The tick sits where the icon would be (`left-2 size-3.5`).
+        // The tick sits where the icon would be (`left-2 size-3.5`), and
+        // pops in from half its size as it's checked.
         div()
             .size(px(16.0))
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
-            .when(on, |el| el.child(icon("check").size(px(16.0)).text_color(p.foreground)))
+            .when(on, |el| {
+                el.child(motion::pop_in(
+                    icon("check").size(px(16.0)).text_color(p.foreground),
+                    SharedString::from(format!("ctx-tick|{key}")),
+                    (0.5, 0.5),
+                    0.5,
+                    0.0,
+                ))
+            })
             .into_any_element()
     } else if item.icon.is_empty() {
         div().size(px(16.0)).flex_none().into_any_element()
@@ -755,7 +805,6 @@ fn row(item: &Item, lit: bool, open: bool, p: &Palette) -> gpui_kit::Div {
         .text_sm()
         .text_color(fg)
         .when(item.danger, |el| el.font_weight(FontWeight::BOLD))
-        .when(lit, |el| el.bg(if item.danger { alpha(p.destructive, 0.1) } else { p.accent.into() }))
         .when(item.disabled, |el| el.opacity(0.5))
         .child(glyph)
         .when_some(item.color.filter(|_| check), |el, c| {
@@ -775,12 +824,13 @@ fn row(item: &Item, lit: bool, open: bool, p: &Palette) -> gpui_kit::Div {
             )
         })
         .when(matches!(item.kind, Kind::Sub(_)), |el| {
-            // The web's chevron turns down while its submenu is open.
+            // The web's chevron turns down while its submenu is open (`rotate-90`).
             el.child(
-                icon(if open { "chevron-down" } else { "chevron-right" })
+                icon("chevron-right")
                     .size(px(16.0))
                     .flex_none()
-                    .text_color(p.muted_foreground),
+                    .text_color(p.muted_foreground)
+                    .rotate(gpui_kit::radians(turn * std::f32::consts::FRAC_PI_2)),
             )
         })
 }

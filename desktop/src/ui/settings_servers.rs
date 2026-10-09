@@ -221,7 +221,8 @@ impl SettingsView {
                     .when(locked, |el| el.opacity(0.5))
                     .when(!locked && !active, |el| {
                         el.cursor_pointer()
-                            .hover(move |s| s.border_color(hover_border).text_color(hover_fg).top(px(-2.0)))
+                            .hover(move |s| s.border_color(hover_border).text_color(hover_fg).translate_y(px(-2.0)))
+                            .active(|s| s.scale(0.95))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.servers.server = Some(id.clone());
                                 this.servers.error = None;
@@ -333,6 +334,7 @@ impl SettingsView {
             self.servers.error.as_deref(),
             alarm,
             p,
+            window,
             cx,
             move |this, _, cx| {
                 let (nickname, effect, decoration) = patch.clone();

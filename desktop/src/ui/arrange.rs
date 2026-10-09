@@ -314,7 +314,20 @@ impl FuwaApp {
                         .bg(p.sidebar),
                 )
         });
+        // The web's `.arrange-ring.on`: it pops from 92% with an overshoot, and a
+        // second ring pings out from it while it's lit.
         let ring = mark.ring.map(|(top, bottom)| {
+            let ping = motion::ambient(
+                div().absolute().inset(px(-2.0)).rounded(corner(10.0)).border_2().border_color(p.primary),
+                SharedString::from(format!("arrange-ping|{}", mark.key)),
+                Duration::from_millis(1100),
+                window,
+                |el, t| {
+                    let k = 1.0 - (1.0 - t).powi(2);
+                    el.opacity(0.6 * (1.0 - k)).scale(1.0 + 0.06 * k)
+                },
+            );
+            let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(520.0, 22.0, 1.0), 0.002);
             div()
                 .absolute()
                 .left(px(2.0))
@@ -324,11 +337,12 @@ impl FuwaApp {
                 .rounded(corner(10.0))
                 .border_2()
                 .border_color(p.primary)
-                .bg(alpha(p.primary, 0.08))
+                .bg(alpha(p.primary, 0.12))
+                .child(ping)
                 .with_animation(
                     SharedString::from(format!("arrange-ring|{}", mark.key)),
-                    Animation::new(Duration::from_millis(220)).with_easing(gpui_kit::ease_out_quint()),
-                    |el, t| el.opacity(t),
+                    Animation::new(duration).with_easing(easing),
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.92 + 0.08 * t),
                 )
         });
         Some(

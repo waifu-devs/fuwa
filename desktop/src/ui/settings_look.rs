@@ -540,8 +540,8 @@ impl SettingsView {
                 .text_color(c("foreground"))
                 .when(on, |el| el.shadow(crate::ui::settings_controls::shadow_lg()))
                 .cursor_pointer()
-                .hover(move |s| s.top(px(-3.0)).border_color(hover_border))
-                .active(|s| s.top(px(1.0)))
+                .hover(move |s| s.translate_y(px(-3.0)).border_color(hover_border))
+                .active(|s| s.scale(0.97))
                 .on_click(cx.listener(move |this, _, _, cx| this.pick_theme(&picked, slot, cx)))
                 .child(div().flex().items_center().gap(px(8.0)).children(
                     ["primary", "card", "muted-foreground", "border"].map(|name| {
@@ -600,6 +600,7 @@ impl SettingsView {
                     div().child(
                         div()
                             .id(SharedString::from(format!("theme-make-{id}")))
+                            .group(SharedString::from(format!("theme-make-{id}")))
                             .w(px(card_w))
                             .h_full()
                             .min_h(px(124.0))
@@ -615,19 +616,32 @@ impl SettingsView {
                             .border_color(p.border)
                             .text_color(p.muted_foreground)
                             .cursor_pointer()
-                            .hover(move |s| s.border_color(hover_border).text_color(hover_fg).top(px(-3.0)))
-                            .active(|s| s.top(px(1.0)))
+                            .hover(move |s| s.border_color(hover_border).text_color(hover_fg).translate_y(px(-3.0)))
+                            .active(|s| s.scale(0.97))
                             .on_click(cx.listener(|this, _, _, cx| this.choose(Page::Themes, None, cx)))
-                            .child(
+                            .child({
+                                // The circle fills with the primary and its plus turns as the card is
+                                // pointed at (`group-hover:bg-primary`, `group-hover:rotate-90`).
+                                let group = SharedString::from(format!("theme-make-{id}"));
+                                let (fill, on_fill) = (p.primary, p.primary_foreground);
                                 div()
+                                    .id(SharedString::from(format!("theme-make-{id}-plus")))
                                     .size(px(28.0))
                                     .rounded_full()
                                     .bg(p.muted)
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(icon("plus").size(px(16.0))),
-                            )
+                                    .group_hover(group.clone(), move |s| s.bg(fill).text_color(on_fill))
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("theme-make-{id}-turn")))
+                                            .group_hover(group, |s| {
+                                                s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                                            })
+                                            .child(icon("plus").size(px(16.0))),
+                                    )
+                            })
                             .child(
                                 div()
                                     .child(

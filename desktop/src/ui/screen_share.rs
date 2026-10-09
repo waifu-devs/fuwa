@@ -263,17 +263,19 @@ impl FuwaApp {
                         cx.notify();
                     })),
             );
+        // "Up to 3.4 Mbit/s of upload", the number rolling as the choice changes (the web's `Count`).
         let mbps = format!("{:.1}", share.mbps());
-        let upload = motion::rise(
-            div()
-                .text_xs()
-                .line_height(px(16.0))
-                .text_color(p.muted_foreground)
-                .child(t_with("dms-calls.calls.share.upload", &[("mbps", Arg::Str(&mbps))])),
-            SharedString::from(format!("share-upload-{mbps}")),
-            Duration::ZERO,
-            6.0,
-        );
+        let line = t_with("dms-calls.calls.share.upload", &[("mbps", Arg::Str("\u{1}"))]);
+        let (before, after) = line.split_once('\u{1}').unwrap_or((&line, ""));
+        let upload = div()
+            .flex()
+            .whitespace_nowrap()
+            .text_xs()
+            .line_height(px(16.0))
+            .text_color(p.muted_foreground)
+            .child(before.to_owned())
+            .child(motion::swap_text("share-upload", mbps, 12.0, window, cx))
+            .child(after.to_owned());
 
         let picked = picker.picked.is_some();
         let footer = div()
@@ -362,9 +364,13 @@ impl FuwaApp {
             .border_2()
             .border_color(if on { ring.into() } else { alpha(p.border, 0.0) })
             .when(on, |el| el.bg(alpha(p.primary, 0.08)))
-            .when(!on, |el| el.hover(move |s| s.border_color(hover)))
+            // It lifts while pointed at and presses in when picked (`whileHover: y -2`, `whileTap: 0.97`).
+            .hover(move |s| {
+                let s = s.translate_y(px(-2.0));
+                if on { s } else { s.border_color(hover) }
+            })
             .cursor_pointer()
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.scale(0.97))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.calls.picker.picked = Some(id);
                 cx.notify();
@@ -483,7 +489,7 @@ fn picks(
                 .text_color(if on { p.foreground } else { p.muted_foreground })
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.scale(0.96))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::EXTRA_BOLD).child(value))
                 .child(div().text_xs().line_height(px(14.0)).text_center().child(hint)),

@@ -392,6 +392,11 @@ pub fn plural(rule: &str, n: u64) -> &'static str {
     }
 }
 
+/// A whole number written as the app's language writes it ("1,234" in English).
+pub fn number(n: i64) -> String {
+    format_number(n, &STATE.read().meta)
+}
+
 /// A whole number with the language's digit grouping: "1,234" in English, "1234" and "12.345" in Spanish.
 pub fn format_number(n: i64, meta: &Meta) -> String {
     let digits = n.unsigned_abs().to_string();

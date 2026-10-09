@@ -21,6 +21,7 @@ use crate::core::voice_notes::{self, Clip, Limits, Player, Progress, Recorder};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::chat::Row;
+use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha};
 use crate::ui::widgets::icon;
 
@@ -710,9 +711,19 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
                     |el, t| el.rotate(gpui_kit::percentage(t)),
                 )
                 .into_any_element()
-        } else {
+        } else if glyph == "play" {
             // The play triangle sits a pixel right of centre, where it looks centred.
-            div().when(glyph == "play", |el| el.ml(px(1.0))).child(inner).into_any_element()
+            div().ml(px(1.0)).child(inner).into_any_element()
+        } else {
+            // Pause (or trouble) pops in, turning upright, as the web's icons swap.
+            motion::pop(
+                div().child(inner),
+                SharedString::from(format!("voice-face|{mid}|{glyph}")),
+                0.4,
+                -30.0,
+                Duration::ZERO,
+            )
+            .into_any_element()
         };
         div()
             .id(SharedString::from(format!("voice-play|{mid}")))
@@ -733,7 +744,7 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
             })
             .when(failed, |el| el.bg(p.muted).text_color(p.muted_foreground))
             .cursor_pointer()
-            .active(|s| s.opacity(0.85))
+            .active(|s| s.scale(0.88))
             .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |this, cx| this.play_voice(file.clone(), None, cx));
@@ -866,14 +877,20 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
             .text_color(p.muted_foreground)
             .cursor_pointer()
             .hover(move |s| s.bg(bg).text_color(fg))
-            .active(|s| s.opacity(0.85))
+            .active(|s| s.scale(0.88))
+            .overflow_hidden()
             .tooltip(|window, cx| {
                 crate::ui::overlay::Tip::new(t("dms-calls.voice.message.speedTitle")).build(window, cx)
             })
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |this, cx| this.next_voice_rate(cx));
             })
-            .child(rate_label(card.rate))
+            // The new speed rises into place as the old one leaves.
+            .child(crate::ui::motion::swapping(
+                SharedString::from(format!("voice-rate-label|{mid}")),
+                rate_label(card.rate),
+                11.2,
+            ))
     };
 
     div()
@@ -912,7 +929,14 @@ pub(crate) fn voice_card(mid: &str, card: &VoiceCard, p: &Palette, this: &WeakEn
                 Play::Failed(why) => Some(why.clone()),
                 _ => None,
             },
-            |el, why| el.child(div().mt(px(4.0)).text_xs().text_color(p.destructive).child(why)),
+            |el, why| {
+                el.child(motion::rise(
+                    div().mt(px(4.0)).text_xs().text_color(p.destructive).child(why),
+                    SharedString::from(format!("voice-problem|{mid}")),
+                    Duration::ZERO,
+                    -4.0,
+                ))
+            },
         )
         .into_any_element()
 }

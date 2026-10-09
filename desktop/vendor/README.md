@@ -1,7 +1,7 @@
 # Vendored GPUI
 
 The desktop app draws with GPUI through gpui-kit, which depends on
-gpui-pre 0.3.7. Stock GPUI can't do three things the web app does all the
+gpui-pre 0.3.7. Stock GPUI can't do a few things the web app does all the
 time, so fuwa keeps its own copy of the crates that needed changing:
 
 - `gpui-pre`: the framework (scene, window, styles, elements).
@@ -74,6 +74,25 @@ matrix and widens the raster bounds by the slant, and Windows asks DirectWrite
 to simulate oblique (`DWRITE_FONT_SIMULATIONS_OBLIQUE`), which it didn't
 before since layout asked for the upright face's own style. Shaping uses the
 upright face, so widths don't change. (`gpui-pre-macos` is vendored for this.)
+
+**Hover transitions.** A div with an id fades its `hover`, `group_hover`,
+`active`, `group_active` and focus styles in and out over 150ms (`cubic-bezier(0.4, 0, 0.2, 1)`),
+as Tailwind's `transition` does on the web: background colors, border and
+text colors, opacity, box shadows and transforms (scale, turn, move) are
+mixed between the two styles (colors in premultiplied sRGB, as browsers do),
+while everything else switches at once. It remembers each style's fade in
+the element's `InteractiveElementState`, starts already there when the
+element first shows (CSS doesn't transition on load), asks for frames only
+while a fade runs, and settles at once with `App::reduce_motion`. Divs
+without an id switch at once, as before.
+
+Calling `hover` or `active` twice adds the second style to the first (a
+shared button's own hover, then a caller's) rather than replacing it, which
+was a debug assertion before.
+
+**Hiding the cursor.** `App::hide_cursor_until_mouse_moves` is public, so a
+popped-out call can hide the pointer with its controls, as the web's
+`cursor-none` does.
 
 ## Checking the renderers
 

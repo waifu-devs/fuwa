@@ -57,9 +57,13 @@ impl crate::ui::app::FuwaApp {
         };
         // What closing it hides: this version, or this line.
         let shown_for = if status.release().is_some() { version.clone() } else { needs.clone().unwrap_or_default() };
-        if CLOSED.lock().as_deref() == Some(shown_for.as_str()) {
-            return None;
-        }
+        // Closed, it fades as it lifts away and shrinks a little (the web's `exit`).
+        let closed = CLOSED.lock().as_deref() == Some(shown_for.as_str());
+        let gone = match motion::kept("update-note", (!closed).then_some(&()), window, cx) {
+            _ if !closed => 0.0,
+            Some((_, t)) => gpui_kit::ease_out_quint()(t),
+            None => return None,
+        };
         let compat_only = status.release().is_none();
         let p = pal(cx);
 
@@ -116,7 +120,11 @@ impl crate::ui::app::FuwaApp {
             .justify_center()
             .cursor_pointer()
             .text_color(p.muted_foreground)
-            .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
+            // The web's "Later": `transition-colors hover:bg-muted hover:text-foreground`.
+            .hover({
+                let (bg, fg) = (p.muted, p.foreground);
+                move |s| s.bg(bg).text_color(fg)
+            })
             .on_click({
                 let shown_for = shown_for.clone();
                 cx.listener(move |_, _, _, cx| {
@@ -142,8 +150,9 @@ impl crate::ui::app::FuwaApp {
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
+                // The web's Reload: `hover:scale-[1.03] active:scale-[0.97]`.
+                .hover(move |s| s.bg(hover).scale(1.03))
+                .active(|s| s.scale(0.97))
                 .child(label)
         };
         let main = if compat_only {
@@ -198,6 +207,7 @@ impl crate::ui::app::FuwaApp {
                 .absolute()
                 .left(px(RAIL + 8.0))
                 .bottom(px(ME_PANEL + 8.0))
+                .when(gone > 0.0, |el| el.opacity(1.0 - gone).translate_y(px(-16.0 * gone)).scale(1.0 - 0.02 * gone))
                 .child(motion::rise(
                     note,
                     SharedString::from(format!("update-note-{version}-{ready}")),

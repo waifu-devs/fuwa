@@ -373,7 +373,7 @@ impl FuwaApp {
             .text_color(p.primary)
             .cursor_pointer()
             .hover(move |s| s.bg(action_hover))
-            .active(|s| s.opacity(0.9))
+            .active(|s| s.scale(0.94))
             .on_click(cx.listener(move |this, _, window, cx| open_a(this, window, cx)))
             .child(w.action.clone())
             .child(div().relative().left(px(nudge)).child(icon("chevron-right").size(px(14.0))));
@@ -482,7 +482,7 @@ impl FuwaApp {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(self.faces(key, user_ids, p))
+                .child(self.faces(key, &tile.id, user_ids, window, cx, p))
                 .child(
                     div()
                         .flex()
@@ -500,7 +500,7 @@ impl FuwaApp {
                 .items_center()
                 .gap(px(6.0))
                 .min_w_0()
-                .child(self.faces(key, user_ids, p))
+                .child(self.faces(key, &tile.id, user_ids, window, cx, p))
                 .child(
                     div()
                         .min_w_0()
@@ -508,9 +508,15 @@ impl FuwaApp {
                         .child(t_with("tiles.thread.unread", &[("count", Arg::Num(i64::from(*unread)))])),
                 )
                 .into_any_element(),
-            Body::Shared { unread, .. } => {
-                div().child(if *unread > 99 { "99+".to_owned() } else { unread.to_string() }).into_any_element()
-            }
+            // The count rolls as messages come in (the web's `Count`).
+            Body::Shared { unread, .. } => motion::count(
+                SharedString::from(format!("tile-unread|{}", tile.id)),
+                u64::from(*unread),
+                Some(99),
+                12.0,
+                window,
+                cx,
+            ),
             Body::App(app) => {
                 let status = if app.live {
                     [t("tiles.app.live"), app.status.clone()]
@@ -534,8 +540,17 @@ impl FuwaApp {
         }
     }
 
-    /// Up to four faces, overlapping, each ringed in the card's color; then a count of the rest.
-    fn faces(&self, key: &str, user_ids: &[String], p: &Palette) -> AnyElement {
+    /// Up to four faces, overlapping, each ringed in the card's color; then a
+    /// count of the rest, which rolls as people come and go.
+    fn faces(
+        &self,
+        key: &str,
+        tile: &str,
+        user_ids: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        p: &Palette,
+    ) -> AnyElement {
         let users: Vec<Option<pb::User>> = self.core.shared.read(|s| {
             let i = s.instance(key);
             user_ids.iter().take(4).map(|id| i.and_then(|i| i.users.get(id).cloned())).collect()
@@ -560,7 +575,16 @@ impl FuwaApp {
             .items_center()
             .gap(px(6.0))
             .child(row)
-            .when(rest > 0, |el| el.child(div().font_weight(FontWeight::BOLD).child(format!("+{rest}"))))
+            .when(rest > 0, |el| {
+                el.child(div().flex().font_weight(FontWeight::BOLD).child("+").child(motion::count(
+                    SharedString::from(format!("tile-rest|{tile}")),
+                    rest as u64,
+                    None,
+                    12.0,
+                    window,
+                    cx,
+                )))
+            })
             .into_any_element()
     }
 

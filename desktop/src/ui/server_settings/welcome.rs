@@ -483,8 +483,8 @@ impl ServerSettingsView {
             .border_1()
             .border_color(if picking == Some(Pick::Emoji) { alpha(p.primary, 0.6) } else { p.border.into() })
             .cursor_pointer()
-            .hover(move |s| s.border_color(hover))
-            .active(|s| s.top(px(1.0)))
+            .hover(move |s| s.border_color(hover).scale(1.08).rotate(gpui_kit::radians(-6f32.to_radians())))
+            .active(|s| s.scale(0.9))
             .on_click(cx.listener(pick(Pick::Emoji)))
             .child(if row.emoji.is_empty() {
                 div()
@@ -612,7 +612,7 @@ impl ServerSettingsView {
                 .rounded(corner(10.0))
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.scale(0.97))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(r) = this.welcome.rows.iter_mut().find(|r| r.key == key) {
                         r.emoji = value.clone();

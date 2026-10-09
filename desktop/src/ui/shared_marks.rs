@@ -2,8 +2,6 @@
 //! sidebar, a pill in the header, a note at its start, and a tag beside the
 //! names of people from the other server. The web's `chat/Shared.tsx`.
 
-use std::time::Duration;
-
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
@@ -95,20 +93,26 @@ pub fn pill(text: String, id: &str, p: &Palette) -> impl IntoElement {
     )
 }
 
-/// The sidebar's mark beside a shared channel's name: pops up into place, and says who it's shared with.
+/// The sidebar's mark beside a shared channel's name: pops in turning upright,
+/// grows on a soft tint when pointed at, and says who it's shared with (the
+/// web's `SharedBadge`).
 pub fn badge(id: &str, label: String, color: impl Into<Hsla>) -> impl IntoElement {
-    motion::rise(
+    let color = color.into();
+    let tint = Hsla { a: 0.1, ..color };
+    crate::ui::widgets::popped(
         div()
             .id(SharedString::from(format!("shared-badge-{id}")))
             .flex_none()
-            .size(px(18.0))
+            .size(px(20.0))
             .flex()
             .items_center()
             .justify_center()
-            .child(glyph(13.0, color))
+            .rounded_full()
+            .hover(move |s| s.bg(tint).scale(1.1))
+            .child(glyph(14.0, color))
             .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx)),
         SharedString::from(format!("shared-badge-in-{id}")),
-        Duration::from_millis(120),
-        6.0,
+        0.0,
+        -40.0,
     )
 }

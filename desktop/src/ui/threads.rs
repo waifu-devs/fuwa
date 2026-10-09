@@ -427,6 +427,54 @@ impl FuwaApp {
 
 // ───────────────────────── Drawing ─────────────────────────
 
+/// Up to three faces, overlapping, each in a ring of the page's colour (the
+/// web's `Faces`): someone who joins the thread while it's in sight pops in,
+/// while the faces there when it first showed are simply there.
+#[derive(IntoElement)]
+struct Faces {
+    id: SharedString,
+    users: Vec<pb::User>,
+    size: f32,
+    ring: gpui_kit::Rgba,
+}
+
+impl gpui_kit::RenderOnce for Faces {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        let first: std::collections::HashSet<String> = self.users.iter().map(|u| u.id.clone()).collect();
+        let there = window.use_keyed_state(SharedString::from(format!("{}|there", self.id)), cx, |_, _| first);
+        let p = pal(cx);
+        let there = there.read(cx);
+        let (size, ring) = (self.size, self.ring);
+        div().flex().flex_none().children(self.users.iter().enumerate().map(|(n, u)| {
+            let face = div().relative().size(px(size)).when(n > 0, |el| el.ml(px(-6.0))).child(
+                div()
+                    .absolute()
+                    .left(px(-2.0))
+                    .top(px(-2.0))
+                    .size(px(size + 4.0))
+                    .rounded_full()
+                    .bg(ring)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(avatar(Some(u), size, &p)),
+            );
+            if there.contains(&u.id) {
+                face.into_any_element()
+            } else {
+                // `initial={{ scale: 0, opacity: 0 }}` on the `SPRING`, 40ms apart.
+                motion::spring_in(
+                    face,
+                    SharedString::from(format!("{}|in|{}", self.id, u.id)),
+                    (520.0, 34.0),
+                    Duration::from_millis(40 * n as u64),
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(t.max(0.0)),
+                )
+            }
+        }))
+    }
+}
+
 /// The row under a message with replies: who replied, how many, and how
 /// recently. Clicking it opens the thread.
 pub(crate) fn replies_row(
@@ -465,36 +513,32 @@ pub(crate) fn replies_row(
             .line_height(px(16.0))
             .cursor_pointer()
             .hover(move |s| s.bg(hover_bg).border_color(hover_border))
-            .active(|s| s.opacity(0.9))
+            .active(|s| s.scale(0.98))
             .on_click(move |_, window, cx| {
                 let open = open.clone();
                 let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
             })
             // Up to three faces, overlapping, each in a ring of the page's colour.
-            .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
-                div().relative().size(px(20.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
-                    div()
-                        .absolute()
-                        .left(px(-2.0))
-                        .top(px(-2.0))
-                        .size(px(24.0))
-                        .rounded_full()
-                        .bg(p.background)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(avatar(Some(u), 20.0, p)),
-                )
-            })))
+            .child(Faces {
+                id: SharedString::from(format!("faces|{id}")),
+                users: r.faces.clone(),
+                size: 20.0,
+                ring: p.background,
+            })
+            // The count rolls when replies come in (the web's `Count`).
             .child(
-                div()
-                    .flex_none()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.primary)
-                    .child(t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(r.count)))])),
+                crate::ui::motion::counted(
+                    SharedString::from(format!("replies-count|{id}")),
+                    "chat.threads.replies",
+                    r.count.max(0) as u64,
+                    12.0,
+                )
+                .flex_none()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.primary),
             )
             .when(r.new > 0, |el| {
-                el.child(motion::rise(
+                el.child(motion::pop_in(
                     div()
                         .flex_none()
                         .px(px(6.0))
@@ -508,13 +552,15 @@ pub(crate) fn replies_row(
                         } else {
                             t_with("chat.threads.newCount", &[("count", Arg::Num(i64::from(r.new)))])
                         }),
-                    SharedString::from(format!("replies-new|{id}|{}", r.new)),
-                    Duration::ZERO,
-                    4.0,
+                    SharedString::from(format!("replies-new|{id}")),
+                    (0.5, 0.5),
+                    0.0,
+                    0.0,
                 ))
             })
             .when(r.locked, |el| el.child(icon("lock").size(px(12.0)).text_color(p.muted_foreground)))
-            // The last reply, or "View thread" while hovered, in one place.
+            // The last reply, or "View thread" while hovered, in one place: one
+            // rises out as the other rises in.
             .child(
                 div()
                     .relative()
@@ -522,20 +568,21 @@ pub(crate) fn replies_row(
                     .text_color(p.muted_foreground)
                     .child(
                         div()
+                            .id(SharedString::from(format!("replies-last|{id}")))
                             .truncate()
-                            .relative()
-                            .top(px(0.0))
-                            .group_hover("replies", |s| s.opacity(0.0).top(px(-4.0)))
+                            .group_hover("replies", |s| s.opacity(0.0).translate_y(px(-4.0)))
                             .child(last),
                     )
                     .child(
                         div()
+                            .id(SharedString::from(format!("replies-view|{id}")))
                             .absolute()
                             .left_0()
-                            .top(px(4.0))
+                            .top_0()
                             .whitespace_nowrap()
                             .opacity(0.0)
-                            .group_hover("replies", |s| s.opacity(1.0).top(px(0.0)))
+                            .translate_y(px(4.0))
+                            .group_hover("replies", |s| s.opacity(1.0).translate_y(px(0.0)))
                             .child(t("chat.threads.view")),
                     ),
             ),
@@ -605,9 +652,21 @@ impl FuwaApp {
         })?;
 
         use crate::core::i18n::{Arg, t, t_with};
-        // The web's `PanelButton`: 32px and round, a 16px icon, the primary at 10% while on.
+        // The web's `PanelButton`: 32px and round, a 16px icon, the primary at 10% while on,
+        // pressed down to 85%. The bell pops in, turning upright, when it changes.
         let panel_button = |id: &'static str, glyph: &'static str, label: String, on: bool| {
             let hover = p.muted;
+            let glyph: AnyElement = match id {
+                "thread-follow" => motion::pop(
+                    div().child(icon(glyph).size(px(16.0))),
+                    SharedString::from(format!("{id}|{glyph}")),
+                    0.6,
+                    -25.0,
+                    Duration::ZERO,
+                )
+                .into_any_element(),
+                _ => icon(glyph).size(px(16.0)).into_any_element(),
+            };
             div()
                 .id(id)
                 .size(px(32.0))
@@ -620,8 +679,9 @@ impl FuwaApp {
                 .text_color(if on { p.primary } else { p.muted_foreground })
                 .when(on, |el| el.bg(alpha(p.primary, 0.1)))
                 .hover(move |s| s.bg(hover))
+                .active(|s| s.scale(0.85))
                 .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
-                .child(icon(glyph).size(px(16.0)))
+                .child(glyph)
         };
         let where_key = match (archived, locked) {
             (true, true) => "chat.threads.whereArchivedLocked",
@@ -676,7 +736,7 @@ impl FuwaApp {
             })
             .when(pins_here, |el| {
                 let open = self.pins.as_ref().is_some_and(|p| p.of_thread(&open.id));
-                el.child(self.pins_button("thread-pins", open, cx))
+                el.child(self.pins_button_in("thread-pins", open, window, cx))
             })
             .child(
                 panel_button("thread-jump", "corner-up-left", t("chat.threads.jump"), false)
@@ -887,7 +947,7 @@ impl FuwaApp {
     }
 
     /// The channel's threads, behind the header's Threads button (`ThreadList`).
-    pub(crate) fn threads_list_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn threads_list_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::core::i18n::{Arg, t, t_with};
         let listing = self.threads.listing.as_ref()?;
         let p = pal(cx);
@@ -954,7 +1014,7 @@ impl FuwaApp {
                     }))
                     .child(icon("x").size(px(16.0))),
             );
-        // Open and Archived, the picked one on a card that glides.
+        // Open and Archived, the picked one on a card that glides (the web's `layoutId`).
         let tab = |id: &'static str, glyph: &'static str, label: String, value: bool, cx: &mut Context<Self>| {
             let on = archived == value;
             div()
@@ -968,11 +1028,12 @@ impl FuwaApp {
                 .rounded(crate::ui::theme::radius_lg())
                 .cursor_pointer()
                 .text_color(if on { p.foreground } else { p.muted_foreground })
-                .when(on, |el| el.bg(p.card).shadow(crate::ui::polls::shadow_sm()))
                 .on_click(cx.listener(move |this, _, _, cx| this.show_archived_threads(value, cx)))
                 .child(icon(glyph).size(px(14.0)))
                 .child(label)
         };
+        let glide = motion::follow("threads-tab-glide", if archived { 1.0 } else { 0.0 }, window, cx);
+        let focused = self.threads.query.read(cx).focus_handle(cx).is_focused(window);
         let tools = div()
             .flex_none()
             .flex()
@@ -991,7 +1052,8 @@ impl FuwaApp {
                     .overflow_hidden()
                     .rounded(crate::ui::theme::radius_xl())
                     .border_1()
-                    .border_color(p.border)
+                    // `focus-within:border-primary/50`.
+                    .border_color(if focused { alpha(p.primary, 0.5) } else { p.border.into() })
                     .bg(p.card)
                     .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
                     .child(
@@ -1001,6 +1063,7 @@ impl FuwaApp {
             .when(hours > 0, |el| {
                 el.child(
                     div()
+                        .relative()
                         .flex()
                         .p(px(2.0))
                         .rounded(crate::ui::theme::radius_xl())
@@ -1008,6 +1071,23 @@ impl FuwaApp {
                         .text_xs()
                         .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
+                        // The card under the picked tab, half the width, sliding between the two.
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .p(px(2.0))
+                                .flex()
+                                .child(div().w(gpui_kit::relative(glide * 0.5)))
+                                .child(
+                                    div()
+                                        .w(gpui_kit::relative(0.5))
+                                        .h_full()
+                                        .rounded(crate::ui::theme::radius_lg())
+                                        .bg(p.card)
+                                        .shadow(crate::ui::polls::shadow_sm()),
+                                ),
+                        )
                         .child(tab("threads-open", "messages-square", t("chat.threads.open"), false, cx))
                         .child(tab("threads-archived", "archive", t("chat.threads.archived"), true, cx)),
                 )
@@ -1188,21 +1268,12 @@ impl FuwaApp {
                                 .gap(px(8.0))
                                 .text_xs()
                                 .line_height(px(16.0))
-                                .child(div().flex().flex_none().children(faces.iter().enumerate().map(|(n, u)| {
-                                    div().relative().size(px(16.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
-                                        div()
-                                            .absolute()
-                                            .left(px(-2.0))
-                                            .top(px(-2.0))
-                                            .size(px(20.0))
-                                            .rounded_full()
-                                            .bg(p.background)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(avatar(Some(u), 16.0, &p)),
-                                    )
-                                })))
+                                .child(Faces {
+                                    id: SharedString::from(format!("faces|list|{}", m.id)),
+                                    users: faces,
+                                    size: 16.0,
+                                    ring: p.background,
+                                })
                                 .child(div().font_weight(FontWeight::BOLD).text_color(p.primary).child(t_with(
                                     "chat.threads.replies",
                                     &[("count", Arg::Num(i64::from(summary.reply_count)))],

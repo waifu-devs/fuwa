@@ -868,7 +868,10 @@ impl Render for InstanceSettingsView {
         }
 
         // The save bar sits under every page, held at the foot of the window as it scrolls.
+        // Once nothing's left to save it slides back down, showing what it last said.
         let changed = self.changed();
+        let said = (!changed.is_empty()).then(|| (changed.len(), self.error.clone()));
+        let going = motion::kept("instance-save", said.as_ref(), window, cx);
         let bar = (!changed.is_empty()).then(|| {
             controls::save_bar(
                 "instance-save",
@@ -881,6 +884,20 @@ impl Render for InstanceSettingsView {
                 |this: &mut Self, window, cx| this.commit(this.changed(), Vec::new(), window, cx),
                 |this: &mut Self, window, cx| this.discard(window, cx),
             )
+        });
+        let leaving = going.map(|((n, error), t)| {
+            let bar = controls::save_bar(
+                "instance-save",
+                n,
+                false,
+                error.as_deref(),
+                None,
+                &p,
+                cx,
+                |_, _, _| {},
+                |_, _, _| {},
+            );
+            crate::ui::settings_controls::bar_going(bar, t)
         });
         // The accounts and servers lists scroll on their own, drawing only the rows in sight.
         let fills = page == Page::Accounts;
@@ -960,7 +977,7 @@ impl Render for InstanceSettingsView {
                     .when(!fills, |el| el.overflow_y_scroll().track_scroll(&self.scroll))
                     .child(content),
             )
-            .when_some(bar, |el, bar| {
+            .when_some(bar.or(leaving), |el, bar| {
                 el.child(div().absolute().bottom(px(8.0)).left(px(aside + 40.0)).w(px(column)).child(bar))
             })
             .child(self.close_button(aside + inner - 64.0, &p, cx))

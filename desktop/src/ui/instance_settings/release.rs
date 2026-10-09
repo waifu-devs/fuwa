@@ -50,8 +50,8 @@ fn link(id: &'static str, label: String, url: String, primary: bool, p: &Palette
                 el.bg(p.secondary).text_color(p.foreground)
             }
         })
-        .hover(|s| s.opacity(0.92))
-        .active(|s| s.opacity(0.8))
+        .hover(|s| s.scale(1.03))
+        .active(|s| s.scale(0.97))
         .on_click(move |_, _, cx| crate::ui::text::open_link(&url, cx))
         .child(label)
         .child(icon("arrow-up-right").size(px(14.0)))

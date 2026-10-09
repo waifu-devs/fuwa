@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::core::dms::DmStatus;
 use crate::core::friends::{self, FriendsStatus};
-use crate::core::i18n::t;
+use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
@@ -22,7 +22,7 @@ use crate::ui::motion;
 use crate::ui::rail::RAIL;
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, badge, conn_dot, icon, pal, server_icon};
+use crate::ui::widgets::{avatar, badge, conn_dot, counted, going, icon, pal, popped, server_icon};
 
 pub const SIDEBAR: f32 = 256.0;
 /// How long a channel that was just dragged into place glows.
@@ -156,6 +156,7 @@ impl FuwaApp {
                         .min_w_0()
                         .flex()
                         .flex_col()
+                        // A renamed server's name swaps (the web's `SwapText`) and its count rolls (`Count`).
                         .child(
                             div()
                                 .overflow_hidden()
@@ -164,20 +165,34 @@ impl FuwaApp {
                                 .font_weight(FontWeight::EXTRA_BOLD)
                                 .text_size(px(16.0))
                                 .line_height(px(24.0))
-                                .child(server.name.clone()),
+                                .child(motion::swap_text(
+                                    format!("server-name|{key}|{server_id}"),
+                                    server.name.clone(),
+                                    16.0,
+                                    window,
+                                    cx,
+                                )),
                         )
                         .child(
                             div()
+                                .flex()
                                 .overflow_hidden()
-                                .text_ellipsis()
                                 .whitespace_nowrap()
                                 .text_size(px(12.0))
                                 .line_height(px(16.0))
                                 .text_color(p.muted_foreground)
-                                .child(format!(
-                                    "{members} {} · {node_name}",
+                                .child(motion::count(
+                                    format!("server-members|{key}|{server_id}"),
+                                    members.max(0) as u64,
+                                    None,
+                                    12.0,
+                                    window,
+                                    cx,
+                                ))
+                                .child(div().min_w_0().overflow_hidden().text_ellipsis().child(format!(
+                                    "\u{a0}{} · {node_name}",
                                     if members == 1 { "member" } else { "members" }
-                                )),
+                                ))),
                         ),
                 )
                 .child(
@@ -191,23 +206,27 @@ impl FuwaApp {
                 .into_any_element()
         };
         let _ = (server_muted, manage);
+        let notice = self.applications_notice(key, &server, &access, &p, window, cx);
 
         // Kept out until they sign in through the server's provider: the way
         // back in, where the channels were.
         if self.sso_locked(key, server_id).is_some() {
             let (k, sid) = (key.to_owned(), server.id.clone());
             let provider = crate::ui::overlay::provider_name(&server.sso_name).to_owned();
-            let hover = alpha(p.primary, 0.18);
+            let hover = alpha(p.primary, 0.15);
+            // The web's SsoNotice: the padlock on a primary tile tips on hover, the chevron nudges right.
+            let group = SharedString::from("sso-row");
             let row = div()
                 .id("sso-sidebar-locked")
+                .group(group.clone())
                 .mx(px(8.0))
-                .mt(px(8.0))
-                .px(px(12.0))
-                .py(px(10.0))
+                .mt(px(12.0))
+                .px(px(10.0))
+                .py(px(8.0))
                 .flex()
                 .items_center()
-                .gap(px(10.0))
-                .rounded(corner(12.0))
+                .gap(px(8.0))
+                .rounded(crate::ui::theme::radius_xl())
                 .bg(alpha(p.primary, 0.1))
                 .text_color(p.primary)
                 .text_sm()
@@ -218,13 +237,36 @@ impl FuwaApp {
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.navigate(Nav::Server { key: k.clone(), server: sid.clone() }, window, cx)
                 }))
-                .child(icon("lock-keyhole").size(px(16.0)).flex_none())
-                .child(div().flex_1().min_w_0().child(format!("Sign in with {provider} to see the channels")));
-            let row = motion::rise(row, SharedString::from(format!("sso-row|{key}|{server_id}")), Duration::ZERO, 6.0);
-            return (header, div().child(row).into_any_element());
+                .child(
+                    div()
+                        .size(px(28.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(crate::ui::theme::radius_lg())
+                        .bg(p.primary)
+                        .text_color(p.primary_foreground)
+                        .child(
+                            div()
+                                .id("sso-row-lock")
+                                .group_hover(group.clone(), |s| s.rotate(gpui_kit::radians((-12f32).to_radians())))
+                                .child(icon("lock-keyhole").size(px(16.0))),
+                        ),
+                )
+                .child(div().flex_1().min_w_0().child(format!("Sign in with {provider} to see the channels")))
+                .child(
+                    div()
+                        .id("sso-row-chevron")
+                        .flex_none()
+                        .group_hover(group, |s| s.translate_x(px(2.0)))
+                        .child(icon("chevron-right").size(px(16.0))),
+                );
+            let row = motion::rise(row, SharedString::from(format!("sso-row|{key}|{server_id}")), Duration::ZERO, -6.0);
+            return (header, div().when_some(notice, |el, n| el.child(n)).child(row).into_any_element());
         }
         let Some(channels) = channels else {
-            return (header, loading_rows(&p).into_any_element());
+            return (header, div().when_some(notice, |el, n| el.child(n)).child(loading_rows(&p)).into_any_element());
         };
 
         // Channels without a category first, then each category with its own.
@@ -276,8 +318,27 @@ impl FuwaApp {
                     window,
                     cx,
                 );
-                let (fg, hover_fg) = (if lit { p.foreground } else { p.muted_foreground }, p.foreground);
+                // A channel held over it would go in: it lights up (the web's `[data-drop-into]`).
+                let into = self.arrange.as_ref().is_some_and(|m| {
+                    m.ring.is_some()
+                        && matches!(&m.drop, crate::core::arrange::Drop::Channel { parent, .. } if *parent == cat.id)
+                });
+                let fg = if into {
+                    p.primary
+                } else if lit {
+                    p.foreground
+                } else {
+                    p.muted_foreground
+                };
+                let hover_fg = p.foreground;
                 let cat_id = cat.id.clone();
+                // How many it holds, while folded; it fades and shrinks to 60% as it opens.
+                let held = going(
+                    &format!("cat-count-going|{}", cat.id),
+                    (closed && !list.is_empty()).then_some(list.len()),
+                    window,
+                    cx,
+                );
                 let label = div()
                     .id(SharedString::from(format!("cat|{}", cat.id)))
                     .group("cat")
@@ -331,19 +392,29 @@ impl FuwaApp {
                                     ))),
                             )
                             .child(div().min_w_0().overflow_hidden().child(tracked(cat.name.to_uppercase(), WIDE)))
-                            .when(closed && !list.is_empty(), |el| {
+                            // How many it holds, popping in as it folds.
+                            .when_some(held, |el, (count, left)| {
                                 el.child(
-                                    div()
-                                        .ml(px(2.0))
-                                        .px(px(6.0))
-                                        .rounded_full()
-                                        .bg(p.muted)
-                                        .text_size(px(9.92))
-                                        .child(list.len().to_string()),
+                                    div().when(left < 1.0, |el| el.opacity(left).scale(0.6 + 0.4 * left)).child(
+                                        popped(
+                                            div()
+                                                .ml(px(2.0))
+                                                .px(px(6.0))
+                                                .rounded_full()
+                                                .bg(p.muted)
+                                                .text_size(px(9.92))
+                                                .child(count.to_string()),
+                                            SharedString::from(format!("cat-count|{}", cat.id)),
+                                            0.6,
+                                            0.0,
+                                        ),
+                                    ),
                                 )
                             }),
                     );
-                rows = rows.child(if manage {
+                // Categories drop in from just above (the web's `y: -6`).
+                let rise_id = SharedString::from(format!("cat-in|{key}|{server_id}|{}", cat.id));
+                let label = if manage {
                     let (key, server, parent) = (key.to_owned(), server_id.to_owned(), cat.id.clone());
                     let hover_fg = p.foreground;
                     label
@@ -359,7 +430,10 @@ impl FuwaApp {
                                 .opacity(0.0)
                                 .group_hover("cat", |s| s.opacity(1.0))
                                 .cursor_pointer()
-                                .hover(move |s| s.text_color(hover_fg))
+                                // The web's `hover:rotate-90 hover:text-foreground`.
+                                .hover(move |s| {
+                                    s.text_color(hover_fg).rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                                })
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let dialog = Dialog::CreateChannel {
                                         key: key.clone(),
@@ -374,7 +448,8 @@ impl FuwaApp {
                         .into_any_element()
                 } else {
                     label.into_any_element()
-                });
+                };
+                rows = rows.child(motion::rise(div().child(label), rise_id, Duration::ZERO, -6.0));
                 y += LABEL;
             }
             let folded = cat.is_some_and(|c| self.collapsed.contains(&c.id));
@@ -393,10 +468,7 @@ impl FuwaApp {
                 let quiet = muted.contains(&c.id);
                 let count = if quiet { 0 } else { unread.get(&c.id).copied().unwrap_or(0) };
                 let row = self
-                    .channel_row(key, server_id, c, active, count, &p, cx)
-                    .when(quiet && !active, |el| {
-                        el.opacity(0.5).child(icon("bell-off").size(px(13.0)).text_color(p.muted_foreground))
-                    })
+                    .channel_row(key, server_id, c, active, count, quiet, &p, window, cx)
                     .when(moving(c), |el| el.opacity(0.3))
                     .when(manage, |el| {
                         let drag = ghost(c, 0);
@@ -418,11 +490,10 @@ impl FuwaApp {
                     }
                     None => row.into_any_element(),
                 };
-                rows = rows.child(motion::rise(
+                rows = rows.child(slide_from_left(
                     div().child(row),
                     SharedString::from(format!("ch|{}|{server_id}|{}", key, c.id)),
-                    Duration::from_millis(18 * n),
-                    6.0,
+                    Duration::from_millis(25 * n.min(12)),
                 ));
                 n += 1;
                 y += ROW;
@@ -465,7 +536,138 @@ impl FuwaApp {
             });
         // "Happening now" over the channels (live_tiles.rs); the rows' own top padding is its gap.
         let tiles = self.live_tiles_strip(key, server_id, window, cx);
-        (header, div().when_some(tiles, |el, t| el.child(t)).child(list).into_any_element())
+        let body = div().when_some(notice, |el, n| el.child(n)).when_some(tiles, |el, t| el.child(t)).child(list);
+        (header, body.into_any_element())
+    }
+
+    /// People waiting to be let in, for whoever can let them in (the web's
+    /// `ApplicationsNotice`): it slides in over the channels and opens the
+    /// server's settings. The count is read when the server opens and again
+    /// once its settings close, where they're let in or turned down.
+    fn applications_notice(
+        &mut self,
+        key: &str,
+        server: &pb::Server,
+        access: &crate::core::permissions::Access,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let reviews = server.applications && access.has(pb::Permission::KickMembers);
+        let of = format!("{key}/{}", server.id);
+        let reviewing = self.server_settings.is_some();
+        let state = window.use_keyed_state("applications-waiting", cx, |_, _| Waiting::default());
+        let (stale, count) = state.update(cx, |w, _| {
+            let stale = reviews && (w.of != of || (w.reviewing && !reviewing));
+            if w.of != of {
+                w.count = 0;
+            }
+            w.of = of.clone();
+            w.reviewing = reviewing;
+            (stale, w.count)
+        });
+        if stale {
+            let (core, k, sid, of) = (self.core.clone(), key.to_owned(), server.id.clone(), of.clone());
+            let state = state.clone();
+            self.run(cx, async move { core.list_applications(&k, &sid).await }, move |_, result, cx| {
+                if let Ok(list) = result {
+                    state.update(cx, |w, cx| {
+                        if w.of == of {
+                            w.count = list.len();
+                            cx.notify();
+                        }
+                    });
+                }
+            });
+        }
+        let count = if reviews { count } else { 0 };
+        let (count, left) = going(&format!("applications-notice|{of}"), (count > 0).then_some(count), window, cx)?;
+
+        // "3 people want to join", the number rolling as it changes.
+        let words = t_with("workspace.sidebar.waiting", &[("count", Arg::Num(count as i64))]);
+        let number = count.to_string();
+        let (before, after) = match words.find(&number) {
+            Some(at) => (words[..at].to_owned(), words[at + number.len()..].to_owned()),
+            None => (words.clone(), String::new()),
+        };
+        let rolling = motion::count(format!("applications-n|{of}"), count as u64, None, 14.0, window, cx);
+        let (k, sid) = (key.to_owned(), server.id.clone());
+        let hover = alpha(p.primary, 0.15);
+        let group = SharedString::from("applications-row");
+        let row = div()
+            .id("applications-notice")
+            .group(group.clone())
+            .mt(px(12.0))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .overflow_hidden()
+            .rounded(crate::ui::theme::radius_xl())
+            .bg(alpha(p.primary, 0.1))
+            .text_color(p.primary)
+            .text_sm()
+            .font_weight(FontWeight::BOLD)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            // Straight to the applications, as the web's notice links there.
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_server_settings(&k, &sid, window, cx);
+                if let Some(view) = &this.server_settings {
+                    view.update(cx, |view, cx| view.show(crate::ui::server_settings::Page::Applications, cx));
+                }
+            }))
+            .child(
+                div()
+                    .relative()
+                    .size(px(28.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(crate::ui::theme::radius_lg())
+                    .bg(p.primary)
+                    .text_color(p.primary_foreground)
+                    // A ring that keeps swelling out of the tile and fading (1.6s).
+                    .child(motion::ambient(
+                        div().absolute().inset_0().rounded(crate::ui::theme::radius_lg()).bg(p.primary),
+                        "applications-ping",
+                        Duration::from_millis(1600),
+                        window,
+                        |el, t| el.opacity(0.6 * (1.0 - t)).scale(1.0 + 0.6 * t),
+                    ))
+                    .child(icon("clipboard-list").size(px(16.0))),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(before)
+                    .child(rolling)
+                    .child(div().min_w_0().overflow_hidden().text_ellipsis().child(after)),
+            )
+            .child(
+                div()
+                    .id("applications-chevron")
+                    .flex_none()
+                    .group_hover(group, |s| s.translate_x(px(2.0)))
+                    .child(icon("chevron-right").size(px(16.0))),
+            );
+        // It drops in from just above (the web's `SLIDE_IN`) and goes back up as it fades.
+        let row = div().when(left < 1.0, |el| el.opacity(left).translate_y(px(-6.0 * (1.0 - left)))).child(
+            motion::spring_in(
+                row,
+                SharedString::from(format!("applications-in|{of}")),
+                (520.0, 34.0),
+                Duration::ZERO,
+                |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px(-6.0 * (1.0 - t))),
+            ),
+        );
+        Some(row.into_any_element())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -476,7 +678,9 @@ impl FuwaApp {
         c: &pb::Channel,
         active: bool,
         unread: u32,
+        quiet: bool,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let kind = pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text);
@@ -503,7 +707,8 @@ impl FuwaApp {
             )
         });
         let group = SharedString::from(format!("row-g|{}", c.id));
-        let row_action = |id: String, name: &str, show: bool, group: SharedString| {
+        // The web's row shortcuts: invite grows (`hover:scale-110`), the gear turns (`hover:rotate-45`).
+        let row_action = |id: String, name: &str, show: bool, group: SharedString, grow: bool| {
             div()
                 .id(SharedString::from(id))
                 .size(px(20.0))
@@ -514,9 +719,22 @@ impl FuwaApp {
                 .rounded(px(4.0))
                 .text_color(p.muted_foreground)
                 .when(!show, |el| el.opacity(0.0).group_hover(group, |s| s.opacity(1.0)))
-                .hover(move |s| s.text_color(fg))
+                .hover(move |s| {
+                    let s = s.text_color(fg);
+                    if grow { s.scale(1.1) } else { s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_4)) }
+                })
                 .child(icon(name).size(px(14.0)))
         };
+        // The bell and the count shrink away once they go (the web's `exit`).
+        let bell = going(&format!("row-muted-going|{}", c.id), quiet.then_some(()), window, cx);
+        let count = going(&format!("row-unread-going|{}", c.id), (unread > 0 && !active).then_some(unread), window, cx);
+        // The unread dot at the list's edge grows from its middle (the web's `scaleY`).
+        let dot = motion::follow(
+            SharedString::from(format!("row-dot|{}", c.id)),
+            if unread > 0 && !active { 1.0 } else { 0.0 },
+            window,
+            cx,
+        );
         div()
             .id(SharedString::from(format!("row|{}", c.id)))
             .group(group.clone())
@@ -537,7 +755,14 @@ impl FuwaApp {
             .text_size(px(15.04))
             .text_color(color)
             .cursor_pointer()
-            .when(!active, |el| el.hover(move |s| s.bg(hover).text_color(fg)))
+            // Muted channels are faint until pointed at (the web's `opacity-55 hover:opacity-100`).
+            .when(quiet && !active, |el| el.opacity(0.55))
+            .when(!active, |el| {
+                el.hover(move |s| {
+                    let s = s.bg(hover).text_color(fg);
+                    if quiet { s.opacity(1.0) } else { s }
+                })
+            })
             .when(!voice, |el| {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
                 el.on_click(cx.listener(move |this, _, window, cx| this.open_channel(&key, &server, &id, window, cx)))
@@ -547,15 +772,28 @@ impl FuwaApp {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
                 el.on_click(cx.listener(move |this, _, window, cx| this.open_stage(&key, &server, &id, window, cx)))
             })
-            // The unread dot at the list's edge.
-            .when(unread > 0 && !active, |el| {
-                el.child(div().absolute().left(px(-8.0)).top(px(13.25)).w(px(4.0)).h(px(8.0)).rounded_r_full().bg(fg))
+            .when(dot > 0.01, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left(px(-8.0))
+                        .top(px(17.25 - 4.0 * dot))
+                        .w(px(4.0))
+                        .h(px(8.0 * dot))
+                        .rounded_r_full()
+                        .bg(fg)
+                        .opacity(dot.clamp(0.0, 1.0)),
+                )
             })
+            // The icon brightens, grows and tips on hover (`group-hover:-rotate-12 group-hover:scale-110`).
             .child(
                 div()
+                    .id(SharedString::from(format!("row-glyph|{}", c.id)))
                     .flex_none()
                     .opacity(if active { 1.0 } else { 0.7 })
-                    .group_hover(group.clone(), |s| s.opacity(1.0))
+                    .group_hover(group.clone(), |s| {
+                        s.opacity(1.0).scale(1.1).rotate(gpui_kit::radians((-12f32).to_radians()))
+                    })
                     .child(icon(glyph).size(px(18.0)).text_color(color)),
             )
             .child(
@@ -575,7 +813,7 @@ impl FuwaApp {
                 let server = server.to_owned();
                 let channel = c.id.clone();
                 let k = key.to_owned();
-                el.child(row_action(format!("row-invite|{}", c.id), "user-plus", active, group.clone()).on_click(
+                el.child(row_action(format!("row-invite|{}", c.id), "user-plus", active, group.clone(), true).on_click(
                     cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.invite_to_channel(&k, &server, &channel, window, cx);
@@ -584,29 +822,50 @@ impl FuwaApp {
             })
             .when(manage, |el| {
                 let (k, server, channel) = (key.to_owned(), server.to_owned(), c.id.clone());
-                el.child(row_action(format!("row-edit|{}", c.id), "settings", active, group.clone()).on_click(
+                el.child(row_action(format!("row-edit|{}", c.id), "settings", active, group.clone(), false).on_click(
                     cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.open_channel_settings(&k, &server, &channel, window, cx);
                     }),
                 ))
             })
-            .when(unread > 0 && !active, |el| {
+            // Muted: a bell that pops in turning, and turns on as it goes.
+            .when_some(bell, |el, ((), left)| {
                 el.child(
                     div()
-                        .h(px(20.0))
-                        .min_w(px(20.0))
-                        .px(px(6.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
-                        .bg(p.destructive)
-                        .text_color(gpui_kit::white())
-                        .text_size(px(11.2))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(if unread > 99 { "99+".to_owned() } else { unread.to_string() }),
+                        .flex_none()
+                        .when(left < 1.0, |el| {
+                            el.scale(left).rotate(gpui_kit::radians((30.0 * (1.0 - left)).to_radians()))
+                        })
+                        .child(popped(
+                            div().flex_none().child(icon("bell-off").size(px(14.0))),
+                            SharedString::from(format!("row-muted|{}", c.id)),
+                            0.0,
+                            -30.0,
+                        )),
                 )
+            })
+            .when_some(count, |el, (unread, left)| {
+                let pill = div()
+                    .h(px(20.0))
+                    .min_w(px(20.0))
+                    .px(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(p.destructive)
+                    .text_color(gpui_kit::white())
+                    .text_size(px(11.2))
+                    .font_weight(FontWeight::EXTRA_BOLD);
+                el.child(div().flex_none().when(left < 1.0, |el| el.scale(left)).child(counted(
+                    pill,
+                    format!("row-unread|{}", c.id),
+                    unread,
+                    11.2,
+                    window,
+                    cx,
+                )))
             })
     }
 
@@ -693,6 +952,7 @@ impl FuwaApp {
             let active = matches!(&self.nav, Nav::Friends { key: k } if *k == key);
             let hover = alpha(p.primary, 0.08);
             let nav = Nav::Friends { key: key.clone() };
+            let waiting = going(&format!("friends-n-going|{key}"), (waiting > 0).then_some(waiting as u32), window, cx);
             top = top.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("friends|{key}")))
@@ -720,7 +980,16 @@ impl FuwaApp {
                                 "Friends".to_owned()
                             }),
                     )
-                    .when(waiting > 0, |el| el.child(badge(waiting as u32, &p).border_color(p.sidebar))),
+                    .when_some(waiting, |el, (waiting, left)| {
+                        el.child(div().when(left < 1.0, |el| el.scale(left)).child(badge(
+                            format!("friends-n|{key}"),
+                            waiting,
+                            p.sidebar,
+                            &p,
+                            window,
+                            cx,
+                        )))
+                    }),
                 SharedString::from(format!("friends-in|{key}")),
                 Duration::from_millis(24 * n as u64),
                 6.0,
@@ -738,6 +1007,12 @@ impl FuwaApp {
             let hover = alpha(p.primary, 0.08);
             let nav = Nav::Home { dm: Some((row.key.clone(), row.id.clone())) };
             let streamer = self.prefs.streamer_mode;
+            let unread = going(
+                &format!("dm-n-going|{}|{}", row.key, row.id),
+                (row.unread > 0 && !active).then_some(row.unread),
+                window,
+                cx,
+            );
             list = list.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("dm|{}|{}", row.key, row.id)))
@@ -782,7 +1057,14 @@ impl FuwaApp {
                                     .child(if streamer { "Encrypted".to_owned() } else { row.instance.clone() }),
                             ),
                     )
-                    .when(row.unread > 0 && !active, |el| el.child(badge(row.unread, &p).border_color(p.sidebar))),
+                    .when_some(unread, |el, (unread, left)| {
+                        let id = format!("dm-n|{}|{}", row.key, row.id);
+                        el.child(
+                            div()
+                                .when(left < 1.0, |el| el.scale(left))
+                                .child(badge(id, unread, p.sidebar, &p, window, cx)),
+                        )
+                    }),
                 SharedString::from(format!("dm-in|{}|{}", row.key, row.id)),
                 Duration::from_millis(24 * n as u64),
                 6.0,
@@ -883,55 +1165,65 @@ impl FuwaApp {
                 }
             });
         let address = url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_owned();
-        let header = div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .w_full()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .text_size(px(16.0))
-                            .line_height(px(24.0))
-                            .child(name),
-                    )
-                    .when_some(connection, |el, c| {
-                        let label = crate::core::i18n::t(match c {
-                            crate::core::store::Connection::Live => "workspace.connection.live",
-                            crate::core::store::Connection::Connecting => "workspace.connection.connecting",
-                            crate::core::store::Connection::Reconnecting => "workspace.connection.reconnecting",
-                            crate::core::store::Connection::Offline => "workspace.connection.offline",
-                            crate::core::store::Connection::SignedOut => "workspace.connection.signedOut",
-                        });
-                        el.child(
+        let shown_host = if streamer { "•••••".to_owned() } else { address.clone() };
+        let hosted = crate::ui::instance_home::hosted_by_us(&url).then(|| hosted_mark(&shown_host, window, cx));
+        // The gear turns a quarter as you point at it (the web's `group-hover:rotate-90`, 500ms).
+        let gear_id = SharedString::from("instance-settings");
+        let header =
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .w_full()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
                             div()
                                 .flex()
                                 .items_center()
-                                .gap(px(6.0))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_size(px(12.0))
-                                .line_height(px(16.0))
-                                .text_color(p.muted_foreground)
-                                .child(conn_dot(c, &p).size(px(8.8)).border_0())
-                                .child(format!("{label} · {}", if streamer { "•••••" } else { address.as_str() })),
+                                .gap(px(4.0))
+                                .min_w_0()
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .text_size(px(16.0))
+                                .line_height(px(24.0))
+                                .child(
+                                    div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(
+                                        motion::swap_text(format!("instance-name|{key}"), name, 16.0, window, cx),
+                                    ),
+                                )
+                                .when_some(hosted, |el, mark| el.child(mark)),
                         )
-                    }),
-            )
-            .when(admin, |el| {
-                // Instance settings, for its admins; the gear turns as you point at it.
-                let k = key.to_owned();
-                let (bg, fg) = (p.muted, p.foreground);
-                el.child(
-                    div()
-                        .id("instance-settings")
+                        .when_some(connection, |el, c| {
+                            let label = crate::core::i18n::t(match c {
+                                crate::core::store::Connection::Live => "workspace.connection.live",
+                                crate::core::store::Connection::Connecting => "workspace.connection.connecting",
+                                crate::core::store::Connection::Reconnecting => "workspace.connection.reconnecting",
+                                crate::core::store::Connection::Offline => "workspace.connection.offline",
+                                crate::core::store::Connection::SignedOut => "workspace.connection.signedOut",
+                            });
+                            el.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_size(px(12.0))
+                                    .line_height(px(16.0))
+                                    .text_color(p.muted_foreground)
+                                    .child(conn_dot(c, &p).size(px(8.8)).border_0())
+                                    .child(format!("{label} · {}", if streamer { "•••••" } else { address.as_str() })),
+                            )
+                        }),
+                )
+                .when(admin, |el| {
+                    // Instance settings, for its admins; the gear turns as you point at it.
+                    let k = key.to_owned();
+                    let (bg, fg) = (p.muted, p.foreground);
+                    let button = div()
+                        .id(gear_id.clone())
                         .size(px(32.0))
                         .flex_none()
                         .flex()
@@ -941,51 +1233,82 @@ impl FuwaApp {
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .hover(move |s| s.bg(bg).text_color(fg))
-                        .on_click(cx.listener(move |this, _, window, cx| this.open_instance_settings(&k, window, cx)))
-                        .child(icon("settings").size(px(16.0))),
-                )
-            })
-            .into_any_element();
+                        .active(|s| s.scale(0.9))
+                        .on_click(cx.listener(move |this, _, window, cx| this.open_instance_settings(&k, window, cx)));
+                    let (button, now) = motion::pointer(button, &gear_id, window, cx);
+                    let turn = motion::follow_pose(
+                        &gear_id,
+                        if now.hovered { motion::Pose::turn(90.0) } else { motion::Pose::REST },
+                        window,
+                        cx,
+                    );
+                    el.child(button.child(motion::posed(div(), turn).child(icon("settings").size(px(16.0)))))
+                })
+                .into_any_element();
 
         // A link at the top: Friends or Browse servers.
-        let link =
-            |id: &str, glyph: &str, label: String, active: bool, count: usize, nav: Nav, cx: &mut Context<Self>| {
-                let (bg, fg) = (p.muted, p.foreground);
-                div()
-                    .id(SharedString::from(id.to_owned()))
-                    .px(px(8.0))
-                    .py(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(crate::ui::theme::radius_lg())
-                    .text_size(px(14.0))
-                    .line_height(px(20.0))
-                    .font_weight(FontWeight::BOLD)
-                    .cursor_pointer()
-                    .when(active, |el| el.bg(alpha(p.primary, 0.15)).text_color(p.primary))
-                    .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(bg).text_color(fg)))
-                    .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
-                    .child(icon(glyph).size(px(16.0)))
-                    .child(label)
-                    .when(count > 0, |el| {
-                        el.child(div().flex_1()).child(
-                            div()
-                                .h(px(20.0))
-                                .min_w(px(20.0))
-                                .px(px(6.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .bg(p.primary)
-                                .text_color(p.primary_foreground)
-                                .text_size(px(11.2))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(if count > 99 { "99+".to_owned() } else { count.to_string() }),
-                        )
-                    })
-            };
+        let link = |id: &str,
+                    glyph: &str,
+                    label: String,
+                    active: bool,
+                    count: usize,
+                    nav: Nav,
+                    window: &mut Window,
+                    cx: &mut Context<Self>| {
+            let (bg, fg) = (p.muted, p.foreground);
+            let group = SharedString::from(format!("{id}|g"));
+            // Friends' people grow a little on hover (`group-hover:scale-110`).
+            let grow = glyph == "users";
+            div()
+                .id(SharedString::from(id.to_owned()))
+                .group(group.clone())
+                .px(px(8.0))
+                .py(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .rounded(crate::ui::theme::radius_lg())
+                .text_size(px(14.0))
+                .line_height(px(20.0))
+                .font_weight(FontWeight::BOLD)
+                .cursor_pointer()
+                .when(active, |el| el.bg(alpha(p.primary, 0.15)).text_color(p.primary))
+                .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(bg).text_color(fg)))
+                .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("{id}|glyph")))
+                        .flex_none()
+                        .when(grow, |el| el.group_hover(group, |s| s.scale(1.1)))
+                        .child(icon(glyph).size(px(16.0))),
+                )
+                .child(label)
+                .when_some(
+                    going(&format!("{id}|n-going"), (count > 0).then_some(count), window, cx),
+                    |el, (count, left)| {
+                        let pill = div()
+                            .h(px(20.0))
+                            .min_w(px(20.0))
+                            .px(px(6.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .bg(p.primary)
+                            .text_color(p.primary_foreground)
+                            .text_size(px(11.2))
+                            .font_weight(FontWeight::EXTRA_BOLD);
+                        el.child(div().flex_1()).child(div().when(left < 1.0, |el| el.scale(left)).child(counted(
+                            pill,
+                            format!("{id}|n"),
+                            count as u32,
+                            11.2,
+                            window,
+                            cx,
+                        )))
+                    },
+                )
+        };
         let mut body = div().pt(px(8.0)).flex().flex_col();
         if friends_on {
             let active = matches!(&self.nav, Nav::Friends { key: k } if k == key);
@@ -996,6 +1319,7 @@ impl FuwaApp {
                 active,
                 waiting,
                 Nav::Friends { key: key.to_owned() },
+                window,
                 cx,
             ));
         }
@@ -1007,6 +1331,7 @@ impl FuwaApp {
             browsing,
             0,
             Nav::Instance { key: key.to_owned() },
+            window,
             cx,
         ));
 
@@ -1101,9 +1426,38 @@ impl FuwaApp {
             let nav = Nav::Home { dm: Some((key.to_owned(), dm.id.clone())) };
             let hover = p.muted;
             let line = if dm.line.is_empty() || streamer { t("dms-calls.dm.encrypted") } else { dm.line.clone() };
-            section = section.child(motion::rise(
+            // The web's DmList row: on hover the avatar tips, the padlock grows and the name nudges right.
+            let group = SharedString::from(format!("dm-g|{key}|{}", dm.id));
+            let line = motion::swap_text(format!("dm-line|{key}|{}", dm.id), line, 12.0, window, cx);
+            let calling = going(&format!("dm-call-going|{key}|{}", dm.id), dm.calling.then_some(()), window, cx);
+            let unread =
+                going(&format!("dm-n-going|{key}|{}", dm.id), (dm.unread > 0).then_some(dm.unread), window, cx);
+            let unread = unread.map(|(count, left)| {
+                let pill = div()
+                    .h(px(20.0))
+                    .min_w(px(20.0))
+                    .px(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(p.primary)
+                    .text_color(p.primary_foreground)
+                    .text_size(px(11.2))
+                    .font_weight(FontWeight::EXTRA_BOLD);
+                div().flex_none().when(left < 1.0, |el| el.scale(left)).child(counted(
+                    pill,
+                    format!("dm-n|{key}|{}", dm.id),
+                    count,
+                    11.2,
+                    window,
+                    cx,
+                ))
+            });
+            section = section.child(slide_from_left(
                 div()
                     .id(SharedString::from(format!("dm|{key}|{}", dm.id)))
+                    .group(group.clone())
                     .on_mouse_down(
                         MouseButton::Right,
                         self.right_click(MenuOf::Dm { key: key.to_owned(), conversation: dm.id.clone() }, cx),
@@ -1121,20 +1475,36 @@ impl FuwaApp {
                     .when(!active, |el| el.hover(move |s| s.bg(hover)))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
                     .child(
-                        div().relative().flex_none().child(avatar(dm.other.as_ref(), 32.0, &p)).child(
-                            div()
-                                .absolute()
-                                .right(px(-2.0))
-                                .bottom(px(-2.0))
-                                .size(px(14.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .bg(p.card)
-                                .text_color(emerald)
-                                .child(icon("lock-keyhole").size(px(10.0))),
-                        ),
+                        div()
+                            .relative()
+                            .flex_none()
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("dm-face|{key}|{}", dm.id)))
+                                    .group_hover(group.clone(), |s| {
+                                        s.scale(1.05).rotate(gpui_kit::radians((-3f32).to_radians()))
+                                    })
+                                    .child(avatar(dm.other.as_ref(), 32.0, &p)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .right(px(-2.0))
+                                    .bottom(px(-2.0))
+                                    .size(px(14.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .bg(p.card)
+                                    .text_color(emerald)
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("dm-lock|{key}|{}", dm.id)))
+                                            .group_hover(group.clone(), |s| s.scale(1.25))
+                                            .child(icon("lock-keyhole").size(px(10.0))),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
@@ -1142,11 +1512,13 @@ impl FuwaApp {
                             .min_w_0()
                             .child(
                                 div()
+                                    .id(SharedString::from(format!("dm-name|{key}|{}", dm.id)))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .font_weight(FontWeight::BOLD)
                                     .line_height(px(20.0))
+                                    .group_hover(group.clone(), |s| s.translate_x(px(2.0)))
                                     .child(who),
                             )
                             .child(
@@ -1162,40 +1534,35 @@ impl FuwaApp {
                                     .child(line),
                             ),
                     )
-                    .when(dm.calling, |el| {
+                    // A call going on: the green phone pops in turning.
+                    // Once it ends, it shrinks away turning on.
+                    .when_some(calling, |el, ((), left)| {
                         el.child(
                             div()
-                                .size(px(24.0))
                                 .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .bg(gpui_kit::rgb(0x3ba55d))
-                                .text_color(gpui_kit::white())
-                                .child(icon("phone-call").size(px(14.0))),
+                                .when(left < 1.0, |el| {
+                                    el.scale(left).rotate(gpui_kit::radians((40.0 * (1.0 - left)).to_radians()))
+                                })
+                                .child(popped(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded_full()
+                                        .bg(gpui_kit::rgb(0x3ba55d))
+                                        .text_color(gpui_kit::white())
+                                        .child(icon("phone-call").size(px(14.0))),
+                                    SharedString::from(format!("dm-call|{key}|{}", dm.id)),
+                                    0.0,
+                                    -40.0,
+                                )),
                         )
                     })
-                    .when(dm.unread > 0, |el| {
-                        el.child(
-                            div()
-                                .h(px(20.0))
-                                .min_w(px(20.0))
-                                .px(px(6.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .bg(p.primary)
-                                .text_color(p.primary_foreground)
-                                .text_size(px(11.2))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(if dm.unread > 99 { "99+".to_owned() } else { dm.unread.to_string() }),
-                        )
-                    }),
+                    .when_some(unread, |el, unread| el.child(unread)),
                 SharedString::from(format!("dm-in|{key}|{}", dm.id)),
                 Duration::from_millis(30 * n.min(12) as u64),
-                6.0,
             ));
         }
         body = body.child(section);
@@ -1207,7 +1574,9 @@ impl FuwaApp {
             let hover = p.muted;
             let nav = Nav::Server { key: key.to_owned(), server: server.id.clone() };
             let group = SharedString::from(format!("is-g|{}", server.id));
-            body = body.child(motion::rise(
+            // The web's ServerLink: on hover the icon tips and grows, the name
+            // nudges right and a # slides in at the end.
+            body = body.child(slide_from_left(
                 div()
                     .id(SharedString::from(format!("is|{}", server.id)))
                     .group(group.clone())
@@ -1221,35 +1590,45 @@ impl FuwaApp {
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
-                    .child(server_icon(server, 28.0, 14.0, &p).text_size(px(10.4)))
                     .child(
                         div()
+                            .id(SharedString::from(format!("is-face|{}", server.id)))
+                            .flex_none()
+                            .group_hover(group.clone(), |s| {
+                                s.scale(1.1).rotate(gpui_kit::radians((-6f32).to_radians()))
+                            })
+                            .child(server_icon(server, 28.0, 14.0, &p).text_size(px(10.4))),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("is-name|{}", server.id)))
                             .min_w_0()
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .font_weight(FontWeight::BOLD)
+                            .group_hover(group.clone(), |s| s.translate_x(px(2.0)))
                             .child(server.name.clone()),
                     )
                     .child(div().flex_1())
                     .child(
                         div()
+                            .id(SharedString::from(format!("is-hash|{}", server.id)))
                             .opacity(0.0)
-                            .group_hover(group, |s| s.opacity(1.0))
+                            .translate_x(px(-4.0))
+                            .group_hover(group, |s| s.opacity(1.0).translate_x(px(0.0)))
                             .text_color(p.muted_foreground)
                             .child(icon("hash").size(px(14.0))),
                     ),
                 SharedString::from(format!("is-in|{}", server.id)),
                 Duration::from_millis(30 * n.min(12) as u64),
-                6.0,
             ));
         }
-        let _ = window;
         (header, body.into_any_element())
     }
 
     /// Who you are, where: your picture, your name, and the way to settings.
-    fn me_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn me_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let key = match &self.nav {
             Nav::Server { key, .. }
@@ -1292,6 +1671,19 @@ impl FuwaApp {
                 .unwrap_or_default()
         };
         let (muted, deaf) = self.core.selves();
+        let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+        // Your name and the line under it swap when they change (the web's `SwapText`).
+        let name = motion::swap_text(format!("me-name|{me_id}"), name, 14.0, window, cx);
+        let sub = motion::swap_text(format!("me-sub|{me_id}"), sub, 12.0, window, cx);
+        // The gear turns half a turn as you point at it (the web's `group-hover:rotate-180`, 500ms).
+        let gear_id = SharedString::from("me-settings");
+        let (gear, gear_now) = motion::pointer(panel_toggle("me-settings", "", false, &p), &gear_id, window, cx);
+        let gear_turn = motion::follow_pose(
+            &gear_id,
+            if gear_now.hovered { motion::Pose::turn(180.0) } else { motion::Pose::REST },
+            window,
+            cx,
+        );
         // The web's UserPanel: you (opening your status), then mute, deafen and settings.
         div()
             .flex_none()
@@ -1318,6 +1710,7 @@ impl FuwaApp {
                 let hover = p.muted;
                 div()
                     .id("me-status")
+                    .group("me-status")
                     .flex_1()
                     .min_w_0()
                     .flex()
@@ -1332,33 +1725,59 @@ impl FuwaApp {
                             cx.notify();
                         }))
                     })
-                    .child(div().relative().child(avatar(me.as_ref(), 32.0, &p)).child(dot))
-                    .child(
+                    // Switching accounts lifts the other one in (the web's `swap-in`, keyed by who you are).
+                    .child(motion::rise(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .overflow_hidden()
                             .flex()
-                            .flex_col()
+                            .items_center()
+                            .gap(px(8.0))
                             .child(
                                 div()
-                                    .text_size(px(14.0))
-                                    .line_height(px(20.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(name),
+                                    .relative()
+                                    .flex_none()
+                                    // The avatar tips and grows on hover (`group-hover:-rotate-6 group-hover:scale-110`).
+                                    .child(
+                                        div()
+                                            .id("me-avatar")
+                                            .group_hover("me-status", |s| {
+                                                s.scale(1.1).rotate(gpui_kit::radians((-6f32).to_radians()))
+                                            })
+                                            .child(avatar(me.as_ref(), 32.0, &p)),
+                                    )
+                                    .child(dot),
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.0))
-                                    .line_height(px(16.0))
-                                    .text_color(p.muted_foreground)
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(sub),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .text_size(px(14.0))
+                                            .line_height(px(20.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .child(name),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .line_height(px(16.0))
+                                            .text_color(p.muted_foreground)
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .child(sub),
+                                    ),
                             ),
-                    )
+                        SharedString::from(format!("me-in|{me_id}")),
+                        Duration::ZERO,
+                        6.0,
+                    ))
             })
             .child(panel_toggle("me-mute", if muted { "mic-off" } else { "mic" }, muted, &p).on_click(cx.listener(
                 move |this, _, _, cx| {
@@ -1373,14 +1792,262 @@ impl FuwaApp {
                 }),
             ))
             .child(
-                panel_toggle("me-settings", "settings", false, &p)
+                gear.child(motion::posed(div(), gear_turn).child(icon("settings").size(px(18.0))))
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
     }
 }
 
+/// A row coming in from the left after `delay`, as the web's lists do
+/// (`initial={{ opacity: 0, x: -10 }}` on its `SPRING`).
+fn slide_from_left<E: IntoElement + gpui_kit::Styled + 'static>(
+    el: E,
+    id: impl Into<gpui_kit::ElementId>,
+    delay: Duration,
+) -> impl IntoElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(520.0, 34.0, 1.0), 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    let easing = move |t: f32| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) };
+    el.with_animation(id, Animation::new(total).with_easing(easing), |el, t| {
+        el.opacity(t.clamp(0.0, 1.0)).translate_x(px((1.0 - t) * -10.0))
+    })
+}
+
+/// How many are waiting to be let in on the server open (`of`, "key/id"), and
+/// whether its settings were open, so the count is read again once they close.
+#[derive(Default)]
+struct Waiting {
+    of: String,
+    count: usize,
+    reviewing: bool,
+}
+
+/// Whether the hosted badge's card is open, and when it last closed.
+#[derive(Default)]
+struct HostedCard {
+    open: bool,
+    closed_at: Option<std::time::Instant>,
+}
+
+/// The web's `HostedBadge` mark beside a Waifu Devs instance's name: a flower
+/// that turns a fifth on hover (700ms) and names who hosts it. Pressed, it
+/// opens the card saying what that means ([`with_hosted_card`]). `host` is the
+/// address shown, hidden in streamer mode.
+fn hosted_mark(host: &str, window: &mut Window, cx: &mut gpui_kit::App) -> AnyElement {
+    let p = pal(cx);
+    let id = SharedString::from("hosted-mark");
+    let hover = alpha(p.primary, 0.15);
+    let mark = div()
+        .id(id.clone())
+        .size(px(20.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .text_color(p.primary)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .active(|s| s.scale(0.9));
+    let (mark, now) = motion::pointer(mark, &id, window, cx);
+    let turn =
+        motion::follow_pose(&id, if now.hovered { motion::Pose::turn(72.0) } else { motion::Pose::REST }, window, cx);
+    let mark = mark.child(motion::posed(div(), turn).child(icon("flower").size(px(14.0))));
+    with_hosted_card(mark, "sidebar", host, true, window, cx)
+}
+
+/// Opens the hosted badge's card under `trigger` when it's pressed (the web's
+/// `HostedBadge` popover, from the sidebar's mark or the instance page's chip);
+/// a press anywhere else closes it. `tip` names who hosts it on hover while
+/// it's closed. `site` keeps each trigger's card apart.
+pub(crate) fn with_hosted_card(
+    trigger: gpui_kit::Stateful<gpui_kit::Div>,
+    site: &str,
+    host: &str,
+    tip: bool,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> AnyElement {
+    let p = pal(cx);
+    let label = t("shell.hosted.label");
+    let state =
+        window.use_keyed_state(SharedString::from(format!("hosted-card|{site}")), cx, |_, _| HostedCard::default());
+    let open = state.read(cx).open;
+    let toggle = state.clone();
+    let trigger = trigger
+        .on_click(move |_, _, cx| {
+            toggle.update(cx, |card, cx| {
+                // The press that closed it from outside isn't one to open it again.
+                if !card.open && card.closed_at.is_some_and(|at| at.elapsed() < Duration::from_millis(250)) {
+                    return;
+                }
+                card.open = !card.open;
+                if !card.open {
+                    card.closed_at = Some(std::time::Instant::now());
+                }
+                cx.notify();
+            });
+        })
+        .when(tip && !open, |el| {
+            let label = label.clone();
+            el.tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+        });
+
+    // Closed, it fades, shrinks to 95% and lifts 4px (the web's `exit`).
+    let leaving = motion::kept(&format!("hosted-card|{site}"), open.then_some(&()), window, cx);
+    let gone = match (open, leaving) {
+        (true, _) => 0.0,
+        (false, Some((_, t))) => gpui_kit::ease_out_quint()(t),
+        _ => return div().relative().child(trigger).into_any_element(),
+    };
+    let card = hosted_card(host, &label, &p, state);
+    let card = div()
+        .when(gone > 0.0, |el| el.opacity(1.0 - gone).scale(1.0 - 0.05 * gone).translate_y(px(-4.0 * gone)))
+        .child(card);
+    div()
+        .relative()
+        .child(trigger)
+        // The web's side="bottom" align="start", 8px under the trigger.
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top(px(28.0))
+                .child(gpui_kit::deferred(gpui_kit::anchored().child(card)).with_priority(2)),
+        )
+        .into_any_element()
+}
+
+/// The hosted badge's card: the flower on its tile, who runs the instance,
+/// that the address was checked, why only these get the badge, and a link to
+/// read more. It grows in from 90% and drops 6px into place on the app's
+/// spring, its lines following one after another.
+fn hosted_card(host: &str, label: &str, p: &Palette, state: gpui_kit::Entity<HostedCard>) -> AnyElement {
+    const SPRING: (f32, f32) = (520.0, 34.0);
+    let line = |el: gpui_kit::Div, id: &'static str, delay: u64| {
+        motion::spring_in(el, id, SPRING, Duration::from_millis(delay), |el, t| {
+            el.opacity(t.clamp(0.0, 1.0)).translate_y(px(4.0 * (1.0 - t)))
+        })
+    };
+    let link_fg = p.primary;
+    let card = div()
+        .id("hosted-card")
+        .relative()
+        .w(px(320.0))
+        .overflow_hidden()
+        .p(px(16.0))
+        .rounded(crate::ui::theme::radius_2xl())
+        .border_1()
+        .border_color(p.border)
+        .bg(p.card)
+        .text_color(p.foreground)
+        .shadow_xl()
+        .occlude()
+        .on_mouse_down_out(move |_, _, cx| {
+            state.update(cx, |card, cx| {
+                if card.open {
+                    card.open = false;
+                    card.closed_at = Some(std::time::Instant::now());
+                    cx.notify();
+                }
+            });
+        })
+        // A soft glow of the primary in the corner (the web's blurred `bg-primary/20` circle).
+        .child(div().absolute().top(px(-64.0)).right(px(-48.0)).size(px(160.0)).rounded_full().shadow(vec![
+            gpui_kit::BoxShadow {
+                color: alpha(p.primary, 0.2),
+                offset: gpui_kit::point(px(0.0), px(0.0)),
+                blur_radius: px(40.0),
+                spread_radius: px(-20.0),
+                inset: false,
+            },
+        ]))
+        .child(
+            div()
+                .relative()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .size(px(44.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(crate::ui::theme::radius_2xl())
+                        .bg(alpha(p.primary, 0.15))
+                        .text_color(p.primary)
+                        // The flower opens as the card does.
+                        .child(popped(div().child(icon("flower").size(px(28.0))), "hosted-card-flower", 0.0, -72.0)),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .child(div().font_weight(FontWeight::EXTRA_BOLD).child(label.to_owned()))
+                        .child(div().text_xs().text_color(p.muted_foreground).child(t("shell.hosted.who"))),
+                ),
+        )
+        .child(line(
+            div()
+                .relative()
+                .mt(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(crate::ui::theme::radius_xl())
+                .bg(alpha(p.muted, 0.6))
+                .text_xs()
+                .child(icon("lock").size(px(14.0)).text_color(gpui_kit::rgb(if p.dark { 0x34d399 } else { 0x059669 })))
+                .child(div().min_w_0().child(crate::core::i18n::t_with(
+                    "shell.hosted.checked",
+                    &[("host", crate::core::i18n::Arg::Str(host))],
+                ))),
+            "hosted-card-checked",
+            150,
+        ))
+        .child(line(
+            div().relative().mt(px(12.0)).text_xs().text_color(p.muted_foreground).child(t("shell.hosted.why")),
+            "hosted-card-why",
+            220,
+        ))
+        .child(motion::fade_in(
+            div()
+                .id("hosted-card-about")
+                .group("hosted-about")
+                .relative()
+                .mt(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(link_fg)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .on_click(|_, _, cx| cx.open_url("https://www.waifu.dev/projects"))
+                .child(t("shell.hosted.about"))
+                .child(
+                    div()
+                        .id("hosted-card-arrow")
+                        .group_hover("hosted-about", |s| s.translate_x(px(2.0)).translate_y(px(-2.0)))
+                        .child(icon("arrow-up-right").size(px(14.0))),
+                ),
+            "hosted-card-about-in",
+            Duration::from_millis(500),
+        ));
+    motion::spring_in(card, "hosted-card-in", SPRING, Duration::ZERO, |el, t| {
+        el.opacity(t.clamp(0.0, 1.0)).transform_origin(0.0, 0.0).scale(0.9 + 0.1 * t).translate_y(px(-6.0 * (1.0 - t)))
+    })
+}
+
 /// The web's small panel buttons (`size-8 rounded-lg`, an 18px icon): muted
-/// until hovered, red on the destructive tint while on.
+/// until hovered, red on the destructive tint while on, dipping while pressed.
+/// Switched, the icon pops in turning (mic one way, headphones the other).
+/// Without a `name`, the caller draws the icon.
 fn panel_toggle(id: &'static str, name: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (hover_bg, hover_fg) =
         if on { (alpha(p.destructive, 0.2), p.destructive) } else { (p.muted.into(), p.foreground) };
@@ -1396,8 +2063,17 @@ fn panel_toggle(id: &'static str, name: &str, on: bool, p: &Palette) -> gpui_kit
         .when(on, |el| el.bg(alpha(p.destructive, 0.12)).text_color(p.destructive))
         .when(!on, |el| el.text_color(p.muted_foreground))
         .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-        .active(|s| s.opacity(0.85))
-        .child(icon(name).size(px(18.0)))
+        .active(|s| s.scale(0.9))
+        .when(!name.is_empty(), |el| {
+            let turn = if id == "me-mute" { -25.0 } else { 25.0 };
+            el.child(motion::pop(
+                div().child(icon(name).size(px(18.0))),
+                SharedString::from(format!("{id}|{on}")),
+                0.5,
+                turn,
+                Duration::ZERO,
+            ))
+        })
 }
 
 /// Soft placeholder rows while a server's channels arrive.

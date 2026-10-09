@@ -369,7 +369,8 @@ impl FuwaApp {
             .items_center()
             .gap(px(8.0))
             .text_center()
-            .child(motion::once(
+            // The icon springs up from half its size, turning upright.
+            .child(motion::pop(
                 div().child(ringed_icon(server, 80.0, 25.6, 4.0, p).shadow(vec![BoxShadow {
                     color: alpha(accent.into(), 0.7),
                     offset: point(px(0.0), px(14.0)),
@@ -378,11 +379,9 @@ impl FuwaApp {
                     inset: false,
                 }])),
                 SharedString::from(format!("invite-icon|{}", server.id)),
-                Duration::from_millis(600),
-                |el, t| {
-                    let s = 1.0 - (1.0 - t).powi(3) * (1.0 + 2.6 * t);
-                    el.relative().top(px(12.0 * (1.0 - s))).opacity(t.min(1.0))
-                },
+                0.5,
+                -14.0,
+                Duration::from_millis(100),
             ))
             .child(
                 div()
@@ -403,14 +402,14 @@ impl FuwaApp {
                     .text_size(px(14.0))
                     .line_height(px(20.0))
                     .text_color(p.muted_foreground)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(icon("users").size(px(14.0)))
-                            .child(t_with("workspace.invitePage.members", &[("count", Arg::Num(members))])),
-                    )
+                    .child(div().flex().items_center().gap(px(4.0)).child(icon("users").size(px(14.0))).child(
+                        motion::counted(
+                            format!("invite-members|{}", server.id),
+                            "workspace.invitePage.members",
+                            members.max(0) as u64,
+                            14.0,
+                        ),
+                    ))
                     .when(!found.channel_name.is_empty(), |el| {
                         el.child(
                             div()
@@ -516,7 +515,8 @@ impl FuwaApp {
                 .child(inner)
                 .children(expires)
         };
-        motion::rise(
+        // It rises in from a little smaller (`y: 24, scale: 0.96`).
+        motion::pop_in(
             div()
                 .w(px(w))
                 .flex()
@@ -538,7 +538,8 @@ impl FuwaApp {
                 .child(body)
                 .child(footer),
             SharedString::from(format!("invite-card|{key}|{}", server.id)),
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             24.0,
         )
         .into_any_element()
@@ -575,6 +576,8 @@ impl FuwaApp {
             )
             .child(
                 filled_button("elsewhere-go", 36.0, p.primary, p.primary_foreground, p)
+                    // `whileHover={{ scale: 1.02 }}` around the button's own lift.
+                    .hover(|s| s.scale(1.02))
                     .flex_1()
                     .child(t_with("workspace.invitePage.elsewhere.continue", &[("host", Arg::Str(&host))]))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -585,9 +588,16 @@ impl FuwaApp {
                         cx.notify();
                     })),
             );
-        motion::rise(
+        // The card rises in from a little smaller, its globe springing up from half its size.
+        motion::pop_in(
             small_card(p)
-                .child(round_badge(alpha(p.primary, 0.15), p.primary.into(), globe))
+                .child(motion::pop(
+                    round_badge(alpha(p.primary, 0.15), p.primary.into(), globe),
+                    "elsewhere-badge",
+                    0.5,
+                    -20.0,
+                    Duration::from_millis(100),
+                ))
                 .child(
                     div()
                         .text_xl()
@@ -597,7 +607,8 @@ impl FuwaApp {
                 .child(div().text_sm().text_color(p.muted_foreground).child(about))
                 .child(actions),
             SharedString::from(format!("elsewhere|{key}")),
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             16.0,
         )
         .into_any_element()
@@ -612,7 +623,7 @@ impl FuwaApp {
                 let a = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 0.25;
                 el.rotate(gpui_kit::radians(a))
             });
-        motion::rise(
+        motion::pop_in(
             small_card(p)
                 .child(round_badge(p.muted.into(), p.muted_foreground.into(), wiggle))
                 .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(if gone {
@@ -636,7 +647,8 @@ impl FuwaApp {
                         })),
                 ),
             "broken-card",
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             16.0,
         )
         .into_any_element()
@@ -832,7 +844,10 @@ impl FuwaApp {
                     .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                     .occlude()
                     .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-                    .child(motion::dialog_in(panel, SharedString::from(format!("join-dialog-{tag_name}")))),
+                    .child(
+                        crate::ui::overlay::leaving_pose(div(), 24.0, 0.97, cx)
+                            .child(motion::dialog_in(panel, SharedString::from(format!("join-dialog-{tag_name}")))),
+                    ),
                 SharedString::from(format!("join-dialog-fade-{tag_name}")),
                 Duration::from_millis(200),
             )
@@ -904,11 +919,17 @@ impl FuwaApp {
                 let apply = self.home.apply.as_ref().expect("checked above");
                 let (agreed, sending, error, nudges) = (apply.agreed, apply.sending, apply.error.clone(), apply.nudges);
                 let send = filled_button("apply-send", 44.0, p.primary, p.primary_foreground, p)
+                    .group("apply-send")
                     .when(sending, |el| el.opacity(0.5))
                     .child(if sending {
                         spinner(16.0, "apply-send", window)
                     } else {
-                        icon("send").size(px(16.0)).into_any_element()
+                        // The plane leans off up and right as the button's hovered.
+                        div()
+                            .id("apply-send-plane")
+                            .group_hover("apply-send", |s| s.translate_x(px(2.0)).translate_y(px(-2.0)))
+                            .child(icon("send").size(px(16.0)))
+                            .into_any_element()
                     })
                     .child(t("join.applyDialog.send"))
                     .on_click(cx.listener(|this, _, window, cx| this.send_application(window, cx)));
@@ -1227,11 +1248,13 @@ impl FuwaApp {
                     .border_1()
                     .border_color(p.border)
                     .bg(p.muted)
-                    .child(motion::once(
+                    // The first letter bounces in as it changes.
+                    .child(motion::pop(
                         server_icon(&preview, 78.0, 24.6, p).text_size(px(20.0)),
                         SharedString::from(format!("create-initial-{initial}")),
-                        Duration::from_millis(300),
-                        |el, t| el.opacity(0.6 + 0.4 * t),
+                        0.8,
+                        -8.0,
+                        Duration::ZERO,
                     )),
             )
             .when(uploading, |el| {
@@ -1343,62 +1366,84 @@ impl FuwaApp {
                 .map(|r| r.name.clone())
                 .unwrap_or_else(|| t("workspace.createServer.homeRegion"));
             let picked_name = picked.as_ref().map(|r| r.name.clone()).unwrap_or_default();
+            // Where each chip was drawn last, so the picked one's tint glides between them.
+            let spots = window.use_keyed_state("create-region-spots", cx, |_, _| Spots::default()).read(cx).clone();
+            let lit = picked.as_ref().and_then(|r| spots.at(&r.id));
+            let tint = lit.map(|(x, y, w, h)| {
+                let pill = div().size_full().rounded_full().bg(alpha(p.primary, 0.15));
+                let pill =
+                    motion::glide(div().h(px(h)).child(pill), "create-region|w".into(), w, cx, |el, v| el.w(px(v)));
+                let pill =
+                    motion::glide(div().absolute().top_0().child(pill), "create-region|x".into(), x, cx, |el, v| {
+                        el.left(px(v))
+                    });
+                motion::glide(div().absolute().left_0().child(pill), "create-region|y".into(), y, cx, |el, v| {
+                    el.top(px(v))
+                })
+            });
+            let chips =
+                div().relative().flex().flex_wrap().gap(px(8.0)).child(spots.measure("")).children(tint).children(
+                    regions.iter().map(|r| {
+                        let on = picked.as_ref().is_some_and(|x| x.id == r.id);
+                        let (k, id) = (place_key.clone(), r.id.clone());
+                        let mark: String = region_mark(&r.name);
+                        let hover = alpha(p.primary, 0.5);
+                        div()
+                            .id(SharedString::from(format!("region|{}", r.id)))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .py(px(6.0))
+                            .pl(px(6.0))
+                            .pr(px(12.0))
+                            .rounded_full()
+                            .border_1()
+                            .relative()
+                            .border_color(if on { p.primary.into() } else { Hsla::from(p.border) })
+                            .bg(if on && lit.is_none() { alpha(p.primary, 0.15) } else { hsla(0.0, 0.0, 0.0, 0.0) })
+                            .child(spots.measure(&r.id))
+                            .text_color(if on { p.primary } else { p.foreground })
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .cursor_pointer()
+                            .when(!on, |el| el.hover(move |s| s.border_color(hover)))
+                            .child(
+                                div()
+                                    .size(px(24.0))
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(if on { p.primary } else { p.muted })
+                                    .text_color(if on { p.primary_foreground } else { p.muted_foreground })
+                                    .text_size(px(9.6))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .child(mark),
+                            )
+                            .child(r.name.clone())
+                            .when(r.home, |el| {
+                                el.child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::NORMAL)
+                                        .text_color(p.muted_foreground)
+                                        .child(t("workspace.createServer.home")),
+                                )
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.home.create.region = Some((k.clone(), id.clone()));
+                                cx.notify();
+                            }))
+                    }),
+                );
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
                 .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("workspace.createServer.region")))
-                .child(div().flex().flex_wrap().gap(px(8.0)).children(regions.iter().map(|r| {
-                    let on = picked.as_ref().is_some_and(|x| x.id == r.id);
-                    let (k, id) = (place_key.clone(), r.id.clone());
-                    let mark: String = region_mark(&r.name);
-                    let hover = alpha(p.primary, 0.5);
-                    div()
-                        .id(SharedString::from(format!("region|{}", r.id)))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .py(px(6.0))
-                        .pl(px(6.0))
-                        .pr(px(12.0))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(if on { p.primary.into() } else { Hsla::from(p.border) })
-                        .bg(if on { alpha(p.primary, 0.15) } else { hsla(0.0, 0.0, 0.0, 0.0) })
-                        .text_color(if on { p.primary } else { p.foreground })
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .when(!on, |el| el.hover(move |s| s.border_color(hover)))
-                        .child(
-                            div()
-                                .size(px(24.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if on { p.primary } else { p.muted })
-                                .text_color(if on { p.primary_foreground } else { p.muted_foreground })
-                                .text_size(px(9.6))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(mark),
-                        )
-                        .child(r.name.clone())
-                        .when(r.home, |el| {
-                            el.child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::NORMAL)
-                                    .text_color(p.muted_foreground)
-                                    .child(t("workspace.createServer.home")),
-                            )
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.home.create.region = Some((k.clone(), id.clone()));
-                            cx.notify();
-                        }))
-                })))
-                .child(
+                .child(chips)
+                // The note comes in again for each region picked.
+                .child(motion::rise(
                     div()
                         .flex()
                         .items_start()
@@ -1410,10 +1455,14 @@ impl FuwaApp {
                             "workspace.createServer.regionNote",
                             &[("region", Arg::Str(&picked_name)), ("home", Arg::Str(&home))],
                         )),
-                )
+                    SharedString::from(format!("region-note|{}", picked.as_ref().map(|r| r.id.as_str()).unwrap_or(""))),
+                    Duration::ZERO,
+                    4.0,
+                ))
         });
         let toggle = div()
             .id("create-browse")
+            .group("create-browse")
             .flex()
             .items_center()
             .justify_between()
@@ -1635,8 +1684,7 @@ impl FuwaApp {
             .map(|a| {
                 let waiting = a.waiting();
                 let id = format!("applied|{key}|{}", a.server.id);
-                let hovered = self.hovered.as_deref() == Some(id.as_str());
-                let ring = if hovered { alpha(p.primary, 0.6) } else { alpha(p.muted_foreground, 0.4) };
+                let (ring, lit_ring) = (alpha(p.muted_foreground, 0.4), alpha(p.primary, 0.6));
                 let badge_ring = mix(p.background, gpui_kit::rgb(0x000000), 0.25);
                 let mark = div()
                     .absolute()
@@ -1657,27 +1705,36 @@ impl FuwaApp {
                         icon("x").size(px(12.0)).into_any_element()
                     });
                 let (k, sid) = (key.to_owned(), a.server.id.clone());
+                // Faded until hovered, when it and its dashed ring light up.
                 let face = div()
                     .id(SharedString::from(id.clone()))
+                    .group(SharedString::from(id.clone()))
                     .relative()
                     .size(px(48.0))
                     .cursor_pointer()
                     .child(
                         div()
+                            .id(SharedString::from(format!("{id}|face")))
                             .size(px(48.0))
                             .rounded_full()
                             .overflow_hidden()
-                            .opacity(if hovered {
-                                1.0
-                            } else if waiting {
-                                0.6
-                            } else {
-                                0.4
-                            })
+                            .opacity(if waiting { 0.6 } else { 0.4 })
+                            .group_hover(SharedString::from(id.clone()), |s| s.opacity(1.0))
                             .child(server_icon(&a.server, 48.0, 24.0, &p)),
                     )
-                    .child(div().absolute().inset_0().rounded_full().border_2().border_dashed().border_color(ring))
-                    .child(mark)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}|ring")))
+                            .absolute()
+                            .inset_0()
+                            .rounded_full()
+                            .border_2()
+                            .border_dashed()
+                            .border_color(ring)
+                            .group_hover(SharedString::from(id.clone()), move |s| s.border_color(lit_ring)),
+                    )
+                    // Its sign springs in, turning, whenever the answer changes.
+                    .child(motion::pop(mark, SharedString::from(format!("{id}|{waiting}")), 0.0, -60.0, Duration::ZERO))
                     .on_hover(cx.listener({
                         let id = id.clone();
                         move |this, on: &bool, _, cx| {
@@ -1697,13 +1754,14 @@ impl FuwaApp {
                             this.open_context_menu(of, ev.position, window, cx);
                         }),
                     );
-                motion::rise(
+                // It pops in from 30% on the web's spring, as the rail's `Pop` does.
+                motion::spring_in(
                     div().flex().w_full().justify_center().child(face),
                     SharedString::from(format!("{id}|in")),
+                    (520.0, 34.0),
                     Duration::ZERO,
-                    10.0,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.3 + 0.7 * t),
                 )
-                .into_any_element()
             })
             .collect()
     }
@@ -1766,6 +1824,42 @@ impl FuwaApp {
 
 // ───────────────────────── Pieces ─────────────────────────
 
+/// Where things were drawn last frame, by id ("" for the box they're in), for
+/// a tint to glide between them as framer's `layoutId` does.
+#[derive(Clone, Default)]
+struct Spots(std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, gpui_kit::Bounds<gpui_kit::Pixels>>>>);
+
+impl Spots {
+    /// `id`'s place inside the box, as left, top, width and height.
+    fn at(&self, id: &str) -> Option<(f32, f32, f32, f32)> {
+        let spots = self.0.borrow();
+        let (b, outer) = (spots.get(id)?, spots.get("")?);
+        Some((
+            f32::from(b.origin.x - outer.origin.x),
+            f32::from(b.origin.y - outer.origin.y),
+            f32::from(b.size.width),
+            f32::from(b.size.height),
+        ))
+    }
+
+    /// An invisible layer over its parent that notes where it was drawn under
+    /// `id`, drawing again when that moved.
+    fn measure(&self, id: &str) -> impl IntoElement {
+        let (spots, id) = (self.0.clone(), id.to_owned());
+        gpui_kit::canvas(
+            move |bounds, window, _| {
+                let moved = spots.borrow_mut().insert(id.clone(), bounds) != Some(bounds);
+                if moved {
+                    window.request_animation_frame();
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0()
+    }
+}
+
 /// "Europe" → "EU": a region's little mark (the web's `regionMark`).
 fn region_mark(name: &str) -> String {
     let words: Vec<&str> = name.split_whitespace().collect();
@@ -1804,23 +1898,9 @@ fn shadow_2xl() -> Vec<BoxShadow> {
     }]
 }
 
-/// The dialog's close button, at its top right.
+/// The dialog's close button, at its top right, turning a quarter on hover.
 fn close_button(p: &Palette, cx: &mut Context<FuwaApp>) -> impl IntoElement {
-    let (bg, fg) = (p.muted, p.foreground);
-    div()
-        .id("join-dialog-close")
-        .absolute()
-        .top(px(16.0))
-        .right(px(16.0))
-        .size(px(32.0))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_color(p.muted_foreground)
-        .cursor_pointer()
-        .hover(move |s| s.bg(bg).text_color(fg))
-        .child(icon("x").size(px(16.0)))
+    crate::ui::overlay::dialog_close("join-dialog-close", p)
         .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
 }
 
@@ -1961,6 +2041,8 @@ pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<D
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .when(!checked, |el| el.hover(move |s| s.border_color(hover)))
+        // `whileTap={{ scale: 0.98 }}`.
+        .active(|s| s.scale(0.98))
         .child(motion::once(
             div()
                 .size(px(24.0))
@@ -1984,9 +2066,11 @@ pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<D
         .child(div().flex_1().min_w_0().child(label.to_owned()))
 }
 
-/// A switch (the web's `Switch`): a pill whose knob slides over.
+/// A switch (the web's `Switch`): a pill whose knob slides over, and
+/// stretches toward the middle while its row is pressed (`pressedWidth`).
 fn switch(on: bool, p: &Palette, window: &mut Window, cx: &mut Context<FuwaApp>) -> impl IntoElement {
     let x = motion::follow("create-switch", if on { 14.0 } else { 0.0 }, window, cx);
+    let pressed = if on { x - 3.0 } else { x };
     div()
         .w(px(32.0))
         .h(px(18.4))
@@ -1994,11 +2078,16 @@ fn switch(on: bool, p: &Palette, window: &mut Window, cx: &mut Context<FuwaApp>)
         .rounded_full()
         .bg(if on { p.primary } else { mix(p.muted, p.foreground, 0.08).into() })
         .p(px(1.0))
-        .child(div().relative().left(px(x)).size(px(16.4)).rounded_full().bg(if on {
-            p.primary_foreground
-        } else {
-            p.background
-        }))
+        .child(
+            div()
+                .id("create-switch-knob")
+                .relative()
+                .left(px(x))
+                .size(px(16.4))
+                .rounded_full()
+                .bg(if on { p.primary_foreground } else { p.background })
+                .group_active("create-browse", move |s| s.w(px(19.4)).left(px(pressed))),
+        )
 }
 
 /// The top of the applying and application screens: the banner, the server's
@@ -2132,7 +2221,12 @@ pub(crate) fn banner_hero_wide(
                                             .child(div().size(px(6.0)).rounded_full().bg(green)),
                                     )
                                     .child(icon("users").ml(px(2.0)).size(px(14.0)))
-                                    .child(t_with("join.banner.members", &[("count", Arg::Num(members))])),
+                                    .child(motion::counted(
+                                        format!("banner-members|{}", server.id),
+                                        "join.banner.members",
+                                        members.max(0) as u64,
+                                        12.0,
+                                    )),
                             )
                         }),
                 ),

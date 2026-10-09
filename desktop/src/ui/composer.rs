@@ -330,6 +330,27 @@ impl FuwaApp {
     }
 
     /// The count of characters left, once the message nears the limit.
+    /// As [`chars_left`](Self::chars_left), shrinking and fading away (`exit={{
+    /// opacity: 0, scale: 0.8 }}`) once there's room again.
+    pub(crate) fn chars_left_in(
+        &self,
+        length: usize,
+        p: &Palette,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::App,
+    ) -> Option<AnyElement> {
+        let now = (length > COUNT_FROM).then_some(length);
+        match (now, motion::kept("chars-left", now.as_ref(), window, cx)) {
+            (Some(length), _) => self.chars_left(length, p),
+            (None, Some((was, t))) => {
+                let e = gpui_kit::ease_out_quint()(t);
+                let count = self.chars_left(was, p)?;
+                Some(div().flex_none().opacity(1.0 - e).scale(1.0 - 0.2 * e).child(count).into_any_element())
+            }
+            (None, None) => None,
+        }
+    }
+
     pub(crate) fn chars_left(&self, length: usize, p: &Palette) -> Option<AnyElement> {
         if length <= COUNT_FROM {
             return None;
@@ -347,7 +368,11 @@ impl FuwaApp {
                 .child(crate::core::i18n::format_number(left, &crate::core::i18n::current().1)),
             "chars-left",
             Duration::from_millis(220),
-            |el, t| el.opacity(t),
+            // The web's `opacity: 0, scale: 0.8`.
+            |el, t| {
+                let t = 1.0 - (1.0 - t) * (1.0 - t);
+                el.opacity(t).scale(0.8 + 0.2 * t)
+            },
         ))
     }
 
@@ -507,17 +532,24 @@ fn tile(id: &'static str, glyph: &str, swing: f32, bg: Hsla, fg: Hsla) -> AnyEle
             el.transform(Transformation::rotate(gpui_kit::radians(deg.to_radians())))
         },
     );
-    div()
-        .size(px(36.0))
-        .flex_none()
-        .rounded(radius_xl())
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(bg)
-        .text_color(fg)
-        .child(glyph)
-        .into_any_element()
+    // The tile grows in as the card rises (the web's `scale: 0.6`).
+    motion::pop(
+        div()
+            .size(px(36.0))
+            .flex_none()
+            .rounded(radius_xl())
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(bg)
+            .text_color(fg)
+            .child(glyph),
+        SharedString::from(format!("{id}|in")),
+        0.6,
+        0.0,
+        Duration::ZERO,
+    )
+    .into_any_element()
 }
 
 fn rises(el: impl IntoElement + gpui_kit::Styled + 'static, id: &'static str) -> AnyElement {
@@ -684,7 +716,8 @@ pub(crate) fn cooldown(gate: &Gate, p: &Palette) -> AnyElement {
     let total = gate.slowmode * 1000;
     let share = if total > 0 { (left as f32 / total as f32).min(1.0) } else { 0.0 };
     let seconds = (left + 999) / 1000;
-    div()
+    // It pops in over the plane (the web's `scale: 0.4` on a lively spring).
+    let ring_face = div()
         .relative()
         .size(px(36.0))
         .flex()
@@ -702,13 +735,13 @@ pub(crate) fn cooldown(gate: &Gate, p: &Palette) -> AnyElement {
                 8.0,
             )
             .into_any_element()
-        })
-        .into_any_element()
+        });
+    motion::pop(ring_face, "cooldown-in", 0.4, 0.0, Duration::ZERO).into_any_element()
 }
 
 /// Around the send button while files go up: how far they've got, together.
 pub(crate) fn upload_ring(share: f32, p: &Palette) -> AnyElement {
-    div()
+    let face = div()
         .relative()
         .size(px(36.0))
         .flex()
@@ -716,8 +749,8 @@ pub(crate) fn upload_ring(share: f32, p: &Palette) -> AnyElement {
         .justify_center()
         .text_color(p.primary)
         .child(ring(share, alpha(p.primary, 0.15), p.primary.into()))
-        .child(icon("upload").size(px(14.0)))
-        .into_any_element()
+        .child(icon("upload").size(px(14.0)));
+    motion::pop(face, "upload-ring-in", 0.4, 0.0, Duration::ZERO).into_any_element()
 }
 
 #[cfg(test)]

@@ -3,12 +3,15 @@
 //! means), your custom status, whether you share what you're doing, and the
 //! accounts kept on this instance, to switch between or add one.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Rgba,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    AnyElement, Bounds, Context, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    Pixels, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -17,6 +20,25 @@ use crate::ui::app::FuwaApp;
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, radius_md, radius_sm};
 use crate::ui::widgets::{avatar, icon, pal};
+
+/// Where each of the menu's lines was last drawn, by id ("" for the list
+/// itself), for the highlight that glides between them.
+type Places = Rc<RefCell<HashMap<String, Bounds<Pixels>>>>;
+
+/// Remembers where `el` is drawn, under `id`.
+fn placed(el: gpui_kit::Stateful<Div>, id: String, places: &Places) -> gpui_kit::Stateful<Div> {
+    let places = places.clone();
+    el.child(
+        gpui_kit::canvas(
+            move |bounds, _, _| {
+                places.borrow_mut().insert(id, bounds);
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0(),
+    )
+}
 
 /// The statuses you can pick, and the hint under each.
 const CHOICES: [(pb::PresenceStatus, &str); 4] = [
@@ -95,6 +117,7 @@ impl FuwaApp {
         let picked = settings.as_ref().map(|s| shown_status(s.status())).unwrap_or(pb::PresenceStatus::Online);
         let hover_id = |id: &str| format!("um|{id}");
         let lit = |this: &Self, id: &str| this.hovered.as_deref() == Some(hover_id(id).as_str());
+        let places: Places = window.use_keyed_state("um-places", cx, |_, _| Places::default()).read(cx).clone();
         let mut list = div().flex().flex_col();
         let mut n = 0usize;
         let mut rise = |el: AnyElement, list: Div| -> Div {
@@ -111,10 +134,9 @@ impl FuwaApp {
         if settings.is_some() {
             for (status, hint) in CHOICES {
                 let id = format!("status-{}", status as i32);
-                let on = lit(self, &id);
                 let key = key.to_owned();
                 let row = self
-                    .menu_row(&id, on, &p, cx)
+                    .menu_row(&id, &places, cx)
                     .items_start()
                     .gap(px(10.0))
                     .py(px(8.0))
@@ -170,7 +192,7 @@ impl FuwaApp {
             let k = key.to_owned();
             let label =
                 if status.is_some() { t("workspace.userPanel.editStatus") } else { t("workspace.userPanel.setStatus") };
-            let row = self.icon_row("edit-status", "pencil", label, &p, cx).on_click(cx.listener(
+            let row = self.icon_row("edit-status", "pencil", label, &places, &p, cx).on_click(cx.listener(
                 move |this, _, window, cx| {
                     this.menu = None;
                     this.open_profile_settings(&k, window, cx);
@@ -180,8 +202,9 @@ impl FuwaApp {
         }
         if status.is_some() {
             let k = key.to_owned();
-            let row = self.icon_row("clear-status", "x", t("workspace.userPanel.clearStatus"), &p, cx).on_click(
-                cx.listener(move |this, _, _, cx| {
+            let row = self
+                .icon_row("clear-status", "x", t("workspace.userPanel.clearStatus"), &places, &p, cx)
+                .on_click(cx.listener(move |this, _, _, cx| {
                     this.menu = None;
                     let (core, key) = (this.core.clone(), k.clone());
                     let patch =
@@ -199,8 +222,7 @@ impl FuwaApp {
                         }
                     });
                     cx.notify();
-                }),
-            );
+                }));
             list = rise(row.into_any_element(), list);
         }
         if let Some(settings) = &settings {
@@ -211,6 +233,7 @@ impl FuwaApp {
                     "sharing",
                     if sharing { "eye" } else { "eye-off" },
                     if sharing { t("workspace.userPanel.sharing") } else { t("workspace.userPanel.notSharing") },
+                    &places,
                     &p,
                     cx,
                 )
@@ -245,7 +268,7 @@ impl FuwaApp {
             let face_scale =
                 motion::follow(SharedString::from(format!("um|{id}|scale")), if on { 1.1 } else { 1.0 }, window, cx);
             let row = self
-                .menu_row(&id, on, &p, cx)
+                .menu_row(&id, &places, cx)
                 .gap(px(10.0))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.menu = None;
@@ -290,7 +313,7 @@ impl FuwaApp {
         }
         {
             let k = key.to_owned();
-            let row = self.icon_row("add-account", "user-plus", t("connect.accounts.add"), &p, cx).on_click(
+            let row = self.icon_row("add-account", "user-plus", t("connect.accounts.add"), &places, &p, cx).on_click(
                 cx.listener(move |this, _, window, cx| {
                     this.menu = None;
                     this.add_account(&k, window, cx);
@@ -298,6 +321,38 @@ impl FuwaApp {
             );
             list = rise(row.into_any_element(), list);
         }
+
+        // The highlight glides from line to line, as the web's Animate UI menus do.
+        let at = self.hovered.as_deref().and_then(|h| h.strip_prefix("um|")).and_then(|h| {
+            let places = places.borrow();
+            let (row, list) = (places.get(h)?, places.get("")?);
+            Some((f32::from(row.top() - list.top()), f32::from(row.size.height)))
+        });
+        // It fades in where it lands and fades out where it was once the pointer
+        // leaves the menu (the web's highlight under `AnimatePresence`).
+        let leaving = motion::kept("um-hl", at.as_ref(), window, cx);
+        let shown = motion::follow("um-hl|shown", if at.is_some() { 1.0 } else { 0.0 }, window, cx);
+        let at = match (at, leaving) {
+            (Some(at), _) => Some((at, shown)),
+            (None, Some((was, t))) => Some((was, shown.min(1.0 - gpui_kit::ease_out_quint()(t)))),
+            _ => None,
+        };
+        let highlight = at.map(|((top, height), shown)| {
+            let top = motion::follow("um-hl|top", top, window, cx);
+            let height = motion::follow("um-hl|height", height, window, cx);
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(top))
+                .h(px(height))
+                .rounded(radius_sm())
+                .bg(p.accent)
+                .opacity(shown.clamp(0.0, 1.0))
+        });
+        let list = placed(div().id("um-list").relative(), String::new(), &places)
+            .when_some(highlight, |el, h| el.child(h))
+            .child(list);
 
         div()
             .id("menu-status-away")
@@ -316,33 +371,41 @@ impl FuwaApp {
                     .bottom(px(56.0))
                     .left(px(crate::ui::rail::RAIL + 8.0))
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(motion::rise(
-                        div()
-                            .w(px(256.0))
-                            .p(px(4.0))
-                            .rounded(radius_md())
-                            .border_1()
-                            .border_color(p.border)
-                            .bg(popover)
-                            .shadow_md()
-                            .text_size(px(14.0))
-                            .line_height(px(20.0))
-                            .text_color(p.foreground)
-                            .child(list),
-                        "menu-status",
-                        Duration::ZERO,
-                        8.0,
+                    // The web's menus grow in from the corner they hang from (side="top" align="start").
+                    // Closed, it shrinks back toward that corner as it fades (the web's `exit`).
+                    .child(crate::ui::overlay::leaving_pose(
+                        div().transform_origin(0.0, 1.0).child(motion::pop_in(
+                            div()
+                                .w(px(256.0))
+                                .p(px(4.0))
+                                .rounded(radius_md())
+                                .border_1()
+                                .border_color(p.border)
+                                .bg(popover)
+                                .shadow_md()
+                                .text_size(px(14.0))
+                                .line_height(px(20.0))
+                                .text_color(p.foreground)
+                                .child(list),
+                            "menu-status",
+                            (0.0, 1.0),
+                            0.95,
+                            0.0,
+                        )),
+                        0.0,
+                        0.95,
+                        cx,
                     )),
             )
             .into_any_element()
     }
 
-    /// One of the menu's lines: the web's `DropdownMenuItem` (px-2 py-1.5, a
-    /// rounded-sm highlight in the accent color under the pointer).
-    fn menu_row(&self, id: &str, on: bool, p: &Palette, cx: &mut Context<Self>) -> gpui_kit::Stateful<Div> {
+    /// One of the menu's lines: the web's `DropdownMenuItem` (px-2 py-1.5),
+    /// under the highlight while pointed at.
+    fn menu_row(&self, id: &str, places: &Places, cx: &mut Context<Self>) -> gpui_kit::Stateful<Div> {
         let hover_key = format!("um|{id}");
-        div()
-            .id(SharedString::from(hover_key.clone()))
+        placed(div().id(SharedString::from(hover_key.clone())), id.to_owned(), places)
+            .relative()
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -350,7 +413,6 @@ impl FuwaApp {
             .py(px(6.0))
             .rounded(radius_sm())
             .cursor_pointer()
-            .when(on, |el| el.bg(p.accent))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
                     this.hovered = Some(hover_key.clone());
@@ -367,11 +429,11 @@ impl FuwaApp {
         id: &str,
         glyph: &str,
         label: String,
+        places: &Places,
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Stateful<Div> {
-        let on = self.hovered.as_deref() == Some(format!("um|{id}").as_str());
-        self.menu_row(id, on, p, cx).child(icon(glyph).size(px(16.0)).text_color(p.muted_foreground)).child(label)
+        self.menu_row(id, places, cx).child(icon(glyph).size(px(16.0)).text_color(p.muted_foreground)).child(label)
     }
 
     /// Settings, on your profile for one instance (where the custom status is set).

@@ -185,22 +185,49 @@ impl gpui_kit::RenderOnce for DialogClose {
     }
 }
 
+/// How far the overlay being drawn is on its way out (0 to 1), while one that
+/// has closed is drawn once more as it fades ([`motion::kept`]); none otherwise.
+#[derive(Default)]
+struct Leaving(Option<f32>);
+
+impl gpui_kit::Global for Leaving {}
+
+/// Says that what's drawn next is an overlay `t` of the way out (or, with
+/// `None`, that it's back to things that are open), so [`leaving_pose`] can
+/// pose it as the web's `exit` does.
+/// `FuwaApp::render_leaving` calls it around each overlay it draws on the way out.
+pub fn set_leaving(t: Option<f32>, cx: &mut gpui_kit::App) {
+    cx.set_global(Leaving(t));
+}
+
+/// Poses a dialog's card or a menu as it leaves, eased as [`motion::leave`]
+/// fades it: it sinks `drop` pixels and shrinks to `to` of its size (the
+/// web's dialogs `y: 24, scale: 0.97`, its menus `scale: 0.95`), while the
+/// layer fades. As it is while open, or with nothing leaving.
+pub fn leaving_pose<E: gpui_kit::Styled>(el: E, drop: f32, to: f32, cx: &gpui_kit::App) -> E {
+    let Some(t) = cx.try_global::<Leaving>().and_then(|l| l.0) else { return el };
+    let gone = gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0));
+    el.translate_y(px(drop * gone)).scale(1.0 - (1.0 - to) * gone)
+}
+
 /// A dialog over the window: the scrim fades in (200ms) and the card springs
 /// up from 40px below, growing from 96%, as the web's dialogs do. `close`
-/// runs on a click outside the card.
+/// runs on a click outside the card. Closed, the card sinks and shrinks a
+/// little as it fades ([`leaving_pose`]).
 pub fn dialog_layer(
     tag: &str,
     panel: impl IntoElement,
     p: &Palette,
     close: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+    cx: &gpui_kit::App,
 ) -> AnyElement {
     motion::fade_in(
         scrim("dialog-scrim", p).on_click(close).child(roomy(
             "dialog-room",
-            motion::dialog_in(
+            leaving_pose(div(), 24.0, 0.97, cx).child(motion::dialog_in(
                 div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
                 SharedString::from(format!("dialog-{tag}")),
-            ),
+            )),
         )),
         SharedString::from(format!("dialog-fade-{tag}")),
         Duration::from_millis(200),
@@ -398,7 +425,7 @@ impl FuwaApp {
             Dialog::Application { .. } => "application",
             Dialog::ShareScreen => "share",
         };
-        Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx))))
+        Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx)), cx))
     }
 
     pub(crate) fn render_toasts(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -439,11 +466,12 @@ impl FuwaApp {
                     .with_animation(
                         SharedString::from(format!("note-out-{id}")),
                         Animation::new(Duration::from_millis(150)),
-                        |el, t| el.opacity(1.0 - t).relative().top(px(8.0 * t)),
+                        |el, t| el.opacity(1.0 - t).translate_y(px(8.0 * t)).scale(1.0 - 0.05 * t),
                     )
                     .into_any_element()
             } else {
-                motion::rise(div().child(pill), SharedString::from(format!("note-in-{id}")), Duration::ZERO, 24.0)
+                // Up from 24px below, growing from 90%.
+                motion::pop_in(div().child(pill), SharedString::from(format!("note-in-{id}")), (0.5, 0.5), 0.9, 24.0)
                     .into_any_element()
             };
             notes = notes.child(el);
@@ -577,8 +605,10 @@ pub(crate) fn emoji_tile(
 }
 
 /// The web's tooltip (`TooltipContent`): `bg-primary text-primary-foreground
-/// rounded-md px-3 py-1.5 text-xs`, no border or shadow. Use it in place of
-/// the kit's `Tooltip::new(...)`, which draws a popover card.
+/// rounded-md px-3 py-1.5 text-xs`, no border or shadow, growing from half
+/// its size out of its top edge as it fades in (Animate UI's
+/// `scale: 0.5` on a `stiffness: 300, damping: 25` spring). Use it in place
+/// of the kit's `Tooltip::new(...)`, which draws a popover card.
 pub struct Tip(SharedString);
 
 impl Tip {
@@ -586,18 +616,37 @@ impl Tip {
         Self(text.into())
     }
 
-    pub fn build(self, window: &mut Window, cx: &mut gpui_kit::App) -> gpui_kit::AnyView {
+    pub fn build(self, _window: &mut Window, cx: &mut gpui_kit::App) -> gpui_kit::AnyView {
+        use gpui_kit::AppContext as _;
         let p = pal(cx);
-        gpui_kit::component::tooltip::Tooltip::new(self.0)
-            .bg(p.primary)
-            .text_color(p.primary_foreground)
-            .border_color(gpui_kit::transparent_black())
-            .shadow(Vec::new())
+        cx.new(|_| TipView { text: self.0, bg: p.primary, fg: p.primary_foreground }).into()
+    }
+}
+
+/// A [`Tip`] on screen: a view of its own, made each time it shows, so it
+/// grows in every time.
+struct TipView {
+    text: SharedString,
+    bg: Rgba,
+    fg: Rgba,
+}
+
+impl gpui_kit::Render for TipView {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let tip = div()
+            .font_family(crate::ui::theme::FONT)
+            .bg(self.bg)
+            .text_color(self.fg)
             .rounded(crate::ui::theme::radius_md())
             .px(px(12.0))
             .py(px(6.0))
             .text_xs()
             .line_height(px(16.0))
-            .build(window, cx)
+            .child(self.text.clone());
+        // It hangs below what it's about (12px clear, as the kit's tooltip was),
+        // so it grows out of its top edge.
+        div().p(px(12.0)).child(motion::spring_in(tip, "tip-in", (300.0, 25.0), Duration::ZERO, |el, t| {
+            el.opacity(t.clamp(0.0, 1.0)).transform_origin(0.5, 0.0).scale(0.5 + 0.5 * t)
+        }))
     }
 }

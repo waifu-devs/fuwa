@@ -2,14 +2,13 @@
 //! and the Members page open, like the web app's `ModerateDialog.tsx`. Each
 //! asks for a reason, kept in the server's audit log.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, BoxShadow, Context, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, point,
-    px, rgb,
+    AnyElement, BoxShadow, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, point, px, rgb,
 };
 
 use crate::core::dms::now_ms;
@@ -19,6 +18,9 @@ use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal};
+
+/// How long the gavel swings before a ban goes through.
+const SWING: Duration = Duration::from_millis(450);
 
 /// Discord's time-out lengths.
 const TIME_OUT: [i64; 6] = [60, 5 * 60, 10 * 60, 60 * 60, 86_400, 7 * 86_400];
@@ -32,6 +34,17 @@ const DELETE: [(i64, &str); 6] = [
     (3 * 86_400, "workspace.moderate.purge.days3"),
     (7 * 86_400, "workspace.moderate.purge.days7"),
 ];
+
+/// The gavel's angle in degrees `t` of the way through its swing: the web's
+/// keyframes `[0, -50, 20, 0]` at `[0, 0.4, 0.7, 1]`, eased in and out between.
+fn swing(t: f32) -> f32 {
+    let keys = [(0.0, 0.0), (0.4, -50.0), (0.7, 20.0), (1.0, 0.0)];
+    let at = keys.windows(2).find(|w| t <= w[1].0).unwrap_or(&keys[2..4]);
+    let ((t0, a), (t1, b)) = (at[0], at[1]);
+    let k = ((t - t0) / (t1 - t0)).clamp(0.0, 1.0);
+    let k = if k < 0.5 { 2.0 * k * k } else { 1.0 - (-2.0 * k + 2.0).powi(2) / 2.0 };
+    a + (b - a) * k
+}
 
 /// A length of time in its largest whole unit, as the web's `formatDuration`:
 /// "30 seconds", "5 minutes", "1 hour", "7 days".
@@ -185,7 +198,7 @@ impl FuwaApp {
             )
             .when_some(until, |el, until| {
                 let amber = amber(&p);
-                el.child(motion::rise(
+                el.child(crate::ui::motion::spring_in(
                     div()
                         .flex()
                         .items_center()
@@ -197,15 +210,22 @@ impl FuwaApp {
                         .text_color(amber)
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .child(icon("hourglass").size(px(14.0)).with_animation(
+                        // The web's `animate-[spin_3s_ease-in-out_infinite]`.
+                        .child(motion::ambient(
+                            div().child(icon("hourglass").size(px(14.0))),
                             "mod-hourglass",
-                            Animation::new(Duration::from_millis(3000)).repeat(),
-                            |el, t| el.opacity(0.55 + 0.45 * (t * std::f32::consts::TAU).cos().abs()),
+                            Duration::from_millis(3000),
+                            window,
+                            |el, t| {
+                                let eased = if t < 0.5 { 2.0 * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0 };
+                                el.rotate(gpui_kit::radians(eased * std::f32::consts::TAU))
+                            },
                         ))
                         .child(left(until - now)),
                     "mod-left",
+                    (520.0, 34.0),
                     Duration::ZERO,
-                    2.0,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.6 + 0.4 * t),
                 ))
             });
 
@@ -321,7 +341,7 @@ impl FuwaApp {
                 .cursor_pointer()
                 .when(busy, |el| el.opacity(0.5))
                 .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.translate_y(px(1.0)))
                 .when_some(glyph, |el, g| el.child(icon(g).size(px(16.0))))
                 .child(text)
         };
@@ -351,16 +371,38 @@ impl FuwaApp {
             .cursor_pointer()
             .when(busy, |el| el.opacity(0.5))
             .hover(move |s| s.bg(fill_hover))
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.translate_y(px(1.0)))
             .child(if busy {
-                icon("loader-circle")
-                    .size(px(16.0))
-                    .with_animation("mod-busy", Animation::new(Duration::from_millis(900)).repeat(), |el, t| {
-                        el.opacity(0.5 + 0.5 * (t * std::f32::consts::TAU).cos().abs())
-                    })
-                    .into_any_element()
+                motion::ambient(
+                    div().child(icon("loader-circle").size(px(16.0))),
+                    "mod-busy",
+                    Duration::from_millis(1000),
+                    window,
+                    |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+                )
             } else {
-                icon(submit_glyph).size(px(16.0)).into_any_element()
+                // The icon acts out the action while pointed at: the hourglass turns
+                // over, the door swings, the gavel lifts.
+                let glyph = div()
+                    .id("mod-submit-icon")
+                    .group_hover("mod-submit", move |s| match submit_glyph {
+                        "hourglass" => s.rotate(gpui_kit::radians(std::f32::consts::PI)),
+                        "door-open" => s.translate_x(px(2.0)),
+                        "gavel" => s.rotate(gpui_kit::radians(-0.21)),
+                        _ => s,
+                    })
+                    .child(icon(submit_glyph).size(px(16.0)));
+                match self.people.swung.filter(|at| submit_glyph == "gavel" && at.elapsed() < SWING) {
+                    // The gavel comes down: back, down past level, and up again.
+                    Some(at) => gpui_kit::AnimationExt::with_animation(
+                        glyph,
+                        SharedString::from(format!("mod-swing|{at:?}")),
+                        gpui_kit::Animation::new(SWING),
+                        |el, t| el.rotate(gpui_kit::radians(swing(t).to_radians())),
+                    )
+                    .into_any_element(),
+                    None => glyph.into_any_element(),
+                }
             })
             .child(submit_text)
             .on_click(cx.listener(|this, _, window, cx| this.submit_moderation(window, cx)));
@@ -428,7 +470,15 @@ impl FuwaApp {
                 .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                 .occlude()
                 .on_click(cx.listener(|this, _, _, cx| this.close_dialog_now(cx)))
-                .child(crate::ui::overlay::roomy("dialog-room", motion::dialog_in(panel, "dialog-moderate"))),
+                .child(crate::ui::overlay::roomy(
+                    "dialog-room",
+                    crate::ui::overlay::leaving_pose(
+                        div().child(motion::dialog_in(panel, "dialog-moderate")),
+                        24.0,
+                        0.97,
+                        cx,
+                    ),
+                )),
             "dialog-fade-moderate",
             Duration::from_millis(200),
         )
@@ -444,7 +494,7 @@ impl FuwaApp {
     /// The dialog's button: does what it says, with the reason (or the new nickname).
     pub(crate) fn submit_moderation(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(Dialog::Moderate { key, server, user_id, action }) = self.dialog.clone() else { return };
-        if self.dialog_busy {
+        if self.dialog_busy || self.people.swung.is_some_and(|at| at.elapsed() < SWING) {
             return;
         }
         let text: String = if action == Action::Nickname {
@@ -452,6 +502,23 @@ impl FuwaApp {
         } else {
             self.people.reason.read(cx).value().trim().chars().take(512).collect()
         };
+        if matches!(action, Action::Ban(_)) && !cx.reduce_motion() {
+            // The gavel swings first, then the ban goes through (the web's `gavel.start`).
+            let at = Instant::now();
+            self.people.swung = Some(at);
+            cx.notify();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(SWING).await;
+                let _ = this.update(cx, |this, cx| {
+                    let same = matches!(&this.dialog, Some(Dialog::Moderate { user_id: u, action: a, .. }) if *u == user_id && *a == action);
+                    if this.people.swung == Some(at) && same {
+                        this.moderate(key, server, user_id, action, text, cx);
+                    }
+                });
+            })
+            .detach();
+            return;
+        }
         self.moderate(key, server, user_id, action, text, cx);
     }
 
@@ -495,13 +562,14 @@ impl FuwaApp {
                                 .hover(move |s| s.border_color(hover_border).text_color(fg))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.92))
                     .when(on, |el| {
-                        el.child(motion::once(
+                        el.child(crate::ui::motion::spring_in(
                             div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                             SharedString::from(format!("{id}-on-{value}")),
-                            Duration::from_millis(260),
-                            |el, t| el.opacity(t),
+                            (520.0, 34.0),
+                            Duration::ZERO,
+                            |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(t),
                         ))
                     })
                     .child(text.clone())

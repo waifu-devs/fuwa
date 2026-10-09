@@ -4,7 +4,7 @@
 //! `components/friends/FriendActions.tsx`.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -256,6 +256,7 @@ impl FuwaApp {
                 let label = if adding { t("common.close") } else { t("dms-calls.friends.add") };
                 div()
                     .id("friends-add")
+                    .group("friends-add")
                     .flex()
                     .flex_none()
                     .items_center()
@@ -269,10 +270,24 @@ impl FuwaApp {
                     .line_height(px(20.0))
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .hover(|s| s.opacity(0.92))
-                    .active(|s| s.top(px(1.0)))
-                    // The web turns its X a quarter of the way round: a plus.
-                    .child(icon(if adding { "plus" } else { "user-plus" }).size(px(16.0)))
+                    .when(!adding, |el| el.hover(|s| s.opacity(0.92)))
+                    .active(|s| s.scale(0.94))
+                    // Opening it, the web's X springs round 45 degrees; closing, the person icon turns back.
+                    .child(
+                        div()
+                            .id("friends-add-icon")
+                            .when(!adding, |el| el.group_hover("friends-add", |s| s.scale(1.1)))
+                            .child(motion::springing(
+                                "friends-add-turn",
+                                if adding { 45.0 } else { 0.0 },
+                                move |deg| {
+                                    div()
+                                        .rotate(gpui_kit::radians(deg.to_radians()))
+                                        .child(icon(if adding { "x" } else { "user-plus" }).size(px(16.0)))
+                                        .into_any_element()
+                                },
+                            )),
+                    )
                     .child(label)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.friends.adding = !this.friends.adding;
@@ -285,8 +300,19 @@ impl FuwaApp {
             });
 
         let mut page = div().relative().flex_1().min_h_0().flex().flex_col().child(header);
-        if adding {
-            page = page.child(self.add_friend_box(&p, window, cx));
+        // Closing it, the box lifts away quickly (the web's `exit: { opacity: 0, y: -12 }` in 0.12s).
+        let closing = motion::kept("friends-add-box", adding.then_some(&()), window, cx).map(|(_, t)| t);
+        if adding || closing.is_some() {
+            let k = closing.map_or(0.0, |t| (t * 1.5).min(1.0));
+            let leaving = closing.is_some();
+            page = page.child(
+                div()
+                    .relative()
+                    .opacity(1.0 - k)
+                    .mt(px(-12.0 * k))
+                    .child(self.add_friend_box(&p, window, cx))
+                    .when(leaving, |el| el.child(div().absolute().inset_0().occlude())),
+            );
         }
         if !signed_in {
             return page.into_any_element();
@@ -306,6 +332,9 @@ impl FuwaApp {
         let typed = self.friends.search.read(cx).value().to_string();
         let searching = self.friends.search.read(cx).focus_handle(cx).is_focused(window);
         let shown = friends::in_tab(&list, self.friends.tab, &typed, now);
+        // Emptied, the clear button shrinks away (the web's `exit: { scale: 0 }`).
+        let clearing = motion::kept("friends-search-clear", (!typed.is_empty()).then_some(&()), window, cx);
+        let leaving = leaving_lines(self.friends.tab, &shown, window, cx);
         let tab_label = t(tab_key(self.friends.tab));
         let fg = p.foreground;
         let muted = p.muted;
@@ -328,8 +357,20 @@ impl FuwaApp {
                         .text_sm()
                         .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
                         .child(div().flex_1().min_w_0().child(Input::new(&self.friends.search).appearance(false)))
-                        .when(!typed.is_empty(), |el| {
+                        .when_some(clearing, |el, (_, t)| {
                             el.child(
+                                div()
+                                    .size(px(20.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(p.muted_foreground)
+                                    .scale(1.0 - gpui_kit::ease_out_quint()(t))
+                                    .child(icon("x").size(px(14.0))),
+                            )
+                        })
+                        .when(!typed.is_empty(), |el| {
+                            el.child(motion::pop(
                                 div()
                                     .id("friends-search-clear")
                                     .size(px(20.0))
@@ -345,7 +386,11 @@ impl FuwaApp {
                                         this.friends.search.update(cx, |s, cx| s.set_value("", window, cx));
                                         cx.notify();
                                     })),
-                            )
+                                "friends-search-clear-in",
+                                0.0,
+                                0.0,
+                                Duration::ZERO,
+                            ))
                         }),
                 )
                 .child(
@@ -357,14 +402,30 @@ impl FuwaApp {
                         .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(p.muted_foreground)
-                        .child(tracked(
-                            t_with(
+                        .child({
+                            let text = t_with(
                                 "dms-calls.friends.page.heading",
                                 &[("tab", Arg::Str(&tab_label)), ("count", Arg::Num(shown.len() as i64))],
                             )
-                            .to_uppercase(),
-                            WIDE,
-                        )),
+                            .to_uppercase();
+                            // The count rolls as it changes (the web's `Count`).
+                            match crate::ui::members::around_count(&text, shown.len()) {
+                                Some((before, after)) => div()
+                                    .flex()
+                                    .child(tracked(before, WIDE))
+                                    .child(motion::count(
+                                        "friends-heading-count",
+                                        shown.len() as u64,
+                                        None,
+                                        12.0,
+                                        window,
+                                        cx,
+                                    ))
+                                    .child(tracked(after, WIDE))
+                                    .into_any_element(),
+                                None => tracked(text, WIDE).into_any_element(),
+                            }
+                        }),
                 ),
         );
 
@@ -407,7 +468,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.92))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.95))
                     .child(icon("user-plus").size(px(16.0)))
                     .child(t("dms-calls.friends.add"))
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -419,8 +480,15 @@ impl FuwaApp {
             });
             body = body.child(empty(glyph, &t(title), &t(text), action, &p, window));
         } else {
+            let mut gone = leaving.iter().peekable();
             for (n, f) in shown.iter().enumerate() {
-                body = body.child(self.friend_line(key, f, n, dms, &p, cx));
+                while let Some((_, f, k)) = gone.next_if(|(at, ..)| *at <= n) {
+                    body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
+                }
+                body = body.child(self.friend_line(key, f, n, dms, &p, window, cx));
+            }
+            for (_, f, k) in gone {
+                body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
             }
         }
         // A new tab slides in from the side.
@@ -488,7 +556,7 @@ impl FuwaApp {
                     .when(on && pill.is_none(), |el| el.bg(alpha(p.primary, 0.15)))
                     .text_color(if on { p.primary } else { p.muted_foreground })
                     .when(!on, |el| el.hover(move |s| s.text_color(fg)))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.95))
                     .child(
                         gpui_kit::canvas(
                             move |bounds, _, _| {
@@ -505,7 +573,7 @@ impl FuwaApp {
                     )
                     .child(t(tab_key(tab)))
                     .when(tab == Tab::Pending && count > 0, |el| {
-                        el.child(motion::rise(
+                        el.child(motion::pop(
                             div()
                                 .h(px(20.0))
                                 .min_w(px(20.0))
@@ -518,14 +586,22 @@ impl FuwaApp {
                                 .text_color(p.primary_foreground)
                                 .text_size(px(11.2))
                                 .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(if count > 99 { "99+".to_owned() } else { count.to_string() }),
-                            SharedString::from(format!("friends-badge|{count}")),
+                                .child(motion::count("friends-badge-count", count as u64, Some(99), 11.2, window, cx)),
+                            "friends-badge",
+                            0.0,
+                            0.0,
                             Duration::ZERO,
-                            2.0,
                         ))
                     })
                     .when(matches!(tab, Tab::Online | Tab::All) && count > 0, |el| {
-                        el.child(div().text_xs().opacity(0.7).child(count.to_string()))
+                        el.child(div().text_xs().opacity(0.7).child(motion::count(
+                            SharedString::from(format!("friends-tab-count-{}", tab.label())),
+                            count as u64,
+                            None,
+                            12.0,
+                            window,
+                            cx,
+                        )))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.friends.tab = tab;
@@ -587,9 +663,13 @@ impl FuwaApp {
                         }
                     })
                     .when(typed && !sending, |el| {
-                        el.cursor_pointer().hover(|s| s.opacity(0.92)).active(|s| s.top(px(1.0)))
+                        el.cursor_pointer().hover(|s| s.opacity(0.92)).active(|s| s.scale(0.95))
                     })
-                    .child(icon(if sending { "loader-circle" } else { "user-plus" }).size(px(16.0)))
+                    .child(crate::ui::dm_view::glyph_swap(
+                        "friend-send-icon",
+                        if sending { "loader-circle" } else { "user-plus" },
+                        16.0,
+                    ))
                     .child(t("dms-calls.friends.page.sendRequest"))
                     .on_click(cx.listener(|this, _, window, cx| this.send_typed_request(window, cx))),
             );
@@ -629,7 +709,15 @@ impl FuwaApp {
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
                             .text_color(if ok { emerald } else { p.destructive.into() })
-                            .when(ok, |el| el.child(icon("check").size(px(16.0))))
+                            .when(ok, |el| {
+                                el.child(motion::pop(
+                                    div().child(icon("check").size(px(16.0))),
+                                    "friend-result-check",
+                                    0.0,
+                                    -45.0,
+                                    Duration::ZERO,
+                                ))
+                            })
                             .child(text.clone()),
                         SharedString::from(format!("friend-result-{text}")),
                         Duration::ZERO,
@@ -644,6 +732,7 @@ impl FuwaApp {
     }
 
     /// One person in a tab: who they are, how things stand, and what you can do.
+    #[allow(clippy::too_many_arguments)]
     fn friend_line(
         &mut self,
         key: &str,
@@ -651,6 +740,7 @@ impl FuwaApp {
         n: usize,
         dms: bool,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(user) = f.user.clone() else { return div().into_any_element() };
@@ -693,8 +783,9 @@ impl FuwaApp {
                 .text_color(p.muted_foreground)
                 .cursor_pointer()
                 .when(busy, |el| el.opacity(0.6))
-                .hover(move |s| s.bg(bg).text_color(fg))
-                .active(|s| s.top(px(1.0)))
+                // The web's `RoundButton`: it swells under the pointer and gives when pressed.
+                .hover(move |s| s.bg(bg).text_color(fg).scale(1.08))
+                .active(|s| s.scale(0.88))
                 .child(icon(glyph).size(px(16.0)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
@@ -709,6 +800,7 @@ impl FuwaApp {
                 actions = actions.child(
                     div()
                         .id(SharedString::from(format!("friend-message|{id}")))
+                        .group("friend-message")
                         .size(px(36.0))
                         .flex()
                         .items_center()
@@ -717,9 +809,14 @@ impl FuwaApp {
                         .bg(alpha(p.muted, 0.7))
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
-                        .hover(move |s| s.bg(bg).text_color(fg))
-                        .active(|s| s.top(px(1.0)))
-                        .child(icon("message-circle").size(px(16.0)))
+                        .hover(move |s| s.bg(bg).text_color(fg).scale(1.08))
+                        .active(|s| s.scale(0.88))
+                        .child(
+                            div()
+                                .id("friend-message-icon")
+                                .group_hover("friend-message", |s| s.rotate(gpui_kit::radians(-0.21)))
+                                .child(icon("message-circle").size(px(16.0))),
+                        )
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
                             this.message_person(k.clone(), uid.clone(), window, cx);
@@ -742,7 +839,7 @@ impl FuwaApp {
                     .text_color(if open { p.foreground } else { p.muted_foreground })
                     .cursor_pointer()
                     .hover(move |s| s.bg(bg).text_color(fg))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.88))
                     .child(icon("ellipsis-vertical").size(px(16.0)))
                     .child({
                         let uid = id.clone();
@@ -782,6 +879,7 @@ impl FuwaApp {
             actions = actions.child(
                 div()
                     .id(SharedString::from(format!("friend-unblock|{id}")))
+                    .group("friend-unblock")
                     .flex()
                     .items_center()
                     .gap(px(6.0))
@@ -796,8 +894,13 @@ impl FuwaApp {
                     .cursor_pointer()
                     .when(busy, |el| el.opacity(0.6))
                     .hover(move |s| s.bg(bg).text_color(fg))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("shield-off").size(px(14.0)))
+                    .active(|s| s.scale(0.95))
+                    .child(
+                        div()
+                            .id("friend-unblock-icon")
+                            .group_hover("friend-unblock", |s| s.rotate(gpui_kit::radians(-0.21)))
+                            .child(icon("shield-off").size(px(14.0))),
+                    )
                     .child(t("dms-calls.friends.unblock"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
@@ -805,9 +908,17 @@ impl FuwaApp {
                     })),
             );
         }
+        // Their dot shrinks a little when they go offline, and greys.
+        let dot_scale = motion::follow_bouncy(
+            SharedString::from(format!("friend-dot|{id}")),
+            if f.online { 1.0 } else { 0.7 },
+            window,
+            cx,
+        );
         let dot = (f.state == FRIEND).then(|| {
             div()
                 .absolute()
+                .scale(dot_scale)
                 .right(px(-2.0 - 3.0))
                 .bottom(px(-2.0 - 3.0))
                 .size(px(14.0 + 6.0))
@@ -844,7 +955,17 @@ impl FuwaApp {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_dialog(Dialog::Profile { key: k.clone(), user_id: uid.clone(), server: None }, window, cx)
             }))
-            .child(div().relative().flex_none().child(avatar(Some(&user), 40.0, p)).children(dot))
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(div().id("friend-face").group_hover(group.clone(), |s| s.scale(1.05)).child(avatar(
+                        Some(&user),
+                        40.0,
+                        p,
+                    )))
+                    .children(dot),
+            )
             .child(
                 div()
                     .flex_1()
@@ -860,12 +981,12 @@ impl FuwaApp {
                             .h(px(24.0))
                             .child(
                                 div()
-                                    .relative()
+                                    .id("friend-name")
                                     .truncate()
                                     .text_base()
                                     .line_height(px(24.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .group_hover(group, |s| s.left(px(2.0)))
+                                    .group_hover(group, |s| s.translate_x(px(2.0)))
                                     .child(name),
                             )
                             .child(
@@ -892,6 +1013,32 @@ impl FuwaApp {
             6.0,
         )
         .into_any_element()
+    }
+
+    /// Someone who just left the list (unfriended, accepted into another tab,
+    /// searched away), `k` of the way out: sliding right and fading (the web's
+    /// `exit: { opacity: 0, x: 24 }`), while the space they took closes up.
+    #[allow(clippy::too_many_arguments)]
+    fn friend_leaving(
+        &mut self,
+        key: &str,
+        f: &pb::Friend,
+        dms: bool,
+        k: f32,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let eased = gpui_kit::ease_out_quint()(k);
+        // No id of its own, so the line inside keeps the state it had (its entrance stays played).
+        div()
+            .relative()
+            .overflow_hidden()
+            .h(px(LINE * (1.0 - eased)))
+            .child(div().opacity(1.0 - k).ml(px(24.0 * eased)).child(self.friend_line(key, f, 0, dms, p, window, cx)))
+            // Nothing in it can be pressed on its way out.
+            .child(div().absolute().inset_0().occlude())
+            .into_any_element()
     }
 
     /// A friend's "more" menu: remove them, or block them.
@@ -1011,8 +1158,8 @@ impl FuwaApp {
                 .text_sm()
                 .font_weight(FontWeight::BOLD)
                 .when(busy || disabled, |el| el.opacity(0.6))
-                .when(!disabled, |el| el.cursor_pointer().hover(move |s| s.bg(hover)).active(|s| s.top(px(1.0))))
-                .child(icon(glyph).size(px(16.0)))
+                .when(!disabled, |el| el.cursor_pointer().hover(move |s| s.bg(hover)).active(|s| s.scale(0.96)))
+                .child(crate::ui::dm_view::glyph_swap(SharedString::from(format!("{id}-icon")), glyph, 16.0))
                 .child(div().truncate().child(label))
         };
         let on = |act: Act, cx: &mut Context<Self>| act_on(key, user_id, act, cx);
@@ -1085,6 +1232,7 @@ impl FuwaApp {
             row = row.child(
                 div()
                     .id("friend-block")
+                    .group("friend-block")
                     .size(px(36.0))
                     .flex()
                     .flex_none()
@@ -1095,8 +1243,13 @@ impl FuwaApp {
                     .cursor_pointer()
                     .when(busy, |el| el.opacity(0.6))
                     .hover(move |s| s.bg(soft).text_color(red))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("ban").size(px(16.0)))
+                    .active(|s| s.scale(0.9))
+                    .child(
+                        div()
+                            .id("friend-block-icon")
+                            .group_hover("friend-block", |s| s.rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4)))
+                            .child(icon("ban").size(px(16.0))),
+                    )
                     .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                     .on_click(on(Act::Block, cx)),
             );
@@ -1118,12 +1271,13 @@ impl FuwaApp {
                     .text_xs()
                     .text_color(p.muted_foreground)
                     .child(div().flex().children(mutual.iter().take(3).enumerate().map(|(n, u)| {
-                        div()
-                            .when(n > 0, |el| el.ml(px(-6.0)))
-                            .rounded_full()
-                            .border_2()
-                            .border_color(p.card)
-                            .child(avatar(Some(u), 20.0, p))
+                        div().when(n > 0, |el| el.ml(px(-6.0))).child(crate::ui::motion::spring_in(
+                            div().rounded_full().border_2().border_color(p.card).child(avatar(Some(u), 20.0, p)),
+                            SharedString::from(format!("mutual-face|{}", u.id)),
+                            (520.0, 34.0),
+                            Duration::from_millis(50 * n as u64),
+                            |el, t| el.scale(t),
+                        ))
                     })))
                     .child(div().truncate().child(text)),
                 SharedString::from(format!("mutual-{user_id}")),
@@ -1142,6 +1296,58 @@ thread_local! {
     /// Where each friend's "more" button was drawn, for its menu.
     static MORE_PLACES: std::cell::RefCell<std::collections::HashMap<String, gpui_kit::Bounds<gpui_kit::Pixels>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// A line in a tab: 8px around a 48px row.
+const LINE: f32 = 64.0;
+
+/// How long a line takes to leave (the web's `duration: 0.18`).
+const LINE_LEAVES: Duration = Duration::from_millis(180);
+
+/// What the tab showed last time, and who has left it since, when.
+struct Lines {
+    tab: Tab,
+    before: Vec<pb::Friend>,
+    gone: Vec<(usize, pb::Friend, Instant)>,
+}
+
+/// The people who just left `tab`'s list: where they were, who, and how far
+/// out they are (0 to 1). Switching tabs lets nobody leave: the new tab's
+/// list just comes in.
+fn leaving_lines(
+    tab: Tab,
+    shown: &[&pb::Friend],
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> Vec<(usize, pb::Friend, f32)> {
+    let still = cx.reduce_motion();
+    let state = window.use_keyed_state("friends-lines", cx, |_, _| Lines { tab, before: Vec::new(), gone: Vec::new() });
+    let leaving = state.update(cx, |lines, _| {
+        let id = |f: &pb::Friend| f.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+        if lines.tab != tab {
+            lines.gone.clear();
+        } else if !still {
+            let now: HashSet<String> = shown.iter().map(|f| id(f)).collect();
+            for (n, f) in lines.before.iter().enumerate() {
+                if !now.contains(&id(f)) && !lines.gone.iter().any(|(_, g, _)| id(g) == id(f)) {
+                    lines.gone.push((n, f.clone(), Instant::now()));
+                }
+            }
+        }
+        lines.gone.retain(|(_, f, at)| at.elapsed() < LINE_LEAVES && !shown.iter().any(|s| id(s) == id(f)));
+        lines.gone.sort_by_key(|(n, ..)| *n);
+        lines.tab = tab;
+        lines.before = shown.iter().map(|f| (*f).clone()).collect();
+        lines
+            .gone
+            .iter()
+            .map(|(n, f, at)| (*n, f.clone(), at.elapsed().as_secs_f32() / LINE_LEAVES.as_secs_f32()))
+            .collect::<Vec<_>>()
+    });
+    if !leaving.is_empty() {
+        window.request_animation_frame();
+    }
+    leaving
 }
 
 fn tab_key(tab: Tab) -> &'static str {
@@ -1274,9 +1480,10 @@ fn swap(
         .cursor_pointer()
         .when(busy, |el| el.opacity(0.6))
         .hover(move |s| s.bg(soft))
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.scale(0.96))
         .child(
             div()
+                .id("swap-label")
                 .absolute()
                 .left_0()
                 .right_0()
@@ -1287,16 +1494,18 @@ fn swap(
                 .justify_center()
                 .gap(px(6.0))
                 .text_color(p.foreground)
-                .group_hover(id, |s| s.top(px(-24.0)).opacity(0.0))
+                .group_hover(id, |s| s.translate_y(px(-24.0)).opacity(0.0))
                 .child(icon(glyph).size(px(16.0)))
                 .child(div().truncate().child(label)),
         )
         .child(
             div()
+                .id("swap-hover-label")
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(px(24.0))
+                .top_0()
+                .translate_y(px(24.0))
                 .h(px(36.0))
                 .flex()
                 .items_center()
@@ -1304,7 +1513,7 @@ fn swap(
                 .gap(px(6.0))
                 .opacity(0.0)
                 .text_color(red)
-                .group_hover(id, |s| s.top(px(0.0)).opacity(1.0))
+                .group_hover(id, |s| s.translate_y(px(0.0)).opacity(1.0))
                 .child(icon(hover_glyph).size(px(16.0)))
                 .child(div().truncate().child(hover_label)),
         )

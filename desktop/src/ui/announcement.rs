@@ -76,7 +76,8 @@ pub fn banner(
             }
         },
     );
-    let badge = motion::once(
+    // Pops in turning upright, a moment after the banner (the web's `scale: 0, rotate: -40`).
+    let badge = motion::pop(
         div()
             .relative()
             .flex_none()
@@ -97,12 +98,9 @@ pub fn banner(
             })
             .child(mark),
         SharedString::from(format!("{id}-badge-{}", tone as i32)),
-        Duration::from_millis(420),
-        |el, t| {
-            // Pops in turning, as on the web.
-            let s = 1.0 - (1.0 - t).powi(3);
-            el.opacity(s)
-        },
+        0.0,
+        -40.0,
+        Duration::from_millis(120),
     );
     let ends = ends_ms(a).map(|at| (ends_label(at, now), stamp_label(at, now)));
     let words = motion::rise(
@@ -114,7 +112,7 @@ pub fn banner(
         ),
         SharedString::from(format!("{id}-words-{}|{}", a.id, a.text.len())),
         Duration::from_millis(80),
-        8.0,
+        -8.0,
     );
     let mut row = div()
         .relative()
@@ -213,20 +211,53 @@ pub(crate) fn hazard(id: &str, window: &Window) -> AnyElement {
 }
 
 impl crate::ui::app::FuwaApp {
-    /// The banner for the instance you're on, unless it's down, over or closed here.
+    /// The banner for the instance you're on, unless it's down, over or
+    /// closed here. Once it goes, it steps out of the way at once and fades
+    /// as it lifts (the web's `SLIDE_IN` under `mode="popLayout"`).
     pub(crate) fn render_announcement(
         &mut self,
         window: &mut Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> Option<AnyElement> {
+        let now = crate::core::dms::now_ms();
+        let shown = self.announcement_shown(now);
+        let leaving = motion::kept("announcement", shown.as_ref(), window, cx);
+        if let Some((key, a)) = shown {
+            return Some(self.announcement_banner(&key, &a, now, window, cx));
+        }
+        let ((key, a), t) = leaving?;
+        let gone = gpui_kit::ease_out_quint()(t);
+        let banner = self.announcement_banner(&key, &a, now, window, cx);
+        Some(
+            div()
+                .relative()
+                .h(px(0.0))
+                .flex_none()
+                .child(
+                    gpui_kit::deferred(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .opacity(1.0 - gone)
+                            .translate_y(px(-6.0 * gone))
+                            .child(banner),
+                    )
+                    .with_priority(1),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The instance you're on and its announcement, while it should show.
+    fn announcement_shown(&self, now: i64) -> Option<(String, pb::Announcement)> {
         use crate::ui::app::Nav;
-        use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
         let key = match &self.nav {
             Nav::Instance { key } | Nav::Server { key, .. } => key.clone(),
             Nav::Home { dm: Some((key, _)) } | Nav::Friends { key } => key.clone(),
             Nav::Home { dm: None } => return None,
         };
-        let now = crate::core::dms::now_ms();
         let a = self
             .core
             .shared
@@ -238,9 +269,22 @@ impl crate::ui::app::FuwaApp {
         if !critical && self.prefs.closed_announcements.get(&key) == Some(&a.id) {
             return None;
         }
+        Some((key, a))
+    }
+
+    fn announcement_banner(
+        &mut self,
+        key: &str,
+        a: &pb::Announcement,
+        now: i64,
+        window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> AnyElement {
+        use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
+        let critical = tone_of(a) == Tone::Critical;
         let p = crate::ui::widgets::pal(cx);
         let close = (!critical).then(|| {
-            let (key, id) = (key.clone(), a.id.clone());
+            let (key, id) = (key.to_owned(), a.id.clone());
             let button = div()
                 .id("announcement-close")
                 .size(px(28.0))
@@ -249,7 +293,12 @@ impl crate::ui::app::FuwaApp {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
+                // The web's `hover:bg-black/10 dark:hover:bg-white/15`.
+                .hover({
+                    let tint =
+                        if p.dark { alpha(gpui_kit::rgb(0xffffff), 0.15) } else { alpha(gpui_kit::rgb(0x000000), 0.1) };
+                    move |s| s.bg(tint)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.set_prefs(|p| {
                         p.closed_announcements.insert(key.clone(), id.clone());
@@ -262,11 +311,13 @@ impl crate::ui::app::FuwaApp {
             let (hover, press) = (motion::Pose::turn(90.0), motion::Pose { scale: 0.9, ..motion::Pose::turn(90.0) });
             motion::answer(button, "announcement-close", hover, press, window, cx).into_any_element()
         });
-        Some(motion::once(
-            div().flex_none().child(banner("announcement", &a, now, close, &p, window)),
+        // It drops in from just above (the web's `SLIDE_IN`, on `stiffness: 420, damping: 40`).
+        motion::spring_in(
+            div().flex_none().child(banner("announcement", a, now, close, &p, window)),
             SharedString::from(format!("announcement-in-{key}-{}", a.id)),
-            Duration::from_millis(320),
-            |el, t| el.opacity(t),
-        ))
+            (420.0, 40.0),
+            Duration::ZERO,
+            |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px(-6.0 * (1.0 - t))),
+        )
     }
 }

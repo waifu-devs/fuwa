@@ -232,12 +232,14 @@ fn heading(title: &str, count: usize, p: &Palette) -> Div {
         .text_color(p.muted_foreground)
         .child(tracked(title.to_uppercase(), WIDE))
         .when(count > 0, |el| {
-            el.child(div().px(px(6.0)).rounded_full().bg(p.muted).text_size(px(10.0)).child(motion::count_up(
-                SharedString::from(format!("shared-count-{title}")),
-                count as f64,
-                Duration::ZERO,
-                |v| format!("{}", v.round()),
-            )))
+            el.child(
+                div().px(px(6.0)).rounded_full().bg(p.muted).text_size(px(10.0)).child(crate::ui::motion::rolling(
+                    format!("shared-count-{title}"),
+                    count as u64,
+                    None,
+                    10.0,
+                )),
+            )
         })
 }
 
@@ -878,7 +880,7 @@ impl ServerSettingsView {
                     )
                     .into_any_element()
                 })
-                .child(text)
+                .child(crate::ui::motion::swapping(format!("conn-state-{id}"), text, 12.0))
         };
         let actions = if c.home && is_waiting {
             let (id2, id3) = (id.clone(), id.clone());

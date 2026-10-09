@@ -569,7 +569,7 @@ fn small_button(
             let (bg, fg) = (alpha(p.muted_foreground, 0.12), p.foreground);
             move |s| s.bg(bg).text_color(fg)
         })
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
         .on_click(on_click)
         .child(icon(glyph).size(px(16.0)))

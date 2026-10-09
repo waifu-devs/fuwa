@@ -183,13 +183,25 @@ impl ServerSettingsView {
             )
             .into_any_element();
         }
-        let people = t_with("serversettings.applications.people", &[("count", Arg::Num(list.len() as i64))]);
-        let intro = t_with("serversettings.applications.waiting", &[("people", Arg::Str(&strong(&people)))]);
-        let mut col = div()
+        // "3 people" in bold, the number rolling as applications come and go, then the rest of
+        // the sentence.
+        let intro = t_with("serversettings.applications.waiting", &[("people", Arg::Str("\u{E002}"))]);
+        let (before, after) = intro.split_once('\u{E002}').unwrap_or((intro.as_str(), ""));
+        let people = div().flex_none().font_weight(FontWeight::BOLD).text_color(p.foreground).child(motion::counted(
+            "applications-count",
+            "serversettings.applications.people",
+            list.len() as u64,
+            14.0,
+        ));
+        let intro = div()
             .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(marked(&intro, p)));
+            .text_sm()
+            .line_height(px(20.0))
+            .text_color(p.muted_foreground)
+            .when(!before.is_empty(), |el| el.child(div().flex_none().child(before.to_owned())))
+            .child(people)
+            .child(div().flex_1().min_w_0().child(after.to_owned()));
+        let mut col = div().flex().flex_col().gap(px(12.0)).child(intro);
         let now = now_ms();
         for (n, app) in list.iter().enumerate() {
             col = col.child(self.application_card(app, n, now, p, window, cx));
@@ -392,7 +404,7 @@ impl ServerSettingsView {
                         .text_color(gpui_kit::white())
                         .cursor_pointer()
                         .hover(move |s| s.bg(emerald_hover))
-                        .active(|s| s.top(px(1.0)))
+                        .active(|s| s.scale(0.97))
                         .when(busy, |el| el.opacity(0.5))
                         .when(!busy, |el| {
                             el.on_click(cx.listener(move |this, _, _, cx| this.decide(u2.clone(), true, cx)))

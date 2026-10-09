@@ -703,9 +703,10 @@ impl InstanceSettingsView {
         for d in domains {
             let gone = d.clone();
             let hover = alpha(p.primary, 0.25);
-            row = row.child(motion::once(
+            row = row.child(motion::pop_in(
                 div()
                     .id(SharedString::from(format!("sso-domain-{d}")))
+                    .group("sso-domain")
                     .flex()
                     .items_center()
                     .gap(px(4.0))
@@ -719,19 +720,16 @@ impl InstanceSettingsView {
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
-                    .active(|s| s.top(px(1.0)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.patch_provider(cx, |p| p.email_domains.retain(|x| x != &gone));
                         this.sync_sso(window, cx);
                     }))
                     .child(format!("@{d}"))
-                    .child(icon("x").size(px(12.0))),
+                    .child(crate::ui::settings_controls::turning_x("sso-domain")),
                 SharedString::from(format!("sso-domain-in-{d}")),
-                Duration::from_millis(280),
-                |el, t| {
-                    let k = 1.0 - (1.0 - t).powi(3);
-                    el.opacity(k)
-                },
+                (0.5, 0.5),
+                0.6,
+                0.0,
             ));
         }
         if domains.len() < MAX_DOMAINS {
@@ -808,7 +806,7 @@ impl InstanceSettingsView {
                                     let bg = p.background;
                                     move |s| s.bg(bg)
                                 })
-                                .active(|s| s.top(px(1.0)))
+                                .active(|s| s.scale(0.85))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
                                     this.sso.copied = Some(n);

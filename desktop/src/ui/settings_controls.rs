@@ -13,13 +13,13 @@ use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div, point, px, relative,
+    AnyElement, App, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement as _, Rgba, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, point, px, relative,
 };
 
 use crate::core::config::Prefs;
-use crate::core::i18n::{Arg, t, t_with};
+use crate::core::i18n::t;
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::text::{WIDE, tracked};
@@ -261,46 +261,56 @@ impl SettingsView {
                 .text_color(fg)
                 .child(text.to_uppercase())
         };
-        if changed {
-            let fg = p.foreground;
-            let hover = p.accent;
-            motion::once(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(pill(t("settings.controls.changed"), alpha(p.primary, 0.15), p.primary))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("reset-{id}")))
-                            .h(px(28.0))
-                            .px(px(8.0))
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(fg)
-                            .cursor_pointer()
-                            .hover(move |s| s.bg(hover))
-                            .on_click(cx.listener(move |this, _, _, cx| reset(this, cx)))
-                            .child(icon("rotate-ccw").size(px(14.0)))
-                            .child(t("settings.controls.reset")),
-                    ),
+        // Changed, with the way back: pressable only while it's the one shown.
+        let fg = p.foreground;
+        let hover = p.accent;
+        let changed_look = |live: bool, cx: &mut Context<Self>| {
+            let reset = reset.clone();
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(4.0))
+                .child(pill(t("settings.controls.changed"), alpha(p.primary, 0.15), p.primary))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("reset-{id}")))
+                        .group(SharedString::from(format!("reset-{id}")))
+                        .h(px(28.0))
+                        .px(px(8.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(fg)
+                        .when(live, |el| {
+                            el.cursor_pointer()
+                                .hover(move |s| s.bg(hover))
+                                .on_click(cx.listener(move |this, _, _, cx| reset(this, cx)))
+                        })
+                        .child(spun(SharedString::from(format!("reset-{id}"))))
+                        .child(t("settings.controls.reset")),
+                )
+        };
+        let default_look = || pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground);
+        // Either one pops in from 80% as the other shrinks away (the web's `AnimatePresence`).
+        let (now, shown, other): (&'static str, AnyElement, (&'static str, AnyElement)) = if changed {
+            let shown = motion::pop_in(
+                changed_look(true, cx),
                 SharedString::from(format!("badge-{id}-changed")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
-            )
+                (0.5, 0.5),
+                0.8,
+                0.0,
+            );
+            ("changed", shown.into_any_element(), ("default", default_look().into_any_element()))
         } else {
-            motion::once(
-                pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground),
-                SharedString::from(format!("badge-{id}-default")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
-            )
-        }
+            let shown =
+                motion::pop_in(default_look(), SharedString::from(format!("badge-{id}-default")), (0.5, 0.5), 0.8, 0.0);
+            ("default", shown.into_any_element(), ("changed", changed_look(false, cx).into_any_element()))
+        };
+        popped(format!("badge-{id}"), now, shown, vec![other]).into_any_element()
     }
 
     /// One field of a form, as a flat row under a rule (account pages' `Row`).
@@ -327,6 +337,15 @@ impl SettingsView {
     }
 }
 
+/// Reset's arrow, going round once backwards while its button is pointed at
+/// (`group-hover:-rotate-[360deg]`).
+pub(crate) fn spun(group: SharedString) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("{group}-spin")))
+        .group_hover(group, |s| s.rotate(gpui_kit::radians(-std::f32::consts::TAU)))
+        .child(icon("rotate-ccw").size(px(14.0)))
+}
+
 /// The web's switch (`h-5 w-8`): the primary when on, the input color when off, and the thumb
 /// springs across.
 pub(crate) fn switch<V: 'static>(
@@ -338,10 +357,30 @@ pub(crate) fn switch<V: 'static>(
     cx: &mut Context<V>,
     set: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
 ) -> Stateful<Div> {
-    let id: SharedString = id.into();
+    switch_track(id.into(), on, disabled, p, window, cx).when(!disabled, |el| {
+        el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
+            set(this, !on, cx)
+        }))
+    })
+}
+
+/// How a switch looks: the track, and the thumb springing across, stretched to 19px while
+/// it's held (Animate UI's `pressedWidth`) toward the side it's on.
+pub(crate) fn switch_track(
+    id: SharedString,
+    on: bool,
+    disabled: bool,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
     let x = motion::follow(SharedString::from(format!("{id}-x")), if on { 13.0 } else { 1.0 }, window, cx);
-    div()
-        .id(ElementId::Name(id))
+    let (track, now) = motion::pointer(div().id(ElementId::Name(id.clone())), &id, window, cx);
+    let held = now.pressed && !disabled;
+    let w = motion::follow(SharedString::from(format!("{id}-w")), if held { 19.0 } else { 16.0 }, window, cx);
+    let left = if on { x + 1.0 - (w - 16.0) } else { x + 1.0 };
+    track
         .flex_none()
         .relative()
         .w(px(32.0))
@@ -349,13 +388,7 @@ pub(crate) fn switch<V: 'static>(
         .rounded_full()
         .bg(if on { p.primary } else { p.border })
         .when(disabled, |el| el.opacity(0.5))
-        .when(!disabled, |el| {
-            el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                set(this, !on, cx)
-            }))
-        })
-        .child(div().absolute().top(px(2.0)).left(px(x + 1.0)).size(px(16.0)).rounded_full().bg(if p.dark && !on {
+        .child(div().absolute().top(px(2.0)).left(px(left)).w(px(w)).h(px(16.0)).rounded_full().bg(if p.dark && !on {
             p.foreground
         } else if p.dark {
             p.primary_foreground
@@ -485,8 +518,9 @@ pub(crate) fn choice<V: 'static>(
                     .when(disabled, |el| el.opacity(0.5))
                     .when(!disabled, |el| {
                         el.cursor_pointer()
-                            .when(!active, |el| el.hover(move |s| s.border_color(hover)))
-                            .active(|s| s.top(px(1.0)))
+                            .hover(move |s| s.translate_y(px(-2.0)))
+                            .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                            .active(|s| s.scale(0.97))
                             .on_click(cx.listener(move |this, _, _, cx| pick(this, i, cx)))
                     })
                     .child(
@@ -503,19 +537,21 @@ pub(crate) fn choice<V: 'static>(
                                     el.bg(p.muted).text_color(p.muted_foreground)
                                 }
                             })
-                            .child(motion::once(
-                                div().child(icon(option.glyph).size(px(16.0))),
-                                SharedString::from(format!("choice-{id}-{i}-{active}")),
-                                Duration::from_millis(360),
-                                move |el, t| {
-                                    if active {
-                                        let k = 1.0 - (1.0 - t).powi(3);
-                                        el.opacity(0.4 + 0.6 * k)
-                                    } else {
-                                        el
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                // The picked one's icon springs up from 40%, turning upright.
+                                let glyph = div().child(icon(option.glyph).size(px(16.0)));
+                                if active {
+                                    el.child(motion::pop(
+                                        glyph,
+                                        SharedString::from(format!("choice-{id}-{i}-on")),
+                                        0.4,
+                                        -30.0,
+                                        Duration::ZERO,
+                                    ))
+                                } else {
+                                    el.child(glyph)
+                                }
+                            }),
                     )
                     .child(
                         div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(option.label.clone()),
@@ -580,6 +616,7 @@ pub(crate) fn segmented<V: 'static>(
                 .text_color(if on { p.foreground } else { p.muted_foreground })
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
+                .active(|s| s.scale(0.95))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .when_some(glyph, |el, g| el.child(icon(g).size(px(14.0))))
                 .child(label),
@@ -627,14 +664,15 @@ pub(crate) fn chips<V: 'static>(
                             .hover(move |s| s.border_color(hover_border).text_color(fg))
                     }
                 })
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.scale(0.92))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .when(on, |el| {
-                    el.child(motion::once(
+                    el.child(motion::pop_in(
                         div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                         SharedString::from(format!("chip-{id}-{n}-on")),
-                        Duration::from_millis(260),
-                        |el, t| el.opacity(t),
+                        (0.5, 0.5),
+                        0.05,
+                        0.0,
                     ))
                 })
                 .child(label)
@@ -653,12 +691,39 @@ pub(crate) enum Look {
     DangerOutline,
 }
 
+/// How a button's icon moves while the button is pointed at.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum IconHover {
+    /// What the web's buttons usually do with that icon ([`glyph_in_button`]).
+    Usual,
+    /// Nothing.
+    Still,
+    /// Turned clockwise by this many degrees (`group-hover:-rotate-180` is -180).
+    Turn(f32),
+    /// Grown to this much of its size (`group-hover:scale-125` is 1.25): the picture cropper's
+    /// "Use it" check.
+    Grow(f32),
+}
+
 /// A shadcn button: `small` is `size="sm"` (h-8), otherwise h-9. The `.btn` lift comes with
 /// primary ones, as the web's settings add it.
 pub(crate) fn button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     glyph: Option<&'static str>,
+    look: Look,
+    small: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    button_with(id, label, glyph, IconHover::Usual, look, small, p)
+}
+
+/// A [`button`] whose icon moves its own way while it's pointed at.
+pub(crate) fn button_with(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    glyph: Option<&'static str>,
+    icon_hover: IconHover,
     look: Look,
     small: bool,
     p: &Palette,
@@ -712,7 +777,7 @@ pub(crate) fn button(
         .map(|el| {
             if look == Look::Primary {
                 el.hover(move |s| {
-                    s.bg(hover).top(px(-2.0)).shadow(vec![BoxShadow {
+                    s.bg(hover).translate_y(px(-2.0)).shadow(vec![BoxShadow {
                         color: glow,
                         offset: point(px(0.0), px(8.0)),
                         blur_radius: px(22.0),
@@ -724,9 +789,51 @@ pub(crate) fn button(
                 el.hover(move |s| s.bg(hover))
             }
         })
-        .active(|s| s.top(px(1.0)))
-        .when_some(glyph, |el, g| el.child(icon(g).size(px(16.0))))
+        // The `.btn` press: back down and in to 94%; the other variants don't move.
+        .when(look == Look::Primary, |el| el.active(|s| s.translate_y(px(0.0)).scale(0.94)))
+        .group("settings-button")
+        .when_some(glyph, |el, g| el.child(glyph_posed(g, icon_hover)))
         .when(!label.is_empty(), |el| el.child(label))
+}
+
+/// A button's icon, moving as the web's do while their button is pointed at: a plus turns a
+/// quarter (`group-hover:rotate-90`), a bin tips (`-rotate-12`), arrows go round, a door nudges
+/// out. The nearest button is the group, so one name serves them all.
+pub(crate) fn glyph_in_button(glyph: &'static str) -> impl IntoElement {
+    glyph_posed(glyph, IconHover::Usual)
+}
+
+/// A button's icon, moving as `hover` says while its button is pointed at.
+fn glyph_posed(glyph: &'static str, hover: IconHover) -> impl IntoElement {
+    let turn = |deg: f32| gpui_kit::radians(deg.to_radians());
+    div().id("glyph").flex_none().child(icon(glyph).size(px(16.0))).group_hover("settings-button", move |s| match hover
+    {
+        IconHover::Still => s,
+        IconHover::Turn(deg) => s.rotate(turn(deg)),
+        IconHover::Grow(k) => s.scale(k),
+        IconHover::Usual => usual_pose(glyph, s),
+    })
+}
+
+/// What the web's buttons do with `glyph` while they're pointed at.
+fn usual_pose(glyph: &'static str, s: gpui_kit::StyleRefinement) -> gpui_kit::StyleRefinement {
+    let turn = |deg: f32| gpui_kit::radians(deg.to_radians());
+    match glyph {
+        "plus" | "x" => s.rotate(turn(90.0)),
+        "trash" | "trash-2" | "clipboard-paste" | "bell-off" | "megaphone-off" | "flask-conical" | "unplug"
+        | "unlink" | "unlink-2" | "pencil" | "user-x" => s.rotate(turn(-12.0)),
+        "refresh-cw" => s.rotate(turn(180.0)),
+        "rotate-ccw" => s.rotate(turn(-360.0)),
+        "key-round" => s.rotate(turn(-45.0)),
+        "user-minus" => s.rotate(turn(-6.0)),
+        "settings" => s.rotate(turn(90.0)),
+        "log-out" => s.translate_x(px(2.0)),
+        "send" => s.translate_x(px(2.0)).translate_y(px(-2.0)),
+        "download" => s.translate_y(px(2.0)),
+        "file-up" => s.translate_y(px(-2.0)),
+        "user-check" | "play" | "volume-2" => s.scale(1.1),
+        _ => s,
+    }
 }
 
 /// A text field as the web draws its inputs: bordered, `h-11 rounded-xl` unless told otherwise.
@@ -784,13 +891,22 @@ pub(crate) fn save_bar<V: 'static>(
     error: Option<&str>,
     alarm: Option<u32>,
     p: &Palette,
+    window: &mut Window,
     cx: &mut Context<V>,
     save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     discard: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
-    if count == 0 {
-        return div().into_any_element();
-    }
+    // Once nothing's left to save it slides back down, showing what it last said.
+    let said = (count > 0).then(|| (count, error.map(str::to_owned)));
+    let (count, error, going) = match motion::kept(&format!("{id}-bar"), said.as_ref(), window, cx) {
+        Some(((count, error), t)) => (count, error, Some(t)),
+        None => match said {
+            Some((count, error)) => (count, error, None),
+            None => return div().into_any_element(),
+        },
+    };
+    let (error, live) = (error.as_deref(), going.is_none());
+    let (pressable, alarm) = (!saving && live, alarm.filter(|_| live));
     let alarmed = alarm.is_some();
     let line: AnyElement = if let Some(e) = error {
         div().text_color(p.destructive).child(e.to_owned()).into_any_element()
@@ -805,11 +921,12 @@ pub(crate) fn save_bar<V: 'static>(
             .flex()
             .gap(px(4.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
-            .child(
-                div()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(count as i64))])),
-            )
+            .child(div().text_color(p.muted_foreground).child(motion::counted(
+                format!("{id}-count"),
+                "settings.controls.unsavedCount",
+                count as u64,
+                14.0,
+            )))
             .into_any_element()
     };
     let bar = div()
@@ -837,7 +954,7 @@ pub(crate) fn save_bar<V: 'static>(
                 p,
             )
             .rounded(radius_xl())
-            .when(!saving, |el| el.on_click(cx.listener(move |this, _, w, cx| discard(this, w, cx)))),
+            .when(pressable, |el| el.on_click(cx.listener(move |this, _, w, cx| discard(this, w, cx)))),
         )
         .child(
             button(
@@ -851,7 +968,7 @@ pub(crate) fn save_bar<V: 'static>(
             .rounded(radius_xl())
             .px(px(16.0))
             .font_weight(FontWeight::BOLD)
-            .when(!saving, |el| el.on_click(cx.listener(move |this, _, w, cx| save(this, w, cx)))),
+            .when(pressable, |el| el.on_click(cx.listener(move |this, _, w, cx| save(this, w, cx)))),
         );
     let bar: AnyElement = match alarm {
         Some(n) => {
@@ -865,13 +982,163 @@ pub(crate) fn save_bar<V: 'static>(
         }
         None => bar.into_any_element(),
     };
-    motion::rise(
+    let shown = motion::rise(
         div().mt(px(24.0)).pb(px(8.0)).child(bar),
         SharedString::from(format!("{id}-bar")),
         Duration::ZERO,
         80.0,
-    )
-    .into_any_element()
+    );
+    match going {
+        Some(t) => bar_going(shown, t),
+        None => shown.into_any_element(),
+    }
+}
+
+/// Where a child of a row was laid out: left, top, width and height, from the row's corner.
+pub(crate) type Spot = (f32, f32, f32, f32);
+
+/// Measures where `row`'s children are laid out, keyed by `id`: the row, and the spots they had
+/// last frame (none on the first), so a pick can glide between them ([`glider`]).
+pub(crate) fn measured(row: Div, id: &str, window: &mut Window, cx: &mut App) -> (Div, Vec<Spot>) {
+    let state = window.use_keyed_state(SharedString::from(format!("{id}|spots")), cx, |_, _| Vec::<Spot>::new());
+    let spots = state.read(cx).clone();
+    let row = row.on_children_prepainted(move |bounds, window, cx| {
+        let first = bounds.first().map_or(point(px(0.0), px(0.0)), |b| b.origin);
+        let now: Vec<Spot> = bounds
+            .iter()
+            .map(|b| {
+                let at = b.origin - first;
+                (f32::from(at.x), f32::from(at.y), f32::from(b.size.width), f32::from(b.size.height))
+            })
+            .collect();
+        state.update(cx, |spots, _| {
+            if *spots != now {
+                *spots = now;
+                window.request_animation_frame();
+            }
+        });
+    });
+    (row, spots)
+}
+
+/// `el` (a pill, a ring) laid over `spot` of a [`measured`] row, gliding there from wherever it
+/// was (the web's `layoutId`). Put it before the row, in a `relative` box around both.
+pub(crate) fn glider(id: &str, spot: Spot, el: Div, cx: &mut App) -> AnyElement {
+    let (x, y, w, h) = spot;
+    let el = motion::glide(el.absolute().left_0().top_0().h(px(h)), format!("{id}|w"), w, cx, |el, w| el.w(px(w)));
+    let el =
+        motion::glide(div().absolute().left_0().top_0().child(el), format!("{id}|y"), y, cx, |el, y| el.top(px(y)));
+    motion::glide(div().absolute().left_0().top_0().child(el), format!("{id}|x"), x, cx, |el, x| el.left(px(x)))
+}
+
+/// A search box's clear button, the cross at its end, while there's a search (`searching`): it
+/// pops in turning upright from -90°, and once the search is emptied it shrinks to half, turns
+/// on a quarter and fades (the web's `exit={{ opacity: 0, scale: 0.5, rotate: 90 }}`). `clear`
+/// empties the search.
+pub(crate) fn search_clear<V: 'static>(
+    id: &'static str,
+    searching: bool,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<V>,
+    clear: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+) -> Option<AnyElement> {
+    let going = motion::kept(&format!("{id}-kept"), searching.then_some(&()), window, cx);
+    if !searching && going.is_none() {
+        return None;
+    }
+    let (hover, fg) = (p.muted, p.foreground);
+    let cross = div()
+        .id(id)
+        .absolute()
+        .right(px(5.0))
+        .top(px(5.0))
+        .size(px(24.0))
+        .rounded(radius_md())
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(p.muted_foreground)
+        .child(icon("x").size(px(14.0)));
+    Some(match going {
+        Some(((), t)) => {
+            let e = gone(t);
+            cross
+                .opacity(1.0 - e)
+                .scale(1.0 - 0.5 * e)
+                .rotate(gpui_kit::radians((90.0 * e).to_radians()))
+                .into_any_element()
+        }
+        None => motion::pop(
+            cross
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover).text_color(fg))
+                .on_click(cx.listener(move |this, _, window, cx| clear(this, window, cx))),
+            SharedString::from(format!("{id}-in")),
+            0.5,
+            -90.0,
+            Duration::ZERO,
+        )
+        .into_any_element(),
+    })
+}
+
+/// How far along something leaving is, `t` of the way through [`motion::kept`]'s time, eased.
+pub(crate) fn gone(t: f32) -> f32 {
+    gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0))
+}
+
+/// A save bar on its way out, `t` of the way: sliding 80px down as it fades (the web's
+/// `exit={{ y: 80, opacity: 0 }}`).
+pub(crate) fn bar_going(el: impl IntoElement, t: f32) -> AnyElement {
+    let e = gone(t);
+    div().opacity(1.0 - e).translate_y(px(80.0 * e)).child(el).into_any_element()
+}
+
+/// One of a few looks that swap as something changes (a setting's Default and Changed): the
+/// one going shrinks to 80% and fades over its spot while the new one pops in (the web's
+/// `AnimatePresence mode="popLayout"` with `exit={{ opacity: 0, scale: 0.8 }}`). `now` names
+/// the look `shown` is; `others` are the rest, drawn as they were, for when one goes.
+#[derive(IntoElement)]
+pub(crate) struct Popped {
+    id: SharedString,
+    now: &'static str,
+    shown: AnyElement,
+    others: Vec<(&'static str, AnyElement)>,
+}
+
+pub(crate) fn popped(
+    id: impl Into<SharedString>,
+    now: &'static str,
+    shown: impl IntoElement,
+    others: Vec<(&'static str, AnyElement)>,
+) -> Popped {
+    Popped { id: id.into(), now, shown: shown.into_any_element(), others }
+}
+
+impl gpui_kit::RenderOnce for Popped {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        motion::kept(&format!("{}-{}", self.id, self.now), Some(&()), window, cx);
+        let mut going = None;
+        for (key, el) in self.others {
+            if let Some(((), t)) = motion::kept::<()>(&format!("{}-{key}", self.id), None, window, cx) {
+                going = Some((el, t));
+            }
+        }
+        div().relative().flex_none().child(self.shown).when_some(going, |el, (going, t)| {
+            let e = gone(t);
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .whitespace_nowrap()
+                    .opacity(1.0 - e)
+                    .scale(1.0 - 0.2 * e)
+                    .child(going),
+            )
+        })
+    }
 }
 
 /// Keys on a keyboard (`.keycap`), for a shortcut.
@@ -1076,4 +1343,12 @@ impl SettingsView {
             .children(marks_row)
             .into_any_element()
     }
+}
+
+/// A chip's cross, turning a quarter while the chip is pointed at (`group-hover:rotate-90`).
+pub(crate) fn turning_x(group: &'static str) -> impl IntoElement {
+    div()
+        .id("x")
+        .group_hover(group, |s| s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+        .child(icon("x").size(px(12.0)))
 }

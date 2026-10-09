@@ -618,6 +618,13 @@ impl ServerSettingsView {
         .detach();
     }
 
+    /// Opens on `page`, as a link to it from elsewhere in the app does (the
+    /// sidebar's "people waiting" notice opens Applications).
+    pub(crate) fn show(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.open(page, cx);
+        cx.notify();
+    }
+
     fn open(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = Some(page);
         self.error = None;
@@ -779,6 +786,7 @@ impl Render for ServerSettingsView {
         let menu = self.menu(&server.name, &allowed, page, &badges, &p, window, cx);
 
         self.bar = None;
+        SAID.with(|s| s.borrow_mut().take());
         frame::ALARM.with(|a| a.set(self.alarm()));
         let body = match page {
             Page::Overview => self.overview(&server, &p, window, cx),
@@ -833,6 +841,21 @@ impl Render for ServerSettingsView {
         };
         frame::ALARM.with(|a| a.set(None));
         self.held = self.bar.is_some();
+        // Once nothing's left to save the bar slides back down, showing what it last said.
+        let said = SAID.with(|s| s.borrow_mut().take()).filter(|_| self.held);
+        if let Some((said, t)) = motion::kept("server-settings-bar", said.as_ref(), window, cx) {
+            let bar = bar_with_error(
+                &said.id,
+                said.n,
+                said.saving,
+                said.error.as_deref(),
+                &p,
+                cx,
+                |_: &mut Self, _, _| {},
+                |_: &mut Self, _, _| {},
+            );
+            self.bar = Some(crate::ui::settings_controls::bar_going(bar, t));
+        }
 
         // A setting picked from search: once it's been drawn, scroll it to the middle.
         if let Some(id) = self.scroll_to {
@@ -900,6 +923,7 @@ impl Render for ServerSettingsView {
         let (hover_bg, hover_fg, hover_ring) = (p.muted, p.foreground, alpha(p.foreground, 0.4));
         let close = div()
             .id("server-settings-close")
+            .group("server-settings-close")
             .absolute()
             .top(px(64.0))
             .left(px(aside + inner - 24.0 - 40.0))
@@ -920,9 +944,19 @@ impl Render for ServerSettingsView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(move |s| s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("x").size(px(20.0))),
+                    .group_hover("server-settings-close", move |s| {
+                        s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring)
+                    })
+                    .active(|s| s.scale(0.9))
+                    // The cross turns a quarter as the pointer comes (`group-hover:rotate-90`).
+                    .child(
+                        div()
+                            .id("server-settings-close-x")
+                            .group_hover("server-settings-close", |s| {
+                                s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                            })
+                            .child(icon("x").size(px(20.0))),
+                    ),
             )
             .child(div().text_size(px(10.4)).font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"));
 
@@ -1031,6 +1065,21 @@ pub(crate) fn marked(text: &str, p: &Palette) -> gpui_kit::StyledText {
     crate::ui::instance_settings::emphasized(&parts, p)
 }
 
+/// What the page's save bar said as it was last drawn, so that once it's gone it can slide
+/// away still saying it.
+#[derive(Clone)]
+struct Said {
+    id: String,
+    n: usize,
+    saving: bool,
+    error: Option<String>,
+}
+
+thread_local! {
+    /// The save bar a page drew this frame, read by the screen after the page.
+    static SAID: RefCell<Option<Said>> = const { RefCell::new(None) };
+}
+
 /// The bar of unsaved changes, with Discard and Save (the web's `SaveBar`). The screen puts it
 /// under the page or over the column's foot; while someone just tried to leave it shakes and
 /// turns red.
@@ -1059,6 +1108,9 @@ pub(crate) fn bar_with_error<V: 'static>(
     save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
     use crate::ui::settings_controls::{Look, button, shadow_xl};
+    if n > 0 {
+        SAID.with(|s| *s.borrow_mut() = Some(Said { id: id.to_owned(), n, saving, error: error.map(str::to_owned) }));
+    }
     let alarm = frame::ALARM.with(|a| a.get());
     let alarmed = alarm.is_some();
     let line: AnyElement = if let Some(e) = error {
@@ -1074,11 +1126,12 @@ pub(crate) fn bar_with_error<V: 'static>(
             .flex()
             .gap(px(4.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
-            .child(
-                div()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(n as i64))])),
-            )
+            .child(div().text_color(p.muted_foreground).child(crate::ui::motion::counted(
+                format!("{id}-count"),
+                "settings.controls.unsavedCount",
+                n as u64,
+                14.0,
+            )))
             .into_any_element()
     };
     let bar = div()
@@ -1205,7 +1258,7 @@ pub(crate) fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui
                 el.bg(p.secondary).text_color(p.foreground).hover(move |s| s.bg(hover))
             }
         })
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.scale(0.97))
         .child(label.to_owned())
 }
 

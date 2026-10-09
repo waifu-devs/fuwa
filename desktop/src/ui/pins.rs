@@ -33,6 +33,7 @@ pub enum PinPlace {
 }
 
 /// The open list.
+#[derive(Clone)]
 pub struct PinsPanel {
     pub key: String,
     pub place: PinPlace,
@@ -417,11 +418,29 @@ impl FuwaApp {
 
     /// The pin in a header (`PinsPopover`'s button): tilted while closed,
     /// upright on the primary at 10% while its list is open. `open` says
-    /// whether the list hangs from this button; it drops down under it.
-    pub(crate) fn pins_button(&mut self, id: &'static str, open: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// whether the list hangs from this button; it drops down under it, and
+    /// once closed stays a moment more on its way out.
+    pub(crate) fn pins_button_in(
+        &mut self,
+        id: &'static str,
+        open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let now = if open { self.pins.clone() } else { None };
+        let going = motion::kept(&format!("{id}|list"), now.as_ref(), window, cx);
+        self.pins_toggle(id, open, going, cx)
+    }
+
+    fn pins_toggle(
+        &mut self,
+        id: &'static str,
+        open: bool,
+        going: Option<(PinsPanel, f32)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = pal(cx);
         let hover = p.muted;
-        let tilt = if open { 0.0 } else { 1.0 };
         let button = div()
             .id(id)
             .size(px(36.0))
@@ -433,7 +452,8 @@ impl FuwaApp {
             .cursor_pointer()
             .text_color(if open { p.primary } else { p.muted_foreground })
             .when(open, |el| el.bg(alpha(p.primary, 0.1)))
-            .when(!open, |el| el.hover(move |s| s.bg(hover)))
+            .hover(move |s| s.bg(hover))
+            .active(|s| s.scale(0.85))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.pins.button")).build(window, cx))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if id == "thread-pins" {
@@ -451,16 +471,33 @@ impl FuwaApp {
                     this.toggle_pins(window, cx);
                 }
             }))
-            .child(
-                div()
-                    .scale(1.0 + 0.08 * (1.0 - tilt))
-                    .child(icon("pin").size(px(20.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt))),
-            );
-        let card = if open { self.pins_card(cx) } else { None };
+            // The pin springs upright as its list opens, and tilts back as it closes.
+            .child(crate::ui::motion::springing(
+                SharedString::from(format!("{id}|tilt")),
+                if open { 0.0 } else { 1.0 },
+                |tilt| {
+                    div()
+                        .scale(1.0 + 0.08 * (1.0 - tilt))
+                        .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt))
+                        .child(icon("pin").size(px(20.0)))
+                        .into_any_element()
+                },
+            ));
+        let card = if open { self.pins.clone().and_then(|panel| self.pins_card(&panel, cx)) } else { None };
+        // `exit={{ opacity: 0, scale: 0.96, y: -6 }}`, out of its top right corner.
+        let leaving = going.and_then(|(panel, t)| Some((self.pins_card(&panel, cx)?, t))).map(|(card, t)| {
+            gpui_kit::deferred(div().absolute().top_0().left_0().size_full().child(crate::ui::chat::closing(
+                div().absolute().top(px(42.0)).right_0().child(card),
+                t,
+                crate::ui::chat::Gone { scale: 0.96, x: 0.0, y: -6.0, origin: (1.0, 0.0) },
+            )))
+            .with_priority(1)
+        });
         div()
             .relative()
             .flex_none()
             .child(button)
+            .children(leaving)
             .when_some(card, |el, card| {
                 // A clear layer closes it when you click anywhere else; the list sits over everything.
                 let away = div()
@@ -491,8 +528,7 @@ impl FuwaApp {
     }
 
     /// The open list (`PinsPopover`'s card): what's pinned, the latest first.
-    fn pins_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let panel = self.pins.as_ref()?;
+    fn pins_card(&mut self, panel: &PinsPanel, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = pal(cx);
         let Read { list, rows, can_unpin } = self.listed(panel)?;
         let in_dm = matches!(panel.place, PinPlace::Dm { .. });
@@ -584,8 +620,9 @@ impl FuwaApp {
             spread_radius: px(-12.0),
             inset: false,
         }];
+        // It drops open from under its button, growing from 94%.
         Some(
-            motion::rise(
+            motion::pop_in(
                 div()
                     .id("pins-card")
                     .w(px(416.0))
@@ -602,7 +639,8 @@ impl FuwaApp {
                     .child(header)
                     .child(body),
                 "pins-card-in",
-                Duration::ZERO,
+                (1.0, 0.0),
+                0.94,
                 -8.0,
             )
             .into_any_element(),
@@ -681,8 +719,10 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
-                    .invisible()
-                    .group_hover("pin", |s| s.visible())
+                    // Shown on the row's hover, fading as the web's `transition-opacity`.
+                    .id(SharedString::from(format!("pin-tools|{id}")))
+                    .opacity(0.0)
+                    .group_hover("pin", |s| s.opacity(1.0))
                     .when_some(jump, |el, jump| {
                         el.child(
                             pill(
@@ -759,6 +799,7 @@ fn loading(p: &Palette) -> AnyElement {
 
 /// Nothing pinned yet: the pin dropping into its tile, and where to pin from.
 fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(420.0, 14.0, 1.0), 0.002);
     div()
         .flex()
         .flex_col()
@@ -766,7 +807,8 @@ fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
         .px(px(24.0))
         .py(px(32.0))
         .text_center()
-        .child(motion::rise(
+        // The pin drops in and swings to its tilt (`stiffness: 420, damping: 14`).
+        .child(motion::once(
             div()
                 .size(px(48.0))
                 .rounded(radius_2xl())
@@ -775,10 +817,15 @@ fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
                 .justify_center()
                 .bg(alpha(p.primary, 0.1))
                 .text_color(p.primary)
-                .child(icon("pin").size(px(24.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4))),
+                .child(icon("pin").size(px(24.0))),
             "pins-empty-in",
-            Duration::ZERO,
-            -14.0,
+            duration,
+            move |el, t| {
+                let k = easing(t);
+                el.opacity(k.clamp(0.0, 1.0))
+                    .translate_y(px(-14.0 * (1.0 - k)))
+                    .rotate(gpui_kit::radians((-70.0 + 25.0 * k).to_radians()))
+            },
         ))
         .child(div().mt(px(12.0)).font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.pins.empty")))
         .child(div().mt(px(4.0)).max_w(px(320.0)).text_sm().text_color(p.muted_foreground).child(hint.to_owned()))

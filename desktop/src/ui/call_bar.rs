@@ -54,7 +54,6 @@ impl FuwaApp {
         };
         let connected = call.status == Status::Connected;
         let seconds = call.since.map(|s| s.elapsed().as_secs()).unwrap_or(0);
-        let open = self.calls.pop == Some(CallPop::Connection);
         let hover = alpha(p.muted, 0.6);
         let status = div()
             .id("call-status")
@@ -72,11 +71,18 @@ impl FuwaApp {
             .text_color(tint)
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
-            .active(|s| s.opacity(0.9))
+            .active(|s| s.scale(0.98))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.calls.panel.details")).build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_call_pop(CallPop::Connection, cx)))
             .child(signal(&call.status, &call.quality, &p, "panel", window))
-            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            // "Connecting" slides away as "Voice connected" comes in (the web's `SwapText`).
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(motion::swap_text(
+                "call-status-text",
+                label,
+                14.0,
+                window,
+                cx,
+            )))
             .when(connected, |el| {
                 el.child(
                     div()
@@ -89,7 +95,9 @@ impl FuwaApp {
                         .child(call.quality.ping_text()),
                 )
             })
-            .when(open, |el| el.child(self.hang(self.connection_card(&call, window, cx), Side::Above)));
+            .children(self.pop_card(&CallPop::Connection, Side::Above, window, cx, |this, window, cx| {
+                this.connection_card(&call, window, cx)
+            }));
         let fg = p.foreground;
         let place = div()
             .id("call-where")
@@ -101,7 +109,7 @@ impl FuwaApp {
             .line_height(px(16.0))
             .text_color(p.muted_foreground)
             .cursor_pointer()
-            .hover(move |s| s.text_color(fg))
+            .hover(move |s| s.text_color(fg).underline())
             .on_click(cx.listener(|this, _, window, cx| this.open_call_place(window, cx)))
             .when(dm, |el| {
                 el.child(
@@ -195,13 +203,14 @@ impl FuwaApp {
                         .child(div().min_w_0().child(text)),
                     "call-problem",
                     Duration::ZERO,
-                    6.0,
+                    -6.0,
                 ))
             })
             .children(allow);
         let panel = div().flex_none().border_t_1().border_color(p.border).bg(alpha(p.background, 0.6)).child(body);
         let id = SharedString::from(format!("call-bar|{}|{}{}", call.instance, call.channel_id, call.conversation_id));
-        Some(motion::rise(panel, id, Duration::ZERO, 12.0).into_any_element())
+        // The web's `SLIDE_IN`: down 6 px into place as it fades in.
+        Some(motion::rise(panel, id, Duration::ZERO, -6.0).into_any_element())
     }
 
     /// Draws the window again every second while a call is connected, for its clock.
@@ -279,13 +288,21 @@ impl FuwaApp {
                 .collect();
             Some((list, i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default()))
         })?;
+        // Who's there as the list first shows is just there (the web's
+        // `initial={false}`); who joins after slides in.
+        let first = crate::ui::call_parts::there_at_first(
+            &format!("voice-people|{channel_id}"),
+            people.iter().map(|(v, ..)| v.user_id.clone()),
+            window,
+            cx,
+        );
         if people.is_empty() {
             return None;
         }
         let call: Option<CallView> = self.core.call().filter(|c| c.in_channel(key, channel_id));
         let height = PERSON * people.len() as f32;
         let mut rows = div().ml(px(24.0)).flex().flex_col();
-        for (n, (state, user, name)) in people.into_iter().enumerate() {
+        for (state, user, name) in people {
             let speaking = call.as_ref().is_some_and(|c| c.speaking.contains(&state.user_id));
             let tag = format!("side|{server}|{}", state.user_id);
             let from = format!("side|{}", state.user_id);
@@ -297,6 +314,7 @@ impl FuwaApp {
                 from: from.clone(),
             };
             let open = self.calls.pop.as_ref() == Some(&pop);
+            let pop_of = pop.clone();
             let hover = alpha(p.muted, 0.7);
             let fg = p.foreground;
             let agent = is_agent(user.as_ref());
@@ -326,22 +344,25 @@ impl FuwaApp {
                         .child(name),
                 )
                 .when(agent, |el| el.child(app_badge(SharedString::from(format!("agent|{tag}")), "APP", &p)))
-                .child(voice_flags(&state, &p));
+                .child(voice_flags(&state, &tag, &p, window, cx));
             let row = if state.user_id == me {
                 row
             } else {
                 row.on_click(cx.listener(move |this, _, _, cx| this.toggle_call_pop(pop.clone(), cx)))
             };
             let mut holder = div().relative().child(row);
-            if open {
-                let card = self.person_card(key, Some(server), Some(channel_id), &state.user_id, window, cx);
-                holder = holder.child(self.hang(card, Side::Right));
-            }
-            rows = rows.child(motion::slide_in(
-                holder,
-                SharedString::from(format!("voice-in|{channel_id}|{}|{n}", state.user_id)),
-                -12.0,
-            ));
+            holder = holder.children(self.pop_card(&pop_of, Side::Right, window, cx, |this, window, cx| {
+                this.person_card(key, Some(server), Some(channel_id), &state.user_id, window, cx)
+            }));
+            rows = if first.contains(&state.user_id) {
+                rows.child(holder)
+            } else {
+                rows.child(motion::slide_in(
+                    holder,
+                    SharedString::from(format!("voice-in|{channel_id}|{}", state.user_id)),
+                    -12.0,
+                ))
+            };
         }
         // The row above keeps a 2 px gap under it that, on the web, comes after the people.
         Some((div().mt(px(-2.0)).pb(px(2.0)).child(rows).into_any_element(), height))

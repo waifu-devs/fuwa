@@ -77,6 +77,7 @@ impl SettingsView {
             .child(
                 div()
                     .id(SharedString::from(format!("play-sound-{id}")))
+                    .group(SharedString::from(format!("play-sound-{id}")))
                     .size(px(36.0))
                     .flex_none()
                     .rounded_full()
@@ -87,9 +88,15 @@ impl SettingsView {
                     .justify_center()
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.9))
                     .on_click(move |_, _, _| sounds::play(sound, volume, &device))
-                    .child(div().ml(px(1.0)).child(icon("play").size(px(16.0)))),
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("play-sound-{id}-icon")))
+                            .ml(px(1.0))
+                            .group_hover(SharedString::from(format!("play-sound-{id}")), |s| s.scale(1.1))
+                            .child(icon("play").size(px(16.0))),
+                    ),
             )
             .child(
                 div()

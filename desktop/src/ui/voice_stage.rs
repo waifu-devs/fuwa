@@ -20,12 +20,13 @@ use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::call_parts::{
-    CallPop, Side, Size, green, hang_up_button, in_voice, red, toggle_icon, voice_avatar, voice_flags,
+    CallPop, Side, Size, green, hang_up_button, in_voice, ping_dot, red, there_at_first, toggle_icon, voice_avatar,
+    voice_flags,
 };
 use crate::ui::motion;
 use crate::ui::popout::Popped;
 use crate::ui::settings_controls::shadow_sm;
-use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
+use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::video::{live_badge, pop_out_button};
 use crate::ui::widgets::{app_badge, hue_gradient, icon, is_agent, pal};
 
@@ -137,6 +138,42 @@ impl FuwaApp {
         // Screens come through only while you're in the channel; yours from this app.
         let sharing: Vec<&pb::VoiceState> =
             states.iter().filter(|s| joined && if s.user_id == me { mine.1 } else { s.self_stream }).collect();
+        // What's there as the page opens shows without its entrance (the
+        // web's `initial={false}`): tiles, screens and the controls.
+        let first = {
+            let mut keys: Vec<String> = states.iter().map(|s| format!("tile|{}", s.user_id)).collect();
+            keys.extend(sharing.iter().map(|s| format!("screen|{}", s.user_id)));
+            if !sharing.is_empty() {
+                keys.push("screens".to_owned());
+            }
+            keys.push(if joined { "in" } else { "out" }.to_owned());
+            there_at_first(&format!("stage|{}", channel.id), keys, window, cx)
+        };
+
+        // How many are here; as the last leaves it shrinks away (`scale: 0.8`).
+        let count = {
+            let now = (!states.is_empty()).then_some(states.len());
+            let leaving = motion::kept(&format!("in-voice|{}", channel.id), now.as_ref(), window, cx);
+            let pill = |n: usize| {
+                div()
+                    .flex_none()
+                    .rounded_full()
+                    .bg(p.muted)
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(in_voice(n))
+            };
+            match (now, leaving) {
+                (Some(n), _) => Some(motion::pop_in(pill(n), "in-voice-pill", (0.5, 0.5), 0.8, 0.0).into_any_element()),
+                (None, Some((n, t))) => Some(motion::leave_in_place(pill(n), t, |el, t| el.scale(1.0 - 0.2 * t))),
+                (None, None) => None,
+            }
+        };
+        let pill = self.recording_pill(key, server, &states, window, cx);
 
         // ── The header ──
         let header = div()
@@ -158,30 +195,18 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_size(px(16.0))
                     .line_height(px(24.0))
-                    .child(channel.name.clone()),
+                    .child(motion::swap_text(
+                        SharedString::from(format!("stage-name|{}", channel.id)),
+                        channel.name.clone(),
+                        16.0,
+                        window,
+                        cx,
+                    )),
             )
             .child(div().flex_1())
-            .when_some(self.recording_pill(key, server, &states, &p, window), |el, pill| el.child(pill))
+            .when_some(pill, |el, pill| el.child(pill))
             .when(can_record, |el| el.child(self.recordings_button(key, server, &channel.id, &states, &p, window, cx)))
-            .when(!states.is_empty(), |el| {
-                el.child(motion::rise(
-                    div()
-                        .flex_none()
-                        .rounded_full()
-                        .bg(p.muted)
-                        .px(px(10.0))
-                        .py(px(4.0))
-                        .text_xs()
-                        .line_height(px(16.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(p.muted_foreground)
-                        .child(in_voice(states.len())),
-                    "in-voice-pill",
-                    Duration::ZERO,
-                    0.0,
-                ))
-            });
-
+            .when_some(count, |el, count| el.child(count));
         // ── The people ──
         let (w, h) = self.calls.stage_box.get();
         let body: AnyElement = if states.is_empty() {
@@ -206,6 +231,7 @@ impl FuwaApp {
                         server,
                         state,
                         state.user_id == me,
+                        first.contains(&format!("screen|{}", state.user_id)),
                         screen_w,
                         screen_h,
                         &p,
@@ -213,7 +239,11 @@ impl FuwaApp {
                         cx,
                     ));
                 }
-                motion::rise(row, "stage-screens", Duration::ZERO, -12.0)
+                if first.contains("screens") {
+                    row.into_any_element()
+                } else {
+                    motion::rise(row, "stage-screens", Duration::ZERO, -12.0).into_any_element()
+                }
             });
             if !sharing.is_empty() {
                 let screen_rows = sharing.len().div_ceil(screen_cols);
@@ -229,6 +259,7 @@ impl FuwaApp {
                     &channel.id,
                     state,
                     n,
+                    first.contains(&format!("tile|{}", state.user_id)),
                     tile_w,
                     tile_h,
                     joined,
@@ -289,12 +320,17 @@ impl FuwaApp {
                     }),
                 ));
             let _ = (mute, deaf);
-            motion::rise(row, "stage-in", Duration::ZERO, 12.0).into_any_element()
+            if first.contains("in") {
+                row.into_any_element()
+            } else {
+                motion::rise(row, "stage-in", Duration::ZERO, 12.0).into_any_element()
+            }
         } else {
             let hover_shadow = alpha(p.primary, 1.0);
             let (k, s, c) = (key.to_owned(), server.to_owned(), channel.id.clone());
             let join = div()
                 .id("stage-join")
+                .group("stage-join")
                 .h(px(48.0))
                 .px(px(12.0))
                 .flex()
@@ -309,8 +345,9 @@ impl FuwaApp {
                 .when(!can_connect, |el| el.opacity(0.5))
                 .when(can_connect, |el| {
                     el.cursor_pointer()
+                        // The web's `.btn`: it lifts with a glow, and presses in.
                         .hover(move |st| {
-                            st.top(px(-2.0)).shadow(vec![BoxShadow {
+                            st.translate_y(px(-2.0)).shadow(vec![BoxShadow {
                                 color: hover_shadow,
                                 offset: point(px(0.0), px(8.0)),
                                 blur_radius: px(22.0),
@@ -318,13 +355,22 @@ impl FuwaApp {
                                 inset: false,
                             }])
                         })
-                        .active(|st| st.top(px(0.0)).opacity(0.9))
+                        .active(|st| st.translate_y(px(0.0)).scale(0.94))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.core.join_voice(&k, &s, &c);
                             cx.notify();
                         }))
                 })
-                .child(icon("headphones").size(px(16.0)))
+                .child(
+                    div()
+                        .id("stage-join-icon")
+                        .when(can_connect, |el| {
+                            el.group_hover("stage-join", |st| {
+                                st.rotate(gpui_kit::radians(-12f32.to_radians())).scale(1.1)
+                            })
+                        })
+                        .child(icon("headphones").size(px(16.0))),
+                )
                 .child(t("dms-calls.calls.stage.join"));
             let note = if !can_connect {
                 Some(
@@ -349,13 +395,13 @@ impl FuwaApp {
             } else {
                 None
             };
-            motion::rise(
-                div().flex().flex_col().items_center().gap(px(6.0)).child(div().relative().child(join)).children(note),
-                "stage-out",
-                Duration::ZERO,
-                12.0,
-            )
-            .into_any_element()
+            let out =
+                div().flex().flex_col().items_center().gap(px(6.0)).child(div().relative().child(join)).children(note);
+            if first.contains("out") {
+                out.into_any_element()
+            } else {
+                motion::rise(out, "stage-out", Duration::ZERO, 12.0).into_any_element()
+            }
         };
         let footer = div()
             .flex_none()
@@ -381,7 +427,7 @@ impl FuwaApp {
                         .child(text),
                     "stage-status",
                     Duration::ZERO,
-                    6.0,
+                    -6.0,
                 ))
             });
 
@@ -465,6 +511,7 @@ impl FuwaApp {
         channel: &str,
         state: &pb::VoiceState,
         n: usize,
+        first: bool,
         w: f32,
         h: f32,
         joined: bool,
@@ -496,10 +543,11 @@ impl FuwaApp {
             user: state.user_id.clone(),
             from: format!("tile|{}", state.user_id),
         };
-        let open = self.calls.pop.as_ref() == Some(&pop);
+        let pop_of = pop.clone();
         let radius = radius_3xl();
         let hover_border = alpha(p.primary, 0.4);
-        let border = if lit > 0.5 { green().into() } else { gpui_kit::Hsla::from(p.border) };
+        // The border turns green as they start talking (`transition-[border-color]`).
+        let border = mix(p.border, green(), lit);
         let mut shadow = shadow_sm();
         if lit > 0.01 {
             shadow = vec![
@@ -520,12 +568,15 @@ impl FuwaApp {
             ];
         }
         let size = 80.0 * grow;
+        // Their color brightens a little while the tile is hovered.
         let hue = hue_gradient(
             &state.user_id,
             f32::from(radius),
             div().absolute().inset_0().rounded(radius).overflow_hidden(),
         )
-        .opacity(0.25);
+        .id("hue")
+        .opacity(0.25)
+        .group_hover(SharedString::from(tag.clone()), |s| s.opacity(0.35));
         let agent = is_agent(user.as_ref());
         let chip = div()
             .absolute()
@@ -556,12 +607,13 @@ impl FuwaApp {
             .when(agent, |el| {
                 el.child(app_badge(SharedString::from(format!("tile-agent|{}", state.user_id)), "AGENT", p))
             })
-            .child(voice_flags(state, p));
+            .child(voice_flags(state, &tag, p, window, cx));
         let feed = crate::core::voice::video::feed_of(&state.user_id, false);
         let camera =
             video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius, window, cx));
         let tile = div()
             .id(SharedString::from(tag.clone()))
+            .group(SharedString::from(tag.clone()))
             .relative()
             .overflow_hidden()
             .w(px(w))
@@ -616,11 +668,13 @@ impl FuwaApp {
                 })),
             );
         }
-        if open {
-            let card = self.person_card(key, Some(server), Some(channel), &state.user_id, window, cx);
-            holder = holder.child(self.hang(card, Side::Right));
+        holder = holder.children(self.pop_card(&pop_of, Side::Right, window, cx, |this, window, cx| {
+            this.person_card(key, Some(server), Some(channel), &state.user_id, window, cx)
+        }));
+        if first {
+            return holder.into_any_element();
         }
-        motion::rise(holder, SharedString::from(format!("{tag}|in")), Duration::from_millis(40 * n.min(8) as u64), 16.0)
+        tile_in(holder, SharedString::from(format!("{tag}|in")), Duration::from_millis(40 * n.min(8) as u64))
             .into_any_element()
     }
 
@@ -633,6 +687,7 @@ impl FuwaApp {
         server: &str,
         state: &pb::VoiceState,
         mine: bool,
+        first: bool,
         w: f32,
         h: f32,
         p: &Palette,
@@ -679,7 +734,7 @@ impl FuwaApp {
                     .bg(alpha(p.background, 0.8))
                     .px(px(10.0))
                     .py(px(4.0))
-                    .child(live_badge())
+                    .child(live_badge(&state.user_id, window))
                     .child(
                         div()
                             .min_w_0()
@@ -703,14 +758,15 @@ impl FuwaApp {
             cx.stop_propagation();
             this.pop_out(popped.clone(), cx)
         }));
-        let sound = crate::ui::video::screen_sound_button(&self.core, &state.user_id, mine, "stage", p);
-        motion::rise(
-            div().relative().group(SharedString::from(group.clone())).child(tile).child(button).children(sound),
-            SharedString::from(format!("screen-in|{}", state.user_id)),
-            Duration::ZERO,
-            -12.0,
-        )
-        .into_any_element()
+        let sound = crate::ui::video::screen_sound_button(&self.core, &state.user_id, mine, "stage", p, window, cx);
+        let holder =
+            div().relative().group(SharedString::from(group.clone())).child(tile).child(button).children(sound);
+        if first {
+            return holder.into_any_element();
+        }
+        // The web's `scale: 0.94, y: -12`.
+        motion::pop_in(holder, SharedString::from(format!("screen-in|{}", state.user_id)), (0.5, 0.5), 0.94, -12.0)
+            .into_any_element()
     }
 
     /// Who's recording the channel, for everyone to see, while anyone is.
@@ -719,69 +775,70 @@ impl FuwaApp {
         key: &str,
         server: &str,
         states: &[pb::VoiceState],
-        p: &Palette,
         window: &mut Window,
+        cx: &mut gpui_kit::App,
     ) -> Option<AnyElement> {
         let recording: Vec<&pb::VoiceState> = states.iter().filter(|v| v.self_record || v.server_record).collect();
-        if recording.is_empty() {
-            return None;
-        }
-        let on_server = states.iter().any(|v| v.server_record);
-        let (names, video) = self.core.shared.read(|s| {
-            let i = s.instance(key);
-            let names: Vec<String> = recording
-                .iter()
-                .map(|v| i.map(|i| i.display_name(Some(server), &v.user_id)).unwrap_or_default())
-                .collect();
-            (names.join(", "), i.and_then(|i| i.server(server)).is_some_and(|s| s.record_video) && on_server)
-        });
-        let text = t_with(
-            if video {
-                "dms-calls.calls.stage.pillVideo"
-            } else if on_server {
-                "dms-calls.calls.stage.pillServer"
-            } else {
-                "dms-calls.calls.stage.pill"
-            },
-            &[("names", Arg::Str(&names))],
-        );
-        let _ = p;
-        let ping = div().absolute().inset_0().rounded_full().bg(alpha(red(), 0.6));
-        let ping = motion::ambient(ping, "rec-pill-ping", Duration::from_secs(1), window, |el, t| {
-            el.opacity(1.0 - t).size(px(8.0 + 8.0 * t)).top(px(-4.0 * t)).left(px(-4.0 * t))
-        });
-        Some(
-            motion::rise(
-                div()
-                    .flex_none()
-                    .max_w(px(420.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .rounded_full()
-                    .bg(alpha(red(), 0.12))
-                    .px(px(10.0))
-                    .py(px(4.0))
-                    .text_xs()
-                    .line_height(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(red())
-                    .child(
-                        div()
-                            .relative()
-                            .size(px(8.0))
-                            .flex_none()
-                            .child(ping)
-                            .child(div().size(px(8.0)).rounded_full().bg(red())),
-                    )
-                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text)),
-                "rec-pill",
-                Duration::ZERO,
-                0.0,
+        let text = (!recording.is_empty()).then(|| {
+            let on_server = states.iter().any(|v| v.server_record);
+            let (names, video) = self.core.shared.read(|s| {
+                let i = s.instance(key);
+                let names: Vec<String> = recording
+                    .iter()
+                    .map(|v| i.map(|i| i.display_name(Some(server), &v.user_id)).unwrap_or_default())
+                    .collect();
+                (names.join(", "), i.and_then(|i| i.server(server)).is_some_and(|s| s.record_video) && on_server)
+            });
+            t_with(
+                if video {
+                    "dms-calls.calls.stage.pillVideo"
+                } else if on_server {
+                    "dms-calls.calls.stage.pillServer"
+                } else {
+                    "dms-calls.calls.stage.pill"
+                },
+                &[("names", Arg::Str(&names))],
             )
-            .into_any_element(),
-        )
+        });
+        // Once nobody records, it shrinks away (`scale: 0.8`) saying what it said.
+        let leaving = motion::kept(&format!("rec-pill|{server}"), text.as_ref(), window, cx);
+        let pill = |text: String, window: &mut Window| {
+            div()
+                .flex_none()
+                .max_w(px(420.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .rounded_full()
+                .bg(alpha(red(), 0.12))
+                .px(px(10.0))
+                .py(px(4.0))
+                .text_xs()
+                .line_height(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(red())
+                .child(ping_dot("rec-pill-ping", 8.0, red(), alpha(red(), 0.6), window))
+                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
+        };
+        match (text, leaving) {
+            // In from the right as it grows (`scale: 0.8, x: 8`).
+            (Some(text), _) => {
+                Some(motion::pop_in(pill(text, window), "rec-pill", (1.0, 0.5), 0.8, 0.0).into_any_element())
+            }
+            (None, Some((text, t))) => {
+                Some(motion::leave_in_place(pill(text, window), t, |el, t| el.scale(1.0 - 0.2 * t)))
+            }
+            (None, None) => None,
+        }
     }
+}
+
+/// A person's tile coming in (the web's `Tile`): it fades in, growing from
+/// 80% and rising 16 px, `delay` after the one before it.
+fn tile_in(el: gpui_kit::Div, id: SharedString, delay: Duration) -> impl IntoElement {
+    motion::spring_in(el, id, (520.0, 34.0), delay, |el, t| {
+        el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * 16.0)).scale(0.8 + 0.2 * t)
+    })
 }
 
 /// Nobody's here yet: the speaker in a soft circle, waves going out from it.

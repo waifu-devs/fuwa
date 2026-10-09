@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -21,7 +21,9 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::themes::{self, Backdrop, Effect, Fit, Picture, SEEDS, TOKENS, Theme, Tokens};
 use crate::ui::motion;
 use crate::ui::settings::{Page, SettingsView};
-use crate::ui::settings_controls::{At, Badge, Look, Opt, Setter, button, choice, field, toggle, with_preview};
+use crate::ui::settings_controls::{
+    At, Badge, IconHover, Look, Opt, Setter, button, button_with, choice, field, toggle, with_preview,
+};
 use crate::ui::settings_menu::Item;
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius_xl, system_dark};
@@ -55,8 +57,32 @@ pub(crate) struct ThemesForm {
     uploading: bool,
     confirming: Option<String>,
     picture_error: Option<String>,
+    /// Which tile of each grid has the check, and since when, while it glides there.
+    picked: HashMap<String, (usize, Option<Instant>)>,
     /// The custom shader editor.
     pub shader: crate::ui::settings_shader::ShaderForm,
+}
+
+/// A picked tile's check: a primary dot of `size` with a check of `glyph` in it.
+fn fx_check_dot(size: f32, glyph: f32, p: &Palette) -> gpui_kit::Div {
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .bg(p.primary)
+        .text_color(p.primary_foreground)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icon("check").size(px(glyph)))
+}
+
+/// A check over a grid of tiles at `at` (left, top), gliding there from where it was. It's
+/// made every frame, even while it sits in its tile, so the glide knows where it starts.
+fn glide_check(id: &str, (x, y): (f32, f32), dot: gpui_kit::Div, cx: &mut gpui_kit::App) -> AnyElement {
+    let el =
+        motion::glide(div().absolute().left_0().top_0().child(dot), format!("{id}|y"), y, cx, |el, y| el.top(px(y)));
+    motion::glide(div().absolute().left_0().top_0().child(el), format!("{id}|x"), x, cx, |el, x| el.left(px(x)))
 }
 
 fn rgba(c: u32) -> gpui_kit::Rgba {
@@ -417,7 +443,19 @@ impl SettingsView {
         let gap = 8.0;
         let tile_w = (width - gap * (cols as f32 - 1.0)) / cols as f32;
         let pv = *p;
-        let mut grid = div().flex().flex_col().gap(px(gap));
+        // The check glides to the effect picked (the web's `layoutId`): over the grid on its
+        // way, then back in its tile, where it lifts with it. A tile is 86px: a 1px border, the
+        // 56px picture and the 28px name.
+        let picked = Effect::ALL.iter().position(|e| *e == b.effect).unwrap_or(0);
+        let fx_moving = self.check_moving(ids("fx-check").to_owned(), picked, cx);
+        let (r, c) = (picked / cols, picked % cols);
+        let fx_check = glide_check(
+            ids("fx-check"),
+            (c as f32 * (tile_w + gap) + tile_w - 1.0 - 8.0 - 16.0, r as f32 * (86.0 + gap) + 1.0 + 56.0 + 6.0),
+            fx_check_dot(16.0, 12.0, p),
+            cx,
+        );
+        let mut grid = div().relative().flex().flex_col().gap(px(gap));
         for (r, chunk) in Effect::ALL.chunks(cols).enumerate() {
             let mut row = div().flex().gap(px(gap));
             for (c, effect) in chunk.iter().copied().enumerate() {
@@ -460,8 +498,9 @@ impl SettingsView {
                         .border_1()
                         .border_color(if active { p.primary } else { p.border })
                         .cursor_pointer()
-                        .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| s.translate_y(px(-2.0)))
+                        .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                        .active(|s| s.scale(0.95))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.patch_backdrop(target, cx, |b| {
                                 b.effect = effect;
@@ -481,32 +520,19 @@ impl SettingsView {
                         )
                         .child(
                             div()
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
                                 .justify_between()
                                 .gap(px(4.0))
                                 .px(px(8.0))
-                                .py(px(6.0))
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
                                 .child(div().truncate().child(match (effect, &b.shader) {
                                     (Effect::Custom, Some(shader)) => shader.name.clone(),
                                     _ => t(&name_key),
                                 }))
-                                .when(active, |el| {
-                                    el.child(
-                                        div()
-                                            .size(px(16.0))
-                                            .flex_none()
-                                            .rounded_full()
-                                            .bg(p.primary)
-                                            .text_color(p.primary_foreground)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(icon("check").size(px(12.0))),
-                                    )
-                                }),
+                                .when(active && !fx_moving, |el| el.child(fx_check_dot(16.0, 12.0, p))),
                         ),
                     SharedString::from(format!("{}-in-{n}", ids("fx"))),
                     Duration::from_millis(25 * n as u64),
@@ -515,6 +541,7 @@ impl SettingsView {
             }
             grid = grid.child(row);
         }
+        let grid = grid.when(fx_moving, |el| el.child(fx_check));
         let mut effect = div().flex().flex_col().gap(px(8.0)).child(grid);
         if let Some(shader) = b.shader.as_ref().filter(|_| b.effect == Effect::Custom) {
             effect = effect.child(self.shader_editor(target, shader, p, window, cx));
@@ -583,6 +610,18 @@ impl SettingsView {
     }
 
     /// The instance pictures go to: the one on screen, or the first signed in.
+    /// Whether the check over a grid of tiles (`grid`) is on its way to tile `n`, so it's drawn
+    /// over the grid gliding there ([`glide_check`]) rather than in the tile.
+    fn check_moving(&mut self, grid: String, n: usize, cx: &gpui_kit::App) -> bool {
+        let still = cx.reduce_motion();
+        let (at, since) = self.themes.picked.entry(grid).or_insert((n, None));
+        if *at != n {
+            *at = n;
+            *since = Some(Instant::now());
+        }
+        !still && since.is_some_and(|s| s.elapsed() < Duration::from_millis(500))
+    }
+
     fn picture_instance(&mut self) -> Option<String> {
         self.account_me().map(|(k, _)| k)
     }
@@ -626,20 +665,26 @@ impl SettingsView {
         }
         shown.extend(kept.iter().cloned());
         let mut tiles: Vec<AnyElement> = Vec::new();
+        // The check glides to the picture picked (the web's `layoutId`): over the grid on its
+        // way, then back in its tile, where it lifts with it. Tiles are None, Add (with an
+        // instance), then the pictures; the check sits 4px in from the 2px border.
+        let first = if key.is_some() { 2 } else { 1 };
+        let picked =
+            if b.image.is_empty() { 0 } else { shown.iter().position(|u| *u == b.image).map_or(0, |n| n + first) };
+        let moving = self.check_moving(format!("bg-check-{}", target == Target::App), picked, cx);
+        let (r, c) = (picked / cols, picked % cols);
+        let gliding = glide_check(
+            &format!("bg-check-{}", target == Target::App),
+            (c as f32 * (tile_w + gap) + 2.0 + 4.0, r as f32 * (tile_h + gap) + tile_h - 2.0 - 4.0 - 20.0),
+            fx_check_dot(20.0, 12.0, p).shadow(crate::ui::settings_controls::shadow_sm()),
+            cx,
+        );
         let check = |p: &Palette| {
-            div()
+            fx_check_dot(20.0, 12.0, p)
                 .absolute()
                 .bottom(px(4.0))
                 .left(px(4.0))
-                .size(px(20.0))
-                .rounded_full()
-                .bg(p.primary)
-                .text_color(p.primary_foreground)
-                .flex()
-                .items_center()
-                .justify_center()
                 .shadow(crate::ui::settings_controls::shadow_sm())
-                .child(icon("check").size(px(12.0)))
         };
         let tile = |id: String, active: bool, p: &Palette| {
             let hover = alpha(p.primary, 0.4);
@@ -653,8 +698,9 @@ impl SettingsView {
                 .border_2()
                 .border_color(if active { p.primary.into() } else { alpha(p.primary, 0.0) })
                 .cursor_pointer()
-                .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
-                .active(|s| s.top(px(1.0)))
+                .hover(|s| s.translate_y(px(-2.0)))
+                .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                .active(|s| s.scale(0.95))
         };
         tiles.push(
             tile(format!("bg-none-{}", target == Target::App), b.image.is_empty(), p)
@@ -669,7 +715,7 @@ impl SettingsView {
                         .justify_center()
                         .child(icon("image-off").size(px(20.0))),
                 )
-                .when(b.image.is_empty(), |el| el.child(check(p)))
+                .when(b.image.is_empty() && !moving, |el| el.child(check(p)))
                 .into_any_element(),
         );
         if let Some(key) = key.clone() {
@@ -693,7 +739,8 @@ impl SettingsView {
                     .text_size(px(10.4))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).top(px(-2.0)))
+                    .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.95))
                     .on_click(cx.listener(move |this, _, _, cx| this.upload_background_to(key.clone(), target, cx)))
                     .child(icon(if uploading { "loader-circle" } else { "image-plus" }).size(px(20.0)))
                     .child(tracked(t("appsettings.backdrop.add").to_uppercase(), WIDE))
@@ -714,7 +761,7 @@ impl SettingsView {
                         this.patch_backdrop(target, cx, move |b| b.image = pick)
                     }))
                     .child(img(SharedString::from(url.clone())).size_full().object_fit(ObjectFit::Cover))
-                    .when(active, |el| el.child(check(p)))
+                    .when(active && !moving, |el| el.child(check(p)))
                     .when(is_kept, |el| {
                         el.child(
                             div()
@@ -753,7 +800,7 @@ impl SettingsView {
                     .into_any_element(),
             );
         }
-        let mut grid = div().flex().flex_col().gap(px(gap));
+        let mut grid = div().relative().flex().flex_col().gap(px(gap));
         let mut it = tiles.into_iter().peekable();
         while it.peek().is_some() {
             let mut row = div().flex().gap(px(gap));
@@ -764,6 +811,7 @@ impl SettingsView {
             }
             grid = grid.child(row);
         }
+        let grid = grid.when(moving, |el| el.child(gliding));
         div()
             .flex()
             .flex_col()
@@ -1146,6 +1194,7 @@ impl SettingsView {
             let hover = alpha(p.primary, 0.5);
             div()
                 .id("themes-empty")
+                .group("themes-empty")
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1159,9 +1208,12 @@ impl SettingsView {
                 .text_center()
                 .cursor_pointer()
                 .hover(move |s| s.border_color(hover))
+                .active(|s| s.scale(0.98))
                 .on_click(cx.listener(move |this, _, window, cx| this.edit_theme(&base, true, window, cx)))
                 .child(
                     div()
+                        .id("themes-empty-wand")
+                        .group_hover("themes-empty", |s| s.scale(1.1))
                         .size(px(56.0))
                         .rounded(radius_2xl())
                         .bg(alpha(p.primary, 0.15))
@@ -1203,6 +1255,7 @@ impl SettingsView {
             builtins = builtins.child(
                 div()
                     .id(SharedString::from(format!("from-{}", theme.id)))
+                    .group(SharedString::from(format!("from-{}", theme.id)))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -1217,8 +1270,8 @@ impl SettingsView {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .hover(|s| s.top(px(-2.0)))
-                    .active(|s| s.top(px(1.0)))
+                    .hover(|s| s.translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.95))
                     .when(full, |el| el.opacity(0.5))
                     .when(!full, |el| {
                         el.on_click(cx.listener(move |this, _, window, cx| this.edit_theme(&base, true, window, cx)))
@@ -1232,7 +1285,14 @@ impl SettingsView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("paintbrush").size(px(14.0))),
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("from-{}-brush", theme.id)))
+                                    .group_hover(SharedString::from(format!("from-{}", theme.id)), |s| {
+                                        s.rotate(gpui_kit::radians(-12f32.to_radians()))
+                                    })
+                                    .child(icon("paintbrush").size(px(14.0))),
+                            ),
                     )
                     .child(theme.name.clone()),
             );
@@ -1322,11 +1382,12 @@ impl SettingsView {
             p,
             cx,
         );
-        let hover = if active { c("primary") } else { c("border") };
         motion::rise(
             div()
+                .id(SharedString::from(format!("theme-card-{id}")))
                 .relative()
                 .w(px(width))
+                .hover(|s| s.translate_y(px(-3.0)))
                 .flex_none()
                 .overflow_hidden()
                 .rounded(radius_2xl())
@@ -1354,7 +1415,6 @@ impl SettingsView {
                         .gap(px(12.0))
                         .p(px(16.0))
                         .cursor_pointer()
-                        .hover(move |s| s.border_color(hover))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let id = id.clone();
                             this.set(cx, move |pr| {
@@ -1668,8 +1728,16 @@ impl SettingsView {
                     .when(changed, |el| el.on_click(cx.listener(|this, _, _, cx| this.save_theme(false, cx)))),
             )
             .child(
-                button("theme-save-use", t("appsettings.themes.saveAndUse"), Some("sparkles"), Look::Primary, false, p)
-                    .on_click(cx.listener(|this, _, _, cx| this.save_theme(true, cx))),
+                button_with(
+                    "theme-save-use",
+                    t("appsettings.themes.saveAndUse"),
+                    Some("sparkles"),
+                    IconHover::Turn(12.0),
+                    Look::Primary,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.save_theme(true, cx))),
             );
         let shown = theme.backdrop.clone().unwrap_or_else(|| prefs.backdrop.clone());
         let readable = contrast(tk.get("foreground"), tk.get("background"));

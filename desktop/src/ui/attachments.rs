@@ -10,8 +10,8 @@ use std::time::Duration;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, ExternalPaths, FontWeight, InteractiveElement, IntoElement,
-    ObjectFit, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _,
-    WeakEntity, Window, div, img, px, rgb,
+    ObjectFit, ParentElement as _, SharedString, SpringConfig, StatefulInteractiveElement as _, Styled,
+    StyledImage as _, WeakEntity, Window, div, img, px, radians, rgb, sampled_easing,
 };
 
 use crate::core::attachments::{self, Family, Look, MAX_FILES};
@@ -20,8 +20,19 @@ use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::overlay::shade;
-use crate::ui::theme::{Palette, alpha, corner, radius_xl};
-use crate::ui::widgets::{icon, icon_button};
+use crate::ui::theme::{Palette, alpha, radius_xl};
+use crate::ui::widgets::icon;
+
+/// Tailwind's `shadow-2xl`, under a picture opened large.
+fn shadow_2xl() -> Vec<gpui_kit::BoxShadow> {
+    vec![gpui_kit::BoxShadow {
+        color: gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.25 },
+        offset: gpui_kit::point(px(0.0), px(25.0)),
+        blur_radius: px(50.0),
+        spread_radius: px(-12.0),
+        inset: false,
+    }]
+}
 
 /// The most room one picture takes in a message.
 const MEDIA_BOX: (f32, f32) = (420.0, 320.0);
@@ -94,8 +105,28 @@ pub(crate) fn badge(name: &str, size: f32) -> impl IntoElement {
         .child(icon(glyph).size(px(size / 2.0)))
 }
 
+/// A file coming in with a message that just came, `n`th of its files (the
+/// web's `enter`): a fade while it rises 6px and grows from 97%, 40ms after
+/// the one before, on `stiffness: 460, damping: 30`.
+fn enter<E: IntoElement + Styled + 'static>(el: E, id: SharedString, n: usize, animate: bool) -> AnyElement {
+    if !animate {
+        return el.into_any_element();
+    }
+    let (duration, easing) = sampled_easing(SpringConfig::new(460.0, 30.0, 1.0), 0.002);
+    let delay = Duration::from_millis(40 * n as u64);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32();
+    el.with_animation(
+        id,
+        Animation::new(total).with_easing(move |t| if t <= start { 0.0 } else { easing((t - start) / (1.0 - start)) }),
+        |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * 6.0)).scale(0.97 + 0.03 * t),
+    )
+    .into_any_element()
+}
+
 /// The files a message came with. Only files on this instance load; each
 /// picture keeps its box before it loads, so the list doesn't jump.
+/// `animate` for a message that just came in, whose files come in one by one.
 pub(crate) fn attachments_view(
     mid: &str,
     files: &[pb::Attachment],
@@ -103,6 +134,7 @@ pub(crate) fn attachments_view(
     p: &Palette,
     this: &WeakEntity<FuwaApp>,
     key: &str,
+    animate: bool,
 ) -> AnyElement {
     let shown = |f: &&pb::Attachment| {
         attachments::look_of(&f.content_type) == Look::Picture && attachments::on_instance(&f.url, instance)
@@ -111,6 +143,7 @@ pub(crate) fn attachments_view(
     let pictures: Vec<(usize, &pb::Attachment)> = files.iter().enumerate().filter(|(_, f)| shown(f)).collect();
     let rest: Vec<&pb::Attachment> = files.iter().filter(|f| !shown(f)).collect();
     let tiled = pictures.len() > 1;
+    let shown_pictures = pictures.len();
     let mut out = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
     if !pictures.is_empty() {
         let mut grid = div().flex().flex_wrap().gap(px(6.0)).when(tiled, |el| el.max_w(px(TILE * 2.0 + 6.0)));
@@ -125,64 +158,77 @@ pub(crate) fn attachments_view(
                 bytes: file.size,
             };
             let this = this.clone();
-            grid = grid.child(
-                div()
-                    .id(SharedString::from(format!("pic|{mid}|{n}")))
-                    .w(px(w))
-                    .h(px(h))
-                    .rounded(crate::ui::theme::radius_xl())
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(p.border)
-                    .bg(alpha(p.muted, 0.6))
-                    .cursor_pointer()
-                    .hover(|s| s.opacity(0.92))
-                    .on_mouse_down(gpui_kit::MouseButton::Right, {
-                        let (this, mid) = (this.clone(), mid.to_owned());
-                        // Says which picture it was; the message's own handler opens the menu.
-                        move |_, _, cx| _ = this.update(cx, |this, _| this.right_picture = Some((mid.clone(), place)))
-                    })
-                    .on_click(move |_, window, cx| {
-                        let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
-                    })
-                    .child(
-                        img(SharedString::from(file.url.clone()))
-                            .size_full()
-                            .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
-                            .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
-                            .with_loading({
-                                let bg = alpha(p.foreground, 0.04);
-                                move || div().size_full().bg(bg).into_any_element()
-                            })
-                            .with_fallback({
-                                let fg = p.muted_foreground;
-                                move || {
-                                    div()
-                                        .size_full()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_color(fg)
-                                        .child(icon("file-image").size(px(24.0)))
-                                        .into_any_element()
-                                }
-                            }),
-                    ),
-            );
+            let picture = div()
+                .id(SharedString::from(format!("pic|{mid}|{n}")))
+                .w(px(w))
+                .h(px(h))
+                .rounded(crate::ui::theme::radius_xl())
+                .overflow_hidden()
+                .border_1()
+                .border_color(p.border)
+                .bg(alpha(p.muted, 0.6))
+                .cursor_pointer()
+                // `whileHover={{ scale: 1.01 }}` and `whileTap={{ scale: 0.98 }}`.
+                .hover(|s| s.scale(1.01))
+                .active(|s| s.scale(0.98))
+                .on_mouse_down(gpui_kit::MouseButton::Right, {
+                    let (this, mid) = (this.clone(), mid.to_owned());
+                    // Says which picture it was; the message's own handler opens the menu.
+                    move |_, _, cx| _ = this.update(cx, |this, _| this.right_picture = Some((mid.clone(), place)))
+                })
+                .on_click(move |_, window, cx| {
+                    let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
+                })
+                .child(
+                    img(SharedString::from(file.url.clone()))
+                        .size_full()
+                        .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
+                        .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
+                        // `animate-pulse bg-muted` until it's here.
+                        .with_loading({
+                            let (bg, id) = (p.muted, SharedString::from(format!("pic-wait|{mid}|{n}")));
+                            move || Pulse { id: id.clone(), bg }.into_any_element()
+                        })
+                        .with_fallback({
+                            let fg = p.muted_foreground;
+                            move || {
+                                div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(fg)
+                                    .child(icon("file-image").size(px(24.0)))
+                                    .into_any_element()
+                            }
+                        }),
+                );
+            grid = grid.child(enter(picture, SharedString::from(format!("pic-in|{mid}|{n}")), n, animate));
         }
         out = out.child(grid);
     }
     for (n, file) in rest.into_iter().enumerate() {
-        out = out.child(file_card(&format!("{mid}|{n}"), file, p, this, key));
+        let card = file_card(&format!("{mid}|{n}"), file, p, this, key);
+        out = out.child(enter(card, SharedString::from(format!("file-in|{mid}|{n}")), shown_pictures + n, animate));
     }
     out.into_any_element()
 }
 
 /// A file to save: its icon, name and size, and a download button.
-fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<FuwaApp>, key: &str) -> impl IntoElement {
+/// It lifts a pixel under the pointer, its badge tilting (`FileCard`).
+fn file_card(
+    id: &str,
+    file: &pb::Attachment,
+    p: &Palette,
+    this: &WeakEntity<FuwaApp>,
+    key: &str,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (this, key, url, name, bytes) =
         (this.clone(), key.to_owned(), file.url.clone(), file.filename.clone(), file.size);
+    let (hover_bg, hover_fg) = (p.muted, p.primary);
     div()
+        .id(SharedString::from(format!("file|{id}")))
+        .hover(|s| s.translate_y(px(-1.0)))
         .flex()
         .items_center()
         .gap(px(12.0))
@@ -194,7 +240,13 @@ fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<Fuw
         .border_1()
         .border_color(p.border)
         .shadow(crate::ui::polls::shadow_sm())
-        .child(badge(&file.filename, 40.0))
+        .child(
+            div()
+                .id(SharedString::from(format!("file-badge|{id}")))
+                .flex_none()
+                .hover(|s| s.rotate(radians((-8.0f32).to_radians())).scale(1.06))
+                .child(badge(&file.filename, 40.0)),
+        )
         .child(
             div()
                 .flex_1()
@@ -210,8 +262,20 @@ fn file_card(id: &str, file: &pb::Attachment, p: &Palette, this: &WeakEntity<Fuw
                 )
                 .child(div().text_xs().text_color(p.muted_foreground).child(attachments::format_bytes(file.size))),
         )
+        // The web's download button: muted, the muted fill and the primary on hover.
         .child(
-            icon_button(SharedString::from(format!("save|{id}")), "download", p)
+            div()
+                .id(SharedString::from(format!("save|{id}")))
+                .size(px(32.0))
+                .flex_none()
+                .rounded(crate::ui::theme::radius_lg())
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_color(p.muted_foreground)
+                .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+                .child(icon("download").size(px(16.0)))
                 .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
                 .on_click(move |_, _, cx| {
                     let _ =
@@ -705,74 +769,100 @@ impl FuwaApp {
     pub(crate) fn render_picture(&self, open: &Dialog, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Dialog::Picture { key, url, name, width, height, bytes } = open else { return div().into_any_element() };
         let (size, bytes) = ((*width, *height), *bytes);
-        let p = crate::ui::widgets::pal(cx);
         let view = window.viewport_size();
         let room = (f32::from(view.width) - 160.0, f32::from(view.height) - 180.0);
         let (w, h) = attachments::fit_box(size.0, size.1, (room.0.max(200.0), room.1.max(200.0)));
         let (key, url_owned, name_owned) = (key.to_owned(), url.to_owned(), name.to_owned());
+        // The web's caption: white on black at 60%, its buttons lit white at 15% on hover.
+        let round = |id: &'static str, glyph: &str| {
+            let hover = gpui_kit::Hsla { h: 0.0, s: 0.0, l: 1.0, a: 0.15 };
+            div()
+                .id(id)
+                .size(px(32.0))
+                .flex_none()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(icon(glyph).size(px(16.0)))
+        };
+        let white = |a: f32| gpui_kit::Hsla { h: 0.0, s: 0.0, l: 1.0, a };
+        let caption = div()
+            .max_w_full()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .pl(px(16.0))
+            .pr(px(6.0))
+            .py(px(6.0))
+            .rounded_full()
+            .bg(gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.6 })
+            .text_sm()
+            .text_color(white(1.0))
+            .child(div().min_w_0().truncate().font_weight(FontWeight::BOLD).child(attachments::short_name(name, 48)))
+            .when(bytes > 0, |el| {
+                el.child(div().flex_none().text_color(white(0.7)).child(attachments::format_bytes(bytes)))
+            })
+            .child(
+                round("picture-save", "download")
+                    .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.save_file(key.clone(), url_owned.clone(), name_owned.clone(), bytes, cx)
+                    })),
+            )
+            .child(
+                // It turns a quarter under the pointer (`hover:rotate-90`).
+                round("picture-close", "x")
+                    .hover(|s| s.rotate(radians(std::f32::consts::FRAC_PI_2)))
+                    .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
+            );
         motion::fade_in(
             // The web's `bg-black/80 backdrop-blur-sm`.
             shade("picture-scrim", 0.8, 4.0).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                motion::rise(
-                    div()
-                        .id("picture-panel")
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(12.0))
-                        .on_click(|_, _, cx| cx.stop_propagation())
-                        .child(motion::grow_in(
-                            img(SharedString::from(url.to_owned()))
-                                .w(px(w))
-                                .h(px(h))
-                                .rounded(corner(14.0))
-                                .object_fit(ObjectFit::Contain),
-                            "picture-zoom",
-                            0.92,
-                        ))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .px(px(14.0))
-                                .py(px(6.0))
-                                .rounded_full()
-                                .bg(p.card)
-                                .border_1()
-                                .border_color(p.border)
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(attachments::short_name(name, 48)),
-                                )
-                                .child(
-                                    icon_button("picture-save", "download", &p)
-                                        .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.save_file(
-                                                key.clone(),
-                                                url_owned.clone(),
-                                                name_owned.clone(),
-                                                bytes,
-                                                cx,
-                                            )
-                                        })),
-                                )
-                                .child(
-                                    icon_button("picture-close", "x", &p)
-                                        .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
-                                ),
-                        ),
-                    "picture-rise",
-                    Duration::ZERO,
-                    16.0,
-                ),
+                div()
+                    .id("picture-panel")
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0))
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(motion::grow_in(
+                        img(SharedString::from(url.to_owned()))
+                            .w(px(w))
+                            .h(px(h))
+                            .rounded(radius_xl())
+                            .shadow(shadow_2xl())
+                            .object_fit(ObjectFit::Contain),
+                        "picture-zoom",
+                        0.92,
+                    ))
+                    .child(motion::rise(caption, "picture-caption", Duration::from_millis(50), 8.0)),
             ),
             "picture-fade",
             Duration::from_millis(160),
         )
         .into_any_element()
+    }
+}
+
+/// A picture's place while it loads, pulsing as Tailwind's `animate-pulse`
+/// does (half see-through at the middle of every two seconds).
+#[derive(IntoElement)]
+struct Pulse {
+    id: SharedString,
+    bg: gpui_kit::Rgba,
+}
+
+impl gpui_kit::RenderOnce for Pulse {
+    fn render(self, window: &mut gpui_kit::Window, _: &mut gpui_kit::App) -> impl IntoElement {
+        crate::ui::motion::ambient(
+            div().size_full().bg(self.bg),
+            self.id,
+            std::time::Duration::from_secs(2),
+            window,
+            |el, t| el.opacity(1.0 - 0.25 * (1.0 - (t * std::f32::consts::TAU).cos())),
+        )
     }
 }

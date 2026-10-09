@@ -4,13 +4,16 @@
 //! and hovers answer. All of it respects reduced motion: GPUI's animations
 //! and Base's springs settle at once when it's on.
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use gpui_kit::prelude::FluentBuilder as _;
 
 use gpui_kit::base::motion::{Spring, spring};
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    MouseButton, SharedString, SpringConfig, Stateful, StatefulInteractiveElement as _, Styled, Window, px, radians,
-    sampled_easing,
+    Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Entity, Global, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, RenderOnce, SharedString, SpringConfig, Stateful,
+    StatefulInteractiveElement as _, Styled, Window, px, radians, sampled_easing,
 };
 
 /// The spring things enter with: quick, with a touch of overshoot.
@@ -174,6 +177,346 @@ pub fn count_up(id: impl Into<ElementId>, value: f64, delay: Duration, format: f
             Animation::new(total).with_easing(delayed(start, gpui_kit::ease_out_quint())),
             move |el, t| gpui_kit::ParentElement::child(el, format(value * f64::from(t.clamp(0.0, 1.0)))),
         )
+        .into_any_element()
+}
+
+/// The web's `SPRING` (`stiffness: 520, damping: 34`), for text that swaps and counts that roll.
+const SWAP: SpringConfig = SpringConfig::new(520.0, 34.0, 1.0);
+
+/// What a swapping text showed, and how many times it has changed.
+struct Swapped {
+    now: SharedString,
+    before: Option<SharedString>,
+    up: bool,
+    changes: u64,
+}
+
+/// Remembers `text` under `id` and says what it was before, if it just
+/// changed: the web's `AnimatePresence` with `initial={false}`, so nothing
+/// moves when it first shows.
+fn swapped(
+    id: &SharedString,
+    text: SharedString,
+    up: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> (Option<SharedString>, bool, u64) {
+    let state = window.use_keyed_state(SharedString::from(format!("{id}|swap")), cx, |_, _| Swapped {
+        now: text.clone(),
+        before: None,
+        up,
+        changes: 0,
+    });
+    state.update(cx, |s, _| {
+        if s.now != text {
+            s.before = Some(std::mem::replace(&mut s.now, text));
+            s.up = up;
+            s.changes += 1;
+        }
+        (s.before.clone(), s.up, s.changes)
+    })
+}
+
+/// Text that slides and fades to its new value when it changes, like a
+/// renamed server (the web's `SwapText`): the new one rises `0.6em` into
+/// place while the old one rises out. `size` is the text's size in pixels.
+pub fn swap_text(
+    id: impl Into<SharedString>,
+    text: impl Into<SharedString>,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let text = text.into();
+    let (before, _, changes) = swapped(&id, text.clone(), true, window, cx);
+    roll(id, text, before, true, changes, size * 0.6, false)
+}
+
+/// A small count, like an unread badge, that rolls to its new value: up when
+/// it grows, down when it shrinks (the web's `Count`). Past `max` it reads
+/// "max+", and it's written as the app's language writes numbers ("12,345"). `size` is the text's size in pixels.
+pub fn count(
+    id: impl Into<SharedString>,
+    value: u64,
+    max: Option<u64>,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let text: SharedString = match max {
+        Some(max) if value > max => format!("{max}+").into(),
+        _ => crate::core::i18n::number(value as i64).into(),
+    };
+    let last = window.use_keyed_state(SharedString::from(format!("{id}|count")), cx, |_, _| value);
+    let up = value >= *last.read(cx);
+    last.update(cx, |v, _| *v = value);
+    let (before, up_then, changes) = swapped(&id, text.clone(), up, window, cx);
+    roll(id, text, before, up_then, changes, size * 1.25, true)
+}
+
+/// Draws `text` coming in and `before` going out, `distance` pixels apart,
+/// rising when `up`. A count clips to its line, as the web's `overflow-hidden`.
+fn roll(
+    id: SharedString,
+    text: SharedString,
+    before: Option<SharedString>,
+    up: bool,
+    changes: u64,
+    distance: f32,
+    clip: bool,
+) -> AnyElement {
+    let Some(before) = before else {
+        return gpui_kit::div().child(text).into_any_element();
+    };
+    let (duration, easing) = sampled_easing(SWAP, 0.002);
+    let easing = std::rc::Rc::new(easing);
+    let sign = if up { 1.0 } else { -1.0 };
+    let incoming = {
+        let easing = easing.clone();
+        gpui_kit::div().child(text).with_animation(
+            ElementId::Name(format!("{id}|in{changes}").into()),
+            Animation::new(duration).with_easing(move |t| easing(t)),
+            move |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * distance * sign)),
+        )
+    };
+    let outgoing = gpui_kit::div().absolute().top_0().left_0().child(before).with_animation(
+        ElementId::Name(format!("{id}|out{changes}").into()),
+        Animation::new(duration).with_easing(move |t| easing(t)),
+        move |el, t| el.opacity((1.0 - t).clamp(0.0, 1.0)).translate_y(px(-t * distance * sign)),
+    );
+    gpui_kit::div().relative().when(clip, |el| el.overflow_hidden()).child(incoming).child(outgoing).into_any_element()
+}
+
+/// A count that rolls ([`count`]), for places drawn without the window at hand.
+#[derive(IntoElement)]
+pub struct Rolling {
+    id: SharedString,
+    value: u64,
+    max: Option<u64>,
+    size: f32,
+}
+
+/// `value`, rolling to each new one; past `max` it reads "max+". `size` is the text's size in pixels.
+pub fn rolling(id: impl Into<SharedString>, value: u64, max: Option<u64>, size: f32) -> Rolling {
+    Rolling { id: id.into(), value, max, size }
+}
+
+impl RenderOnce for Rolling {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        count(self.id, self.value, self.max, self.size, window, cx)
+    }
+}
+
+/// `key`'s translated words for `n` ("3 replies") with the number rolling in
+/// them, as the web puts `<Count>` inside `<T>`. `size` is the text's size in pixels.
+pub fn counted(id: impl Into<SharedString>, key: &str, n: u64, size: f32) -> Div {
+    let text = crate::core::i18n::t_with(key, &[("count", crate::core::i18n::Arg::Num(n as i64))]);
+    let number = crate::core::i18n::number(n as i64);
+    let Some(at) = text.find(&number) else { return gpui_kit::div().child(text) };
+    let (before, after) = (text[..at].to_owned(), text[at + number.len()..].to_owned());
+    gpui_kit::div()
+        .flex()
+        .whitespace_nowrap()
+        .when(!before.is_empty(), |el| el.child(before))
+        .child(rolling(id, n, None, size))
+        .when(!after.is_empty(), |el| el.child(after))
+}
+
+/// Text that swaps ([`swap_text`]), for places drawn without the window at hand.
+#[derive(IntoElement)]
+pub struct Swapping {
+    id: SharedString,
+    text: SharedString,
+    size: f32,
+}
+
+/// `text`, sliding to each new value. `size` is the text's size in pixels.
+pub fn swapping(id: impl Into<SharedString>, text: impl Into<SharedString>, size: f32) -> Swapping {
+    Swapping { id: id.into(), text: text.into(), size }
+}
+
+impl RenderOnce for Swapping {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        swap_text(self.id, self.text, self.size, window, cx)
+    }
+}
+
+/// A value that springs toward a target ([`follow`]) for something drawn
+/// without the window at hand: `build` draws it at the value it's at.
+#[derive(IntoElement)]
+pub struct Springing {
+    id: SharedString,
+    target: f32,
+    build: Box<dyn FnOnce(f32) -> AnyElement>,
+}
+
+/// Draws `build` at a value springing toward `target`.
+pub fn springing(
+    id: impl Into<SharedString>,
+    target: f32,
+    build: impl FnOnce(f32) -> AnyElement + 'static,
+) -> Springing {
+    Springing { id: id.into(), target, build: Box::new(build) }
+}
+
+impl RenderOnce for Springing {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        (self.build)(follow(self.id, self.target, window, cx))
+    }
+}
+
+/// Like [`slide_in`], starting `delay` later (rows coming in one after another).
+pub fn slide_in_after<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    from: f32,
+    delay: Duration,
+) -> impl IntoElement {
+    let (duration, easing) = sampled_easing(ENTER, 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    el.with_animation(id, Animation::new(total).with_easing(delayed(start, easing)), move |el, t| {
+        el.opacity(t.clamp(0.0, 1.0)).translate_x(px((1.0 - t) * from))
+    })
+}
+
+/// Springs `el` from `pose(el, 0.0)` to `pose(el, 1.0)` after `delay`, on a
+/// spring of `stiffness` and `damping` (the web's `initial`/`animate` with
+/// `type: "spring"`). `t` overshoots past 1 on lively springs.
+pub fn spring_in<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    (stiffness, damping): (f32, f32),
+    delay: Duration,
+    pose: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    let (duration, easing) = sampled_easing(SpringConfig::new(stiffness, damping, 1.0), 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    el.with_animation(id, Animation::new(total).with_easing(delayed(start, easing)), pose).into_any_element()
+}
+
+/// Where each glide was last sent, so the next one starts from where it is.
+#[derive(Default)]
+struct Glides(HashMap<String, Glide>);
+
+impl Global for Glides {}
+
+struct Glide {
+    from: f32,
+    to: f32,
+    at: Instant,
+    /// How many times it has moved, which names its animation.
+    moves: u64,
+}
+
+/// A selection gliding to `to` (a lit row's top, a tab's left) on the web's
+/// `SPRING` whenever it changes, as framer's `layoutId` does, for places
+/// drawn without the window at hand ([`follow`] needs it). `place`
+/// puts the value on `el`. A glide cut short carries on from where it was.
+pub fn glide<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: String,
+    to: f32,
+    cx: &mut App,
+    place: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    let spring = SWAP;
+    let (duration, easing) = sampled_easing(spring, 0.002);
+    let glides = cx.default_global::<Glides>();
+    // Lists come and go; what they left behind needn't pile up.
+    if glides.0.len() > 64 && !glides.0.contains_key(&id) {
+        glides.0.clear();
+    }
+    let g = glides.0.entry(id.clone()).or_insert(Glide { from: to, to, at: Instant::now(), moves: 0 });
+    if g.to == to && g.at.elapsed() >= duration {
+        // Settled: it stays put, even if the list closes and opens again.
+        g.from = to;
+    } else if g.to != to {
+        let t = (g.at.elapsed().as_secs_f32() / duration.as_secs_f32()).min(1.0);
+        let now = g.from + (g.to - g.from) * easing(t);
+        *g = Glide { from: now, to, at: Instant::now(), moves: g.moves + 1 };
+    }
+    let (from, moves) = (g.from, g.moves);
+    if from == to {
+        return place(el, to).into_any_element();
+    }
+    let (_, easing) = sampled_easing(spring, 0.002);
+    el.with_animation(
+        ElementId::Name(format!("{id}|{moves}").into()),
+        Animation::new(duration).with_easing(easing),
+        move |el, t| place(el, from + (to - from) * t),
+    )
+    .into_any_element()
+}
+
+/// How long an overlay takes to leave once closed: the web's dialogs and menus
+/// fading out (`exit` under `AnimatePresence`, 0.2s for a dialog's backdrop).
+pub const LEAVE: Duration = Duration::from_millis(180);
+
+/// What an overlay showed while it was open, and when it closed.
+struct Kept<T> {
+    last: Option<T>,
+    gone: Option<Instant>,
+}
+
+/// What an overlay was, for [`LEAVE`] after it closes, so it can be drawn once
+/// more on its way out (the web's `AnimatePresence`), with how far it has gone
+/// (0 to 1). `now` is what's open: while something is, this is `None`; once it
+/// closes, this is what it was, until it has gone. Nothing lingers with
+/// reduced motion.
+pub fn kept<T: Clone + 'static>(id: &str, now: Option<&T>, window: &mut Window, cx: &mut App) -> Option<(T, f32)> {
+    let state = window
+        .use_keyed_state(SharedString::from(format!("{id}|kept")), cx, |_, _| Kept::<T> { last: None, gone: None });
+    let still = cx.reduce_motion();
+    let leaving = state.update(cx, |k, _| {
+        if let Some(now) = now {
+            k.last = Some(now.clone());
+            k.gone = None;
+            return None;
+        }
+        let gone = *k.gone.get_or_insert_with(Instant::now);
+        let t = gone.elapsed().as_secs_f32() / LEAVE.as_secs_f32();
+        if still || t >= 1.0 {
+            k.last = None;
+            return None;
+        }
+        k.last.clone().map(|last| (last, t))
+    });
+    if leaving.is_some() {
+        window.request_animation_frame();
+    }
+    leaving
+}
+
+/// Draws an overlay that has closed ([`kept`]) `t` of the way out: fading,
+/// with a cover over everything taking the pointer meanwhile, so nothing in
+/// it can be pressed again as it goes. It adds no element id, so what's in it
+/// keeps its state (an entrance that has played stays played).
+pub fn leave(el: impl IntoElement, t: f32) -> AnyElement {
+    let shown = 1.0 - gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0));
+    gpui_kit::div()
+        .absolute()
+        .inset_0()
+        .opacity(shown)
+        .child(el)
+        .child(gpui_kit::deferred(gpui_kit::div().absolute().inset_0().occlude()).with_priority(100))
+        .into_any_element()
+}
+
+/// Draws something that has gone ([`kept`]) `t` of the way out where it
+/// stood, for things in the flow of a page (a panel in the sidebar, a pill):
+/// it keeps its place, fades, and takes the pointer only over itself while
+/// it goes. `pose` adds its own exit (a shrink, a drop) at `t`.
+pub fn leave_in_place<E: IntoElement + Styled + 'static>(
+    el: E,
+    t: f32,
+    pose: impl FnOnce(Div, f32) -> Div,
+) -> AnyElement {
+    let t = gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0));
+    pose(gpui_kit::div().relative().opacity(1.0 - t).child(el).child(gpui_kit::div().absolute().inset_0().occlude()), t)
         .into_any_element()
 }
 

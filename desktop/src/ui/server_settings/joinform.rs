@@ -432,8 +432,8 @@ impl ServerSettingsView {
                                 .line_height(px(16.0))
                                 .font_weight(FontWeight::BOLD)
                                 .cursor_pointer()
-                                .hover(move |s| s.border_color(hover).text_color(primary))
-                                .active(|s| s.top(px(1.0)))
+                                .hover(move |s| s.border_color(hover).text_color(primary).translate_y(px(-2.0)))
+                                .active(|s| s.scale(0.95))
                                 .on_click(
                                     cx.listener(move |this, _, window, cx| this.add_join_rule(&add, false, window, cx)),
                                 )

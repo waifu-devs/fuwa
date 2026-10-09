@@ -16,19 +16,21 @@
 //! constructed by combining these two systems into an all-in-one element.
 
 use crate::{
-    Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent, DispatchPhase,
-    Display, Element, ElementId, Entity, EntityId, ExternalDragPayload, ExternalDragPayloadSource,
-    FileDropEvent, FocusHandle, Global, GlobalElementId, Hitbox, HitboxBehavior, HitboxId,
-    InspectorElementId, IntoElement, IsZero, KeyContext, KeyDownEvent, KeyUpEvent, KeyboardButton,
-    KeyboardClickEvent, LayoutId, LongPressEvent, ModifiersChangedEvent, MouseButton,
-    MouseClickEvent, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent,
-    MouseUpEvent, OngoingScroll, Overflow, ParentElement, PinchEvent, Pixels, Point, Render,
-    ScrollWheelEvent, SharedString, Size, Style, StyleRefinement, Styled, Task, TooltipId,
-    TouchPhase, Visibility, Window, WindowControlArea, point, px, size,
+    Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, BackgroundTag, Bounds, BoxShadow,
+    ClickEvent, DispatchPhase, Display, Element, ElementId, Entity, EntityId, ExternalDragPayload,
+    ExternalDragPayloadSource, FileDropEvent, Fill, FocusHandle, Global, GlobalElementId, Hitbox,
+    HitboxBehavior, HitboxId, Hsla, InspectorElementId, IntoElement, IsZero, KeyContext,
+    KeyDownEvent, KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, LongPressEvent,
+    ModifiersChangedEvent, MouseButton, MouseClickEvent, MouseDownEvent, MouseExitEvent,
+    MouseMoveEvent, MousePressureEvent, MouseUpEvent, OngoingScroll, Overflow, ParentElement,
+    PinchEvent, Pixels, Point, Render, Rgba, ScrollWheelEvent, SharedString, Size, Style,
+    StyleRefinement, Styled, Task, TooltipId, TouchPhase, Visibility, Window, WindowControlArea,
+    point, px, size, solid_background,
 };
 use collections::HashMap;
 use gpui_util::ResultExt;
 use refineable::Refineable;
+use scheduler::Instant;
 use smallvec::SmallVec;
 use std::{
     any::{Any, TypeId},
@@ -838,13 +840,15 @@ pub trait InteractiveElement: Sized {
         self
     }
 
-    /// Apply the given style to this element when the mouse hovers over it
+    /// Apply the given style to this element when the mouse hovers over it.
+    /// A second call adds to the first (a widget's own hover, then a caller's).
     fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        debug_assert!(
-            self.interactivity().hover_style.is_none(),
-            "hover style already set"
-        );
-        self.interactivity().hover_style = Some(Box::new(f(StyleRefinement::default())));
+        let added = f(StyleRefinement::default());
+        let hover_style = &mut self.interactivity().hover_style;
+        match hover_style {
+            Some(style) => style.refine(&added),
+            None => *hover_style = Some(Box::new(added)),
+        }
         self
     }
 
@@ -1556,7 +1560,13 @@ pub trait StatefulInteractiveElement: InteractiveElement {
     where
         Self: Sized,
     {
-        self.interactivity().active_style = Some(Box::new(f(StyleRefinement::default())));
+        // A second call adds to the first, as `hover` does.
+        let added = f(StyleRefinement::default());
+        let active_style = &mut self.interactivity().active_style;
+        match active_style {
+            Some(style) => style.refine(&added),
+            None => *active_style = Some(Box::new(added)),
+        }
         self
     }
 
@@ -3412,7 +3422,7 @@ impl Interactivity {
     fn compute_style_internal(
         &self,
         hitbox: Option<&Hitbox>,
-        element_state: Option<&mut InteractiveElementState>,
+        mut element_state: Option<&mut InteractiveElementState>,
         window: &mut Window,
         cx: &mut App,
     ) -> Style {
@@ -3420,23 +3430,46 @@ impl Interactivity {
         style.refine(&self.base_style);
 
         if let Some(focus_handle) = self.tracked_focus_handle.as_ref() {
-            if let Some(in_focus_style) = self.in_focus_style.as_ref()
-                && focus_handle.within_focused(window, cx)
-            {
-                style.refine(in_focus_style);
+            if let Some(in_focus_style) = self.in_focus_style.as_ref() {
+                let on = focus_handle.within_focused(window, cx);
+                style = fade_into(
+                    style,
+                    in_focus_style,
+                    on,
+                    FadeSlot::InFocus,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
 
-            if let Some(focus_style) = self.focus_style.as_ref()
-                && focus_handle.is_focused(window)
-            {
-                style.refine(focus_style);
+            if let Some(focus_style) = self.focus_style.as_ref() {
+                let on = focus_handle.is_focused(window);
+                style = fade_into(
+                    style,
+                    focus_style,
+                    on,
+                    FadeSlot::Focus,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
 
-            if let Some(focus_visible_style) = self.focus_visible_style.as_ref()
-                && focus_handle.is_focused(window)
-                && window.last_input_was_keyboard()
-            {
-                style.refine(focus_visible_style);
+            if let Some(focus_visible_style) = self.focus_visible_style.as_ref() {
+                let on = focus_handle.is_focused(window) && window.last_input_was_keyboard();
+                style = fade_into(
+                    style,
+                    focus_visible_style,
+                    on,
+                    FadeSlot::FocusVisible,
+                    true,
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
         }
 
@@ -3456,9 +3489,16 @@ impl Interactivity {
                         false
                     };
 
-                if is_group_hovered {
-                    style.refine(&group_hover.style);
-                }
+                style = fade_into(
+                    style,
+                    &group_hover.style,
+                    is_group_hovered,
+                    FadeSlot::GroupHover,
+                    hitbox.is_some(),
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
 
             if let Some(hover_style) = self.hover_style.as_ref() {
@@ -3475,9 +3515,16 @@ impl Interactivity {
                     false
                 };
 
-                if is_hovered {
-                    style.refine(hover_style);
-                }
+                style = fade_into(
+                    style,
+                    hover_style,
+                    is_hovered,
+                    FadeSlot::Hover,
+                    hitbox.is_some(),
+                    &mut element_state,
+                    window,
+                    cx,
+                );
             }
         }
 
@@ -3512,21 +3559,35 @@ impl Interactivity {
             }
         }
 
-        if let Some(element_state) = element_state {
-            let clicked_state = element_state
+        if let Some(element_state) = element_state.as_mut() {
+            let clicked_state = *element_state
                 .clicked_state
                 .get_or_insert_with(Default::default)
                 .borrow();
-            if clicked_state.group
-                && let Some(group) = self.group_active_style.as_ref()
-            {
-                style.refine(&group.style)
+            if let Some(group) = self.group_active_style.as_ref() {
+                style = fade_into(
+                    style,
+                    &group.style,
+                    clicked_state.group,
+                    FadeSlot::GroupActive,
+                    true,
+                    &mut Some(&mut **element_state),
+                    window,
+                    cx,
+                );
             }
 
-            if let Some(active_style) = self.active_style.as_ref()
-                && clicked_state.element
-            {
-                style.refine(active_style)
+            if let Some(active_style) = self.active_style.as_ref() {
+                style = fade_into(
+                    style,
+                    active_style,
+                    clicked_state.element,
+                    FadeSlot::Active,
+                    true,
+                    &mut Some(&mut **element_state),
+                    window,
+                    cx,
+                );
             }
         }
 
@@ -3630,6 +3691,232 @@ pub struct InteractiveElementState {
     ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
     long_press_tooltip_active: Option<Rc<Cell<bool>>>,
+    /// How far its focus, group hover, hover and active styles have faded in.
+    fades: [Option<StyleFade>; 7],
+}
+
+/// How long a hover, focus or active style takes to fade in or out:
+/// CSS's `transition` as Tailwind sets it (150ms, `cubic-bezier(0.4, 0, 0.2, 1)`).
+const STYLE_FADE: Duration = Duration::from_millis(150);
+
+#[derive(Copy, Clone, Debug)]
+enum FadeSlot {
+    GroupHover = 0,
+    Hover = 1,
+    Active = 2,
+    InFocus = 3,
+    Focus = 4,
+    FocusVisible = 5,
+    GroupActive = 6,
+}
+
+/// A style fading in or out, as CSS transitions a `:hover`.
+#[derive(Copy, Clone, Debug)]
+struct StyleFade {
+    on: bool,
+    from: f32,
+    since: Instant,
+}
+
+impl StyleFade {
+    fn progress(&self, now: Instant) -> f32 {
+        let t = (now.saturating_duration_since(self.since).as_secs_f32()
+            / STYLE_FADE.as_secs_f32())
+        .clamp(0., 1.);
+        let to = if self.on { 1. } else { 0. };
+        self.from + (to - self.from) * ease_standard(t)
+    }
+}
+
+/// `cubic-bezier(0.4, 0, 0.2, 1)`, solved for x by Newton's method.
+fn ease_standard(x: f32) -> f32 {
+    let (x1, y1, x2, y2) = (0.4f32, 0., 0.2f32, 1.);
+    let bezier = |t: f32, a: f32, b: f32| {
+        let u = 1. - t;
+        3. * u * u * t * a + 3. * u * t * t * b + t * t * t
+    };
+    let slope = |t: f32, a: f32, b: f32| {
+        let u = 1. - t;
+        3. * u * u * a + 6. * u * t * (b - a) + 3. * t * t * (1. - b)
+    };
+    let mut t = x;
+    for _ in 0..6 {
+        let d = slope(t, x1, x2);
+        if d.abs() < 1e-5 {
+            break;
+        }
+        t = (t - (bezier(t, x1, x2) - x) / d).clamp(0., 1.);
+    }
+    bezier(t, y1, y2)
+}
+
+/// Refines `style` with `refinement` when `on`, fading the colors, shadows,
+/// opacity and transform between the two over [`STYLE_FADE`] when it changes,
+/// as a browser transitions them. Everything else switches at once. Only
+/// elements with an id remember a fade; `update` is false where the element's
+/// hover can't be read yet (before it's painted), so the fade is only looked at.
+fn fade_into(
+    style: Style,
+    refinement: &StyleRefinement,
+    on: bool,
+    slot: FadeSlot,
+    update: bool,
+    element_state: &mut Option<&mut InteractiveElementState>,
+    window: &mut Window,
+    cx: &App,
+) -> Style {
+    let Some(state) = element_state.as_mut() else {
+        let mut style = style;
+        if on {
+            style.refine(refinement);
+        }
+        return style;
+    };
+    let now = Instant::now();
+    let fade = &mut state.fades[slot as usize];
+    let progress = match fade {
+        // Already there when it first shows, as CSS doesn't transition on load.
+        None => {
+            *fade = Some(StyleFade {
+                on,
+                from: if on { 1. } else { 0. },
+                since: now.checked_sub(STYLE_FADE).unwrap_or(now),
+            });
+            if on { 1. } else { 0. }
+        }
+        Some(fade) => {
+            if update && fade.on != on {
+                let from = fade.progress(now);
+                *fade = StyleFade {
+                    on,
+                    from,
+                    since: now,
+                };
+            }
+            if cx.reduce_motion() {
+                fade.since = now.checked_sub(STYLE_FADE).unwrap_or(now);
+                fade.from = if fade.on { 1. } else { 0. };
+            }
+            fade.progress(now)
+        }
+    };
+    let settled = if on { progress >= 1. } else { progress <= 0. };
+    if settled {
+        let mut style = style;
+        if on {
+            style.refine(refinement);
+        }
+        return style;
+    }
+    let mut target = style.clone();
+    target.refine(refinement);
+    window.request_animation_frame();
+    let mut mixed = if on { target.clone() } else { style.clone() };
+    mix_styles(&mut mixed, &style, &target, progress);
+    mixed
+}
+
+/// Sets the faded parts of `out` to `from` mixed `t` of the way to `to`.
+fn mix_styles(out: &mut Style, from: &Style, to: &Style, t: f32) {
+    let from_bg = from
+        .background
+        .as_ref()
+        .and_then(Fill::color)
+        .map(|c| c.solid);
+    let to_bg = to
+        .background
+        .as_ref()
+        .and_then(Fill::color)
+        .map(|c| c.solid);
+    let solid = |fill: &Option<Fill>| {
+        fill.as_ref()
+            .is_none_or(|f| f.color().is_some_and(|c| c.tag == BackgroundTag::Solid))
+    };
+    if solid(&from.background) && solid(&to.background) && (from_bg.is_some() || to_bg.is_some()) {
+        out.background = Some(Fill::Color(solid_background(mix_hsla(
+            from_bg.unwrap_or_else(|| to_bg.unwrap().opacity(0.)),
+            to_bg.unwrap_or_else(|| from_bg.unwrap().opacity(0.)),
+            t,
+        ))));
+    }
+    if let (Some(a), Some(b)) = (from.border_color, to.border_color) {
+        out.border_color = Some(mix_hsla(a, b, t));
+    }
+    if let (Some(a), Some(b)) = (from.text.color, to.text.color) {
+        out.text.color = Some(mix_hsla(a, b, t));
+    }
+    if from.opacity.is_some() || to.opacity.is_some() {
+        let (a, b) = (from.opacity.unwrap_or(1.), to.opacity.unwrap_or(1.));
+        out.opacity = Some(a + (b - a) * t);
+    }
+    if from.box_shadow != to.box_shadow {
+        let (a, b) = (&from.box_shadow, &to.box_shadow);
+        if a.len() == b.len() {
+            out.box_shadow = a.iter().zip(b).map(|(a, b)| mix_shadow(a, b, t)).collect();
+        } else if a.is_empty() {
+            out.box_shadow = b
+                .iter()
+                .map(|b| mix_shadow(&clear_shadow(b), b, t))
+                .collect();
+        } else if b.is_empty() {
+            out.box_shadow = a
+                .iter()
+                .map(|a| mix_shadow(a, &clear_shadow(a), t))
+                .collect();
+        }
+    }
+    let (a, b) = (&from.transform, &to.transform);
+    if a != b {
+        let lerp = |x: f32, y: f32| x + (y - x) * t;
+        out.transform.scale_x = lerp(a.scale_x, b.scale_x);
+        out.transform.scale_y = lerp(a.scale_y, b.scale_y);
+        out.transform.rotate = lerp(a.rotate, b.rotate);
+        out.transform.translate_x = px(lerp(a.translate_x.0, b.translate_x.0));
+        out.transform.translate_y = px(lerp(a.translate_y.0, b.translate_y.0));
+    }
+}
+
+fn clear_shadow(shadow: &BoxShadow) -> BoxShadow {
+    BoxShadow {
+        color: shadow.color.opacity(0.),
+        ..shadow.clone()
+    }
+}
+
+fn mix_shadow(a: &BoxShadow, b: &BoxShadow, t: f32) -> BoxShadow {
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    BoxShadow {
+        color: mix_hsla(a.color, b.color, t),
+        offset: point(
+            px(lerp(a.offset.x.0, b.offset.x.0)),
+            px(lerp(a.offset.y.0, b.offset.y.0)),
+        ),
+        blur_radius: px(lerp(a.blur_radius.0, b.blur_radius.0)),
+        spread_radius: px(lerp(a.spread_radius.0, b.spread_radius.0)),
+        inset: b.inset,
+    }
+}
+
+/// Mixes two colors as browsers transition them: in sRGB, premultiplied by
+/// alpha, so fading from transparent doesn't pass through black.
+fn mix_hsla(a: Hsla, b: Hsla, t: f32) -> Hsla {
+    let (a, b) = (Rgba::from(a), Rgba::from(b));
+    let alpha = a.a + (b.a - a.a) * t;
+    if alpha <= 0. {
+        return Hsla::from(Rgba {
+            r: b.r,
+            g: b.g,
+            b: b.b,
+            a: 0.,
+        });
+    }
+    let channel = |x: f32, y: f32| ((x * a.a) + ((y * b.a) - (x * a.a)) * t) / alpha;
+    Hsla::from(Rgba {
+        r: channel(a.r, b.r),
+        g: channel(a.g, b.g),
+        b: channel(a.b, b.b),
+        a: alpha,
+    })
 }
 
 /// Whether or not the element or a group that contains it is clicked by the mouse.
@@ -4452,6 +4739,24 @@ mod tests {
         MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas, util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
+
+    #[test]
+    fn style_fades_ease_and_mix_like_css() {
+        assert_eq!(ease_standard(0.), 0.);
+        assert!((ease_standard(1.) - 1.).abs() < 1e-4);
+        // cubic-bezier(0.4, 0, 0.2, 1) is past 0.75 by the middle.
+        assert!(ease_standard(0.5) > 0.75 && ease_standard(0.5) < 0.85);
+
+        // Fading in from transparent keeps the color rather than passing through black.
+        let red = Hsla::from(Rgba {
+            r: 1.,
+            g: 0.,
+            b: 0.,
+            a: 1.,
+        });
+        let half = Rgba::from(mix_hsla(red.opacity(0.), red, 0.5));
+        assert!((half.r - 1.).abs() < 1e-3 && half.g.abs() < 1e-3 && (half.a - 0.5).abs() < 1e-3);
+    }
 
     struct GroupHoverTestView {
         render_count: Rc<Cell<usize>>,

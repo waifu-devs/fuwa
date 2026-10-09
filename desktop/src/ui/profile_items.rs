@@ -454,8 +454,11 @@ impl ProfileItemsView {
         p: &Palette,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let (hover_bg, hover_border) = (alpha(p.primary, 0.05), alpha(p.primary, 0.5));
+        // The picture tips one way, the sparkles grow and tip the other, while pointed at.
+        let sparkles = glyph == "sparkles";
         div()
             .id(id)
+            .group(id)
             .flex_1()
             .min_w_0()
             .relative()
@@ -470,8 +473,8 @@ impl ProfileItemsView {
             .border_color(p.border)
             .text_center()
             .cursor_pointer()
-            .hover(move |s| s.bg(hover_bg).border_color(hover_border).top(px(-2.0)))
-            .active(|s| s.top(px(1.0)))
+            .hover(move |s| s.bg(hover_bg).border_color(hover_border).translate_y(px(-2.0)))
+            .active(|s| s.scale(0.98))
             .child(
                 div()
                     .size(px(44.0))
@@ -481,7 +484,18 @@ impl ProfileItemsView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(glyph).size(px(20.0))),
+                    .child(
+                        div()
+                            .id("pi-add-glyph")
+                            .group_hover(id, move |s| {
+                                if sparkles {
+                                    s.scale(1.1).rotate(gpui_kit::radians(-12f32.to_radians()))
+                                } else {
+                                    s.rotate(gpui_kit::radians(12f32.to_radians()))
+                                }
+                            })
+                            .child(icon(glyph).size(px(20.0))),
+                    ),
             )
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title))
             .child(div().max_w(px(320.0)).text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about))
@@ -953,6 +967,7 @@ impl ProfileItemsView {
         } else {
             let item_c = item.clone();
             div()
+                .id("pi-actions")
                 .flex()
                 .gap(px(4.0))
                 .opacity(0.6)
@@ -1083,7 +1098,7 @@ fn round_icon(
         .text_color(p.muted_foreground)
         .cursor_pointer()
         .hover(move |s| s.bg(bg).text_color(hover))
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.translate_y(px(1.0)))
         .child(icon(glyph).size(px(16.0)))
 }
 

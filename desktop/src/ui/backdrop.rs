@@ -33,7 +33,20 @@ pub fn layers(b: &Backdrop, p: &Palette, window: &mut Window, cx: &mut App) -> O
     }
     let size = window.viewport_size();
     let (w, h) = (f32::from(size.width), f32::from(size.height));
-    let picture = (!b.image.is_empty()).then(|| picture(&b.image, b.fit, b.blur, w, h, window, cx));
+    let picture = (!b.image.is_empty()).then(|| picture(&b.image, b.fit, b.blur, w, h, window, cx)).flatten();
+    // A picture fades in once it has loaded, settling from 104%, so a slow one never pops in half drawn.
+    let picture = picture.map(|pic| {
+        div()
+            .absolute()
+            .inset_0()
+            .child(pic)
+            .with_animation(
+                SharedString::from(format!("backdrop-picture|{}", b.image)),
+                Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_out_quint()),
+                |el, t| el.opacity(t).scale(1.04 - 0.04 * t),
+            )
+            .into_any_element()
+    });
     let effect = crate::ui::effects::layer(b.effect, b.shader.as_ref(), b.intensity, b.speed, p, window, cx);
     // A new effect or texture fades in, as on the web.
     let fade = |el: AnyElement| {
@@ -67,30 +80,29 @@ pub fn layers(b: &Backdrop, p: &Palette, window: &mut Window, cx: &mut App) -> O
     )
 }
 
-fn picture(url: &str, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
+/// The picture, once it has loaded (none until then).
+fn picture(url: &str, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let url = SharedString::from(url.to_owned());
     if blur > 0 {
         return blurred(url, fit, blur, w, h, window, cx);
     }
+    let resource = Resource::Uri(url.clone().into());
+    let Some(Ok(image)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else { return None };
     if fit == Fit::Tile {
         // Repeated at its own size, which is known once it has loaded.
-        let resource = Resource::Uri(url.clone().into());
-        if let Some(Ok(image)) = window.use_asset::<ImgResourceLoader>(&resource, cx) {
-            let s = image.size(0);
-            let scale = window.scale_factor();
-            let (tw, th) = (i32::from(s.width) as f32 / scale, i32::from(s.height) as f32 / scale);
-            if tw >= 1.0 && th >= 1.0 {
-                return tiled(Tile::Uri(url), tw, th, w, h).into_any_element();
-            }
-        }
-        return div().into_any_element();
+        let s = image.size(0);
+        let scale = window.scale_factor();
+        let (tw, th) = (i32::from(s.width) as f32 / scale, i32::from(s.height) as f32 / scale);
+        return (tw >= 1.0 && th >= 1.0).then(|| tiled(Tile::Uri(url), tw, th, w, h).into_any_element());
     }
-    img(url)
-        .absolute()
-        .inset_0()
-        .size_full()
-        .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
-        .into_any_element()
+    Some(
+        img(url)
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
+            .into_any_element(),
+    )
 }
 
 /// The longest side a blurred picture is made at: blurring hides the detail a bigger one would have.
@@ -99,7 +111,15 @@ const BLURRED_SIDE: f32 = 480.0;
 /// The picture blurred by `blur` points. It's made smaller, blurred off the
 /// main thread and kept; until it's ready (or while a resize makes it
 /// again) the last one made for this picture shows, and nothing sharp does.
-fn blurred(url: SharedString, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
+fn blurred(
+    url: SharedString,
+    fit: Fit,
+    blur: u8,
+    w: f32,
+    h: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
     struct Made {
         key: String,
         working: Option<String>,
@@ -108,9 +128,7 @@ fn blurred(url: SharedString, fit: Fit, blur: u8, w: f32, h: f32, window: &mut W
     static MADE: Mutex<Made> = Mutex::new(Made { key: String::new(), working: None, image: None });
 
     let resource = Resource::Uri(url.clone().into());
-    let Some(Ok(source)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else {
-        return div().into_any_element();
-    };
+    let Some(Ok(source)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else { return None };
     let s = source.size(0);
     let (iw, ih) = (i32::from(s.width).max(1) as f32, i32::from(s.height).max(1) as f32);
     let shrink = (iw.max(ih) / BLURRED_SIDE).max(1.0);
@@ -149,18 +167,18 @@ fn blurred(url: SharedString, fit: Fit, blur: u8, w: f32, h: f32, window: &mut W
         })
         .detach();
     }
-    let Some((_, image, tw, th)) = made.image.as_ref().filter(|(u, ..)| *u == url) else {
-        return div().into_any_element();
-    };
+    let (_, image, tw, th) = made.image.as_ref().filter(|(u, ..)| *u == url)?;
     if fit == Fit::Tile {
-        return tiled(Tile::Image(image.clone()), *tw, *th, w, h).into_any_element();
+        return Some(tiled(Tile::Image(image.clone()), *tw, *th, w, h).into_any_element());
     }
-    img(image.clone())
-        .absolute()
-        .inset_0()
-        .size_full()
-        .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
-        .into_any_element()
+    Some(
+        img(image.clone())
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
+            .into_any_element(),
+    )
 }
 
 /// A loaded picture (BGRA) made `dw` by `dh` and blurred by three box blurs

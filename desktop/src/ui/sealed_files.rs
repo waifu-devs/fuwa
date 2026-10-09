@@ -167,8 +167,10 @@ fn one_file(
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .invisible()
-                    .group_hover("sealed", |st| st.visible())
+                    // Fades in on the picture's hover, and grows under the pointer.
+                    .opacity(0.0)
+                    .group_hover("sealed", |st| st.opacity(1.0))
+                    .hover(|st| st.opacity(1.0).scale(1.1))
                     .tooltip({
                         let name = file.name.clone();
                         move |window, cx| {
@@ -223,7 +225,9 @@ fn one_file(
             .justify_center()
             .text_color(p.muted_foreground)
             .cursor_pointer()
-            .hover(move |st| st.bg(hover_bg).text_color(hover_fg))
+            // `whileHover={{ scale: 1.1 }}` and `whileTap={{ scale: 0.9 }}`.
+            .hover(move |st| st.bg(hover_bg).text_color(hover_fg).scale(1.1))
+            .active(|st| st.scale(0.9))
             .when(busy, |el| el.opacity(0.5))
             .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
             .child(icon(glyph).size(px(16.0)))

@@ -17,7 +17,7 @@ use gpui_kit::{
 use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::FuwaApp;
-use crate::ui::dm_view::{seal, shadow_2xl};
+use crate::ui::dm_view::{glyph_swap, seal, shadow_2xl};
 use crate::ui::motion;
 use crate::ui::settings_controls::{Look, button};
 use crate::ui::text::{TIGHT, WIDER, tracked};
@@ -76,7 +76,12 @@ pub(crate) fn dialog_shell(tag: &str, width: f32, body: Div, window: &Window, cx
             .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
             .occlude()
             .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-            .child(motion::dialog_in(card, SharedString::from(format!("dialog-rise-{tag}")))),
+            .child(crate::ui::overlay::leaving_pose(
+                div().child(motion::dialog_in(card, SharedString::from(format!("dialog-rise-{tag}")))),
+                24.0,
+                0.97,
+                cx,
+            )),
         SharedString::from(format!("dialog-fade-{tag}")),
         Duration::from_millis(200),
     )
@@ -101,7 +106,8 @@ pub(crate) fn web_switch(
         .w(px(32.0))
         .h(px(20.0))
         .rounded_full()
-        .bg(if on { p.primary } else { p.border })
+        // The color crosses over as the thumb does (`transition-colors`).
+        .bg(crate::ui::theme::mix(p.border, p.primary, ((x - 1.0) / 12.0).clamp(0.0, 1.0)))
         .when(disabled, |el| el.opacity(0.5))
         .when(!disabled, |el| {
             el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
@@ -305,7 +311,7 @@ impl FuwaApp {
         let copied = COPIED.with(|c| c.borrow().is_some_and(|at| at.elapsed() < Duration::from_millis(1200)));
 
         let chip = |id: &'static str, glyph: &str, label: String, bg: Hsla, fg: Hsla| {
-            motion::once(
+            crate::ui::motion::spring_in(
                 div()
                     .flex()
                     .items_center()
@@ -321,8 +327,9 @@ impl FuwaApp {
                     .child(icon(glyph).size(px(14.0)))
                     .child(label),
                 id,
-                Duration::from_millis(350),
-                |el, t| el.opacity(t.clamp(0.0, 1.0)),
+                (600.0, 16.0),
+                Duration::ZERO,
+                |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.5 + 0.5 * t),
             )
         };
         let state_chip = if is_verified {
@@ -356,7 +363,9 @@ impl FuwaApp {
             let mut grid = div().mt(px(12.0)).flex().flex_wrap().gap_y(px(8.0));
             for (n, group) in groups.iter().enumerate() {
                 grid = grid.child(
-                    div().w(gpui_kit::relative(0.25)).flex().justify_center().child(motion::rise(
+                    // Each group flips up into place, one after another (the web's `rotateX: -90`,
+                    // drawn here as the group unfolding from a line).
+                    div().w(gpui_kit::relative(0.25)).flex().justify_center().child(motion::spring_in(
                         div()
                             .font_family("monospace")
                             .text_size(px(16.0))
@@ -364,8 +373,9 @@ impl FuwaApp {
                             .font_weight(FontWeight::BOLD)
                             .child(tracked(group.clone(), WIDER)),
                         SharedString::from(format!("safety-{safety}-{n}")),
+                        (520.0, 34.0),
                         Duration::from_millis(150 + 35 * n as u64),
-                        6.0,
+                        |el, t| el.opacity(t.clamp(0.0, 1.0)).scale_y(t.max(0.0)).translate_y(px((1.0 - t) * 6.0)),
                     )),
                 );
             }
@@ -406,26 +416,32 @@ impl FuwaApp {
                     })),
                 )
                 .child(
-                    button(
-                        "safety-copy",
-                        t(if copied { "dms-calls.dm.encryption.copied" } else { "dms-calls.dm.encryption.copy" }),
-                        Some(if copied { "check" } else { "copy" }),
-                        Look::Ghost,
-                        true,
-                        &p,
-                    )
-                    .rounded(radius_xl())
-                    .font_weight(FontWeight::BOLD)
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(joined.clone()));
-                        COPIED.with(|c| *c.borrow_mut() = Some(Instant::now()));
-                        cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(Duration::from_millis(1250)).await;
-                            let _ = this.update(cx, |_, cx| cx.notify());
+                    // Its icon pops to a tick and back (`stiffness: 700, damping: 22`).
+                    button("safety-copy", "", None, Look::Ghost, true, &p)
+                        .px(px(10.0))
+                        .gap(px(6.0))
+                        .child({
+                            let glyph = glyph_swap("safety-copy-icon", if copied { "check" } else { "copy" }, 16.0)
+                                .pop(0.3, (700.0, 22.0));
+                            if copied { glyph.color(p.primary) } else { glyph }
                         })
-                        .detach();
-                        cx.notify();
-                    })),
+                        .child(t(if copied {
+                            "dms-calls.dm.encryption.copied"
+                        } else {
+                            "dms-calls.dm.encryption.copy"
+                        }))
+                        .rounded(radius_xl())
+                        .font_weight(FontWeight::BOLD)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(joined.clone()));
+                            COPIED.with(|c| *c.borrow_mut() = Some(Instant::now()));
+                            cx.spawn(async move |this, cx| {
+                                cx.background_executor().timer(Duration::from_millis(1250)).await;
+                                let _ = this.update(cx, |_, cx| cx.notify());
+                            })
+                            .detach();
+                            cx.notify();
+                        })),
                 )
         });
         let section = div()
@@ -472,6 +488,7 @@ impl FuwaApp {
                 list = list.child(motion::slide_in(
                     div()
                         .id(SharedString::from(format!("device-{}", m.device_id)))
+                        .group("device-row")
                         .flex()
                         .items_center()
                         .gap(px(12.0))
@@ -479,8 +496,11 @@ impl FuwaApp {
                         .py(px(6.0))
                         .rounded(radius_xl())
                         .hover(move |st| st.bg(hover))
+                        // The device's tile tips a little while its row is pointed at.
                         .child(
                             div()
+                                .id("device-tile")
+                                .group_hover("device-row", |st| st.rotate(gpui_kit::radians(-6f32.to_radians())))
                                 .size(px(32.0))
                                 .flex_none()
                                 .rounded(radius_lg())

@@ -12,7 +12,7 @@
 //! the others slide aside on springs while one is held.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -33,7 +33,7 @@ use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::context_menu::{Built, Item, MenuOf, run};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, mix};
-use crate::ui::widgets::{badge, conn_dot, fuwa_mark, icon, initials, pal, server_icon};
+use crate::ui::widgets::{conn_dot, counted, fuwa_mark, going, icon, initials, pal, server_icon};
 
 pub const RAIL: f32 = 72.0;
 /// A server's (or a folder's) place: 48px, then the rail's 8px gap.
@@ -324,6 +324,15 @@ pub(crate) struct FolderEdit {
     _sub: gpui_kit::Subscription,
 }
 
+/// What the folder dialog shows, kept to draw it once more as it leaves.
+#[derive(Clone)]
+struct FolderShown {
+    key: String,
+    folder: String,
+    name: gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    color: u32,
+}
+
 /// What's held: a server's icon or a folder's tile, following the pointer.
 #[derive(Clone)]
 pub struct RailDrag {
@@ -351,7 +360,7 @@ impl Render for RailDrag {
         let radius = size * 0.32;
         let face = match &self.server {
             Some(server) => server_icon(server, size, radius, &p).into_any_element(),
-            None => folder_tile(&self.tiles, false, folder_color(self.color, &p), size / ICON, &p).into_any_element(),
+            None => folder_tile(&self.tiles, 0.0, folder_color(self.color, &p), size / ICON, &p).into_any_element(),
         };
         div().w(px(RAIL)).h(px(ICON)).flex().items_center().justify_center().child(
             div()
@@ -384,10 +393,13 @@ struct RailOver(bool);
 impl gpui_kit::Global for RailOver {}
 
 /// A folder's face: its first servers in a 2×2 tile while closed, a folder
-/// icon in its color while open (the web's `.rail-folder`).
-fn folder_tile(servers: &[pb::Server], open: bool, color: Rgba, scale: f32, p: &Palette) -> gpui_kit::Div {
+/// icon in its color while open (the web's `.rail-folder`). `open` goes from
+/// 0 to 1 as it opens: the tile shrinks away while the icon turns and grows in.
+fn folder_tile(servers: &[pb::Server], open: f32, color: Rgba, scale: f32, p: &Palette) -> gpui_kit::Div {
     let size = ICON * scale;
     let mini = 16.0 * scale;
+    let shown = open.clamp(0.0, 1.0);
+    let closed = 1.0 - shown;
     let mut grid = div().w(px(mini * 2.0 + 3.2 * scale)).flex().flex_wrap().gap(px(3.2 * scale));
     for s in servers.iter().take(4) {
         grid = grid.child(server_icon(s, mini, mini * 0.35, p));
@@ -400,9 +412,24 @@ fn folder_tile(servers: &[pb::Server], open: bool, color: Rgba, scale: f32, p: &
         .items_center()
         .justify_center()
         .rounded(px(16.0 * scale))
-        .when(!open, |el| el.bg(mix(p.background, color, 0.3)).border_1().border_color(alpha(color, 0.35)))
-        .when(!open, |el| el.child(grid))
-        .when(open, |el| el.child(icon("folder-open").size(px(24.0 * scale)).text_color(color)))
+        .when(closed > 0.0, |el| {
+            el.bg(mix(p.background, color, 0.3).opacity(closed))
+                .border_1()
+                .border_color(alpha(color, 0.35 * closed))
+                .child(grid.opacity(closed).scale(1.0 - 0.5 * shown))
+        })
+        .when(shown > 0.0, |el| {
+            el.child(
+                div().absolute().inset_0().flex().items_center().justify_center().opacity(shown).child(
+                    div().scale(0.4 + 0.6 * open.max(0.0)).child(
+                        icon("folder-open")
+                            .size(px(24.0 * scale))
+                            .text_color(color)
+                            .rotate(gpui_kit::radians((-14.0 * (1.0 - open)).to_radians())),
+                    ),
+                ),
+            )
+        })
 }
 
 impl FuwaApp {
@@ -478,8 +505,7 @@ impl FuwaApp {
 
         // Adding a server or an instance, under a divider.
         let add_hovered = self.hovered.as_deref() == Some("rail-add");
-        let lit = add_hovered;
-        let add_radius = motion::follow("rail-add|r", icon_radius(48.0, lit), window, cx);
+        let add_radius = motion::follow("rail-add|r", icon_radius(48.0, add_hovered), window, cx);
         let add_turn = motion::follow("rail-add|turn", if add_hovered { 90.0 } else { 0.0 }, window, cx);
         let add_at = self.rail.add_at.clone();
         let add = div()
@@ -490,8 +516,13 @@ impl FuwaApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(if lit { p.primary } else { p.card })
-            .text_color(if lit { p.primary_foreground } else { p.primary })
+            // The web's `transition-colors hover:bg-primary hover:text-primary-foreground`.
+            .bg(p.card)
+            .text_color(p.primary)
+            .hover({
+                let (bg, fg) = (p.primary, p.primary_foreground);
+                move |s| s.bg(bg).text_color(fg)
+            })
             .cursor_pointer()
             .on_hover(cx.listener(|this, on: &bool, _, cx| {
                 if *on {
@@ -501,7 +532,7 @@ impl FuwaApp {
                 }
                 cx.notify();
             }))
-            .active(|s| s.opacity(0.92))
+            .active(|s| s.scale(0.92))
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.context.as_ref().is_some_and(|m| matches!(m.of, MenuOf::RailAdd)) {
                     this.close_context_menu(cx);
@@ -517,13 +548,8 @@ impl FuwaApp {
                 this.open_context_menu(MenuOf::RailAdd, at, window, cx);
             }))
             .child(gpui_kit::canvas(move |bounds, _, _| add_at.set(Some(bounds)), |_, _, _, _| {}).absolute().inset_0())
-            .child(
-                gpui_kit::svg()
-                    .path("icons/plus.svg")
-                    .size(px(24.0))
-                    .text_color(if lit { p.primary_foreground } else { p.primary })
-                    .with_transformation(gpui_kit::Transformation::rotate(gpui_kit::radians(add_turn.to_radians()))),
-            );
+            // The plus takes the button's color as it fades, and turns a quarter on hover.
+            .child(icon("plus").size(px(24.0)).rotate(gpui_kit::radians(add_turn.to_radians())));
 
         div()
             .w(px(RAIL))
@@ -568,6 +594,21 @@ impl FuwaApp {
         };
         let can_arrange = inst.signed_in && inst.connection == Connection::Live;
 
+        // The servers there once the instance first came in rise with the rest
+        // of the rail; any joined after that pop in from 30% (the web's `Pop`).
+        let first = window.use_keyed_state(SharedString::from(format!("rail-first|{}", inst.key)), cx, |_, _| {
+            None::<HashSet<String>>
+        });
+        let first: Option<HashSet<String>> = first.update(cx, |first, _| {
+            match first {
+                Some(seen) => seen.retain(|id| inst.servers.contains_key(id)),
+                None if inst.connection == Connection::Live => *first = Some(inst.servers.keys().cloned().collect()),
+                None => {}
+            }
+            first.clone()
+        });
+        let joined = |id: &str| first.as_ref().is_some_and(|seen| !seen.contains(id));
+
         let mut group =
             div().id(SharedString::from(format!("rail-group|{}", inst.key))).w_full().flex().flex_col().gap(px(GAP));
         let mut m = 0usize;
@@ -594,12 +635,22 @@ impl FuwaApp {
                         window,
                         cx,
                     );
-                    group = group.child(motion::rise(
-                        div().child(item),
-                        SharedString::from(format!("s|{}|{}|in", inst.key, id)),
-                        Duration::from_millis(40 * (n + m) as u64),
-                        10.0,
-                    ));
+                    group = if joined(id) {
+                        group.child(motion::spring_in(
+                            div().child(item),
+                            SharedString::from(format!("s|{}|{}|pop", inst.key, id)),
+                            (520.0, 34.0),
+                            Duration::ZERO,
+                            |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.3 + 0.7 * t),
+                        ))
+                    } else {
+                        group.child(motion::rise(
+                            div().child(item),
+                            SharedString::from(format!("s|{}|{}|in", inst.key, id)),
+                            Duration::from_millis(40 * (n + m) as u64),
+                            10.0,
+                        ))
+                    };
                 }
                 RailEntry::Folder(f) => {
                     let unit = self.folder_block(
@@ -689,7 +740,10 @@ impl FuwaApp {
             motion::follow(SharedString::from(format!("{id}|target")), if target { 1.12 } else { 1.0 }, window, cx);
         let tiles: Vec<pb::Server> =
             f.servers.iter().filter_map(|s| inst.servers.get(s).map(|(sv, _)| sv.clone())).collect();
-        let face = folder_tile(&tiles, open, color, grow, &p).when(target, |el| {
+        // The tile and the icon trade places with a little overshoot, as the web's `.rail-folder-glyph`.
+        let opened =
+            motion::follow_bouncy(SharedString::from(format!("{id}|open")), if open { 1.0 } else { 0.0 }, window, cx);
+        let face = folder_tile(&tiles, opened, color, grow, &p).when(target, |el| {
             el.shadow(vec![
                 gpui_kit::BoxShadow {
                     color: p.background.into(),
@@ -755,10 +809,9 @@ impl FuwaApp {
                     .bg(p.foreground)
                     .opacity((pill / 8.0).clamp(0.0, 1.0)),
             )
-            .child(div().relative().child(face))
-            .when(unread > 0 && !open, |el| {
-                el.child(div().absolute().right(px(8.0)).bottom(px(-4.0)).child(badge(unread, &p)))
-            })
+            // Pressed, it dips (the web's `button:active > .rail-folder`).
+            .child(div().id(SharedString::from(format!("{id}|face"))).relative().active(|s| s.scale(0.92)).child(face))
+            .when_some(rail_badge(&id, if open { 0 } else { unread }, &p, window, cx), |el, b| el.child(b))
             .when(hovered && self.context.is_none(), |el| el.child(tooltip(&id, &label, ICON, &p)));
         let icon_row = slid(icon_row, &format!("{id}|icon"), icon_slide, settled, window, cx);
 
@@ -967,8 +1020,27 @@ impl FuwaApp {
                     .bg(p.foreground)
                     .opacity((pill / 8.0).clamp(0.0, 1.0)),
             )
-            .child(div().relative().flex().items_center().justify_center().child(face.overflow_hidden()))
-            .when(count > 0, |el| el.child(div().absolute().right(px(8.0)).bottom(px(-4.0)).child(badge(count, &p))))
+            .child(
+                div().relative().flex().items_center().justify_center().child(
+                    // The web's `.server-icon:active`: it dips while pressed. With its
+                    // menu open, a ring in the primary color (`data-[menu-open]:ring-2`).
+                    div()
+                        .id(SharedString::from(format!("{id}|face")))
+                        .rounded_full()
+                        .active(|s| s.scale(0.92))
+                        .when(lit, |el| {
+                            el.shadow(vec![gpui_kit::BoxShadow {
+                                color: alpha(p.primary, 0.6),
+                                offset: gpui_kit::point(px(0.0), px(0.0)),
+                                blur_radius: px(0.0),
+                                spread_radius: px(2.0),
+                                inset: false,
+                            }])
+                        })
+                        .child(face.overflow_hidden()),
+                ),
+            )
+            .when_some(rail_badge(&id, count, &p, window, cx), |el, b| el.child(b))
             .when(hovered && self.context.is_none(), |el| el.child(tooltip(&id, name, size, &p)))
     }
 
@@ -1005,6 +1077,8 @@ impl FuwaApp {
             .when(inst.connection != Connection::Live, |el| el.opacity(0.7))
             .child(initials(&inst.name));
         let name = inst.name.clone();
+        // Unread conversations, kept a moment once read so the count can shrink away.
+        let dms = going(&format!("{id}|dms-going"), (inst.dm_unread > 0).then_some(inst.dm_unread), window, cx);
         let item = self.rail_item(
             id.clone(),
             active,
@@ -1028,28 +1102,30 @@ impl FuwaApp {
                         .top(px(40.0 - 2.0 - 10.8))
                         .child(conn_dot(inst.connection, &p)),
                 )
-                // Unread conversations there: the web's small red count at the chip's top right.
-                .when(inst.dm_unread > 0, |el| {
-                    let ring = crate::ui::theme::mix(p.background, gpui_kit::rgb(0x000000), 0.25);
+                // Unread conversations there: the web's small red count at the chip's top right
+                // (`-top-1.5 -right-1.5`, a 3px ring), popping in and rolling as it changes.
+                .when_some(dms, |el, (count, left)| {
+                    let pill = div()
+                        .h(px(22.0))
+                        .min_w(px(22.0))
+                        .px(px(7.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .border(px(3.0))
+                        .border_color(badge_ring(&p))
+                        .bg(p.destructive)
+                        .text_color(gpui_kit::white())
+                        .text_size(px(9.6))
+                        .font_weight(FontWeight::EXTRA_BOLD);
                     el.child(
                         div()
                             .absolute()
-                            .left(px(RAIL / 2.0 + 18.0 - 10.0))
+                            .right(px(RAIL / 2.0 - 18.0 - 9.0))
                             .top(px(-7.0))
-                            .h(px(22.0))
-                            .min_w(px(22.0))
-                            .px(px(7.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .border(px(3.0))
-                            .border_color(ring)
-                            .bg(p.destructive)
-                            .text_color(gpui_kit::white())
-                            .text_size(px(9.6))
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(if inst.dm_unread > 99 { "99+".to_owned() } else { inst.dm_unread.to_string() }),
+                            .when(left < 1.0, |el| el.scale(left))
+                            .child(counted(pill, format!("{id}|dms"), count, 9.6, window, cx)),
                     )
                 }),
             SharedString::from(format!("{id}|in-{n}")),
@@ -1300,9 +1376,24 @@ impl FuwaApp {
         cx.notify();
     }
 
-    /// Renames and recolors a folder, with a preview of its tile (the web's `FolderDialog`).
+    /// Renames and recolors a folder, with a preview of its tile (the web's
+    /// `FolderDialog`); once closed, it fades out as the web's dialogs do.
     pub(crate) fn render_folder_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let edit = self.rail.editing.as_ref()?;
+        let now = self.rail.editing.as_ref().map(|e| FolderShown {
+            key: e.key.clone(),
+            folder: e.folder.clone(),
+            name: e.name.clone(),
+            color: e.color,
+        });
+        let leaving = motion::kept("folder-dialog", now.as_ref(), window, cx);
+        match (now, leaving) {
+            (Some(shown), _) => Some(self.folder_dialog(&shown, window, cx)),
+            (None, Some((shown, t))) => Some(motion::leave(self.folder_dialog(&shown, window, cx), t)),
+            _ => None,
+        }
+    }
+
+    fn folder_dialog(&mut self, edit: &FolderShown, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
         let (key, color) = (edit.key.clone(), edit.color);
         let tiles: Vec<pb::Server> = self.core.shared.read(|s| {
@@ -1334,6 +1425,8 @@ impl FuwaApp {
                     .relative()
                     .size(px(32.0))
                     .cursor_pointer()
+                    // The web's `.rail-swatch:hover`.
+                    .hover(|s| s.scale(1.12))
                     .when(on, |el| el.child(ring(4.0, fill.into())).child(ring(2.0, p.card.into())))
                     .child(ring(0.0, fill.into()))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1421,7 +1514,7 @@ impl FuwaApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(folder_tile(&tiles, false, shown, 1.3, &p).flex_none()),
+                                    .child(folder_tile(&tiles, 0.0, shown, 1.3, &p).flex_none()),
                             )
                             .child(
                                 div()
@@ -1475,15 +1568,13 @@ impl FuwaApp {
                     }),
             )
             .child(close);
-        Some(
-            dialog_scrim("folder-scrim")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.rail.editing = None;
-                    cx.notify();
-                }))
-                .child(crate::ui::overlay::roomy("folder-room", motion::dialog_in(card, "folder-dialog-in")))
-                .into_any_element(),
-        )
+        dialog_scrim("folder-scrim")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.rail.editing = None;
+                cx.notify();
+            }))
+            .child(crate::ui::overlay::roomy("folder-room", motion::dialog_in(card, "folder-dialog-in")))
+            .into_any_element()
     }
 }
 
@@ -1508,8 +1599,10 @@ fn slid<E: IntoElement + gpui_kit::Styled + 'static>(
 /// The name beside something on the rail, drawn over everything so the rail's scrolling doesn't clip it.
 fn tooltip(id: &str, name: &str, size: f32, p: &Palette) -> impl IntoElement {
     div().absolute().left(px(RAIL - 7.0)).top(px(size / 2.0 - 14.0)).child(gpui_kit::deferred(
-        gpui_kit::anchored().child(motion::slide_in(
+        // The web's Animate UI tooltip grows from half its size out of the side it points from.
+        gpui_kit::anchored().child(motion::pop_in(
             div()
+                .relative()
                 // The web's tooltip: `bg-primary rounded-md px-3 py-1.5 text-xs`, bold on the rail.
                 .px(px(12.0))
                 .py(px(6.0))
@@ -1520,11 +1613,59 @@ fn tooltip(id: &str, name: &str, size: f32, p: &Palette) -> impl IntoElement {
                 .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .whitespace_nowrap()
-                .child(name.to_owned()),
+                // Its arrow: a 10px square turned a quarter, its point at the icon's edge.
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(-3.0))
+                        .top(px(9.0))
+                        .size(px(10.0))
+                        .rounded(px(2.0))
+                        .bg(p.primary)
+                        .rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_4)),
+                )
+                .child(div().relative().child(name.to_owned())),
             SharedString::from(format!("{id}|tip")),
-            -6.0,
+            (0.0, 0.5),
+            0.5,
+            0.0,
         )),
     ))
+}
+
+/// The ring around a count on the rail: the web's `color-mix(in srgb, var(--background) 75%, black)`.
+fn badge_ring(p: &Palette) -> Hsla {
+    mix(p.background, gpui_kit::rgb(0x000000), 0.25)
+}
+
+/// A server's or folder's unread count at its icon's bottom right (the web's
+/// `-right-1 -bottom-1 h-5 min-w-5` with a 3px ring), popping in, rolling as
+/// it changes and shrinking away once it's 0.
+fn rail_badge(id: &str, count: u32, p: &Palette, window: &mut Window, cx: &mut gpui_kit::App) -> Option<AnyElement> {
+    let (count, left) = going(&format!("{id}|unread-going"), (count > 0).then_some(count), window, cx)?;
+    let pill = div()
+        .h(px(26.0))
+        .min_w(px(26.0))
+        .px(px(4.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .border(px(3.0))
+        .border_color(badge_ring(p))
+        .bg(p.destructive)
+        .text_color(gpui_kit::white())
+        .text_size(px(10.4))
+        .font_weight(FontWeight::EXTRA_BOLD);
+    Some(
+        div()
+            .absolute()
+            .right(px(RAIL / 2.0 - 24.0 - 7.0))
+            .bottom(px(-7.0))
+            .when(left < 1.0, |el| el.scale(left))
+            .child(counted(pill, format!("{id}|unread"), count, 10.4, window, cx))
+            .into_any_element(),
+    )
 }
 
 /// A divider between groups: the web's `my-1 h-0.5 w-8` line in the border color.

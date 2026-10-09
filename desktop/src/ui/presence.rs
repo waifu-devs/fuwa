@@ -2,6 +2,8 @@
 //! avatars, the one line under a name in the member list, and activity cards
 //! on profile cards (`core::presence::people`).
 
+use std::time::Duration;
+
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
@@ -221,7 +223,7 @@ pub fn activity_cards(
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
                         .hover(move |s| s.bg(lit))
-                        .active(|s| s.top(px(1.0)))
+                        .active(|s| s.scale(0.98))
                         .child(div().truncate().child(button.label.clone()))
                         .child(div().flex_none().opacity(0.6).child(icon("external-link").size(px(14.0))))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -307,7 +309,25 @@ pub fn avatar_dot(
     under: gpui_kit::Hsla,
     p: &Palette,
 ) -> gpui_kit::Div {
-    div().absolute().right(px(-2.0 - ring)).bottom(px(-2.0 - ring)).child(ringed_dot(status, size, ring, under, p))
+    div().absolute().right(px(-2.0 - ring)).bottom(px(-2.0 - ring)).child(popping(status, size, ring, under, p))
+}
+
+/// A [`ringed_dot`] that pops in when it shows and whenever the status
+/// changes (the web's `StatusDot`, keyed by its status).
+pub fn popping(
+    status: pb::PresenceStatus,
+    size: f32,
+    ring: f32,
+    under: gpui_kit::Hsla,
+    p: &Palette,
+) -> impl IntoElement {
+    crate::ui::motion::spring_in(
+        ringed_dot(status, size, ring, under, p),
+        SharedString::from(format!("presence-dot|{}", status as i32)),
+        (600.0, 16.0),
+        Duration::ZERO,
+        |el, t| el.scale(0.3 + 0.7 * t).opacity((0.4 + 0.6 * t).clamp(0.0, 1.0)),
+    )
 }
 
 /// The web's `.presence-dot` with `ring-[n]` around it: the ring is drawn

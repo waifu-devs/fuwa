@@ -17,7 +17,7 @@ use super::{InstanceSettingsEvent, InstanceSettingsView, Page};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, radius_lg, radius_md};
+use crate::ui::theme::{Palette, alpha, radius_lg};
 use crate::ui::widgets::icon;
 
 /// How long the screen takes to come and go.
@@ -397,6 +397,7 @@ impl InstanceSettingsView {
     ) -> AnyElement {
         let query = self.query.read(cx).value().to_string();
         let focused = gpui_kit::Focusable::focus_handle(self.query.read(cx), cx).is_focused(window);
+        let lit = motion::follow("isettings-search-lit", if focused { 1.0 } else { 0.0 }, window, cx);
         let search_box = div()
             .relative()
             .h(px(36.0))
@@ -423,33 +424,22 @@ impl InstanceSettingsView {
                     .absolute()
                     .left(px(9.0))
                     .top(px(9.0))
-                    .text_color(if focused { p.primary } else { p.muted_foreground })
+                    .text_color(crate::ui::theme::mix(p.muted_foreground, p.primary, lit.clamp(0.0, 1.0)))
+                    .scale(1.0 + 0.1 * lit)
                     .child(icon("search").size(px(16.0))),
             )
             .child(div().flex_1().min_w_0().child(Input::new(&self.query).appearance(false)))
-            .when(!query.is_empty(), |el| {
-                let (hover, fg) = (p.muted, p.foreground);
-                el.child(
-                    div()
-                        .id("isettings-search-clear")
-                        .absolute()
-                        .right(px(5.0))
-                        .top(px(5.0))
-                        .size(px(24.0))
-                        .rounded(radius_md())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(p.muted_foreground)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(hover).text_color(fg))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.query.update(cx, |q, cx| q.set_value("", window, cx));
-                            cx.notify();
-                        }))
-                        .child(icon("x").size(px(14.0))),
-                )
-            });
+            .children(crate::ui::settings_controls::search_clear(
+                "isettings-search-clear",
+                !query.is_empty(),
+                p,
+                window,
+                cx,
+                |this, window, cx| {
+                    this.query.update(cx, |q, cx| q.set_value("", window, cx));
+                    cx.notify();
+                },
+            ));
 
         let nav = div()
             .w(px(240.0))
@@ -521,8 +511,10 @@ impl InstanceSettingsView {
                 }
                 let page = section.page;
                 let (hover_bg, hover_fg) = (alpha(p.muted, 0.7), p.foreground);
+                let group = SharedString::from(format!("imenu-{page:?}"));
                 let row = div()
-                    .id(SharedString::from(format!("imenu-{page:?}")))
+                    .id(group.clone())
+                    .group(group.clone())
                     .relative()
                     .h(px(32.0))
                     .px(px(10.0))
@@ -535,12 +527,12 @@ impl InstanceSettingsView {
                     .text_color(if active { p.primary } else { p.muted_foreground })
                     .cursor_pointer()
                     .when(!active, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(page, None, cx)
                     }))
-                    .child(div().flex_1().min_w_0().truncate().child(section.label.clone()));
+                    .child(crate::ui::settings::nudged(&group, section.label.clone()));
                 block = block.child(slide(row, SharedString::from(format!("imenu-in-{page:?}")), n));
                 n += 1;
                 y += 32.0;
@@ -582,11 +574,7 @@ impl InstanceSettingsView {
                         div().child(icon("search-x").size(px(28.0))),
                         SharedString::from(format!("inomatch-{query}")),
                         Duration::from_millis(700),
-                        |el, t| {
-                            let k = if t < 1.0 / 7.0 { 0.0 } else { (t - 1.0 / 7.0) * 7.0 / 6.0 };
-                            let wiggle = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 2.0;
-                            el.relative().left(px(wiggle))
-                        },
+                        |el, t| el.rotate(gpui_kit::radians(crate::ui::settings::shake(t).to_radians())),
                     ))
                     .child(t_with("settings.screen.noMatches", &[("query", Arg::Str(query))])),
                 "isettings-nomatch",
@@ -603,6 +591,7 @@ impl InstanceSettingsView {
             list = list.child(slide(
                 div()
                     .id(SharedString::from(format!("iresult-{page:?}")))
+                    .group(SharedString::from(format!("iresult-{page:?}")))
                     .h(px(32.0))
                     .px(px(10.0))
                     .flex()
@@ -614,11 +603,16 @@ impl InstanceSettingsView {
                     .text_color(p.foreground)
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(page, None, cx)
                     }))
-                    .child(icon(section.glyph).size(px(16.0)))
+                    .child(crate::ui::settings::tilted(
+                        &SharedString::from(format!("iresult-{page:?}")),
+                        section.glyph,
+                        16.0,
+                    ))
                     .child(div().truncate().child(section.label.clone())),
                 SharedString::from(format!("iresult-in-{page:?}")),
                 n,
@@ -641,6 +635,7 @@ impl InstanceSettingsView {
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover).text_color(fg))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, _, cx| this.choose(page, Some(id), cx)))
                         .child(div().opacity(0.6).child(icon("corner-down-right").size(px(14.0))))
                         .child(div().truncate().child(label.clone())),
@@ -658,6 +653,7 @@ impl InstanceSettingsView {
         let (hover_bg, hover_fg, hover_ring) = (p.muted, p.foreground, alpha(p.foreground, 0.4));
         div()
             .id("isettings-close")
+            .group("isettings-close")
             .absolute()
             .top(px(64.0))
             .left(px(left))
@@ -678,9 +674,19 @@ impl InstanceSettingsView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(move |s| s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("x").size(px(20.0))),
+                    .group_hover("isettings-close", move |s| {
+                        s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring)
+                    })
+                    .active(|s| s.scale(0.9))
+                    // The cross turns a quarter as the pointer comes (`group-hover:rotate-90`).
+                    .child(
+                        div()
+                            .id("isettings-close-x")
+                            .group_hover("isettings-close", |s| {
+                                s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                            })
+                            .child(icon("x").size(px(20.0))),
+                    ),
             )
             .child(div().text_size(px(10.4)).font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"))
             .into_any_element()

@@ -422,7 +422,7 @@ impl InstanceSettingsView {
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
                         .hover(move |s| s.bg(alpha(destructive, 0.1)))
-                        .active(|s| s.top(px(1.0)))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(|this, _, window, cx| this.put_up(true, window, cx)))
                         .child(icon("megaphone-off").size(px(16.0)))
                         .child(t("instancesettings.announcement.takeDown")),

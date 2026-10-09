@@ -14,7 +14,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, radians,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -80,6 +80,8 @@ pub struct PickLayout {
     pub cell_row: Vec<usize>,
     /// Each section's id, header row and mark.
     pub sections: Vec<(String, usize, Mark)>,
+    /// Where each row starts, from the grid's top.
+    pub tops: Vec<f32>,
     pub searching: bool,
 }
 
@@ -91,9 +93,11 @@ impl PickLayout {
                 continue;
             }
             out.sections.push((id.clone(), out.rows.len(), mark.clone()));
+            out.tops.push(out.height());
             out.rows.push(PickRow::Header { id, title, mark });
             for chunk in choices.chunks(COLS) {
                 let row = out.rows.len();
+                out.tops.push(out.height());
                 out.rows.push(PickRow::Cells { start: out.flat.len() });
                 for choice in chunk {
                     out.flat.push(choice.clone());
@@ -102,6 +106,15 @@ impl PickLayout {
             }
         }
         out
+    }
+
+    /// How tall the rows so far are.
+    fn height(&self) -> f32 {
+        match (self.tops.last(), self.rows.last()) {
+            (Some(top), Some(PickRow::Header { .. })) => top + HEADER,
+            (Some(top), Some(PickRow::Cells { .. })) => top + CELL,
+            _ => 0.0,
+        }
     }
 
     /// The emoji in a row of cells.
@@ -139,6 +152,8 @@ impl PickLayout {
 pub struct EmojiPicker {
     /// The emoji lit by the pointer or the arrows, in `PickLayout::flat`.
     pub active: Option<usize>,
+    /// The arrows lit it, not the pointer (which poses it by hovering).
+    pub by_keys: bool,
     pub tones_open: bool,
     /// The grid's rows: titles are shorter than rows of emoji, so it's a list of its own.
     pub scroll: gpui_kit::ListState,
@@ -153,6 +168,7 @@ impl Default for EmojiPicker {
     fn default() -> Self {
         Self {
             active: None,
+            by_keys: false,
             tones_open: false,
             scroll: gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(200.0)),
             recent: Vec::new(),
@@ -172,14 +188,37 @@ impl FuwaApp {
     /// The smiley in the composer that opens the picker.
     pub(crate) fn emoji_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.emoji_open;
-        crate::ui::widgets::tool_button("emoji-open", "face-slightly-smiling", open, p)
-            .on_click(cx.listener(|this, _, window, cx| {
-                if this.emoji_open {
-                    this.close_emoji(window, cx);
-                } else {
-                    this.open_emoji(window, cx);
-                }
-            }))
+        let fg = p.primary;
+        // A composer tool (`widgets::tool_button`) that also tilts and grows when pointed
+        // at, and shrinks when pressed: the web's `whileHover={{ scale: 1.12, rotate: -10 }}`
+        // and `whileTap={{ scale: 0.85 }}`.
+        div()
+            .id("emoji-open")
+            .size(px(36.0))
+            .mb(px(2.0))
+            .flex_none()
+            .rounded(crate::ui::theme::radius_xl())
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .text_color(if open { p.primary } else { p.muted_foreground })
+            .when(open, |el| el.bg(alpha(p.primary, 0.1)))
+            .hover(move |s| s.text_color(fg).scale(1.12).rotate(radians((-10f32).to_radians())))
+            .active(|s| s.scale(0.85))
+            .child(icon("face-slightly-smiling").size(px(18.0)))
+            // It toggles as it's pressed: a press while it's open has already closed it
+            // (the panel's press outside), so it mustn't open it again on release.
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    if open {
+                        this.close_emoji(window, cx);
+                    } else {
+                        this.open_emoji(window, cx);
+                    }
+                }),
+            )
             .into_any_element()
     }
 
@@ -341,6 +380,7 @@ impl FuwaApp {
             _ => return false,
         };
         self.emoji.active = Some(next);
+        self.emoji.by_keys = true;
         self.emoji.scroll.scroll_to_reveal_item(layout.cell_row[next]);
         cx.notify();
         true
@@ -348,7 +388,18 @@ impl FuwaApp {
 
     /// The picker itself, floating above the composer's emoji button (the
     /// web's `top-end` placement: its right edge on the button's, 8px above it).
-    pub(crate) fn emoji_panel(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Once closed, it's drawn a moment more on its way out.
+    pub(crate) fn emoji_panel(
+        &mut self,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let open = self.emoji_open;
+        let going = motion::kept("emoji-panel", open.then_some(&()), window, cx).map(|(_, t)| t);
+        if !open && going.is_none() {
+            return None;
+        }
         let query = self.emoji_query.read(cx).value().to_string();
         let tone = self.core.prefs().skin_tone;
         let layout = self.emoji_layout(&query, tone);
@@ -356,8 +407,12 @@ impl FuwaApp {
             self.emoji.active = Some(0);
         }
         let active = self.emoji.active.filter(|n| *n < layout.flat.len());
-        let top_row = self.emoji.scroll.logical_scroll_top().item_ix;
+        let scrolled = self.emoji.scroll.logical_scroll_top();
+        let top_row = scrolled.item_ix;
         let current = layout.section_at(top_row).map(str::to_owned);
+        // Springs keyed to this opening, so the next one starts in place.
+        let opened = format!("{:?}", self.emoji_born);
+        let fresh_open = self.emoji_born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
 
         let focused = self.emoji_query.read(cx).focus_handle(cx).is_focused(window);
         let search = div()
@@ -400,7 +455,26 @@ impl FuwaApp {
             .child(self.tone_button(tone, p, cx));
 
         let rail = (!layout.searching).then(|| {
-            let mut rail = div().flex().px(px(8.0)).py(px(6.0)).gap(px(2.0)).border_b_1().border_color(p.border);
+            let mut rail =
+                div().relative().flex().px(px(8.0)).py(px(6.0)).gap(px(2.0)).border_b_1().border_color(p.border);
+            // The section in view's fill glides along the rail (the web's `layoutId`).
+            if let Some(at) = layout.sections.iter().position(|(id, _, _)| current.as_deref() == Some(id.as_str())) {
+                let x = motion::follow(
+                    SharedString::from(format!("emoji-rail-lit|{opened}")),
+                    at as f32 * 34.0,
+                    window,
+                    cx,
+                );
+                rail = rail.child(
+                    div()
+                        .absolute()
+                        .top(px(6.0))
+                        .left(px(8.0 + x))
+                        .size(px(32.0))
+                        .rounded(crate::ui::theme::radius_lg())
+                        .bg(alpha(p.primary, 0.12)),
+                );
+            }
             for (id, row, mark) in &layout.sections {
                 let lit = current.as_deref() == Some(id.as_str());
                 let row = *row;
@@ -421,7 +495,6 @@ impl FuwaApp {
                         .rounded(crate::ui::theme::radius_lg())
                         .cursor_pointer()
                         .text_color(if lit { p.primary } else { p.muted_foreground })
-                        .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
                         .when(!lit, |el| el.hover(move |s| s.text_color(fg)))
                         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(title.clone()).build(window, cx))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -435,25 +508,51 @@ impl FuwaApp {
         });
 
         let rows_layout = layout.clone();
-        let fresh = !layout.searching && self.emoji_born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
+        let fresh = !layout.searching && fresh_open;
+        let by_keys = self.emoji.by_keys;
         let grid = gpui_kit::list(
             self.emoji.scroll.clone(),
             cx.processor(move |this, row: usize, _window, cx| {
                 let p = crate::ui::widgets::pal(cx);
-                this.emoji_row(&rows_layout, row, active, fresh, &p, cx)
+                this.emoji_row(&rows_layout, row, active, by_keys, fresh, &p, cx)
             }),
         )
         .size_full();
+        // The lit emoji's fill glides from cell to cell under the list (the web's
+        // spring-driven `bg-primary/12` square), kept where the grid has scrolled to.
+        let lit = active.map(|n| {
+            let row = layout.cell_row[n];
+            let x = (n - layout.cells(row).start) as f32 * CELL;
+            let x = motion::follow(SharedString::from(format!("emoji-lit-x|{opened}")), x, window, cx);
+            let y = motion::follow(SharedString::from(format!("emoji-lit-y|{opened}")), layout.tops[row], window, cx);
+            let scrolled =
+                layout.tops.get(scrolled.item_ix).copied().unwrap_or(0.0) + f32::from(scrolled.offset_in_item);
+            div()
+                .absolute()
+                .left(px(x))
+                .top(px(y - scrolled))
+                .size(px(CELL))
+                .rounded(corner(10.0))
+                .bg(alpha(p.primary, 0.12))
+        });
         // The web's grid keeps 8px at the sides and below; the list takes no padding of its own.
-        let grid = div().h(px(GRID)).px(px(8.0)).pb(px(8.0)).child(grid);
-        // The section in view stays named at the top as the grid scrolls (the web's sticky title).
+        let grid = div()
+            .h(px(GRID))
+            .px(px(8.0))
+            .pb(px(8.0))
+            .child(div().relative().size_full().overflow_hidden().children(lit).child(grid));
+        // The section in view stays named at the top as the grid scrolls (the web's sticky title),
+        // the next one dropping in as it takes over.
         let sticky = current.as_ref().and_then(|id| {
             let (_, _, mark) = layout.sections.iter().find(|(s, _, _)| s == id)?;
-            Some(div().absolute().top_0().left_0().right_0().bg(p.card).px(px(12.0)).child(section_title(
-                layout.title_of(id),
-                mark,
-                p,
-            )))
+            let title = div().bg(p.card).px(px(12.0)).child(section_title(layout.title_of(id), mark, p));
+            let title: AnyElement = if fresh_open {
+                title.into_any_element()
+            } else {
+                motion::rise(title, SharedString::from(format!("emoji-sticky|{id}")), Duration::ZERO, -6.0)
+                    .into_any_element()
+            };
+            Some(div().absolute().top_0().left_0().right_0().child(title))
         });
         let grid = if layout.flat.is_empty() {
             div()
@@ -490,23 +589,35 @@ impl FuwaApp {
             .child(search)
             .when_some(rail, |el, rail| el.child(rail))
             .child(grid)
-            .child(preview(shown, p));
-        div()
+            .child(preview(shown, p, fresh_open));
+        let panel = div()
             .id("emoji-panel")
             .absolute()
             .right(px(self.tool_right(crate::ui::composer::Tool::Emoji)))
             .bottom(gpui_kit::relative(1.0))
-            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx)))
-            .child(motion::rise(body.mb(px(-1.0)), "emoji-panel-rise", Duration::ZERO, 8.0))
-            .into_any_element()
+            .when(open, |el| el.on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx))))
+            // The web's `scale: 0.92, y: 8`, out of its corner over the button.
+            .child(motion::pop_in(body.mb(px(-1.0)), "emoji-panel-in", (1.0, 1.0), 0.92, 8.0))
+            // And out: `opacity: 0, scale: 0.95, y: 6`.
+            .when_some(going, |el, t| {
+                crate::ui::chat::closing(
+                    el,
+                    t,
+                    crate::ui::chat::Gone { scale: 0.95, x: 0.0, y: 6.0, origin: (1.0, 1.0) },
+                )
+            })
+            .into_any_element();
+        Some(panel)
     }
 
     /// One row: a section's title, or its emoji.
+    #[allow(clippy::too_many_arguments)]
     fn emoji_row(
         &self,
         layout: &PickLayout,
         row: usize,
         active: Option<usize>,
+        by_keys: bool,
         fresh: bool,
         p: &Palette,
         cx: &mut Context<Self>,
@@ -520,36 +631,35 @@ impl FuwaApp {
             PickRow::Cells { .. } => {
                 let mut cells = div().id(SharedString::from(format!("emoji-row|{row}"))).h(px(CELL)).flex();
                 for n in layout.cells(row) {
-                    cells = cells.child(self.emoji_cell(&layout.flat[n], n, active == Some(n), fresh, p, cx));
+                    let posed = by_keys && active == Some(n);
+                    cells = cells.child(self.emoji_cell(&layout.flat[n], n, posed, fresh, cx));
                 }
                 cells.into_any_element()
             }
         }
     }
 
-    fn emoji_cell(
-        &self,
-        choice: &Choice,
-        n: usize,
-        lit: bool,
-        fresh: bool,
-        p: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// One emoji. Pointed at (or lit by the arrows, `posed`) it grows and
+    /// tilts, and shrinks while held (the web's `.emoji-cell`); its fill is
+    /// the one gliding under the grid.
+    fn emoji_cell(&self, choice: &Choice, n: usize, posed: bool, fresh: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = SharedString::from(format!("emoji|{n}|{}", choice.key));
         let pick = choice.clone();
         let glyph = div().child(emoji_glyph(choice, 30.0));
+        // They pop in one after another as the picker opens (the web's `emoji-in`).
         let glyph = if fresh {
-            motion::rise(
+            motion::pop(
                 glyph,
                 SharedString::from(format!("emoji-in|{n}")),
+                0.6,
+                0.0,
                 Duration::from_millis(8 * n.min(40) as u64),
-                6.0,
             )
             .into_any_element()
         } else {
             glyph.into_any_element()
         };
+        let tilt = radians((-6f32).to_radians());
         div()
             .id(id)
             .size(px(CELL))
@@ -558,14 +668,16 @@ impl FuwaApp {
             .justify_center()
             .rounded(corner(10.0))
             .cursor_pointer()
-            .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
+            .when(posed, |el| el.scale(1.22).rotate(tilt))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                if *hovered && this.emoji.active != Some(n) {
+                if *hovered && (this.emoji.active != Some(n) || this.emoji.by_keys) {
                     this.emoji.active = Some(n);
+                    this.emoji.by_keys = false;
                     cx.notify();
                 }
             }))
-            .active(|s| s.top(px(1.0)))
+            .hover(move |s| s.scale(1.22).rotate(tilt))
+            .active(|s| s.scale(0.88).rotate(radians(0.0)))
             .on_click(cx.listener(move |this, _, window, cx| this.choose_emoji(&pick, window, cx)))
             .child(glyph)
             .into_any_element()
@@ -584,7 +696,12 @@ impl FuwaApp {
             .cursor_pointer()
             .in_color()
             .text_size(px(19.0))
-            .hover(|s| s.bg(alpha(p.primary, 0.08)))
+            // The web's `hover:bg-primary/10`, `whileHover={{ scale: 1.12, rotate: -8 }}` and `whileTap={{ scale: 0.88 }}`.
+            .hover({
+                let bg = alpha(p.primary, 0.1);
+                move |s| s.bg(bg).scale(1.12).rotate(radians((-8f32).to_radians()))
+            })
+            .active(|s| s.scale(0.88))
             .when(open, |el| el.bg(alpha(p.primary, 0.12)))
             .tooltip(move |window, cx| {
                 crate::ui::overlay::Tip::new(t_with(
@@ -601,35 +718,42 @@ impl FuwaApp {
         let mut wrap = div().relative().child(button);
         if open {
             let mut row = card(p).p(px(4.0)).flex().gap(px(2.0)).rounded(corner(12.0));
-            for (n, hand) in TONES.iter().enumerate() {
-                let n = n as u8;
-                row = row.child(
-                    div()
-                        .id(SharedString::from(format!("emoji-tone|{n}")))
-                        .size(px(32.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(corner(8.0))
-                        .cursor_pointer()
-                        .in_color()
-                        .text_size(px(18.0))
-                        .when(n == tone, |el| el.bg(alpha(p.primary, 0.14)))
-                        .hover(|s| s.bg(alpha(p.primary, 0.08)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.core.set_prefs(|prefs| prefs.skin_tone = n);
-                            this.emoji.tones_open = false;
-                            cx.notify();
-                        }))
-                        .child(*hand),
-                );
+            for (k, hand) in TONES.iter().enumerate() {
+                let n = k as u8;
+                let hand = div()
+                    .id(SharedString::from(format!("emoji-tone|{n}")))
+                    .size(px(32.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(corner(8.0))
+                    .cursor_pointer()
+                    .in_color()
+                    .text_size(px(18.0))
+                    .when(n == tone, |el| el.bg(alpha(p.primary, 0.15)))
+                    .hover(|s| s.scale(1.2))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.core.set_prefs(|prefs| prefs.skin_tone = n);
+                        this.emoji.tones_open = false;
+                        cx.notify();
+                    }))
+                    .child(*hand);
+                // Each hand pops in a moment after the one before it.
+                row = row.child(motion::pop(
+                    hand,
+                    SharedString::from(format!("emoji-tone-in|{n}")),
+                    0.5,
+                    0.0,
+                    Duration::from_millis(25 * k as u64),
+                ));
             }
-            // Rising moves it by its own offset, so it sits in an absolute box of its own.
-            wrap = wrap.child(div().absolute().top(px(40.0)).right_0().child(motion::rise(
+            // It drops out of the hand's corner (the web's `scale: 0.85, y: -4`).
+            wrap = wrap.child(div().absolute().top(px(40.0)).right_0().child(motion::pop_in(
                 row,
-                "emoji-tones-rise",
-                Duration::ZERO,
-                6.0,
+                "emoji-tones-in",
+                (1.0, 0.0),
+                0.85,
+                -4.0,
             )));
         }
         wrap.into_any_element()
@@ -653,8 +777,9 @@ fn section_title(title: &str, mark: &Mark, p: &Palette) -> impl IntoElement {
         .child(tracked(title.to_uppercase(), WIDE))
 }
 
-/// The emoji you're on, big, with the name to type and where it's from.
-fn preview(shown: Option<&Choice>, p: &Palette) -> AnyElement {
+/// The emoji you're on, big, with the name to type and where it's from,
+/// each one rising in as it's lit (the web's `AnimatePresence` keyed by it).
+fn preview(shown: Option<&Choice>, p: &Palette, fresh: bool) -> AnyElement {
     let base = div()
         .h(px(48.0))
         .px(px(12.0))
@@ -667,12 +792,14 @@ fn preview(shown: Option<&Choice>, p: &Palette) -> AnyElement {
     let Some(choice) = shown else {
         return base.text_color(p.muted_foreground).child(t("chattools.emoji.hint")).into_any_element();
     };
+    let base = div().flex().items_center().gap(px(10.0)).min_w_0();
     let from = match (&choice.from, &choice.url) {
         (Some(server), _) => t_with("chattools.emoji.fromServer", &[("server", Arg::Str(server))]),
         (None, Some(_)) => t("chattools.emoji.fromHere"),
         (None, None) => String::new(),
     };
-    base.child(div().size(px(32.0)).flex_none().flex().items_center().justify_center().child(emoji_glyph(choice, 28.0)))
+    let base = base
+        .child(div().size(px(32.0)).flex_none().flex().items_center().justify_center().child(emoji_glyph(choice, 28.0)))
         .child(
             div()
                 .min_w_0()
@@ -682,6 +809,21 @@ fn preview(shown: Option<&Choice>, p: &Palette) -> AnyElement {
                 .when(!from.is_empty(), |el| {
                     el.child(div().text_xs().text_color(p.muted_foreground).truncate().child(from))
                 }),
-        )
+        );
+    let shown: AnyElement = if fresh {
+        base.into_any_element()
+    } else {
+        motion::rise(base, SharedString::from(format!("emoji-preview|{}", choice.key)), Duration::ZERO, 6.0)
+            .into_any_element()
+    };
+    div()
+        .h(px(48.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .border_t_1()
+        .border_color(p.border)
+        .text_sm()
+        .child(shown)
         .into_any_element()
 }

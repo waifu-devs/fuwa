@@ -324,8 +324,12 @@ impl SettingsView {
                         .rounded_full()
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
-                        .hover(|s| s.bg(p.muted).text_color(p.foreground))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| {
+                            s.bg(p.muted)
+                                .text_color(p.foreground)
+                                .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_2))
+                        })
+                        .active(|s| s.scale(0.85))
                         .tooltip(move |window, cx| {
                             crate::ui::overlay::Tip::new(t("appsettings.shader.retry")).build(window, cx)
                         })
@@ -381,13 +385,13 @@ impl SettingsView {
                             el.border_color(p.primary)
                                 .bg(alpha(p.primary, 0.1))
                                 .text_color(p.primary)
-                                .hover(|s| s.top(px(-2.0)))
+                                .hover(|s| s.translate_y(px(-2.0)))
                         } else {
                             el.border_color(p.border)
-                                .hover(move |s| s.border_color(hover).text_color(primary).top(px(-2.0)))
+                                .hover(move |s| s.border_color(hover).text_color(primary).translate_y(px(-2.0)))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.92))
                     .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(hint)).build(window, cx))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let fallback = this.backdrop_shader(target).map_or(Effect::Aurora, |s| s.fallback);
@@ -527,7 +531,12 @@ impl SettingsView {
             )
         });
 
-        let mut pills = div().flex().flex_wrap().gap(px(6.0));
+        // The picked one's pill glides between them (the web's `layoutId`), once they've been
+        // measured; until then the picked one wears it itself.
+        let row = format!("shader-fallbacks-{}", target == Target::App);
+        let (mut pills, spots) =
+            crate::ui::settings_controls::measured(div().flex().flex_wrap().gap(px(6.0)), &row, window, cx);
+        let spot = FALLBACKS.iter().position(|f| *f == shader.fallback).and_then(|n| spots.get(n).copied());
         for fallback in FALLBACKS {
             let on = fallback == shader.fallback;
             let name = if fallback == Effect::None {
@@ -547,18 +556,20 @@ impl SettingsView {
                     .cursor_pointer()
                     .map(|el| {
                         if on {
-                            el.bg(p.primary).text_color(p.primary_foreground)
+                            el.when(spot.is_none(), |el| el.bg(p.primary)).text_color(p.primary_foreground)
                         } else {
                             el.text_color(p.muted_foreground).hover(move |s| s.text_color(fg))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
                     .on_click(
                         cx.listener(move |this, _, _, cx| this.patch_shader(target, cx, |s| s.fallback = fallback)),
                     )
                     .child(name),
             );
         }
+        let glider =
+            spot.map(|spot| crate::ui::settings_controls::glider(&row, spot, div().rounded_full().bg(p.primary), cx));
+        let pills = div().relative().children(glider).child(pills);
         let fallback = div().flex().flex_col().gap(px(6.0)).child(label("appsettings.shader.fallback")).child(pills);
 
         motion::rise(

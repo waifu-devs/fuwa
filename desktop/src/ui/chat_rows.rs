@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, Context, Div, FontWeight, HighlightStyle, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, StyledText, WeakEntity, Window, div, px, rgb,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, RenderOnce, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, StyledText, WeakEntity, Window, div, px, radians, rgb,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -29,6 +29,7 @@ const AMBER_400: u32 = 0xfbbf24;
 const AMBER_500: u32 = 0xf59e0b;
 const AMBER_600: u32 = 0xd97706;
 const ROSE_500: u32 = 0xf43f5e;
+const EMERALD_400: u32 = 0x34d399;
 const EMERALD_500: u32 = 0x10b981;
 const EMERALD_600: u32 = 0x059669;
 
@@ -192,6 +193,18 @@ pub(crate) fn tool(
     danger: bool,
     p: &Palette,
 ) -> Stateful<Div> {
+    tool_with(id, icon(glyph).size(px(16.0)).into_any_element(), label, danger, p)
+}
+
+/// A tool holding `inner` rather than a plain icon, growing 10% under the
+/// pointer as the web's `hover:scale-110` does.
+pub(crate) fn tool_with(
+    id: impl Into<SharedString>,
+    inner: AnyElement,
+    label: String,
+    danger: bool,
+    p: &Palette,
+) -> Stateful<Div> {
     let (bg, fg) = if danger { (alpha(p.destructive, 0.15), p.destructive) } else { (p.muted.into(), p.foreground) };
     div()
         .id(id.into())
@@ -203,10 +216,45 @@ pub(crate) fn tool(
         .justify_center()
         .cursor_pointer()
         .text_color(p.muted_foreground)
-        .hover(move |s| s.bg(bg).text_color(fg))
-        .active(|s| s.opacity(0.8))
+        .hover(move |s| s.bg(bg).text_color(fg).scale(1.1))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
-        .child(icon(glyph).size(px(16.0)))
+        .child(inner)
+}
+
+/// The tools' card coming in as the web's `.message-tools` do (`@starting-style`):
+/// a fade while it rises 4px and grows from 96%, with a little overshoot.
+pub(crate) fn tools_in(frame: Stateful<Div>, id: &str) -> AnyElement {
+    motion::pop_in(frame, SharedString::from(format!("tools-in|{id}")), (0.5, 0.5), 0.96, 4.0).into_any_element()
+}
+
+/// Something built knowing whether the pointer is on it, for a flourish
+/// that plays while it is (the wave's hand waving under the pointer).
+#[derive(IntoElement)]
+pub(crate) struct Pointed {
+    id: SharedString,
+    build: Box<dyn FnOnce(bool) -> Stateful<Div>>,
+}
+
+impl Pointed {
+    pub(crate) fn new(id: impl Into<SharedString>, build: impl FnOnce(bool) -> Stateful<Div> + 'static) -> Self {
+        Pointed { id: id.into(), build: Box::new(build) }
+    }
+}
+
+impl RenderOnce for Pointed {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state = window.use_keyed_state(SharedString::from(format!("{}|over", self.id)), cx, |_, _| false);
+        let over = *state.read(cx);
+        (self.build)(over).on_hover(move |on, _, cx| {
+            let on = *on;
+            state.update(cx, |over, cx| {
+                if *over != on {
+                    *over = on;
+                    cx.notify();
+                }
+            });
+        })
+    }
 }
 
 /// The card the tools sit in, over the message's top right corner. It keeps
@@ -295,17 +343,20 @@ pub(crate) fn confirm_delete_as(
 fn delete_tools(id: &str, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElement {
     let frame = tools_frame(id, ctx, p);
     if ctx.deleting.as_deref() == Some(id) {
-        return frame.child(confirm_delete(id, t("chat.messages.keep"), ctx, p)).into_any_element();
+        return tools_in(frame.child(confirm_delete(id, t("chat.messages.keep"), ctx, p)), id);
     }
     let (this, row) = (ctx.this.clone(), id.to_owned());
-    frame
-        .child(tool(format!("del|{id}"), "trash", t("chat.messages.delete"), true, p).on_click(move |_, _, cx| {
-            let _ = this.update(cx, |this, cx| {
-                this.msg_ui.deleting = Some(row.clone());
-                cx.notify();
-            });
-        }))
-        .into_any_element()
+    tools_in(
+        frame.child(tool(format!("del|{id}"), "trash", t("chat.messages.delete"), true, p).on_click(
+            move |_, _, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.msg_ui.deleting = Some(row.clone());
+                    cx.notify();
+                });
+            },
+        )),
+        id,
+    )
 }
 
 /// The web's `hueOf`: a stable number from an id.
@@ -400,59 +451,64 @@ pub(crate) fn join_row(j: &JoinLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElemen
     let wave = (!j.mine && j.user.is_some() && j.can_wave).then(|| {
         let done = waved || waving;
         let (hover_border, hover_bg, hover_fg) = (alpha(p.primary, 0.4), alpha(p.primary, 0.1), p.primary);
-        let hand = div().child("👋");
-        let hand: AnyElement = if done {
-            motion::once(
-                hand,
-                SharedString::from(format!("wave-hand|{}", j.id)),
-                Duration::from_millis(800),
-                |el, t| {
-                    let k = [0.0, 22.0, -10.0, 22.0, -6.0, 0.0];
-                    let x = t * 5.0;
-                    let n = (x.floor() as usize).min(4);
-                    let deg = k[n] + (k[n + 1] - k[n]) * (x - n as f32);
-                    el.relative().left(px(deg / 22.0 * 1.5)).top(px(-deg.abs() / 22.0))
-                },
-            )
-        } else {
-            hand.into_any_element()
-        };
-        let mut button = div()
-            .id(SharedString::from(format!("wave|{}", j.id)))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .px(px(12.0))
-            .py(px(4.0))
-            .rounded_full()
-            .border_1()
-            .text_xs()
-            .line_height(px(16.0))
-            .font_weight(FontWeight::BOLD)
-            .child(hand)
-            .child(if waved { t("chat.join.waved") } else { t("chat.join.wave") });
-        if waved {
-            button = button
-                .border_color(gpui_kit::transparent_black())
-                .bg(alpha(rgb(EMERALD_500), 0.1))
-                .text_color(rgb(EMERALD_600));
-        } else {
-            let (this, id, username) =
-                (ctx.this.clone(), j.id.clone(), j.user.as_ref().map(|u| u.username.clone()).unwrap_or_default());
-            button = button
-                .border_color(p.border)
+        let waved_fg = rgb(if p.dark { EMERALD_400 } else { EMERALD_600 });
+        let (border, label) = (p.border, if waved { t("chat.join.waved") } else { t("chat.join.wave") });
+        let (this, id, username) =
+            (ctx.this.clone(), j.id.clone(), j.user.as_ref().map(|u| u.username.clone()).unwrap_or_default());
+        let button_id = SharedString::from(format!("wave|{}", j.id));
+        // The hand waves once when you wave, and again whenever the pointer comes onto it.
+        Pointed::new(button_id.clone(), move |over| {
+            let hand = div().child("👋").transform_origin(0.7, 0.8);
+            let hand: AnyElement = if done {
+                motion::once(
+                    hand,
+                    SharedString::from(format!("wave-hand|{id}")),
+                    Duration::from_millis(800),
+                    |el, t| el.rotate(radians(wave_turn(t).to_radians())),
+                )
+            } else if over {
+                motion::once(
+                    hand,
+                    SharedString::from(format!("wave-over|{id}")),
+                    Duration::from_millis(900),
+                    |el, t| el.rotate(radians(wave_turn(gpui_kit::ease_in_out(t)).to_radians())),
+                )
+            } else {
+                hand.into_any_element()
+            };
+            let button = div()
+                .id(button_id)
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(12.0))
+                .py(px(4.0))
+                .rounded_full()
+                .border_1()
+                .text_xs()
+                .line_height(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .child(hand)
+                .child(label);
+            if waved {
+                return button
+                    .border_color(gpui_kit::transparent_black())
+                    .bg(alpha(rgb(EMERALD_500), 0.1))
+                    .text_color(waved_fg);
+            }
+            button
+                .border_color(border)
                 .when(!waving, |el| {
                     el.cursor_pointer()
                         .hover(move |s| s.border_color(hover_border).bg(hover_bg).text_color(hover_fg))
-                        .active(|s| s.opacity(0.85))
+                        .active(|s| s.scale(0.9))
                         .on_click(move |_, _, cx| {
                             let _ = this.update(cx, |this, cx| this.wave(id.clone(), username.clone(), cx));
                         })
                 })
-                .when(waving, |el| el.opacity(0.6));
-        }
-        button
+                .when(waving, |el| el.opacity(0.6))
+        })
     });
     let id = j.id.clone();
     let row = div()
@@ -485,9 +541,8 @@ pub(crate) fn join_row(j: &JoinLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElemen
         .child(
             div().w(px(40.0)).flex_none().flex().justify_center().child(
                 div()
-                    .relative()
-                    .left(px(0.0))
-                    .group_hover("join", |s| s.left(px(4.0)))
+                    .id(SharedString::from(format!("join-arrow|{id}")))
+                    .group_hover("join", |s| s.translate_x(px(4.0)))
                     .child(icon("arrow-right").size(px(16.0)).text_color(rgb(EMERALD_500))),
             ),
         )
@@ -508,6 +563,15 @@ pub(crate) fn join_row(j: &JoinLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElemen
         .children(wave);
     let row = if j.can_delete && tools_shown(&j.id, ctx) { row.child(delete_tools(&j.id, ctx, p)) } else { row };
     row.into_any_element()
+}
+
+/// How far the waving hand is turned, in degrees, `t` of the way through
+/// (the web's `rotate: [0, 22, -10, 22, -6, 0]`).
+fn wave_turn(t: f32) -> f32 {
+    const KEYS: [f32; 6] = [0.0, 22.0, -10.0, 22.0, -6.0, 0.0];
+    let x = t.clamp(0.0, 1.0) * 5.0;
+    let n = (x.floor() as usize).min(4);
+    KEYS[n] + (KEYS[n + 1] - KEYS[n]) * (x - n as f32)
 }
 
 /// The words of an alert in its quote, with what set the rule off marked.
@@ -574,22 +638,28 @@ pub(crate) fn alert_row(a: &AlertLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElem
     let alert = &a.alert;
     let amber = rgb(AMBER_500);
     let amber_fg: Hsla = if p.dark { rgb(AMBER_400).into() } else { rgb(AMBER_600).into() };
-    let badge = div().w(px(40.0)).flex_none().pt(px(4.0)).child(
-        div()
-            .size(px(40.0))
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(gpui_kit::linear_gradient(
-                135.0,
-                gpui_kit::linear_color_stop(rgb(AMBER_400), 0.0),
-                gpui_kit::linear_color_stop(rgb(ROSE_500), 1.0),
-            ))
-            .text_color(rgb(0xffffff))
-            .shadow(shadow_md())
-            .child(icon("shield-alert").size(px(20.0))),
-    );
+    // The shield pops in, turning upright, when the alert is new.
+    let shield = div()
+        .size(px(40.0))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(gpui_kit::linear_gradient(
+            135.0,
+            gpui_kit::linear_color_stop(rgb(AMBER_400), 0.0),
+            gpui_kit::linear_color_stop(rgb(ROSE_500), 1.0),
+        ))
+        .text_color(rgb(0xffffff))
+        .shadow(shadow_md())
+        .child(icon("shield-alert").size(px(20.0)));
+    let shield = if ctx.fresh.contains_key(&a.id) {
+        motion::pop(shield, SharedString::from(format!("alert-pop|{}", a.id)), 0.0, -30.0, Duration::from_millis(100))
+            .into_any_element()
+    } else {
+        shield.into_any_element()
+    };
+    let badge = div().w(px(40.0)).flex_none().pt(px(4.0)).child(shield);
     let head = div()
         .flex()
         .flex_wrap()
@@ -720,18 +790,27 @@ pub(crate) fn alert_row(a: &AlertLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElem
 }
 
 /// Back to the newest messages (`JumpButton`), counting the ones that came in meanwhile.
-pub(crate) fn jump_pill(missed: usize, p: &Palette, cx: &mut Context<FuwaApp>) -> AnyElement {
+/// `going` once it's no longer wanted, as it leaves.
+pub(crate) fn jump_pill(
+    missed: usize,
+    going: Option<f32>,
+    p: &Palette,
+    window: &Window,
+    cx: &mut Context<FuwaApp>,
+) -> AnyElement {
     let label = if missed > 0 {
         t_with("chat.messages.newMessages", &[("count", Arg::Num(missed as i64))])
     } else {
         t("chat.messages.jumpToPresent")
     };
-    let arrow = icon("arrow-down").size(px(16.0)).with_animation(
+    let arrow = motion::ambient(
+        icon("arrow-down").size(px(16.0)),
         "jump-bounce",
-        Animation::new(Duration::from_millis(1000)).repeat(),
+        Duration::from_millis(1000),
+        window,
         |el, t| {
             // Tailwind's animate-bounce: up a quarter of its size and back, easing at each end.
-            let k = (t * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+            let k = 0.5 - (t * std::f32::consts::TAU).cos() * 0.5;
             el.relative().top(px(-4.0 * k))
         },
     );
@@ -742,7 +821,8 @@ pub(crate) fn jump_pill(missed: usize, p: &Palette, cx: &mut Context<FuwaApp>) -
         .right_0()
         .flex()
         .justify_center()
-        .child(motion::rise(
+        // It springs up from 90% as the web's does.
+        .child(motion::pop_in(
             div()
                 .id("jump-present")
                 .flex()
@@ -767,9 +847,14 @@ pub(crate) fn jump_pill(missed: usize, p: &Palette, cx: &mut Context<FuwaApp>) -
                 .child(arrow)
                 .child(label),
             "jump-present-in",
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.9,
             16.0,
         ))
+        // And back down the same way (`exit={{ opacity: 0, y: 16, scale: 0.9 }}`).
+        .when_some(going, |el, t| {
+            crate::ui::chat::closing(el, t, crate::ui::chat::Gone { scale: 0.9, x: 0.0, y: 16.0, origin: (0.5, 0.5) })
+        })
         .into_any_element()
 }
 
