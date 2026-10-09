@@ -25,7 +25,7 @@ import { useFuwa, type DmMember, type DmState, type PendingMessage } from "@/fuw
 import { NotificationBell } from "@/components/chat/NotificationBell";
 import { EncryptedComposer, EncryptedMessages, Starting, Unavailable, type ThreadHooks } from "@/components/dm/DmView";
 import { earlierFrom, type Earlier } from "@/components/dm/earlier";
-import { SecureAlsoSent, SecureRepliesRow, SecureThreadList, SecureThreadPanel, useArchiveHours, useThreadNote } from "@/components/chat/SecureThreads";
+import { SecureAlsoSent, SecureRepliesRow, SecureThreadList, SecureThreadPanel, useArchiveHours, useSecureReacting, useThreadNote } from "@/components/chat/SecureThreads";
 import { ThreadsButton } from "@/components/chat/Threads";
 import { Padlock } from "@/components/dm/Padlock";
 import { ConnDot, UserAvatar } from "@/components/Icons";
@@ -87,6 +87,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const canAttach = canSend && hasIn(access, id, Permission.ATTACH_FILES);
   const canReset = hasIn(access, id, Permission.MANAGE_CHANNELS);
   const sharesHistory = useFuwa((s) => !!s.instances[instanceKey]?.dms.secureHistory[id]);
+  const reacting = useSecureReacting(instanceKey, serverId, id);
 
   // Once encryption is running here: catch up, and if you may write, bring in everyone who can see the channel.
   useEffect(() => {
@@ -187,6 +188,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
               lines={org.channel}
               pendingIn={inChannel}
               threads={hooks}
+              reacting={reacting}
             />
             <SecureComposer instanceKey={instanceKey} serverId={serverId} channel={channel} canSend={canSend} canAttach={canAttach} canReset={canReset} />
             <SecureChannelDialog

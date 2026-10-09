@@ -351,6 +351,11 @@ pub struct FuwaApp {
     pub gifs: crate::ui::gifs::Gifs,
     /// The open channel's pinned messages, beside its messages (`ui::pins`).
     pub pins: Option<crate::ui::pins::PinsPanel>,
+    /// The emoji picker opened to react to a message, and where (`ui::reactions`).
+    /// Kept after it closes, so it leaves from where it was.
+    pub reacting: Option<crate::ui::reactions::ReactAt>,
+    /// Who reacted with what, as last asked of the instance (`ui::reactions`).
+    pub reactors: std::collections::HashMap<String, crate::ui::reactions::SeenReactors>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The activity link the open card asks about following (`ui::presence`).
@@ -636,6 +641,8 @@ impl FuwaApp {
             emoji_born: None,
             gifs,
             pins: None,
+            reacting: None,
+            reactors: Default::default(),
             profile: None,
             profile_leaving: None,
             profile_tick: None,
@@ -2084,6 +2091,7 @@ impl FuwaApp {
         .when_some(dialog_leaving, |el, d| el.child(d))
         .when_some(crate::ui::cropper::layer(&self.home.create.cropper), |el, c| el.child(c))
         .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
+        .when_some(self.react_panel(window, cx), |el, panel| el.child(panel))
         .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
         .when_some(context_leaving, |el, menu| el.child(menu))
         .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))

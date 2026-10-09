@@ -15,11 +15,31 @@ fn missing() -> Problem {
 }
 
 /// What the home can let a guest server's people do; seeing the channel comes with being shown it.
-pub const SHAREABLE: [(pb::Permission, &str, &str); 3] = [
+/// Some only once the instance takes them in shared channels ([`shareable`]).
+pub const SHAREABLE: [(pb::Permission, &str, &str); 6] = [
     (pb::Permission::SendMessages, "Send messages", "message-square"),
     (pb::Permission::EmbedLinks, "Embed links", "link"),
     (pb::Permission::AttachFiles, "Attach files", "image"),
+    (pb::Permission::CreatePolls, "Create polls", "chart-bar-big"),
+    (pb::Permission::CreateThreads, "Start threads", "messages-square"),
+    (pb::Permission::AddReactions, "Add reactions", "face-slightly-smiling"),
 ];
+
+/// The feature an instance needs before a permission can be handed to a guest server.
+fn shareable_since(p: pb::Permission) -> Option<&'static str> {
+    match p {
+        pb::Permission::CreatePolls => Some("shared-polls"),
+        pb::Permission::CreateThreads => Some("shared-threads"),
+        pb::Permission::AddReactions => Some("reactions"),
+        _ => None,
+    }
+}
+
+/// What this instance lets a home hand to a guest server's people (the web's
+/// `SHAREABLE` as filtered by the instance's features).
+pub fn shareable(has: impl Fn(&str) -> bool) -> Vec<(pb::Permission, &'static str, &'static str)> {
+    SHAREABLE.into_iter().filter(|(p, _, _)| shareable_since(*p).is_none_or(&has)).collect()
+}
 
 pub fn waiting(c: &pb::SharedConnection) -> bool {
     c.state() == pb::SharedConnectionState::Waiting

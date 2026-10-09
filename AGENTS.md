@@ -224,6 +224,18 @@
     (`shared::no_pings` drops them from shared copies). Runs and presses per
     account a minute are capped by `commands_per_minute`. Web:
     `components/chat/Commands.tsx`.
+    Reactions (`api/reactions.rs`, docs/reactions.md): one row per person,
+    emoji and message in the server file's `reactions` (a standard emoji's
+    characters or a custom one's id), added up on read by `reactions::attach`
+    with `me` for the reader; `ReactionUpdated` and `ReactionsCleared` events
+    never carry `me`, and whole-message events carry no reactions (apps keep
+    theirs). `ADD_REACTIONS` to react; Manage Messages clears others' (audited).
+    Paths that delete messages call `reactions::forget` (or `forget_thread`,
+    `forget_channel`); deleting an account calls `forget_reactor`. In shared
+    channels the home keeps them all (guests' through `GuestReact` and
+    `GuestReactors`, writing with `reactions::apply`); direct messages and
+    secure channels react inside the encryption (`DirectMessageReaction`,
+    in backups and shared history too), so `React` refuses secure channels.
     Live tiles (`api/live_tiles.rs`, `LiveTileService`, docs/live-tiles.md):
     which kinds a server shows is `server.live_tiles` (JSON, NULL for the
     default, resolved in `load_server` with `BIG_SERVER`); the tiles agents

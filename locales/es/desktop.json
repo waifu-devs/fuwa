@@ -48,5 +48,6 @@
   "sounds.tune.pop": "Pop",
   "sounds.tune.drop": "Gota",
   "sounds.tune.twinkle": "Centelleo",
-  "sounds.tune.pluck": "Pellizco"
+  "sounds.tune.pluck": "Pellizco",
+  "reactions.clearOneConfirm": "¿Quitar todas las reacciones {emoji} de este mensaje? No se puede deshacer."
 }

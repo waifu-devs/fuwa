@@ -11,6 +11,7 @@ import {
   BackupItemKind,
   BackupItemSchema,
   BackupPartSchema,
+  DirectMessageReactionSchema,
   SignedFormSchema,
   type Backup,
   type BackupItem,
@@ -20,6 +21,7 @@ import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, paddingFor,
 import * as vault from "./vault";
 import { filesOf, toSealedFiles } from "./files";
 import { toVoiceMessage, voiceOf } from "./voice";
+import { isOneEmoji } from "@/lib/reactions";
 
 /**
  * The account's message backup, as this device takes part in it: every line
@@ -45,6 +47,7 @@ const KINDS: Partial<Record<vault.Item["kind"], BackupItemKind>> = {
   setting: BackupItemKind.SETTING,
   thread: BackupItemKind.THREAD,
   voice: BackupItemKind.VOICE,
+  reaction: BackupItemKind.REACTION,
 };
 const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.TEXT]: "text",
@@ -53,6 +56,7 @@ const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.SETTING]: "setting",
   [BackupItemKind.THREAD]: "thread",
   [BackupItemKind.VOICE]: "voice",
+  [BackupItemKind.REACTION]: "reaction",
 };
 
 const signedForm = (s: vault.Signed | undefined) =>
@@ -83,6 +87,10 @@ function toBackup(i: vault.Item): BackupItem | null {
     threadSequence: BigInt(i.thread ?? 0),
     inChannel: !!i.inChannel,
     locked: i.kind === "thread" && i.content === "locked",
+    // A reaction: the message it's on, the emoji, and whether it takes the sender's off.
+    reaction: i.reaction
+      ? create(DirectMessageReactionSchema, { sequence: BigInt(i.reaction.target), emoji: i.reaction.emoji, removed: i.reaction.removed })
+      : undefined,
     voice: i.voice ? toVoiceMessage(i.voice) : undefined,
     // A deleted line's files are gone from the instance too.
     files: i.deleted ? [] : toSealedFiles(i.files),
@@ -100,6 +108,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   if (kind === "thread" && !(thread > 0 && b.signed)) return null;
   const voice = kind === "voice" && !b.deleted ? voiceOf(b.voice) : null;
   if (kind === "voice" && !voice && !b.deleted) return null;
+  const target = Number(b.reaction?.sequence ?? 0n);
+  if (kind === "reaction" && !(b.reaction && target > 0 && target < seq && isOneEmoji(b.reaction.emoji))) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -121,6 +131,7 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
     voice: voice ?? undefined,
     ...(kind === "text" && !b.deleted && b.files.length ? { files: filesOf(b.files) } : {}),
+    ...(kind === "reaction" && b.reaction ? { content: "", replyTo: 0, reaction: { target, emoji: b.reaction.emoji, removed: b.reaction.removed } } : {}),
   };
 }
 

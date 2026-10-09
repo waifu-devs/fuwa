@@ -57,10 +57,11 @@ audit log notes an instance admin did it.
 ## What each side controls
 
 - **The home decides what guests may do**, at most send messages, embed links,
-  attach files and create polls (`UpdateConnection`; `SHAREABLE` in
-  `api/shared.rs`). A new connection starts with all of them; one made
-  before polls could cross keeps what it had until the home's admins turn
-  Create polls on.
+  attach files, create polls, start threads and add reactions
+  (`UpdateConnection`; `SHAREABLE` in `api/shared.rs`). A new connection
+  starts with all of them; one made before polls could cross keeps what it
+  had until the home's admins turn Create polls on. Connections from before
+  reactions got Add Reactions wherever they let guests send messages.
   Seeing the channel comes with being shown it. Guests get no other
   permission there: they can't ping @everyone, @here or roles, pin, or manage
   anything (`Access::guest`).
@@ -121,6 +122,12 @@ audit log notes an instance admin did it.
   its copy. From then on the file is served, counted and deleted as one of
   the home's. From another instance, the home fetches them with a ticket
   (docs/federation.md).
+- **Reactions** are the home's too, like polls (docs/reactions.md): a
+  guest's go as `GuestReact`, "who reacted" as `GuestReactors`, and the home
+  checks Add Reactions on the connection and who it kept out.
+  `ReactionUpdated` and `ReactionsCleared` go to guests like message events.
+  Guests react with standard emoji or the home's custom ones, never their own
+  server's, and only the home clears reactions.
 - **Polls** in a shared channel are the home's too: the poll, its counts and
   its votes are kept where the channel lives, and nothing of them on the
   guest's side. A guest's poll goes as `GuestPoll`, its votes as

@@ -10,6 +10,7 @@ import {
   ConversationRecordKind,
   DirectMessageContentSchema,
   DirectMessageEditSchema,
+  DirectMessageReactionSchema,
   DirectMessageTextSchema,
   SharedEntrySchema,
   SharedHistorySchema,
@@ -32,6 +33,7 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
 import { i18n, type Key } from "@/i18n/i18n";
 import { reportError } from "@/lib/reports";
+import { isOneEmoji, tallyDm } from "@/lib/reactions";
 import { BackupSync } from "./backup";
 import * as history from "./history";
 import * as threads from "./threads";
@@ -188,13 +190,16 @@ export type Content =
   | { text: string; replyTo?: number; thread?: number; inChannel?: boolean; files?: vault.FileRef[] }
   | { edit: number; text: string }
   | { lock: number; locked: boolean }
-  | { voice: vault.Voice; replyTo?: number };
+  | { voice: vault.Voice; replyTo?: number }
+  | { react: number; emoji: string; removed: boolean };
 
 function contentOf(content: Content): DirectMessageContent {
   const body: DirectMessageContent["body"] =
     "voice" in content
       ? { case: "voice", value: toVoiceMessage(content.voice, content.replyTo) }
-      : "edit" in content
+      : "react" in content
+        ? { case: "reaction", value: create(DirectMessageReactionSchema, { sequence: BigInt(content.react), emoji: content.emoji, removed: content.removed }) }
+        : "edit" in content
         ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
         : "lock" in content
           ? { case: "thread", value: create(ThreadChangeSchema, { parentSequence: BigInt(content.lock), locked: content.locked }) }
@@ -889,6 +894,12 @@ export class DmEngine {
       if (target?.kind === "text" && target.senderId === senderId && !target.deleted) {
         put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at, editSigned: signed });
       }
+    } else if (body.case === "reaction" && (!c.channel || signed)) {
+      // Kept as a line of its own, never shown: each device tallies them (lib/reactions.ts), the latest per sender and emoji winning.
+      const target = Number(body.value.sequence);
+      if (target > 0 && target < seq && isOneEmoji(body.value.emoji)) {
+        put(item(this.vaultKey, c.id, { seq, at, kind: "reaction", senderId, deviceId, reaction: { target, emoji: body.value.emoji, removed: body.value.removed }, signed }));
+      }
     }
     // Anything else is from a newer app: there's nothing to show for it here.
   }
@@ -940,7 +951,7 @@ export class DmEngine {
       try {
         const o = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
         const body = o?.payload.content?.body;
-        if (o && (body?.case === "text" || body?.case === "edit" || body?.case === "thread")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
+        if (o && (body?.case === "text" || body?.case === "edit" || body?.case === "thread" || body?.case === "reaction")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
       } catch {
         // Not a signed payload: left out.
       }
@@ -996,6 +1007,23 @@ export class DmEngine {
             sharedBy: by,
           }),
         );
+      } else if (body.case === "reaction") {
+        // Checked like a text: its own record, from that device. Tallied with the rest; one to a message this
+        // device doesn't have counts for nothing.
+        const target = Number(body.value.sequence);
+        if (known.has(seq) || !(target > 0 && target < seq) || !isOneEmoji(body.value.emoji)) continue;
+        put(
+          item(this.vaultKey, c.id, {
+            seq,
+            at,
+            kind: "reaction",
+            senderId,
+            deviceId,
+            reaction: { target, emoji: body.value.emoji, removed: body.value.removed },
+            signed: o.signed,
+            sharedBy: by,
+          }),
+        );
       } else if (body.case === "edit") {
         const target = known.get(seq);
         if (target?.sharedBy && target.kind === "text" && target.senderId === senderId && !target.deleted) {
@@ -1036,7 +1064,7 @@ export class DmEngine {
     // What was said while sharing was off stays with those who were there.
     const since = Math.max(0, ...all.filter((i) => i.kind === "setting").map((i) => i.seq));
     const items = all
-      .filter((i) => (i.kind === "text" || i.kind === "thread") && !i.deleted && i.signed && i.seq > since)
+      .filter((i) => (i.kind === "text" || i.kind === "thread" || i.kind === "reaction") && !i.deleted && i.signed && i.seq > since)
       .sort((a, b) => b.seq - a.seq);
     const entries: ReturnType<typeof create<typeof SharedEntrySchema>>[] = [];
     let size = 0;
@@ -1301,12 +1329,17 @@ export class DmEngine {
     this.tabs?.postMessage({ vault: this.vaultKey, conversation });
   }
 
+  /** A conversation's lines to show, and its reactions tallied: reactions are lines of their own, never shown. */
+  private lineUp(all: vault.Item[]) {
+    return { items: all.filter((i) => i.kind !== "reaction"), reactions: tallyDm(all, this.me.id) };
+  }
+
   /** Puts what this browser knows about a conversation in the store. */
   async refresh(id: string) {
     if (this.secure.has(id)) return this.refreshChannel(id);
     const c = this.conversations.get(id);
     if (!c || this.stopped) return;
-    const [items, note, members] = await Promise.all([
+    const [all, note, members] = await Promise.all([
       vault.loadItems(this.vaultKey, id),
       vault.loadNote(this.vaultKey, id),
       exclusive(this.lock, async () => {
@@ -1315,6 +1348,7 @@ export class DmEngine {
       }),
     ]);
     if (this.stopped) return;
+    const { items, reactions } = this.lineUp(all);
     const focused = store.get().focus;
     const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
     const unread = looking
@@ -1324,6 +1358,7 @@ export class DmEngine {
     updateDms(this.key, (d) => ({
       ...d,
       items: { ...d.items, [id]: items },
+      reactions: { ...d.reactions, [id]: reactions },
       unread: { ...d.unread, [id]: unread },
       members: { ...d.members, [id]: members satisfies DmMember[] },
       safety: { ...d.safety, [id]: safety },
@@ -1334,7 +1369,7 @@ export class DmEngine {
 
   /** Puts what this browser knows about a secure channel in the store; its unread count goes with the server's channels. */
   private async refreshChannel(id: string) {
-    const [items, note, members] = await Promise.all([
+    const [all, note, members] = await Promise.all([
       vault.loadItems(this.vaultKey, id),
       vault.loadNote(this.vaultKey, id),
       exclusive(this.lock, async () => {
@@ -1343,6 +1378,7 @@ export class DmEngine {
       }),
     ]);
     if (this.stopped || !this.secure.has(id)) return;
+    const { items, reactions } = this.lineUp(all);
     const focused = store.get().focus;
     const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
     // Replies kept to their threads count in their threads, not the channel.
@@ -1355,6 +1391,7 @@ export class DmEngine {
     updateDms(this.key, (d) => ({
       ...d,
       items: { ...d.items, [id]: items },
+      reactions: { ...d.reactions, [id]: reactions },
       members: { ...d.members, [id]: members satisfies DmMember[] },
       threadNotes: { ...d.threadNotes, [id]: threadNote },
     }));

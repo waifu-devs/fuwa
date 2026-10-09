@@ -37,10 +37,13 @@ pub const SHAREABLE: Bits = bit(Permission::SendMessages)
     | bit(Permission::EmbedLinks)
     | bit(Permission::AttachFiles)
     | bit(Permission::CreatePolls)
-    | bit(Permission::CreateThreads);
+    | bit(Permission::CreateThreads)
+    | bit(Permission::AddReactions);
 /// The same for a server on another instance: as much, now that files
 /// cross instances too ([`crate::shared_files`]).
 const SHAREABLE_ELSEWHERE: Bits = SHAREABLE;
+/// Most reactions a message from another instance shows.
+const MAX_REACTIONS: usize = 100;
 /// How long a share code works.
 const CODE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Requests from one other instance a server keeps waiting, at most.
@@ -396,6 +399,7 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     message.emojis = message.emojis.iter().take(MAX_OUTSIDE_EMOJIS).filter_map(|e| their_emoji(e, pictures)).collect();
     message.gif = message.gif.as_ref().and_then(|gif| their_gif(gif, pictures));
     message.poll = message.poll.take().map(|poll| their_poll(poll, at, own)).transpose()?;
+    message.reactions = their_reactions(std::mem::take(&mut message.reactions), pictures);
     if let Some(webhook) = &mut message.webhook {
         webhook.webhook_id.clear();
         webhook.name = one_line(&webhook.name, 80);
@@ -416,6 +420,25 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pict
     }
     no_pings(message);
     Ok(())
+}
+
+/// A message's reactions from another instance: each one as
+/// [`super::reactions::arrived`] reads it, custom emoji's pictures through
+/// this instance's proxy, and at most as many as a message could show.
+fn their_reactions(reactions: Vec<pb::Reaction>, pictures: &Pictures) -> Vec<pb::Reaction> {
+    reactions.into_iter().take(MAX_REACTIONS).filter_map(|r| their_reaction(r, pictures)).collect()
+}
+
+fn their_reaction(reaction: pb::Reaction, pictures: &Pictures) -> Option<pb::Reaction> {
+    let me = reaction.me;
+    let mut reaction = super::reactions::arrived(reaction)?;
+    if !reaction.emoji_id.is_empty() {
+        reaction.emoji_url = pictures.of(&reaction.emoji_url);
+        if reaction.emoji_url.is_empty() {
+            return None;
+        }
+    }
+    Some(pb::Reaction { me, ..reaction })
 }
 
 /// A poll in what another instance (at `at`) sends: as [`super::polls::arrived`]
@@ -732,6 +755,19 @@ pub fn arrived(
             their_guest(end.guest.as_mut(), at, &pictures)?;
             parse_id("message", &end.message_id)?;
         }
+        Some(Call::React(react)) => {
+            their_guest(react.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &react.message_id)?;
+            super::reactions::check_emoji(&react.emoji, &react.emoji_id)?;
+        }
+        Some(Call::Reactors(reactors)) => {
+            their_guest(reactors.guest.as_mut(), at, &pictures)?;
+            parse_id("message", &reactors.message_id)?;
+            super::reactions::check_emoji(&reactors.emoji, &reactors.emoji_id)?;
+            if !reactors.after_id.is_empty() {
+                reactors.after_id = from_there(&reactors.after_id, at, own)?;
+            }
+        }
         Some(Call::Voters(voters)) => {
             their_guest(voters.guest.as_mut(), at, &pictures)?;
             parse_id("message", &voters.message_id)?;
@@ -767,6 +803,27 @@ pub fn arrived(
                             updated.voter_id = from_there(&updated.voter_id, at, own)?;
                         }
                         updated.voter_answer_ids.truncate(super::polls::MAX_ANSWERS);
+                    }
+                    Some(Payload::ReactionUpdated(updated)) => {
+                        parse_id("message", &updated.message_id)?;
+                        if !updated.thread_id.is_empty() {
+                            parse_id("message", &updated.thread_id)?;
+                        }
+                        updated.user_id = from_there(&updated.user_id, at, own)?;
+                        let reaction = updated.reaction.take().ok_or_else(|| Error::invalid("reaction is required"))?;
+                        // Counts only: never `me`, which is each reader's own.
+                        let reaction = their_reaction(reaction, &pictures)
+                            .ok_or_else(|| Error::invalid("that isn't a reaction"))?;
+                        updated.reaction = Some(pb::Reaction { me: false, ..reaction });
+                    }
+                    Some(Payload::ReactionsCleared(cleared)) => {
+                        parse_id("message", &cleared.message_id)?;
+                        if !cleared.thread_id.is_empty() {
+                            parse_id("message", &cleared.thread_id)?;
+                        }
+                        if !(cleared.emoji.is_empty() && cleared.emoji_id.is_empty()) {
+                            super::reactions::check_emoji(&cleared.emoji, &cleared.emoji_id)?;
+                        }
                     }
                     _ => continue,
                 }
@@ -848,6 +905,19 @@ pub fn returned(
         }
         Some(Call::Vote(_) | Call::EndPoll(_)) => {
             out.poll = reply.poll.map(|poll| their_poll(poll, at, own)).transpose()?;
+            return Ok(out);
+        }
+        Some(Call::React(_)) => {
+            out.reaction = reply.reaction.and_then(|r| their_reaction(r, &pictures));
+            return Ok(out);
+        }
+        Some(Call::Reactors(_)) => {
+            let mut reactors = reply.reactors.unwrap_or_default();
+            reactors.users.truncate(100);
+            for user in &mut reactors.users {
+                their_user(user, at, own, &pictures)?;
+            }
+            out.reactors = Some(reactors);
             return Ok(out);
         }
         Some(Call::Threads(_)) => {
@@ -1853,6 +1923,54 @@ pub(super) async fn guest_poll_voters(
     Ok(voters)
 }
 
+/// Reacts to a message in a channel this server shows from another, or
+/// takes the reaction off. The caller has checked the member may, here.
+pub(super) async fn guest_react(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    req: &pb::ReactRequest,
+) -> Result<pb::Reaction> {
+    let call = Call::React(cpb::GuestReact {
+        guest: Some(guest),
+        message_id: req.message_id.clone(),
+        emoji: req.emoji.clone(),
+        emoji_id: req.emoji_id.clone(),
+        reacted: req.reacted,
+    });
+    to_home(app, server_id, link, call)
+        .await?
+        .reaction
+        .ok_or_else(|| Error::internal("the home server didn't say how the reaction stands"))
+}
+
+/// Who reacted to a message in a channel this server shows from another:
+/// this server's own people as this instance has them, when the home is on
+/// another instance.
+pub(super) async fn guest_reactors(
+    app: &Arc<App>,
+    server_id: &str,
+    link: &LinkRow,
+    guest: cpb::Guest,
+    req: &pb::ListReactorsRequest,
+) -> Result<pb::ListReactorsResponse> {
+    let call = Call::Reactors(cpb::GuestReactors {
+        guest: Some(guest),
+        message_id: req.message_id.clone(),
+        emoji: req.emoji.clone(),
+        emoji_id: req.emoji_id.clone(),
+        limit: req.limit,
+        after_id: req.after_id.clone(),
+    });
+    let mut reactors = to_home(app, server_id, link, call).await?.reactors.unwrap_or_default();
+    if link.instance.origin.is_some() {
+        let conn = app.servers.get(server_id).await?.read()?;
+        reactors.users = own_authors(&conn, std::mem::take(&mut reactors.users)).await?;
+    }
+    Ok(reactors)
+}
+
 /// Answers a call from the other end of one of this process's servers'
 /// shared channels.
 pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
@@ -1874,6 +1992,8 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Vote(vote) => home_vote(app, &sdb, vote).await,
         Call::EndPoll(end) => home_end_poll(&sdb, end).await,
         Call::Voters(voters) => home_voters(app, &sdb, voters).await,
+        Call::React(react) => home_react(app, &sdb, react).await,
+        Call::Reactors(reactors) => home_reactors(app, &sdb, reactors).await,
         Call::Emojis(emojis) => home_emoji_list(app, &sdb, emojis).await,
         Call::Reply(reply) => {
             let send = reply.send.ok_or_else(|| Error::invalid("send is required"))?;
@@ -2441,6 +2561,7 @@ async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cp
         messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
     super::threads::attach(&conn, &mut messages).await?;
     super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
+    super::reactions::attach(&conn, &user.id, &mut messages).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     home_emojis(&conn, &sdb.id, &mut messages).await?;
@@ -2469,6 +2590,7 @@ async fn home_get(app: &App, sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::
         .ok_or(Error::NotFound("message"))?;
     super::threads::attach(&conn, std::slice::from_mut(&mut message)).await?;
     super::polls::mark_mine(&conn, &user.id, std::slice::from_mut(&mut message)).await?;
+    super::reactions::attach(&conn, &user.id, std::slice::from_mut(&mut message)).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
     home_emojis(&conn, &sdb.id, std::slice::from_mut(&mut message)).await?;
@@ -2659,6 +2781,7 @@ async fn home_thread(app: &App, sdb: &ServerDb, call: cpb::GuestThread) -> Resul
     .await?;
     messages.push(parent);
     super::polls::mark_mine(&conn, &user.id, &mut messages).await?;
+    super::reactions::attach(&conn, &user.id, &mut messages).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     home_emojis(&conn, &sdb.id, &mut messages).await?;
@@ -2886,6 +3009,82 @@ async fn home_voters(app: &App, sdb: &ServerDb, voters: cpb::GuestPollVoters) ->
     Ok(cpb::SharedReply { voters: Some(pb::ListPollVotersResponse { users: found, has_more }), ..Default::default() })
 }
 
+/// A message in the shared channel a guest may react to: one people wrote.
+async fn reactable(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> Result<pb::Message> {
+    load_message(conn, server_id, message_id)
+        .await?
+        .filter(|m| m.channel_id == channel_id && m.kind == pb::MessageKind::Unspecified as i32)
+        .ok_or(Error::NotFound("message"))
+}
+
+async fn home_react(app: &Arc<App>, sdb: &ServerDb, react: cpb::GuestReact) -> Result<cpb::SharedReply> {
+    let guest = react.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    // A server on another instance counts as one sender here, reactions and all.
+    let elsewhere = guest.server.as_ref().map(|s| s.id.clone()).filter(|id| id.contains('@'));
+    if let Some(server_id) = &elsewhere
+        && !app.federation.take_send(server_id, app.settings().limits.shared_remote_sends_per_minute)
+    {
+        return Err(Error::ResourceExhausted("that server is sending too fast; try again in a minute".into()));
+    }
+    let cap = app.settings().limits.reactions_per_message;
+    let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    let reaction = sdb
+        .write(&actor_id, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            if blocked(conn, &row.channel_id, &user.id).await? {
+                return Ok(Err(KEPT_OUT.to_string()));
+            }
+            // What the home lets the guest's people do; taking one's own off
+            // needs nothing.
+            if react.reacted
+                && !Access::guest(&row.channel_id, row.allowed).has_in(&row.channel_id, Permission::AddReactions)
+            {
+                return Ok(Err("this channel's home server doesn't let your server's people react here".to_string()));
+            }
+            let message = reactable(conn, &sdb.id, &row.channel_id, &react.message_id).await?;
+            remember(conn, &user, &server).await?;
+            super::reactions::apply(conn, &message, &react.emoji, &react.emoji_id, &user.id, react.reacted, cap, events)
+                .await
+                .map(Ok)
+        })
+        .await?
+        .map_err(Error::denied)?;
+    let mut reaction = reaction;
+    if actor_id.contains('@') {
+        reaction.emoji_url = own_picture(&reaction.emoji_url, &app.settings().public_url);
+    }
+    Ok(cpb::SharedReply { reaction: Some(reaction), ..Default::default() })
+}
+
+async fn home_reactors(app: &App, sdb: &ServerDb, call: cpb::GuestReactors) -> Result<cpb::SharedReply> {
+    let guest = call.guest.ok_or_else(|| Error::invalid("guest is required"))?;
+    let conn = sdb.read()?;
+    let (row, user, _) = connection(&conn, &guest).await?;
+    if blocked(&conn, &row.channel_id, &user.id).await? {
+        return Err(Error::denied(KEPT_OUT));
+    }
+    reactable(&conn, &sdb.id, &row.channel_id, &call.message_id).await?;
+    let mut page = super::reactions::reactor_page(
+        &conn,
+        &call.message_id,
+        &call.emoji,
+        &call.emoji_id,
+        call.limit,
+        &call.after_id,
+    )
+    .await?;
+    if user.id.contains('@') {
+        let public_url = &app.settings().public_url;
+        page.users = page.users.iter().map(|u| plain_user(u, public_url)).collect();
+    }
+    Ok(cpb::SharedReply { reactors: Some(page), ..Default::default() })
+}
+
 /// Ends a connection at the home, inside a write: its row, and the people
 /// from that server kept out of the channel. None if it was already gone.
 async fn drop_guest(
@@ -3067,6 +3266,8 @@ async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> 
                 Payload::MessageDeleted(d) => d.channel_id = channel_id.clone(),
                 Payload::PollUpdated(p) => p.channel_id = channel_id.clone(),
                 Payload::ThreadUpdated(t) => t.channel_id = channel_id.clone(),
+                Payload::ReactionUpdated(r) => r.channel_id = channel_id.clone(),
+                Payload::ReactionsCleared(c) => c.channel_id = channel_id.clone(),
                 _ => return None,
             }
             // Not in this server's log: it's shown, not kept.
@@ -3289,6 +3490,9 @@ fn message_channel(payload: &Payload) -> Option<&str> {
         Payload::ThreadUpdated(t) => Some(&t.channel_id),
         // Checked by [`for_guests`]: only polls in messages shown in the channel.
         Payload::PollUpdated(p) => Some(&p.channel_id),
+        // Checked by [`for_guests`]: only on messages people wrote.
+        Payload::ReactionUpdated(r) => Some(&r.channel_id),
+        Payload::ReactionsCleared(c) => Some(&c.channel_id),
         _ => None,
     }
 }
@@ -3296,6 +3500,27 @@ fn message_channel(payload: &Payload) -> Option<&str> {
 /// An event as guests get it: each message says who wrote it, since its
 /// author needn't be in the guest server.
 async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
+    let reacted_to = match &event.payload {
+        Some(Payload::ReactionUpdated(r)) => Some(&r.message_id),
+        Some(Payload::ReactionsCleared(c)) => Some(&c.message_id),
+        _ => None,
+    };
+    if let Some(message_id) = reacted_to {
+        let shown = async {
+            let sdb = app.servers.get(&event.server_id).await?;
+            let message = load_message(&*sdb.read()?, &sdb.id, message_id).await?;
+            Ok::<_, Error>(message.is_some_and(|m| m.kind == pb::MessageKind::Unspecified as i32))
+        }
+        .await;
+        return match shown {
+            Ok(true) => Some(event.clone()),
+            Ok(false) => None,
+            Err(_) => {
+                tracing::warn!("couldn't read a shared reaction's message");
+                None
+            }
+        };
+    }
     if let Some(Payload::PollUpdated(updated)) = &event.payload {
         // A poll in a thread stays with the home, as threads do.
         let shown = async {
@@ -3356,6 +3581,11 @@ fn leaving(event: &pb::Event, public_url: &str) -> pb::Event {
     {
         plain_message(m, public_url);
     }
+    if let Some(Payload::ReactionUpdated(pb::ReactionUpdated { reaction: Some(r), .. })) = event.payload.as_mut()
+        && !r.emoji_id.is_empty()
+    {
+        r.emoji_url = own_picture(&r.emoji_url, public_url);
+    }
     event
 }
 
@@ -3393,6 +3623,19 @@ fn plain_message(message: &mut pb::Message, public_url: &str) {
     if let Some(webhook) = &mut message.webhook {
         webhook.avatar_url = own_picture(&webhook.avatar_url, public_url);
     }
+    plain_reactions(&mut message.reactions, public_url);
+}
+
+/// Reactions as they leave for another instance: custom emoji only with a
+/// picture of this instance's own.
+fn plain_reactions(reactions: &mut Vec<pb::Reaction>, public_url: &str) {
+    reactions.retain_mut(|r| {
+        if r.emoji_id.is_empty() {
+            return true;
+        }
+        r.emoji_url = own_picture(&r.emoji_url, public_url);
+        !r.emoji_url.is_empty()
+    });
 }
 
 /// How long a guest server on another instance is waited for before trying
@@ -3614,7 +3857,7 @@ fn allowed_from(list: &[i32]) -> Result<Bits> {
     let bits = permissions::from_list(list)?;
     if bits & !(SHAREABLE | bit(Permission::ViewChannels)) != 0 {
         return Err(Error::invalid(
-            "a shared channel can let other servers' people send messages, embed links and attach files, nothing more",
+            "a shared channel can let other servers' people send messages, embed links, attach files, make polls, start threads and react, nothing more",
         ));
     }
     Ok(bits & SHAREABLE)

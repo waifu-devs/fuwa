@@ -25,10 +25,12 @@ import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
+import type { DmReaction } from "@/lib/reactions";
 import type { Applied } from "@/lib/applied";
 import { emptyFriends, type FriendsState } from "@/lib/friends";
 import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
+import { withoutReactions, withReactionUpdate } from "@/lib/reactions";
 
 /**
  * Everything the client shows, for every instance at once. It changes only
@@ -108,8 +110,10 @@ export type DmState = {
   deviceId: string;
   /** The latest first. */
   conversations: Conversation[];
-  /** What each conversation said, as this device opened it, oldest first. Only conversations someone opened. */
+  /** What each conversation said, as this device opened it, oldest first. Only conversations someone opened. Reactions aren't lines: they're tallied in `reactions`. */
   items: Record<string, Item[]>;
+  /** Each conversation's reactions, as this device tallied them, by the record of the message they're on. */
+  reactions: Record<string, Record<number, DmReaction[]>>;
   pending: Record<string, PendingMessage[]>;
   unread: Record<string, number>;
   /** Every device in each conversation's group. */
@@ -140,6 +144,7 @@ export const emptyDms = (): DmState => ({
   deviceId: "",
   conversations: [],
   items: {},
+  reactions: {},
   pending: {},
   unread: {},
   members: {},
@@ -364,6 +369,35 @@ export function upsertMessage(items: Message[], message: Message): Message[] {
   return [...items.slice(0, at), message, ...items.slice(at)];
 }
 
+/**
+ * A message as an event brings it again (MessageCreated, MessageUpdated) or
+ * an edit's answer: they leave reactions out, so the ones already here stay.
+ */
+export function upsertKeepingReactions(items: Message[], message: Message): Message[] {
+  const before = items.find((m) => m.id === message.id);
+  return upsertMessage(items, before?.reactions.length && !message.reactions.length ? { ...message, reactions: before.reactions } : message);
+}
+
+/**
+ * Changes one message wherever it's kept: its channel's list, its thread's
+ * (a reply), and as the message a thread opened here is under.
+ */
+export function withMessage(i: InstanceState, channelId: string, threadId: string, messageId: string, fn: (m: Message) => Message): InstanceState {
+  let messages = i.messages;
+  for (const at of [channelId, threadId && threadKey(threadId)]) {
+    const loaded = at ? messages[at] : undefined;
+    const n = loaded?.items.findIndex((m) => m.id === messageId) ?? -1;
+    if (!loaded || n === -1) continue;
+    const before = loaded.items[n]!;
+    const after = fn(before);
+    if (after !== before) messages = { ...messages, [at!]: { ...loaded, items: loaded.items.map((m, k) => (k === n ? after : m)) } };
+  }
+  const parent = i.threadParents[messageId];
+  const changed = parent && fn(parent);
+  const threadParents = parent && changed !== parent ? { ...i.threadParents, [messageId]: changed! } : i.threadParents;
+  return messages === i.messages && threadParents === i.threadParents ? i : { ...i, messages, threadParents };
+}
+
 /** A thread's new summary, on the message it's under wherever that's kept. */
 export function withThreadSummary(i: InstanceState, channelId: string, threadId: string, thread: Message["thread"]): InstanceState {
   const summary = thread && (thread.replyCount > 0 || thread.locked) ? thread : undefined;
@@ -542,7 +576,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         const key = threadKey(message.threadId);
         const replies = next.messages[key];
         const seen = replies?.items.some((m) => m.id === message.id);
-        if (replies) next = { ...next, messages: { ...next.messages, [key]: { ...replies, items: upsertMessage(replies.items, message) } } };
+        if (replies) next = { ...next, messages: { ...next.messages, [key]: { ...replies, items: upsertKeepingReactions(replies.items, message) } } };
         if (
           p.case === "messageCreated" &&
           !seen &&
@@ -558,7 +592,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       if (loaded) {
         next = {
           ...next,
-          messages: { ...next.messages, [message.channelId]: { ...loaded, items: upsertMessage(loaded.items, message) } },
+          messages: { ...next.messages, [message.channelId]: { ...loaded, items: upsertKeepingReactions(loaded.items, message) } },
         };
       }
       const known = loaded?.items.some((m) => m.id === message.id);
@@ -615,6 +649,23 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         if (found) messages = { ...messages, [at!]: { ...loaded!, items: upsertMessage(loaded!.items, { ...found, pinnedAt }) } };
       }
       return messages === i.messages ? i : { ...i, messages };
+    }
+    case "reactionUpdated": {
+      const { channelId, threadId, messageId, reaction, userId, added } = p.value;
+      if (!reaction) return i;
+      // Events never say whether you're among them: only that this one was you.
+      const mine = userId && userId === i.me?.id ? added : undefined;
+      return withMessage(i, channelId, threadId, messageId, (m) => {
+        const reactions = withReactionUpdate(m.reactions, reaction, mine);
+        return reactions === m.reactions ? m : { ...m, reactions };
+      });
+    }
+    case "reactionsCleared": {
+      const { channelId, threadId, messageId, emoji, emojiId } = p.value;
+      return withMessage(i, channelId, threadId, messageId, (m) => {
+        const reactions = withoutReactions(m.reactions, { emoji, emojiId });
+        return reactions === m.reactions ? m : { ...m, reactions };
+      });
     }
     case "userUpdated": {
       const user = p.value.user;

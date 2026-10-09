@@ -177,6 +177,8 @@
   "limits.pinsPerChannelHint": "Cuántos mensajes se pueden fijar en un canal y en un hilo. Desfijar uno deja sitio.",
   "limits.pinsPerConversation": "Fijados por mensaje directo",
   "limits.pinsPerConversationHint": "Cuántos mensajes se pueden fijar en una conversación de mensajes directos. La instancia solo guarda qué mensajes están fijados, nunca lo que dicen.",
+  "limits.reactionsPerMessage": "Reacciones por mensaje",
+  "limits.reactionsPerMessageHint": "Cuántos emoji distintos puede tener un mensaje como reacciones. Que más personas reaccionen con uno que ya está siempre se permite.",
   "limits.liveTilesPerChannel": "Tarjetas en vivo por canal",
   "limits.liveTilesPerChannelHint": "Cuántas tarjetas pueden mantener las apps (agentes y webhooks) en un canal a la vez.",
   "limits.liveTileUpdates": "Cambios de tarjetas en vivo",

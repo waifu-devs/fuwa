@@ -13,7 +13,7 @@ import {
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ListThreadsResponse } from "@/gen/fuwa/v1/message_pb";
-import { Permission, type Channel, type Message, type ThreadSummary, type User } from "@/gen/fuwa/v1/types_pb";
+import { MessageKind, Permission, type Channel, type Message, type ThreadSummary, type User } from "@/gen/fuwa/v1/types_pb";
 import { focusThread, followThread, listThreads, loadFollowed, lockThread, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess } from "@/fuwa/hooks";
@@ -32,6 +32,10 @@ import { isArchived, type ThreadPanelState } from "@/lib/threads";
 import { usePrefs } from "@/lib/prefs";
 import { instanceHas } from "@/lib/compat";
 import { ChannelPinsButton } from "@/components/chat/Pins";
+import { pickedReaction, ReactionRow, useReactionCatalog } from "@/components/chat/Reactions";
+import { react, whoReacted, type ReactEmoji } from "@/fuwa/reactions";
+import { useCatalog } from "@/lib/emoji-catalog";
+import { reactedWith } from "@/lib/reactions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -152,14 +156,20 @@ export function AlsoSentNote({ message, inThread, onOpen }: { message: Message; 
   );
 }
 
-/** The top of a thread: the message it's under, then how many replies follow. */
-function ThreadStart({ instanceKey, parent }: { instanceKey: string; parent: Message | undefined }) {
+/** The top of a thread: the message it's under, with its reactions, then how many replies follow. */
+function ThreadStart({ instanceKey, serverId, channel, parent }: { instanceKey: string; serverId: string; channel: Channel; parent: Message | undefined }) {
   const { t } = useI18n();
   const display = usePrefs((p) => p.messageDisplay);
   const look = useServerLook();
   const author = useFuwa((s) => (parent ? s.instances[instanceKey]?.users[parent.authorId] : undefined));
   const member = look.members.find((m) => m.user?.id === parent?.authorId);
+  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions"));
+  const access = useAccess(instanceKey, serverId);
+  const canReact = reactionsHere && hasIn(access, channel.id, Permission.ADD_REACTIONS);
+  const catalog = useCatalog(instanceKey, serverId, channel);
+  const reactCatalog = useReactionCatalog(instanceKey, catalog, !!channel.shared && !channel.shared.home);
   if (!parent) return <div className="shimmer mx-4 my-4 h-16 rounded-2xl" />;
+  const toggle = (emoji: ReactEmoji, on: boolean) => void react(instanceKey, serverId, parent, emoji, on).catch((err: Error) => toast(err.message));
   const count = parent.thread?.replyCount ?? 0;
   return (
     <div className="pt-3">
@@ -184,6 +194,20 @@ function ThreadStart({ instanceKey, parent }: { instanceKey: string; parent: Mes
         >
           {parent.content && <MessageBody content={parent.content} display={display} />}
           <Embeds embeds={parent.embeds} animate={false} />
+          {reactionsHere && parent.kind === MessageKind.UNSPECIFIED && parent.reactions.length > 0 && (
+            <ReactionRow
+              reactions={parent.reactions}
+              emojis={look.emojis}
+              canAdd={canReact}
+              catalog={reactCatalog}
+              onToggle={toggle}
+              onPick={(picked) => {
+                const emoji = pickedReaction(picked);
+                if (!reactedWith(parent.reactions, emoji)) toggle(emoji, true);
+              }}
+              who={(r) => whoReacted(instanceKey, serverId, parent, r, t("chattools.reactions.you"))}
+            />
+          )}
         </MessageLine>
       </div>
       <div role="separator" className="my-3 flex items-center gap-3 px-4 text-xs font-bold text-muted-foreground">
@@ -398,7 +422,7 @@ export function ThreadPanel({
         serverId={serverId}
         channel={channel}
         threadId={threadId}
-        header={<ThreadStart instanceKey={instanceKey} parent={parent} />}
+        header={<ThreadStart instanceKey={instanceKey} serverId={serverId} channel={channel} parent={parent} />}
       />
       <Composer
         instanceKey={instanceKey}

@@ -316,5 +316,6 @@
   "sounds.tune.pop": "Pop",
   "sounds.tune.drop": "Drop",
   "sounds.tune.twinkle": "Twinkle",
-  "sounds.tune.pluck": "Pluck"
+  "sounds.tune.pluck": "Pluck",
+  "reactions.clearOneConfirm": "Remove every {emoji} reaction from this message? This can't be undone."
 }

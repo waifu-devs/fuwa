@@ -107,6 +107,10 @@ pub struct InstanceState {
     pub profile_items: Vec<pb::ProfileItem>,
     /// Per server, the profile items it offers, oldest first.
     pub server_items: HashMap<String, Vec<pb::ProfileItem>>,
+    /// The home server's custom emoji for a channel shown here from another
+    /// server, by channel id, once asked (None while asking): what reactions
+    /// there can use (`reactions::Core::want_home_emojis`).
+    pub home_emojis: HashMap<String, Option<Vec<pb::Emoji>>>,
 }
 
 impl InstanceState {
@@ -146,6 +150,7 @@ impl InstanceState {
             recent_sign_ins: Vec::new(),
             profile_items: Vec::new(),
             server_items: HashMap::new(),
+            home_emojis: HashMap::new(),
         }
     }
 
@@ -276,14 +281,29 @@ pub fn sort_roles(roles: &mut [pb::Role]) {
     });
 }
 
-/// Inserts or replaces a message, keeping the list sorted by id (which is by time).
+/// Inserts or replaces a message, keeping the list sorted by id (which is by
+/// time). A message from an event or an answer that doesn't carry its
+/// reactions keeps the ones it had; a page read from the instance, which does,
+/// goes through [`put_message`].
 pub fn upsert_message(items: &mut Vec<pb::Message>, message: pb::Message) {
+    put(items, message, true);
+}
+
+/// Inserts or replaces a message as a page read from the instance has it, reactions and all.
+pub fn put_message(items: &mut Vec<pb::Message>, message: pb::Message) {
+    put(items, message, false);
+}
+
+fn put(items: &mut Vec<pb::Message>, message: pb::Message, keep_reactions: bool) {
     match items.binary_search_by(|m| m.id.as_str().cmp(&message.id)) {
         Ok(at) => {
             // An edit doesn't always say how the thread under it stands; keep what we know.
             let mut message = message;
             if message.thread.is_none() {
                 message.thread = items[at].thread.take();
+            }
+            if keep_reactions {
+                crate::core::reactions::keep(&items[at], &mut message);
             }
             items[at] = message;
         }
@@ -500,6 +520,8 @@ pub fn apply_event(
             crate::core::pins::forget(i, &p.channel_id, &p.message_id);
         }
         Payload::MessagePinned(p) => crate::core::pins::mark(i, p),
+        Payload::ReactionUpdated(p) => crate::core::reactions::updated(i, p),
+        Payload::ReactionsCleared(p) => crate::core::reactions::cleared(i, p),
         Payload::ThreadUpdated(p) => threads::with_thread_summary(i, &p.channel_id, &p.thread_id, p.thread.as_ref()),
         Payload::UserUpdated(pb::UserUpdated { user: Some(user) }) => update_user(i, user),
         Payload::MemberJoined(pb::MemberJoined { member: Some(member) })

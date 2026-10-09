@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 27] = [
+pub const KNOWN: [P; 28] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -41,6 +41,7 @@ pub const KNOWN: [P; 27] = [
     P::Record,
     P::CreateThreads,
     P::CreatePolls,
+    P::AddReactions,
 ];
 
 pub const ALL: Bits = {
@@ -57,6 +58,7 @@ pub const ALL: Bits = {
 pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::CreateThreads)
     | bit(P::CreatePolls)
+    | bit(P::AddReactions)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -99,6 +101,7 @@ pub const GROUPS: [(&str, &[P]); 5] = [
             P::SendMessages,
             P::CreateThreads,
             P::CreatePolls,
+            P::AddReactions,
             P::EmbedLinks,
             P::AttachFiles,
             P::MentionEveryone,
@@ -141,6 +144,7 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         P::CreatePolls => {
             ("Create polls", "Ask a question with answers people vote on. Anyone who can see the channel can vote.")
         }
+        P::AddReactions => ("Add reactions", "React to messages with emoji. Anyone can take their own reaction off."),
         P::EmbedLinks => ("Embed links", "Post links."),
         P::AttachFiles => ("Attach files", "Upload files and pictures with their messages."),
         P::MentionEveryone => (
@@ -177,6 +181,7 @@ pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
             P::SendMessages,
             P::CreateThreads,
             P::CreatePolls,
+            P::AddReactions,
             P::EmbedLinks,
             P::AttachFiles,
             P::MentionEveryone,
@@ -193,6 +198,7 @@ pub fn channel_about(p: P) -> &'static str {
         P::ManageChannels => "Edit or delete this channel. Also skips its slow mode.",
         P::ViewChannels => "See this channel and read its messages.",
         P::CreatePolls => "Ask a question in this channel with answers people vote on.",
+        P::AddReactions => "React to messages in this channel with emoji.",
         P::CreateInvite => "Make invite links that open this channel.",
         P::Connect => "Join this voice channel.",
         P::Speak => "Talk in this voice channel. Without it they can join and listen.",

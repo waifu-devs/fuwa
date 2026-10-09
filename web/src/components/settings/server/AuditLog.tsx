@@ -130,6 +130,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.PROFILE_ITEM_CREATE]: { label: "serversettings.audit.kind.profileItemCreate", icon: SparklesIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.PROFILE_ITEM_UPDATE]: { label: "serversettings.audit.kind.profileItemUpdate", icon: SparkleIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.PROFILE_ITEM_DELETE]: { label: "serversettings.audit.kind.profileItemDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.REACTIONS_CLEAR]: { label: "serversettings.audit.kind.reactionsClear", icon: SmileIcon, tint: "bg-orange-500/15 text-orange-500" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -670,6 +671,8 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       return say("serversettings.audit.s.messagePin", { target, channel: named });
     case AuditAction.MESSAGE_UNPIN:
       return say("serversettings.audit.s.messageUnpin", { target, channel: named });
+    case AuditAction.REACTIONS_CLEAR:
+      return say("serversettings.audit.s.reactionsClear", { target, channel: named });
     case AuditAction.LIVE_TILE_END:
       return say("serversettings.audit.s.liveTileEnd", { target, channel: named });
     case AuditAction.PROFILE_ITEM_CREATE:

@@ -210,6 +210,17 @@ impl InstanceSettingsView {
                 )
             },
             Row {
+                off: Some("20"),
+                ..row(
+                    "reactions-per-message",
+                    "instancesettings.limits.reactionsPerMessage",
+                    "instancesettings.limits.reactionsPerMessageHint",
+                    &["reactions_per_message"],
+                    false,
+                    count(defaults.reactions_per_message),
+                )
+            },
+            Row {
                 off: Some("10"),
                 ..row(
                     "live-tiles-per-channel",
@@ -260,7 +271,7 @@ impl InstanceSettingsView {
 }
 
 /// Every cap a page shows: (path, a size), for the boxes they're typed in.
-pub(super) const CAPS: [(&str, bool); 30] = [
+pub(super) const CAPS: [(&str, bool); 31] = [
     ("servers_per_account", false),
     ("default_limits.members", false),
     ("default_limits.channels", false),
@@ -281,6 +292,7 @@ pub(super) const CAPS: [(&str, bool); 30] = [
     ("commands_per_minute", false),
     ("pins_per_channel", false),
     ("pins_per_conversation", false),
+    ("reactions_per_message", false),
     ("live_tiles_per_channel", false),
     ("live_tile_updates_per_minute", false),
     ("live_tile_publish_ms", false),

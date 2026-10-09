@@ -20,6 +20,7 @@ pub fn emptied(i: &Item) -> Item {
     gone.signed = None;
     gone.edit_signed = None;
     gone.files.clear();
+    gone.reactions.clear();
     gone
 }
 

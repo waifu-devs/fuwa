@@ -89,6 +89,11 @@ pub(crate) enum MenuOf {
     RailAdd,
     /// The message box (the web's composer menu).
     Composer,
+    /// A reaction chip under a message, for someone who can clear it (`reactions.rs`).
+    Reaction {
+        msg: String,
+        chip: crate::ui::reactions::Chip,
+    },
 }
 
 impl MenuOf {
@@ -107,6 +112,7 @@ impl MenuOf {
             MenuOf::RailFolder { key, folder } => format!("f|{key}|{folder}"),
             MenuOf::RailAdd => "rail-add".into(),
             MenuOf::Composer => "composer".into(),
+            MenuOf::Reaction { msg, .. } => format!("msg|{msg}"),
         }
     }
 }
@@ -123,6 +129,9 @@ pub(crate) enum Kind {
         run: Run,
     },
     Sub(Vec<Item>),
+    /// A row of emoji to react with, each its own button (the `react` group).
+    /// The keys pass over it: the item after it opens the picker.
+    Emojis(Vec<(crate::ui::emoji::Choice, Run)>),
 }
 
 /// One line of a menu.
@@ -151,6 +160,10 @@ impl Item {
             confirm: None,
             kind: Kind::Act(run),
         }
+    }
+
+    pub(crate) fn emojis(label: impl Into<String>, emojis: Vec<(crate::ui::emoji::Choice, Run)>) -> Self {
+        Self { kind: Kind::Emojis(emojis), ..Self::act(label, "", run(|_, _, _| {})) }
     }
 
     pub(crate) fn sub(label: impl Into<String>, icon: &'static str, items: Vec<Item>) -> Self {
@@ -195,7 +208,7 @@ impl Item {
     }
 
     fn enabled(&self) -> bool {
-        !self.disabled
+        !self.disabled && !matches!(self.kind, Kind::Emojis(_))
     }
 }
 
@@ -429,7 +442,7 @@ impl FuwaApp {
                 }
                 run(self, window, cx);
             }
-            Kind::Sub(_) => {}
+            Kind::Sub(_) | Kind::Emojis(_) => {}
         }
         cx.notify();
     }
@@ -633,6 +646,12 @@ impl FuwaApp {
             if built.lines[ix] {
                 list = list.child(div().h(px(1.0)).my(px(4.0)).mx(px(4.0)).bg(p.border));
             }
+            if let Kind::Emojis(emojis) = &item.kind {
+                let row = emoji_row(emojis, &format!("{id}|{ix}"), p, cx);
+                let delay = Duration::from_millis(12 * ix.min(10) as u64);
+                list = list.child(motion::rise(row, SharedString::from(format!("ctx-in|{id}|{ix}")), delay, 4.0));
+                continue;
+            }
             let is_sub = matches!(item.kind, Kind::Sub(_));
             let open = sub.is_some_and(|(o, _)| o == ix);
             // The chevron turns a quarter while its submenu is open.
@@ -755,6 +774,43 @@ impl FuwaApp {
         }
         (list.into_any_element(), beside)
     }
+}
+
+/// The `react` group's row of emoji: each grows and tilts when pointed at,
+/// shrinks while held, and reacts (closing the menu) when pressed.
+fn emoji_row(
+    emojis: &[(crate::ui::emoji::Choice, Run)],
+    key: &str,
+    p: &Palette,
+    cx: &mut Context<FuwaApp>,
+) -> gpui_kit::Div {
+    let tilt = gpui_kit::radians((-8f32).to_radians());
+    let lit = p.accent;
+    let mut row = div().h(px(ROW)).flex().items_center().justify_between().px(px(2.0));
+    for (n, (choice, run)) in emojis.iter().enumerate() {
+        let run = run.clone();
+        let name = choice.name.clone();
+        row = row.child(
+            div()
+                .id(SharedString::from(format!("ctx-emoji|{key}|{n}")))
+                .size(px(30.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(radius_sm())
+                .cursor_pointer()
+                .hover(move |s| s.bg(lit).scale(1.15).rotate(tilt))
+                .active(|s| s.scale(0.88))
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(format!(":{name}:")).build(window, cx))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.context = None;
+                    run(this, window, cx);
+                    cx.notify();
+                }))
+                .child(crate::ui::chat::emoji_glyph(choice, 20.0)),
+        );
+    }
+    row
 }
 
 /// An item's line, as the web's dropdown items draw it (`px-2 py-1.5 gap-2

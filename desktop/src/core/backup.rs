@@ -20,7 +20,7 @@ use tonic::Code;
 use crate::core::api::Problem;
 use crate::core::dms::DmEngine;
 use crate::core::i18n::t;
-use crate::core::vault::{DeviceRef, Item, ItemKind, Signed, VoiceFile};
+use crate::core::vault::{DeviceRef, Item, ItemKind, ReactionMark, Signed, VoiceFile};
 use crate::pb;
 use crate::rpc;
 
@@ -217,6 +217,49 @@ fn from_signed(s: Option<pb::SignedForm>) -> Option<Signed> {
     })
 }
 
+/// A line and, for a message, each reaction record kept on it (each person's
+/// latest for each emoji, with its signed form in a secure channel). A
+/// message goes again whenever it changes, reactions and all; taking them
+/// back in again changes nothing.
+fn to_backup_all(conversation: &str, i: &Item) -> Vec<pb::BackupItem> {
+    let mut out: Vec<pb::BackupItem> = to_backup(conversation, i).into_iter().collect();
+    if i.kind == ItemKind::Text && !i.deleted {
+        out.extend(i.reactions.iter().map(|m| pb::BackupItem {
+            conversation_id: conversation.to_owned(),
+            sequence: m.seq,
+            at_ms: i.at,
+            sender_id: m.user_id.clone(),
+            kind: pb::BackupItemKind::Reaction as i32,
+            reaction: Some(pb::DirectMessageReaction { sequence: i.seq, emoji: m.emoji.clone(), removed: m.removed }),
+            signed: signed_form(&m.signed),
+            ..Default::default()
+        }));
+    }
+    out
+}
+
+/// A reaction record from a backup: the conversation, the message it's to, and what it said.
+fn reaction_from_backup(b: &pb::BackupItem) -> Option<(String, i64, ReactionMark)> {
+    let r = b.reaction.as_ref()?;
+    if b.kind != pb::BackupItemKind::Reaction as i32
+        || b.conversation_id.is_empty()
+        || b.sequence <= 0
+        || r.sequence <= 0
+        || b.sender_id.is_empty()
+        || !crate::core::reactions::valid_emoji(&r.emoji)
+    {
+        return None;
+    }
+    let mark = ReactionMark {
+        user_id: b.sender_id.clone(),
+        emoji: r.emoji.clone(),
+        seq: b.sequence,
+        removed: r.removed,
+        signed: from_signed(b.signed.clone()),
+    };
+    Some((b.conversation_id.clone(), r.sequence, mark))
+}
+
 fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
     let kind = match (i.kind, i.voice.is_some()) {
         (ItemKind::Text, true) => pb::BackupItemKind::Voice,
@@ -261,6 +304,7 @@ fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
         thread_sequence: i.thread,
         in_channel: i.in_channel,
         locked: i.kind == ItemKind::Thread && i.content == "locked",
+        reaction: None,
     })
 }
 
@@ -441,16 +485,14 @@ impl DmEngine {
             let mut taken = Vec::new();
             let mut size = 0;
             for ((conversation, seq), item) in waiting {
-                let b = item.as_ref().and_then(|i| to_backup(&conversation, i));
-                let bytes = b.as_ref().map_or(0, |b| b.encoded_len() + 4);
+                let b = item.as_ref().map(|i| to_backup_all(&conversation, i)).unwrap_or_default();
+                let bytes: usize = b.iter().map(|b| b.encoded_len() + 4).sum();
                 if !items.is_empty() && size + bytes > PART_BYTES {
                     break;
                 }
                 taken.push((conversation, seq));
-                if let Some(b) = b {
-                    items.push(b);
-                    size += bytes;
-                }
+                items.extend(b);
+                size += bytes;
             }
             drop(inner);
             if !items.is_empty() {
@@ -565,14 +607,48 @@ impl DmEngine {
                         unreadable += 1;
                         continue;
                     };
+                    let reactions: Vec<(String, i64, ReactionMark)> =
+                        decoded.items.iter().filter_map(reaction_from_backup).collect();
                     let items: Vec<(String, Item)> = decoded.items.into_iter().filter_map(from_backup).collect();
                     let mut inner = self.inner.lock().await;
-                    let mut take = Vec::new();
-                    for (conversation, item) in items {
+                    let mut take: Vec<(String, Item)> = Vec::new();
+                    for (conversation, mut item) in items {
                         let have = inner.vault.item_at(&conversation, item.seq).ok().flatten();
                         if newer(have.as_ref(), &item) {
+                            // What this device tallied on it stays.
+                            if let Some(have) = &have {
+                                item.reactions = have.reactions.clone();
+                            }
                             touched.insert(conversation.clone());
                             take.push((conversation, item));
+                        }
+                    }
+                    // Reactions go back on the messages they're to, the latest record winning.
+                    for (conversation, target, m) in reactions {
+                        let at = take.iter().position(|(c, i)| *c == conversation && i.seq == target);
+                        let mut item = match at {
+                            Some(at) => take[at].1.clone(),
+                            None => match inner.vault.item_at(&conversation, target).ok().flatten() {
+                                Some(item) => item,
+                                None => continue,
+                            },
+                        };
+                        if item.kind != ItemKind::Text || item.deleted {
+                            continue;
+                        }
+                        if crate::core::reactions::mark(
+                            &mut item.reactions,
+                            &m.user_id,
+                            &m.emoji,
+                            m.seq,
+                            m.removed,
+                            m.signed,
+                        ) {
+                            touched.insert(conversation.clone());
+                            match at {
+                                Some(at) => take[at].1 = item,
+                                None => take.push((conversation, item)),
+                            }
                         }
                     }
                     if !take.is_empty() {
@@ -666,6 +742,28 @@ mod tests {
         assert_eq!(open(&keys, "alice", 3, &sealed).as_deref(), Some(&b"hello"[..]));
         assert!(open(&keys, "alice", 4, &sealed).is_none());
         assert!(open(&keys, "bob", 3, &sealed).is_none());
+    }
+
+    #[test]
+    fn reactions_go_in_as_their_own_records() {
+        let mut item = Item::new(4, ItemKind::Text, 10, "aoi", "a1");
+        item.content = "hi".into();
+        crate::core::reactions::mark(&mut item.reactions, "mika", "👍", 7, false, None);
+        crate::core::reactions::mark(&mut item.reactions, "aoi", "🎉", 9, true, None);
+        let out = to_backup_all("c", &item);
+        assert_eq!(out.len(), 3);
+        let r = &out[1];
+        assert_eq!((r.kind, r.sequence, r.sender_id.as_str()), (pb::BackupItemKind::Reaction as i32, 7, "mika"));
+        assert_eq!(r.reaction.as_ref().map(|r| (r.sequence, r.emoji.as_str(), r.removed)), Some((4, "👍", false)));
+        // An older app's reader skips it; this one takes it back.
+        assert!(from_backup(r.clone()).is_none());
+        let (c, target, m) = reaction_from_backup(r).unwrap();
+        assert_eq!((c.as_str(), target, m.seq, m.user_id.as_str(), m.removed), ("c", 4, 7, "mika", false));
+        let gone = reaction_from_backup(&out[2]).unwrap().2;
+        assert!(gone.removed);
+        // A deleted message carries none.
+        item.deleted = true;
+        assert_eq!(to_backup_all("c", &item).len(), 1);
     }
 
     #[test]

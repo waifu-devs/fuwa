@@ -264,6 +264,8 @@ pub struct Msg {
     pub owner: bool,
     /// In a conversation or a secure channel: what its encryption adds.
     pub enc: Option<Rc<crate::ui::dm_view::EncBits>>,
+    /// Its reactions, where messages here can have them (`ui::reactions`).
+    pub reactions: Option<Rc<crate::ui::reactions::ReactBits>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -314,6 +316,9 @@ impl Row {
                 m.thread.digest(h);
                 m.can_delete.hash(h);
                 m.enc.as_ref().map(|e| (e.deleted, e.shared, e.files.len(), e.sending.len())).hash(h);
+                if let Some(r) = &m.reactions {
+                    r.digest(h);
+                }
             }
         }
     }
@@ -396,6 +401,16 @@ impl FuwaApp {
         // Pins are the home's in a shared channel, and need the instance to keep them.
         let pins_here = i.has("pins") && manage && !guest_side;
         let can_vote = !guest_side && !i.access(&server).pending;
+        // Reactions need the instance to keep them; in a guest's shared channel only the home clears them.
+        let reactions_here = i.has("reactions");
+        let timed_out = i
+            .my_member(&server)
+            .and_then(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()))
+            .is_some();
+        let can_react = reactions_here && {
+            let access = i.access(&server);
+            access.has_in(&channel, pb::Permission::AddReactions) && (!timed_out || access.owner)
+        };
         let now = crate::core::dms::now_ms();
         let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
         // My roles, which decide whether a role mention pings me.
@@ -537,6 +552,8 @@ impl FuwaApp {
             let agent = crate::ui::commands::AgentBits::of(i, &server, m, can_vote, &self.commands).map(Rc::new);
             let pinned = m.pinned_at.is_some();
             let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
+            let reactions = (reactions_here && m.kind == pb::MessageKind::Unspecified as i32)
+                .then(|| Rc::new(crate::ui::reactions::ReactBits::server(m, can_react, manage && !guest_side)));
             let mut h = DefaultHasher::new();
             bits.digest(&mut h);
             if let Some(agent) = &agent {
@@ -556,6 +573,9 @@ impl FuwaApp {
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
             (pinned, can_pin).hash(&mut h);
+            if let Some(r) = &reactions {
+                r.digest(&mut h);
+            }
             // Never 0, which means "not kept".
             let sig = h.finish() | 1;
             let (key, was) = match built.remove_entry(&m.id) {
@@ -604,6 +624,7 @@ impl FuwaApp {
                     agent: agent.clone(),
                     pinned,
                     can_pin,
+                    reactions: reactions.clone(),
                     decoration: decoration.clone(),
                     owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
                     enc: None,
@@ -652,6 +673,7 @@ impl FuwaApp {
                 thread: ThreadBits::default(),
                 agent: None,
                 pinned: false,
+                reactions: None,
                 can_pin: false,
                 decoration: None,
                 owner: me == owner_id,
@@ -1877,6 +1899,15 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     {
         text = text.child(buttons);
     }
+    // Drawn even with none yet, so the first one to come springs in.
+    if let Some(bits) = m.reactions.as_ref().filter(|_| !deleted && !m.pending) {
+        text = text.child(crate::ui::reactions::ReactionRow {
+            msg: reacts_as(&m.id),
+            bits: bits.clone(),
+            this: ctx.this.clone(),
+            key: ctx.key.clone(),
+        });
+    }
     if let Some(reason) = &m.failed {
         text = text.child(failed_line(m, reason, blocked.as_deref(), p, ctx));
     }
@@ -2013,6 +2044,12 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .child(body)
         .children(tools)
         .into_any_element()
+}
+
+/// The message a row's reactions are to: a secure thread's top copy
+/// (`top|<record>`) reacts to the message itself.
+fn reacts_as(id: &str) -> String {
+    id.strip_prefix("top|").unwrap_or(id).to_owned()
 }
 
 /// The web's chat Markdown (`.markdown.chat` in app.css): code on the muted
@@ -2281,6 +2318,18 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
                 let _ = this.update(cx, |this, cx| this.open_thread(mid.clone(), window, cx));
             },
         ));
+    }
+    if let Some(bits) = m.reactions.as_ref().filter(|r| r.can_add) {
+        let (this, mid, standard_only) = (ctx.this.clone(), reacts_as(&id), bits.standard_only);
+        frame = frame.child(
+            tool(format!("react|{id}"), "face-slightly-smiling-plus", t("chattools.reactions.add"), false, p).on_click(
+                move |ev, window, cx| {
+                    let at = ev.position();
+                    let _ =
+                        this.update(cx, |this, cx| this.open_react_picker(mid.clone(), standard_only, at, window, cx));
+                },
+            ),
+        );
     }
     if m.can_pin {
         let (this, mid, pinned, in_thread) = (ctx.this.clone(), id.clone(), m.pinned, ctx.thread.is_some());

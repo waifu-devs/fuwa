@@ -23,6 +23,7 @@ export {
   type LiveTileHandle,
   type MessageContext,
   type Outgoing,
+  type ReactionEmoji,
 } from "./agent.js";
 export {
   AlreadyExistsError,

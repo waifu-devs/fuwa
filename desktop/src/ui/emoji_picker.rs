@@ -187,7 +187,8 @@ impl EmojiPicker {
 impl FuwaApp {
     /// The smiley in the composer that opens the picker.
     pub(crate) fn emoji_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let open = self.emoji_open;
+        // Open over a message to react with, it isn't the composer's.
+        let open = self.emoji_open && self.reacting.is_none();
         let fg = p.primary;
         // A composer tool (`widgets::tool_button`) that also tilts and grows when pointed
         // at, and shrinks when pressed: the web's `whileHover={{ scale: 1.12, rotate: -10 }}`
@@ -224,6 +225,7 @@ impl FuwaApp {
 
     pub(crate) fn open_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_gifs(cx);
+        self.reacting = None;
         self.emoji_open = true;
         self.picker = None;
         self.emoji = EmojiPicker { recent: self.core.prefs().recent_emoji, ..Default::default() };
@@ -246,6 +248,15 @@ impl FuwaApp {
     /// servers', or none in direct messages.
     fn emoji_catalog(&self) -> Catalog {
         match self.target() {
+            // A reaction takes only the message's own server's emoji (and none where it's encrypted).
+            // In a channel shown from another server, that server's.
+            Some(Target::Channel { .. }) if self.reacting.is_some() => {
+                if self.reacting.as_ref().is_some_and(|r| r.standard_only) {
+                    Catalog::default()
+                } else {
+                    self.react_catalog()
+                }
+            }
             Some(Target::Channel { key, server, .. }) => self
                 .core
                 .shared
@@ -328,6 +339,10 @@ impl FuwaApp {
     /// Puts a picked emoji in the box and remembers it. The picker stays
     /// open, so a few can go in one after another.
     fn choose_emoji(&mut self, choice: &Choice, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reacting.is_some() {
+            self.react_with_picked(choice, window, cx);
+            return;
+        }
         let key = choice.key.clone();
         self.core.set_prefs(|prefs| {
             prefs.recent_emoji.retain(|k| *k != key);
@@ -395,8 +410,31 @@ impl FuwaApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if self.reacting.is_some() {
+            return None;
+        }
+        self.emoji_panel_as(false, p, window, cx)
+    }
+
+    /// The picker opened to react to a message, by the pointer that opened it
+    /// (`ui::reactions`): over everything, kept in the window.
+    pub(crate) fn react_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.reacting.as_ref()?;
+        let p = crate::ui::widgets::pal(cx);
+        self.emoji_panel_as(true, &p, window, cx)
+    }
+
+    /// The picker, over the composer or (`react`) by the pointer.
+    fn emoji_panel_as(
+        &mut self,
+        react: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let open = self.emoji_open;
-        let going = motion::kept("emoji-panel", open.then_some(&()), window, cx).map(|(_, t)| t);
+        let kept_as = if react { "react-panel" } else { "emoji-panel" };
+        let going = motion::kept(kept_as, open.then_some(&()), window, cx).map(|(_, t)| t);
         if !open && going.is_none() {
             return None;
         }
@@ -590,6 +628,35 @@ impl FuwaApp {
             .when_some(rail, |el, rail| el.child(rail))
             .child(grid)
             .child(preview(shown, p, fresh_open));
+        if react {
+            let at = self.reacting.as_ref().map(|r| r.at).unwrap_or_default();
+            let card = div()
+                .id("react-panel")
+                .occlude()
+                .when(open, |el| el.on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx))))
+                // Out of its corner by the pointer, as the composer's comes out of the button.
+                .child(motion::pop_in(body, "react-panel-in", (0.0, 1.0), 0.92, 8.0))
+                .when_some(going, |el, t| {
+                    crate::ui::chat::closing(
+                        el,
+                        t,
+                        crate::ui::chat::Gone { scale: 0.95, x: 0.0, y: 6.0, origin: (0.0, 1.0) },
+                    )
+                });
+            return Some(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(
+                        gpui_kit::anchored()
+                            .anchor(gpui_kit::Anchor::BottomLeft)
+                            .position(at)
+                            .snap_to_window_with_margin(gpui_kit::Edges::all(px(8.0)))
+                            .child(card),
+                    )
+                    .into_any_element(),
+            );
+        }
         let panel = div()
             .id("emoji-panel")
             .absolute()

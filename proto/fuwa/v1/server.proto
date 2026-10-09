@@ -355,6 +355,8 @@ enum AuditAction {
   AUDIT_ACTION_PROFILE_ITEM_CREATE = 57;
   AUDIT_ACTION_PROFILE_ITEM_UPDATE = 58;
   AUDIT_ACTION_PROFILE_ITEM_DELETE = 59;
+  // A moderator took reactions off a message. The target is its author.
+  AUDIT_ACTION_REACTIONS_CLEAR = 60;
 }
 
 // One thing someone did with a moderator's or manager's permission.

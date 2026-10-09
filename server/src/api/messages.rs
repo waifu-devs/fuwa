@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, commands, polls, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, commands, polls, reactions, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -281,6 +281,7 @@ pub(super) fn message_row(
                 components: vec![],
                 interaction: None,
                 pinned_at: r.get::<Option<i64>>(11)?.map(timestamp),
+                reactions: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -763,6 +764,7 @@ pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, o
 pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Message) -> Result<Vec<String>> {
     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
     polls::forget(conn, &message.id).await?;
+    reactions::forget(conn, &message.id).await?;
     let files = attachments::forget_message(conn, &message.id).await?;
     store::add_usage(
         conn,
@@ -1042,6 +1044,7 @@ impl MessageService for Api {
                             components: components.clone(),
                             interaction,
                             pinned_at: None,
+                            reactions: vec![],
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0
@@ -1100,6 +1103,7 @@ impl MessageService for Api {
                     .ok_or(Error::NotFound("message"))?;
                 shared::mark_guests(&conn, std::slice::from_mut(&mut message)).await?;
                 polls::mark_mine(&conn, &account.id, std::slice::from_mut(&mut message)).await?;
+                reactions::attach(&conn, &account.id, std::slice::from_mut(&mut message)).await?;
                 threads::attach(&conn, std::slice::from_mut(&mut message)).await?;
                 let author = authors(&conn, std::slice::from_ref(&message)).await?.into_iter().next();
                 Ok(pb::GetMessageResponse { message: Some(message), author })
@@ -1131,6 +1135,7 @@ impl MessageService for Api {
                         .filter(|m| m.channel_id == req.channel_id && m.thread_id.is_empty())
                         .ok_or(Error::NotFound("thread"))?;
                     shared::mark_guests(&conn, std::slice::from_mut(&mut found)).await?;
+                    reactions::attach(&conn, &account.id, std::slice::from_mut(&mut found)).await?;
                     threads::attach(&conn, std::slice::from_mut(&mut found)).await?;
                     parent = Some(found);
                 }
@@ -1147,6 +1152,7 @@ impl MessageService for Api {
                 .await?;
                 shared::mark_guests(&conn, &mut messages).await?;
                 polls::mark_mine(&conn, &account.id, &mut messages).await?;
+                reactions::attach(&conn, &account.id, &mut messages).await?;
                 threads::attach(&conn, &mut messages).await?;
                 let authors = authors(&conn, &[messages.as_slice(), parent.as_slice()].concat()).await?;
                 Ok(pb::ListMessagesResponse { messages, authors, has_more, parent })
@@ -1329,6 +1335,7 @@ impl MessageService for Api {
                         let with_thread = threads::may_delete_with_thread(conn, &access, &account.id, &message).await?;
                         conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
                         polls::forget(conn, &message.id).await?;
+                        reactions::forget(conn, &message.id).await?;
                         let mut files = attachments::forget_message(conn, &message.id).await?;
                         if with_thread && threads::others_replied(conn, &message.id, &account.id).await? {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
@@ -1415,6 +1422,42 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 self.list_pins_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn react(&self, request: Request<pb::ReactRequest>) -> Result<Response<pb::ReactResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.react_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn list_reactors(
+        &self,
+        request: Request<pb::ListReactorsRequest>,
+    ) -> Result<Response<pb::ListReactorsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.list_reactors_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn clear_reactions(
+        &self,
+        request: Request<pb::ClearReactionsRequest>,
+    ) -> Result<Response<pb::ClearReactionsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.clear_reactions_impl(&account, request.into_inner()).await
             }
             .await,
         )

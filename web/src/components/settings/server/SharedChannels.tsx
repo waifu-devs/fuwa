@@ -23,6 +23,7 @@ import {
   XIcon,
   BarChart3Icon,
   MessagesSquareIcon,
+  SmilePlusIcon,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -83,6 +84,7 @@ const SHAREABLE: readonly { permission: Permission; label: Key; icon: typeof Eye
   { permission: Permission.SEND_MESSAGES, label: "serversettings.permission.sendMessages", icon: MessageSquareIcon },
   { permission: Permission.EMBED_LINKS, label: "serversettings.permission.embedLinks", icon: LinkIcon },
   { permission: Permission.ATTACH_FILES, label: "serversettings.permission.attachFiles", icon: ImageIcon },
+  { permission: Permission.ADD_REACTIONS, label: "serversettings.permission.addReactions", icon: SmilePlusIcon },
   { permission: Permission.CREATE_POLLS, label: "serversettings.permission.createPolls", icon: BarChart3Icon },
   { permission: Permission.CREATE_THREADS, label: "serversettings.permission.createThreads", icon: MessagesSquareIcon },
 ];
@@ -716,8 +718,13 @@ function Allowed({ instanceKey, serverId, connection: c }: { instanceKey: string
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
   // And threads once it keeps them for guests.
   const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
+  // And reactions once it has them.
+  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions"));
   const toggles = SHAREABLE.filter(
-    (s) => (s.permission !== Permission.CREATE_POLLS || pollsShared) && (s.permission !== Permission.CREATE_THREADS || threadsShared),
+    (s) =>
+      (s.permission !== Permission.CREATE_POLLS || pollsShared) &&
+      (s.permission !== Permission.CREATE_THREADS || threadsShared) &&
+      (s.permission !== Permission.ADD_REACTIONS || reactionsHere),
   );
   const allowed = new Set(c.allowed);
   if (!c.home)

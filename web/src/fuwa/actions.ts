@@ -62,6 +62,7 @@ import {
   threadKey,
   updateInstance,
   upsertMessage,
+  upsertKeepingReactions,
   withThreadSummary,
   without,
   withSharedAuthors,
@@ -1525,10 +1526,12 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
       let messages = i.messages;
       for (const at of [channelId, message.threadId && threadKey(message.threadId)]) {
         const loaded = at ? messages[at] : undefined;
-        if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertMessage(loaded.items, message) } };
+        if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertKeepingReactions(loaded.items, message) } };
       }
       const parent = i.threadParents[message.id];
-      const threadParents = parent ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread } } : i.threadParents;
+      const threadParents = parent
+        ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread, reactions: message.reactions.length ? message.reactions : parent.reactions } }
+        : i.threadParents;
       return { ...i, messages, threadParents };
     });
   });

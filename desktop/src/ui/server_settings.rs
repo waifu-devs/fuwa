@@ -1586,6 +1586,10 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.messageUnpin",
             &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
         ),
+        A::ReactionsClear => t_with(
+            "serversettings.audit.s.reactionsClear",
+            &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
+        ),
         A::OwnershipTransfer => {
             t_with("serversettings.audit.s.ownership", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
         }

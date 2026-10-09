@@ -55,6 +55,7 @@ mod profile_card;
 mod profile_effect;
 mod profile_items;
 mod rail;
+mod reactions;
 mod recordings;
 mod screen_share;
 mod sealed_files;

@@ -115,6 +115,26 @@ pub struct Item {
     /// A thread reply its author also sent to the channel.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub in_channel: bool,
+    /// Reactions to it, each person's latest for each emoji (`core/reactions.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<ReactionMark>,
+}
+
+/// One person's reaction to a message with one emoji, as the record that
+/// said so last left it: on, or taken off (kept, so an older record can't
+/// put it back).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionMark {
+    pub user_id: String,
+    pub emoji: String,
+    /// The record that said it.
+    pub seq: i64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
+    /// In a secure channel: the reaction as its sender signed it, kept so it
+    /// can be passed on to devices added later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed: Option<Signed>,
 }
 
 fn is_zero(n: &i64) -> bool {
@@ -177,6 +197,7 @@ impl Item {
             files: Vec::new(),
             thread: 0,
             in_channel: false,
+            reactions: Vec::new(),
         }
     }
 }

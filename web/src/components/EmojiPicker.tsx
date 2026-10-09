@@ -170,6 +170,8 @@ export function EmojiPicker({
   children,
   placement = "top-end",
   closeOnPick = true,
+  open: shownOpen,
+  onOpenChange,
 }: {
   /** Every server emoji to offer (see `useCatalog`). */
   catalog?: Catalog;
@@ -181,8 +183,19 @@ export function EmojiPicker({
   children: (open: boolean) => ReactElement;
   placement?: Placement;
   closeOnPick?: boolean;
+  /** Opened from elsewhere too (a menu's "Add reaction"): whether it's open, and told when that changes. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = shownOpen ?? ownOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOwnOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   const { refs, floatingStyles, context, elements } = useFloating({
     open,
     onOpenChange: setOpen,
@@ -202,7 +215,7 @@ export function EmojiPicker({
       onPick(picked);
       if (closeOnPick) setOpen(false);
     },
-    [onPick, closeOnPick],
+    [onPick, closeOnPick, setOpen],
   );
 
   return (

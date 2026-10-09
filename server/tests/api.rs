@@ -9631,6 +9631,253 @@ async fn polls_cross_instances() {
     b.stop().await;
 }
 
+/// The next ReactionUpdated on a stream.
+async fn next_reaction(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> pb::ReactionUpdated {
+    loop {
+        let item = tokio::time::timeout(std::time::Duration::from_secs(10), stream.message())
+            .await
+            .expect("no reaction came")
+            .unwrap()
+            .unwrap();
+        if let Some(pb::event::Payload::ReactionUpdated(r)) = item.event.and_then(|e| e.payload) {
+            return r;
+        }
+    }
+}
+
+async fn reactor_ids(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    emoji: &str,
+) -> Result<Vec<String>, Code> {
+    c.messages
+        .list_reactors(authed(
+            token,
+            pb::ListReactorsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                emoji: emoji.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().users.into_iter().map(|u| u.id).collect())
+        .map_err(|s| s.code())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reactions_in_shared_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &rin, &guest).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let wave = add_emoji(&mut c, &instance, &juan, &home, "wave", 1).await;
+    let mine = add_emoji(&mut c, &instance, &mika, &guest, "mine", 2).await;
+    let hello = send(&mut c, &juan, &home, &dev.id, "hello").await.unwrap();
+    // A reaction from before the share shows to the guest's people.
+    react(&mut c, &juan, &home, &dev.id, &hello.id, "👍", true).await.unwrap();
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let mut at_home = events_of(&mut c, &juan, &home).await;
+    let mut at_guest = events_of(&mut c, &mika, &guest).await;
+    assert_eq!(reactions_on(&mut c, &rin, &guest, &shown.id, &hello.id).await, [("👍".to_string(), 1, false)]);
+
+    // A guest reacts, with a standard emoji and with the home's own.
+    let thumbs = react(&mut c, &rin, &guest, &shown.id, &hello.id, "👍", true).await.unwrap();
+    assert!(thumbs.count == 2 && thumbs.me);
+    let waved = react(&mut c, &rin, &guest, &shown.id, &hello.id, &format!("id:{}", wave.id), true).await.unwrap();
+    assert_eq!((waved.emoji_name.as_str(), waved.emoji_url.as_str(), waved.count), ("wave", wave.url.as_str(), 1));
+    // Not with the guest server's own: the home doesn't have it.
+    let theirs = react(&mut c, &rin, &guest, &shown.id, &hello.id, &format!("id:{}", mine.id), true).await;
+    assert_eq!(theirs.unwrap_err(), Code::NotFound);
+    let update = next_reaction(&mut at_home).await;
+    assert_eq!((update.channel_id.as_str(), update.user_id.as_str()), (dev.id.as_str(), rin_user.id.as_str()));
+    let update = next_reaction(&mut at_guest).await;
+    assert_eq!((update.channel_id.as_str(), update.user_id.as_str()), (shown.id.as_str(), rin_user.id.as_str()));
+    assert_eq!(update.reaction.unwrap().count, 2);
+    // Each side reads its own as its own, and who reacted names both.
+    assert_eq!(
+        reactions_on(&mut c, &rin, &guest, &shown.id, &hello.id).await,
+        [("👍".to_string(), 2, true), (":wave:".to_string(), 1, true)]
+    );
+    assert_eq!(
+        reactions_on(&mut c, &juan, &home, &dev.id, &hello.id).await,
+        [("👍".to_string(), 2, true), (":wave:".to_string(), 1, false)]
+    );
+    let both = vec![juan_user.id.clone(), rin_user.id.clone()];
+    assert_eq!(reactor_ids(&mut c, &mika, &guest, &shown.id, &hello.id, "👍").await.unwrap(), both);
+    assert_eq!(reactor_ids(&mut c, &juan, &home, &dev.id, &hello.id, "👍").await.unwrap(), both);
+    // The home's reactions reach the guest too.
+    react(&mut c, &juan, &home, &dev.id, &hello.id, "🎉", true).await.unwrap();
+    let update = loop {
+        let update = next_reaction(&mut at_guest).await;
+        if update.user_id == juan_user.id {
+            break update;
+        }
+    };
+    assert_eq!(update.reaction.unwrap().emoji, "🎉");
+
+    // Only the home clears reactions.
+    let clear = pb::ClearReactionsRequest {
+        server_id: guest.clone(),
+        channel_id: shown.id.clone(),
+        message_id: hello.id.clone(),
+        ..Default::default()
+    };
+    assert_eq!(c.messages.clear_reactions(authed(&mika, clear)).await.unwrap_err().code(), Code::FailedPrecondition);
+
+    // A home that takes reacting away from guests is heard; taking one's own off still works.
+    let connection = c
+        .shared
+        .list_connections(authed(&juan, pb::ListConnectionsRequest { server_id: home.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connections
+        .remove(0);
+    c.shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest {
+                server_id: home.clone(),
+                connection_id: connection.id.clone(),
+                allowed: vec![pb::Permission::SendMessages as i32],
+            },
+        ))
+        .await
+        .unwrap();
+    let refused = react(&mut c, &rin, &guest, &shown.id, &hello.id, "🎉", true).await.unwrap_err();
+    assert_eq!(refused, Code::PermissionDenied);
+    assert_eq!(react(&mut c, &rin, &guest, &shown.id, &hello.id, "👍", false).await.unwrap().count, 1);
+
+    // Someone the home keeps out reacts no more.
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: true,
+            },
+        ))
+        .await
+        .unwrap();
+    let kept_out = react(&mut c, &rin, &guest, &shown.id, &hello.id, &format!("id:{}", wave.id), false).await;
+    assert_eq!(kept_out.unwrap_err(), Code::PermissionDenied);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reactions_cross_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, juan_user, _) = sign_up(&mut ca, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let wave = add_emoji(&mut ca, &a, &juan, &home, "wave", 1).await;
+    let hello = send(&mut ca, &juan, &home, &dev.id, "hello").await.unwrap();
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert!(asked.allowed.contains(&(pb::Permission::AddReactions as i32)));
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+    let mut at_guest = events_of(&mut cb, &mika, &guest).await;
+    let juan_there = format!("{}@{origin_a}", juan_user.id);
+    let mika_there = format!("{}@{origin_b}", mika_user.id);
+
+    // The guest reacts with the home's emoji; its picture comes through its own instance.
+    let waved = react(&mut cb, &mika, &guest, &shown.id, &hello.id, &format!("id:{}", wave.id), true).await.unwrap();
+    assert!(waved.me && waved.count == 1);
+    assert!(waved.emoji_url.starts_with(&origin_b), "{}", waved.emoji_url);
+    react(&mut ca, &juan, &home, &dev.id, &hello.id, &format!("id:{}", wave.id), true).await.unwrap();
+    let update = loop {
+        let update = next_reaction(&mut at_guest).await;
+        if update.user_id != mika_user.id {
+            break update;
+        }
+    };
+    assert_eq!((update.channel_id.as_str(), update.user_id.as_str()), (shown.id.as_str(), juan_there.as_str()));
+    let reaction = update.reaction.unwrap();
+    assert!(reaction.count == 2 && !reaction.me && reaction.emoji_url.starts_with(&origin_b));
+    // Each side names its own people as they are, and the other's under their instance.
+    let listed = messages(&mut cb, &mika, &guest, &shown.id).await;
+    let there = &listed.iter().find(|m| m.id == hello.id).unwrap().reactions;
+    assert_eq!((there.len(), there[0].count, there[0].me), (1, 2, true));
+    let ids = |c: &mut Clients, token: &str, server: &str, channel: &str| {
+        let request = pb::ListReactorsRequest {
+            server_id: server.into(),
+            channel_id: channel.into(),
+            message_id: hello.id.clone(),
+            emoji_id: wave.id.clone(),
+            ..Default::default()
+        };
+        let mut client = c.messages.clone();
+        let request = authed(token, request);
+        async move {
+            client
+                .list_reactors(request)
+                .await
+                .unwrap()
+                .into_inner()
+                .users
+                .into_iter()
+                .map(|u| u.id)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(ids(&mut cb, &mika, &guest, &shown.id).await, [mika_user.id.clone(), juan_there.clone()]);
+    assert_eq!(ids(&mut ca, &juan, &home, &dev.id).await, [mika_there.clone(), juan_user.id.clone()]);
+    a.stop().await;
+    b.stop().await;
+}
+
 async fn add_emoji(
     c: &mut Clients,
     instance: &Instance,
@@ -10732,6 +10979,224 @@ async fn moderators_pin_messages_to_channels_and_threads() {
     let vault = new_channel(&mut c, &juan, &sid, "vault", pb::ChannelType::Secure).await.id;
     assert_eq!(pin(&mut c, &juan, &sid, &vault, &first.id, true).await.unwrap_err(), Code::FailedPrecondition);
     assert_eq!(try_pins(&mut c, &juan, &sid, &vault, "").await.unwrap_err(), Code::FailedPrecondition);
+}
+
+async fn react(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    emoji: &str,
+    reacted: bool,
+) -> Result<pb::Reaction, Code> {
+    let (emoji, emoji_id) = match emoji.strip_prefix("id:") {
+        Some(id) => (String::new(), id.to_string()),
+        None => (emoji.to_string(), String::new()),
+    };
+    c.messages
+        .react(authed(
+            token,
+            pb::ReactRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                emoji,
+                emoji_id,
+                reacted,
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().reaction.unwrap())
+        .map_err(|s| s.code())
+}
+
+/// A message's reactions as `token` reads them: (emoji or custom name, count, me).
+async fn reactions_on(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> Vec<(String, u32, bool)> {
+    messages(c, token, server_id, channel_id)
+        .await
+        .into_iter()
+        .find(|m| m.id == message_id)
+        .unwrap()
+        .reactions
+        .into_iter()
+        .map(|r| (if r.emoji_id.is_empty() { r.emoji } else { format!(":{}:", r.emoji_name) }, r.count, r.me))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn members_react_to_messages() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_REACTIONS_PER_MESSAGE", "3")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Reactions", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    join(&mut c, &rin, &sid).await;
+    let general = new_channel(&mut c, &juan, &sid, "general", pb::ChannelType::Text).await.id;
+    let quiet = new_channel(&mut c, &juan, &sid, "quiet", pb::ChannelType::Text).await.id;
+    set_permissions(&mut c, &juan, &sid, &quiet, vec![overwrite(&sid, T::Role, &[], &[P::AddReactions])])
+        .await
+        .unwrap();
+    let picture = upload(&mut c, &instance, &juan, pb::MediaPurpose::Emoji, png(64, 1)).await;
+    let wave = c
+        .emojis
+        .create_emoji(authed(
+            &juan,
+            pb::CreateEmojiRequest { server_id: sid.clone(), name: "wave".into(), url: picture },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let mut rin_events = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let hello = send(&mut c, &mika, &sid, &general, "hello").await.unwrap();
+    let shh = send(&mut c, &juan, &sid, &quiet, "shh").await.unwrap();
+
+    // Anyone who can talk reacts; reacting again changes nothing.
+    assert_eq!(react(&mut c, &mika, &sid, &general, &hello.id, "👍", true).await.unwrap().count, 1);
+    let again = react(&mut c, &mika, &sid, &general, &hello.id, "👍", true).await.unwrap();
+    assert!(again.count == 1 && again.me);
+    // The same emoji with a variation selector, as emoji lists write it, is the same reaction,
+    // shown as its first reactor wrote it.
+    let same = react(&mut c, &rin, &sid, &general, &hello.id, "👍\u{FE0F}", true).await.unwrap();
+    assert_eq!((same.emoji.as_str(), same.count), ("👍", 2));
+    let custom = format!("id:{}", wave.id);
+    let waved = react(&mut c, &rin, &sid, &general, &hello.id, &custom, true).await.unwrap();
+    assert_eq!((waved.emoji_name.as_str(), waved.count), ("wave", 1));
+    assert_eq!(
+        reactions_on(&mut c, &mika, &sid, &general, &hello.id).await,
+        [("👍".to_string(), 2, true), (":wave:".to_string(), 1, false)],
+        "in the order each was first used, with the reader's own marked"
+    );
+
+    // Words, two emoji at once and emoji the server doesn't have aren't reactions.
+    for bad in ["pizza", "👍 👍", ":wave:"] {
+        assert_eq!(react(&mut c, &rin, &sid, &general, &hello.id, bad, true).await.unwrap_err(), Code::InvalidArgument);
+    }
+    assert_eq!(
+        react(&mut c, &rin, &sid, &general, &hello.id, "id:01J9ZK8Q4V3M2N1P0R9S8T7U6W", true).await.unwrap_err(),
+        Code::NotFound
+    );
+
+    // The cap counts different emoji: a fourth is refused, more of one already there aren't.
+    react(&mut c, &juan, &sid, &general, &hello.id, "🎉", true).await.unwrap();
+    assert_eq!(react(&mut c, &juan, &sid, &general, &hello.id, "🍕", true).await.unwrap_err(), Code::ResourceExhausted);
+    assert_eq!(react(&mut c, &juan, &sid, &general, &hello.id, "👍", true).await.unwrap().count, 3);
+
+    // Who reacted, the earliest first, a page at a time.
+    let reactors = |after: &str| pb::ListReactorsRequest {
+        server_id: sid.clone(),
+        channel_id: general.clone(),
+        message_id: hello.id.clone(),
+        emoji: "👍".into(),
+        limit: 2,
+        after_id: after.into(),
+        ..Default::default()
+    };
+    let page = c.messages.list_reactors(authed(&rin, reactors(""))).await.unwrap().into_inner();
+    assert_eq!(page.users.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), ["mika", "rin"]);
+    assert!(page.has_more);
+    let rest = c.messages.list_reactors(authed(&rin, reactors(&rin_user.id))).await.unwrap().into_inner();
+    assert_eq!(rest.users.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), ["juan"]);
+    assert!(!rest.has_more);
+
+    // Without Add Reactions in a channel, no reacting there.
+    assert_eq!(react(&mut c, &rin, &sid, &quiet, &shh.id, "👍", true).await.unwrap_err(), Code::PermissionDenied);
+    react(&mut c, &juan, &sid, &quiet, &shh.id, "👍", true).await.unwrap();
+    // A message isn't another channel's to react to.
+    assert_eq!(react(&mut c, &juan, &sid, &quiet, &hello.id, "👍", true).await.unwrap_err(), Code::NotFound);
+
+    // Taking one's own off needs nothing, and goes down by one.
+    let off = react(&mut c, &rin, &sid, &general, &hello.id, "👍", false).await.unwrap();
+    assert!(off.count == 2 && !off.me);
+
+    // Only moderators clear others' reactions, and the log says so.
+    let clear = |emoji: &str| pb::ClearReactionsRequest {
+        server_id: sid.clone(),
+        channel_id: general.clone(),
+        message_id: hello.id.clone(),
+        emoji: emoji.into(),
+        ..Default::default()
+    };
+    assert_eq!(c.messages.clear_reactions(authed(&rin, clear("👍"))).await.unwrap_err().code(), Code::PermissionDenied);
+    c.messages.clear_reactions(authed(&juan, clear("👍"))).await.unwrap();
+    assert_eq!(
+        reactions_on(&mut c, &rin, &sid, &general, &hello.id).await,
+        [(":wave:".to_string(), 1, true), ("🎉".to_string(), 1, false)]
+    );
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let cleared: Vec<&pb::AuditEntry> =
+        log.entries.iter().filter(|e| e.action == pb::AuditAction::ReactionsClear as i32).collect();
+    assert_eq!(cleared.len(), 1);
+    assert_eq!(cleared[0].target_id, mika_user.id);
+
+    // A deleted custom emoji's reactions stop showing.
+    c.emojis
+        .delete_emoji(authed(&juan, pb::DeleteEmojiRequest { server_id: sid.clone(), emoji_id: wave.id.clone() }))
+        .await
+        .unwrap();
+    assert_eq!(reactions_on(&mut c, &rin, &sid, &general, &hello.id).await, [("🎉".to_string(), 1, false)]);
+
+    // Rin saw each change as it happened, counts in order.
+    let mut seen = Vec::new();
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(3), rin_events.message()).await.map(Result::unwrap)
+    {
+        match item.event.and_then(|e| e.payload) {
+            Some(pb::event::Payload::ReactionUpdated(r)) => {
+                if r.channel_id == quiet {
+                    seen.push("quiet".into());
+                    continue;
+                }
+                let reaction = r.reaction.unwrap();
+                assert!(!reaction.me, "events never say me");
+                let emoji = if reaction.emoji_id.is_empty() { reaction.emoji } else { reaction.emoji_name };
+                seen.push(format!("{}{emoji}{}", if r.added { "+" } else { "-" }, reaction.count));
+            }
+            Some(pb::event::Payload::ReactionsCleared(r)) => seen.push(format!("clear{}", r.emoji)),
+            _ => {}
+        }
+    }
+    assert_eq!(seen, ["+👍1", "+👍2", "+wave1", "+🎉1", "+👍3", "quiet", "-👍2", "clear👍"]);
+
+    // Deleting a message takes its reactions along.
+    c.messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: hello.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(react(&mut c, &rin, &sid, &general, &hello.id, "🎉", true).await.unwrap_err(), Code::NotFound);
+
+    // Secure channels' reactions go through their devices, not the server.
+    let vault = new_channel(&mut c, &juan, &sid, "vault", pb::ChannelType::Secure).await.id;
+    assert_eq!(react(&mut c, &juan, &sid, &vault, &shh.id, "👍", true).await.unwrap_err(), Code::FailedPrecondition);
+    instance.stop().await;
 }
 
 fn tile_content(title: &str, score: &str) -> pb::LiveTileContent {

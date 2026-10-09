@@ -1,12 +1,15 @@
 import { ArchiveIcon, BellIcon, BellOffIcon, CornerDownRightIcon, LockIcon, LockOpenIcon, MessagesSquareIcon, SearchIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { Channel, Member, User } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { archived, following, search, unreadIn, type Organized, type SecureThread } from "@/e2ee/threads";
 import { lineText, type Item } from "@/e2ee/vault";
 import { dmProblem, followSecureThread, lockSecureThread, markSecureThreadRead } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage, type ThreadNote } from "@/fuwa/store";
-import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/components/dm/DmView";
+import { EncryptedComposer, EncryptedMessages, type Reacting, type ThreadHooks } from "@/components/dm/DmView";
+import { useAccess } from "@/fuwa/hooks";
+import { instanceHas } from "@/lib/compat";
+import { hasIn } from "@/lib/permissions";
 import { Faces, PanelButton, SWAP, ThreadFilters, ThreadListHeader } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
@@ -27,6 +30,16 @@ import { cn } from "@/lib/utils";
 
 const NO_ITEMS: Item[] = [];
 const NO_NOTE: ThreadNote = { follows: {}, read: {} };
+
+/**
+ * Reactions in a secure channel: they travel inside the encryption, so the
+ * server can't check Add Reactions; the app keeps to it as the server would.
+ */
+export function useSecureReacting(instanceKey: string, serverId: string, channelId: string): Reacting | undefined {
+  const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions"));
+  const canAdd = hasIn(useAccess(instanceKey, serverId), channelId, Permission.ADD_REACTIONS);
+  return useMemo(() => (here ? { canAdd } : undefined), [here, canAdd]);
+}
 
 export const useArchiveHours = (instanceKey: string, serverId: string) =>
   useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.threadArchiveHours ?? 0);
@@ -196,6 +209,7 @@ export function SecureThreadPanel({
   const locked = !!thread?.locked;
   const last = lines.at(-1)?.seq ?? 0;
   const pendingIn = useCallback((p: PendingMessage) => p.thread === parent, [parent]);
+  const reacting = useSecureReacting(instanceKey, serverId, id);
   const hooks = useMemo<ThreadHooks>(
     () => ({
       under: (i) => <SecureAlsoSent item={i} inThread onOpen={() => {}} />,
@@ -254,6 +268,7 @@ export function SecureThreadPanel({
         lines={lines}
         pendingIn={pendingIn}
         threads={hooks}
+        reacting={reacting}
       />
       <EncryptedComposer
         instanceKey={instanceKey}
