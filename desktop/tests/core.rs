@@ -1006,6 +1006,49 @@ fn servers_share_a_channel() {
     assert_eq!(from.as_deref(), Some("Night owls"));
     assert_eq!(name, "Bob");
 
+    // Alice lets Bob's server react there; Bob reacts from his side and Alice sees it live,
+    // and her own reaction reaches him.
+    let (core, k, sid, id2) = (alice.clone(), key.clone(), tea.id.clone(), connection.clone());
+    let allowed = vec![pb::Permission::SendMessages, pb::Permission::AddReactions];
+    wait(&alice, async move { core.update_connection(&k, &sid, &id2, allowed).await }).unwrap();
+    let react = |core: &Arc<Core>, sid: &str, cid: &str, on: bool| {
+        let (c, k, sid, cid, mid) = (core.clone(), key.clone(), sid.to_owned(), cid.to_owned(), id.clone());
+        let r = pb::Reaction { emoji: "🦉".into(), ..Default::default() };
+        wait(core, async move { c.react(&k, &sid, &cid, &mid, r, on).await })
+    };
+    react(&bob, &owls.id, &shown.id, true).unwrap();
+    let owl_count = |core: &Core, at: &str| {
+        core.shared.read(|s| {
+            s.instance(&key).unwrap().messages[at]
+                .items
+                .iter()
+                .find(|m| m.id == id)
+                .and_then(|m| m.reactions.first().map(|r| (r.count, r.me)))
+        })
+    };
+    let (k2, g2, i2) = (key.clone(), general.clone(), id.clone());
+    until(&alice, "Bob's reaction from the other server", move |s| {
+        s.instance(&k2).unwrap().messages[&g2].items.iter().any(|m| m.id == i2 && !m.reactions.is_empty())
+    });
+    assert_eq!(owl_count(&alice, &general), Some((1, false)));
+    react(&alice, &tea.id, &general, true).unwrap();
+    let (k2, s2, i2) = (key.clone(), shown.id.clone(), id.clone());
+    until(&bob, "Alice's reaction at the guest", move |s| {
+        s.instance(&k2).unwrap().messages[&s2]
+            .items
+            .iter()
+            .any(|m| m.id == i2 && m.reactions.first().is_some_and(|r| r.count == 2))
+    });
+    assert_eq!(owl_count(&bob, &shown.id), Some((2, true)));
+    // Who reacted, asked from the guest's side.
+    let (core, k, sid, cid, mid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone(), id.clone());
+    let emoji = fuwa_desktop::core::reactions::EmojiKey::standard("🦉");
+    let page = wait(&bob, async move { core.list_reactors(&k, &sid, &cid, &mid, &emoji, "").await }).unwrap();
+    assert_eq!(page.users.len(), 2);
+    // Only the home clears.
+    let (core, k, sid, cid, mid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone(), id.clone());
+    assert!(wait(&bob, async move { core.clear_reactions(&k, &sid, &cid, &mid, None).await }).is_err());
+
     // Alice keeps Bob out of the channel; he's on her list of people kept out.
     let bob_id = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
     let (core, k, sid, cid, uid) = (alice.clone(), key.clone(), tea.id.clone(), general.clone(), bob_id.clone());
@@ -1105,8 +1148,28 @@ fn secure_channels_stay_between_devices() {
     });
     send(&alice, "carol is coming too");
     said(&bob, "carol is coming too");
+    // Bob reacts, signed like a text; Alice tallies it, shown on Bob's own device at once.
+    let coming = bob.shared.read(|s| {
+        s.instance(&key).unwrap().dms.items[&cid].iter().find(|i| i.content == "carol is coming too").unwrap().seq
+    });
+    {
+        let (c, key, cid) = (bob.clone(), key.clone(), cid.clone());
+        wait(&bob, async move { c.react_dm(&key, &cid, coming, "🥨", true).await }).unwrap();
+    }
+    let reacted = |core: &Core, what: &str| {
+        let (key, cid) = (key.clone(), cid.clone());
+        until(core, what, move |s| {
+            s.instance(&key).unwrap().dms.items[&cid].iter().any(|i| {
+                i.seq == coming && i.reactions.iter().any(|m| m.emoji == "🥨" && !m.removed && m.signed.is_some())
+            })
+        });
+    };
+    reacted(&bob, "Bob's own reaction, read back");
+    reacted(&alice, "Bob's reaction");
     join(&carol);
     said(&carol, "carol is coming too");
+    // Passed on with the history, still signed.
+    reacted(&carol, "Bob's reaction in the shared history");
     // Only what was said since sharing was turned on is passed on.
     assert!(carol.shared.read(|s| {
         let texts: Vec<_> =

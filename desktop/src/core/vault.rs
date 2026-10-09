@@ -131,6 +131,10 @@ pub struct ReactionMark {
     pub seq: i64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removed: bool,
+    /// In a secure channel: the reaction as its sender signed it, kept so it
+    /// can be passed on to devices added later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed: Option<Signed>,
 }
 
 fn is_zero(n: &i64) -> bool {

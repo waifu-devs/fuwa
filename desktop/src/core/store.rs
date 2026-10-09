@@ -107,6 +107,10 @@ pub struct InstanceState {
     pub profile_items: Vec<pb::ProfileItem>,
     /// Per server, the profile items it offers, oldest first.
     pub server_items: HashMap<String, Vec<pb::ProfileItem>>,
+    /// The home server's custom emoji for a channel shown here from another
+    /// server, by channel id, once asked (None while asking): what reactions
+    /// there can use (`reactions::Core::want_home_emojis`).
+    pub home_emojis: HashMap<String, Option<Vec<pb::Emoji>>>,
 }
 
 impl InstanceState {
@@ -146,6 +150,7 @@ impl InstanceState {
             recent_sign_ins: Vec::new(),
             profile_items: Vec::new(),
             server_items: HashMap::new(),
+            home_emojis: HashMap::new(),
         }
     }
 

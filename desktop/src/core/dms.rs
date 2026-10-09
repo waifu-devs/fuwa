@@ -112,6 +112,8 @@ pub struct DmState {
     pub calls: HashMap<String, pb::DmCall>,
     /// Per secure channel: whether earlier messages are passed on to people added later.
     pub secure_history: HashMap<String, bool>,
+    /// Your reactions on their way, shown before they're read back (`reactions`).
+    pub reacting: Vec<crate::core::reactions::PendingReaction>,
     /// Per conversation, once opened: its pins (`pins`).
     pub pins: HashMap<String, crate::core::pins::DmPinList>,
     /// Per secure channel: the threads you follow or stopped following, and
@@ -1241,19 +1243,48 @@ impl DmEngine {
             // A reaction: kept on the message it's to, never shown as a line of its own,
             // counted as unread or notified. In a secure channel only signed ones count.
             Some(Body::Reaction(r)) if room.server().is_none() || signed.is_some() => {
-                if !crate::core::reactions::valid_emoji(&r.emoji) {
-                    return Ok(());
-                }
-                if let Some(mut target) = inner.known(change, &id, r.sequence)?
-                    && target.kind == ItemKind::Text
-                    && !target.deleted
-                    && crate::core::reactions::mark(&mut target.reactions, sender_id, &r.emoji, seq, r.removed)
-                {
-                    change.items.push((id, target));
-                }
+                self.take_reaction(inner, change, room, seq, at, sender_id, &r, signed)?;
             }
             // Anything else is from a newer app: there's nothing to show for it here.
             Some(Body::Signed(_) | Body::History(_) | Body::Thread(_) | Body::Reaction(_)) | None => {}
+        }
+        Ok(())
+    }
+
+    /// A reaction from `sender_id` in record `seq`, kept on the message it's
+    /// to. In a secure channel it counts only from someone this device sees
+    /// with Add Reactions there, though anyone may take their own off.
+    #[allow(clippy::too_many_arguments)]
+    fn take_reaction(
+        &self,
+        inner: &mut Inner,
+        change: &mut Change,
+        room: &Room,
+        seq: i64,
+        at: i64,
+        sender_id: &str,
+        r: &pb::DirectMessageReaction,
+        signed: Option<Signed>,
+    ) -> Result<()> {
+        if !crate::core::reactions::valid_emoji(&r.emoji) {
+            return Ok(());
+        }
+        if let Some(server) = room.server()
+            && !r.removed
+            && !self.shared.read(|s| {
+                s.instance(&self.key)
+                    .is_none_or(|i| crate::core::reactions::may_react(i, server, room.id(), sender_id, at))
+            })
+        {
+            return Ok(());
+        }
+        let id = room.id().to_owned();
+        if let Some(mut target) = inner.known(change, &id, r.sequence)?
+            && target.kind == ItemKind::Text
+            && !target.deleted
+            && crate::core::reactions::mark(&mut target.reactions, sender_id, &r.emoji, seq, r.removed, signed)
+        {
+            change.items.push((id, target));
         }
         Ok(())
     }
@@ -1317,7 +1348,7 @@ impl DmEngine {
             let Some(o) = open_signed(&id, &entry.payload, &entry.signature, &entry.signature_key) else { continue };
             if matches!(
                 o.payload.content.as_ref().and_then(|c| c.body.as_ref()),
-                Some(Body::Text(_) | Body::Edit(_) | Body::Thread(_))
+                Some(Body::Text(_) | Body::Edit(_) | Body::Thread(_) | Body::Reaction(_))
             ) {
                 opened.push((entry.sequence, o, fuwa_e2ee::device_id(&entry.signature_key)));
             }
@@ -1373,6 +1404,10 @@ impl DmEngine {
                     item.signed = Some(o.signed.clone());
                     item.shared_by = by.to_owned();
                     change.items.push((id.clone(), item));
+                }
+                // A reaction, at its own record: on a message this device has.
+                Some(Body::Reaction(r)) => {
+                    self.take_reaction(inner, change, room, *seq, at, sender, r, Some(o.signed.clone()))?;
                 }
                 Some(Body::Edit(edit)) => {
                     if let Some(mut target) = inner.known(change, &id, *seq)?
@@ -1459,17 +1494,18 @@ impl DmEngine {
         let mut entries: Vec<pb::SharedEntry> = Vec::new();
         let mut size = 0;
         for i in items {
-            let mut parts: Vec<pb::SharedEntry> = i
-                .signed
-                .iter()
-                .chain(i.edit_signed.iter())
-                .map(|s| pb::SharedEntry {
-                    sequence: i.seq,
-                    payload: s.payload.clone(),
-                    signature: s.signature.clone(),
-                    signature_key: s.key.clone(),
-                })
-                .collect();
+            let entry = |sequence: i64, s: &Signed| pb::SharedEntry {
+                sequence,
+                payload: s.payload.clone(),
+                signature: s.signature.clone(),
+                signature_key: s.key.clone(),
+            };
+            let mut parts: Vec<pb::SharedEntry> =
+                i.signed.iter().chain(i.edit_signed.iter()).map(|s| entry(i.seq, s)).collect();
+            // Its reactions that are on, each at its own record, after it.
+            let mut reactions: Vec<_> = i.reactions.iter().filter(|m| !m.removed && m.seq > since).collect();
+            reactions.sort_by_key(|m| m.seq);
+            parts.extend(reactions.into_iter().filter_map(|m| Some(entry(m.seq, m.signed.as_ref()?))));
             let bytes: usize =
                 parts.iter().map(|p| p.payload.len() + p.signature.len() + p.signature_key.len() + 16).sum();
             if size + bytes > HISTORY_BYTES || entries.len() + parts.len() > HISTORY_ENTRIES {

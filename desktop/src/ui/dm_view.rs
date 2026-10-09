@@ -372,7 +372,7 @@ pub(crate) fn encrypted_rows(
         if let Some(can_add) = react.filter(|_| !item.deleted) {
             let name_of = |u: &str| who(u).name;
             m.reactions =
-                Some(Rc::new(crate::ui::reactions::ReactBits::encrypted(&item.reactions, &me_id, can_add, &name_of)));
+                Some(Rc::new(crate::ui::reactions::ReactBits::encrypted_item(i, id, item, can_add, &name_of)));
         }
         if let Some(l) = &lines {
             (l.dress)(item, &mut m);

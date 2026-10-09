@@ -401,8 +401,8 @@ impl FuwaApp {
         // Pins are the home's in a shared channel, and need the instance to keep them.
         let pins_here = i.has("pins") && manage && !guest_side;
         let can_vote = !guest_side && !i.access(&server).pending;
-        // Reactions need the instance to keep them, and aren't in channels shared between servers yet.
-        let reactions_here = i.has("reactions") && shared.is_none();
+        // Reactions need the instance to keep them; in a guest's shared channel only the home clears them.
+        let reactions_here = i.has("reactions");
         let timed_out = i
             .my_member(&server)
             .and_then(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()))
@@ -553,7 +553,7 @@ impl FuwaApp {
             let pinned = m.pinned_at.is_some();
             let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
             let reactions = (reactions_here && m.kind == pb::MessageKind::Unspecified as i32)
-                .then(|| Rc::new(crate::ui::reactions::ReactBits::server(i, &server, m, can_react, manage)));
+                .then(|| Rc::new(crate::ui::reactions::ReactBits::server(m, can_react, manage && !guest_side)));
             let mut h = DefaultHasher::new();
             bits.digest(&mut h);
             if let Some(agent) = &agent {
@@ -1902,7 +1902,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     // Drawn even with none yet, so the first one to come springs in.
     if let Some(bits) = m.reactions.as_ref().filter(|_| !deleted && !m.pending) {
         text = text.child(crate::ui::reactions::ReactionRow {
-            msg: m.id.clone(),
+            msg: reacts_as(&m.id),
             bits: bits.clone(),
             this: ctx.this.clone(),
             key: ctx.key.clone(),
@@ -2044,6 +2044,12 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         .child(body)
         .children(tools)
         .into_any_element()
+}
+
+/// The message a row's reactions are to: a secure thread's top copy
+/// (`top|<record>`) reacts to the message itself.
+fn reacts_as(id: &str) -> String {
+    id.strip_prefix("top|").unwrap_or(id).to_owned()
 }
 
 /// The web's chat Markdown (`.markdown.chat` in app.css): code on the muted
@@ -2314,7 +2320,7 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
         ));
     }
     if let Some(bits) = m.reactions.as_ref().filter(|r| r.can_add) {
-        let (this, mid, standard_only) = (ctx.this.clone(), id.clone(), bits.standard_only);
+        let (this, mid, standard_only) = (ctx.this.clone(), reacts_as(&id), bits.standard_only);
         frame = frame.child(
             tool(format!("react|{id}"), "face-slightly-smiling-plus", t("chattools.reactions.add"), false, p).on_click(
                 move |ev, window, cx| {

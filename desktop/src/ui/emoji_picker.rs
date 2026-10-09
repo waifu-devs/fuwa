@@ -249,13 +249,13 @@ impl FuwaApp {
     fn emoji_catalog(&self) -> Catalog {
         match self.target() {
             // A reaction takes only the message's own server's emoji (and none where it's encrypted).
-            Some(Target::Channel { key, server, .. }) if self.reacting.is_some() => {
-                let standard_only = self.reacting.as_ref().is_some_and(|r| r.standard_only);
-                let own = self.core.shared.read(|s| {
-                    let i = s.instance(&key).filter(|_| !standard_only)?;
-                    Some(Catalog::own(i.server(&server)?, i.emojis.get(&server).map(Vec::as_slice).unwrap_or_default()))
-                });
-                own.unwrap_or_default()
+            // In a channel shown from another server, that server's.
+            Some(Target::Channel { .. }) if self.reacting.is_some() => {
+                if self.reacting.as_ref().is_some_and(|r| r.standard_only) {
+                    Catalog::default()
+                } else {
+                    self.react_catalog()
+                }
             }
             Some(Target::Channel { key, server, .. }) => self
                 .core

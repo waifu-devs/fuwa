@@ -12,7 +12,7 @@ use crate::core::api::Problem;
 use crate::core::dms::{Content, DmError};
 use crate::core::store::InstanceState;
 use crate::core::threads::thread_key;
-use crate::core::vault::ReactionMark;
+use crate::core::vault::{ReactionMark, Signed};
 use crate::core::{Core, reports};
 use crate::pb;
 use crate::rpc;
@@ -177,19 +177,73 @@ pub fn same(a: &str, b: &str) -> bool {
 /// Notes what a record (`seq`) from `user` said about their reaction with
 /// `emoji`: the latest record wins. False when it changes nothing (an older
 /// or repeated record).
-pub fn mark(marks: &mut Vec<ReactionMark>, user: &str, emoji: &str, seq: i64, removed: bool) -> bool {
+/// In a secure channel `signed` is the record as its sender signed it.
+pub fn mark(
+    marks: &mut Vec<ReactionMark>,
+    user: &str,
+    emoji: &str,
+    seq: i64,
+    removed: bool,
+    signed: Option<Signed>,
+) -> bool {
     match marks.iter_mut().find(|m| m.user_id == user && same(&m.emoji, emoji)) {
         Some(m) if m.seq >= seq => false,
         Some(m) => {
             m.seq = seq;
             m.removed = removed;
+            m.signed = signed;
             true
         }
         None => {
-            marks.push(ReactionMark { user_id: user.to_owned(), emoji: emoji.to_owned(), seq, removed });
+            marks.push(ReactionMark { user_id: user.to_owned(), emoji: emoji.to_owned(), seq, removed, signed });
             true
         }
     }
+}
+
+/// Your reactions on their way, put over what's been read back, so they show
+/// at once: each `(emoji, on)` as your latest.
+pub fn with_pending<'a>(
+    marks: &[ReactionMark],
+    me: &str,
+    pending: impl IntoIterator<Item = (&'a str, bool)>,
+) -> Vec<ReactionMark> {
+    let mut out = marks.to_vec();
+    for (emoji, on) in pending {
+        mark(&mut out, me, emoji, i64::MAX, !on, None);
+    }
+    out
+}
+
+/// Whether someone may react in a secure channel, as this device sees the
+/// server: Add Reactions in the channel, and not timed out at `at`. Without
+/// the server's members to go by, it can't tell, and takes it.
+pub fn may_react(i: &InstanceState, server_id: &str, channel_id: &str, user_id: &str, at: i64) -> bool {
+    let (Some(server), Some(members)) = (i.server(server_id), i.members.get(server_id)) else { return true };
+    let Some(member) = members.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id)) else {
+        return false;
+    };
+    let access = crate::core::permissions::access_of(
+        server_id,
+        &server.owner_id,
+        i.roles.get(server_id).map(Vec::as_slice).unwrap_or_default(),
+        i.channels.get(server_id).map(Vec::as_slice).unwrap_or_default(),
+        user_id,
+        &member.role_ids,
+        member.pending,
+    );
+    access.has_in(channel_id, pb::Permission::AddReactions)
+        && (access.owner || crate::core::moderation::timed_out_until(member, at).is_none())
+}
+
+/// A reaction on its way from this device in an encrypted place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingReaction {
+    pub room: String,
+    pub sequence: i64,
+    pub emoji: String,
+    pub on: bool,
+    pub nonce: u64,
 }
 
 /// A message's reactions from its marks, as the instance would count them:
@@ -232,6 +286,35 @@ fn missing() -> Problem {
 }
 
 impl Core {
+    /// Asks, once a run, for the home server's custom emoji in a channel this
+    /// server shows from another (ListEmojis with the channel), for reacting
+    /// there. Asked again next time if it fails.
+    pub fn want_home_emojis(self: &std::sync::Arc<Self>, key: &str, server_id: &str, channel_id: &str) {
+        let asked = self
+            .shared
+            .instance(key, |i| {
+                let asked = i.home_emojis.contains_key(channel_id);
+                i.home_emojis.entry(channel_id.to_owned()).or_insert(None);
+                asked
+            })
+            .unwrap_or(true);
+        let Some(api) = self.api(key).filter(|_| !asked) else { return };
+        let (core, key, server_id, channel_id) =
+            (self.clone(), key.to_owned(), server_id.to_owned(), channel_id.to_owned());
+        drop(self.spawn(async move {
+            let req = pb::ListEmojisRequest { server_id, channel_id: channel_id.clone() };
+            let res = rpc!(api.emojis(), list_emojis(req)).await;
+            core.shared.instance(&key, |i| match res {
+                Ok(res) => {
+                    i.home_emojis.insert(channel_id, Some(res.emojis));
+                }
+                Err(_) => {
+                    i.home_emojis.remove(&channel_id);
+                }
+            });
+        }));
+    }
+
     /// Reacts to a message in a channel or thread with `r`'s emoji, or takes
     /// your reaction off. It shows at once, and goes back if the instance says no.
     pub async fn react(
@@ -370,7 +453,13 @@ impl Core {
             return Err(DmError(crate::core::i18n::t("chattools.reactions.failed")));
         }
         reports::used(if on { "message.react" } else { "message.unreact" });
-        self.send_dm(key, room, Content::React { sequence, emoji: emoji.to_owned(), removed: !on }).await
+        // It shows at once, and goes back if it can't be sent; once sent, this device has read it back.
+        let nonce = crate::core::dms::new_nonce();
+        let pending = PendingReaction { room: room.to_owned(), sequence, emoji: emoji.to_owned(), on, nonce };
+        self.shared.instance(key, |i| i.dms.reacting.push(pending));
+        let res = self.send_dm(key, room, Content::React { sequence, emoji: emoji.to_owned(), removed: !on }).await;
+        self.shared.instance(key, |i| i.dms.reacting.retain(|p| p.nonce != nonce));
+        res
     }
 }
 
@@ -482,37 +571,91 @@ mod tests {
     #[test]
     fn latest_record_wins_in_encrypted_places() {
         let mut marks = Vec::new();
-        assert!(mark(&mut marks, "ann", "👍", 5, false));
-        assert!(mark(&mut marks, "me", "👍", 6, false));
-        assert!(mark(&mut marks, "ann", "❤️", 7, false));
+        assert!(mark(&mut marks, "ann", "👍", 5, false, None));
+        assert!(mark(&mut marks, "me", "👍", 6, false, None));
+        assert!(mark(&mut marks, "ann", "❤️", 7, false, None));
         // Read again, or an older record: nothing changes.
-        assert!(!mark(&mut marks, "ann", "👍", 5, false));
-        assert!(!mark(&mut marks, "ann", "👍", 4, true));
+        assert!(!mark(&mut marks, "ann", "👍", 5, false, None));
+        assert!(!mark(&mut marks, "ann", "👍", 4, true, None));
         let t = tally(&marks, "me");
         assert_eq!(t.len(), 2);
         assert_eq!((t[0].emoji.as_str(), t[0].count, t[0].me), ("👍", 2, true));
         assert_eq!((t[1].emoji.as_str(), t[1].count, t[1].me), ("❤️", 1, false));
         assert_eq!(reactors(&marks, "👍"), vec!["ann".to_owned(), "me".to_owned()]);
         // Taken off, then an older "on" arriving late can't put it back.
-        assert!(mark(&mut marks, "me", "👍", 9, true));
-        assert!(!mark(&mut marks, "me", "👍", 8, false));
+        assert!(mark(&mut marks, "me", "👍", 9, true, None));
+        assert!(!mark(&mut marks, "me", "👍", 8, false, None));
         let t = tally(&marks, "me");
         assert_eq!((t[0].count, t[0].me), (1, false));
         // Everyone off: the emoji goes.
-        assert!(mark(&mut marks, "ann", "👍", 10, true));
+        assert!(mark(&mut marks, "ann", "👍", 10, true, None));
         assert_eq!(tally(&marks, "me").len(), 1);
     }
 
     #[test]
     fn variation_selectors_dont_split_a_reaction() {
         let mut marks = Vec::new();
-        assert!(mark(&mut marks, "ann", "👍", 1, false));
-        assert!(mark(&mut marks, "bo", "👍\u{fe0f}", 2, false));
-        assert!(mark(&mut marks, "ann", "👍\u{fe0f}", 3, true));
+        assert!(mark(&mut marks, "ann", "👍", 1, false, None));
+        assert!(mark(&mut marks, "bo", "👍\u{fe0f}", 2, false, None));
+        assert!(mark(&mut marks, "ann", "👍\u{fe0f}", 3, true, None));
         let t = tally(&marks, "bo");
         assert_eq!((t.len(), t[0].count, t[0].me), (1, 1, true));
         assert_eq!(reactors(&marks, "👍"), vec!["bo".to_owned()]);
         assert!(EmojiKey::standard("👍").is(&pb::Reaction { emoji: "👍\u{fe0f}".into(), ..Default::default() }));
+    }
+
+    #[test]
+    fn your_reactions_on_their_way_show_over_the_tally() {
+        let mut marks = Vec::new();
+        mark(&mut marks, "ann", "👍", 5, false, None);
+        mark(&mut marks, "me", "🎉", 6, false, None);
+        let shown = with_pending(&marks, "me", [("👍️", true), ("🎉", false)]);
+        let t = tally(&shown, "me");
+        assert_eq!(t.len(), 1);
+        assert_eq!((t[0].count, t[0].me), (2, true));
+        // Nothing changes underneath.
+        assert_eq!(tally(&marks, "me").len(), 2);
+    }
+
+    #[test]
+    fn secure_channels_take_reactions_only_from_who_may_react() {
+        let mut i = InstanceState::new("k", "http://x");
+        let server = pb::Server { id: "s".into(), owner_id: "owner".into(), ..Default::default() };
+        i.servers.push(server);
+        let everyone = pb::Role {
+            id: "s".into(),
+            server_id: "s".into(),
+            permissions: vec![pb::Permission::ViewChannels as i32, pb::Permission::AddReactions as i32],
+            ..Default::default()
+        };
+        i.roles.insert("s".into(), vec![everyone]);
+        let quiet = pb::PermissionOverwrite {
+            target_id: "muted".into(),
+            target: pb::OverwriteTarget::Member as i32,
+            deny: vec![pb::Permission::AddReactions as i32],
+            ..Default::default()
+        };
+        let channel = pb::Channel {
+            id: "c".into(),
+            r#type: pb::ChannelType::Secure as i32,
+            permission_overwrites: vec![quiet],
+            ..Default::default()
+        };
+        i.channels.insert("s".into(), vec![channel]);
+        // Without the members to go by, it can't tell.
+        assert!(may_react(&i, "s", "c", "ann", 0));
+        let member = |id: &str| pb::Member {
+            user: Some(pb::User { id: id.into(), ..Default::default() }),
+            ..Default::default()
+        };
+        let mut timed = member("late");
+        timed.timed_out_until = Some(prost_types::Timestamp { seconds: 100, nanos: 0 });
+        i.members.insert("s".into(), vec![member("ann"), member("muted"), timed]);
+        assert!(may_react(&i, "s", "c", "ann", 0));
+        assert!(!may_react(&i, "s", "c", "muted", 0));
+        assert!(!may_react(&i, "s", "c", "stranger", 0));
+        assert!(!may_react(&i, "s", "c", "late", 50_000));
+        assert!(may_react(&i, "s", "c", "late", 200_000));
     }
 
     #[test]

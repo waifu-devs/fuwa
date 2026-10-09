@@ -64,6 +64,7 @@ impl Chip {
             emoji_id: self.key.emoji_id.clone(),
             emoji_name: self.name.clone(),
             animated: self.animated,
+            emoji_url: self.url.clone().unwrap_or_default(),
             count: self.count,
             me: self.me,
         }
@@ -90,9 +91,9 @@ impl ReactBits {
         (self.can_add, self.can_clear, self.standard_only).hash(h);
     }
 
-    /// A server message's reactions; a custom emoji the server no longer has isn't shown.
-    pub fn server(i: &InstanceState, server: &str, m: &pb::Message, can_add: bool, can_clear: bool) -> Self {
-        let emojis = i.emojis.get(server);
+    /// A server message's reactions. A custom emoji comes with its picture
+    /// (the home server's, in a shared channel); one without isn't shown.
+    pub fn server(m: &pb::Message, can_add: bool, can_clear: bool) -> Self {
         let chips = m
             .reactions
             .iter()
@@ -101,7 +102,7 @@ impl ReactBits {
                 let url = if r.emoji_id.is_empty() {
                     None
                 } else {
-                    Some(emojis?.iter().find(|e| e.id == r.emoji_id)?.url.clone())
+                    Some(Some(r.emoji_url.clone()).filter(|u| !u.is_empty())?)
                 };
                 Some(Chip {
                     key: EmojiKey::of(r),
@@ -115,6 +116,25 @@ impl ReactBits {
             })
             .collect();
         Self { chips, can_add, can_clear, standard_only: false }
+    }
+
+    /// An encrypted message's reactions in `room`, with yours on their way shown already.
+    pub fn encrypted_item(
+        i: &InstanceState,
+        room: &str,
+        item: &crate::core::vault::Item,
+        can_add: bool,
+        name_of: &dyn Fn(&str) -> String,
+    ) -> Self {
+        let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
+        let pending = i
+            .dms
+            .reacting
+            .iter()
+            .filter(|p| p.room == room && p.sequence == item.seq)
+            .map(|p| (p.emoji.as_str(), p.on));
+        let marks = crate::core::reactions::with_pending(&item.reactions, me, pending);
+        Self::encrypted(&marks, me, can_add, name_of)
     }
 
     /// An encrypted message's reactions, from what this device tallied.
@@ -342,6 +362,15 @@ fn chip(row: &ReactionRow, c: &Chip, p: &Palette) -> AnyElement {
                     let _ = this.update(cx, |this, cx| this.react_to(msg.clone(), r.clone(), on, cx));
                 },
             )
+        })
+        // With Manage Messages, its own menu: take everyone's off.
+        .when(row.bits.can_clear, |el| {
+            let (this, msg, chip) = (row.this.clone(), msg.clone(), c.clone());
+            el.on_mouse_down(gpui_kit::MouseButton::Right, move |ev, window, cx| {
+                cx.stop_propagation();
+                let of = crate::ui::context_menu::MenuOf::Reaction { msg: msg.clone(), chip: chip.clone() };
+                let _ = this.update(cx, |this, cx| this.open_context_menu(of, ev.position, window, cx));
+            })
         });
     let tip_chip = c.clone();
     match &c.who {
@@ -444,12 +473,6 @@ impl gpui_kit::Render for ReactorsTip {
     }
 }
 
-/// Whether two standard emoji are the same but for variation selectors.
-fn same_emoji(a: &str, b: &str) -> bool {
-    let bare = |s: &str| s.chars().filter(|c| *c != '\u{fe0f}' && *c != '\u{fe0e}').collect::<String>();
-    a == b || bare(a) == bare(b)
-}
-
 /// Where who reacted with an emoji is kept.
 fn reactors_key(key: &str, msg: &str, emoji: &EmojiKey) -> String {
     format!("{key}|{msg}|{}", emoji.id())
@@ -462,15 +485,12 @@ impl FuwaApp {
     /// toned), or one of the open server's own.
     fn reaction_of(&self, choice: &Choice) -> Option<pb::Reaction> {
         if let Some(id) = choice.key.strip_prefix("c:") {
-            let Some(Target::Channel { key, server, .. }) = self.target() else { return None };
-            let emoji = self
-                .core
-                .shared
-                .read(|s| s.instance(&key)?.emojis.get(&server)?.iter().find(|e| e.id == id).cloned())?;
+            let emoji = self.react_catalog().by_id(id)?.emoji.clone();
             return Some(pb::Reaction {
                 emoji_id: emoji.id,
                 emoji_name: emoji.name,
                 animated: emoji.animated,
+                emoji_url: emoji.url,
                 ..Default::default()
             });
         }
@@ -481,17 +501,7 @@ impl FuwaApp {
     /// The emoji a message's menu offers to react with: the ones you used
     /// lately that work here, then the usual few.
     pub(crate) fn quick_reactions(&self, standard_only: bool) -> Vec<Choice> {
-        let catalog = match self.target() {
-            Some(Target::Channel { key, server, .. }) if !standard_only => self
-                .core
-                .shared
-                .read(|s| {
-                    let i = s.instance(&key)?;
-                    Some(Catalog::own(i.server(&server)?, i.emojis.get(&server).map(Vec::as_slice).unwrap_or_default()))
-                })
-                .unwrap_or_default(),
-            _ => Catalog::default(),
-        };
+        let catalog = if standard_only { Catalog::default() } else { self.react_catalog() };
         let prefs = self.core.prefs();
         let mut out: Vec<Choice> = Vec::new();
         let recent = prefs.recent_emoji.iter().filter_map(|k| Choice::recalled(k, &catalog, prefs.skin_tone));
@@ -509,6 +519,35 @@ impl FuwaApp {
             }
         }
         out
+    }
+
+    /// The custom emoji a reaction in the open channel may use: its server's
+    /// own, or in a channel shown here from another server, that server's
+    /// (asked of the instance the first time). None in encrypted places.
+    pub(crate) fn react_catalog(&self) -> Catalog {
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return Catalog::default() };
+        let (catalog, guest) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&key) else { return (Catalog::default(), false) };
+            let home = i.channel(&server, &channel).and_then(|c| c.shared.as_ref()).filter(|sh| !sh.home);
+            match home {
+                Some(sh) => {
+                    let from = sh.home_server.clone().unwrap_or_default();
+                    let at = pb::Server { id: from.id, name: from.name, icon_url: from.icon_url, ..Default::default() };
+                    let list = i.home_emojis.get(&channel).cloned().flatten().unwrap_or_default();
+                    (Catalog::own(&at, &list), true)
+                }
+                None => (
+                    i.server(&server)
+                        .map(|sv| Catalog::own(sv, i.emojis.get(&server).map(Vec::as_slice).unwrap_or_default()))
+                        .unwrap_or_default(),
+                    false,
+                ),
+            }
+        });
+        if guest {
+            self.core.want_home_emojis(&key, &server, &channel);
+        }
+        catalog
     }
 
     /// Reacts to a message in the open place, or takes your reaction off.
@@ -549,7 +588,10 @@ impl FuwaApp {
         let Some(mut r) = self.reaction_of(choice) else { return };
         // The same emoji with or without its variation selector (👍 and 👍️) joins the chip that's there.
         let there = self.message_reactions(&msg).and_then(|b| {
-            b.chips.iter().find(|c| c.key.emoji_id == r.emoji_id && same_emoji(&c.key.emoji, &r.emoji)).cloned()
+            b.chips
+                .iter()
+                .find(|c| c.key.emoji_id == r.emoji_id && crate::core::reactions::same(&c.key.emoji, &r.emoji))
+                .cloned()
         });
         if let Some(c) = &there {
             r.emoji = c.key.emoji.clone();
@@ -601,13 +643,13 @@ impl FuwaApp {
         self.react_with(at.msg, choice, cx);
     }
 
-    /// Takes every reaction off a message (Manage Messages).
-    pub(crate) fn clear_all_reactions(&mut self, msg: String, cx: &mut Context<Self>) {
+    /// Takes every reaction off a message (Manage Messages), or (`emoji`) every one with that emoji.
+    pub(crate) fn clear_all_reactions(&mut self, msg: String, emoji: Option<EmojiKey>, cx: &mut Context<Self>) {
         let Some(Target::Channel { key, server, channel }) = self.target() else { return };
         let core = self.core.clone();
         self.run(
             cx,
-            async move { core.clear_reactions(&key, &server, &channel, &msg, None).await },
+            async move { core.clear_reactions(&key, &server, &channel, &msg, emoji.as_ref()).await },
             |this, result, cx| match result {
                 Ok(()) => this.toast("check", t("chattools.reactions.cleared"), String::new(), None, None, cx),
                 Err(err) => this.toast("circle-alert", t("chattools.reactions.failed"), err.message, None, None, cx),
@@ -686,11 +728,6 @@ mod tests {
         let text = tip_text(&chip("👍", 2), &["Ann".into(), you.clone()]);
         assert!(text.starts_with(&format!("{you}, Ann")), "{text}");
         assert!(text.contains("👍"));
-    }
-
-    #[test]
-    fn variation_selectors_dont_split_an_emoji() {
-        assert!(same_emoji("👍", "👍\u{fe0f}") && same_emoji("❤️", "❤") && !same_emoji("👍", "👎"));
     }
 
     #[test]

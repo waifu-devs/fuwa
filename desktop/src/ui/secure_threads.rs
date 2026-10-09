@@ -558,6 +558,12 @@ impl FuwaApp {
                 let mut msg = msg;
                 msg.can_delete = false;
                 msg.edited = m.edited_at > 0;
+                // Its reactions, as the channel's list has them.
+                let seq = m.seq.to_string();
+                msg.reactions = self.rows.iter().find_map(|r| match r {
+                    Row::Msg(c) if c.id == seq => c.reactions.clone(),
+                    _ => None,
+                });
                 crate::ui::chat::render_row(&Row::Msg(Rc::new(msg)), 0, &self.row_ctx(Some("secure".into()), cx), cx)
             }
             _ => div()

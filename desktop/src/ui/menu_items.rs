@@ -7,7 +7,7 @@ use gpui_kit::{App, Context, Hsla};
 
 use crate::core::account::NotificationPatch;
 use crate::core::dms::now_ms;
-use crate::core::i18n::t;
+use crate::core::i18n::{Arg, t};
 use crate::core::moderation::Action;
 use crate::core::store::InstanceState;
 use crate::pb::{self, NotificationLevel as Level, Permission as P};
@@ -180,7 +180,7 @@ impl FuwaApp {
                         Item::act(
                             t("chattools.reactions.clearAll"),
                             "face-slightly-frowning",
-                            run(move |this, _, cx| this.clear_all_reactions(id.clone(), cx)),
+                            run(move |this, _, cx| this.clear_all_reactions(id.clone(), None, cx)),
                         )
                         .danger()
                         .confirm(
@@ -258,6 +258,20 @@ impl FuwaApp {
                 Built::of(vec![vec![read], copy_id(&other, "user")])
             }
             MenuOf::Composer => self.composer_items(cx),
+            MenuOf::Reaction { msg, chip } => {
+                let (id, emoji, label) = (msg.clone(), chip.key.clone(), chip.label());
+                let title = crate::core::i18n::t_with("chattools.reactions.clearOne", &[("emoji", Arg::Str(&label))]);
+                let body =
+                    crate::core::i18n::t_with("desktop.reactions.clearOneConfirm", &[("emoji", Arg::Str(&label))]);
+                let clear = Item::act(
+                    title.clone(),
+                    "face-slightly-frowning",
+                    run(move |this, _, cx| this.clear_all_reactions(id.clone(), Some(emoji.clone()), cx)),
+                )
+                .danger()
+                .confirm(title.clone(), &body, &title);
+                Built::of(vec![vec![clear]])
+            }
         }
     }
 

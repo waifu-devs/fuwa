@@ -11,7 +11,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 
 use super::roles::permission_name;
 use super::*;
-use crate::core::shared::{CodeLeft, SHAREABLE, code_left, find_share_code, share_code_instance, waiting};
+use crate::core::shared::{CodeLeft, code_left, find_share_code, share_code_instance, shareable, waiting};
 use crate::ui::shared_marks::{glyph, server_picture, server_tag};
 use crate::ui::text::{WIDE, tracked};
 
@@ -1067,18 +1067,24 @@ impl ServerSettingsView {
     }
 
     /// What the guest server's people may do: switches at the home, what they were given at the guest.
+    /// What this instance lets a home hand to a guest server.
+    fn shareable_here(&self) -> Vec<(P, &'static str, &'static str)> {
+        self.core.shared.read(|s| s.instance(&self.key).map(|i| shareable(|f| i.has(f))).unwrap_or_default())
+    }
+
     fn allowed(&self, c: &pb::SharedConnection, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let on = |perm: P| c.allowed().any(|a| a == perm);
+        let offered = self.shareable_here();
         if !c.home {
             let mut list = div().flex().flex_wrap().gap(px(6.0)).pl(px(52.0));
-            for (n, (perm, _, glyph_name)) in SHAREABLE.iter().enumerate() {
+            for (n, (perm, _, glyph_name)) in offered.iter().enumerate() {
                 list = list.child(capability(on(*perm), &permission_name(*perm), glyph_name, n, &c.id, p));
             }
             return list.into_any_element();
         }
         // Three across where there's room, wrapping in narrower places (a channel's Share tab).
         let mut grid = div().flex().flex_wrap().gap(px(6.0)).p(px(6.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.4));
-        for (perm, _, glyph_name) in SHAREABLE {
+        for (perm, _, glyph_name) in offered {
             let lit = on(perm);
             let saving = self.shared.busy.contains(&format!("{}/{}", c.id, perm as i32));
             let any_saving = self.shared.busy.iter().any(|b| b.starts_with(&format!("{}/", c.id)));
@@ -1676,9 +1682,13 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
         code,
         p,
     ));
-    for (n, (perm, _, glyph_name)) in SHAREABLE.iter().enumerate() {
-        let label = permission_name(*perm);
-        caps = caps.child(capability(allowed.contains(&(*perm as i32)), &label, glyph_name, n + 1, code, p));
+    // What the home lets them do: the usual three, and whatever else it handed over.
+    let offered = shareable(|_| true)
+        .into_iter()
+        .filter(|(perm, _, _)| allowed.contains(&(*perm as i32)) || shareable(|_| false).iter().any(|s| s.0 == *perm));
+    for (n, (perm, _, glyph_name)) in offered.enumerate() {
+        let label = permission_name(perm);
+        caps = caps.child(capability(allowed.contains(&(perm as i32)), &label, glyph_name, n + 1, code, p));
     }
     body = body.child(
         div()

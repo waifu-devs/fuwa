@@ -89,6 +89,11 @@ pub(crate) enum MenuOf {
     RailAdd,
     /// The message box (the web's composer menu).
     Composer,
+    /// A reaction chip under a message, for someone who can clear it (`reactions.rs`).
+    Reaction {
+        msg: String,
+        chip: crate::ui::reactions::Chip,
+    },
 }
 
 impl MenuOf {
@@ -107,6 +112,7 @@ impl MenuOf {
             MenuOf::RailFolder { key, folder } => format!("f|{key}|{folder}"),
             MenuOf::RailAdd => "rail-add".into(),
             MenuOf::Composer => "composer".into(),
+            MenuOf::Reaction { msg, .. } => format!("msg|{msg}"),
         }
     }
 }
