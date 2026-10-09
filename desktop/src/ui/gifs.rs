@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
     IntoElement as _, ObjectFit, ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Subscription, Task, WeakEntity, Window, div, img, px,
+    Styled, StyledImage as _, Subscription, Task, WeakEntity, Window, div, img, px, radians,
 };
 
 use crate::core::gifs::{self as gifs, KeptGif};
@@ -23,8 +23,8 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, icon, icon_button};
+use crate::ui::theme::{Palette, alpha, corner, radius_xl};
+use crate::ui::widgets::{card, icon};
 
 /// The picker's size, and its grid's spacing.
 const PANEL_W: f32 = 384.0;
@@ -218,8 +218,37 @@ impl FuwaApp {
         self.ask_gifs(&key, cx);
         self.gifs_on(&key)?;
         let open = self.gifs.open;
+        let (fg, rest) = (p.primary, if open { p.primary } else { p.muted_foreground });
+        // The web's GIF button: a little "GIF" tag in the tool's `size-9 rounded-xl`,
+        // which tilts and grows when pointed at and shrinks when pressed.
+        let tag = div()
+            .id("gif-open-tag")
+            .px(px(4.0))
+            .rounded(corner(6.0))
+            .border_2()
+            .border_color(rest)
+            .group_hover("gif-open", move |s| s.border_color(fg))
+            .text_size(px(9.6))
+            .line_height(px(15.2))
+            .font_weight(FontWeight::BLACK)
+            .child(tracked("GIF", WIDE));
         Some(
-            crate::ui::widgets::tool_button("gif-open", "image-play", open, p)
+            div()
+                .id("gif-open")
+                .group("gif-open")
+                .size(px(36.0))
+                .mb(px(2.0))
+                .flex_none()
+                .rounded(radius_xl())
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_color(rest)
+                .when(open, |el| el.bg(alpha(p.primary, 0.1)))
+                .hover(move |s| s.text_color(fg).scale(1.1).rotate(radians(6f32.to_radians())))
+                .active(|s| s.scale(0.85))
+                .child(tag)
                 .tooltip(|window, cx| crate::ui::overlay::Tip::new("GIFs").build(window, cx))
                 .on_click(cx.listener(|this, _, window, cx| {
                     if this.gifs.open {
@@ -529,14 +558,29 @@ impl FuwaApp {
         };
         let credit = gifs::provider_name(self.gifs_on(&key).unwrap_or_default());
         let searching = self.gifs.results.is_some();
+        let fresh = self.gifs.born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
 
+        // Back takes the glass's place while searching, each popping in as the other goes.
         let lead: AnyElement = if searching {
-            icon_button("gif-back", "arrow-left", p)
+            let (bg, fg) = (p.muted, p.foreground);
+            let back = div()
+                .id("gif-back")
                 .size(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(crate::ui::theme::radius_lg())
+                .cursor_pointer()
+                .text_color(p.muted_foreground)
+                .hover(move |s| s.bg(bg).text_color(fg))
                 .on_click(cx.listener(|this, _, window, cx| this.gifs_back(window, cx)))
-                .into_any_element()
-        } else {
+                .child(icon("arrow-left").size(px(16.0)));
+            motion::pop(back, "gif-back-in", 0.6, 45.0, Duration::ZERO).into_any_element()
+        } else if fresh {
             icon("search").size(px(16.0)).into_any_element()
+        } else {
+            motion::pop(div().child(icon("search").size(px(16.0))), "gif-glass-in", 0.6, 0.0, Duration::ZERO)
+                .into_any_element()
         };
         let search = div()
             .p(px(8.0))
@@ -545,6 +589,11 @@ impl FuwaApp {
             .child(Input::new(&self.gifs.query).prefix(lead).cleanable(true));
 
         let tabs = (!searching).then(|| self.gif_tabs(&key, p, cx));
+        // What each tab or search shows slides in as it takes over.
+        let shown = match self.gifs.results.as_ref() {
+            Some(r) => format!("results|{}", r.run),
+            None => format!("tab|{}", self.gifs.tab as u8),
+        };
         let body = match self.gifs.results.as_ref() {
             Some(_) => self.gif_results(&key, p, cx),
             None => match self.gifs.tab {
@@ -590,7 +639,12 @@ impl FuwaApp {
             .flex_col()
             .child(search)
             .children(tabs)
-            .child(div().h(px(BODY_H)).relative().child(body))
+            .child(div().h(px(BODY_H)).relative().child(if fresh {
+                body
+            } else {
+                motion::slide_in(div().size_full().child(body), SharedString::from(format!("gif-body|{shown}")), 12.0)
+                    .into_any_element()
+            }))
             .children(footer);
         Some(
             div()
@@ -599,7 +653,8 @@ impl FuwaApp {
                 .right(px(20.0))
                 .bottom(gpui_kit::relative(1.0))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_gifs(cx)))
-                .child(motion::rise(panel.mb(px(-8.0)), "gif-panel-rise", Duration::ZERO, 12.0))
+                // The web's `scale: 0.92, y: 10` from the bottom right, over the button.
+                .child(motion::pop_in(panel.mb(px(-8.0)), "gif-panel-in", (1.0, 1.0), 0.92, 10.0))
                 .into_any_element(),
         )
     }
@@ -607,7 +662,16 @@ impl FuwaApp {
     fn gif_tabs(&self, key: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let count = self.gifs.saved.get(key).map_or(0, Vec::len);
         let saved = if count > 0 { format!("Saved · {count}") } else { "Saved".to_owned() };
-        let mut row = div().flex().gap(px(4.0)).px(px(8.0)).pt(px(8.0));
+        let mut row = div().relative().flex().gap(px(4.0)).px(px(8.0)).pt(px(8.0));
+        // The open tab's fill glides between them (the web's `layoutId="gif-tab"`).
+        let w = (INNER_W - PAD * 2.0 - 8.0) / 3.0;
+        row = row.child(crate::ui::compose::glide(
+            div().absolute().top(px(8.0)).w(px(w)).h(px(32.0)).rounded(corner(9.0)).bg(alpha(p.primary, 0.1)),
+            format!("gif-tab|{:?}", self.gifs.born),
+            PAD + self.gifs.tab as u8 as f32 * (w + 4.0),
+            cx,
+            |el, x| el.left(px(x)),
+        ));
         for (tab, label, glyph) in [
             (Tab::Browse, "Browse".to_owned(), "trending-up"),
             (Tab::Saved, saved, "star"),
@@ -628,7 +692,6 @@ impl FuwaApp {
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
                     .text_color(if on { p.primary } else { p.muted_foreground })
-                    .when(on, |el| el.bg(alpha(p.primary, 0.1)))
                     .when(!on, |el| el.hover(|s| s.text_color(p.foreground)))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.gifs.tab = tab;
@@ -828,18 +891,30 @@ fn gif_tile(
 ) -> AnyElement {
     let group = SharedString::from(format!("gif-tile|{grid}|{}", tile.key));
     let (pick, save) = (tile.clone(), tile.clone());
-    let ring = alpha(p.primary, 0.6);
+    // The web's `hover:ring-2 ring-primary/60`, outside the picture.
+    let ring = |color: gpui_kit::Hsla| {
+        vec![gpui_kit::BoxShadow {
+            color,
+            offset: gpui_kit::point(px(0.0), px(0.0)),
+            blur_radius: px(0.0),
+            spread_radius: px(2.0),
+            inset: false,
+        }]
+    };
+    let lit = ring(alpha(p.primary, 0.6));
     let picture = div()
         .id(SharedString::from(format!("gif-pick|{grid}|{}", tile.key)))
         .size_full()
         .rounded(corner(12.0))
         .overflow_hidden()
         .bg(p.muted)
-        .border_2()
-        .border_color(gpui_kit::transparent_black())
+        .shadow(ring(alpha(p.primary, 0.0)))
         .cursor_pointer()
-        .hover(move |s| s.border_color(ring))
-        .active(|s| s.opacity(0.85))
+        // The web's `whileHover={{ scale: 1.03 }}` and `whileTap={{ scale: 0.95 }}`;
+        // the one being sent sits a little smaller.
+        .hover(move |s| s.shadow(lit.clone()).scale(1.03))
+        .active(|s| s.scale(0.95))
+        .when(sending, |el| el.scale(0.94))
         .when(dimmed, |el| el.opacity(0.45))
         .tooltip({
             let title = tile.title.clone();
@@ -883,7 +958,7 @@ fn gif_tile(
         .text_color(if starred { gpui_kit::rgb(0xfbbf24).into() } else { gpui_kit::white() })
         .cursor_pointer()
         .when(!starred, |el| el.opacity(0.0).group_hover(group.clone(), |s| s.opacity(1.0)))
-        .active(|s| s.top(px(7.0)))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| {
             let say = if starred { "Remove from your GIFs" } else { "Save to your GIFs" };
             crate::ui::overlay::Tip::new(say).build(window, cx)
@@ -901,13 +976,33 @@ fn gif_tile(
         .top(px(y))
         .w(px(w))
         .h(px(h))
-        .child(motion::rise(
+        .child(grow(
             tile_el,
             SharedString::from(format!("gif-in|{grid}|{n}")),
+            0.94,
             Duration::from_millis(20 * n.min(10) as u64),
-            6.0,
         ))
         .into_any_element()
+}
+
+/// Fades in while it grows from `from` of its size, after `delay`, on the
+/// web's `SPRING` (tiles rippling in one after another).
+fn grow<E: gpui_kit::IntoElement + Styled + 'static>(
+    el: E,
+    id: SharedString,
+    from: f32,
+    delay: Duration,
+) -> AnyElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(520.0, 34.0, 1.0), 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    el.with_animation(
+        id,
+        Animation::new(total)
+            .with_easing(move |t| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) }),
+        move |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(from + (1.0 - from) * t),
+    )
+    .into_any_element()
 }
 
 /// A mood's tile; they ripple in when the picker opens.
@@ -915,8 +1010,7 @@ fn arrive(tile: gpui_kit::Stateful<gpui_kit::Div>, n: usize, fresh: bool) -> Any
     if !fresh {
         return tile.into_any_element();
     }
-    motion::rise(tile, SharedString::from(format!("gif-cat-in|{n}")), Duration::from_millis(25 * n.min(12) as u64), 6.0)
-        .into_any_element()
+    grow(tile, SharedString::from(format!("gif-cat-in|{n}")), 0.9, Duration::from_millis(25 * n.min(12) as u64))
 }
 
 fn category_tile(
@@ -937,8 +1031,9 @@ fn category_tile(
         .overflow_hidden()
         .bg(p.muted)
         .cursor_pointer()
-        .hover(|s| s.opacity(0.9))
-        .active(|s| s.opacity(0.8))
+        // The web's `whileHover={{ scale: 1.03 }}` and `whileTap={{ scale: 0.96 }}`.
+        .hover(|s| s.scale(1.03))
+        .active(|s| s.scale(0.96))
         .when_some(picture, |el, picture| {
             el.child(
                 img(SharedString::from(picture.preview_url.clone()))
@@ -1052,6 +1147,7 @@ pub(crate) fn gif_in_message(
         .text_color(if starred { gpui_kit::rgb(0xfbbf24).into() } else { gpui_kit::white() })
         .cursor_pointer()
         .when(!starred, |el| el.opacity(0.0).group_hover(group.clone(), |s| s.opacity(1.0)))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| {
             let say = if starred { "Remove from your GIFs" } else { "Save to your GIFs" };
             crate::ui::overlay::Tip::new(say).build(window, cx)
@@ -1071,6 +1167,14 @@ pub(crate) fn gif_in_message(
         .rounded(corner(12.0))
         .overflow_hidden()
         .bg(p.muted)
+        // `shadow-sm`.
+        .shadow(vec![gpui_kit::BoxShadow {
+            color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.05),
+            offset: gpui_kit::point(px(0.0), px(1.0)),
+            blur_radius: px(2.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }])
         .child(
             img(SharedString::from(gif.url.clone()))
                 .id(SharedString::from(format!("gif-msg-img|{mid}")))
@@ -1094,6 +1198,7 @@ pub(crate) fn gif_in_message(
         .when(!credit.is_empty(), |el| {
             el.child(
                 div()
+                    .id(SharedString::from(format!("gif-msg-credit|{mid}")))
                     .absolute()
                     .right(px(8.0))
                     .bottom(px(6.0))

@@ -18,8 +18,9 @@ use crate::core::config::PopoutFit;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::video::feed_of;
 use crate::pb;
-use crate::ui::call_parts::{green, person_avatar};
-use crate::ui::theme::radius_xl;
+use crate::ui::call_parts::{green, voice_avatar};
+use crate::ui::motion;
+use crate::ui::theme::{alpha, radius_xl};
 use crate::ui::video;
 use crate::ui::widgets::{hue_gradient, icon};
 
@@ -105,8 +106,9 @@ fn toggle(id: &str, glyph: &str, on: bool, label: String) -> gpui_kit::Stateful<
         .cursor_pointer()
         .text_color(if on { gpui_kit::white() } else { gpui_kit::hsla(0.0, 0.0, 1.0, 0.7) })
         .bg(if on { gpui_kit::hsla(0.0, 0.0, 1.0, 0.25) } else { gpui_kit::hsla(0.0, 0.0, 0.0, 0.5) })
-        .hover(|s| s.text_color(gpui_kit::white()))
-        .active(|s| s.opacity(0.8))
+        .backdrop_blur(px(8.0))
+        .hover(|s| s.text_color(gpui_kit::white()).scale(1.05))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
         .child(icon(glyph).size(px(16.0)))
 }
@@ -127,6 +129,11 @@ impl Render for PopOut {
         let on = self.on();
         let speaking = self.core.call().is_some_and(|c| c.speaking.contains(&p.user));
         let awake = self.moved.elapsed() < AWAKE;
+        // The controls and the glow fade in and out (`transition-opacity duration-300`).
+        let shown = motion::follow("pop-awake", if awake { 1.0 } else { 0.0 }, window, cx).clamp(0.0, 1.0);
+        let glowing = prefs.popout_glow && speaking;
+        let glow = motion::follow("pop-glow", if glowing { 1.0 } else { 0.0 }, window, cx).clamp(0.0, 1.0);
+        let grow = motion::follow("pop-grow", if glowing { 1.06 } else { 1.0 }, window, cx);
         let fit =
             if p.screen || prefs.popout_fit == PopoutFit::Contain { ObjectFit::Contain } else { ObjectFit::Cover };
         let user = self.core.shared.read(|s| s.instance(&p.instance).and_then(|i| i.users.get(&p.user).cloned()));
@@ -153,24 +160,33 @@ impl Render for PopOut {
                 .detach();
             }))
             .child(hue_gradient(&p.user, 0.0, div().absolute().inset_0()).opacity(0.25))
-            .child(div().absolute().inset_0().flex().items_center().justify_center().child(person_avatar(
+            // Their avatar while the feed's off, ringed and a little bigger while they talk.
+            .child(div().absolute().inset_0().flex().items_center().justify_center().child(voice_avatar(
                 user.as_ref(),
                 &p.user,
-                112.0,
-                36.0,
+                112.0 * grow,
+                36.0 * grow,
+                4.0,
+                glowing,
+                "popout",
+                window,
+                cx,
             )));
         if on {
             root = root.child(video::feed_view(&self.core, &feed_of(&p.user, p.screen), fit, px(0.0), window, cx));
         }
-        if prefs.popout_glow && speaking {
+        if glow > 0.01 {
+            // The web's `inset 0 0 0 4px #3ba55d, inset 0 0 40px` green glow.
             root =
-                root.child(div().absolute().inset_0().border(px(4.0)).border_color(green()).shadow(vec![BoxShadow {
-                    color: gpui_kit::hsla(136.0 / 360.0, 0.47, 0.44, 0.45),
-                    offset: point(px(0.0), px(0.0)),
-                    blur_radius: px(40.0),
-                    spread_radius: px(0.0),
-                    inset: false,
-                }]));
+                root.child(div().absolute().inset_0().border(px(4.0)).border_color(alpha(green(), glow)).shadow(vec![
+                    BoxShadow {
+                        color: gpui_kit::hsla(136.0 / 360.0, 0.47, 0.44, 0.45 * glow),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(40.0),
+                        spread_radius: px(0.0),
+                        inset: true,
+                    },
+                ]));
         }
         if prefs.popout_name {
             root = root.child(
@@ -191,10 +207,10 @@ impl Render for PopOut {
                     .child(name),
             );
         }
-        if awake {
+        if shown > 0.01 {
             let core = self.core.clone();
             let (n, g, f) = (prefs.popout_name, prefs.popout_glow, prefs.popout_fit);
-            let mut controls = div().absolute().top(px(12.0)).right(px(12.0)).flex().gap(px(6.0)).child(
+            let mut controls = div().absolute().top(px(12.0)).right(px(12.0)).flex().gap(px(6.0)).opacity(shown).child(
                 toggle(
                     "pop-name",
                     "tag",

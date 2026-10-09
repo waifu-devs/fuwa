@@ -44,6 +44,7 @@ impl SettingsView {
             let mut row = div().flex().gap(px(gap));
             for (id, label, item) in chunk {
                 let active = value == id;
+                let group = SharedString::from(format!("decoration-{place}-{id}"));
                 let face = decorated(avatar(Some(me), size, p), size, item.map(|i| i.picture_url.as_str()));
                 let face = match item {
                     Some(_) => face,
@@ -60,10 +61,21 @@ impl SettingsView {
                             .items_center()
                             .justify_center()
                             .text_color(p.muted_foreground)
-                            .child(icon("ban").size(px(14.0))),
+                            // The ban sign turns a quarter while its tile is pointed at.
+                            .child(
+                                div()
+                                    .id("decoration-none-ban")
+                                    .group_hover(group.clone(), |s| {
+                                        s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                                    })
+                                    .child(icon("ban").size(px(14.0))),
+                            ),
                     ),
                 };
+                // The face swells a little while its tile is pointed at.
+                let face = div().id("decoration-face").group_hover(group.clone(), |s| s.scale(1.05)).child(face);
                 let mut square = div()
+                    .id("decoration-square")
                     .relative()
                     .w(px(face_w))
                     .h(px(face_w))
@@ -72,6 +84,7 @@ impl SettingsView {
                     .border_color(p.border)
                     .bg(p.card)
                     .shadow(crate::ui::settings_controls::shadow_sm())
+                    .group_hover(group.clone(), |s| s.shadow(crate::ui::profile_card::shadow_md()))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -81,9 +94,11 @@ impl SettingsView {
                         .child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
                 let pick_id = id.clone();
+                let fg = p.foreground;
                 row = row.child(
                     div()
-                        .id(SharedString::from(format!("decoration-{place}-{id}")))
+                        .id(group.clone())
+                        .group(group.clone())
                         .w(px(tile_w))
                         .flex()
                         .flex_col()
@@ -94,15 +109,17 @@ impl SettingsView {
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
-                        .hover(|s| s.top(px(-3.0)))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| s.translate_y(px(-3.0)))
+                        .active(|s| s.scale(0.95))
                         .on_click(cx.listener(move |this, _, _, cx| pick(this, pick_id.clone(), cx)))
                         .child(square)
                         .child(
                             div()
+                                .id("decoration-label")
                                 .max_w_full()
                                 .truncate()
                                 .text_color(if active { p.foreground } else { p.muted_foreground })
+                                .group_hover(group, move |s| s.text_color(fg))
                                 .child(label.clone()),
                         ),
                 );

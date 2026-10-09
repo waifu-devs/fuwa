@@ -674,7 +674,11 @@ impl InstanceSettingsView {
                 .child(if busy {
                     spinner(SharedString::from(format!("account-busy-{id}")), 16.0, window)
                 } else {
-                    icon("ellipsis").size(px(16.0)).into_any_element()
+                    div()
+                        .id("dots")
+                        .group_hover("account-row", |s| s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+                        .child(icon("ellipsis").size(px(16.0)))
+                        .into_any_element()
                 })
         });
 
@@ -707,6 +711,7 @@ impl InstanceSettingsView {
         };
         let row = div()
             .id(SharedString::from(format!("account-{id}")))
+            .group("account-row")
             .h(px(ROW))
             .flex()
             .flex_col()
@@ -723,11 +728,15 @@ impl InstanceSettingsView {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(div().flex_none().when(a.disabled, |el| el.opacity(0.5)).child(avatar(
-                        user.as_ref(),
-                        40.0,
-                        p,
-                    )))
+                    // `group-hover:scale-105` on the avatar.
+                    .child(
+                        div()
+                            .id("face")
+                            .flex_none()
+                            .when(a.disabled, |el| el.opacity(0.5))
+                            .group_hover("account-row", |s| s.scale(1.05))
+                            .child(avatar(user.as_ref(), 40.0, p)),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -1287,7 +1296,7 @@ impl InstanceSettingsView {
                 let c = alpha(p.primary, 0.08);
                 move |s| s.bg(c)
             })
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.scale(0.9))
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                 this.accounts.copied = Some(Instant::now());

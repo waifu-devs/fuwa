@@ -321,8 +321,8 @@ pub(super) fn hover_button(
         .when(outline, |el| el.border_1().border_color(p.border).bg(p.background))
         .cursor_pointer()
         .hover(hover)
-        .active(|s| s.top(px(1.0)))
-        .when_some(glyph, |el, g| el.child(crate::ui::widgets::icon(g).size(px(16.0))))
+        .group("settings-button")
+        .when_some(glyph, |el, g| el.child(crate::ui::settings_controls::glyph_in_button(g)))
         .when(!label.is_empty(), |el| el.child(label))
 }
 

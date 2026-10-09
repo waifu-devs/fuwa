@@ -72,11 +72,18 @@ impl FuwaApp {
             .text_color(tint)
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
-            .active(|s| s.opacity(0.9))
+            .active(|s| s.scale(0.98))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.calls.panel.details")).build(window, cx))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_call_pop(CallPop::Connection, cx)))
             .child(signal(&call.status, &call.quality, &p, "panel", window))
-            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            // "Connecting" slides away as "Voice connected" comes in (the web's `SwapText`).
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(motion::swap_text(
+                "call-status-text",
+                label,
+                14.0,
+                window,
+                cx,
+            )))
             .when(connected, |el| {
                 el.child(
                     div()
@@ -101,7 +108,7 @@ impl FuwaApp {
             .line_height(px(16.0))
             .text_color(p.muted_foreground)
             .cursor_pointer()
-            .hover(move |s| s.text_color(fg))
+            .hover(move |s| s.text_color(fg).underline())
             .on_click(cx.listener(|this, _, window, cx| this.open_call_place(window, cx)))
             .when(dm, |el| {
                 el.child(
@@ -195,13 +202,14 @@ impl FuwaApp {
                         .child(div().min_w_0().child(text)),
                     "call-problem",
                     Duration::ZERO,
-                    6.0,
+                    -6.0,
                 ))
             })
             .children(allow);
         let panel = div().flex_none().border_t_1().border_color(p.border).bg(alpha(p.background, 0.6)).child(body);
         let id = SharedString::from(format!("call-bar|{}|{}{}", call.instance, call.channel_id, call.conversation_id));
-        Some(motion::rise(panel, id, Duration::ZERO, 12.0).into_any_element())
+        // The web's `SLIDE_IN`: down 6 px into place as it fades in.
+        Some(motion::rise(panel, id, Duration::ZERO, -6.0).into_any_element())
     }
 
     /// Draws the window again every second while a call is connected, for its clock.

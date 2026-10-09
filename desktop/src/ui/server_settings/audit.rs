@@ -300,6 +300,7 @@ impl ServerSettingsView {
             }))
             .child(
                 div()
+                    .id("badge")
                     .relative()
                     .size(px(36.0))
                     .flex_none()
@@ -309,6 +310,7 @@ impl ServerSettingsView {
                     .justify_center()
                     .bg(bg)
                     .text_color(fg)
+                    .group_hover(group.clone(), |s| s.scale(1.1))
                     .child(icon(glyph).size(px(16.0)))
                     .child(
                         div()

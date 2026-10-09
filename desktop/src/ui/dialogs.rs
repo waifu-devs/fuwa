@@ -118,14 +118,17 @@ fn chips(
                             .hover(move |s| s.border_color(hover_border).text_color(fg))
                     }
                 })
-                .active(|s| s.top(px(1.0)))
+                // `whileTap={{ scale: 0.92 }}`.
+                .active(|s| s.scale(0.92))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .when(on, |el| {
-                    el.child(motion::once(
+                    // The tick grows in from nothing.
+                    el.child(motion::pop_in(
                         div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                         SharedString::from(format!("chip-{id}-{n}-on")),
-                        Duration::from_millis(260),
-                        |el, t| el.opacity(t),
+                        (0.5, 0.5),
+                        0.0,
+                        0.0,
                     ))
                 })
                 .child(label)
@@ -206,7 +209,9 @@ pub(crate) fn agree_check(id: &str, checked: bool, p: &Palette) -> gpui_kit::Sta
                 el.border_color(p.border).hover(move |s| s.border_color(hover))
             }
         })
-        .child(
+        // `whileTap={{ scale: 0.98 }}`.
+        .active(|s| s.scale(0.98))
+        .child(motion::once(
             div()
                 .size(px(24.0))
                 .flex_none()
@@ -225,7 +230,11 @@ pub(crate) fn agree_check(id: &str, checked: bool, p: &Palette) -> gpui_kit::Sta
                 .when(checked, |el| {
                     el.child(motion::rise(icon("check").size(px(16.0)), "rules-tick", Duration::ZERO, 0.0))
                 }),
-        )
+            // The box bumps up a quarter and back as it's checked.
+            SharedString::from(format!("{id}|{checked}")),
+            Duration::from_millis(300),
+            move |el, t| el.scale(if checked { 1.0 + 0.25 * (t * std::f32::consts::PI).sin() } else { 1.0 }),
+        ))
         .child(div().flex_1().min_w_0().child(t("join.rules.agree")))
 }
 
@@ -362,7 +371,7 @@ impl FuwaApp {
     ) -> Option<AnyElement> {
         let p = pal(cx);
         let (tag, panel) = match dialog {
-            Dialog::Invite { server, .. } => ("invite", self.invite_panel(server, &p, cx)),
+            Dialog::Invite { server, .. } => ("invite", self.invite_panel(server, &p, window, cx)),
             Dialog::CreateChannel { key, server, parent, kind } => {
                 ("channel", self.create_channel_panel(key, server, parent, *kind, &p, window, cx))
             }
@@ -377,7 +386,13 @@ impl FuwaApp {
 
     // ───────────────────────── Inviting people ─────────────────────────
 
-    fn invite_panel(&mut self, server_id: &str, p: &Palette, cx: &mut Context<Self>) -> gpui_kit::Div {
+    fn invite_panel(
+        &mut self,
+        server_id: &str,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::Div {
         let state = &self.web_dialogs.invite;
         let key = state.key.clone();
         let (server, channel) = self.core.shared.read(|s| {
@@ -399,7 +414,8 @@ impl FuwaApp {
             .items_center()
             .gap(px(12.0))
             .when_some(server.as_ref(), |el, server| {
-                el.child(motion::rise(server_icon(server, 40.0, 12.8, p), "invite-icon", Duration::ZERO, -6.0))
+                // It pops in, turning upright from a little tilt.
+                el.child(motion::pop(server_icon(server, 40.0, 12.8, p), "invite-icon", 0.6, -12.0, Duration::ZERO))
             })
             .child(
                 div()
@@ -455,7 +471,21 @@ impl FuwaApp {
             .bg(if copied { green } else { p.primary.into() })
             .text_color(copy_fg)
             .when(link.is_none(), |el| el.opacity(0.5))
-            .when(link.is_some(), |el| el.cursor_pointer().active(|s| s.top(px(1.0))))
+            .when(link.is_some(), |el| {
+                // The web's `.btn`, lifting with a glow, in a `whileTap={{ scale: 0.92 }}`.
+                let glow = if copied { green } else { p.primary.into() };
+                el.cursor_pointer()
+                    .hover(move |s| {
+                        s.translate_y(px(-2.0)).shadow(vec![gpui_kit::BoxShadow {
+                            color: glow,
+                            offset: gpui_kit::point(px(0.0), px(8.0)),
+                            blur_radius: px(22.0),
+                            spread_radius: px(-8.0),
+                            inset: false,
+                        }])
+                    })
+                    .active(|s| s.translate_y(px(0.0)).scale(0.92))
+            })
             .on_click(cx.listener(|this, _, _, cx| this.copy_invite(cx)))
             .child(motion::rise(
                 div()
@@ -482,6 +512,8 @@ impl FuwaApp {
             .child(copy);
 
         let editing = state.editing;
+        // The chevron turns over while the options are open (`rotate-180`, 300ms).
+        let turn = motion::follow("invite-edit-turn", if editing { 1.0 } else { 0.0 }, window, cx);
         let terms = state.invite.as_ref().map(|i| invites::terms(i, crate::core::dms::now_ms()));
         let fg = p.primary;
         let mut col = div()
@@ -524,12 +556,15 @@ impl FuwaApp {
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg)
                         .cursor_pointer()
+                        .hover(|s| s.underline())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.web_dialogs.invite.editing = !this.web_dialogs.invite.editing;
                             cx.notify();
                         }))
                         .child(t("workspace.invite.edit"))
-                        .child(icon(if editing { "chevron-up" } else { "chevron-down" }).size(px(14.0))),
+                        .child(
+                            icon("chevron-down").size(px(14.0)).rotate(gpui_kit::radians(turn * std::f32::consts::PI)),
+                        ),
                 ),
         );
         let mut panel = dialog_card(false, p)
@@ -695,73 +730,111 @@ impl FuwaApp {
         let category = kind == K::Category;
         let busy = self.dialog_busy;
         let named = !self.dialog_input.read(cx).value().trim().is_empty();
-        let choices = div().flex().flex_col().gap(px(8.0)).children(KINDS.into_iter().enumerate().map(
-            |(n, (k, glyph, label, hint))| {
-                let on = k == kind;
-                let hover = alpha(p.primary, 0.4);
-                div()
-                    .id(SharedString::from(format!("kind-{n}")))
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .p(px(12.0))
-                    .rounded(radius_2xl())
-                    .border_1()
-                    .cursor_pointer()
-                    .map(|el| {
-                        if on {
-                            // `border-primary/60`, and the glider's `bg-primary/10 ring-2 ring-primary/40`.
-                            // Opaque: GPUI fills under a shadow, which would show through a see-through tint.
-                            el.border_color(alpha(p.primary, 0.6))
-                                .bg(crate::ui::theme::mix(p.card, p.primary, 0.1))
-                                .shadow(vec![gpui_kit::BoxShadow {
-                                    color: alpha(p.primary, 0.4),
-                                    offset: gpui_kit::point(px(0.0), px(0.0)),
-                                    blur_radius: px(0.0),
-                                    spread_radius: px(2.0),
-                                    inset: false,
-                                }])
-                        } else {
-                            el.border_color(p.border).hover(move |s| s.border_color(hover).left(px(2.0)))
-                        }
-                    })
-                    .active(|s| s.opacity(0.9))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(Dialog::CreateChannel { kind, .. }) = &mut this.dialog {
-                            *kind = k;
-                        }
-                        let hint = channel_placeholder(k);
-                        this.dialog_input.update(cx, |s, cx| s.set_placeholder(hint, window, cx));
-                        cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .size(px(36.0))
-                            .flex_none()
-                            .rounded(radius_xl())
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(if on { p.primary } else { p.muted })
-                            .text_color(if on { p.primary_foreground } else { p.muted_foreground })
-                            .child(motion::rise(
-                                icon(glyph).size(px(18.0)),
-                                SharedString::from(format!("kind-glyph-{n}-{on}")),
-                                Duration::ZERO,
-                                if on { 4.0 } else { 0.0 },
-                            )),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(t(label)))
-                            .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(t(hint))),
-                    )
-            },
-        ));
+        // The choice's highlight glides to the one picked (`layoutId="channel-type"`): where
+        // each sits is measured as it's drawn, and until then the picked one lights itself.
+        let spots = window.use_keyed_state("channel-kinds", cx, |_, _| Vec::<(f32, f32)>::new());
+        let spot = KINDS.iter().position(|(k, ..)| *k == kind).and_then(|n| spots.read(cx).get(n).copied());
+        let glider = spot.map(|(top, h)| {
+            let top = motion::follow("channel-kind-glide", top, window, cx);
+            // `bg-primary/10 ring-2 ring-primary/40`. Opaque: GPUI fills under a
+            // shadow, which would show through a see-through tint.
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(top))
+                .h(px(h))
+                .rounded(radius_2xl())
+                .bg(crate::ui::theme::mix(p.card, p.primary, 0.1))
+                .shadow(vec![gpui_kit::BoxShadow {
+                    color: alpha(p.primary, 0.4),
+                    offset: gpui_kit::point(px(0.0), px(0.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(2.0),
+                    inset: false,
+                }])
+        });
+        let glides = glider.is_some();
+        let choices = div().flex().flex_col().gap(px(8.0)).on_children_prepainted(move |bounds, window, cx| {
+            let measured = crate::ui::menus::measured(&bounds);
+            if *spots.read(cx) != measured {
+                spots.update(cx, |s, _| *s = measured);
+                window.request_animation_frame();
+            }
+        });
+        let choices = choices.children(KINDS.into_iter().enumerate().map(|(n, (k, glyph, label, hint))| {
+            let on = k == kind;
+            let hover = alpha(p.primary, 0.4);
+            div()
+                .id(SharedString::from(format!("kind-{n}")))
+                .relative()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .p(px(12.0))
+                .rounded(radius_2xl())
+                .border_1()
+                .cursor_pointer()
+                .map(|el| {
+                    if on && glides {
+                        el.border_color(alpha(p.primary, 0.6))
+                    } else if on {
+                        // `border-primary/60`, and the glider's look on the choice itself.
+                        el.border_color(alpha(p.primary, 0.6)).bg(crate::ui::theme::mix(p.card, p.primary, 0.1)).shadow(
+                            vec![gpui_kit::BoxShadow {
+                                color: alpha(p.primary, 0.4),
+                                offset: gpui_kit::point(px(0.0), px(0.0)),
+                                blur_radius: px(0.0),
+                                spread_radius: px(2.0),
+                                inset: false,
+                            }],
+                        )
+                    } else {
+                        el.border_color(p.border)
+                    }
+                })
+                // `whileHover={{ x: 2 }} whileTap={{ scale: 0.98 }}`, and `hover:border-primary/40`.
+                .hover(move |s| {
+                    let s = s.translate_x(px(2.0));
+                    if on { s } else { s.border_color(hover) }
+                })
+                .active(|s| s.scale(0.98))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if let Some(Dialog::CreateChannel { kind, .. }) = &mut this.dialog {
+                        *kind = k;
+                    }
+                    let hint = channel_placeholder(k);
+                    this.dialog_input.update(cx, |s, cx| s.set_placeholder(hint, window, cx));
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .size(px(36.0))
+                        .flex_none()
+                        .rounded(radius_xl())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(if on { p.primary } else { p.muted })
+                        .text_color(if on { p.primary_foreground } else { p.muted_foreground })
+                        // Picked, the icon springs up from small and tilted.
+                        .child(motion::pop(
+                            icon(glyph).size(px(18.0)),
+                            SharedString::from(format!("kind-glyph-{n}-{on}")),
+                            if on { 0.4 } else { 1.0 },
+                            if on { -30.0 } else { 0.0 },
+                            Duration::ZERO,
+                        )),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(t(label)))
+                        .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(t(hint))),
+                )
+        }));
         let mark = match kind {
             K::Category => None,
             K::Voice => Some("volume-2"),
@@ -802,7 +875,7 @@ impl FuwaApp {
                 .flex()
                 .flex_col()
                 .gap(px(16.0))
-                .child(choices)
+                .child(div().relative().children(glider).child(choices))
                 .child(
                     div()
                         .flex()
@@ -1073,7 +1146,15 @@ impl FuwaApp {
                         let (k, sid, cid) = (key.to_owned(), server_id.to_owned(), channel.id.clone());
                         let fallback =
                             if channel.r#type == pb::ChannelType::Announcement as i32 { "megaphone" } else { "hash" };
+                        let group = SharedString::from(format!("welcome-{}", channel.id));
+                        // The tile grows and tips as its card's hovered (`group-hover:scale-110 -rotate-6`).
                         let lead = div()
+                            .id(SharedString::from(format!("{group}|tile")))
+                            .when(!agreeing, |el| {
+                                el.group_hover(group.clone(), |s| {
+                                    s.scale(1.1).rotate(gpui_kit::radians(-6f32.to_radians()))
+                                })
+                            })
                             .size(px(40.0))
                             .flex_none()
                             .rounded(radius_xl())
@@ -1085,7 +1166,8 @@ impl FuwaApp {
                         let pick = !agreeing;
                         grid = grid.child(motion::rise(
                             div()
-                                .id(SharedString::from(format!("welcome-{}", channel.id)))
+                                .id(group.clone())
+                                .group(group.clone())
                                 .w(px(cell))
                                 .flex()
                                 .items_center()
@@ -1097,8 +1179,8 @@ impl FuwaApp {
                                 .bg(alpha(p.background, 0.6))
                                 .when(pick, |el| {
                                     el.cursor_pointer()
-                                        .hover(move |s| s.bg(hover_bg).border_color(hover_border).top(px(-3.0)))
-                                        .active(|s| s.opacity(0.9))
+                                        .hover(move |s| s.bg(hover_bg).border_color(hover_border).translate_y(px(-3.0)))
+                                        .active(|s| s.scale(0.97))
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.dialog = None;
                                             this.open_channel(&k, &sid, &cid, window, cx);
@@ -1131,8 +1213,16 @@ impl FuwaApp {
                                         }),
                                 )
                                 .when(pick, |el| {
+                                    // The arrow leans on and takes the server's color.
                                     el.child(
-                                        icon("arrow-right").size(px(16.0)).flex_none().text_color(p.muted_foreground),
+                                        div()
+                                            .id(SharedString::from(format!("{group}|arrow")))
+                                            .flex_none()
+                                            .text_color(p.muted_foreground)
+                                            .group_hover(group.clone(), move |s| {
+                                                s.translate_x(px(4.0)).text_color(tint)
+                                            })
+                                            .child(icon("arrow-right").size(px(16.0))),
                                     )
                                 }),
                             SharedString::from(format!("welcome-in-{n}")),

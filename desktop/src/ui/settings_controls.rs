@@ -13,13 +13,13 @@ use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div, point, px, relative,
+    AnyElement, App, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement as _, Rgba, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, point, px, relative,
 };
 
 use crate::core::config::Prefs;
-use crate::core::i18n::{Arg, t, t_with};
+use crate::core::i18n::t;
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::text::{WIDE, tracked};
@@ -261,10 +261,11 @@ impl SettingsView {
                 .text_color(fg)
                 .child(text.to_uppercase())
         };
+        // Either one pops in from 80% as the other goes (the web's `AnimatePresence`).
         if changed {
             let fg = p.foreground;
             let hover = p.accent;
-            motion::once(
+            motion::pop_in(
                 div()
                     .flex()
                     .flex_none()
@@ -274,6 +275,7 @@ impl SettingsView {
                     .child(
                         div()
                             .id(SharedString::from(format!("reset-{id}")))
+                            .group(SharedString::from(format!("reset-{id}")))
                             .h(px(28.0))
                             .px(px(8.0))
                             .rounded_full()
@@ -286,20 +288,24 @@ impl SettingsView {
                             .cursor_pointer()
                             .hover(move |s| s.bg(hover))
                             .on_click(cx.listener(move |this, _, _, cx| reset(this, cx)))
-                            .child(icon("rotate-ccw").size(px(14.0)))
+                            .child(spun(SharedString::from(format!("reset-{id}"))))
                             .child(t("settings.controls.reset")),
                     ),
                 SharedString::from(format!("badge-{id}-changed")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
+                (0.5, 0.5),
+                0.8,
+                0.0,
             )
+            .into_any_element()
         } else {
-            motion::once(
+            motion::pop_in(
                 pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground),
                 SharedString::from(format!("badge-{id}-default")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
+                (0.5, 0.5),
+                0.8,
+                0.0,
             )
+            .into_any_element()
         }
     }
 
@@ -327,6 +333,15 @@ impl SettingsView {
     }
 }
 
+/// Reset's arrow, going round once backwards while its button is pointed at
+/// (`group-hover:-rotate-[360deg]`).
+pub(crate) fn spun(group: SharedString) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("{group}-spin")))
+        .group_hover(group, |s| s.rotate(gpui_kit::radians(-std::f32::consts::TAU)))
+        .child(icon("rotate-ccw").size(px(14.0)))
+}
+
 /// The web's switch (`h-5 w-8`): the primary when on, the input color when off, and the thumb
 /// springs across.
 pub(crate) fn switch<V: 'static>(
@@ -338,10 +353,30 @@ pub(crate) fn switch<V: 'static>(
     cx: &mut Context<V>,
     set: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
 ) -> Stateful<Div> {
-    let id: SharedString = id.into();
+    switch_track(id.into(), on, disabled, p, window, cx).when(!disabled, |el| {
+        el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
+            set(this, !on, cx)
+        }))
+    })
+}
+
+/// How a switch looks: the track, and the thumb springing across, stretched to 19px while
+/// it's held (Animate UI's `pressedWidth`) toward the side it's on.
+pub(crate) fn switch_track(
+    id: SharedString,
+    on: bool,
+    disabled: bool,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
     let x = motion::follow(SharedString::from(format!("{id}-x")), if on { 13.0 } else { 1.0 }, window, cx);
-    div()
-        .id(ElementId::Name(id))
+    let (track, now) = motion::pointer(div().id(ElementId::Name(id.clone())), &id, window, cx);
+    let held = now.pressed && !disabled;
+    let w = motion::follow(SharedString::from(format!("{id}-w")), if held { 19.0 } else { 16.0 }, window, cx);
+    let left = if on { x + 1.0 - (w - 16.0) } else { x + 1.0 };
+    track
         .flex_none()
         .relative()
         .w(px(32.0))
@@ -349,13 +384,7 @@ pub(crate) fn switch<V: 'static>(
         .rounded_full()
         .bg(if on { p.primary } else { p.border })
         .when(disabled, |el| el.opacity(0.5))
-        .when(!disabled, |el| {
-            el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                set(this, !on, cx)
-            }))
-        })
-        .child(div().absolute().top(px(2.0)).left(px(x + 1.0)).size(px(16.0)).rounded_full().bg(if p.dark && !on {
+        .child(div().absolute().top(px(2.0)).left(px(left)).w(px(w)).h(px(16.0)).rounded_full().bg(if p.dark && !on {
             p.foreground
         } else if p.dark {
             p.primary_foreground
@@ -485,8 +514,9 @@ pub(crate) fn choice<V: 'static>(
                     .when(disabled, |el| el.opacity(0.5))
                     .when(!disabled, |el| {
                         el.cursor_pointer()
-                            .when(!active, |el| el.hover(move |s| s.border_color(hover)))
-                            .active(|s| s.top(px(1.0)))
+                            .hover(move |s| s.translate_y(px(-2.0)))
+                            .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                            .active(|s| s.scale(0.97))
                             .on_click(cx.listener(move |this, _, _, cx| pick(this, i, cx)))
                     })
                     .child(
@@ -503,19 +533,21 @@ pub(crate) fn choice<V: 'static>(
                                     el.bg(p.muted).text_color(p.muted_foreground)
                                 }
                             })
-                            .child(motion::once(
-                                div().child(icon(option.glyph).size(px(16.0))),
-                                SharedString::from(format!("choice-{id}-{i}-{active}")),
-                                Duration::from_millis(360),
-                                move |el, t| {
-                                    if active {
-                                        let k = 1.0 - (1.0 - t).powi(3);
-                                        el.opacity(0.4 + 0.6 * k)
-                                    } else {
-                                        el
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                // The picked one's icon springs up from 40%, turning upright.
+                                let glyph = div().child(icon(option.glyph).size(px(16.0)));
+                                if active {
+                                    el.child(motion::pop(
+                                        glyph,
+                                        SharedString::from(format!("choice-{id}-{i}-on")),
+                                        0.4,
+                                        -30.0,
+                                        Duration::ZERO,
+                                    ))
+                                } else {
+                                    el.child(glyph)
+                                }
+                            }),
                     )
                     .child(
                         div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(option.label.clone()),
@@ -580,6 +612,7 @@ pub(crate) fn segmented<V: 'static>(
                 .text_color(if on { p.foreground } else { p.muted_foreground })
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
+                .active(|s| s.scale(0.95))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .when_some(glyph, |el, g| el.child(icon(g).size(px(14.0))))
                 .child(label),
@@ -627,14 +660,15 @@ pub(crate) fn chips<V: 'static>(
                             .hover(move |s| s.border_color(hover_border).text_color(fg))
                     }
                 })
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.scale(0.92))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, n, cx)))
                 .when(on, |el| {
-                    el.child(motion::once(
+                    el.child(motion::pop_in(
                         div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                         SharedString::from(format!("chip-{id}-{n}-on")),
-                        Duration::from_millis(260),
-                        |el, t| el.opacity(t),
+                        (0.5, 0.5),
+                        0.05,
+                        0.0,
                     ))
                 })
                 .child(label)
@@ -712,7 +746,7 @@ pub(crate) fn button(
         .map(|el| {
             if look == Look::Primary {
                 el.hover(move |s| {
-                    s.bg(hover).top(px(-2.0)).shadow(vec![BoxShadow {
+                    s.bg(hover).translate_y(px(-2.0)).shadow(vec![BoxShadow {
                         color: glow,
                         offset: point(px(0.0), px(8.0)),
                         blur_radius: px(22.0),
@@ -724,9 +758,35 @@ pub(crate) fn button(
                 el.hover(move |s| s.bg(hover))
             }
         })
-        .active(|s| s.top(px(1.0)))
-        .when_some(glyph, |el, g| el.child(icon(g).size(px(16.0))))
+        // The `.btn` press: back down and in to 94%; the other variants don't move.
+        .when(look == Look::Primary, |el| el.active(|s| s.translate_y(px(0.0)).scale(0.94)))
+        .group("settings-button")
+        .when_some(glyph, |el, g| el.child(glyph_in_button(g)))
         .when(!label.is_empty(), |el| el.child(label))
+}
+
+/// A button's icon, moving as the web's do while their button is pointed at: a plus turns a
+/// quarter (`group-hover:rotate-90`), a bin tips (`-rotate-12`), arrows go round, a door nudges
+/// out. The nearest button is the group, so one name serves them all.
+pub(crate) fn glyph_in_button(glyph: &'static str) -> impl IntoElement {
+    let turn = |deg: f32| gpui_kit::radians(deg.to_radians());
+    div().id("glyph").flex_none().child(icon(glyph).size(px(16.0))).group_hover("settings-button", move |s| match glyph
+    {
+        "plus" | "x" => s.rotate(turn(90.0)),
+        "trash" | "trash-2" | "clipboard-paste" | "bell-off" | "megaphone-off" | "flask-conical" | "unplug"
+        | "unlink" | "unlink-2" | "pencil" | "user-x" => s.rotate(turn(-12.0)),
+        "refresh-cw" => s.rotate(turn(180.0)),
+        "rotate-ccw" => s.rotate(turn(-360.0)),
+        "key-round" => s.rotate(turn(-45.0)),
+        "user-minus" => s.rotate(turn(-6.0)),
+        "settings" => s.rotate(turn(90.0)),
+        "log-out" => s.translate_x(px(2.0)),
+        "send" => s.translate_x(px(2.0)).translate_y(px(-2.0)),
+        "download" => s.translate_y(px(2.0)),
+        "file-up" => s.translate_y(px(-2.0)),
+        "user-check" | "play" | "volume-2" => s.scale(1.1),
+        _ => s,
+    })
 }
 
 /// A text field as the web draws its inputs: bordered, `h-11 rounded-xl` unless told otherwise.
@@ -805,11 +865,12 @@ pub(crate) fn save_bar<V: 'static>(
             .flex()
             .gap(px(4.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
-            .child(
-                div()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(count as i64))])),
-            )
+            .child(div().text_color(p.muted_foreground).child(motion::counted(
+                format!("{id}-count"),
+                "settings.controls.unsavedCount",
+                count as u64,
+                14.0,
+            )))
             .into_any_element()
     };
     let bar = div()
@@ -1076,4 +1137,12 @@ impl SettingsView {
             .children(marks_row)
             .into_any_element()
     }
+}
+
+/// A chip's cross, turning a quarter while the chip is pointed at (`group-hover:rotate-90`).
+pub(crate) fn turning_x(group: &'static str) -> impl IntoElement {
+    div()
+        .id("x")
+        .group_hover(group, |s| s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+        .child(icon("x").size(px(12.0)))
 }

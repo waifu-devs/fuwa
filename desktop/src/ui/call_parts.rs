@@ -14,9 +14,9 @@ use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, BoxShadow, Context, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    StyledImage as _, Subscription, Window, div, point, px, relative,
+    AnyElement, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _,
+    StyleRefinement, Styled as _, StyledImage as _, Subscription, Window, div, point, px, radians, relative,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -42,6 +42,64 @@ pub(crate) fn red() -> Rgba {
 /// Tailwind's amber-500, for a connection that's coming back.
 pub(crate) fn amber() -> Rgba {
     gpui_kit::rgb(0xf59e0b)
+}
+
+/// A solid color a tenth brighter, for a button's `hover:brightness-110`.
+pub(crate) fn brighter(c: impl Into<Rgba>) -> gpui_kit::Hsla {
+    let c: Rgba = c.into();
+    Rgba { r: (c.r * 1.1).min(1.0), g: (c.g * 1.1).min(1.0), b: (c.b * 1.1).min(1.0), a: c.a }.into()
+}
+
+/// A dot with Tailwind's `animate-ping` going out of it (a recording, a
+/// live screen): a copy of it in `wave` that grows to twice its size and
+/// fades, once a second.
+pub(crate) fn ping_dot(
+    id: impl Into<SharedString>,
+    size: f32,
+    color: impl Into<gpui_kit::Hsla>,
+    wave: gpui_kit::Hsla,
+    window: &Window,
+) -> Div {
+    let ping = motion::ambient(
+        div().absolute().inset_0().rounded_full().bg(wave),
+        ElementId::Name(id.into()),
+        Duration::from_secs(1),
+        window,
+        |el, t| {
+            let k = ping_at(t);
+            el.scale(1.0 + k).opacity(1.0 - k)
+        },
+    );
+    div()
+        .relative()
+        .size(px(size))
+        .flex_none()
+        .child(ping)
+        .child(div().absolute().inset_0().rounded_full().bg(color.into()))
+}
+
+/// How far a ping has gone `t` into its loop: out over the first three
+/// quarters (`cubic-bezier(0, 0, 0.2, 1)`), then gone until the next.
+pub(crate) fn ping_at(t: f32) -> f32 {
+    let x = (t / 0.75).min(1.0);
+    1.0 - (1.0 - x).powi(3)
+}
+
+/// A button's icon, `glyph`: it springs in from `from` of its size, turned
+/// `turn` degrees, whenever `swap` changes (the web's `motion.span` keyed by
+/// whether the button is on), and takes `hover` while `group` is hovered.
+pub(crate) fn button_glyph(
+    group: &SharedString,
+    swap: impl Into<SharedString>,
+    glyph: impl IntoElement,
+    from: f32,
+    turn: f32,
+    hover: impl Fn(StyleRefinement) -> StyleRefinement + 'static,
+) -> AnyElement {
+    let swap = swap.into();
+    // The pop and the hover nest, so a press that flips the icon still shows its pop.
+    let inner = div().id(SharedString::from(format!("{swap}|hover"))).group_hover(group.clone(), hover).child(glyph);
+    motion::pop(div().child(inner), ElementId::Name(swap), from, turn, Duration::ZERO).into_any_element()
 }
 
 /// What calls keep in the window: the open voice channel, the open card,
@@ -250,7 +308,7 @@ pub(crate) fn voice_avatar(
 }
 
 /// The web's `VoiceFlags`: camera on, muted, deafened, recording; the ones
-/// a moderator set in red. Each pops in with a little turn.
+/// a moderator set in red.
 pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
     let mut flags: Vec<(&'static str, &'static str, bool)> = Vec::new();
     if state.server_record {
@@ -292,7 +350,8 @@ pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
             .text_color(if by_mod { p.destructive } else { p.muted_foreground })
             .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(label)).build(window, cx))
             .child(icon(glyph).size(px(14.0)));
-        row = row.child(motion::once(cell, id, Duration::from_millis(260), |el, t| el.opacity(t)));
+        // Each pops in with a little turn (`scale: 0, rotate: -40` on a lively spring).
+        row = row.child(motion::pop(cell, id, 0.0, -40.0, Duration::ZERO));
     }
     row
 }
@@ -314,10 +373,15 @@ pub(crate) fn toggle_icon(
         (false, Size::Sm) => (None, p.muted_foreground.into(), p.muted.into(), p.foreground.into()),
         (false, Size::Lg) => (Some(p.muted.into()), p.foreground.into(), alpha(p.muted, 0.7), p.foreground.into()),
     };
-    call_button_frame(id, size, bg, fg, hover_bg, hover_fg, label).child(icon(glyph).size(px(size.icon())))
+    // Mute's microphone turns in one way, deafen's headphones the other.
+    let turn = if glyph.starts_with("mic") { -25.0 } else { 25.0 };
+    let glyph =
+        button_glyph(&id, format!("{id}|glyph|{on}"), icon(glyph).size(px(size.icon())), 0.5, turn, |s| s.scale(1.1));
+    call_button_frame(id, size, bg, fg, hover_bg, hover_fg, label).child(glyph)
 }
 
-/// A call button's frame: `size-8 rounded-lg` or `size-12 rounded-2xl`, pressing in.
+/// A call button's frame: `size-8 rounded-lg` or `size-12 rounded-2xl`,
+/// pressing in (`active:scale-90`); a `group` named by its id, for its icon.
 fn call_button_frame(
     id: SharedString,
     size: Size,
@@ -329,7 +393,8 @@ fn call_button_frame(
 ) -> Stateful<Div> {
     let side = if size == Size::Sm { 32.0 } else { 48.0 };
     div()
-        .id(id)
+        .id(id.clone())
+        .group(id)
         .relative()
         .h(px(side))
         .min_w(px(side))
@@ -342,16 +407,22 @@ fn call_button_frame(
         .text_color(fg)
         .when_some(bg, |el, bg| el.bg(bg))
         .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-        .active(|s| s.opacity(0.85))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
 }
 
 /// The web's `HangUpButton`: big and red, its phone turning on hover.
 pub(crate) fn hang_up_button(id: impl Into<SharedString>, size: Size, label: String, p: &Palette) -> Stateful<Div> {
+    let id: SharedString = id.into();
     let (w, h) = if size == Size::Sm { (36.0, 36.0) } else { (64.0, 48.0) };
-    let _ = p;
+    let hover = brighter(p.destructive);
+    let phone = div()
+        .id("phone")
+        .group_hover(id.clone(), |s| s.rotate(radians(135f32.to_radians())))
+        .child(icon("phone-off").size(px(size.icon())));
     div()
-        .id(id.into())
+        .id(id.clone())
+        .group(id)
         .w(px(w))
         .h(px(h))
         .flex_none()
@@ -363,10 +434,10 @@ pub(crate) fn hang_up_button(id: impl Into<SharedString>, size: Size, label: Str
         .bg(p.destructive)
         .text_color(gpui_kit::white())
         .shadow(shadow_sm())
-        .hover(|s| s.opacity(0.92))
-        .active(|s| s.opacity(0.8))
+        .hover(move |s| s.bg(hover))
+        .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
-        .child(icon("phone-off").size(px(size.icon())))
+        .child(phone)
 }
 
 /// Whether you may turn your camera on or share your screen in the call
@@ -384,7 +455,7 @@ pub(crate) fn may_film(app: &FuwaApp, call: &CallView) -> bool {
 /// A camera or screen button's colors: `on` in its own color.
 fn film_colors(on: bool, on_bg: Rgba, on_fg: gpui_kit::Hsla, size: Size, p: &Palette) -> FrameColors {
     match (on, size) {
-        (true, _) => (Some(on_bg.into()), on_fg, alpha(on_bg, 0.9), on_fg),
+        (true, _) => (Some(on_bg.into()), on_fg, brighter(on_bg), on_fg),
         (false, Size::Sm) => (None, p.muted_foreground.into(), p.muted.into(), p.foreground.into()),
         (false, Size::Lg) => (Some(p.muted.into()), p.foreground.into(), alpha(p.muted, 0.7), p.foreground.into()),
     }
@@ -408,14 +479,10 @@ impl FuwaApp {
             "dms-calls.calls.video.cameraOn"
         });
         let (bg, fg, hover_bg, hover_fg) = film_colors(on, green(), gpui_kit::white(), size, &p);
+        let id = SharedString::from(format!("camera|{tag}"));
         let glyph = icon(if on { "video" } else { "video-off" }).size(px(size.icon()));
-        let glyph = motion::once(
-            div().child(glyph),
-            SharedString::from(format!("camera-glyph|{tag}|{on}")),
-            Duration::from_millis(260),
-            |el, t| el.opacity(t),
-        );
-        call_button_frame(SharedString::from(format!("camera|{tag}")), size, bg, fg, hover_bg, hover_fg, label)
+        let glyph = button_glyph(&id, format!("{id}|glyph|{on}"), glyph, 0.5, 0.0, |s| s.scale(1.1));
+        call_button_frame(id, size, bg, fg, hover_bg, hover_fg, label)
             .when(grow, |el| el.flex_1())
             .when(!may, |el| el.opacity(0.4).cursor_default())
             .when(may, |el| {
@@ -450,21 +517,28 @@ impl FuwaApp {
             "dms-calls.calls.video.screenShare"
         });
         let (bg, fg, hover_bg, hover_fg) = film_colors(on, p.primary, p.primary_foreground.into(), size, &p);
-        let button =
-            call_button_frame(SharedString::from(format!("screen|{tag}")), size, bg, fg, hover_bg, hover_fg, label)
-                .when(grow, |el| el.flex_1())
-                .when(!may, |el| el.opacity(0.4).cursor_default())
-                .when(may, |el| {
-                    el.on_click(cx.listener(move |this, _, window, cx| {
-                        if on {
-                            this.core.set_screen(false, None, false);
-                        } else {
-                            this.open_share_picker(window, cx);
-                        }
-                        cx.notify();
-                    }))
-                })
-                .child(icon(if on { "monitor-x" } else { "monitor-up" }).size(px(size.icon())));
+        let id = SharedString::from(format!("screen|{tag}"));
+        let glyph = icon(if on { "monitor-x" } else { "monitor-up" }).size(px(size.icon()));
+        // Off, its arrow lifts while hovered; on, it grows.
+        let glyph = if on {
+            button_glyph(&id, format!("{id}|glyph|{on}"), glyph, 0.5, 0.0, |s| s.scale(1.1))
+        } else {
+            button_glyph(&id, format!("{id}|glyph|{on}"), glyph, 0.5, 0.0, |s| s.translate_y(px(-2.0)))
+        };
+        let button = call_button_frame(id, size, bg, fg, hover_bg, hover_fg, label)
+            .when(grow, |el| el.flex_1())
+            .when(!may, |el| el.opacity(0.4).cursor_default())
+            .when(may, |el| {
+                el.on_click(cx.listener(move |this, _, window, cx| {
+                    if on {
+                        this.core.set_screen(false, None, false);
+                    } else {
+                        this.open_share_picker(window, cx);
+                    }
+                    cx.notify();
+                }))
+            })
+            .child(glyph);
         let holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
         holder.into_any_element()
     }
@@ -748,6 +822,7 @@ impl FuwaApp {
                 .cursor_pointer()
                 .text_color(p.muted_foreground)
                 .hover(move |s| s.bg(p.muted).text_color(fg))
+                .active(|s| s.scale(0.9))
                 .tooltip(move |window, cx| crate::ui::overlay::Tip::new(mute_label.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let to = if silent { 100.0 } else { 0.0 };
@@ -779,8 +854,15 @@ impl FuwaApp {
                     .cursor_pointer()
                     .when(red_text, |el| el.text_color(p.destructive))
                     .hover(move |s| s.bg(hover))
-                    .active(|s| s.opacity(0.85))
-                    .child(icon(glyph).size(px(16.0)))
+                    .active(|s| s.scale(0.98))
+                    .group(id)
+                    // Its icon tilts and grows while the row is hovered.
+                    .child(
+                        div()
+                            .id("icon")
+                            .group_hover(id, |s| s.rotate(radians(-12f32.to_radians())).scale(1.1))
+                            .child(icon(glyph).size(px(16.0))),
+                    )
                     .child(text)
             };
             let moderate = |change: pb::ModerateVoiceRequest| {
@@ -846,7 +928,9 @@ impl FuwaApp {
             }
             card = card.child(list);
         }
-        motion::rise(card, SharedString::from(format!("person-card|{user_id}")), Duration::ZERO, 6.0).into_any_element()
+        // Grows out of its top corner as the web's popover does (`scale: 0.92`).
+        motion::pop_in(card, SharedString::from(format!("person-card|{user_id}")), (0.0, 0.0), 0.92, 0.0)
+            .into_any_element()
     }
 
     /// Sets how loud someone is for you (100 is as they sound), and tells the call.
@@ -1020,65 +1104,70 @@ impl FuwaApp {
             Some(Level::Poor) => red(),
             _ => green(),
         };
-        let card =
-            pop_card(256.0, &p)
-                .child(
-                    div().flex().items_center().gap(px(8.0)).child(signal(&call.status, q, &p, "card", window)).child(
-                        div().text_sm().line_height(px(20.0)).font_weight(FontWeight::EXTRA_BOLD).child(heading),
+        let card = pop_card(256.0, &p)
+            .child(div().flex().items_center().gap(px(8.0)).child(signal(&call.status, q, &p, "card", window)).child(
+                div().text_sm().line_height(px(20.0)).font_weight(FontWeight::EXTRA_BOLD).child(motion::swap_text(
+                    "connection-heading",
+                    heading,
+                    14.0,
+                    window,
+                    cx,
+                )),
+            ))
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .flex()
+                    .items_end()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .text_size(px(24.0))
+                            .line_height(px(32.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(q.ping_text()),
+                    )
+                    .child(
+                        div()
+                            // On the big number's baseline, as the web's `items-baseline`.
+                            .mb(px(4.0))
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("dms-calls.calls.connection.ping")),
                     ),
-                )
-                .child(
-                    div()
-                        .mt(px(12.0))
-                        .flex()
-                        .items_end()
-                        .gap(px(6.0))
-                        .child(
-                            div()
-                                .text_size(px(24.0))
-                                .line_height(px(32.0))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(q.ping_text()),
-                        )
-                        .child(
-                            div()
-                                // On the big number's baseline, as the web's `items-baseline`.
-                                .mb(px(4.0))
-                                .text_xs()
-                                .line_height(px(16.0))
-                                .text_color(p.muted_foreground)
-                                .child(t("dms-calls.calls.connection.ping")),
-                        ),
-                )
-                .child(div().mt(px(4.0)).mb(px(12.0)).child(ping_graph(&q.history, color)))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.0))
-                        .child(row(t("dms-calls.calls.connection.loss"), loss))
-                        .child(row(t("dms-calls.calls.connection.jitter"), jitter))
-                        .child(row(t("dms-calls.calls.connection.route"), route)),
-                )
-                .child(
-                    div()
-                        .mt(px(12.0))
-                        .text_size(px(11.0))
-                        .line_height(px(15.0))
-                        .text_color(p.muted_foreground)
-                        .child(t("dms-calls.calls.connection.about")),
-                );
-        motion::rise(card, "connection-card", Duration::ZERO, 8.0).into_any_element()
+            )
+            .child(div().mt(px(4.0)).mb(px(12.0)).child(ping_graph(&q.history, color)))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(row(t("dms-calls.calls.connection.loss"), loss))
+                    .child(row(t("dms-calls.calls.connection.jitter"), jitter))
+                    .child(row(t("dms-calls.calls.connection.route"), route)),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .text_size(px(11.0))
+                    .line_height(px(15.0))
+                    .text_color(p.muted_foreground)
+                    .child(t("dms-calls.calls.connection.about")),
+            );
+        // Grows up out of the status it opened from (`scale: 0.92, y: 8`).
+        motion::pop_in(card, "connection-card", (0.0, 1.0), 0.92, 8.0).into_any_element()
     }
 
     /// The web's `RecordMenu`: on this computer, or everyone's sound on the server.
-    pub(crate) fn record_card(&self, call: &CallView, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn record_card(&self, call: &CallView, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
         let video = self.core.shared.read(|s| {
             s.instance(&call.instance).and_then(|i| i.server(&call.server_id)).is_some_and(|s| s.record_video)
         });
-        let item = |id: &'static str, glyph: &'static str, title: String, text: String, on: bool| {
-            let hover = alpha(p.primary, 0.1);
+        let item = |id: &'static str, glyph: &'static str, title: String, text: String, on: bool, window: &Window| {
+            // The menu's highlight (`bg-accent`).
+            let hover = p.accent;
             div()
                 .id(id)
                 .flex()
@@ -1097,7 +1186,10 @@ impl FuwaApp {
                         .child(div().text_sm().line_height(px(20.0)).font_weight(FontWeight::BOLD).child(title))
                         .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(text)),
                 )
-                .when(on, |el| el.child(div().mt(px(6.0)).size(px(8.0)).flex_none().rounded_full().bg(red())))
+                // The web's `RecordingDot`, pinging while it records.
+                .when(on, |el| {
+                    el.child(ping_dot(format!("{id}|dot"), 8.0, red(), alpha(red(), 0.6), window).mt(px(6.0)))
+                })
         };
         let device = call.self_record;
         let server = call.server_record;
@@ -1127,6 +1219,7 @@ impl FuwaApp {
                     t(if device { "dms-calls.calls.video.deviceStop" } else { "dms-calls.calls.video.device" }),
                     t(if device { "dms-calls.calls.video.deviceStopText" } else { "dms-calls.calls.video.deviceText" }),
                     device,
+                    window,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.calls.pop = None;
@@ -1147,6 +1240,7 @@ impl FuwaApp {
                         "dms-calls.calls.video.serverText"
                     }),
                     server,
+                    window,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.calls.pop = None;
@@ -1154,7 +1248,8 @@ impl FuwaApp {
                     cx.notify();
                 })),
             );
-        motion::rise(card, "record-card", Duration::ZERO, 8.0).into_any_element()
+        // The web's dropdown menus come in from 95%, from the button they open over.
+        motion::pop_in(card, "record-card", (0.5, 1.0), 0.95, 0.0).into_any_element()
     }
 
     /// The web's `RecordButton`: on this computer, or (in a voice channel
@@ -1181,17 +1276,17 @@ impl FuwaApp {
             (false, false) => "dms-calls.calls.video.recordStart",
         });
         let (bg, fg, hover_bg, hover_fg) = match (on, size) {
-            (true, _) => (Some(red().into()), gpui_kit::white(), alpha(red(), 0.9), gpui_kit::white()),
+            (true, _) => (Some(red().into()), gpui_kit::white(), brighter(red()), gpui_kit::white()),
             (false, Size::Sm) => (None, p.muted_foreground.into(), p.muted.into(), p.foreground.into()),
             (false, Size::Lg) => (Some(p.muted.into()), p.foreground.into(), alpha(p.muted, 0.7), p.foreground.into()),
         };
         let pop = CallPop::Record { from: from.to_owned() };
         let open = self.calls.pop.as_ref() == Some(&pop);
+        let id = SharedString::from(format!("record|{from}"));
         let mut button =
-            call_button_frame(SharedString::from(format!("record|{from}")), size, bg, fg, hover_bg, hover_fg, label)
-                .when(grow, |el| el.flex_1());
+            call_button_frame(id.clone(), size, bg, fg, hover_bg, hover_fg, label).when(grow, |el| el.flex_1());
         if on {
-            // A soft ping goes out from it while it records.
+            // A soft ping goes out from it while it records (`animate-ping`, every 2 seconds).
             let radius = if size == Size::Sm { radius_lg() } else { radius_2xl() };
             let wave = div().absolute().inset_0().rounded(radius).bg(alpha(red(), 0.4));
             button = button.child(motion::ambient(
@@ -1200,12 +1295,16 @@ impl FuwaApp {
                 Duration::from_secs(2),
                 window,
                 |el, t| {
-                    let k = (t * 2.0).min(1.0);
-                    el.opacity(1.0 - k)
+                    let k = ping_at(t);
+                    el.scale(1.0 + k).opacity(1.0 - k)
                 },
             ));
         }
-        let button = button.child(div().relative().child(icon("circle-dot").size(px(size.icon()))));
+        let glyph =
+            button_glyph(&id, format!("{id}|glyph|{on}"), icon("circle-dot").size(px(size.icon())), 0.4, 0.0, |s| {
+                s.scale(1.1)
+            });
+        let button = button.child(div().relative().child(glyph));
         let button = if both {
             button.on_click(cx.listener(move |this, _, _, cx| this.toggle_call_pop(pop.clone(), cx)))
         } else {
@@ -1217,7 +1316,7 @@ impl FuwaApp {
         };
         let mut holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
         if open {
-            holder = holder.child(self.hang(self.record_card(&call, cx), Side::AboveCenter));
+            holder = holder.child(self.hang(self.record_card(&call, window, cx), Side::AboveCenter));
         }
         Some(holder.into_any_element())
     }

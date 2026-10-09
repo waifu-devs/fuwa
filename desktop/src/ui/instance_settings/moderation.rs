@@ -238,6 +238,7 @@ impl InstanceSettingsView {
         // `rounded-3xl border-2 border-dashed p-4`, lifting on hover with its plus turning.
         let add = div()
             .id("instance-add-provider")
+            .group("instance-add-provider")
             .flex()
             .items_center()
             .gap(px(12.0))
@@ -250,12 +251,13 @@ impl InstanceSettingsView {
             .when(!full, |el| {
                 let (hover_border, hover_bg) = (alpha(p.primary, 0.5), alpha(p.primary, 0.03));
                 el.cursor_pointer()
-                    .hover(move |s| s.border_color(hover_border).bg(hover_bg).top(px(-2.0)))
-                    .active(|s| s.top(px(0.0)))
+                    .hover(move |s| s.border_color(hover_border).bg(hover_bg).translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.98))
                     .on_click(cx.listener(|this, _, window, cx| this.add_custom(window, cx)))
             })
             .child(
                 div()
+                    .id("instance-add-provider-plus")
                     .flex_none()
                     .size(px(40.0))
                     .flex()
@@ -264,6 +266,11 @@ impl InstanceSettingsView {
                     .rounded(radius_2xl())
                     .bg(alpha(violet, 0.15))
                     .text_color(violet_fg)
+                    .when(!full, |el| {
+                        el.group_hover("instance-add-provider", |s| {
+                            s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                        })
+                    })
                     .child(icon("plus").size(px(20.0))),
             )
             .child(

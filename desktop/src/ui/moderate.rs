@@ -7,9 +7,8 @@ use std::time::Duration;
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, BoxShadow, Context, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, point,
-    px, rgb,
+    AnyElement, BoxShadow, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, point, px, rgb,
 };
 
 use crate::core::dms::now_ms;
@@ -185,7 +184,7 @@ impl FuwaApp {
             )
             .when_some(until, |el, until| {
                 let amber = amber(&p);
-                el.child(motion::rise(
+                el.child(crate::ui::profile_card::spring_in(
                     div()
                         .flex()
                         .items_center()
@@ -197,15 +196,22 @@ impl FuwaApp {
                         .text_color(amber)
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .child(icon("hourglass").size(px(14.0)).with_animation(
+                        // The web's `animate-[spin_3s_ease-in-out_infinite]`.
+                        .child(motion::ambient(
+                            div().child(icon("hourglass").size(px(14.0))),
                             "mod-hourglass",
-                            Animation::new(Duration::from_millis(3000)).repeat(),
-                            |el, t| el.opacity(0.55 + 0.45 * (t * std::f32::consts::TAU).cos().abs()),
+                            Duration::from_millis(3000),
+                            window,
+                            |el, t| {
+                                let eased = if t < 0.5 { 2.0 * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0 };
+                                el.rotate(gpui_kit::radians(eased * std::f32::consts::TAU))
+                            },
                         ))
                         .child(left(until - now)),
                     "mod-left",
+                    (520.0, 34.0),
                     Duration::ZERO,
-                    2.0,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.6 + 0.4 * t),
                 ))
             });
 
@@ -321,7 +327,7 @@ impl FuwaApp {
                 .cursor_pointer()
                 .when(busy, |el| el.opacity(0.5))
                 .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
+                .active(|s| s.translate_y(px(1.0)))
                 .when_some(glyph, |el, g| el.child(icon(g).size(px(16.0))))
                 .child(text)
         };
@@ -351,16 +357,28 @@ impl FuwaApp {
             .cursor_pointer()
             .when(busy, |el| el.opacity(0.5))
             .hover(move |s| s.bg(fill_hover))
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.translate_y(px(1.0)))
             .child(if busy {
-                icon("loader-circle")
-                    .size(px(16.0))
-                    .with_animation("mod-busy", Animation::new(Duration::from_millis(900)).repeat(), |el, t| {
-                        el.opacity(0.5 + 0.5 * (t * std::f32::consts::TAU).cos().abs())
-                    })
-                    .into_any_element()
+                motion::ambient(
+                    div().child(icon("loader-circle").size(px(16.0))),
+                    "mod-busy",
+                    Duration::from_millis(1000),
+                    window,
+                    |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+                )
             } else {
-                icon(submit_glyph).size(px(16.0)).into_any_element()
+                // The icon acts out the action while pointed at: the hourglass turns
+                // over, the door swings, the gavel lifts.
+                div()
+                    .id("mod-submit-icon")
+                    .group_hover("mod-submit", move |s| match submit_glyph {
+                        "hourglass" => s.rotate(gpui_kit::radians(std::f32::consts::PI)),
+                        "door-open" => s.translate_x(px(2.0)),
+                        "gavel" => s.rotate(gpui_kit::radians(-0.21)),
+                        _ => s,
+                    })
+                    .child(icon(submit_glyph).size(px(16.0)))
+                    .into_any_element()
             })
             .child(submit_text)
             .on_click(cx.listener(|this, _, window, cx| this.submit_moderation(window, cx)));
@@ -495,13 +513,14 @@ impl FuwaApp {
                                 .hover(move |s| s.border_color(hover_border).text_color(fg))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.92))
                     .when(on, |el| {
-                        el.child(motion::once(
+                        el.child(crate::ui::profile_card::spring_in(
                             div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                             SharedString::from(format!("{id}-on-{value}")),
-                            Duration::from_millis(260),
-                            |el, t| el.opacity(t),
+                            (520.0, 34.0),
+                            Duration::ZERO,
+                            |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(t),
                         ))
                     })
                     .child(text.clone())

@@ -369,7 +369,8 @@ impl FuwaApp {
             .items_center()
             .gap(px(8.0))
             .text_center()
-            .child(motion::once(
+            // The icon springs up from half its size, turning upright.
+            .child(motion::pop(
                 div().child(ringed_icon(server, 80.0, 25.6, 4.0, p).shadow(vec![BoxShadow {
                     color: alpha(accent.into(), 0.7),
                     offset: point(px(0.0), px(14.0)),
@@ -378,11 +379,9 @@ impl FuwaApp {
                     inset: false,
                 }])),
                 SharedString::from(format!("invite-icon|{}", server.id)),
-                Duration::from_millis(600),
-                |el, t| {
-                    let s = 1.0 - (1.0 - t).powi(3) * (1.0 + 2.6 * t);
-                    el.relative().top(px(12.0 * (1.0 - s))).opacity(t.min(1.0))
-                },
+                0.5,
+                -14.0,
+                Duration::from_millis(100),
             ))
             .child(
                 div()
@@ -516,7 +515,8 @@ impl FuwaApp {
                 .child(inner)
                 .children(expires)
         };
-        motion::rise(
+        // It rises in from a little smaller (`y: 24, scale: 0.96`).
+        motion::pop_in(
             div()
                 .w(px(w))
                 .flex()
@@ -538,7 +538,8 @@ impl FuwaApp {
                 .child(body)
                 .child(footer),
             SharedString::from(format!("invite-card|{key}|{}", server.id)),
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             24.0,
         )
         .into_any_element()
@@ -585,9 +586,16 @@ impl FuwaApp {
                         cx.notify();
                     })),
             );
-        motion::rise(
+        // The card rises in from a little smaller, its globe springing up from half its size.
+        motion::pop_in(
             small_card(p)
-                .child(round_badge(alpha(p.primary, 0.15), p.primary.into(), globe))
+                .child(motion::pop(
+                    round_badge(alpha(p.primary, 0.15), p.primary.into(), globe),
+                    "elsewhere-badge",
+                    0.5,
+                    -20.0,
+                    Duration::from_millis(100),
+                ))
                 .child(
                     div()
                         .text_xl()
@@ -597,7 +605,8 @@ impl FuwaApp {
                 .child(div().text_sm().text_color(p.muted_foreground).child(about))
                 .child(actions),
             SharedString::from(format!("elsewhere|{key}")),
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             16.0,
         )
         .into_any_element()
@@ -612,7 +621,7 @@ impl FuwaApp {
                 let a = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 0.25;
                 el.rotate(gpui_kit::radians(a))
             });
-        motion::rise(
+        motion::pop_in(
             small_card(p)
                 .child(round_badge(p.muted.into(), p.muted_foreground.into(), wiggle))
                 .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(if gone {
@@ -636,7 +645,8 @@ impl FuwaApp {
                         })),
                 ),
             "broken-card",
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.96,
             16.0,
         )
         .into_any_element()
@@ -904,11 +914,17 @@ impl FuwaApp {
                 let apply = self.home.apply.as_ref().expect("checked above");
                 let (agreed, sending, error, nudges) = (apply.agreed, apply.sending, apply.error.clone(), apply.nudges);
                 let send = filled_button("apply-send", 44.0, p.primary, p.primary_foreground, p)
+                    .group("apply-send")
                     .when(sending, |el| el.opacity(0.5))
                     .child(if sending {
                         spinner(16.0, "apply-send", window)
                     } else {
-                        icon("send").size(px(16.0)).into_any_element()
+                        // The plane leans off up and right as the button's hovered.
+                        div()
+                            .id("apply-send-plane")
+                            .group_hover("apply-send", |s| s.translate_x(px(2.0)).translate_y(px(-2.0)))
+                            .child(icon("send").size(px(16.0)))
+                            .into_any_element()
                     })
                     .child(t("join.applyDialog.send"))
                     .on_click(cx.listener(|this, _, window, cx| this.send_application(window, cx)));
@@ -1227,11 +1243,13 @@ impl FuwaApp {
                     .border_1()
                     .border_color(p.border)
                     .bg(p.muted)
-                    .child(motion::once(
+                    // The first letter bounces in as it changes.
+                    .child(motion::pop(
                         server_icon(&preview, 78.0, 24.6, p).text_size(px(20.0)),
                         SharedString::from(format!("create-initial-{initial}")),
-                        Duration::from_millis(300),
-                        |el, t| el.opacity(0.6 + 0.4 * t),
+                        0.8,
+                        -8.0,
+                        Duration::ZERO,
                     )),
             )
             .when(uploading, |el| {
@@ -1414,6 +1432,7 @@ impl FuwaApp {
         });
         let toggle = div()
             .id("create-browse")
+            .group("create-browse")
             .flex()
             .items_center()
             .justify_between()
@@ -1635,8 +1654,7 @@ impl FuwaApp {
             .map(|a| {
                 let waiting = a.waiting();
                 let id = format!("applied|{key}|{}", a.server.id);
-                let hovered = self.hovered.as_deref() == Some(id.as_str());
-                let ring = if hovered { alpha(p.primary, 0.6) } else { alpha(p.muted_foreground, 0.4) };
+                let (ring, lit_ring) = (alpha(p.muted_foreground, 0.4), alpha(p.primary, 0.6));
                 let badge_ring = mix(p.background, gpui_kit::rgb(0x000000), 0.25);
                 let mark = div()
                     .absolute()
@@ -1657,27 +1675,36 @@ impl FuwaApp {
                         icon("x").size(px(12.0)).into_any_element()
                     });
                 let (k, sid) = (key.to_owned(), a.server.id.clone());
+                // Faded until hovered, when it and its dashed ring light up.
                 let face = div()
                     .id(SharedString::from(id.clone()))
+                    .group(SharedString::from(id.clone()))
                     .relative()
                     .size(px(48.0))
                     .cursor_pointer()
                     .child(
                         div()
+                            .id(SharedString::from(format!("{id}|face")))
                             .size(px(48.0))
                             .rounded_full()
                             .overflow_hidden()
-                            .opacity(if hovered {
-                                1.0
-                            } else if waiting {
-                                0.6
-                            } else {
-                                0.4
-                            })
+                            .opacity(if waiting { 0.6 } else { 0.4 })
+                            .group_hover(SharedString::from(id.clone()), |s| s.opacity(1.0))
                             .child(server_icon(&a.server, 48.0, 24.0, &p)),
                     )
-                    .child(div().absolute().inset_0().rounded_full().border_2().border_dashed().border_color(ring))
-                    .child(mark)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}|ring")))
+                            .absolute()
+                            .inset_0()
+                            .rounded_full()
+                            .border_2()
+                            .border_dashed()
+                            .border_color(ring)
+                            .group_hover(SharedString::from(id.clone()), move |s| s.border_color(lit_ring)),
+                    )
+                    // Its sign springs in, turning, whenever the answer changes.
+                    .child(motion::pop(mark, SharedString::from(format!("{id}|{waiting}")), 0.0, -60.0, Duration::ZERO))
                     .on_hover(cx.listener({
                         let id = id.clone();
                         move |this, on: &bool, _, cx| {
@@ -1804,23 +1831,9 @@ fn shadow_2xl() -> Vec<BoxShadow> {
     }]
 }
 
-/// The dialog's close button, at its top right.
+/// The dialog's close button, at its top right, turning a quarter on hover.
 fn close_button(p: &Palette, cx: &mut Context<FuwaApp>) -> impl IntoElement {
-    let (bg, fg) = (p.muted, p.foreground);
-    div()
-        .id("join-dialog-close")
-        .absolute()
-        .top(px(16.0))
-        .right(px(16.0))
-        .size(px(32.0))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_color(p.muted_foreground)
-        .cursor_pointer()
-        .hover(move |s| s.bg(bg).text_color(fg))
-        .child(icon("x").size(px(16.0)))
+    crate::ui::overlay::dialog_close("join-dialog-close", p)
         .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
 }
 
@@ -1961,6 +1974,8 @@ pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<D
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .when(!checked, |el| el.hover(move |s| s.border_color(hover)))
+        // `whileTap={{ scale: 0.98 }}`.
+        .active(|s| s.scale(0.98))
         .child(motion::once(
             div()
                 .size(px(24.0))
@@ -1984,9 +1999,11 @@ pub(crate) fn agree_check(checked: bool, label: &str, p: &Palette) -> Stateful<D
         .child(div().flex_1().min_w_0().child(label.to_owned()))
 }
 
-/// A switch (the web's `Switch`): a pill whose knob slides over.
+/// A switch (the web's `Switch`): a pill whose knob slides over, and
+/// stretches toward the middle while its row is pressed (`pressedWidth`).
 fn switch(on: bool, p: &Palette, window: &mut Window, cx: &mut Context<FuwaApp>) -> impl IntoElement {
     let x = motion::follow("create-switch", if on { 14.0 } else { 0.0 }, window, cx);
+    let pressed = if on { x - 3.0 } else { x };
     div()
         .w(px(32.0))
         .h(px(18.4))
@@ -1994,11 +2011,16 @@ fn switch(on: bool, p: &Palette, window: &mut Window, cx: &mut Context<FuwaApp>)
         .rounded_full()
         .bg(if on { p.primary } else { mix(p.muted, p.foreground, 0.08).into() })
         .p(px(1.0))
-        .child(div().relative().left(px(x)).size(px(16.4)).rounded_full().bg(if on {
-            p.primary_foreground
-        } else {
-            p.background
-        }))
+        .child(
+            div()
+                .id("create-switch-knob")
+                .relative()
+                .left(px(x))
+                .size(px(16.4))
+                .rounded_full()
+                .bg(if on { p.primary_foreground } else { p.background })
+                .group_active("create-browse", move |s| s.w(px(19.4)).left(px(pressed))),
+        )
 }
 
 /// The top of the applying and application screens: the banner, the server's

@@ -529,8 +529,8 @@ impl ServerSettingsView {
             .when(full, |el| el.opacity(0.6))
             .when(!full, |el| {
                 el.cursor_pointer()
-                    .hover(move |s| s.bg(hover_bg).border_color(hover_border))
-                    .active(|s| s.top(px(1.0)))
+                    .hover(move |s| s.bg(hover_bg).border_color(hover_border).translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.98))
                     .on_click(cx.listener(|this, _, _, cx| this.pick_emoji(cx)))
                     .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drag_bg).border_color(primary))
                     .on_drop(
@@ -801,6 +801,7 @@ impl ServerSettingsView {
             let red = p.destructive;
             div()
                 .opacity(0.5)
+                .id(SharedString::from(format!("{group}-tools")))
                 .group_hover(group.clone(), |s| s.opacity(1.0))
                 .child(icon_button_in(SharedString::from(format!("emoji-delete-{id}")), "trash", p, red).on_click(
                     cx.listener(move |this, _, _, cx| {
@@ -824,11 +825,15 @@ impl ServerSettingsView {
                 .border_color(p.border)
                 .bg(alpha(p.background, 0.5))
                 .hover(move |s| s.border_color(hover_border))
+                // The picture grows and tips under the pointer (`scale: 1.25, rotate: -8`).
                 .child(
-                    img(SharedString::from(emoji.url.clone()))
-                        .size(px(40.0))
+                    div()
+                        .id(SharedString::from(format!("emoji-pic-{id}")))
                         .flex_none()
-                        .object_fit(ObjectFit::Contain),
+                        .hover(|s| s.scale(1.25).rotate(gpui_kit::radians(-8f32.to_radians())))
+                        .child(
+                            img(SharedString::from(emoji.url.clone())).size(px(40.0)).object_fit(ObjectFit::Contain),
+                        ),
                 )
                 .child(
                     div()

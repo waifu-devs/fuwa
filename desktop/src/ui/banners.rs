@@ -64,11 +64,13 @@ impl FuwaApp {
                 window,
                 |el, t| el.left(gpui_kit::relative(-0.4 + 1.6 * t)).opacity((1.0 - (2.0 * t - 1.0).abs()).min(1.0)),
             ))
-            .child(motion::once(
+            // The screen pops in a moment after the bar (`scale: 0, rotate: -30`).
+            .child(motion::pop(
                 div().child(icon("tv-minimal-play").size(px(16.0))),
                 "streamer-icon",
-                Duration::from_millis(400),
-                |el, t| el.opacity(t),
+                0.0,
+                -30.0,
+                Duration::from_millis(100),
             ))
             .child(div().truncate().child(t("chattools.streamer.on")))
             .child(
@@ -90,7 +92,7 @@ impl FuwaApp {
                             .line_height(px(16.0))
                             .cursor_pointer()
                             .hover(move |s| s.bg(white(0.2)))
-                            .active(|s| s.opacity(0.9))
+                            .active(|s| s.scale(0.95))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.streamer_banner_hidden = true;
                                 cx.notify();
@@ -109,7 +111,7 @@ impl FuwaApp {
                             .line_height(px(16.0))
                             .cursor_pointer()
                             .hover(move |s| s.bg(white(0.35)))
-                            .active(|s| s.opacity(0.9))
+                            .active(|s| s.scale(0.95))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.core.set_prefs(|p| p.streamer_mode = false);
                                 this.prefs = this.core.prefs();
@@ -138,6 +140,9 @@ impl FuwaApp {
             return None;
         }
         let p = pal(cx);
+        // Black over a light theme, white over a dark one, as the web's `bg-black/15 dark:bg-white/15`.
+        let dark = p.dark;
+        let shade = move |a: f32| alpha(if dark { gpui_kit::rgb(0xffffff) } else { gpui_kit::rgb(0x000000) }, a);
         let date = {
             use chrono::TimeZone as _;
             chrono::Local
@@ -146,15 +151,22 @@ impl FuwaApp {
                 .map(|d| d.format("%b %-d").to_string())
                 .unwrap_or_default()
         };
-        let badge = div()
-            .size(px(28.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .bg(crate::ui::announcement::amber())
-            .child(provider_mark(&latest.kind, 14.0));
+        // The provider's mark pops in after the bar (`scale: 0, rotate: -40`).
+        let badge = motion::pop(
+            div()
+                .size(px(28.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(crate::ui::announcement::amber())
+                .child(provider_mark(&latest.kind, 14.0)),
+            SharedString::from(format!("sign-in-badge|{id}")),
+            0.0,
+            -40.0,
+            Duration::from_millis(120),
+        );
         let review = div()
             .id("sign-in-review")
             .flex()
@@ -169,7 +181,7 @@ impl FuwaApp {
             .line_height(px(16.0))
             .font_weight(FontWeight::BOLD)
             .cursor_pointer()
-            .hover(move |s| s.opacity(0.85))
+            .hover(move |s| s.bg(shade(0.15)))
             .on_click({
                 let key = key.clone();
                 cx.listener(move |this, _, window, cx| this.open_security_settings(&key, window, cx))
@@ -180,14 +192,15 @@ impl FuwaApp {
             let (key, id) = (key.clone(), id.clone());
             div()
                 .id("sign-in-notice-close")
+                .group("sign-in-notice-close")
                 .size(px(28.0))
                 .rounded_full()
                 .flex()
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .hover(|s| s.bg(alpha(gpui_kit::rgb(0x000000), 0.1)))
-                .active(|s| s.opacity(0.9))
+                .hover(move |s| s.bg(if dark { shade(0.15) } else { shade(0.1) }))
+                .active(|s| s.scale(0.9))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.set_prefs(|p| {
                         p.sign_in_notice_closed.insert(key.clone(), id.clone());
@@ -195,7 +208,13 @@ impl FuwaApp {
                     this.prefs = this.core.prefs();
                     cx.notify();
                 }))
-                .child(icon("x").size(px(16.0)))
+                // Its cross turns a quarter while hovered.
+                .child(
+                    div()
+                        .id("sign-in-notice-x")
+                        .group_hover("sign-in-notice-close", |s| s.rotate(gpui_kit::radians(90f32.to_radians())))
+                        .child(icon("x").size(px(16.0))),
+                )
         };
         let bar = div()
             .relative()

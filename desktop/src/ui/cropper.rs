@@ -303,7 +303,7 @@ impl Render for PictureCropper {
                             cx.notify();
                         }),
                     )
-                    .child(motion::rise(div().child(card), "cropper-panel", Duration::ZERO, 40.0)),
+                    .child(motion::dialog_in(div().child(card), "cropper-panel")),
                 "cropper-fade",
                 Duration::from_millis(200),
             ))
@@ -335,7 +335,10 @@ impl PictureCropper {
                 .justify_center()
                 .text_color(p.muted_foreground)
                 .when(off, |el| el.opacity(0.4))
-                .when(!off, |el| el.cursor_pointer().hover(move |s| s.bg(hover).text_color(fg)))
+                // `active:scale-90`.
+                .when(!off, |el| {
+                    el.cursor_pointer().hover(move |s| s.bg(hover).text_color(fg)).active(|s| s.scale(0.9))
+                })
                 .child(icon(glyph).size(px(16.0)))
         };
         let zoom_row = div()

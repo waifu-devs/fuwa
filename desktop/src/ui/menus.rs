@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    AnyElement, App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, Rgba,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::core::account::NotificationPatch;
@@ -190,7 +190,7 @@ impl FuwaApp {
             .text_sm()
             .when(on, |el| el.text_color(p.primary).font_weight(FontWeight::BOLD))
             .hover(move |s| s.bg(hover))
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.translate_y(px(1.0)))
             .on_click(
                 cx.listener(move |this, _, _, cx| this.save_notifications(&key, &server, &channel, patch.clone(), cx)),
             )
@@ -235,6 +235,8 @@ impl FuwaApp {
             .text_color(if muted { amber } else { p.muted_foreground })
             .when(open, |el| el.bg(p.muted))
             .hover(move |s| s.bg(hover))
+            // The web's `whileTap={{ scale: 0.85 }}`.
+            .active(|s| s.scale(0.85))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.menu = if this.menu.as_ref() == Some(&toggle) { None } else { Some(toggle.clone()) };
                 this.msg_ui.bell_sub = false;
@@ -250,7 +252,8 @@ impl FuwaApp {
                     let x = t * 6.0;
                     let n = (x.floor() as usize).min(5);
                     let deg = k[n] + (k[n + 1] - k[n]) * (x - n as f32);
-                    el.rotate(gpui_kit::radians(deg.to_radians()))
+                    // Swinging from near its top, as a bell hangs (`originY: 0.1`).
+                    el.transform_origin(0.5, 0.1).rotate(gpui_kit::radians(deg.to_radians()))
                 },
             ));
         let card = open.then(|| self.bell_card(key, server, channel, channel_muted, server_muted, &p, cx));
@@ -330,7 +333,7 @@ impl FuwaApp {
             }
         });
         let close_sub = std::rc::Rc::new(close_sub);
-        let mut body = div().flex().flex_col().child(
+        let mut rows: Vec<(AnyElement, bool)> = vec![(
             div()
                 .px(px(8.0))
                 .py(px(6.0))
@@ -339,8 +342,10 @@ impl FuwaApp {
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(p.muted_foreground)
                 .truncate()
-                .child(format!("#{name}")),
-        );
+                .child(format!("#{name}"))
+                .into_any_element(),
+            false,
+        )];
         if channel_muted {
             let until = mute_until(own.as_ref());
             let hint = if until.is_empty() {
@@ -349,7 +354,7 @@ impl FuwaApp {
                 crate::core::i18n::t_with("common.notify.until", &[("time", crate::core::i18n::Arg::Str(&until))])
             };
             let c = close_sub.clone();
-            body = body.child(
+            rows.push((
                 drop_item("bell-unmute", Some("bell"), t("chat.bell.unmute"), p)
                     .on_hover(move |on, w, cx| c(on, w, cx))
                     .on_click(save(NotificationPatch { unmute: true, ..NotificationPatch::default() }))
@@ -357,8 +362,10 @@ impl FuwaApp {
                         el.child(
                             div().ml_auto().pl(px(8.0)).truncate().text_xs().text_color(p.muted_foreground).child(hint),
                         )
-                    }),
-            );
+                    })
+                    .into_any_element(),
+                true,
+            ));
         } else {
             let sub_open = self.msg_ui.bell_sub;
             let mut trigger = drop_item("bell-mute", Some("bell-off"), t("chat.bell.mute"), p)
@@ -372,14 +379,7 @@ impl FuwaApp {
                     this.msg_ui.bell_sub = !this.msg_ui.bell_sub;
                     cx.notify();
                 }))
-                .child(
-                    div().ml_auto().child(
-                        icon("chevron-right")
-                            .size(px(16.0))
-                            .text_color(p.muted_foreground)
-                            .when(sub_open, |el| el.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))),
-                    ),
-                );
+                .child(div().ml_auto().child(Chevron { open: sub_open, color: p.muted_foreground }));
             if sub_open {
                 trigger = trigger.bg(p.accent);
                 let mut sub = div().flex().flex_col();
@@ -395,12 +395,15 @@ impl FuwaApp {
                             &[("count", crate::core::i18n::Arg::Num(ms / 3_600_000))],
                         ),
                     };
-                    sub = sub.child(drop_item(SharedString::from(format!("bell-mute-{n}")), None, label, p).on_click(
-                        save(NotificationPatch {
-                            mute_until: Some(ms.map(|ms| now + ms)),
-                            ..NotificationPatch::default()
-                        }),
-                    ));
+                    let hover = p.accent;
+                    sub = sub.child(
+                        drop_item(SharedString::from(format!("bell-mute-{n}")), None, label, p)
+                            .hover(move |s| s.bg(hover))
+                            .on_click(save(NotificationPatch {
+                                mute_until: Some(ms.map(|ms| now + ms)),
+                                ..NotificationPatch::default()
+                            })),
+                    );
                 }
                 trigger = trigger.child(div().absolute().top(px(0.0)).left(gpui_kit::relative(1.0)).ml(px(1.0)).child(
                     motion::rise(
@@ -411,11 +414,11 @@ impl FuwaApp {
                     ),
                 ));
             }
-            body = body.child(trigger.relative());
+            rows.push((trigger.relative().into_any_element(), true));
         }
         if server_muted {
             let until = mute_until(server_own.as_ref());
-            body = body.child(
+            rows.push((
                 div()
                     .px(px(8.0))
                     .pb(px(4.0))
@@ -429,35 +432,28 @@ impl FuwaApp {
                             "common.notify.wholeServerMutedUntil",
                             &[("time", crate::core::i18n::Arg::Str(&until))],
                         )
-                    }),
-            );
+                    })
+                    .into_any_element(),
+                false,
+            ));
         }
-        body = body.child(separator(p));
+        rows.push((separator(p).into_any_element(), false));
         let levels = [
             (Level::Unspecified, t("chat.bell.useServer")),
             (Level::All, t("common.notify.all")),
             (Level::Mentions, t("common.notify.mentions")),
             (Level::Nothing, t("common.notify.nothing")),
         ];
+        let mut dot = None;
         for (value, label) in levels {
-            let on = value == level;
+            if value == level {
+                dot = Some(rows.len());
+            }
             let c = close_sub.clone();
             let item = drop_item(SharedString::from(format!("bell-level-{}", value as i32)), None, String::new(), p)
                 .pl(px(32.0))
                 .on_hover(move |on, w, cx| c(on, w, cx))
                 .on_click(save(NotificationPatch { level: Some(value), ..NotificationPatch::default() }))
-                .when(on, |el| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .left(px(8.0))
-                            .size(px(14.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(div().size(px(8.0)).rounded_full().bg(p.foreground)),
-                    )
-                })
                 .child(if value == Level::Unspecified {
                     div()
                         .min_w_0()
@@ -473,11 +469,11 @@ impl FuwaApp {
                 } else {
                     div().child(label).into_any_element()
                 });
-            body = body.child(item.relative());
+            rows.push((item.into_any_element(), true));
         }
-        body = body.child(separator(p));
+        rows.push((separator(p).into_any_element(), false));
         let c = close_sub.clone();
-        body = body.child(
+        rows.push((
             drop_item("bell-settings", Some("settings"), t("chat.bell.settings"), p)
                 .on_hover(move |on, w, cx| c(on, w, cx))
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -490,12 +486,16 @@ impl FuwaApp {
                         });
                     }
                     cx.notify();
-                })),
-        );
+                }))
+                .into_any_element(),
+            true,
+        ));
+        let body = Glide { id: "bell".into(), rows, dot, accent: p.accent, dot_color: p.foreground };
+        // It hangs from the bell's right edge (`align="end"`), and grows out of that corner.
         motion::pop_in(
             menu_frame(256.0, p).id("bell-menu").occlude().on_click(|_, _, cx| cx.stop_propagation()).child(body),
             "bell-menu-in",
-            (0.5, 0.0),
+            (1.0, 0.0),
             0.95,
             -6.0,
         )
@@ -527,14 +527,125 @@ fn menu_frame(width: f32, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
         .shadow(crate::ui::chat_rows::shadow_md())
 }
 
-/// One line of a dropdown (`DropdownMenuItem`): a 16px icon, words, the accent under the pointer.
+/// A dropdown's lines with the web's highlight (Animate UI's `Highlight`):
+/// one accent box that glides to the line under the pointer, rather than each
+/// line lighting up by itself, and the radio dot gliding to the picked line
+/// (`layoutId`). Each row says whether the highlight goes to it; `dot` is the
+/// row with the dot.
+#[derive(IntoElement)]
+struct Glide {
+    id: SharedString,
+    rows: Vec<(AnyElement, bool)>,
+    dot: Option<usize>,
+    accent: Rgba,
+    dot_color: Rgba,
+}
+
+/// Where a [`Glide`]'s rows sit (top and height, from the first row's top) and
+/// which one's under the pointer. `visits` counts the times the pointer came
+/// in, so the highlight appears where it comes in instead of gliding from
+/// where it last left.
+#[derive(Default)]
+struct Glided {
+    rows: Vec<(f32, f32)>,
+    hovered: Option<usize>,
+    visits: u32,
+}
+
+impl RenderOnce for Glide {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state =
+            window.use_keyed_state(SharedString::from(format!("{}|glide", self.id)), cx, |_, _| Glided::default());
+        let (lit, dot, visits) = {
+            let s = state.read(cx);
+            (
+                s.hovered.and_then(|ix| s.rows.get(ix).copied()),
+                self.dot.and_then(|ix| s.rows.get(ix).copied()),
+                s.visits,
+            )
+        };
+        let measure = state.clone();
+        let mut col = div().flex().flex_col().on_children_prepainted(move |bounds, window, cx| {
+            let rows = measured(&bounds);
+            // Drawn again when they move, so the dot shows from the first frame they're known.
+            if measure.read(cx).rows != rows {
+                measure.update(cx, |s, _| s.rows = rows);
+                window.request_animation_frame();
+            }
+        });
+        for (ix, (row, glides)) in self.rows.into_iter().enumerate() {
+            let state = state.clone();
+            col = col.child(div().id(ix).child(row).when(glides, |el| {
+                el.on_hover(move |on, _, cx| {
+                    state.update(cx, |s, cx| {
+                        if *on {
+                            if s.hovered.is_none() {
+                                s.visits += 1;
+                            }
+                            s.hovered = Some(ix);
+                        } else if s.hovered == Some(ix) {
+                            s.hovered = None;
+                        }
+                        cx.notify();
+                    })
+                })
+            }));
+        }
+        let id = self.id;
+        let highlight = lit.map(|(top, h)| {
+            let key = format!("{id}|glide|{visits}");
+            let top = motion::follow(SharedString::from(format!("{key}|y")), top, window, cx);
+            let h = motion::follow(SharedString::from(format!("{key}|h")), h, window, cx);
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(top))
+                .h(px(h))
+                .rounded(crate::ui::theme::radius_sm())
+                .bg(self.accent)
+        });
+        // The dot sits in the row's `left-2 size-3.5` box, level with its middle.
+        let dot = dot.map(|(top, h)| {
+            let y = motion::follow(SharedString::from(format!("{id}|dot")), top + h / 2.0, window, cx);
+            div().absolute().left(px(11.0)).top(px(y - 4.0)).size(px(8.0)).rounded_full().bg(self.dot_color)
+        });
+        div().relative().children(highlight).child(col).children(dot)
+    }
+}
+
+/// Each of a column's children's top (from the first one's) and height.
+pub(crate) fn measured(bounds: &[gpui_kit::Bounds<gpui_kit::Pixels>]) -> Vec<(f32, f32)> {
+    let first = bounds.first().map_or(0.0, |b| f32::from(b.origin.y));
+    bounds.iter().map(|b| (f32::from(b.origin.y) - first, f32::from(b.size.height))).collect()
+}
+
+/// A submenu's chevron, turning a quarter (down) while it's open, as the
+/// web's does over 300ms.
+#[derive(IntoElement)]
+struct Chevron {
+    open: bool,
+    color: Rgba,
+}
+
+impl RenderOnce for Chevron {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let turn = motion::follow("bell-chevron", if self.open { 1.0 } else { 0.0 }, window, cx);
+        icon("chevron-right")
+            .size(px(16.0))
+            .text_color(self.color)
+            .rotate(gpui_kit::radians(turn * std::f32::consts::FRAC_PI_2))
+    }
+}
+
+/// One line of a dropdown (`DropdownMenuItem`): a 16px icon and words. The
+/// accent under the pointer is the [`Glide`]'s, or the caller's own `hover`.
 fn drop_item(
     id: impl Into<SharedString>,
     glyph: Option<&str>,
     label: String,
     p: &Palette,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let hover = p.accent;
     div()
         .id(id.into())
         .flex()
@@ -546,7 +657,6 @@ fn drop_item(
         .text_sm()
         .line_height(px(20.0))
         .cursor_pointer()
-        .hover(move |s| s.bg(hover))
         .when_some(glyph, |el, g| el.child(icon(g).size(px(16.0)).text_color(p.muted_foreground)))
         .when(!label.is_empty(), |el| el.child(label))
 }

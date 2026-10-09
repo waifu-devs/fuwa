@@ -101,7 +101,8 @@ pub(crate) fn web_switch(
         .w(px(32.0))
         .h(px(20.0))
         .rounded_full()
-        .bg(if on { p.primary } else { p.border })
+        // The color crosses over as the thumb does (`transition-colors`).
+        .bg(crate::ui::theme::mix(p.border, p.primary, ((x - 1.0) / 12.0).clamp(0.0, 1.0)))
         .when(disabled, |el| el.opacity(0.5))
         .when(!disabled, |el| {
             el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
@@ -305,7 +306,7 @@ impl FuwaApp {
         let copied = COPIED.with(|c| c.borrow().is_some_and(|at| at.elapsed() < Duration::from_millis(1200)));
 
         let chip = |id: &'static str, glyph: &str, label: String, bg: Hsla, fg: Hsla| {
-            motion::once(
+            crate::ui::profile_card::spring_in(
                 div()
                     .flex()
                     .items_center()
@@ -321,8 +322,9 @@ impl FuwaApp {
                     .child(icon(glyph).size(px(14.0)))
                     .child(label),
                 id,
-                Duration::from_millis(350),
-                |el, t| el.opacity(t.clamp(0.0, 1.0)),
+                (600.0, 16.0),
+                Duration::ZERO,
+                |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.5 + 0.5 * t),
             )
         };
         let state_chip = if is_verified {
@@ -472,6 +474,7 @@ impl FuwaApp {
                 list = list.child(motion::slide_in(
                     div()
                         .id(SharedString::from(format!("device-{}", m.device_id)))
+                        .group("device-row")
                         .flex()
                         .items_center()
                         .gap(px(12.0))
@@ -479,8 +482,11 @@ impl FuwaApp {
                         .py(px(6.0))
                         .rounded(radius_xl())
                         .hover(move |st| st.bg(hover))
+                        // The device's tile tips a little while its row is pointed at.
                         .child(
                             div()
+                                .id("device-tile")
+                                .group_hover("device-row", |st| st.rotate(gpui_kit::radians(-6f32.to_radians())))
                                 .size(px(32.0))
                                 .flex_none()
                                 .rounded(radius_lg())

@@ -206,6 +206,8 @@ impl FuwaApp {
     pub(crate) fn timestamp_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let open = self.time_picker.is_some();
         crate::ui::widgets::tool_button("time-open", "calendar-clock", open, p)
+            .hover(|s| s.scale(1.12).rotate(gpui_kit::radians(8f32.to_radians())))
+            .active(|s| s.scale(0.85))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.insert")).build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.time_picker.is_some() {
@@ -362,7 +364,7 @@ impl FuwaApp {
                             .text_color(p.muted_foreground)
                             .hover(move |s| s.bg(muted).text_color(fg))
                     })
-                    .active(|s| s.opacity(0.85))
+                    .active(|s| s.scale(0.92))
                     .on_click(cx.listener(move |this, _, window, cx| this.set_picked(at, window, cx)))
                     .child(t(label)),
                 SharedString::from(format!("time-quick-in|{n}")),
@@ -394,7 +396,24 @@ impl FuwaApp {
             .child(fields)
             .child(quick);
 
-        let mut styles = div().p(px(6.0)).flex().flex_col();
+        // The picked style's tint glides to it (the web's `layoutId`): every row is 48px.
+        let place = Style::ALL.iter().position(|s| *s == chosen).unwrap_or(0) as f32;
+        let tint = alpha(p.primary, 0.12);
+        let mut styles = div().relative().p(px(6.0)).flex().flex_col().child(crate::ui::motion::springing(
+            "time-style-glide",
+            place,
+            move |at| {
+                div()
+                    .absolute()
+                    .left(px(6.0))
+                    .right(px(6.0))
+                    .top(px(6.0 + 48.0 * at))
+                    .h(px(48.0))
+                    .rounded(radius_xl())
+                    .bg(tint)
+                    .into_any_element()
+            },
+        ));
         for (n, style) in Style::ALL.into_iter().enumerate() {
             let lit = style == chosen;
             styles = styles.child(motion::rise(
@@ -407,7 +426,6 @@ impl FuwaApp {
                     .py(px(6.0))
                     .rounded(radius_xl())
                     .cursor_pointer()
-                    .when(lit, |el| el.bg(alpha(p.primary, 0.12)))
                     .on_click(cx.listener(move |this, e: &gpui_kit::ClickEvent, window, cx| {
                         this.time_style = style;
                         // A double click puts it in straight away.
@@ -443,7 +461,16 @@ impl FuwaApp {
                                     .child(t(style_name(style))),
                             ),
                     )
-                    .when(lit, |el| el.child(icon("check").size(px(16.0)).text_color(p.primary))),
+                    // The check pops in by the one picked.
+                    .when(lit, |el| {
+                        el.child(motion::pop_in(
+                            div().child(icon("check").size(px(16.0)).text_color(p.primary)),
+                            SharedString::from(format!("time-style-check|{}", style.letter())),
+                            (0.5, 0.5),
+                            0.0,
+                            0.0,
+                        ))
+                    }),
                 SharedString::from(format!("time-style-in|{n}")),
                 Duration::from_millis(60 + 25 * n as u64),
                 0.0,
@@ -478,6 +505,7 @@ impl FuwaApp {
                     .rounded(radius_xl())
                     .text_xs()
                     .when(picked.is_none(), |el| el.opacity(0.5))
+                    .active(|s| s.scale(0.92))
                     .on_click(cx.listener(|this, _, window, cx| this.insert_timestamp(window, cx))),
             );
 
@@ -511,7 +539,8 @@ impl FuwaApp {
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
                     this.close_time_picker(window, cx);
                 }))
-                .child(motion::rise(body.mb(px(-1.0)), "time-panel-rise", Duration::ZERO, 8.0))
+                // It grows from 92% as it rises from the button.
+                .child(motion::pop_in(body.mb(px(-1.0)), "time-panel-rise", (1.0, 1.0), 0.92, 8.0))
                 .into_any_element(),
         )
     }

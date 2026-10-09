@@ -757,7 +757,7 @@ impl FuwaApp {
             .border_color(border)
             .bg(p.card)
             .hover(move |s| {
-                s.border_color(hover).top(px(-4.0)).shadow(vec![BoxShadow {
+                s.border_color(hover).translate_y(px(-4.0)).shadow(vec![BoxShadow {
                     color: glow,
                     offset: point(px(0.0), px(18.0)),
                     blur_radius: px(20.0),
@@ -1344,7 +1344,7 @@ pub(crate) fn filled_button(
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .hover(move |s| {
-            s.top(px(-2.0)).shadow(vec![BoxShadow {
+            s.translate_y(px(-2.0)).shadow(vec![BoxShadow {
                 color: glow,
                 offset: point(px(0.0), px(8.0)),
                 blur_radius: px(11.0),
@@ -1352,7 +1352,7 @@ pub(crate) fn filled_button(
                 inset: false,
             }])
         })
-        .active(|s| s.top(px(0.0)).scale(0.94))
+        .active(|s| s.translate_y(px(0.0)).scale(0.94))
 }
 
 /// The web's `variant="outline"` button: the page's color, a border, a soft shadow.
@@ -1387,8 +1387,10 @@ pub(crate) fn outline_button(id: impl Into<gpui_kit::ElementId>, tall: f32, p: &
 
 /// The arrow on "Open", nudging along on hover.
 fn arrow_nudge(id: &str, _p: &Palette) -> impl IntoElement {
-    let _ = id;
-    div().relative().group_hover("outline", |s| s.left(px(4.0))).child(icon("arrow-right").size(px(16.0)))
+    div()
+        .id(SharedString::from(format!("nudge|{id}")))
+        .group_hover("outline", |s| s.translate_x(px(4.0)))
+        .child(icon("arrow-right").size(px(16.0)))
 }
 
 /// Signing in through a provider (the web's `ProviderButton`): dark, with
@@ -1400,19 +1402,21 @@ pub(crate) fn provider_button(
     p: &Palette,
     window: &Window,
 ) -> Stateful<Div> {
+    let building = || div().text_color(p.primary).child(icon("building").size(px(20.0)));
     let glyph = if waiting {
-        motion::ambient(
-            div().text_color(p.primary).child(icon("building").size(px(20.0))),
-            "provider-spin",
-            Duration::from_millis(1200),
-            window,
-            |el, _| el,
-        )
+        motion::ambient(building(), "provider-spin", Duration::from_millis(1200), window, |el, t| {
+            el.rotate(gpui_kit::radians(t * std::f32::consts::TAU))
+        })
     } else {
-        div().text_color(p.primary).child(icon("building").size(px(20.0))).into_any_element()
+        // `group-hover:-translate-y-0.5 group-hover:scale-110`.
+        building()
+            .id("provider-building")
+            .group_hover("provider", |s| s.translate_y(px(-2.0)).scale(1.1))
+            .into_any_element()
     };
     div()
         .id(id)
+        .group("provider")
         .relative()
         .w_full()
         .h(px(48.0))
@@ -1433,9 +1437,18 @@ pub(crate) fn provider_button(
             inset: false,
         }])
         .when(waiting, |el| el.opacity(0.85))
-        .when(!waiting, |el| el.cursor_pointer().hover(|s| s.top(px(-2.0))))
+        // `whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}`.
+        .when(!waiting, |el| el.cursor_pointer().hover(|s| s.translate_y(px(-2.0))).active(|s| s.scale(0.97)))
         .child(glyph)
         .child(div().min_w_0().truncate().child(label.to_owned()))
+        // The arrow nudges along on hover, and slips away while the browser's out.
+        .child(
+            div()
+                .id("provider-arrow")
+                .when(waiting, |el| el.opacity(0.0).translate_x(px(8.0)))
+                .when(!waiting, |el| el.group_hover("provider", |s| s.translate_x(px(4.0))))
+                .child(icon("arrow-right").size(px(16.0))),
+        )
 }
 
 /// The line under a join button.

@@ -450,7 +450,7 @@ impl ServerSettingsView {
             .text_color(if copied { success } else { p.muted_foreground.into() })
             .cursor_pointer()
             .when(!copied, |el| el.hover(move |s| s.bg(hover_bg).text_color(fg)))
-            .active(|s| s.top(px(1.0)))
+            .active(|s| s.scale(0.9))
             .on_click(cx.listener({
                 let code = code.clone();
                 move |this, _, _, cx| {
@@ -481,8 +481,8 @@ impl ServerSettingsView {
             .justify_center()
             .text_color(p.muted_foreground)
             .cursor_pointer()
-            .hover(move |s| s.bg(red).text_color(destructive))
-            .active(|s| s.top(px(1.0)))
+            .hover(move |s| s.bg(red).text_color(destructive).rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+            .active(|s| s.scale(0.9))
             .on_click(cx.listener(move |this, _, _, cx| this.revoke_invite(code.clone(), cx)))
             .child(icon("x").size(px(16.0)));
         list_row(p)
@@ -728,13 +728,19 @@ impl ServerSettingsView {
         let hover_bg = alpha(p.muted, 0.4);
         let mut row = list_row(p)
             .id(SharedString::from(format!("member-row-{uid}")))
+            .group("member-row")
             .flex()
             .items_center()
             .gap(px(12.0))
             .p(px(10.0))
             .pr(px(8.0))
             .hover(move |s| s.border_color(hover_border).bg(hover_bg))
-            .child(div().self_start().child(avatar(Some(&user), 40.0, p)))
+            // `group-hover:scale-105` on the avatar.
+            .child(div().id("face").self_start().group_hover("member-row", |s| s.scale(1.05)).child(avatar(
+                Some(&user),
+                40.0,
+                p,
+            )))
             .child(
                 div()
                     .flex_1()
@@ -809,7 +815,13 @@ impl ServerSettingsView {
                     el.text_color(p.muted_foreground).hover(move |s| s.bg(hover_bg).text_color(fg))
                 }
             })
-            .child(icon("ellipsis").size(px(16.0)));
+            // The dots turn a quarter while the row is pointed at (`group-hover:rotate-90`).
+            .child(
+                div()
+                    .id("dots")
+                    .group_hover("member-row", |s| s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+                    .child(icon("ellipsis").size(px(16.0))),
+            );
         let _ = name;
         let punish = can.timeout || can.kick || can.ban;
         let mut items = Vec::new();
@@ -905,6 +917,7 @@ impl ServerSettingsView {
                         div()
                             .absolute()
                             .inset_0()
+                            .id(SharedString::from(format!("{group}-dot")))
                             .group_hover(group.clone(), |s| s.opacity(0.0))
                             .child(role_dot(role.color.map(|c| c as u32), p).size(px(12.0))),
                     )
@@ -914,6 +927,7 @@ impl ServerSettingsView {
                             .inset_0()
                             .opacity(0.0)
                             .text_color(p.destructive)
+                            .id(SharedString::from(format!("{group}-x")))
                             .group_hover(group.clone(), |s| s.opacity(1.0))
                             .child(icon("x").size(px(12.0))),
                     )
@@ -1324,6 +1338,7 @@ impl ServerSettingsView {
                 div()
                     .child(avatar(user.as_ref(), 40.0, p))
                     .opacity(0.75)
+                    .id(SharedString::from(format!("{group}-face")))
                     .group_hover(group.clone(), |s| s.opacity(1.0)),
             )
             .child(

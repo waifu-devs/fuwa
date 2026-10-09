@@ -536,6 +536,7 @@ impl ServerSettingsView {
                     .text_size(px(10.4))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .opacity(if uploading { 1.0 } else { 0.0 })
+                    .id("banner-tile-shade")
                     .group_hover("banner-tile", |s| s.opacity(1.0))
                     .child(if uploading {
                         spinner("banner-busy", 20.0, window)
@@ -794,7 +795,8 @@ impl ServerSettingsView {
                     .rounded_full()
                     .when(on, |el| el.border_2().border_color(ring).p(px(2.0)))
                     .cursor_pointer()
-                    .hover(|s| s.opacity(0.85))
+                    .hover(|s| s.scale(1.1))
+                    .active(|s| s.scale(0.9))
                     .tooltip(move |window, cx| crate::ui::overlay::Tip::new(name.clone()).build(window, cx))
                     .child(face)
                     .when(on, |el| {

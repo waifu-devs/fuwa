@@ -3,8 +3,8 @@
 
 use gpui_kit::{
     AnyElement, App, Div, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _, div,
-    hsla, img, px, svg,
+    ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _,
+    Window, div, hsla, img, px, svg,
 };
 
 use gpui_kit::component::Icon;
@@ -160,24 +160,62 @@ pub fn server_icon(server: &pb::Server, size: f32, radius: f32, _p: &Palette) ->
     }
 }
 
-/// A red count, like on Discord's rail.
-pub fn badge(count: u32, p: &Palette) -> Div {
-    let text = if count > 99 { "99+".to_owned() } else { count.to_string() };
-    div()
+/// A red count with a ring in `ring`, like on Discord's rail. It pops in and
+/// rolls when the count changes (see [`counted`]).
+pub fn badge(
+    id: impl Into<SharedString>,
+    count: u32,
+    ring: impl Into<Hsla>,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let pill = div()
         .h(px(18.0))
         .min_w(px(18.0))
         .px(px(5.0))
         .rounded_full()
         .bg(p.destructive)
         .border_2()
-        .border_color(p.rail)
+        .border_color(ring.into())
         .flex()
         .items_center()
         .justify_center()
         .text_color(gpui_kit::white())
         .text_size(px(10.5))
-        .font_weight(FontWeight::EXTRA_BOLD)
-        .child(text)
+        .font_weight(FontWeight::EXTRA_BOLD);
+    counted(pill, id, count, 10.5, window, cx)
+}
+
+/// A pill holding a count, like an unread badge: `pill` is its look (text
+/// `size` pixels). The count rolls when it changes and reads "99+" past 99
+/// (the web's `Count`), and the pill pops in on the web's badge spring.
+pub fn counted(
+    pill: Div,
+    id: impl Into<SharedString>,
+    count: u32,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let number = crate::ui::motion::count(format!("{id}|n"), u64::from(count), Some(99), size, window, cx);
+    popped(pill.child(number), SharedString::from(format!("{id}|pop")), 0.0, 0.0).into_any_element()
+}
+
+/// Pops something in from `from` of its size, turning upright from `turn`
+/// degrees, on the spring the web's badges use (`stiffness: 600, damping: 18`).
+pub fn popped<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    from: f32,
+    turn: f32,
+) -> impl IntoElement {
+    use gpui_kit::{Animation, AnimationExt as _};
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(600.0, 18.0, 1.0), 0.002);
+    el.with_animation(id, Animation::new(duration).with_easing(easing), move |el, t| {
+        el.scale(from + (1.0 - from) * t).rotate(gpui_kit::radians(((1.0 - t) * turn).to_radians()))
+    })
 }
 
 /// The dot that says how a connection is doing.
@@ -193,7 +231,8 @@ pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
     div().size(px(12.8)).rounded_full().bg(color).border_2().border_color(ring)
 }
 
-/// A filled button in the primary color, with a glow on hover and a dip on press.
+/// A filled button in the primary color, the web's `.btn`: it lifts with a
+/// glow on hover and dips on press.
 pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
     filled_button(id, label, p.primary, p.primary_foreground, p)
 }
@@ -229,7 +268,7 @@ fn filled_button(
         .hover({
             let c = mix(color, p.foreground, 0.08);
             move |s| {
-                s.bg(c).shadow(vec![gpui_kit::BoxShadow {
+                s.bg(c).translate_y(px(-2.0)).shadow(vec![gpui_kit::BoxShadow {
                     color: glow,
                     offset: gpui_kit::point(px(0.0), px(8.0)),
                     blur_radius: px(24.0),
@@ -240,7 +279,7 @@ fn filled_button(
         })
         .active({
             let c = mix(color, p.foreground, 0.18);
-            move |s| s.bg(c).top(px(1.0))
+            move |s| s.bg(c).translate_y(px(0.0)).scale(0.94)
         })
         .child(label.into())
 }
@@ -297,11 +336,14 @@ pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: 
 }
 
 /// The web's round header button (`size-9 rounded-full`, a 20px icon):
-/// muted, the muted fill on hover, and the primary at 10% while what it opens is open.
-pub fn header_button(id: impl Into<ElementId>, name: &str, on: bool, p: &Palette) -> Stateful<Div> {
+/// muted, the muted fill on hover, and the primary at 10% while what it opens
+/// is open. It gives under a press, and its icon springs upright and a little
+/// larger when on, from `tilt` degrees when off (the web's `MembersToggle`).
+pub fn header_button(id: &str, name: &str, on: bool, tilt: f32, p: &Palette) -> Stateful<Div> {
     let hover = p.muted;
+    let name = name.to_owned();
     div()
-        .id(id)
+        .id(SharedString::from(id.to_owned()))
         .size(px(36.0))
         .flex_none()
         .rounded_full()
@@ -311,8 +353,15 @@ pub fn header_button(id: impl Into<ElementId>, name: &str, on: bool, p: &Palette
         .cursor_pointer()
         .text_color(if on { p.primary } else { p.muted_foreground })
         .when(on, |el| el.bg(alpha(p.primary, 0.1)))
-        .when(!on, |el| el.hover(move |s| s.bg(hover)))
-        .child(icon(name).size(px(20.0)))
+        .hover(move |s| s.bg(hover))
+        .active(|s| s.scale(0.85))
+        .child(crate::ui::motion::springing(format!("{id}|pose"), if on { 1.0 } else { 0.0 }, move |t| {
+            div()
+                .rotate(gpui_kit::radians((tilt * (1.0 - t)).to_radians()))
+                .scale(1.0 + 0.08 * t)
+                .child(icon(&name).size(px(20.0)))
+                .into_any_element()
+        }))
 }
 
 /// A composer tool (the web's `size-9 rounded-xl` with an 18px icon): muted,

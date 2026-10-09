@@ -567,6 +567,12 @@ impl SettingsView {
         let recent = last > 0 && crate::core::dms::now_ms() - last < 10 * 60_000;
         let id = user.id.clone();
         let saving = self.agents.busy == Some("save") && open;
+        let turn = motion::follow(
+            SharedString::from(format!("agent-chevron-{}", user.id)),
+            if open { 180.0 } else { 0.0 },
+            window,
+            cx,
+        );
         let summary = div()
             .id(SharedString::from(format!("agent-{}", user.id)))
             .flex()
@@ -580,19 +586,31 @@ impl SettingsView {
                 this.agents.confirm = None;
                 cx.notify();
             }))
-            .child(div().relative().child(avatar(Some(&user), 40.0, p)).when(recent, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .right(px(-2.0))
-                        .bottom(px(-2.0))
-                        .size(px(12.0))
-                        .rounded_full()
-                        .border_2()
-                        .border_color(p.background)
-                        .bg(rgb(0x10b981)),
-                )
-            }))
+            // The avatar tips and grows a little under the pointer (`rotate: -8, scale: 1.08`).
+            .child(
+                div()
+                    .id(SharedString::from(format!("agent-face-{}", user.id)))
+                    .relative()
+                    .hover(|s| s.rotate(gpui_kit::radians(-8f32.to_radians())).scale(1.08))
+                    .child(avatar(Some(&user), 40.0, p))
+                    .when(recent, |el| {
+                        el.child(motion::pop(
+                            div()
+                                .absolute()
+                                .right(px(-2.0))
+                                .bottom(px(-2.0))
+                                .size(px(12.0))
+                                .rounded_full()
+                                .border_2()
+                                .border_color(p.background)
+                                .bg(rgb(0x10b981)),
+                            SharedString::from(format!("agent-recent-{}", user.id)),
+                            0.05,
+                            0.0,
+                            Duration::ZERO,
+                        ))
+                    }),
+            )
             .child(
                 div()
                     .flex_1()
@@ -638,11 +656,15 @@ impl SettingsView {
                     ))),
             )
             .when(saving, |el| el.child(icon("loader-circle").size(px(16.0)).text_color(p.muted_foreground)))
+            // The chevron turns over as the card opens (`transition-transform duration-300`).
             .child(
-                icon(if open { "chevron-up" } else { "chevron-down" }).size(px(16.0)).text_color(p.muted_foreground),
+                div()
+                    .rotate(gpui_kit::radians(turn.to_radians()))
+                    .child(icon("chevron-down").size(px(16.0)).text_color(p.muted_foreground)),
             );
         let hover = alpha(p.primary, 0.3);
         let mut card = div()
+            .id(SharedString::from(format!("agent-card-{}", user.id)))
             .overflow_hidden()
             .rounded(radius_2xl())
             .border_1()
@@ -770,7 +792,14 @@ impl SettingsView {
                                         .text_xs()
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(if bio_len * 10 > 18000 { rgb(AMBER) } else { p.muted_foreground })
-                                        .child(format!("{bio_len} / 2000")),
+                                        .flex()
+                                        .child(crate::ui::motion::rolling(
+                                            "agent-bio-count",
+                                            bio_len as u64,
+                                            None,
+                                            12.0,
+                                        ))
+                                        .child(" / 2000"),
                                 ),
                             )
                             .child(

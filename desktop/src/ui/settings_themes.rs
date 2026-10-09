@@ -460,8 +460,9 @@ impl SettingsView {
                         .border_1()
                         .border_color(if active { p.primary } else { p.border })
                         .cursor_pointer()
-                        .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| s.translate_y(px(-2.0)))
+                        .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                        .active(|s| s.scale(0.95))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.patch_backdrop(target, cx, |b| {
                                 b.effect = effect;
@@ -653,8 +654,9 @@ impl SettingsView {
                 .border_2()
                 .border_color(if active { p.primary.into() } else { alpha(p.primary, 0.0) })
                 .cursor_pointer()
-                .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
-                .active(|s| s.top(px(1.0)))
+                .hover(|s| s.translate_y(px(-2.0)))
+                .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                .active(|s| s.scale(0.95))
         };
         tiles.push(
             tile(format!("bg-none-{}", target == Target::App), b.image.is_empty(), p)
@@ -693,7 +695,8 @@ impl SettingsView {
                     .text_size(px(10.4))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).top(px(-2.0)))
+                    .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.95))
                     .on_click(cx.listener(move |this, _, _, cx| this.upload_background_to(key.clone(), target, cx)))
                     .child(icon(if uploading { "loader-circle" } else { "image-plus" }).size(px(20.0)))
                     .child(tracked(t("appsettings.backdrop.add").to_uppercase(), WIDE))
@@ -1146,6 +1149,7 @@ impl SettingsView {
             let hover = alpha(p.primary, 0.5);
             div()
                 .id("themes-empty")
+                .group("themes-empty")
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1159,9 +1163,12 @@ impl SettingsView {
                 .text_center()
                 .cursor_pointer()
                 .hover(move |s| s.border_color(hover))
+                .active(|s| s.scale(0.98))
                 .on_click(cx.listener(move |this, _, window, cx| this.edit_theme(&base, true, window, cx)))
                 .child(
                     div()
+                        .id("themes-empty-wand")
+                        .group_hover("themes-empty", |s| s.scale(1.1))
                         .size(px(56.0))
                         .rounded(radius_2xl())
                         .bg(alpha(p.primary, 0.15))
@@ -1203,6 +1210,7 @@ impl SettingsView {
             builtins = builtins.child(
                 div()
                     .id(SharedString::from(format!("from-{}", theme.id)))
+                    .group(SharedString::from(format!("from-{}", theme.id)))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -1217,8 +1225,8 @@ impl SettingsView {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .hover(|s| s.top(px(-2.0)))
-                    .active(|s| s.top(px(1.0)))
+                    .hover(|s| s.translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.95))
                     .when(full, |el| el.opacity(0.5))
                     .when(!full, |el| {
                         el.on_click(cx.listener(move |this, _, window, cx| this.edit_theme(&base, true, window, cx)))
@@ -1232,7 +1240,14 @@ impl SettingsView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("paintbrush").size(px(14.0))),
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("from-{}-brush", theme.id)))
+                                    .group_hover(SharedString::from(format!("from-{}", theme.id)), |s| {
+                                        s.rotate(gpui_kit::radians(-12f32.to_radians()))
+                                    })
+                                    .child(icon("paintbrush").size(px(14.0))),
+                            ),
                     )
                     .child(theme.name.clone()),
             );
@@ -1322,11 +1337,12 @@ impl SettingsView {
             p,
             cx,
         );
-        let hover = if active { c("primary") } else { c("border") };
         motion::rise(
             div()
+                .id(SharedString::from(format!("theme-card-{id}")))
                 .relative()
                 .w(px(width))
+                .hover(|s| s.translate_y(px(-3.0)))
                 .flex_none()
                 .overflow_hidden()
                 .rounded(radius_2xl())
@@ -1354,7 +1370,6 @@ impl SettingsView {
                         .gap(px(12.0))
                         .p(px(16.0))
                         .cursor_pointer()
-                        .hover(move |s| s.border_color(hover))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let id = id.clone();
                             this.set(cx, move |pr| {

@@ -29,7 +29,7 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{avatar, icon, icon_button};
+use crate::ui::widgets::{avatar, icon};
 
 /// What the window keeps about commands between frames.
 #[derive(Default)]
@@ -263,11 +263,12 @@ fn button_el(
     key: &str,
     server: Option<&str>,
 ) -> AnyElement {
-    let (bg, fg) = match button.style() {
-        pb::ButtonStyle::Primary => (p.primary.into(), p.primary_foreground.into()),
-        pb::ButtonStyle::Success => (p.success.into(), gpui_kit::white()),
-        pb::ButtonStyle::Danger => (p.destructive.into(), gpui_kit::white()),
-        _ => (alpha(p.muted_foreground, 0.16), p.foreground.into()),
+    // Each style and its hover (the web's `hover:bg-primary/90`, `hover:bg-muted/70`).
+    let (bg, hover, fg) = match button.style() {
+        pb::ButtonStyle::Primary => (p.primary.into(), alpha(p.primary, 0.9), p.primary_foreground.into()),
+        pb::ButtonStyle::Success => (p.success.into(), alpha(p.success, 0.9), gpui_kit::white()),
+        pb::ButtonStyle::Danger => (p.destructive.into(), alpha(p.destructive, 0.9), gpui_kit::white()),
+        _ => (alpha(p.muted_foreground, 0.16), alpha(p.muted_foreground, 0.11), p.foreground.into()),
     };
     let id = SharedString::from(format!("btn|{mid}|{r}|{b}"));
     let base = div()
@@ -290,8 +291,8 @@ fn button_el(
         };
         return base
             .cursor_pointer()
-            .hover(|s| s.opacity(0.85))
-            .active(|s| s.top(px(1.0)))
+            .hover(move |s| s.bg(hover))
+            .active(|s| s.scale(0.95))
             .on_click(move |_, _, cx| cx.open_url(&url))
             .child(icon("external-link").size(px(14.0)))
             .into_any_element();
@@ -304,7 +305,7 @@ fn button_el(
         .when(can, |el| {
             let (this, key, server) = (this.clone(), key.to_owned(), server.unwrap_or_default().to_owned());
             let (mid, custom) = (mid.to_owned(), button.custom_id.clone());
-            el.cursor_pointer().hover(|s| s.opacity(0.85)).active(|s| s.top(px(1.0))).on_click(move |_, _, cx| {
+            el.cursor_pointer().hover(move |s| s.bg(hover)).active(|s| s.scale(0.95)).on_click(move |_, _, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.press_button(key.clone(), server.clone(), mid.clone(), custom.clone(), cx)
                 });
@@ -320,12 +321,12 @@ fn button_el(
     if times == 0 {
         return el.into_any_element();
     }
-    // A press that went through bounces once.
+    // A press that went through swells once (the web's `scale: [1, 1.06, 1]`).
     motion::once(
         el,
         SharedString::from(format!("btn-pop|{mid}|{r}|{b}|{times}")),
         Duration::from_millis(320),
-        |el, t| el.relative().top(px(-3.0 * (t * std::f32::consts::PI).sin())),
+        |el, t| el.scale(1.0 + 0.06 * (t * std::f32::consts::PI).sin()),
     )
 }
 
@@ -634,8 +635,12 @@ impl FuwaApp {
     /// The "/" list floating over the composer.
     pub(crate) fn command_list_view(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (options, loading, empty) = self.command_list(cx)?;
-        let hl = alpha(p.primary, 0.12);
-        let mut list = div().flex().flex_col().child(Self::above_title("slash", &t("chattools.commands.title"), p));
+        let mut list = div().relative().flex().flex_col();
+        if !options.is_empty() {
+            // The lit row's fill glides (the web's `layoutId="command-active"`).
+            list = list.child(Self::above_glide("command-lit".into(), self.commands.active, p, cx));
+        }
+        list = list.child(Self::above_title("slash", &t("chattools.commands.title"), p));
         if loading {
             list = list.child(
                 div()
@@ -664,7 +669,6 @@ impl FuwaApp {
             );
         }
         for (n, choice) in options.into_iter().enumerate() {
-            let active = n == self.commands.active;
             let agent = choice.agent.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| "An agent".into());
             let id = SharedString::from(format!("cmd|{}", choice.key()));
             let (name, about, face) =
@@ -680,7 +684,6 @@ impl FuwaApp {
                     .rounded(crate::ui::theme::radius_xl())
                     .text_sm()
                     .cursor_pointer()
-                    .when(active, |el| el.bg(hl))
                     .on_mouse_move(cx.listener(move |this, _, _, cx| {
                         if this.commands.active != n {
                             this.commands.active = n;
@@ -717,9 +720,12 @@ impl FuwaApp {
         let (ix, list) = self.open_picks(window, cx)?;
         let form = self.commands.form.as_ref()?;
         let lit = form.lit.min(list.len().saturating_sub(1));
-        let hl = alpha(p.primary, 0.12);
         let hover = alpha(p.primary, 0.08);
-        let mut rows = div().flex().flex_col().child(Self::above_title("", &form.fields[ix].option.name, p));
+        let mut rows = div().relative().flex().flex_col();
+        if !list.is_empty() {
+            rows = rows.child(Self::above_glide(format!("command-pick-lit|{ix}"), lit, p, cx));
+        }
+        rows = rows.child(Self::above_title("", &form.fields[ix].option.name, p));
         if list.is_empty() {
             rows = rows.child(
                 div().px(px(8.0)).py(px(8.0)).text_sm().text_color(p.muted_foreground).child("Nothing matches."),
@@ -738,7 +744,6 @@ impl FuwaApp {
                     .gap(px(8.0))
                     .rounded(crate::ui::theme::radius_xl())
                     .cursor_pointer()
-                    .when(n == lit, |el| el.bg(hl))
                     .when(n != lit, |el| el.hover(move |s| s.bg(hover)))
                     .on_click(cx.listener(move |this, _, window, cx| this.choose(ix, pick.clone(), window, cx)))
                     .when_some(user, |el, user| el.child(avatar(Some(&user), 22.0, p)))
@@ -782,8 +787,22 @@ impl FuwaApp {
                     .child(format!("{} · {agent}", form.choice.command.description)),
             )
             .child(
-                icon_button("command-cancel", "x", p)
+                // `size-7 rounded-lg`, the muted fill and the text's color on hover.
+                div()
+                    .id("command-cancel")
                     .size(px(28.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(crate::ui::theme::radius_lg())
+                    .cursor_pointer()
+                    .text_color(p.muted_foreground)
+                    .hover({
+                        let (bg, fg) = (p.muted, p.foreground);
+                        move |s| s.bg(bg).text_color(fg)
+                    })
+                    .child(icon("x").size(px(16.0)))
                     .tooltip(|window, cx| crate::ui::overlay::Tip::new("Back to typing (Escape)").build(window, cx))
                     .on_click(cx.listener(|this, _, window, cx| this.cancel_command(window, cx))),
             );

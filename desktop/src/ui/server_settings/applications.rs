@@ -392,7 +392,7 @@ impl ServerSettingsView {
                         .text_color(gpui_kit::white())
                         .cursor_pointer()
                         .hover(move |s| s.bg(emerald_hover))
-                        .active(|s| s.top(px(1.0)))
+                        .active(|s| s.scale(0.97))
                         .when(busy, |el| el.opacity(0.5))
                         .when(!busy, |el| {
                             el.on_click(cx.listener(move |this, _, _, cx| this.decide(u2.clone(), true, cx)))

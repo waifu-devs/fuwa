@@ -22,7 +22,7 @@ use crate::core::calls::{Part, safe_name, zip};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::FuwaApp;
-use crate::ui::call_parts::red;
+use crate::ui::call_parts::{ping_dot, red};
 use crate::ui::motion;
 use crate::ui::overlay::scrim;
 use crate::ui::text::ms_of;
@@ -81,6 +81,7 @@ impl FuwaApp {
         let background = p.background;
         div()
             .id("recordings-button")
+            .group("recordings-button")
             .relative()
             .size(px(36.0))
             .flex_none()
@@ -91,27 +92,28 @@ impl FuwaApp {
             .cursor_pointer()
             .text_color(p.muted_foreground)
             .hover(move |st| st.bg(hover).text_color(fg))
-            .active(|st| st.opacity(0.85))
+            .active(|st| st.scale(0.88))
             .tooltip(|window, cx| {
                 crate::ui::overlay::Tip::new(t("dms-calls.calls.recordings.buttonTitle")).build(window, cx)
             })
             .on_click(cx.listener(move |this, _, _, cx| this.open_recordings(&k, &s, &c, cx)))
-            .child(icon("audio-lines").size(px(18.0)))
+            .child(
+                div()
+                    .id("recordings-glyph")
+                    .group_hover("recordings-button", |st| st.scale(1.1))
+                    .child(icon("audio-lines").size(px(18.0))),
+            )
             .when(live, |el| {
-                let ping = div().absolute().size(px(8.0)).rounded_full().bg(alpha(red(), 0.6));
-                let ping = motion::ambient(ping, "rec-button-ping", Duration::from_secs(1), window, |el, t| {
-                    let s = 8.0 * (1.0 + t);
-                    el.opacity(1.0 - t).size(px(s)).top(px((8.0 - s) / 2.0)).left(px((8.0 - s) / 2.0))
-                });
-                el.child(
-                    div()
-                        .absolute()
-                        .top(px(6.0))
-                        .right(px(6.0))
-                        .size(px(8.0))
-                        .child(ping)
-                        .child(div().absolute().inset_0().rounded_full().bg(red()).border_2().border_color(background)),
-                )
+                // The red dot pops in, pinging while the server records.
+                let dot = ping_dot("rec-button-ping", 8.0, red(), alpha(red(), 0.6), window)
+                    .child(div().absolute().inset_0().rounded_full().border_2().border_color(background));
+                el.child(div().absolute().top(px(6.0)).right(px(6.0)).child(motion::pop(
+                    dot,
+                    "rec-button-dot",
+                    0.0,
+                    0.0,
+                    Duration::ZERO,
+                )))
             })
             .into_any_element()
     }
@@ -384,7 +386,8 @@ impl FuwaApp {
             .justify_center()
             .cursor_pointer()
             .text_color(p.muted_foreground)
-            .hover(move |s| s.bg(hover).text_color(fg))
+            // The web's dialogs' close button turns a quarter while hovered.
+            .hover(move |s| s.bg(hover).text_color(fg).rotate(gpui_kit::radians(90f32.to_radians())))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.calls.recordings = None;
                 cx.notify();
@@ -564,7 +567,7 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().child(date))
                     .when(rec.video, |el| {
-                        el.child(
+                        el.child(motion::pop_in(
                             div()
                                 .id(SharedString::from(format!("rec-video|{}", rec.id)))
                                 .flex()
@@ -584,7 +587,11 @@ impl FuwaApp {
                                 })
                                 .child(icon("video").size(px(14.0)))
                                 .child(t("dms-calls.calls.recordings.withVideo")),
-                        )
+                            SharedString::from(format!("rec-video-in|{}", rec.id)),
+                            (0.5, 0.5),
+                            0.7,
+                            0.0,
+                        ))
                     }),
             )
             .child(if live {
@@ -666,8 +673,10 @@ impl FuwaApp {
         let actions = (!live).then(|| {
             let rec_all = rec.clone();
             let all_hover = alpha(p.secondary, 0.8);
+            let all_id = SharedString::from(format!("rec-all|{}", rec.id));
             let all = div()
-                .id(SharedString::from(format!("rec-all|{}", rec.id)))
+                .id(all_id.clone())
+                .group(all_id.clone())
                 .h(px(32.0))
                 .px(px(10.0))
                 .flex()
@@ -685,13 +694,22 @@ impl FuwaApp {
                         this.download_recording_files(rec_all.clone(), files.clone(), cx)
                     }))
                 })
-                .child(icon("file-archive").size(px(16.0)))
+                // Its archive lifts while hovered.
+                .child(
+                    div()
+                        .id("rec-all-glyph")
+                        .when(!busy && !everything.is_empty(), |el| {
+                            el.group_hover(all_id.clone(), |s| s.translate_y(px(-2.0)))
+                        })
+                        .child(icon("file-archive").size(px(16.0))),
+                )
                 .child(format!("{} .zip", t("dms-calls.calls.recordings.all")));
             let bin: AnyElement = if !may_delete {
                 div().into_any_element()
             } else if confirming {
                 let yes = id.clone();
-                div()
+                let (danger_hover, ghost_hover) = (alpha(p.destructive, 0.9), p.accent);
+                let sure = div()
                     .flex()
                     .items_center()
                     .gap(px(4.0))
@@ -709,6 +727,7 @@ impl FuwaApp {
                             .line_height(px(20.0))
                             .font_weight(FontWeight::BOLD)
                             .cursor_pointer()
+                            .hover(move |s| s.bg(danger_hover))
                             .when(removing, |el| el.opacity(0.5))
                             .on_click(cx.listener(move |this, _, _, cx| this.delete_recording(yes.clone(), cx)))
                             .child(if removing {
@@ -728,7 +747,7 @@ impl FuwaApp {
                             .text_sm()
                             .line_height(px(20.0))
                             .cursor_pointer()
-                            .hover(|s| s.opacity(0.8))
+                            .hover(move |s| s.bg(ghost_hover))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(r) = this.calls.recordings.as_mut() {
                                     r.confirming = None;
@@ -736,14 +755,17 @@ impl FuwaApp {
                                 cx.notify();
                             }))
                             .child(t("dms-calls.calls.recordings.keepIt")),
-                    )
-                    .into_any_element()
+                    );
+                // In from the right (`x: 10`).
+                motion::slide_in(sure, SharedString::from(format!("rec-sure|{}", rec.id)), 10.0).into_any_element()
             } else {
                 let danger = p.destructive;
                 let danger_bg = alpha(p.destructive, 0.1);
                 let ask = id.clone();
-                div()
-                    .id(SharedString::from(format!("rec-bin|{}", rec.id)))
+                let bin_id = SharedString::from(format!("rec-bin|{}", rec.id));
+                let bin = div()
+                    .id(bin_id.clone())
+                    .group(bin_id.clone())
                     .size(px(32.0))
                     .rounded(radius_xl())
                     .flex()
@@ -752,6 +774,7 @@ impl FuwaApp {
                     .cursor_pointer()
                     .text_color(p.muted_foreground)
                     .hover(move |s| s.bg(danger_bg).text_color(danger))
+                    .active(|s| s.scale(0.85))
                     .tooltip(|window, cx| {
                         crate::ui::overlay::Tip::new(t("dms-calls.calls.recordings.deleteTitle")).build(window, cx)
                     })
@@ -761,8 +784,13 @@ impl FuwaApp {
                         }
                         cx.notify();
                     }))
-                    .child(icon("trash").size(px(16.0)))
-                    .into_any_element()
+                    .child(
+                        div()
+                            .id("rec-bin-glyph")
+                            .group_hover(bin_id.clone(), |s| s.rotate(gpui_kit::radians(-12f32.to_radians())))
+                            .child(icon("trash").size(px(16.0))),
+                    );
+                motion::pop_in(bin, SharedString::from(format!("{bin_id}|in")), (0.5, 0.5), 0.6, 0.0).into_any_element()
             };
             div().ml_auto().flex_none().flex().items_center().gap(px(4.0)).child(all).child(bin)
         });
@@ -845,52 +873,65 @@ impl FuwaApp {
                 };
                 if live {
                     if part != Part::Sound {
-                        row = row.child(
+                        let live_id = SharedString::from(format!("rec-live|{}|{}|{glyph}", rec.id, track.user_id));
+                        row = row.child(motion::pop(
                             div()
-                                .id(SharedString::from(format!("rec-live|{}|{}|{glyph}", rec.id, track.user_id)))
+                                .id(live_id.clone())
                                 .relative()
                                 .text_color(p.muted_foreground)
                                 .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(live_key)).build(window, cx))
                                 .child(icon(glyph).size(px(14.0))),
-                        );
+                            SharedString::from(format!("{live_id}|in")),
+                            0.0,
+                            0.0,
+                            Duration::ZERO,
+                        ));
                     }
                     continue;
                 }
                 let getting = progress.contains_key(&(rec.id.clone(), track.user_id.clone(), part));
                 let (fg, bg) = (p.primary, alpha(p.primary, 0.1));
                 let (rec_one, track_one) = (rec.clone(), track.clone());
-                row = row.child(
-                    div()
-                        .id(SharedString::from(format!("rec-get|{}|{}|{glyph}", rec.id, track.user_id)))
-                        .relative()
-                        .size(px(32.0))
-                        .flex_none()
-                        .rounded(radius_xl())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(p.muted_foreground)
-                        .when(getting, |el| el.opacity(0.6))
-                        .when(!getting, |el| {
-                            el.cursor_pointer().hover(move |s| s.bg(bg).text_color(fg)).on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.download_recording_files(rec_one.clone(), vec![(track_one.clone(), part)], cx)
-                                },
-                            ))
-                        })
-                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(their)).build(window, cx))
-                        .child(if getting {
-                            motion::ambient(
-                                icon("loader-circle").size(px(16.0)),
-                                SharedString::from(format!("rec-spin|{}|{}|{glyph}", rec.id, track.user_id)),
-                                Duration::from_secs(1),
-                                window,
-                                |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
-                            )
-                        } else {
-                            icon(glyph).size(px(16.0)).into_any_element()
-                        }),
-                );
+                let get_id = SharedString::from(format!("rec-get|{}|{}|{glyph}", rec.id, track.user_id));
+                let get = div()
+                    .id(get_id.clone())
+                    .group(get_id.clone())
+                    .relative()
+                    .size(px(32.0))
+                    .flex_none()
+                    .rounded(radius_xl())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(p.muted_foreground)
+                    .when(getting, |el| el.opacity(0.6))
+                    .when(!getting, |el| {
+                        el.cursor_pointer().hover(move |s| s.bg(bg).text_color(fg)).active(|s| s.scale(0.85)).on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.download_recording_files(rec_one.clone(), vec![(track_one.clone(), part)], cx)
+                            }),
+                        )
+                    })
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(their)).build(window, cx))
+                    .child(if getting {
+                        motion::ambient(
+                            icon("loader-circle").size(px(16.0)),
+                            SharedString::from(format!("rec-spin|{}|{}|{glyph}", rec.id, track.user_id)),
+                            Duration::from_secs(1),
+                            window,
+                            |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+                        )
+                    } else {
+                        // Its arrow dips while hovered.
+                        div()
+                            .id("rec-get-glyph")
+                            .group_hover(get_id.clone(), |s| s.translate_y(px(2.0)))
+                            .child(icon(glyph).size(px(16.0)))
+                            .into_any_element()
+                    });
+                // Its own fade-in mustn't undo its dimming while it downloads, so it's on a holder.
+                let get = div().flex_none().child(get);
+                row = row.child(motion::pop_in(get, SharedString::from(format!("{get_id}|in")), (0.5, 0.5), 0.6, 0.0));
             }
             tracks =
                 tracks.child(motion::slide_in(row, SharedString::from(format!("rec-track-in|{}|{i}", rec.id)), -8.0));
@@ -988,7 +1029,13 @@ fn usage_strip((used, cap, keep): (i64, Option<i64>, Option<i64>), p: &Palette) 
                     .overflow_hidden()
                     .rounded_full()
                     .bg(p.muted)
-                    .child(div().h_full().w(relative(share)).rounded_full().bg(bar)),
+                    // It fills to the share as it shows (the web's `scaleX` from 0, on a slow spring).
+                    .child(motion::once(
+                        div().h_full().w(relative(share)).rounded_full().bg(bar),
+                        "recordings-usage-bar",
+                        Duration::from_millis(700),
+                        move |el, t| el.w(relative(share * (1.0 - (1.0 - t).powi(3)))),
+                    )),
             );
     }
     if let Some(days) = keep {

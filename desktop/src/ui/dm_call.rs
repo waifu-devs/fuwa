@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
+    AnyElement, BoxShadow, Context, FontWeight, InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, point, px, relative,
 };
 
 use crate::core::calls::clock;
@@ -18,10 +18,10 @@ use crate::core::i18n::{Arg, t, t_with};
 use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
-use crate::ui::call_parts::{CallPop, Side, Size, green, hang_up_button, person_avatar, voice_avatar};
+use crate::ui::call_parts::{CallPop, Side, Size, brighter, green, hang_up_button, person_avatar, voice_avatar};
 use crate::ui::motion;
 use crate::ui::popout::Popped;
-use crate::ui::settings_controls::shadow_xl;
+use crate::ui::settings_controls::{shadow_sm, shadow_xl};
 use crate::ui::text::ms_of;
 use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_lg};
 use crate::ui::video::{live_badge, pop_out_button};
@@ -94,11 +94,18 @@ impl FuwaApp {
                 },
             )
         } else {
-            icon("phone").size(px(18.0)).into_any_element()
+            // It tilts and grows while hovered.
+            div()
+                .id("dm-call-phone")
+                .group_hover("dm-call", |s| s.rotate(gpui_kit::radians(-12f32.to_radians())).scale(1.1))
+                .child(icon("phone").size(px(18.0)))
+                .into_any_element()
         };
+        let lit = brighter(green());
         Some(
             div()
                 .id("dm-call")
+                .group("dm-call")
                 .size(px(36.0))
                 .flex_none()
                 .rounded_full()
@@ -106,9 +113,9 @@ impl FuwaApp {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .when(going, |el| el.bg(green()).text_color(gpui_kit::white()).hover(|s| s.opacity(0.92)))
+                .when(going, |el| el.bg(green()).text_color(gpui_kit::white()).hover(move |s| s.bg(lit)))
                 .when(!going, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
-                .active(|s| s.opacity(0.85))
+                .active(|s| s.scale(0.85))
                 .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.join_dm_call(&k, &c);
@@ -219,6 +226,7 @@ impl FuwaApp {
             let size = 80.0 * grow;
             let face = div()
                 .id(SharedString::from(tag.clone()))
+                .group(SharedString::from(tag.clone()))
                 .relative()
                 .size(px(80.0))
                 .flex()
@@ -226,17 +234,14 @@ impl FuwaApp {
                 .justify_center()
                 .rounded_full()
                 .when(ringing, |el| el.children(waves(&tag, 80.0, window)))
-                .child(div().opacity(dim.clamp(0.0, 1.0)).child(voice_avatar(
-                    Some(user),
-                    &user.id,
-                    size,
-                    24.0 * grow,
-                    4.0,
-                    talking,
-                    &tag,
-                    window,
-                    cx,
-                )))
+                .child(
+                    div()
+                        .id("face")
+                        .opacity(dim.clamp(0.0, 1.0))
+                        // `group-hover:scale-105` on the avatar.
+                        .group_hover(SharedString::from(tag.clone()), |s| s.scale(1.05))
+                        .child(voice_avatar(Some(user), &user.id, size, 24.0 * grow, 4.0, talking, &tag, window, cx)),
+                )
                 .when(user.id != me, |el| {
                     el.cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| this.toggle_call_pop(pop.clone(), cx)))
@@ -258,10 +263,12 @@ impl FuwaApp {
                 let talking = speaking.contains(&user.id);
                 tiles = tiles.child(self.dm_camera_tile(key, user, here, on(&user.id, false), talking, &p, window, cx));
             }
-            motion::rise(tiles, SharedString::from(format!("dm-cameras|{conversation}")), Duration::ZERO, 8.0)
+            // The web's `scale: 0.96` as the cameras take the avatars' place.
+            motion::pop_in(tiles, SharedString::from(format!("dm-cameras|{conversation}")), (0.5, 0.5), 0.96, 0.0)
                 .into_any_element()
         } else {
-            people.into_any_element()
+            motion::fade_in(people, SharedString::from(format!("dm-people|{conversation}")), Duration::from_millis(250))
+                .into_any_element()
         };
         let controls: AnyElement = if in_call {
             div()
@@ -281,8 +288,10 @@ impl FuwaApp {
                 .into_any_element()
         } else {
             let (k, c) = (key.to_owned(), conversation.to_owned());
+            let lit = brighter(green());
             div()
                 .id("dm-join-call")
+                .group("dm-join-call")
                 .h(px(44.0))
                 .px(px(12.0))
                 .flex()
@@ -295,13 +304,17 @@ impl FuwaApp {
                 .line_height(px(20.0))
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .cursor_pointer()
-                .hover(|s| s.opacity(0.92))
-                .active(|s| s.opacity(0.85))
+                .hover(move |s| s.bg(lit))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.join_dm_call(&k, &c);
                     cx.notify();
                 }))
-                .child(icon("phone").size(px(16.0)))
+                .child(
+                    div()
+                        .id("dm-join-phone")
+                        .group_hover("dm-join-call", |s| s.rotate(gpui_kit::radians(-12f32.to_radians())))
+                        .child(icon("phone").size(px(16.0))),
+                )
                 .child(t("dms-calls.calls.dm.joinCall"))
                 .into_any_element()
         };
@@ -340,7 +353,8 @@ impl FuwaApp {
                     .child(controls),
             );
         Some(
-            motion::rise(strip, SharedString::from(format!("dm-strip|{conversation}")), Duration::ZERO, -8.0)
+            // The web's `SLIDE_IN`.
+            motion::rise(strip, SharedString::from(format!("dm-strip|{conversation}")), Duration::ZERO, -6.0)
                 .into_any_element(),
         )
     }
@@ -364,16 +378,50 @@ impl FuwaApp {
         let feed = crate::core::voice::video::feed_of(&user.id, false);
         let camera =
             video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius_2xl(), window, cx));
+        // Lit green while they talk, fading in and out as the web's `transition-[box-shadow,border-color]`.
+        let lit =
+            motion::follow(SharedString::from(format!("{group}|lit")), if talking { 1.0 } else { 0.0 }, window, cx)
+                .clamp(0.0, 1.0);
+        let mut shadow = shadow_sm();
+        if lit > 0.01 {
+            shadow = vec![
+                BoxShadow {
+                    color: alpha(green(), lit),
+                    offset: point(px(0.0), px(0.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(2.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: gpui_kit::hsla(136.0 / 360.0, 0.47, 0.44, 0.6 * lit),
+                    offset: point(px(0.0), px(10.0)),
+                    blur_radius: px(40.0),
+                    spread_radius: px(-10.0),
+                    inset: false,
+                },
+            ];
+        }
+        let hover_border = alpha(p.primary, 0.4);
+        let tile_id = SharedString::from(format!("{group}|tile"));
         let tile = div()
+            .id(tile_id.clone())
+            .group(tile_id.clone())
             .relative()
             .w_full()
             .aspect_ratio(16.0 / 9.0)
             .overflow_hidden()
             .rounded(radius_2xl())
             .border_1()
-            .border_color(if talking { gpui_kit::Hsla::from(green()) } else { p.border.into() })
+            .border_color(mix(p.border, green(), lit))
             .bg(p.card)
-            .child(hue_gradient(&user.id, 16.0, div().absolute().inset_0()).opacity(0.25))
+            .shadow(shadow)
+            .when(lit < 0.5, |el| el.hover(move |s| s.border_color(hover_border)))
+            .child(
+                hue_gradient(&user.id, 16.0, div().absolute().inset_0())
+                    .id("hue")
+                    .opacity(0.25)
+                    .group_hover(tile_id, |s| s.opacity(0.35)),
+            )
             .child(div().absolute().inset_0().flex().items_center().justify_center().child(voice_avatar(
                 Some(user),
                 &user.id,
@@ -405,12 +453,14 @@ impl FuwaApp {
                     .child(name.clone()),
             );
         let popped = Popped { instance: key.to_owned(), user: user.id.clone(), server: None, screen: false };
+        let away =
+            motion::follow(SharedString::from(format!("{group}|here")), if here { 1.0 } else { 0.5 }, window, cx);
         div()
             .relative()
             .w(relative(0.48))
             .flex_grow(1.0)
             .group(SharedString::from(group.clone()))
-            .when(!here, |el| el.opacity(0.5))
+            .opacity(away.clamp(0.0, 1.0))
             .child(tile)
             .when(here, |el| {
                 el.child(
@@ -472,7 +522,7 @@ impl FuwaApp {
                     .bg(alpha(p.background, 0.8))
                     .px(px(8.0))
                     .py(px(2.0))
-                    .child(live_badge())
+                    .child(live_badge(&user.id, window))
                     .child(
                         div()
                             .min_w_0()
@@ -485,7 +535,7 @@ impl FuwaApp {
                             .child(label),
                     ),
             );
-        div()
+        let holder = div()
             .relative()
             .w_full()
             .group(SharedString::from(group.clone()))
@@ -503,8 +553,9 @@ impl FuwaApp {
                     cx.stop_propagation();
                     this.pop_out(popped.clone(), cx)
                 })),
-            )
-            .into_any_element()
+            );
+        // The web's `scale: 0.95` as it comes in.
+        motion::pop_in(holder, SharedString::from(format!("{group}|in")), (0.5, 0.5), 0.95, 0.0).into_any_element()
     }
 
     /// Calls that started a moment ago in conversations you're in, that you're not in yet.
@@ -603,8 +654,10 @@ impl FuwaApp {
         let decline_key = r.key.clone();
         let (k, c) = (r.instance.clone(), r.conversation.clone());
         let round = |id: String, bg: gpui_kit::Rgba| {
+            let lit = brighter(bg);
             div()
-                .id(SharedString::from(id))
+                .id(SharedString::from(id.clone()))
+                .group(SharedString::from(id))
                 .size(px(44.0))
                 .flex_none()
                 .rounded_full()
@@ -614,8 +667,8 @@ impl FuwaApp {
                 .bg(bg)
                 .text_color(gpui_kit::white())
                 .cursor_pointer()
-                .hover(|s| s.opacity(0.92))
-                .active(|s| s.opacity(0.8))
+                .hover(move |s| s.bg(lit))
+                .active(|s| s.scale(0.85))
         };
         let shake = motion::ambient(
             icon("phone").size(px(20.0)),
@@ -688,7 +741,14 @@ impl FuwaApp {
                         this.calls.declined.insert(decline_key.clone());
                         cx.notify();
                     }))
-                    .child(icon("phone-off").size(px(20.0))),
+                    .child(
+                        div()
+                            .id("decline-phone")
+                            .group_hover(SharedString::from(format!("decline|{}", r.key)), |s| {
+                                s.rotate(gpui_kit::radians(135f32.to_radians()))
+                            })
+                            .child(icon("phone-off").size(px(20.0))),
+                    ),
             )
             .child(
                 round(format!("answer|{}", r.key), green())
@@ -702,6 +762,7 @@ impl FuwaApp {
                     }))
                     .child(shake),
             );
-        motion::rise(card, SharedString::from(format!("ring|{}", r.key)), Duration::ZERO, -24.0).into_any_element()
+        // Down into place as it grows (`y: -24, scale: 0.9`).
+        motion::pop_in(card, SharedString::from(format!("ring|{}", r.key)), (0.5, 0.5), 0.9, -24.0).into_any_element()
     }
 }

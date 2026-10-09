@@ -141,6 +141,7 @@ impl ServerSettingsView {
     ) -> AnyElement {
         let query = self.query.read(cx).value().to_string();
         let focused = gpui_kit::Focusable::focus_handle(self.query.read(cx), cx).is_focused(window);
+        let lit = motion::follow("server-search-lit", if focused { 1.0 } else { 0.0 }, window, cx);
         let search_box = div()
             .relative()
             .h(px(36.0))
@@ -167,13 +168,14 @@ impl ServerSettingsView {
                     .absolute()
                     .left(px(9.0))
                     .top(px(9.0))
-                    .text_color(if focused { p.primary } else { p.muted_foreground })
+                    .text_color(crate::ui::theme::mix(p.muted_foreground, p.primary, lit.clamp(0.0, 1.0)))
+                    .scale(1.0 + 0.1 * lit)
                     .child(icon("search").size(px(16.0))),
             )
             .child(div().flex_1().min_w_0().child(Input::new(&self.query).appearance(false)))
             .when(!query.is_empty(), |el| {
                 let (hover, fg) = (p.muted, p.foreground);
-                el.child(
+                el.child(motion::pop(
                     div()
                         .id("server-search-clear")
                         .absolute()
@@ -192,7 +194,11 @@ impl ServerSettingsView {
                             cx.notify();
                         }))
                         .child(icon("x").size(px(14.0))),
-                )
+                    "server-search-clear-in",
+                    0.5,
+                    -90.0,
+                    Duration::ZERO,
+                ))
             });
         let shown_for_enter = shown.to_vec();
         let search_box = div()
@@ -296,8 +302,10 @@ impl ServerSettingsView {
                     (false, false) => p.muted_foreground.into(),
                 };
                 let badge = badges(section);
+                let group = SharedString::from(format!("smenu-{section:?}"));
                 let row = div()
-                    .id(SharedString::from(format!("smenu-{section:?}")))
+                    .id(group.clone())
+                    .group(group.clone())
                     .relative()
                     .h(px(32.0))
                     .px(px(10.0))
@@ -310,14 +318,14 @@ impl ServerSettingsView {
                     .text_color(color)
                     .cursor_pointer()
                     .when(!active, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(section, None, cx)
                     }))
-                    .child(div().flex_1().min_w_0().truncate().child(section.label()))
-                    .when(badge > 0, |el| el.child(count_badge(badge, p)))
-                    .when(trailing, |el| el.child(page_glyph(section, 16.0, color)));
+                    .child(crate::ui::settings::nudged(&group, section.label()))
+                    .when(badge > 0, |el| el.child(count_badge(section, badge, p)))
+                    .when(trailing, |el| el.child(tipped(&group, page_glyph(section, 16.0, color))));
                 block = block.child(slide(row, SharedString::from(format!("smenu-in-{section:?}")), n));
                 n += 1;
                 y += 32.0;
@@ -358,11 +366,7 @@ impl ServerSettingsView {
                         div().child(icon("search-x").size(px(28.0))),
                         SharedString::from(format!("server-nomatch-{query}")),
                         Duration::from_millis(700),
-                        |el, t| {
-                            let k = if t < 1.0 / 7.0 { 0.0 } else { (t - 1.0 / 7.0) * 7.0 / 6.0 };
-                            let wiggle = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 2.0;
-                            el.relative().left(px(wiggle))
-                        },
+                        |el, t| el.rotate(gpui_kit::radians(crate::ui::settings::shake(t).to_radians())),
                     ))
                     .child(t_with("settings.screen.noMatches", &[("query", Arg::Str(query))])),
                 "server-settings-nomatch",
@@ -379,6 +383,7 @@ impl ServerSettingsView {
             list = list.child(slide(
                 div()
                     .id(SharedString::from(format!("sresult-{page:?}")))
+                    .group(SharedString::from(format!("sresult-{page:?}")))
                     .h(px(32.0))
                     .px(px(10.0))
                     .flex()
@@ -390,14 +395,18 @@ impl ServerSettingsView {
                     .text_color(if page.danger() { alpha(p.destructive, 0.8) } else { p.foreground.into() })
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(page, None, cx)
                     }))
-                    .child(page_glyph(
-                        page,
-                        16.0,
-                        if page.danger() { alpha(p.destructive, 0.8) } else { p.foreground.into() },
+                    .child(tipped(
+                        &SharedString::from(format!("sresult-{page:?}")),
+                        page_glyph(
+                            page,
+                            16.0,
+                            if page.danger() { alpha(p.destructive, 0.8) } else { p.foreground.into() },
+                        ),
                     ))
                     .child(div().truncate().child(page.label())),
                 SharedString::from(format!("sresult-in-{page:?}")),
@@ -421,6 +430,7 @@ impl ServerSettingsView {
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover).text_color(fg))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, _, cx| this.choose(page, Some(id), cx)))
                         .child(div().opacity(0.6).child(icon("corner-down-right").size(px(14.0))))
                         .child(div().truncate().child(label.clone())),
@@ -443,10 +453,19 @@ pub(super) fn page_glyph(page: Page, size: f32, color: impl Into<gpui_kit::Hsla>
     icon(page.glyph()).size(px(size)).text_color(color).into_any_element()
 }
 
-/// Something waiting on a page, as a red count (the web's menu badge).
-fn count_badge(n: usize, p: &Palette) -> impl IntoElement {
-    let _ = p;
-    motion::once(
+/// A menu row's icon, tipped and grown while the row is pointed at (the web's `ICON`).
+fn tipped(group: &SharedString, glyph: AnyElement) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("{group}-icon")))
+        .flex_none()
+        .group_hover(group.clone(), |s| s.rotate(gpui_kit::radians(-12f32.to_radians())).scale(1.1))
+        .child(glyph)
+}
+
+/// Something waiting on a page, as a red count (the web's menu badge): it pops in, and its
+/// number rolls as it changes.
+fn count_badge(page: Page, n: usize, p: &Palette) -> impl IntoElement {
+    motion::pop(
         div()
             .relative()
             .h(px(20.0))
@@ -461,10 +480,11 @@ fn count_badge(n: usize, p: &Palette) -> impl IntoElement {
             .text_size(px(10.4))
             .font_weight(FontWeight::EXTRA_BOLD)
             .text_color(gpui_kit::white())
-            .child(if n > 99 { "99+".to_owned() } else { n.to_string() }),
-        SharedString::from(format!("smenu-badge-{n}")),
-        Duration::from_millis(260),
-        |el, t| el.opacity(t),
+            .child(crate::ui::motion::rolling(format!("smenu-count-{page:?}"), n as u64, Some(99), 10.4)),
+        SharedString::from(format!("smenu-badge-{page:?}")),
+        0.05,
+        0.0,
+        Duration::ZERO,
     )
 }
 

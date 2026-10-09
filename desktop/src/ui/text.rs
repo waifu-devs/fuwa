@@ -161,6 +161,17 @@ pub fn ago(ms: i64, now: i64) -> String {
     format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
 }
 
+/// "Thursday, October 9, 2026 at 3:04 PM": the whole moment, for the tooltip
+/// on a message's time (the web's `formatFull`, its `title`).
+pub fn full(ms: i64) -> String {
+    let Some(at) = Local.timestamp_millis_opt(ms).single() else { return String::new() };
+    let (day, time) = (at.format("%A, %B %-d, %Y").to_string(), time_of(&at));
+    crate::core::i18n::t_with(
+        "common.time.dayTime",
+        &[("day", crate::core::i18n::Arg::Str(&day)), ("time", crate::core::i18n::Arg::Str(&time))],
+    )
+}
+
 /// Just the time, for the side of a follow-up message.
 pub fn clock(ms: i64) -> String {
     Local.timestamp_millis_opt(ms).single().map(|at: DateTime<Local>| time_of(&at)).unwrap_or_default()

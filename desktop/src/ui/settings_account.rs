@@ -1006,6 +1006,7 @@ impl SettingsView {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .when(kind == Kind::Avatar, |el| el.rounded_full())
                     .opacity(if busy { 1.0 } else { 0.0 })
+                    .id(SharedString::from(format!("pic-{id}-shade")))
                     .group_hover(SharedString::from(format!("pic-{id}")), |s| s.opacity(1.0))
                     .child(icon(if busy { "loader-circle" } else { "camera" }).size(px(20.0)))
                     .child(if busy { String::new() } else { t("workspace.picture.changeShort").to_uppercase() }),
@@ -1147,8 +1148,8 @@ impl SettingsView {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .hover(|s| s.top(px(-2.0)))
-                .active(|s| s.top(px(1.0)))
+                .hover(|s| s.translate_y(px(-2.0)))
+                .active(|s| s.scale(0.9))
         };
         let mut row = div().flex().flex_wrap().gap(px(0.0)).when(!ready, |el| el.opacity(0.5));
         row = row.child(ring(
@@ -1159,7 +1160,8 @@ impl SettingsView {
             )
             .id("color-auto")
             .cursor_pointer()
-            .hover(|s| s.top(px(-2.0)))
+            .hover(|s| s.translate_y(px(-2.0)))
+            .active(|s| s.scale(0.9))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.account.accent = -1;
                 cx.notify();
@@ -1557,11 +1559,19 @@ impl SettingsView {
                     .text_color(p.muted_foreground)
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+                    .active(|s| s.scale(0.9))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.show_password = !this.account.show_password;
                         cx.notify();
                     }))
-                    .child(icon(if show { "eye-off" } else { "eye" }).size(px(16.0))),
+                    // The eye swaps with a turn as it opens or shuts.
+                    .child(motion::pop(
+                        div().child(icon(if show { "eye-off" } else { "eye" }).size(px(16.0))),
+                        SharedString::from(format!("{id}-eye-{show}")),
+                        0.6,
+                        -40.0,
+                        Duration::ZERO,
+                    )),
             )
             .into_any_element()
     }
@@ -1943,7 +1953,7 @@ fn strength_meter(
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
-                .child(if any { t(label) } else { String::new() }),
+                .child(motion::swap_text("pw-strength", if any { t(label) } else { " ".to_owned() }, 12.0, window, cx)),
         )
         .into_any_element()
 }
@@ -1969,7 +1979,7 @@ pub(crate) fn banner_of(user_id: &str, picture: String, accent: i32, p: &Palette
 }
 
 /// One device: what it is, when it was last used and when it signed in.
-fn device_row(s: &pb::Session, here: bool, p: &Palette) -> gpui_kit::Div {
+fn device_row(s: &pb::Session, here: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (glyph, label) = device_label(&s.user_agent);
     let created = ms_of(s.created_at.as_ref());
     let active = ms_of(s.last_active_at.as_ref()).max(created);
@@ -1991,6 +2001,7 @@ fn device_row(s: &pb::Session, here: bool, p: &Palette) -> gpui_kit::Div {
     }
     let hover = alpha(p.primary, 0.3);
     div()
+        .id(SharedString::from(format!("device-{}", s.id)))
         .flex()
         .items_center()
         .gap(px(12.0))

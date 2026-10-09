@@ -15,6 +15,7 @@ use super::pages::form_row;
 use super::*;
 use crate::core::permissions::{self, Access, Bits, GROUPS, bit};
 use crate::core::server_admin::RolePatch;
+use crate::ui::motion::{rolling, swapping};
 use crate::ui::settings_controls::{Look, button};
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_lg, radius_md, radius_xl};
@@ -754,11 +755,12 @@ impl ServerSettingsView {
                     .when(active, |el| el.font_weight(FontWeight::BOLD))
                     .when(!active, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover).text_color(fg)))
                     .on_click(cx.listener(move |this, _, _, cx| this.select_role(id.clone(), cx)))
-                    .child(motion::once(
+                    .child(motion::pop(
                         dot(color, 12.0, p),
                         SharedString::from(format!("role-dot-{}-{color:?}", r.id)),
-                        Duration::from_millis(300),
-                        |el, t| el.opacity(0.3 + 0.7 * t),
+                        0.3,
+                        0.0,
+                        Duration::ZERO,
                     ))
                     .child(
                         div()
@@ -766,7 +768,7 @@ impl ServerSettingsView {
                             .min_w_0()
                             .truncate()
                             .when_some(color.filter(|_| active), |el, c| el.text_color(color_of(c)))
-                            .child(r.name.clone()),
+                            .child(swapping(format!("role-name-{}", r.id), r.name.clone(), 14.0)),
                     )
                     .child(
                         div()
@@ -778,7 +780,7 @@ impl ServerSettingsView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
                             .child(icon("users").size(px(12.0)))
-                            .child(count.to_string()),
+                            .child(rolling(format!("role-count-{}", r.id), count as u64, None, 11.2)),
                     ),
             )
     }
@@ -954,11 +956,13 @@ impl ServerSettingsView {
                 .rounded_full()
                 .when(locked, |el| el.opacity(0.5))
                 .when(!locked, |el| {
-                    el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                        this.roles.edits.color = Some(c);
-                        this.roles.custom = false;
-                        cx.notify();
-                    }))
+                    el.cursor_pointer().hover(|s| s.scale(1.12)).active(|s| s.scale(0.9)).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.roles.edits.color = Some(c);
+                            this.roles.custom = false;
+                            cx.notify();
+                        },
+                    ))
                 });
             swatch = match c {
                 Some(c) => swatch.bg(color_of(c)),
@@ -966,11 +970,17 @@ impl ServerSettingsView {
             };
             swatch = ring(swatch, on);
             if on {
-                swatch = swatch.child(motion::once(
-                    icon("check").size(px(16.0)).text_color(if c.is_some() { rgb(0xffffff) } else { p.foreground }),
+                // The check springs in, turning upright from -60°.
+                swatch = swatch.child(motion::pop(
+                    div().child(icon("check").size(px(16.0)).text_color(if c.is_some() {
+                        rgb(0xffffff)
+                    } else {
+                        p.foreground
+                    })),
                     SharedString::from(format!("swatch-check-{c:?}")),
-                    Duration::from_millis(260),
-                    |el, t| el.opacity(t),
+                    0.05,
+                    -60.0,
+                    Duration::ZERO,
                 ));
             } else if c.is_none() {
                 swatch = swatch.child(icon("slash").size(px(20.0)).text_color(alpha(p.muted_foreground, 0.6)));
@@ -998,13 +1008,15 @@ impl ServerSettingsView {
             })
             .when(locked, |el| el.opacity(0.5))
             .when(!locked, |el| {
-                el.cursor_pointer().on_click(cx.listener(|this, _, window, cx| {
-                    this.roles.custom = !this.roles.custom;
-                    if this.roles.custom {
-                        this.roles.hex.update(cx, |s, cx| s.focus(window, cx));
-                    }
-                    cx.notify();
-                }))
+                el.cursor_pointer().hover(|s| s.scale(1.12)).active(|s| s.scale(0.9)).on_click(cx.listener(
+                    |this, _, window, cx| {
+                        this.roles.custom = !this.roles.custom;
+                        if this.roles.custom {
+                            this.roles.hex.update(cx, |s, cx| s.focus(window, cx));
+                        }
+                        cx.notify();
+                    },
+                ))
             })
             .when(custom, |el| el.child(icon("check").size(px(16.0)).text_color(rgb(0xffffff))));
         swatches = swatches.child(ring(rainbow, custom));
@@ -1537,6 +1549,7 @@ impl ServerSettingsView {
                             .child(
                                 div()
                                     .opacity(0.0)
+                                    .id(SharedString::from(format!("{group}-reveal")))
                                     .group_hover(group, |s| s.opacity(1.0))
                                     .text_color(p.primary)
                                     .child(icon("plus").size(px(16.0))),

@@ -311,8 +311,12 @@ impl SettingsView {
                         .rounded_full()
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
-                        .hover(|s| s.bg(p.muted).text_color(p.foreground))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| {
+                            s.bg(p.muted)
+                                .text_color(p.foreground)
+                                .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_2))
+                        })
+                        .active(|s| s.scale(0.85))
                         .tooltip(move |window, cx| {
                             crate::ui::overlay::Tip::new(t("appsettings.shader.retry")).build(window, cx)
                         })
@@ -368,13 +372,13 @@ impl SettingsView {
                             el.border_color(p.primary)
                                 .bg(alpha(p.primary, 0.1))
                                 .text_color(p.primary)
-                                .hover(|s| s.top(px(-2.0)))
+                                .hover(|s| s.translate_y(px(-2.0)))
                         } else {
                             el.border_color(p.border)
-                                .hover(move |s| s.border_color(hover).text_color(primary).top(px(-2.0)))
+                                .hover(move |s| s.border_color(hover).text_color(primary).translate_y(px(-2.0)))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.92))
                     .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(hint)).build(window, cx))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let fallback = this.backdrop_shader(target).map_or(Effect::Aurora, |s| s.fallback);
@@ -539,7 +543,6 @@ impl SettingsView {
                             el.text_color(p.muted_foreground).hover(move |s| s.text_color(fg))
                         }
                     })
-                    .active(|s| s.top(px(1.0)))
                     .on_click(
                         cx.listener(move |this, _, _, cx| this.patch_shader(target, cx, |s| s.fallback = fallback)),
                     )

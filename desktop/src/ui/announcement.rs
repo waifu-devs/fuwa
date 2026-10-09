@@ -76,7 +76,8 @@ pub fn banner(
             }
         },
     );
-    let badge = motion::once(
+    // Pops in turning upright, a moment after the banner (the web's `scale: 0, rotate: -40`).
+    let badge = motion::pop(
         div()
             .relative()
             .flex_none()
@@ -97,12 +98,9 @@ pub fn banner(
             })
             .child(mark),
         SharedString::from(format!("{id}-badge-{}", tone as i32)),
-        Duration::from_millis(420),
-        |el, t| {
-            // Pops in turning, as on the web.
-            let s = 1.0 - (1.0 - t).powi(3);
-            el.opacity(s)
-        },
+        0.0,
+        -40.0,
+        Duration::from_millis(120),
     );
     let ends = ends_ms(a).map(|at| (ends_label(at, now), stamp_label(at, now)));
     let words = motion::rise(
@@ -114,7 +112,7 @@ pub fn banner(
         ),
         SharedString::from(format!("{id}-words-{}|{}", a.id, a.text.len())),
         Duration::from_millis(80),
-        8.0,
+        -8.0,
     );
     let mut row = div()
         .relative()
@@ -249,7 +247,12 @@ impl crate::ui::app::FuwaApp {
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
-                .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
+                // The web's `hover:bg-black/10 dark:hover:bg-white/15`.
+                .hover({
+                    let tint =
+                        if p.dark { alpha(gpui_kit::rgb(0xffffff), 0.15) } else { alpha(gpui_kit::rgb(0x000000), 0.1) };
+                    move |s| s.bg(tint)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.core.set_prefs(|p| {
                         p.closed_announcements.insert(key.clone(), id.clone());
@@ -262,11 +265,15 @@ impl crate::ui::app::FuwaApp {
             let (hover, press) = (motion::Pose::turn(90.0), motion::Pose { scale: 0.9, ..motion::Pose::turn(90.0) });
             motion::answer(button, "announcement-close", hover, press, window, cx).into_any_element()
         });
-        Some(motion::once(
-            div().flex_none().child(banner("announcement", &a, now, close, &p, window)),
-            SharedString::from(format!("announcement-in-{key}-{}", a.id)),
-            Duration::from_millis(320),
-            |el, t| el.opacity(t),
-        ))
+        // It drops in from just above (the web's `SLIDE_IN`).
+        Some(
+            motion::rise(
+                div().flex_none().child(banner("announcement", &a, now, close, &p, window)),
+                SharedString::from(format!("announcement-in-{key}-{}", a.id)),
+                Duration::ZERO,
+                -6.0,
+            )
+            .into_any_element(),
+        )
     }
 }

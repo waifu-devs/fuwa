@@ -11,8 +11,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::base::motion::{Spring, spring};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, SharedString, SpringConfig, Stateful, StatefulInteractiveElement as _, Styled,
-    Window, px, radians, sampled_easing,
+    MouseButton, ParentElement as _, RenderOnce, SharedString, SpringConfig, Stateful, StatefulInteractiveElement as _,
+    Styled, Window, px, radians, sampled_easing,
 };
 
 /// The spring things enter with: quick, with a touch of overshoot.
@@ -234,7 +234,7 @@ pub fn swap_text(
 
 /// A small count, like an unread badge, that rolls to its new value: up when
 /// it grows, down when it shrinks (the web's `Count`). Past `max` it reads
-/// "max+". `size` is the text's size in pixels.
+/// "max+", and it's written as the app's language writes numbers ("12,345"). `size` is the text's size in pixels.
 pub fn count(
     id: impl Into<SharedString>,
     value: u64,
@@ -246,7 +246,7 @@ pub fn count(
     let id = id.into();
     let text: SharedString = match max {
         Some(max) if value > max => format!("{max}+").into(),
-        _ => value.to_string().into(),
+        _ => crate::core::i18n::number(value as i64).into(),
     };
     let last = window.use_keyed_state(SharedString::from(format!("{id}|count")), cx, |_, _| value);
     let up = value >= *last.read(cx);
@@ -286,6 +286,84 @@ fn roll(
         move |el, t| el.opacity((1.0 - t).clamp(0.0, 1.0)).translate_y(px(-t * distance * sign)),
     );
     gpui_kit::div().relative().when(clip, |el| el.overflow_hidden()).child(incoming).child(outgoing).into_any_element()
+}
+
+/// A count that rolls ([`count`]), for places drawn without the window at hand.
+#[derive(IntoElement)]
+pub struct Rolling {
+    id: SharedString,
+    value: u64,
+    max: Option<u64>,
+    size: f32,
+}
+
+/// `value`, rolling to each new one; past `max` it reads "max+". `size` is the text's size in pixels.
+pub fn rolling(id: impl Into<SharedString>, value: u64, max: Option<u64>, size: f32) -> Rolling {
+    Rolling { id: id.into(), value, max, size }
+}
+
+impl RenderOnce for Rolling {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        count(self.id, self.value, self.max, self.size, window, cx)
+    }
+}
+
+/// `key`'s translated words for `n` ("3 replies") with the number rolling in
+/// them, as the web puts `<Count>` inside `<T>`. `size` is the text's size in pixels.
+pub fn counted(id: impl Into<SharedString>, key: &str, n: u64, size: f32) -> Div {
+    let text = crate::core::i18n::t_with(key, &[("count", crate::core::i18n::Arg::Num(n as i64))]);
+    let number = crate::core::i18n::number(n as i64);
+    let Some(at) = text.find(&number) else { return gpui_kit::div().child(text) };
+    let (before, after) = (text[..at].to_owned(), text[at + number.len()..].to_owned());
+    gpui_kit::div()
+        .flex()
+        .whitespace_nowrap()
+        .when(!before.is_empty(), |el| el.child(before))
+        .child(rolling(id, n, None, size))
+        .when(!after.is_empty(), |el| el.child(after))
+}
+
+/// Text that swaps ([`swap_text`]), for places drawn without the window at hand.
+#[derive(IntoElement)]
+pub struct Swapping {
+    id: SharedString,
+    text: SharedString,
+    size: f32,
+}
+
+/// `text`, sliding to each new value. `size` is the text's size in pixels.
+pub fn swapping(id: impl Into<SharedString>, text: impl Into<SharedString>, size: f32) -> Swapping {
+    Swapping { id: id.into(), text: text.into(), size }
+}
+
+impl RenderOnce for Swapping {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        swap_text(self.id, self.text, self.size, window, cx)
+    }
+}
+
+/// A value that springs toward a target ([`follow`]) for something drawn
+/// without the window at hand: `build` draws it at the value it's at.
+#[derive(IntoElement)]
+pub struct Springing {
+    id: SharedString,
+    target: f32,
+    build: Box<dyn FnOnce(f32) -> AnyElement>,
+}
+
+/// Draws `build` at a value springing toward `target`.
+pub fn springing(
+    id: impl Into<SharedString>,
+    target: f32,
+    build: impl FnOnce(f32) -> AnyElement + 'static,
+) -> Springing {
+    Springing { id: id.into(), target, build: Box::new(build) }
+}
+
+impl RenderOnce for Springing {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        (self.build)(follow(self.id, self.target, window, cx))
+    }
 }
 
 /// How something looks while it's pointed at or held: scaled, turned

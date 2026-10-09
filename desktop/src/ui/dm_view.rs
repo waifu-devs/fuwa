@@ -572,7 +572,13 @@ pub(crate) fn render_line(line: &SysLine, p: &Palette) -> AnyElement {
         .py(px(2.0))
         .hover(move |st| st.bg(hover))
         .child(
-            div().w(px(40.0)).flex_none().flex().justify_center().child(icon(glyph).size(px(16.0)).text_color(color)),
+            // The icon tips back while the line's pointed at.
+            div().w(px(40.0)).flex_none().flex().justify_center().child(
+                div()
+                    .id("sysline-icon")
+                    .group_hover("sysline", |st| st.rotate(gpui_kit::radians(-20f32.to_radians())))
+                    .child(icon(glyph).size(px(16.0)).text_color(color)),
+            ),
         )
         .child(
             div()
@@ -697,8 +703,15 @@ pub(crate) fn trust_pill(id: &str, trust: Trust, label: String, p: &Palette) -> 
                 .child(icon(glyph).size(px(14.0)))
         },
     );
+    let group = SharedString::from(format!("{id}-pill"));
+    // The mark tips and grows while the pill's pointed at.
+    let mark = div()
+        .id(SharedString::from(format!("{id}-mark")))
+        .group_hover(group.clone(), |st| st.rotate(gpui_kit::radians(-0.21)).scale(1.1))
+        .child(mark);
     div()
         .id(SharedString::from(id.to_owned()))
+        .group(group)
         .relative()
         .overflow_hidden()
         .flex_none()
@@ -715,7 +728,7 @@ pub(crate) fn trust_pill(id: &str, trust: Trust, label: String, p: &Palette) -> 
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .hover(move |st| st.bg(hover))
-        .active(|st| st.opacity(0.85))
+        .active(|st| st.scale(0.92))
         .child(glint)
         .child(mark)
         .child(label)
@@ -751,7 +764,7 @@ impl FuwaApp {
             .px(px(16.0))
             .border_b_1()
             .border_color(p.border)
-            .child(partner_name(partner.as_ref(), &p))
+            .child(partner_name(partner.as_ref(), &p, window, cx))
             .child(div().flex_1())
             .when(conversation.is_some() && ready && pins_here, |el| {
                 let open = self.pins.is_some();
@@ -899,7 +912,7 @@ pub(crate) fn placed(el: AnyElement, start: bool, last: bool) -> AnyElement {
 }
 
 /// Who the conversation is with, in the header; it slides up when that changes.
-fn partner_name(partner: Option<&pb::User>, p: &Palette) -> AnyElement {
+fn partner_name(partner: Option<&pb::User>, p: &Palette, window: &mut Window, cx: &mut gpui_kit::App) -> AnyElement {
     let key = partner.map_or_else(|| "none".to_owned(), |u| u.id.clone());
     let name = partner.map_or_else(|| t("dms-calls.dm.view.untitled"), user_name);
     motion::rise(
@@ -914,7 +927,7 @@ fn partner_name(partner: Option<&pb::User>, p: &Palette) -> AnyElement {
                         .text_size(px(16.0))
                         .line_height(px(20.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(name),
+                        .child(motion::swap_text(format!("dm-partner-name|{key}"), name, 16.0, window, cx)),
                 )
                 .when_some(partner, |el, u| {
                     el.child(
@@ -1151,7 +1164,7 @@ impl FuwaApp {
                             let bg = alpha(p.primary, 0.1);
                             move |st| st.bg(bg)
                         })
-                        .active(|st| st.top(px(1.0)))
+                        .active(|st| st.translate_y(px(1.0)))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let core = this.core.clone();
                             let (key, id) = (key.clone(), id.clone());
@@ -1385,7 +1398,9 @@ impl FuwaApp {
                     inset: false,
                 }])
                 .cursor_pointer()
-                .active(|st| st.opacity(0.85))
+                // It grows when there's something to send, and gives when pressed.
+                .scale(rest)
+                .active(|st| st.scale(0.85))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if thread {
                         this.threads.reply.update(cx, |state, cx| state.focus(window, cx));
@@ -1394,7 +1409,7 @@ impl FuwaApp {
                     this.composer.update(cx, |state, cx| state.focus(window, cx));
                     this.send_now(window, cx);
                 }))
-                .child(icon("send-horizontal").size(px(18.0 * rest)))
+                .child(icon("send-horizontal").size(px(18.0)))
         });
         let row = div()
             .flex()

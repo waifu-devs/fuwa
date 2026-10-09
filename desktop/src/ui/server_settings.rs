@@ -900,6 +900,7 @@ impl Render for ServerSettingsView {
         let (hover_bg, hover_fg, hover_ring) = (p.muted, p.foreground, alpha(p.foreground, 0.4));
         let close = div()
             .id("server-settings-close")
+            .group("server-settings-close")
             .absolute()
             .top(px(64.0))
             .left(px(aside + inner - 24.0 - 40.0))
@@ -920,9 +921,19 @@ impl Render for ServerSettingsView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(move |s| s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("x").size(px(20.0))),
+                    .group_hover("server-settings-close", move |s| {
+                        s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring)
+                    })
+                    .active(|s| s.scale(0.9))
+                    // The cross turns a quarter as the pointer comes (`group-hover:rotate-90`).
+                    .child(
+                        div()
+                            .id("server-settings-close-x")
+                            .group_hover("server-settings-close", |s| {
+                                s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                            })
+                            .child(icon("x").size(px(20.0))),
+                    ),
             )
             .child(div().text_size(px(10.4)).font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"));
 
@@ -1072,11 +1083,12 @@ pub(crate) fn bar_with_error<V: 'static>(
             .flex()
             .gap(px(4.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
-            .child(
-                div()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(n as i64))])),
-            )
+            .child(div().text_color(p.muted_foreground).child(crate::ui::motion::counted(
+                format!("{id}-count"),
+                "settings.controls.unsavedCount",
+                n as u64,
+                14.0,
+            )))
             .into_any_element()
     };
     let bar = div()
@@ -1203,7 +1215,7 @@ pub(crate) fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui
                 el.bg(p.secondary).text_color(p.foreground).hover(move |s| s.bg(hover))
             }
         })
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.scale(0.97))
         .child(label.to_owned())
 }
 

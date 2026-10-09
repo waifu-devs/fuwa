@@ -227,13 +227,50 @@ fn footer_button(
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .hover(move |s| s.bg(hover).text_color(fg))
-        .active(|s| s.top(px(1.0)))
+        .active(|s| s.scale(0.92))
         .child(icon(glyph).size(px(14.0)))
         .when_some(label, |el, l| el.child(l))
 }
 
-/// The card under a poll's message.
-pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<FuwaApp>) -> AnyElement {
+/// Something in a poll that just came in, sliding in after `delay` (the web's
+/// `SPRING` entrances): a fade while it moves `from` pixels, `(x, y)`, and
+/// grows from `scale`.
+fn poll_in<E: IntoElement + gpui_kit::Styled + 'static>(
+    el: E,
+    id: SharedString,
+    delay: Duration,
+    from: (f32, f32),
+    scale: f32,
+) -> AnyElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(520.0, 34.0, 1.0), 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32();
+    el.with_animation(
+        id,
+        Animation::new(total).with_easing(move |t| if t <= start { 0.0 } else { easing((t - start) / (1.0 - start)) }),
+        move |el, t| {
+            el.opacity(t.clamp(0.0, 1.0))
+                .translate_x(px(from.0 * (1.0 - t)))
+                .translate_y(px(from.1 * (1.0 - t)))
+                .scale(scale + (1.0 - scale) * t)
+        },
+    )
+    .into_any_element()
+}
+
+/// A whole number, as a count rolls through it.
+fn whole(v: f64) -> String {
+    (v.round() as i64).to_string()
+}
+
+/// A share, as a count rolls through it.
+fn percent(v: f64) -> String {
+    format!("{}%", v.round() as i64)
+}
+
+/// The card under a poll's message. `animate` for a message that just came
+/// in: the card rises in and its answers slide in one after another.
+pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<FuwaApp>, animate: bool) -> AnyElement {
     let poll = &c.poll;
     let muted = p.muted;
     let mut pills = div()
@@ -262,11 +299,12 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                 .child(pill(Some(glyph), text, p.muted_foreground, muted))
         });
     if c.closed {
-        pills = pills.child(motion::rise(
+        pills = pills.child(motion::pop_in(
             pill(Some("flag"), "Final results", p.background, p.foreground),
             SharedString::from(format!("poll-final|{mid}")),
-            Duration::ZERO,
-            4.0,
+            (0.0, 0.5),
+            0.6,
+            0.0,
         ));
     }
     let header = div().flex().flex_col().gap(px(6.0)).child(pills).child(
@@ -316,14 +354,15 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
             .map(|el| if poll.multiple { el.rounded(corner(6.0)) } else { el.rounded_full() })
             .when(chosen, |el| el.border_color(p.primary).bg(p.primary).text_color(p.primary_foreground))
             .when(!chosen, |el| el.border_color(alpha(p.muted_foreground, 0.4)))
+            // The check pops in, turning upright (`PickMark`).
             .when(chosen, |el| {
-                el.child(
-                    div().flex().items_center().justify_center().child(icon("check").size(px(12.0))).with_animation(
-                        SharedString::from(format!("poll-check|{mid}|{}", a.id)),
-                        Animation::new(Duration::from_millis(260)).with_easing(gpui_kit::ease_out_quint()),
-                        |el, t| el.opacity(t).size(px(6.0 + 6.0 * t)),
-                    ),
-                )
+                el.child(motion::pop(
+                    div().flex().items_center().justify_center().child(icon("check").size(px(12.0))),
+                    SharedString::from(format!("poll-check|{mid}|{}", a.id)),
+                    0.0,
+                    -45.0,
+                    Duration::ZERO,
+                ))
             });
         let percent = (to * 100.0).round() as i64;
         let id = a.id;
@@ -335,6 +374,23 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
             .border_color(if chosen { alpha(p.primary, 0.6) } else { p.border.into() })
             .when(dim, |el| el.opacity(0.62))
             .child(bar)
+            // A ring that flashes out when your pick lands (`PickFlash`).
+            .when(chosen, |el| {
+                el.child(motion::once(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(crate::ui::theme::radius_xl())
+                        .border_2()
+                        .border_color(p.primary),
+                    SharedString::from(format!("poll-flash|{mid}|{}", a.id)),
+                    Duration::from_millis(550),
+                    |el, t| {
+                        let t = 1.0 - (1.0 - t) * (1.0 - t);
+                        el.opacity(0.9 * (1.0 - t)).scale(1.0 + 0.04 * t)
+                    },
+                ))
+            })
             .child(
                 div()
                     .relative()
@@ -361,32 +417,52 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                                 .gap(px(6.0))
                                 .text_xs()
                                 .line_height(px(16.0))
-                                .child(div().text_color(p.muted_foreground).child(a.votes.to_string()))
+                                // Both count up from nothing as they show (`CountUp`).
+                                .child(div().text_color(p.muted_foreground).child(motion::count_up(
+                                    SharedString::from(format!("poll-votes|{mid}|{id}")),
+                                    a.votes as f64,
+                                    Duration::ZERO,
+                                    whole,
+                                )))
                                 .child(
-                                    div()
-                                        .w(px(36.0))
-                                        .flex()
-                                        .justify_end()
-                                        .font_weight(FontWeight::EXTRA_BOLD)
-                                        .child(format!("{percent}%")),
+                                    div().w(px(36.0)).flex().justify_end().font_weight(FontWeight::EXTRA_BOLD).child(
+                                        motion::count_up(
+                                            SharedString::from(format!("poll-share|{mid}|{id}")),
+                                            percent as f64,
+                                            Duration::ZERO,
+                                            self::percent,
+                                        ),
+                                    ),
                                 ),
                             SharedString::from(format!("poll-numbers|{mid}|{id}")),
                             8.0,
                         ))
                     }),
             );
+        // Under the pointer it nudges right and its border lights; held, it gives a little.
         let row = if c.can_vote {
             let hover = alpha(p.primary, 0.4);
             let (this, mid) = (this.clone(), mid.to_owned());
-            row.cursor_pointer().hover(move |s| s.border_color(hover)).active(|s| s.top(px(1.0))).on_click(
-                move |_, _, cx| {
+            row.cursor_pointer()
+                .hover(move |s| s.border_color(hover).translate_x(px(2.0)))
+                .active(|s| s.scale(0.985))
+                .on_click(move |_, _, cx| {
                     let _ = this.update(cx, |this, cx| this.poll_pick(mid.clone(), id, cx));
-                },
-            )
+                })
         } else {
             row
         };
-        answers = answers.child(row);
+        answers = answers.child(if animate {
+            poll_in(
+                row,
+                SharedString::from(format!("poll-answer-in|{mid}|{id}")),
+                Duration::from_millis(50 + 40 * n as u64),
+                (-8.0, 0.0),
+                1.0,
+            )
+        } else {
+            row.into_any_element()
+        });
     }
 
     let voters = poll.voters;
@@ -447,6 +523,10 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                         p,
                     )
                     .text_color(p.destructive)
+                    .hover({
+                        let bg = alpha(p.destructive, 0.1);
+                        move |s| s.bg(bg)
+                    })
                     .on_click(move |_, _, cx| {
                         let _ = yes.update(cx, |this, cx| this.poll_end(m1.clone(), cx));
                     }),
@@ -488,14 +568,21 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .text_color(p.muted_foreground)
         .child(
             div()
+                .flex()
                 .font_weight(FontWeight::BOLD)
-                .child(format!("{voters} {}", if voters == 1 { "vote" } else { "votes" })),
+                .child(motion::count_up(
+                    SharedString::from(format!("poll-voters|{mid}")),
+                    voters as f64,
+                    Duration::ZERO,
+                    whole,
+                ))
+                .child(if voters == 1 { " vote" } else { " votes" }),
         )
         .child("·")
         .child(c.status.clone())
         .child(buttons);
 
-    div()
+    let card = div()
         .mt(px(4.0))
         .max_w(px(512.0))
         .flex()
@@ -510,8 +597,12 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
         .shadow(crate::ui::polls::shadow_sm())
         .child(header)
         .child(answers)
-        .child(footer)
-        .into_any_element()
+        .child(footer);
+    if animate {
+        poll_in(card, SharedString::from(format!("poll-in|{mid}")), Duration::ZERO, (0.0, 8.0), 0.98)
+    } else {
+        card.into_any_element()
+    }
 }
 
 // ───────────────────────── Voting ─────────────────────────

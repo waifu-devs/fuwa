@@ -5,12 +5,13 @@
 //! the floating bar, beside previews of the server as Browse shows it, its
 //! join message, and three accounts at the door.
 
-use gpui_kit::{AnimationExt as _, ObjectFit, StyledImage as _, img};
+use gpui_kit::{ObjectFit, StyledImage as _, img};
 
 use super::pages::{boxed, focused, heading, label, part, preview_card};
 use super::*;
 use crate::core::pictures::PictureKind;
 use crate::core::server_pages::{ACCOUNT_AGES, AccessPatch};
+use crate::ui::motion::{counted, swapping};
 use crate::ui::settings_controls::{Look, Opt, button, chips, choice, toggle};
 use crate::ui::theme::{radius_lg, radius_xl};
 
@@ -424,6 +425,7 @@ impl ServerSettingsView {
                     .text_size(px(10.4))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .opacity(if busy { 1.0 } else { 0.0 })
+                    .id("server-icon-tile-shade")
                     .group_hover("server-icon-tile", |s| s.opacity(1.0))
                     .child(if busy {
                         spinner("icon-busy", 20.0, window)
@@ -855,7 +857,7 @@ fn browse_card(server: &pb::Server, p: &Palette) -> AnyElement {
                                 .line_height(px(28.0))
                                 .font_weight(FontWeight::EXTRA_BOLD)
                                 .truncate()
-                                .child(server.name.clone()),
+                                .child(swapping("browse-name", server.name.clone(), 18.0)),
                         )
                         .child(
                             div()
@@ -866,7 +868,12 @@ fn browse_card(server: &pb::Server, p: &Palette) -> AnyElement {
                                 .line_height(px(16.0))
                                 .text_color(p.muted_foreground)
                                 .child(icon("users").size(px(14.0)))
-                                .child(t_with("serversettings.shared.members", &[("count", Arg::Num(members))])),
+                                .child(counted(
+                                    "browse-members",
+                                    "serversettings.shared.members",
+                                    members.max(0) as u64,
+                                    12.0,
+                                )),
                         ),
                 ),
         )
@@ -889,15 +896,14 @@ fn browse_card(server: &pb::Server, p: &Palette) -> AnyElement {
                 .text_sm()
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.primary_foreground)
-                .child(motion::once(
-                    div().child(if server.applications {
+                .child(swapping(
+                    "browse-join",
+                    if server.applications {
                         t("serversettings.nav.applyToJoin")
                     } else {
                         t("serversettings.browse.join")
-                    }),
-                    SharedString::from(format!("browse-join-{}", server.applications)),
-                    Duration::from_millis(240),
-                    |el, t| el.opacity(t),
+                    },
+                    14.0,
                 )),
         );
     let faded = motion::once(
@@ -958,13 +964,10 @@ fn join_preview(channel: Option<&str>, me: Option<&pb::User>, p: &Palette) -> An
     let on = channel.is_some();
     let arrow = div().text_color(gpui_kit::rgb(0x10b981)).child("→");
     let arrow: AnyElement = if on {
-        div()
-            .id("join-arrow")
-            .with_animation("join-arrow", gpui_kit::Animation::new(Duration::from_millis(1600)).repeat(), |el, t| {
-                el.relative().left(px(4.0 * (t * std::f32::consts::PI).sin()))
-            })
-            .child(arrow)
-            .into_any_element()
+        // The web nudges it forever; a cached page plays its flourishes once.
+        motion::once(div().child(arrow), "join-arrow", Duration::from_millis(1600), |el, t| {
+            el.translate_x(px(4.0 * (t * std::f32::consts::PI).sin()))
+        })
     } else {
         arrow.into_any_element()
     };

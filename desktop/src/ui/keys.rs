@@ -22,7 +22,7 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_3xl, radius_lg, radius_xl};
+use crate::ui::theme::{Palette, alpha, corner, mix, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
 
 /// The combo a key press makes, in the web's words; None for a bare modifier.
@@ -501,7 +501,7 @@ impl FuwaApp {
         out
     }
 
-    pub(crate) fn render_switcher(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let switcher = self.switcher.as_ref()?;
         // `pt-[12vh]` and `max-h-[70vh]`: parts of the window's height.
         let tall = f32::from(window.viewport_size().height);
@@ -519,7 +519,29 @@ impl FuwaApp {
             .p(px(8.0))
             .overflow_y_scroll()
             .track_scroll(&switcher.scroll);
-        if typed.is_empty() && !items.is_empty() {
+        let titled = typed.is_empty() && !items.is_empty();
+        if !items.is_empty() {
+            // The lit row's fill glides from row to row (the web's `layoutId="switcher-active"`):
+            // the list's 8px, the title's 26 and 56 a row.
+            let top = 8.0 + if titled { 26.0 } else { 0.0 } + active.min(items.len() - 1) as f32 * SWITCH_ROW;
+            let top = motion::follow(
+                SharedString::from(format!("switcher-lit|{}", switcher.query.entity_id())),
+                top,
+                window,
+                cx,
+            );
+            list = list.child(
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .right(px(8.0))
+                    .top(px(top))
+                    .h(px(SWITCH_ROW))
+                    .rounded(radius_xl())
+                    .bg(alpha(p.primary, 0.12)),
+            );
+        }
+        if titled {
             let first_unread = items[0].channel.is_some() && items[0].unread > 0;
             list = list.child(
                 div()
@@ -559,7 +581,7 @@ impl FuwaApp {
             ));
         }
         for (n, item) in items.into_iter().enumerate() {
-            list = list.child(self.switcher_row(item, n, n == active, &p, cx));
+            list = list.child(self.switcher_row(item, n, n == active, &p, window, cx));
         }
         let footer = div()
             .flex_none()
@@ -639,11 +661,14 @@ impl FuwaApp {
                 .items_center()
                 .pt(px(tall * 0.12))
                 .px(px(12.0))
-                .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.45))
-                // The web's `backdrop-blur-[3px]`.
-                .backdrop_blur(px(3.0))
                 .occlude()
                 .on_click(cx.listener(|this, _, window, cx| this.close_switcher(window, cx)))
+                // The web's `bg-black/45 backdrop-blur-[3px]`, fading in.
+                .child(motion::fade_in(
+                    div().absolute().inset_0().bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.45)).backdrop_blur(px(3.0)),
+                    "switcher-scrim-in",
+                    Duration::from_millis(180),
+                ))
                 .child(motion::pop_in(
                     div().w_full().max_w(px(576.0)).flex().flex_col().child(panel),
                     "switcher-panel",
@@ -657,7 +682,15 @@ impl FuwaApp {
 
     /// One place to go: an icon tile (or the server's icon), its name with the
     /// letters that matched, where it is under it, an unread count, and ⏎ on the lit one.
-    fn switcher_row(&self, item: Item, n: usize, active: bool, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn switcher_row(
+        &self,
+        item: Item,
+        n: usize,
+        active: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let lead: AnyElement = match (&item.channel, item.kind) {
             (None, _) => {
                 let server = self
@@ -699,8 +732,12 @@ impl FuwaApp {
             HighlightStyle { color: Some(p.primary.into()), font_weight: Some(FontWeight::BOLD), ..Default::default() };
         let name = StyledText::new(item.name.clone()).with_highlights(ranges.into_iter().map(|r| (r, bold)));
         let strong = active || item.unread > 0;
+        let place = format!("{}|{}|{}", item.key, item.server, item.channel.as_deref().unwrap_or_default());
+        let unread = (item.unread > 0).then(|| {
+            motion::count(format!("switch-unread|{place}"), u64::from(item.unread), Some(99), 11.2, window, cx)
+        });
         let pick = item.clone();
-        div()
+        let row = div()
             .id(SharedString::from(format!("switch-{n}")))
             .relative()
             .flex_shrink_0()
@@ -712,7 +749,6 @@ impl FuwaApp {
             .rounded(radius_xl())
             .cursor_pointer()
             .text_color(if active { p.foreground } else { p.muted_foreground })
-            .when(active, |el| el.bg(alpha(p.primary, 0.12)))
             .on_mouse_move(cx.listener(move |this, _, _, cx| {
                 if let Some(s) = &mut this.switcher
                     && s.active != n
@@ -746,7 +782,7 @@ impl FuwaApp {
                             .child(item.place.clone()),
                     ),
             )
-            .when(item.unread > 0, |el| {
+            .when_some(unread, |el, unread| {
                 el.child(
                     div()
                         .h(px(20.0))
@@ -760,7 +796,7 @@ impl FuwaApp {
                         .text_color(gpui_kit::white())
                         .text_size(px(11.2))
                         .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(if item.unread > 99 { "99+".to_owned() } else { item.unread.to_string() }),
+                        .child(unread),
                 )
             })
             .child(
@@ -776,8 +812,9 @@ impl FuwaApp {
                         ))
                     })
                     .when(!active, |el| el.child(icon("corner-down-left").size(px(16.0)))),
-            )
-            .into_any_element()
+            );
+        // Each place slides in as it turns up (the web's `x: -6`).
+        motion::slide_in(row, SharedString::from(format!("switch-in|{place}")), -6.0).into_any_element()
     }
 
     // ───────────────────────── The shortcut sheet ─────────────────────────
@@ -888,8 +925,13 @@ impl FuwaApp {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .hover(|s| s.opacity(0.9))
-                    .active(|s| s.top(px(1.0)))
+                    .group("sheet-change")
+                    // The web's `hover:brightness-110 active:scale-95`.
+                    .hover({
+                        let bright = mix(p.primary, gpui_kit::rgb(0xffffff), 0.1);
+                        move |s| s.bg(bright)
+                    })
+                    .active(|s| s.scale(0.95))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.sheet_open = false;
                         this.open_settings(window, cx);
@@ -897,7 +939,13 @@ impl FuwaApp {
                             s.update(cx, |s, cx| s.show_keyboard(cx));
                         }
                     }))
-                    .child(icon("sparkles").size(px(15.0)))
+                    .child(
+                        // The sparkles tilt as the button's pointed at.
+                        div()
+                            .id("sheet-change-sparkles")
+                            .group_hover("sheet-change", |s| s.rotate(gpui_kit::radians(12f32.to_radians())))
+                            .child(icon("sparkles").size(px(15.0))),
+                    )
                     .child(t("chattools.shortcuts.change")),
             );
         let header = div()
@@ -996,18 +1044,29 @@ impl FuwaApp {
                 .flex_col()
                 .justify_end()
                 .items_center()
-                .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.4))
-                .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                 .occlude()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sheet_open = false;
                     cx.notify();
                 }))
+                // The web's `bg-black/40 backdrop-blur`, fading in.
+                .child(motion::fade_in(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.4))
+                        .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR)),
+                    "sheet-scrim-in",
+                    Duration::from_millis(200),
+                ))
                 .child(motion::sheet_up(sheet, "sheet-up"))
                 .into_any_element(),
         )
     }
 }
+
+/// A row of the switcher: its 32px picture and two lines, and 8px above and below.
+const SWITCH_ROW: f32 = 56.0;
 
 /// Stands in for the keycaps while a sentence around them is translated.
 const KEYS_AT: &str = "\u{E000}";

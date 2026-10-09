@@ -86,6 +86,10 @@ element first shows (CSS doesn't transition on load), asks for frames only
 while a fade runs, and settles at once with `App::reduce_motion`. Divs
 without an id switch at once, as before.
 
+Calling `hover` or `active` twice adds the second style to the first (a
+shared button's own hover, then a caller's) rather than replacing it, which
+was a debug assertion before.
+
 ## Checking the renderers
 
 Only Linux can be built and run here. The wgpu renderer has headless tests

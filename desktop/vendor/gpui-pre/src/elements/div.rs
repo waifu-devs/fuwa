@@ -840,13 +840,15 @@ pub trait InteractiveElement: Sized {
         self
     }
 
-    /// Apply the given style to this element when the mouse hovers over it
+    /// Apply the given style to this element when the mouse hovers over it.
+    /// A second call adds to the first (a widget's own hover, then a caller's).
     fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        debug_assert!(
-            self.interactivity().hover_style.is_none(),
-            "hover style already set"
-        );
-        self.interactivity().hover_style = Some(Box::new(f(StyleRefinement::default())));
+        let added = f(StyleRefinement::default());
+        let hover_style = &mut self.interactivity().hover_style;
+        match hover_style {
+            Some(style) => style.refine(&added),
+            None => *hover_style = Some(Box::new(added)),
+        }
         self
     }
 
@@ -1558,7 +1560,13 @@ pub trait StatefulInteractiveElement: InteractiveElement {
     where
         Self: Sized,
     {
-        self.interactivity().active_style = Some(Box::new(f(StyleRefinement::default())));
+        // A second call adds to the first, as `hover` does.
+        let added = f(StyleRefinement::default());
+        let active_style = &mut self.interactivity().active_style;
+        match active_style {
+            Some(style) => style.refine(&added),
+            None => *active_style = Some(Box::new(added)),
+        }
         self
     }
 

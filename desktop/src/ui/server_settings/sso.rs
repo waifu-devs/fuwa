@@ -589,8 +589,8 @@ impl ServerSettingsView {
                                 inset: false,
                             }])
                             .cursor_pointer()
-                            .hover(|s| s.top(px(-2.0)))
-                            .active(|s| s.top(px(1.0)))
+                            .hover(|s| s.translate_y(px(-2.0)))
+                            .active(|s| s.scale(0.97))
                             .when(!busy, |el| {
                                 el.on_click(cx.listener(|this, _, window, cx| this.sso_sign_in(window, cx)))
                             })
@@ -910,9 +910,10 @@ impl ServerSettingsView {
             });
         for d in list.iter() {
             let gone = d.clone();
-            row = row.child(motion::once(
+            row = row.child(motion::pop_in(
                 div()
                     .id(SharedString::from(format!("domain-{d}")))
+                    .group("sso-domain")
                     .flex()
                     .items_center()
                     .gap(px(4.0))
@@ -930,10 +931,11 @@ impl ServerSettingsView {
                         cx.notify();
                     }))
                     .child(format!("@{d}"))
-                    .child(icon("x").size(px(12.0))),
+                    .child(crate::ui::settings_controls::turning_x("sso-domain")),
                 SharedString::from(format!("domain-in-{d}")),
-                Duration::from_millis(240),
-                |el, t| el.opacity(t),
+                (0.5, 0.5),
+                0.6,
+                0.0,
             ));
         }
         if list.len() < MAX_DOMAINS {
@@ -1008,6 +1010,7 @@ impl ServerSettingsView {
                                     .text_color(if done { gpui_kit::rgb(0x10b981) } else { p.muted_foreground })
                                     .cursor_pointer()
                                     .when(!done, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
+                                    .active(|s| s.scale(0.85))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                                         this.pages.sso.copied = Some((n, Instant::now()));

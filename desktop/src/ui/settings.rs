@@ -30,7 +30,7 @@ use crate::ui::settings_account::AccountForm;
 use crate::ui::settings_controls::Sliders;
 use crate::ui::settings_look::Look;
 use crate::ui::text::{TIGHT, WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_lg, radius_md};
+use crate::ui::theme::{Palette, alpha, corner, mix, radius_2xl, radius_lg, radius_md};
 use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_button, soft_button};
 
 pub enum SettingsEvent {
@@ -902,6 +902,9 @@ impl SettingsView {
             None => t("settings.nav.thisDevice"),
         };
         let focused = gpui_kit::Focusable::focus_handle(self.query.read(cx), cx).is_focused(window);
+        // The magnifier grows a little and takes the primary while the search has the keys
+        // (`group-focus-within:scale-110 group-focus-within:text-primary`).
+        let lit = motion::follow("settings-search-lit", if focused { 1.0 } else { 0.0 }, window, cx);
         let search_box = div()
             .relative()
             .h(px(36.0))
@@ -928,13 +931,14 @@ impl SettingsView {
                     .absolute()
                     .left(px(9.0))
                     .top(px(9.0))
-                    .text_color(if focused { p.primary } else { p.muted_foreground })
+                    .text_color(mix(p.muted_foreground, p.primary, lit.clamp(0.0, 1.0)))
+                    .scale(1.0 + 0.1 * lit)
                     .child(icon("search").size(px(16.0))),
             )
             .child(div().flex_1().min_w_0().child(Input::new(&self.query).appearance(false)))
             .when(!query.is_empty(), |el| {
                 let (hover, fg) = (p.muted, p.foreground);
-                el.child(
+                el.child(motion::pop(
                     div()
                         .id("settings-search-clear")
                         .absolute()
@@ -953,7 +957,11 @@ impl SettingsView {
                             cx.notify();
                         }))
                         .child(icon("x").size(px(14.0))),
-                )
+                    "settings-search-clear-in",
+                    0.5,
+                    -90.0,
+                    Duration::ZERO,
+                ))
             });
 
         let mut nav = div()
@@ -1035,8 +1043,10 @@ impl SettingsView {
                     (false, true) => alpha(p.destructive, 0.8),
                     (false, false) => p.muted_foreground.into(),
                 };
+                let group = SharedString::from(format!("menu-{page:?}"));
                 let row = div()
-                    .id(SharedString::from(format!("menu-{page:?}")))
+                    .id(group.clone())
+                    .group(group.clone())
                     .relative()
                     .h(px(32.0))
                     .px(px(10.0))
@@ -1049,13 +1059,13 @@ impl SettingsView {
                     .text_color(color)
                     .cursor_pointer()
                     .when(!active, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
-                    .active(|s| s.top(px(1.0)))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(page, None, cx)
                     }))
-                    .child(div().flex_1().min_w_0().truncate().child(section.label.clone()))
-                    .when(trailing, |el| el.child(icon(section.glyph).size(px(16.0))));
+                    .child(nudged(&group, section.label.clone()))
+                    .when(trailing, |el| el.child(tilted(&group, section.glyph, 16.0)));
                 block = block.child(slide(row, SharedString::from(format!("menu-in-{page:?}")), n));
                 n += 1;
                 y += 32.0;
@@ -1094,11 +1104,7 @@ impl SettingsView {
                         div().child(icon("search-x").size(px(28.0))),
                         SharedString::from(format!("nomatch-{query}")),
                         Duration::from_millis(700),
-                        |el, t| {
-                            let k = if t < 1.0 / 7.0 { 0.0 } else { (t - 1.0 / 7.0) * 7.0 / 6.0 };
-                            let wiggle = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 2.0;
-                            el.relative().left(px(wiggle))
-                        },
+                        |el, t| el.rotate(gpui_kit::radians(crate::ui::settings::shake(t).to_radians())),
                     ))
                     .child(t_with("settings.screen.noMatches", &[("query", Arg::Str(query))])),
                 "settings-nomatch",
@@ -1115,6 +1121,7 @@ impl SettingsView {
             list = list.child(slide(
                 div()
                     .id(SharedString::from(format!("result-{page:?}")))
+                    .group(SharedString::from(format!("result-{page:?}")))
                     .h(px(32.0))
                     .px(px(10.0))
                     .flex()
@@ -1126,11 +1133,12 @@ impl SettingsView {
                     .text_color(if section.danger { alpha(p.destructive, 0.8) } else { p.foreground.into() })
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
+                    .active(|s| s.scale(0.97))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.blur(cx);
                         this.choose(page, None, cx)
                     }))
-                    .child(icon(section.glyph).size(px(16.0)))
+                    .child(tilted(&SharedString::from(format!("result-{page:?}")), section.glyph, 16.0))
                     .child(div().truncate().child(section.label.clone())),
                 SharedString::from(format!("result-in-{page:?}")),
                 n,
@@ -1153,6 +1161,7 @@ impl SettingsView {
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover).text_color(fg))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, _, cx| this.choose(page, Some(id), cx)))
                         .child(div().opacity(0.6).child(icon("corner-down-right").size(px(14.0))))
                         .child(div().truncate().child(label.clone())),
@@ -1164,6 +1173,36 @@ impl SettingsView {
         }
         list.into_any_element()
     }
+}
+
+/// A menu row's label, nudged right while the row is pointed at (`group-hover:translate-x-0.5`).
+pub(crate) fn nudged(group: &SharedString, label: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("{group}-label")))
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .group_hover(group.clone(), |s| s.translate_x(px(2.0)))
+        .child(label.into())
+}
+
+/// A menu row's icon, tipped and grown while the row is pointed at (the web's `ICON`:
+/// `group-hover:-rotate-12 group-hover:scale-110`).
+pub(crate) fn tilted(group: &SharedString, glyph: &'static str, size: f32) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("{group}-icon")))
+        .flex_none()
+        .group_hover(group.clone(), |s| s.rotate(gpui_kit::radians(-12f32.to_radians())).scale(1.1))
+        .child(icon(glyph).size(px(size)))
+}
+
+/// The "no matches" magnifier's head shake, in degrees at `t` of its 700ms: a beat's wait,
+/// then `rotate: [0, -12, 10, -6, 0]`.
+pub(crate) fn shake(t: f32) -> f32 {
+    const TURNS: [f32; 5] = [0.0, -12.0, 10.0, -6.0, 0.0];
+    let k = ((t - 1.0 / 7.0) * 7.0 / 6.0).clamp(0.0, 1.0) * 4.0;
+    let i = (k.floor() as usize).min(3);
+    TURNS[i] + (TURNS[i + 1] - TURNS[i]) * (k - i as f32)
 }
 
 /// A menu row sliding in from the left, a beat after the one above it.
@@ -1296,6 +1335,7 @@ impl Render for SettingsView {
         let (hover_bg, hover_fg, hover_ring) = (p.muted, p.foreground, alpha(p.foreground, 0.4));
         let close = div()
             .id("settings-close")
+            .group("settings-close")
             .absolute()
             .top(px(64.0))
             .left(px(aside + inner - 24.0 - 40.0))
@@ -1316,9 +1356,17 @@ impl Render for SettingsView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(move |s| s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring))
-                    .active(|s| s.top(px(1.0)))
-                    .child(icon("x").size(px(20.0))),
+                    .group_hover("settings-close", move |s| {
+                        s.bg(hover_bg).text_color(hover_fg).border_color(hover_ring)
+                    })
+                    .active(|s| s.scale(0.9))
+                    // The cross turns a quarter as the pointer comes (`group-hover:rotate-90`).
+                    .child(
+                        div()
+                            .id("settings-close-x")
+                            .group_hover("settings-close", |s| s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)))
+                            .child(icon("x").size(px(20.0))),
+                    ),
             )
             .child(div().text_size(px(10.4)).font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"));
 

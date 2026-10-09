@@ -465,10 +465,16 @@ impl FuwaApp {
             )
             .into_any_element()
         } else {
-            icon("rotate-ccw-key").size(px(14.0)).into_any_element()
+            // The key turns back while the button's pointed at.
+            div()
+                .id("secure-reset-icon")
+                .group_hover(id, |st| st.rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4)))
+                .child(icon("rotate-ccw-key").size(px(14.0)))
+                .into_any_element()
         };
         div()
             .id(id)
+            .group(id)
             .flex_none()
             .flex()
             .items_center()
@@ -483,7 +489,7 @@ impl FuwaApp {
             .bg(bg)
             .hover(move |st| st.bg(hover))
             .cursor_pointer()
-            .active(|st| st.top(px(1.0)))
+            .active(|st| st.scale(0.94))
             .when(busy, |el| el.opacity(0.5))
             .on_click(
                 cx.listener(move |this, _, _, cx| this.reset_secure(k.clone(), s.clone(), c.clone(), in_dialog, cx)),

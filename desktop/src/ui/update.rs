@@ -116,7 +116,11 @@ impl crate::ui::app::FuwaApp {
             .justify_center()
             .cursor_pointer()
             .text_color(p.muted_foreground)
-            .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
+            // The web's "Later": `transition-colors hover:bg-muted hover:text-foreground`.
+            .hover({
+                let (bg, fg) = (p.muted, p.foreground);
+                move |s| s.bg(bg).text_color(fg)
+            })
             .on_click({
                 let shown_for = shown_for.clone();
                 cx.listener(move |_, _, _, cx| {
@@ -142,8 +146,9 @@ impl crate::ui::app::FuwaApp {
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .active(|s| s.top(px(1.0)))
+                // The web's Reload: `hover:scale-[1.03] active:scale-[0.97]`.
+                .hover(move |s| s.bg(hover).scale(1.03))
+                .active(|s| s.scale(0.97))
                 .child(label)
         };
         let main = if compat_only {

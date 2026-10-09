@@ -305,6 +305,7 @@ impl SettingsView {
                     Some(spec) => effect_text(spec).0,
                     None => none_label.clone().unwrap_or_else(|| t("accountsettings.effects.none")),
                 };
+                let group = SharedString::from(format!("effect-{place}-{id}"));
                 let mut card = mini_card(user_id, accent, card_w, p);
                 match spec {
                     None => {
@@ -321,7 +322,15 @@ impl SettingsView {
                                 .items_center()
                                 .justify_center()
                                 .text_color(p.muted_foreground)
-                                .child(icon("ban").size(px(24.0))),
+                                // The ban sign turns a quarter while its tile is pointed at.
+                                .child(
+                                    div()
+                                        .id("effect-none-ban")
+                                        .group_hover(group.clone(), |s| {
+                                            s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2))
+                                        })
+                                        .child(icon("ban").size(px(24.0))),
+                                ),
                         );
                     }
                     Some(spec) => {
@@ -335,9 +344,15 @@ impl SettingsView {
                         card.child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
                 let (pick_id, hover_on) = (id.clone(), hover_key.clone());
+                let fg = p.foreground;
+                // Its shadow deepens while pointed at.
+                let card = card
+                    .id("effect-card")
+                    .group_hover(group.clone(), |s| s.shadow(crate::ui::profile_card::shadow_md()));
                 row = row.child(
                     div()
-                        .id(SharedString::from(format!("effect-{place}-{id}")))
+                        .id(group.clone())
+                        .group(group.clone())
                         .w(px(tile_w))
                         .flex()
                         .flex_col()
@@ -348,8 +363,8 @@ impl SettingsView {
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
-                        .hover(|s| s.top(px(-3.0)))
-                        .active(|s| s.top(px(1.0)))
+                        .hover(|s| s.translate_y(px(-3.0)))
+                        .active(|s| s.scale(0.95))
                         .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                             if *on {
                                 this.state.effect_hover = Some(hover_on.clone());
@@ -363,8 +378,10 @@ impl SettingsView {
                         .child(
                             // As on the web, a long name runs past its tile rather than being cut.
                             div()
+                                .id("effect-label")
                                 .whitespace_nowrap()
                                 .text_color(if active { p.foreground } else { p.muted_foreground })
+                                .group_hover(group, move |s| s.text_color(fg))
                                 .child(label),
                         ),
                 );

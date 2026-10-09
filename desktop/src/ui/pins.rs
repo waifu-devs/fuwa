@@ -421,7 +421,6 @@ impl FuwaApp {
     pub(crate) fn pins_button(&mut self, id: &'static str, open: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
         let hover = p.muted;
-        let tilt = if open { 0.0 } else { 1.0 };
         let button = div()
             .id(id)
             .size(px(36.0))
@@ -433,7 +432,8 @@ impl FuwaApp {
             .cursor_pointer()
             .text_color(if open { p.primary } else { p.muted_foreground })
             .when(open, |el| el.bg(alpha(p.primary, 0.1)))
-            .when(!open, |el| el.hover(move |s| s.bg(hover)))
+            .hover(move |s| s.bg(hover))
+            .active(|s| s.scale(0.85))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.pins.button")).build(window, cx))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if id == "thread-pins" {
@@ -451,11 +451,18 @@ impl FuwaApp {
                     this.toggle_pins(window, cx);
                 }
             }))
-            .child(
-                div()
-                    .scale(1.0 + 0.08 * (1.0 - tilt))
-                    .child(icon("pin").size(px(20.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt))),
-            );
+            // The pin springs upright as its list opens, and tilts back as it closes.
+            .child(crate::ui::motion::springing(
+                SharedString::from(format!("{id}|tilt")),
+                if open { 0.0 } else { 1.0 },
+                |tilt| {
+                    div()
+                        .scale(1.0 + 0.08 * (1.0 - tilt))
+                        .rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4 * tilt))
+                        .child(icon("pin").size(px(20.0)))
+                        .into_any_element()
+                },
+            ));
         let card = if open { self.pins_card(cx) } else { None };
         div()
             .relative()
@@ -584,8 +591,9 @@ impl FuwaApp {
             spread_radius: px(-12.0),
             inset: false,
         }];
+        // It drops open from under its button, growing from 94%.
         Some(
-            motion::rise(
+            motion::pop_in(
                 div()
                     .id("pins-card")
                     .w(px(416.0))
@@ -602,7 +610,8 @@ impl FuwaApp {
                     .child(header)
                     .child(body),
                 "pins-card-in",
-                Duration::ZERO,
+                (1.0, 0.0),
+                0.94,
                 -8.0,
             )
             .into_any_element(),
@@ -681,8 +690,10 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
-                    .invisible()
-                    .group_hover("pin", |s| s.visible())
+                    // Shown on the row's hover, fading as the web's `transition-opacity`.
+                    .id(SharedString::from(format!("pin-tools|{id}")))
+                    .opacity(0.0)
+                    .group_hover("pin", |s| s.opacity(1.0))
                     .when_some(jump, |el, jump| {
                         el.child(
                             pill(
@@ -759,6 +770,7 @@ fn loading(p: &Palette) -> AnyElement {
 
 /// Nothing pinned yet: the pin dropping into its tile, and where to pin from.
 fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(420.0, 14.0, 1.0), 0.002);
     div()
         .flex()
         .flex_col()
@@ -766,7 +778,8 @@ fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
         .px(px(24.0))
         .py(px(32.0))
         .text_center()
-        .child(motion::rise(
+        // The pin drops in and swings to its tilt (`stiffness: 420, damping: 14`).
+        .child(motion::once(
             div()
                 .size(px(48.0))
                 .rounded(radius_2xl())
@@ -775,10 +788,15 @@ fn empty_pins(hint: &str, p: &Palette) -> AnyElement {
                 .justify_center()
                 .bg(alpha(p.primary, 0.1))
                 .text_color(p.primary)
-                .child(icon("pin").size(px(24.0)).rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4))),
+                .child(icon("pin").size(px(24.0))),
             "pins-empty-in",
-            Duration::ZERO,
-            -14.0,
+            duration,
+            move |el, t| {
+                let k = easing(t);
+                el.opacity(k.clamp(0.0, 1.0))
+                    .translate_y(px(-14.0 * (1.0 - k)))
+                    .rotate(gpui_kit::radians((-70.0 + 25.0 * k).to_radians()))
+            },
         ))
         .child(div().mt(px(12.0)).font_weight(FontWeight::EXTRA_BOLD).child(t("chattools.pins.empty")))
         .child(div().mt(px(4.0)).max_w(px(320.0)).text_sm().text_color(p.muted_foreground).child(hint.to_owned()))

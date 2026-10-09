@@ -26,8 +26,8 @@ use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::keys::fuzzy;
 use crate::ui::motion;
 use crate::ui::text::{WIDE, ms_of, tracked, when};
-use crate::ui::theme::{Palette, alpha, corner, radius_2xl, radius_xl};
-use crate::ui::widgets::{avatar, icon, icon_button, pal};
+use crate::ui::theme::{Palette, alpha, corner, mix, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, icon, pal};
 
 /// The search field and its suggestions, and the results panel while it's open.
 pub struct Search {
@@ -558,6 +558,9 @@ impl FuwaApp {
         let combo = keybinds::action_by_id("searchServer")
             .and_then(|a| keybinds::binding_of(a, &self.prefs.keybinds))
             .map(|c| keybinds::label(&c));
+        // Focus lights it up gradually (the web's 200ms `transition` on the
+        // border, the ring and the fill, and the glass's color).
+        let on = motion::follow("search-focus", if focused { 1.0 } else { 0.0 }, window, cx);
         let field = div()
             .w_full()
             .h(px(36.0))
@@ -567,12 +570,21 @@ impl FuwaApp {
             .px(px(12.0))
             .rounded_full()
             .border_1()
-            .border_color(if focused { alpha(p.primary, 0.5) } else { p.border.into() })
-            .bg(if focused { alpha(p.background, 1.0) } else { alpha(p.background, 0.6) })
-            .child(icon("search").size(px(16.0)).text_color(if focused { p.primary } else { p.muted_foreground }))
+            .border_color(mix(p.border, p.primary, 0.5 * on))
+            .bg(alpha(p.background, 0.6 + 0.4 * on))
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.primary, 0.2 * on),
+                offset: gpui_kit::point(px(0.0), px(0.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(2.0),
+                inset: false,
+            }])
+            .child(icon("search").size(px(16.0)).text_color(mix(p.muted_foreground, p.primary, on)))
             .child(div().flex_1().min_w_0().child(Input::new(&self.search.field).appearance(false).small()))
             .when(typed, |el| {
-                el.child(motion::rise(
+                let (bg, fg) = (p.muted, p.foreground);
+                // It pops in (the web's `scale: 0.5`), muted until hovered.
+                el.child(motion::grow_in(
                     div()
                         .id("search-clear")
                         .size(px(20.0))
@@ -582,18 +594,17 @@ impl FuwaApp {
                         .items_center()
                         .justify_center()
                         .text_color(p.muted_foreground)
-                        .hover(|s| s.bg(alpha(p.foreground, 0.08)))
+                        .hover(move |s| s.bg(bg).text_color(fg))
                         .cursor_pointer()
                         .child(icon("x").size(px(14.0)))
                         .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx))),
                     "search-clear-in",
-                    Duration::ZERO,
-                    4.0,
+                    0.5,
                 ))
             })
             .when(!typed && !focused, |el| {
                 el.when_some(combo, |el, combo| {
-                    el.child(
+                    el.child(motion::fade_in(
                         div()
                             .flex_none()
                             .px(px(6.0))
@@ -606,7 +617,9 @@ impl FuwaApp {
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.muted_foreground)
                             .child(combo),
-                    )
+                        "search-combo-in",
+                        Duration::from_millis(200),
+                    ))
                 })
             });
         // Gives way to the channel's name and marks when the header is short of room.
@@ -733,10 +746,23 @@ impl FuwaApp {
                         .when_some(forget, |el, query| {
                             el.child(
                                 // Shown on hover only, as the web's.
-                                icon_button(SharedString::from(format!("forget|{query}")), "x", &p)
+                                div()
+                                    .id(SharedString::from(format!("forget|{query}")))
                                     .size(px(24.0))
-                                    .invisible()
-                                    .group_hover("suggestion", |s| s.visible())
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .cursor_pointer()
+                                    .text_color(p.muted_foreground)
+                                    .child(icon("x").size(px(14.0)))
+                                    .opacity(0.0)
+                                    .hover({
+                                        let bg = p.muted;
+                                        move |s| s.bg(bg)
+                                    })
+                                    .group_hover("suggestion", |s| s.opacity(1.0))
                                     .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| window.prevent_default())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -753,7 +779,8 @@ impl FuwaApp {
         }
         // Drawn after the messages below it, so it sits over them.
         gpui_kit::deferred(
-            div().absolute().top(px(45.0)).right(px(0.0)).w(px(320.0)).child(motion::rise(
+            // It drops out of the field's corner (the web's `origin-top-right`, `y: -6, scale: 0.97`).
+            div().absolute().top(px(45.0)).right(px(0.0)).w(px(320.0)).child(motion::pop_in(
                 // `rounded-2xl border bg-popover shadow-xl`.
                 div()
                     .rounded(radius_2xl())
@@ -765,7 +792,8 @@ impl FuwaApp {
                     .occlude()
                     .child(list),
                 "search-suggestions-in",
-                Duration::ZERO,
+                (1.0, 0.0),
+                0.97,
                 -6.0,
             )),
         )
@@ -797,13 +825,13 @@ impl FuwaApp {
         } else {
             let n = panel.total;
             let word = if n == 1 && !panel.total_at_least { "result" } else { "results" };
+            // The count rolls to each search's total (the web's `Count`).
+            let count = motion::count("search-count", n.max(0) as u64, None, 16.0, window, cx);
             div()
                 .flex()
                 .items_baseline()
                 .gap(px(5.0))
-                .child(motion::count_up(SharedString::from(format!("count|{run}")), n as f64, Duration::ZERO, |v| {
-                    group_digits(v.round() as i64)
-                }))
+                .child(count)
                 .when(panel.total_at_least, |el| el.child("+"))
                 .child(word)
                 .into_any_element()
@@ -840,7 +868,7 @@ impl FuwaApp {
                     .cursor_pointer()
                     .text_color(p.muted_foreground)
                     .hover(move |s| s.bg(bg).text_color(fg))
-                    .active(|s| s.opacity(0.8))
+                    .active(|s| s.scale(0.85))
                     .child(icon("x").size(px(16.0)))
                     .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx)))
             });
@@ -920,7 +948,7 @@ impl FuwaApp {
             }
             // On a big server one search reads only so far back; this carries on from there.
             if !panel.cursor.is_empty() && !panel.loading && panel.results.len() < 12 {
-                body = body.child(
+                body = body.child(motion::rise(
                     div().flex().justify_center().py(px(12.0)).child(
                         div()
                             .id("search-further")
@@ -933,13 +961,16 @@ impl FuwaApp {
                             .text_color(p.muted_foreground)
                             .cursor_pointer()
                             .hover(|s| s.bg(alpha(p.primary, 0.1)).text_color(p.primary))
+                            .active(|s| s.scale(0.95))
                             .child(t("chattools.search.further"))
                             .on_click(cx.listener(|this, _, _, cx| this.more_results(cx))),
                     ),
-                );
+                    "search-further-in",
+                    Duration::ZERO,
+                    6.0,
+                ));
             }
         }
-        let _ = window;
         Some(
             motion::slide_in(
                 div()
@@ -1023,6 +1054,7 @@ impl FuwaApp {
             .bg(alpha(p.card, 0.6))
             .cursor_pointer()
             .hover(|s| s.bg(p.card).border_color(p.border))
+            .active(|s| s.scale(0.99))
             .on_click(cx.listener(move |this, _, window, cx| this.open_result(open.clone(), window, cx)))
             .child(avatar(author.as_ref(), 32.0, &p))
             .child(
@@ -1099,8 +1131,10 @@ impl FuwaApp {
                         el.child(div().text_xs().text_color(p.muted_foreground).truncate().child(line))
                     }),
             )
+            // "Jump" slides in from the right as the row is pointed at.
             .child(
                 div()
+                    .id(SharedString::from(format!("result-jump|{id}")))
                     .absolute()
                     .top(px(8.0))
                     .right(px(8.0))
@@ -1114,8 +1148,9 @@ impl FuwaApp {
                     .text_color(p.primary_foreground)
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
-                    .invisible()
-                    .group_hover("result", |s| s.visible())
+                    .opacity(0.0)
+                    .translate_x(px(4.0))
+                    .group_hover("result", |s| s.opacity(1.0).translate_x(px(0.0)))
                     .child(t("chattools.search.jump"))
                     .child(icon("arrow-right").size(px(12.0))),
             );
@@ -1266,19 +1301,6 @@ impl gpui_kit::component::text::MarkdownPlugin for HitPlugin {
     }
 }
 
-/// 12345 → "12,345".
-fn group_digits(n: i64) -> String {
-    let digits = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (k, c) in digits.chars().enumerate() {
-        if k > 0 && (digits.len() - k).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
-}
-
 /// Rows that pulse while results are on their way.
 pub(crate) fn skeleton(rows: usize, p: &Palette) -> impl IntoElement {
     let shade = alpha(p.muted_foreground, 0.12);
@@ -1322,7 +1344,8 @@ pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -
             .gap(px(8.0))
             .px(px(24.0))
             .py(px(48.0))
-            .child(
+            // The icon pops upright a moment after (the web's `scale: 0.6, rotate: -12`).
+            .child(motion::pop(
                 div()
                     .size(px(48.0))
                     .rounded(corner(16.0))
@@ -1332,7 +1355,11 @@ pub(crate) fn empty(glyph: &'static str, title: &str, text: &str, p: &Palette) -
                     .justify_center()
                     .text_color(p.muted_foreground)
                     .child(icon(glyph).size(px(24.0))),
-            )
+                SharedString::from(format!("search-empty-icon|{title}")),
+                0.6,
+                -12.0,
+                Duration::from_millis(50),
+            ))
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title.to_owned()))
             .child(
                 div().max_w(px(240.0)).text_sm().text_center().text_color(p.muted_foreground).child(text.to_owned()),
@@ -1354,7 +1381,5 @@ mod tests {
         let marked = hits_as_markdown(&mark_hits(text, &hits));
         assert!(marked.starts_with("![the](fuwa-hit:) cake is `the lie` at https://the.example and @the"));
         assert!(marked.ends_with("**![the](fuwa-hit:)**"));
-        assert_eq!(group_digits(10000), "10,000");
-        assert_eq!(group_digits(999), "999");
     }
 }

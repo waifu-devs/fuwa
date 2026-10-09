@@ -82,6 +82,9 @@ pub struct MembersView {
     rows: Rc<Vec<Item>>,
     digest: u64,
     born: Instant,
+    /// Everyone in the server last time, and who wasn't, since when: they slide in.
+    known: std::collections::HashSet<String>,
+    joined: Option<Rc<(std::collections::HashSet<String>, Instant)>>,
     /// Lines of two heights (headings and people), drawn only while in sight.
     list: gpui_kit::ListState,
 }
@@ -100,7 +103,17 @@ impl MembersView {
         })
         .detach();
         let list = gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(240.0));
-        let mut this = Self { core, key, server, rows: Rc::default(), digest: 0, born: Instant::now(), list };
+        let mut this = Self {
+            core,
+            key,
+            server,
+            rows: Rc::default(),
+            digest: 0,
+            born: Instant::now(),
+            known: Default::default(),
+            joined: None,
+            list,
+        };
         this.refresh(cx);
         this
     }
@@ -136,6 +149,21 @@ impl MembersView {
         }
         if digest != self.digest {
             self.digest = digest;
+            // Only people who just joined slide in, not the first ones seen.
+            let ids: std::collections::HashSet<String> = rows
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Member(r) => Some(r.user.id.clone()),
+                    Item::Heading(..) => None,
+                })
+                .collect();
+            if !self.known.is_empty() {
+                let fresh: std::collections::HashSet<String> = ids.difference(&self.known).cloned().collect();
+                if !fresh.is_empty() {
+                    self.joined = Some(Rc::new((fresh, Instant::now())));
+                }
+            }
+            self.known = ids;
             self.list.reset(rows.len());
             self.rows = Rc::new(rows);
             cx.notify();
@@ -222,13 +250,17 @@ impl Render for MembersView {
         let entering = self.born.elapsed() < ENTERING;
         let this = cx.entity().downgrade();
         // The web's list: 16px above and below, 8px at the sides.
-        let list = gpui_kit::list(self.list.clone(), move |n, _window, cx| {
+        let joined = self.joined.clone();
+        let list = gpui_kit::list(self.list.clone(), move |n, window, cx| {
             let p = pal(cx);
             let first = n == 0;
             let last = n + 1 == rows.len();
             let el = match rows.get(n) {
-                Some(Item::Heading(name, color, members)) => heading(name, *color, *members, n, first, &p),
-                Some(Item::Member(row)) => member_row(row, n, entering, &p, this.clone()).into_any_element(),
+                Some(Item::Heading(name, color, members)) => heading(name, *color, *members, n, first, &p, window, cx),
+                Some(Item::Member(row)) => {
+                    let fresh = joined.as_ref().is_some_and(|j| j.1.elapsed() < ENTERING && j.0.contains(&row.user.id));
+                    member_row(row, n, entering, fresh, &p, this.clone(), window, cx)
+                }
                 None => div().into_any_element(),
             };
             div()
@@ -244,6 +276,7 @@ impl Render for MembersView {
 }
 
 /// A group's name over its people: the web's 12px bold capitals, with the role's dot.
+#[allow(clippy::too_many_arguments)]
 fn heading(
     name: &str,
     color: Option<u32>,
@@ -251,6 +284,8 @@ fn heading(
     n: usize,
     first: bool,
     p: &crate::ui::theme::Palette,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
 ) -> gpui_kit::AnyElement {
     let text = crate::core::i18n::t_with(
         "chat.members.heading",
@@ -259,6 +294,17 @@ fn heading(
             ("count", crate::core::i18n::Arg::Num(members as i64)),
         ],
     );
+    // The count rolls as people come and go (the web's `Count`).
+    let label = match around_count(&text, members) {
+        Some((before, after)) => div()
+            .flex()
+            .min_w_0()
+            .child(tracked(before, WIDE))
+            .child(motion::count(format!("member-count|{name}"), members as u64, None, 12.0, window, cx))
+            .child(tracked(after, WIDE))
+            .into_any_element(),
+        None => tracked(text, WIDE).into_any_element(),
+    };
     div()
         .id(SharedString::from(format!("member-heading|{name}|{n}")))
         .when(!first, |el| el.pt(px(SECTION_GAP)))
@@ -275,18 +321,30 @@ fn heading(
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
                 .when_some(color, |el, c| el.child(div().flex_none().size(px(8.0)).rounded_full().bg(rgb(c))))
-                .child(tracked(text, WIDE)),
+                .child(label),
         )
         .into_any_element()
 }
 
+/// `text` cut around where `count` is written (the last time), so the number
+/// can roll on its own: None when it isn't there as plain digits.
+pub(crate) fn around_count(text: &str, count: usize) -> Option<(String, String)> {
+    let digits = count.to_string();
+    let at = text.rfind(&digits)?;
+    Some((text[..at].to_owned(), text[at + digits.len()..].to_owned()))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn member_row(
     row: &Row,
     n: usize,
     entering: bool,
+    fresh: bool,
     p: &crate::ui::theme::Palette,
     this: gpui_kit::WeakEntity<MembersView>,
-) -> impl IntoElement {
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> gpui_kit::AnyElement {
     let user = &row.user;
     let hover = alpha(p.muted, 0.7);
     let amber = gpui_kit::hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0);
@@ -342,10 +400,13 @@ fn member_row(
                 .child(crate::ui::profile_card::mark(&user.id, crate::ui::profile_card::Side::Left)),
         )
         .child(
+            // The picture swells a little while the row's pointed at.
             div()
+                .id("member-face")
                 .relative()
                 .flex_none()
                 .mr(px(6.0))
+                .group_hover("member", |s| s.scale(1.05))
                 .child(crate::ui::widgets::decorated(avatar(Some(user), 32.0, p), 32.0, row.decoration.as_deref()))
                 .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
                     el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, opaque(p.side_surface).into(), p))
@@ -388,13 +449,26 @@ fn member_row(
                         .when(row.owner, |el| {
                             el.child(icon("crown").size(px(12.0)).text_color(gpui_kit::rgb(0xfbbf24)))
                         })
-                        .when(row.timed_out, |el| el.child(icon("hourglass").size(px(12.0)).text_color(amber)))
+                        .when(row.timed_out, |el| {
+                            el.child(motion::pop(
+                                div().flex_none().child(icon("hourglass").size(px(12.0)).text_color(amber)),
+                                "member-timed-out",
+                                0.0,
+                                -90.0,
+                                Duration::ZERO,
+                            ))
+                        })
                         .when(row.agent, |el| {
                             el.child(app_badge(SharedString::from(format!("member-badge|{}", user.id)), "AGENT", p))
                         }),
                 )
                 // Under the name: what they're doing, else their status, else their username.
-                .child(
+                .child(subtitle(
+                    &user.id,
+                    &row.activity,
+                    &row.status_text,
+                    window,
+                    cx,
                     div()
                         .h(px(16.0))
                         .min_w_0()
@@ -408,9 +482,13 @@ fn member_row(
                             (None, Some(status)) => gpui_kit::StyledText::new(status.clone()),
                             (None, None) => gpui_kit::StyledText::new(format!("@{}", row.user.username)),
                         }),
-                ),
+                )),
         );
-    if entering && n < 24 {
+    if fresh {
+        // Someone who just joined slides in from the side.
+        motion::slide_in(div().child(el), SharedString::from(format!("member-joined|{}", user.id)), 16.0)
+            .into_any_element()
+    } else if entering && n < 24 {
         // Wrapped, so the rise's opacity doesn't replace the row's own (offline people are faded).
         motion::rise(
             div().child(el),
@@ -422,6 +500,39 @@ fn member_row(
     } else {
         el.into_any_element()
     }
+}
+
+/// The line under a name, rising into place when what it says changes (the
+/// web's `MemberSubtitle`); nothing moves when it first shows.
+fn subtitle(
+    user_id: &str,
+    activity: &Option<Box<(String, String)>>,
+    status: &Option<String>,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+    line: gpui_kit::Div,
+) -> gpui_kit::AnyElement {
+    let mut h = DefaultHasher::new();
+    (activity, status).hash(&mut h);
+    let said = h.finish();
+    let state = window.use_keyed_state(SharedString::from(format!("member-sub|{user_id}")), cx, |_, _| (said, 0u64));
+    let changes = state.update(cx, |(was, changes), _| {
+        if *was != said {
+            *was = said;
+            *changes += 1;
+        }
+        *changes
+    });
+    if changes == 0 {
+        return line.into_any_element();
+    }
+    crate::ui::profile_card::spring_in(
+        line,
+        SharedString::from(format!("member-sub-in|{user_id}|{changes}")),
+        (500.0, 32.0),
+        Duration::ZERO,
+        |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * 12.0)),
+    )
 }
 
 /// The list's color without see-through, for the ring that cuts a dot out of a picture.

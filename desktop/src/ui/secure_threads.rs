@@ -329,7 +329,7 @@ impl FuwaApp {
     /// The header's Threads button: the list's own, lit while anything's open beside the channel.
     pub(crate) fn secure_threads_button(&self, channel: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let side = side_of(channel);
-        crate::ui::widgets::header_button("secure-threads", "messages-square", side.is_some(), p)
+        crate::ui::widgets::header_button("secure-threads", "messages-square", side.is_some(), -8.0, p)
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.threads.threads")).build(window, cx))
             .on_click(cx.listener(|this, _, window, cx| this.toggle_secure_threads(window, cx)))
             .into_any_element()
@@ -354,7 +354,7 @@ impl FuwaApp {
                 self.secure_thread_panel(&key, &server, &channel, parent, window, cx)
             }
             Side::List { key, server, channel, archived } => {
-                self.secure_thread_list(&key, &server, &channel, archived, cx)
+                self.secure_thread_list(&key, &server, &channel, archived, window, cx)
             }
         };
         Some(
@@ -638,9 +638,11 @@ impl FuwaApp {
         server: &str,
         channel: &str,
         archived: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = pal(cx);
+        let pill = motion::follow("secure-threads-pill", if archived { 1.0 } else { 0.0 }, window, cx);
         let query = self.threads.query.read(cx).value().to_string();
         let read = self.core.shared.read(|s| {
             let i = s.instance(key)?;
@@ -734,7 +736,6 @@ impl FuwaApp {
                 .rounded(radius_lg())
                 .cursor_pointer()
                 .text_color(if on { p.foreground } else { p.muted_foreground })
-                .when(on, |el| el.bg(p.card).shadow(crate::ui::polls::shadow_sm()))
                 .on_click(cx.listener(move |_, _, _, cx| {
                     let side = Side::List { key: k.clone(), server: s.clone(), channel: c.clone(), archived: value };
                     SIDE.with(|st| *st.borrow_mut() = Some(side));
@@ -780,8 +781,26 @@ impl FuwaApp {
                         .text_xs()
                         .line_height(px(16.0))
                         .font_weight(FontWeight::BOLD)
-                        .child(tab("secure-threads-open", "messages-square", t("chat.threads.open"), false, cx))
-                        .child(tab("secure-threads-archived", "archive", t("chat.threads.archived"), true, cx)),
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .flex()
+                                // The picked tab's card glides between them (the web's `layoutId`).
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .left(gpui_kit::relative(0.5 * pill))
+                                        .w(gpui_kit::relative(0.5))
+                                        .rounded(radius_lg())
+                                        .bg(p.card)
+                                        .shadow(crate::ui::polls::shadow_sm()),
+                                )
+                                .child(tab("secure-threads-open", "messages-square", t("chat.threads.open"), false, cx))
+                                .child(tab("secure-threads-archived", "archive", t("chat.threads.archived"), true, cx)),
+                        ),
                 )
             });
         let mut body =

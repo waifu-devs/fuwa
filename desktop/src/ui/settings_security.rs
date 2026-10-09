@@ -1121,6 +1121,7 @@ impl SettingsView {
                 buttons = buttons.child(
                     div()
                         .id(SharedString::from(format!("link-{}", option.id)))
+                        .group(SharedString::from(format!("link-{}", option.id)))
                         .flex()
                         .items_center()
                         .gap(px(10.0))
@@ -1132,12 +1133,18 @@ impl SettingsView {
                         .py(px(10.0))
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
-                        .hover(move |s| s.border_color(hover).top(px(-2.0)))
+                        .hover(move |s| s.border_color(hover).translate_y(px(-2.0)))
+                        .active(|s| s.scale(0.97))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.security.asking = Some((true, id.clone(), name.clone()));
                             this.ask(None, window, cx);
                         }))
-                        .child(icon(&format!("brand-{}", option.id)).size(px(16.0)))
+                        .child(
+                            div()
+                                .id("mark")
+                                .group_hover(SharedString::from(format!("link-{}", option.id)), |s| s.scale(1.1))
+                                .child(icon(&format!("brand-{}", option.id)).size(px(16.0))),
+                        )
                         .child(t_with("accountsettings.signIn.link", &[("name", Arg::Str(&option.name))]))
                         .child(icon("link").size(px(14.0)).text_color(p.muted_foreground)),
                 );

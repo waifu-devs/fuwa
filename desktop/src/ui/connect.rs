@@ -536,7 +536,7 @@ impl ConnectView {
         }
         let kept = self.others();
         if !kept.is_empty() {
-            body = body.child(self.continue_as(&kept, window, cx, p));
+            body = body.child(self.continue_as(&kept, cx, p));
         }
         if others {
             body = body.child(self.provider_buttons(&auth, cx, p));
@@ -772,21 +772,20 @@ impl ConnectView {
     }
 
     /// The web's `ContinueAs`: the other accounts kept here.
-    fn continue_as(&self, kept: &[SavedAccount], window: &mut Window, cx: &mut Context<Self>, p: &Palette) -> Div {
+    fn continue_as(&self, kept: &[SavedAccount], cx: &mut Context<Self>, p: &Palette) -> Div {
         let streamer = self.core.prefs().streamer_mode;
         let mut list = div().flex().flex_col().gap(px(8.0));
         for (n, a) in kept.iter().enumerate() {
             let user = crate::core::accounts::user_of(a);
             let id = format!("as-{}", a.user_id);
             let (key, uid) = (instance_key(&self.url), a.user_id.clone());
-            let lift = motion::follow(SharedString::from(format!("{id}|h")), 0.0, window, cx);
             let border = p.border;
             let hover_border = p.primary;
+            let (glow, lit) = (alpha(p.primary, 1.0), p.primary);
             list = list.child(motion::rise(
                 div()
-                    .id(SharedString::from(id))
-                    .relative()
-                    .top(px(lift))
+                    .id(SharedString::from(id.clone()))
+                    .group(SharedString::from(id.clone()))
                     .flex()
                     .items_center()
                     .gap(px(12.0))
@@ -796,13 +795,30 @@ impl ConnectView {
                     .border_color(border)
                     .bg(alpha(p.background, 0.6))
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(hover_border))
+                    // The web's `.card-pop`: the border lights and a glow drops under it.
+                    .hover(move |s| {
+                        s.border_color(hover_border).shadow(vec![gpui_kit::BoxShadow {
+                            color: glow,
+                            offset: gpui_kit::point(px(0.0), px(18.0)),
+                            blur_radius: px(20.0),
+                            spread_radius: px(-22.0),
+                            inset: false,
+                        }])
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if this.core.switch_account(&key, &uid) {
                             cx.emit(ConnectEvent::Done { key: key.clone() });
                         }
                     }))
-                    .child(avatar(Some(&user), 40.0, p))
+                    // `group-hover:-rotate-6 group-hover:scale-110`.
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}|avatar")))
+                            .group_hover(SharedString::from(id.clone()), |s| {
+                                s.rotate(gpui_kit::radians(-6f32.to_radians())).scale(1.1)
+                            })
+                            .child(avatar(Some(&user), 40.0, p)),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -828,7 +844,15 @@ impl ConnectView {
                                     }),
                             ),
                     )
-                    .child(icon("arrow-right").size(px(16.0)).text_color(p.muted_foreground)),
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}|arrow")))
+                            .text_color(p.muted_foreground)
+                            .group_hover(SharedString::from(id.clone()), move |s| {
+                                s.translate_x(px(4.0)).text_color(lit)
+                            })
+                            .child(icon("arrow-right").size(px(16.0))),
+                    ),
                 SharedString::from(format!("as-in-{n}")),
                 Duration::from_millis(40 * n as u64),
                 8.0,
@@ -942,7 +966,8 @@ impl ConnectView {
             .items_center()
             .gap(px(12.0))
             .child(round_button("back-2fa", "arrow-left", p).on_click(cx.listener(|this, _, _, cx| this.back(cx))))
-            .child(motion::once(
+            // It pops up from nothing, turning upright, a moment after the page.
+            .child(motion::pop(
                 div()
                     .size(px(40.0))
                     .flex()
@@ -953,11 +978,9 @@ impl ConnectView {
                     .text_color(p.primary)
                     .child(icon("shield-check").size(px(20.0))),
                 "shield-pop",
-                Duration::from_millis(450),
-                |el, t| {
-                    let e = 1.0 - (1.0 - t).powi(3);
-                    el.opacity(e)
-                },
+                0.0,
+                -30.0,
+                Duration::from_millis(100),
             ))
             .child(
                 div()
@@ -1331,16 +1354,12 @@ impl Render for ConnectView {
                     .child(form)
                     .when(self.can_cancel, |el| {
                         el.child(
-                            round_button("connect-close", "x", &p)
-                                .size(px(32.0))
-                                .absolute()
-                                .top(px(16.0))
-                                .right(px(16.0))
+                            crate::ui::overlay::dialog_close("connect-close", &p)
                                 .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectEvent::Cancel))),
                         )
                     });
-                // The web's dialog overlay: the app behind darkened by half.
-                div()
+                // The web's dialog overlay: the app behind darkened by half, fading in.
+                let scrim = div()
                     .id("connect")
                     .absolute()
                     .inset_0()
@@ -1355,8 +1374,8 @@ impl Render for ConnectView {
                             cx.emit(ConnectEvent::Cancel);
                         }
                     }))
-                    .child(motion::dialog_in(card, "connect-dialog-in"))
-                    .into_any_element()
+                    .child(motion::dialog_in(card, "connect-dialog-in"));
+                motion::fade_in(scrim, "connect-fade", Duration::from_millis(200)).into_any_element()
             }
         }
     }
@@ -1378,15 +1397,17 @@ impl ConnectView {
             .flex_col()
             .items_start()
             .gap(px(24.0))
-            .child(motion::once(
-                div().relative().size(px(80.0)).child(fuwa_mark(80.0, p)),
-                "welcome-mark",
-                Duration::from_millis(700),
-                |el, t| {
-                    // A spring from small and tilted (stiffness 260, damping 16): close enough with an overshoot ease.
-                    let s = 1.0 - (1.0 - t).powi(3) * (1.0 - 2.2 * t).cos().abs().max(0.0);
-                    el.opacity(t.min(1.0) * 1.0).top(px((1.0 - s) * 10.0))
-                },
+            // The mark springs in from small and tilted as it fades in.
+            .child(motion::fade_in(
+                div().child(motion::pop(
+                    div().relative().size(px(80.0)).child(fuwa_mark(80.0, p)),
+                    "welcome-mark",
+                    0.6,
+                    -12.0,
+                    Duration::ZERO,
+                )),
+                "welcome-mark-in",
+                Duration::from_millis(300),
             ))
             .child(
                 div()
@@ -1619,8 +1640,9 @@ fn big_button(id: &'static str, text: String, p: &Palette) -> Stateful<Div> {
         .text_size(px(14.0))
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
-        .hover(move |s| s.top(px(-2.0)).shadow(vec![glow.clone()]))
-        .active(|s| s.top(px(0.0)).opacity(0.94))
+        // The web's `.btn`: it lifts with a glow, and dips as it's pressed.
+        .hover(move |s| s.translate_y(px(-2.0)).shadow(vec![glow.clone()]))
+        .active(|s| s.translate_y(px(0.0)).scale(0.94))
         .child(text)
 }
 
@@ -1661,15 +1683,18 @@ fn provider_button_with(id: SharedString, mark: AnyElement, name: &str, p: &Pale
         .font_weight(FontWeight::EXTRA_BOLD)
         .shadow(vec![glow])
         .cursor_pointer()
-        .hover(|s| s.top(px(-2.0)))
-        .active(|s| s.opacity(0.94))
-        .child(mark)
+        .group("provider")
+        // `whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}`.
+        .hover(|s| s.translate_y(px(-2.0)))
+        .active(|s| s.scale(0.97))
+        .child(div().id("provider-mark").group_hover("provider", |s| s.scale(1.1)).child(mark))
         .child(div().min_w_0().truncate().child(t_with("connect.provider.continueWith", &[("name", Arg::Str(name))])))
-        .child(icon("arrow-right").size(px(16.0)))
+        .child(provider_arrow())
 }
 
 /// One "Continue with …" button: dark, the icon in the primary color, an arrow that nudges on hover.
 fn provider_button(id: &'static str, glyph: &str, name: &str, p: &Palette) -> Stateful<Div> {
+    let flower = glyph == "flower-2";
     let glow = gpui_kit::BoxShadow {
         color: p.primary.into(),
         offset: gpui_kit::point(px(0.0), px(14.0)),
@@ -1692,10 +1717,28 @@ fn provider_button(id: &'static str, glyph: &str, name: &str, p: &Palette) -> St
         .font_weight(FontWeight::EXTRA_BOLD)
         .shadow(vec![glow])
         .cursor_pointer()
-        .hover(|s| s.top(px(-2.0)))
-        .active(|s| s.opacity(0.94))
-        .child(icon(glyph).size(px(20.0)).text_color(p.primary))
+        .group("provider")
+        .hover(|s| s.translate_y(px(-2.0)))
+        .active(|s| s.scale(0.97))
+        .child(
+            // The flower turns a petal's width and the building rises as they grow.
+            div()
+                .id("provider-mark")
+                .group_hover("provider", move |s| {
+                    let s = s.scale(1.1);
+                    if flower { s.rotate(gpui_kit::radians(72f32.to_radians())) } else { s.translate_y(px(-2.0)) }
+                })
+                .child(icon(glyph).size(px(20.0)).text_color(p.primary)),
+        )
         .child(div().min_w_0().truncate().child(t_with("connect.provider.continueWith", &[("name", Arg::Str(name))])))
+        .child(provider_arrow())
+}
+
+/// The arrow on a "Continue with …" button, nudging along as it's hovered.
+fn provider_arrow() -> impl IntoElement {
+    div()
+        .id("provider-arrow")
+        .group_hover("provider", |s| s.translate_x(px(4.0)))
         .child(icon("arrow-right").size(px(16.0)))
 }
 
@@ -1711,6 +1754,7 @@ fn closed_note(name: &str, p: &Palette) -> impl IntoElement {
 /// The web's `size-9 rounded-full` ghost button with an icon.
 fn round_button(id: &'static str, glyph: &str, p: &Palette) -> Stateful<Div> {
     let (bg, fg) = (p.muted, p.foreground);
+    let lean = glyph == "arrow-left";
     div()
         .id(id)
         .size(px(36.0))
@@ -1721,8 +1765,11 @@ fn round_button(id: &'static str, glyph: &str, p: &Palette) -> Stateful<Div> {
         .rounded_full()
         .text_color(p.muted_foreground)
         .cursor_pointer()
-        .hover(move |s| s.bg(bg).text_color(fg))
-        .active(|s| s.opacity(0.9))
+        // `hover:-translate-x-0.5`: a back arrow leans back.
+        .hover(move |s| {
+            let s = s.bg(bg).text_color(fg);
+            if lean { s.translate_x(px(-2.0)) } else { s }
+        })
         .child(icon(glyph).size(px(16.0)))
 }
 

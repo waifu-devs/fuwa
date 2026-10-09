@@ -423,11 +423,12 @@ impl FuwaApp {
                     .with_animation(
                         SharedString::from(format!("note-out-{id}")),
                         Animation::new(Duration::from_millis(150)),
-                        |el, t| el.opacity(1.0 - t).relative().top(px(8.0 * t)),
+                        |el, t| el.opacity(1.0 - t).translate_y(px(8.0 * t)).scale(1.0 - 0.05 * t),
                     )
                     .into_any_element()
             } else {
-                motion::rise(div().child(pill), SharedString::from(format!("note-in-{id}")), Duration::ZERO, 24.0)
+                // Up from 24px below, growing from 90%.
+                motion::pop_in(div().child(pill), SharedString::from(format!("note-in-{id}")), (0.5, 0.5), 0.9, 24.0)
                     .into_any_element()
             };
             notes = notes.child(el);

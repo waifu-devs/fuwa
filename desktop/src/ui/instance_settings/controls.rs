@@ -10,12 +10,12 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, BoxShadow, Context, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, point, px,
+    AnyElement, BoxShadow, Context, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, point, px,
 };
 
 use super::InstanceSettingsView;
-use crate::core::i18n::{Arg, t, t_with};
+use crate::core::i18n::t;
 use crate::core::instance_admin::{self as admin, UNITS};
 use crate::ui::motion;
 use crate::ui::settings_controls::{Look, button, shadow_sm, shadow_xl};
@@ -129,30 +129,12 @@ pub(super) fn switch(
     cx: &mut Context<View>,
     set: impl Fn(&mut View, bool, &mut Window, &mut Context<View>) + 'static,
 ) -> Stateful<Div> {
-    let id: SharedString = id.into();
-    let x = motion::follow(SharedString::from(format!("{id}-x")), if on { 13.0 } else { 1.0 }, window, cx);
-    div()
-        .id(ElementId::Name(id))
-        .flex_none()
-        .relative()
-        .w(px(32.0))
-        .h(px(20.0))
-        .rounded_full()
-        .bg(if on { p.primary } else { p.border })
-        .when(disabled, |el| el.opacity(0.5))
-        .when(!disabled, |el| {
-            el.cursor_pointer().on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                set(this, !on, window, cx)
-            }))
-        })
-        .child(div().absolute().top(px(2.0)).left(px(x + 1.0)).size(px(16.0)).rounded_full().bg(if p.dark && !on {
-            p.foreground
-        } else if p.dark {
-            p.primary_foreground
-        } else {
-            p.background
+    crate::ui::settings_controls::switch_track(id.into(), on, disabled, p, window, cx).when(!disabled, |el| {
+        el.cursor_pointer().on_click(cx.listener(move |this, _, window, cx| {
+            cx.stop_propagation();
+            set(this, !on, window, cx)
         }))
+    })
 }
 
 /// A switch whose change also gets the window, for boxes it fills.
@@ -229,11 +211,12 @@ pub(super) fn save_bar(
             .flex()
             .gap(px(4.0))
             .child(div().font_weight(FontWeight::BOLD).child(t("settings.controls.unsaved")))
-            .child(
-                div()
-                    .text_color(p.muted_foreground)
-                    .child(t_with("settings.controls.unsavedCount", &[("count", Arg::Num(count as i64))])),
-            )
+            .child(div().text_color(p.muted_foreground).child(crate::ui::motion::counted(
+                format!("{id}-count"),
+                "settings.controls.unsavedCount",
+                count as u64,
+                14.0,
+            )))
             .into_any_element()
     };
     let bar = div()
@@ -521,8 +504,9 @@ impl InstanceSettingsView {
                         .when(disabled, |el| el.opacity(0.5))
                         .when(!disabled, |el| {
                             el.cursor_pointer()
-                                .when(!active, |el| el.hover(move |s| s.border_color(hover).top(px(-2.0))))
-                                .active(|s| s.top(px(1.0)))
+                                .hover(|s| s.translate_y(px(-2.0)))
+                                .when(!active, |el| el.hover(move |s| s.border_color(hover).translate_y(px(-2.0))))
+                                .active(|s| s.scale(0.97))
                                 .on_click(cx.listener(move |this, _, window, cx| pick(this, value, window, cx)))
                         })
                         .child(
@@ -539,19 +523,21 @@ impl InstanceSettingsView {
                                         el.bg(p.muted).text_color(p.muted_foreground)
                                     }
                                 })
-                                .child(motion::once(
-                                    div().child(icon(option.glyph).size(px(16.0))),
-                                    SharedString::from(format!("ichoice-{id}-{i}-{active}")),
-                                    Duration::from_millis(360),
-                                    move |el, t| {
-                                        if active {
-                                            let k = 1.0 - (1.0 - t).powi(3);
-                                            el.opacity(0.4 + 0.6 * k)
-                                        } else {
-                                            el
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    // The picked one's icon springs up from 40%, turning upright.
+                                    let glyph = div().child(icon(option.glyph).size(px(16.0)));
+                                    if active {
+                                        el.child(motion::pop(
+                                            glyph,
+                                            SharedString::from(format!("ichoice-{id}-{i}-on")),
+                                            0.4,
+                                            -30.0,
+                                            Duration::ZERO,
+                                        ))
+                                    } else {
+                                        el.child(glyph)
+                                    }
+                                }),
                         )
                         .child(
                             div()
@@ -724,7 +710,7 @@ impl InstanceSettingsView {
                                 .cursor_pointer()
                                 .text_color(if copied { green } else { p.muted_foreground.into() })
                                 .when(!copied, |el| el.hover(move |s| s.bg(hover_bg).text_color(hover_fg)))
-                                .active(|s| s.top(px(1.0)))
+                                .active(|s| s.scale(0.9))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(value.clone()));
                                     this.copied = Some(id_owned.clone());
@@ -825,16 +811,19 @@ impl InstanceSettingsView {
                 .child(text.to_uppercase())
         };
         if !self.overridden_any(paths) {
-            return motion::once(
+            // Either one pops in from 80% as the other goes (the web's `AnimatePresence`).
+            return motion::pop_in(
                 pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground.into()),
                 SharedString::from(format!("idefault-{key}")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
-            );
+                (0.5, 0.5),
+                0.8,
+                0.0,
+            )
+            .into_any_element();
         }
         let saving = self.saving;
         let (fg, hover) = (p.foreground, p.accent);
-        motion::once(
+        motion::pop_in(
             div()
                 .flex()
                 .flex_none()
@@ -844,6 +833,7 @@ impl InstanceSettingsView {
                 .child(
                     div()
                         .id(SharedString::from(format!("ireset-{key}")))
+                        .group(SharedString::from(format!("ireset-{key}")))
                         .h(px(28.0))
                         .px(px(8.0))
                         .rounded_full()
@@ -861,13 +851,15 @@ impl InstanceSettingsView {
                                 },
                             ))
                         })
-                        .child(icon("rotate-ccw").size(px(14.0)))
+                        .child(crate::ui::settings_controls::spun(SharedString::from(format!("ireset-{key}"))))
                         .child(t("settings.controls.reset")),
                 ),
             SharedString::from(format!("ichanged-{key}")),
-            Duration::from_millis(260),
-            |el, t| el.opacity(t),
+            (0.5, 0.5),
+            0.8,
+            0.0,
         )
+        .into_any_element()
     }
 }
 
@@ -1139,7 +1131,7 @@ pub(super) fn segmented(
                 .text_color(if on { p.foreground } else { p.muted_foreground })
                 .cursor_pointer()
                 .hover(move |s| s.text_color(fg))
-                .active(|s| s.opacity(0.85))
+                .active(|s| s.scale(0.95))
                 .on_click(cx.listener(move |this, _, window, cx| pick(this, n, window, cx)))
                 .child(label),
         );
@@ -1172,13 +1164,14 @@ pub(super) fn choice_chip(id: SharedString, label: &str, on: bool, p: &Palette) 
                     .hover(move |s| s.border_color(hover_edge).text_color(hover_fg))
             }
         })
-        .active(|s| s.opacity(0.85))
+        .active(|s| s.scale(0.92))
         .when(on, |el| {
-            el.child(motion::once(
+            el.child(motion::pop_in(
                 div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                 SharedString::from(format!("{id}-check")),
-                Duration::from_millis(260),
-                |el, t| el.opacity(t),
+                (0.5, 0.5),
+                0.05,
+                0.0,
             ))
         })
         .child(label.to_owned())

@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window,
-    div, point, px, relative,
+    Animation, AnimationExt as _, AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat,
+    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Rgba, SharedString, SpringConfig,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, point, px, relative, sampled_easing,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -20,12 +20,12 @@ use crate::core::voice::Status;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::call_parts::{
-    CallPop, Side, Size, green, hang_up_button, in_voice, red, toggle_icon, voice_avatar, voice_flags,
+    CallPop, Side, Size, green, hang_up_button, in_voice, ping_dot, red, toggle_icon, voice_avatar, voice_flags,
 };
 use crate::ui::motion;
 use crate::ui::popout::Popped;
 use crate::ui::settings_controls::shadow_sm;
-use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
+use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::video::{live_badge, pop_out_button};
 use crate::ui::widgets::{app_badge, hue_gradient, icon, is_agent, pal};
 
@@ -158,13 +158,19 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_size(px(16.0))
                     .line_height(px(24.0))
-                    .child(channel.name.clone()),
+                    .child(motion::swap_text(
+                        SharedString::from(format!("stage-name|{}", channel.id)),
+                        channel.name.clone(),
+                        16.0,
+                        window,
+                        cx,
+                    )),
             )
             .child(div().flex_1())
             .when_some(self.recording_pill(key, server, &states, &p, window), |el, pill| el.child(pill))
             .when(can_record, |el| el.child(self.recordings_button(key, server, &channel.id, &states, &p, window, cx)))
             .when(!states.is_empty(), |el| {
-                el.child(motion::rise(
+                el.child(motion::pop_in(
                     div()
                         .flex_none()
                         .rounded_full()
@@ -177,7 +183,8 @@ impl FuwaApp {
                         .text_color(p.muted_foreground)
                         .child(in_voice(states.len())),
                     "in-voice-pill",
-                    Duration::ZERO,
+                    (0.5, 0.5),
+                    0.8,
                     0.0,
                 ))
             });
@@ -295,6 +302,7 @@ impl FuwaApp {
             let (k, s, c) = (key.to_owned(), server.to_owned(), channel.id.clone());
             let join = div()
                 .id("stage-join")
+                .group("stage-join")
                 .h(px(48.0))
                 .px(px(12.0))
                 .flex()
@@ -309,8 +317,9 @@ impl FuwaApp {
                 .when(!can_connect, |el| el.opacity(0.5))
                 .when(can_connect, |el| {
                     el.cursor_pointer()
+                        // The web's `.btn`: it lifts with a glow, and presses in.
                         .hover(move |st| {
-                            st.top(px(-2.0)).shadow(vec![BoxShadow {
+                            st.translate_y(px(-2.0)).shadow(vec![BoxShadow {
                                 color: hover_shadow,
                                 offset: point(px(0.0), px(8.0)),
                                 blur_radius: px(22.0),
@@ -318,13 +327,22 @@ impl FuwaApp {
                                 inset: false,
                             }])
                         })
-                        .active(|st| st.top(px(0.0)).opacity(0.9))
+                        .active(|st| st.translate_y(px(0.0)).scale(0.94))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.core.join_voice(&k, &s, &c);
                             cx.notify();
                         }))
                 })
-                .child(icon("headphones").size(px(16.0)))
+                .child(
+                    div()
+                        .id("stage-join-icon")
+                        .when(can_connect, |el| {
+                            el.group_hover("stage-join", |st| {
+                                st.rotate(gpui_kit::radians(-12f32.to_radians())).scale(1.1)
+                            })
+                        })
+                        .child(icon("headphones").size(px(16.0))),
+                )
                 .child(t("dms-calls.calls.stage.join"));
             let note = if !can_connect {
                 Some(
@@ -381,7 +399,7 @@ impl FuwaApp {
                         .child(text),
                     "stage-status",
                     Duration::ZERO,
-                    6.0,
+                    -6.0,
                 ))
             });
 
@@ -499,7 +517,8 @@ impl FuwaApp {
         let open = self.calls.pop.as_ref() == Some(&pop);
         let radius = radius_3xl();
         let hover_border = alpha(p.primary, 0.4);
-        let border = if lit > 0.5 { green().into() } else { gpui_kit::Hsla::from(p.border) };
+        // The border turns green as they start talking (`transition-[border-color]`).
+        let border = mix(p.border, green(), lit);
         let mut shadow = shadow_sm();
         if lit > 0.01 {
             shadow = vec![
@@ -520,12 +539,15 @@ impl FuwaApp {
             ];
         }
         let size = 80.0 * grow;
+        // Their color brightens a little while the tile is hovered.
         let hue = hue_gradient(
             &state.user_id,
             f32::from(radius),
             div().absolute().inset_0().rounded(radius).overflow_hidden(),
         )
-        .opacity(0.25);
+        .id("hue")
+        .opacity(0.25)
+        .group_hover(SharedString::from(tag.clone()), |s| s.opacity(0.35));
         let agent = is_agent(user.as_ref());
         let chip = div()
             .absolute()
@@ -562,6 +584,7 @@ impl FuwaApp {
             video.then(|| crate::ui::video::feed_view(&self.core, &feed, ObjectFit::Cover, radius, window, cx));
         let tile = div()
             .id(SharedString::from(tag.clone()))
+            .group(SharedString::from(tag.clone()))
             .relative()
             .overflow_hidden()
             .w(px(w))
@@ -620,7 +643,7 @@ impl FuwaApp {
             let card = self.person_card(key, Some(server), Some(channel), &state.user_id, window, cx);
             holder = holder.child(self.hang(card, Side::Right));
         }
-        motion::rise(holder, SharedString::from(format!("{tag}|in")), Duration::from_millis(40 * n.min(8) as u64), 16.0)
+        tile_in(holder, SharedString::from(format!("{tag}|in")), Duration::from_millis(40 * n.min(8) as u64))
             .into_any_element()
     }
 
@@ -679,7 +702,7 @@ impl FuwaApp {
                     .bg(alpha(p.background, 0.8))
                     .px(px(10.0))
                     .py(px(4.0))
-                    .child(live_badge())
+                    .child(live_badge(&state.user_id, window))
                     .child(
                         div()
                             .min_w_0()
@@ -704,10 +727,12 @@ impl FuwaApp {
             this.pop_out(popped.clone(), cx)
         }));
         let sound = crate::ui::video::screen_sound_button(&self.core, &state.user_id, mine, "stage", p);
-        motion::rise(
+        // The web's `scale: 0.94, y: -12`.
+        motion::pop_in(
             div().relative().group(SharedString::from(group.clone())).child(tile).child(button).children(sound),
             SharedString::from(format!("screen-in|{}", state.user_id)),
-            Duration::ZERO,
+            (0.5, 0.5),
+            0.94,
             -12.0,
         )
         .into_any_element()
@@ -746,12 +771,9 @@ impl FuwaApp {
             &[("names", Arg::Str(&names))],
         );
         let _ = p;
-        let ping = div().absolute().inset_0().rounded_full().bg(alpha(red(), 0.6));
-        let ping = motion::ambient(ping, "rec-pill-ping", Duration::from_secs(1), window, |el, t| {
-            el.opacity(1.0 - t).size(px(8.0 + 8.0 * t)).top(px(-4.0 * t)).left(px(-4.0 * t))
-        });
         Some(
-            motion::rise(
+            // In from the right as it grows (`scale: 0.8, x: 8`).
+            motion::pop_in(
                 div()
                     .flex_none()
                     .max_w(px(420.0))
@@ -766,22 +788,31 @@ impl FuwaApp {
                     .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(red())
-                    .child(
-                        div()
-                            .relative()
-                            .size(px(8.0))
-                            .flex_none()
-                            .child(ping)
-                            .child(div().size(px(8.0)).rounded_full().bg(red())),
-                    )
+                    .child(ping_dot("rec-pill-ping", 8.0, red(), alpha(red(), 0.6), window))
                     .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text)),
                 "rec-pill",
-                Duration::ZERO,
+                (1.0, 0.5),
+                0.8,
                 0.0,
             )
             .into_any_element(),
         )
     }
+}
+
+/// The web's `SPRING` (`stiffness: 520, damping: 34`), for tiles coming in.
+const SPRING: SpringConfig = SpringConfig::new(520.0, 34.0, 1.0);
+
+/// A person's tile coming in (the web's `Tile`): it fades in, growing from
+/// 80% and rising 16 px, `delay` after the one before it.
+fn tile_in(el: gpui_kit::Div, id: SharedString, delay: Duration) -> impl IntoElement {
+    let (duration, easing) = sampled_easing(SPRING, 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    let ease = move |t: f32| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) };
+    el.with_animation(id, Animation::new(total).with_easing(ease), |el, t| {
+        el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * 16.0)).scale(0.8 + 0.2 * t)
+    })
 }
 
 /// Nobody's here yet: the speaker in a soft circle, waves going out from it.

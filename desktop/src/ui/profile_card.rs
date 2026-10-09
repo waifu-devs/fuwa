@@ -174,6 +174,28 @@ fn glint(id: &'static str, width: f32, window: &Window) -> AnyElement {
     })
 }
 
+/// Springs `el` from `pose(el, 0.0)` to `pose(el, 1.0)` after `delay`, on a
+/// spring of `stiffness` and `damping` (the web's `initial`/`animate` with
+/// `type: "spring"`). `t` overshoots past 1 on lively springs.
+pub(crate) fn spring_in<E: IntoElement + gpui_kit::Styled + 'static>(
+    el: E,
+    id: impl Into<gpui_kit::ElementId>,
+    (stiffness, damping): (f32, f32),
+    delay: Duration,
+    pose: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(stiffness, damping, 1.0), 0.002);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    el.with_animation(
+        id,
+        gpui_kit::Animation::new(total)
+            .with_easing(move |t| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) }),
+        pose,
+    )
+    .into_any_element()
+}
+
 /// "Oct 7, 2026".
 fn day(ms: i64) -> String {
     use chrono::TimeZone as _;
@@ -369,11 +391,23 @@ impl FuwaApp {
                         .font_weight(FontWeight::BOLD)
                         .cursor_pointer()
                         .hover(|s| s.opacity(0.92))
-                        .active(|s| s.top(px(1.0)))
+                        .active(|s| s.scale(0.96))
                         .child(glint("profile-message-glint", WIDTH - 24.0, window))
-                        .child(icon("message-circle").size(px(16.0)))
+                        // The bubble tips and grows, and the padlock nudges over, while pointed at.
+                        .child(
+                            div()
+                                .id("profile-message-icon")
+                                .group_hover("profile-message", |s| s.rotate(gpui_kit::radians(-0.21)).scale(1.1))
+                                .child(icon("message-circle").size(px(16.0))),
+                        )
                         .child(t("workspace.popover.message"))
-                        .child(div().opacity(0.8).child(icon("lock-keyhole").size(px(14.0))))
+                        .child(
+                            div()
+                                .id("profile-message-lock")
+                                .opacity(0.8)
+                                .group_hover("profile-message", |s| s.translate_x(px(2.0)))
+                                .child(icon("lock-keyhole").size(px(14.0))),
+                        )
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.dialog = None;
                             this.message_person(k.clone(), uid.clone(), window, cx);
@@ -407,12 +441,24 @@ impl FuwaApp {
                     P::KickMembers => ("door-open", t("workspace.popover.kick"), Action::Kick),
                     _ => ("gavel", t("workspace.popover.ban"), Action::Ban(0)),
                 };
+                let group = SharedString::from(format!("profile-mod-{glyph}"));
+                // Each icon acts out its action while pointed at: the hourglass
+                // turns over, the door swings, the gavel lifts.
+                let glyph_el = div()
+                    .id(SharedString::from(format!("profile-mod-icon-{glyph}")))
+                    .group_hover(group.clone(), move |s| match glyph {
+                        "hourglass" => s.rotate(gpui_kit::radians(std::f32::consts::PI)),
+                        "door-open" => s.translate_x(px(2.0)),
+                        _ => s.rotate(gpui_kit::radians(-std::f32::consts::FRAC_PI_4)),
+                    })
+                    .child(icon(glyph).size(px(14.0)));
                 let (k, s, uid) = (key.to_owned(), sid.to_owned(), user_id.to_owned());
                 let red = p.destructive;
                 let soft = alpha(p.destructive, 0.1);
                 row = row.child(
                     div()
-                        .id(SharedString::from(format!("profile-mod-{label}")))
+                        .id(group.clone())
+                        .group(group)
                         .flex_1()
                         .h(px(28.0))
                         .px(px(8.0))
@@ -426,8 +472,8 @@ impl FuwaApp {
                         .text_color(p.muted_foreground)
                         .cursor_pointer()
                         .hover(move |s| s.bg(soft).text_color(red))
-                        .active(|s| s.top(px(1.0)))
-                        .child(icon(glyph).size(px(14.0)))
+                        .active(|s| s.scale(0.95))
+                        .child(glyph_el)
                         .child(label)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             let dialog =
@@ -458,15 +504,19 @@ impl FuwaApp {
         }
         .clamp(EDGE, (vw - EDGE - WIDTH).max(EDGE));
         let scroller = div().id("profile-scroll").max_h(px(vh - 2.0 * EDGE)).overflow_y_scroll().child(column);
-        let popover = motion::rise(
-            div().child(div().child(scroller).with_animation(
-                SharedString::from(format!("profile-pop|{user_id}")),
-                gpui_kit::Animation::new(Duration::from_millis(220)).with_easing(gpui_kit::ease_out_quint()),
-                |el, t| el.opacity(t),
-            )),
-            SharedString::from(format!("profile-rise|{user_id}")),
+        // It grows out of the side it opens from (Radix's transform origin), rising 6px as it fades in.
+        let from_right = x < left;
+        let popover = spring_in(
+            div().child(scroller),
+            SharedString::from(format!("profile-pop|{user_id}")),
+            (520.0, 32.0),
             Duration::ZERO,
-            6.0,
+            move |el, t| {
+                el.opacity(t.clamp(0.0, 1.0))
+                    .transform_origin(if from_right { 1.0 } else { 0.0 }, 0.0)
+                    .translate_y(px((1.0 - t) * 6.0))
+                    .scale(0.92 + 0.08 * t)
+            },
         );
         let mut layer = div().absolute().inset_0().child(
             gpui_kit::anchored()
@@ -520,15 +570,16 @@ impl FuwaApp {
             SharedString::from(format!("profile-banner|{user_id}|{accent}")),
             Duration::from_millis(600),
             |el, t| {
-                let e = 1.0 - (1.0 - t).powi(3);
-                el.opacity(e)
+                // The web's `EASE_OUT` (0.22, 1, 0.36, 1), near enough: settling in from 112%.
+                let e = 1.0 - (1.0 - t).powi(4);
+                el.opacity(e).scale(1.12 - 0.12 * e)
             },
         );
 
         // Their picture in a ring of the card's color, the dot on it, and their status beside it.
         let dot = f.presence.as_ref().map(|pr| {
             let status = crate::ui::presence::shown(pr.as_ref());
-            div().absolute().right(px(2.0 - 5.0)).bottom(px(2.0 - 5.0)).child(crate::ui::presence::ringed_dot(
+            div().absolute().right(px(2.0 - 5.0)).bottom(px(2.0 - 5.0)).child(crate::ui::presence::popping(
                 status,
                 20.0,
                 5.0,
@@ -550,14 +601,17 @@ impl FuwaApp {
                     .child(crate::ui::widgets::decorated(avatar(user, 80.0, &p), 80.0, f.decoration.as_deref()))
                     .children(dot),
             );
-        let picture = motion::rise(
+        // Their picture springs in, growing and turning upright.
+        let picture = spring_in(
             div().child(picture),
             SharedString::from(format!("profile-face|{user_id}")),
+            (420.0, 18.0),
             Duration::ZERO,
-            6.0,
+            |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.6 + 0.4 * t).rotate(gpui_kit::radians((1.0 - t) * -0.21)),
         );
+        let status = status.map(|s| motion::swap_text(format!("profile-status-text|{user_id}"), s, 14.0, window, cx));
         let top = div().mt(px(-44.0)).flex().items_end().gap(px(8.0)).child(picture).when_some(status, |el, status| {
-            el.child(motion::rise(
+            el.child(spring_in(
                 div()
                     .mb(px(36.0))
                     .min_w_0()
@@ -573,8 +627,15 @@ impl FuwaApp {
                     .shadow(shadow_md())
                     .child(div().line_clamp(2).child(status)),
                 SharedString::from(format!("profile-status|{user_id}")),
+                (500.0, 22.0),
                 Duration::from_millis(150),
-                4.0,
+                // A speech bubble growing out of its tail, by the picture.
+                |el, t| {
+                    el.opacity(t.clamp(0.0, 1.0))
+                        .transform_origin(0.0, 1.0)
+                        .translate_x(px((1.0 - t) * -12.0))
+                        .scale(0.6 + 0.4 * t)
+                },
             ))
         });
 
@@ -594,7 +655,13 @@ impl FuwaApp {
                         .text_xl()
                         .line_height(px(28.0))
                         .font_weight(FontWeight::EXTRA_BOLD)
-                        .child(div().min_w_0().truncate().child(name))
+                        .child(div().min_w_0().truncate().child(motion::swap_text(
+                            format!("profile-name|{user_id}"),
+                            name,
+                            20.0,
+                            window,
+                            cx,
+                        )))
                         .when(f.owner, |el| el.child(icon("crown").size(px(16.0)).text_color(rgb(0xfbbf24))))
                         .when(is_agent(user), |el| el.child(app_badge("profile-badge", "AGENT", &p))),
                 )
@@ -614,7 +681,7 @@ impl FuwaApp {
                             format!("@{username}")
                         }))
                         .when_some(pronouns, |el, pronouns| {
-                            el.child(
+                            el.child(spring_in(
                                 div()
                                     .rounded_full()
                                     .bg(p.muted)
@@ -625,7 +692,11 @@ impl FuwaApp {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(alpha(p.foreground, 0.8))
                                     .child(pronouns),
-                            )
+                                "profile-pronouns",
+                                (520.0, 34.0),
+                                Duration::ZERO,
+                                |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.8 + 0.2 * t),
+                            ))
                         })
                         .when_some(nickname.map(|_| display.clone()), |el, display| {
                             el.child(div().truncate().child(format!("· {display}")))
@@ -637,7 +708,7 @@ impl FuwaApp {
         );
 
         let mut body = div().relative().px(px(16.0)).pb(px(16.0)).child(top).child(names);
-        if let Some(roles) = self.member_roles(key, user_id, f, &p, cx) {
+        if let Some(roles) = self.member_roles(key, user_id, f, &p, window, cx) {
             body = body.child(roles);
         }
         if let Some(Some(presence)) = &f.presence
@@ -760,7 +831,6 @@ impl FuwaApp {
             view.update(cx, |v, cx| v.set(Some(&spec), &seed, accent, WIDTH, 420.0, true, cx));
             crate::ui::profile_effect::over_card(view)
         });
-        let _ = window;
         div()
             .relative()
             .w(px(WIDTH))
@@ -784,6 +854,7 @@ impl FuwaApp {
         user_id: &str,
         f: &Facts,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         f.member.as_ref()?;
@@ -804,14 +875,23 @@ impl FuwaApp {
                     .size(px(12.0))
                     .flex_none()
                     .cursor_pointer()
-                    .child(div().absolute().inset_0().group_hover(group.clone(), |s| s.opacity(0.0)).child(dot))
+                    // The dot shrinks away for an X while the chip's pointed at.
                     .child(
                         div()
+                            .id("role-take-dot")
                             .absolute()
                             .inset_0()
-                            .opacity(0.0)
+                            .group_hover(group.clone(), |s| s.scale(0.0))
+                            .child(dot),
+                    )
+                    .child(
+                        div()
+                            .id("role-take-x")
+                            .absolute()
+                            .inset_0()
+                            .scale(0.0)
                             .text_color(p.destructive)
-                            .group_hover(group.clone(), |s| s.opacity(1.0))
+                            .group_hover(group.clone(), |s| s.scale(1.0))
                             .child(icon("x").size(px(12.0))),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -851,6 +931,8 @@ impl FuwaApp {
         if !f.assignable.is_empty() {
             let open = self.people.roles_menu.is_some();
             let (muted, primary, ring) = (p.muted_foreground, p.primary, alpha(p.primary, 0.5));
+            // A quarter turn while pointed at, an eighth (a cross) while its menu is open.
+            let turn = motion::follow("role-add-turn", if open { 45.0 } else { 0.0 }, window, cx);
             chips = chips.child(
                 div()
                     .id("role-add")
@@ -865,9 +947,12 @@ impl FuwaApp {
                     .border_color(if open { ring } else { p.border.into() })
                     .text_color(if open { primary } else { muted })
                     .cursor_pointer()
-                    .hover(move |s| s.border_color(ring).text_color(primary))
-                    // `data-[state=open]:rotate-45`: the plus turned into a cross.
-                    .child(icon(if open { "x" } else { "plus" }).size(px(14.0)))
+                    .rotate(gpui_kit::radians(turn.to_radians()))
+                    .hover(move |s| {
+                        let s = s.border_color(ring).text_color(primary);
+                        if open { s } else { s.rotate(gpui_kit::radians(std::f32::consts::FRAC_PI_2)) }
+                    })
+                    .child(icon("plus").size(px(14.0)))
                     .child(
                         div().absolute().inset_0().child(
                             canvas(|bounds, _, _| ROLE_ADD.with(|c| *c.borrow_mut() = Some(bounds)), |_, _, _, _| {})
@@ -955,11 +1040,12 @@ impl FuwaApp {
                     .child(role_dot(role, p))
                     .child(div().flex_1().truncate().child(role.name.clone()))
                     .when(on, |el| {
-                        el.child(motion::rise(
+                        el.child(spring_in(
                             div().text_color(p.primary).child(icon("check").size(px(16.0))),
                             SharedString::from(format!("roles-menu-on|{}", role.id)),
+                            (520.0, 34.0),
                             Duration::ZERO,
-                            2.0,
+                            |el, t| el.scale(t).rotate(gpui_kit::radians((1.0 - t) * -std::f32::consts::FRAC_PI_4)),
                         ))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| this.change_role(&k, &s, &uid, &rid, !on, cx))),
