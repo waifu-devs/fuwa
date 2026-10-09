@@ -454,6 +454,25 @@ Apps and instances also agree on features by date: see
 instance has says "Update fuwa to use ..." there, and keeps working
 everywhere else.
 
+### Opening the desktop app the first time
+
+The installers are signed ad hoc but not by a publisher Apple or Microsoft
+knows, so the first launch of one downloaded in a browser asks first. After
+that it opens like any app, and its own updates don't ask again.
+
+- **macOS**: drag fuwa to Applications and open it. macOS says it couldn't
+  check fuwa for malware; press Done, then go to System Settings > Privacy &
+  Security, find "fuwa was blocked" near the bottom and press Open Anyway. On
+  macOS 14 or older, Control-click fuwa in Applications and choose Open
+  instead. From a terminal, `xattr -dr com.apple.quarantine /Applications/fuwa.app`
+  does the same. Releases before 0.3.3 weren't signed at all, which macOS
+  reports as "fuwa is damaged"; that command opens those too, but take a
+  newer release.
+- **Windows**: if SmartScreen says "Windows protected your PC", press More
+  info, then Run anyway.
+- **Linux**: install the `.deb` with `sudo apt install ./fuwa-desktop-*.deb`,
+  or `chmod +x` the `.AppImage` and run it.
+
 ### Release signing
 
 Each release's `SHA256SUMS` is signed with Waifu Devs' release key (Ed25519),

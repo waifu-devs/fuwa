@@ -202,7 +202,7 @@ jobs:
           docker run -d --name fuwa -p 8080:8080 -v fuwa:/data ghcr.io/$REPO:$VERSION
           \`\`\`
 
-          Or download the binary for your machine below. For the desktop app, take the installer for your computer: the \`.deb\` or \`.AppImage\` on Linux, the \`.dmg\` on macOS, or \`-setup.exe\` on Windows (the bare \`fuwa-desktop\` files run without installing). They aren't signed yet, so macOS and Windows ask before the first launch. The [self-hosting guide](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md) walks through both.
+          Or download the binary for your machine below. For the desktop app, take the installer for your computer: the \`.deb\` or \`.AppImage\` on Linux, the \`.dmg\` on macOS, or \`-setup.exe\` on Windows (the bare \`fuwa-desktop\` files run without installing). Apple and Microsoft don't know the publisher yet, so macOS and Windows ask before the first launch: [Opening the desktop app the first time](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md#opening-the-desktop-app-the-first-time) says what to press.
 
           Check a download is an official build:
 
