@@ -33,7 +33,7 @@ fn standard(value: &str) -> Result<String> {
     let value = value.trim();
     let fits = !value.is_empty()
         && value.len() <= MAX_EMOJI_BYTES
-        && value.chars().any(|c| !c.is_ascii())
+        && !value.is_ascii()
         && value.chars().all(|c| {
             !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphabetic() && !"<>:@_`~|[]()\\".contains(c)
         });

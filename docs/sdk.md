@@ -169,6 +169,30 @@ await tile.end();
 - `agent.api.liveTiles.listLiveTiles({ serverId })` lists every app's tiles
   the agent can see.
 
+### Reactions
+
+```ts
+agent.on("message", async (ctx) => {
+  if (ctx.content.includes("good bot")) await ctx.react("💜");
+});
+agent.on("reactionUpdated", (payload) => {
+  if (payload.added && payload.userId !== agent.me.id) console.log(payload.reaction?.emoji, payload.reaction?.count);
+});
+```
+
+- `agent.react(message, emoji)` reacts, and `agent.react(message, emoji,
+  false)` takes the agent's reaction off; both resolve with the emoji's
+  reaction as it is now. An emoji is a standard one's characters ("👍") or
+  one of the server's custom emoji (`<:name:id>`, or the `Emoji` itself).
+- Reacting needs Add Reactions in the channel. A message holds at most the
+  instance's `reactions_per_message` different emoji (unlimited unless set):
+  past it, `react` fails with `RateLimitedError` (no `retryAfterMs`).
+  Not in channels shared between servers yet (`FailedPreconditionError`).
+- `agent.reactors(message, emoji)` is who reacted, the earliest first.
+- Messages read through the API carry `reactions` (`me` for the agent);
+  `reactionUpdated` and `reactionsCleared` events say what changes (`me` is
+  never set in events: compare `userId`).
+
 ### Typed events
 
 Every event kind has a handler named after its payload, with that payload's

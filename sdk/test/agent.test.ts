@@ -131,6 +131,36 @@ test("an agent answers commands, mentions and messages", async () => {
   await agent.stop();
 });
 
+test("an agent reacts to messages and hears others react", async () => {
+  const agent = newAgent();
+  const heard: string[] = [];
+  agent.on("reactionUpdated", (payload) => {
+    if (payload.userId !== agent.me.id) heard.push(`${payload.added ? "+" : "-"}${payload.reaction?.emoji}${payload.reaction?.count}`);
+  });
+  await agent.start();
+  const { message } = await say("react to this");
+  const thumbs = await agent.react(message!, "👍");
+  assert.equal(thumbs.count, 1);
+  assert.equal(thumbs.me, true);
+  await person.messages.react({ serverId, channelId, messageId: message!.id, emoji: "👍", reacted: true });
+  await until("the person's reaction as an event", () => heard.includes("+👍2") || undefined);
+  const who = await agent.reactors(message!, "👍");
+  assert.deepEqual(
+    who.map((u) => u.username),
+    ["helper", "owner"],
+  );
+  const read = await person.messages.getMessage({ serverId, channelId, messageId: message!.id });
+  assert.deepEqual(
+    read.message!.reactions.map((r) => [r.emoji, r.count, r.me]),
+    [["👍", 2, true]],
+  );
+  const off = await agent.react(message!, "👍", false);
+  assert.equal(off.count, 1);
+  assert.equal(off.me, false);
+  await assert.rejects(agent.react(message!, "not an emoji"), (e: FuwaError) => e.code === Code.InvalidArgument);
+  await agent.stop();
+});
+
 test("an agent catches up on what it missed while stopped", async () => {
   const first = newAgent();
   await first.start();

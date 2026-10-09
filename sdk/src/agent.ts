@@ -13,6 +13,7 @@ import {
   type Event,
   type Interaction,
   type Message,
+  type Reaction,
   type User,
 } from "./gen/fuwa/v1/types_pb.js";
 import type { Media } from "./gen/fuwa/v1/media_pb.js";
@@ -62,6 +63,19 @@ export interface AgentOptions extends Omit<FuwaOptions, "token"> {
   onError?: (error: unknown) => void;
 }
 
+/**
+ * An emoji to react with: a standard one as its characters ("👍"), or one of
+ * the server's custom emoji, as written in messages (`<:name:id>`) or as the
+ * `Emoji` itself.
+ */
+export type ReactionEmoji = string | { id: string };
+
+function reactionEmoji(emoji: ReactionEmoji): { emoji: string; emojiId: string } {
+  if (typeof emoji !== "string") return { emoji: "", emojiId: emoji.id };
+  const custom = /^<a?:\w+:(\w+)>$/.exec(emoji.trim());
+  return custom ? { emoji: "", emojiId: custom[1]! } : { emoji: emoji.trim(), emojiId: "" };
+}
+
 /** What to send: text, or the whole request (attachments, embeds, a reply). */
 export type Outgoing = string | Omit<MessageInitShape<typeof SendMessageRequestSchema>, "$typeName" | "serverId" | "channelId">;
 
@@ -80,6 +94,8 @@ export interface MessageContext {
   reply(content: Outgoing): Promise<Message>;
   /** Sends a message in the same channel. */
   send(content: Outgoing): Promise<Message>;
+  /** Reacts to it (see `agent.react`). */
+  react(emoji: ReactionEmoji): Promise<Reaction>;
 }
 
 /** A command someone sent, such as "/dice 2d6". */
@@ -389,6 +405,37 @@ export class Agent {
     });
   }
 
+  /**
+   * Reacts to a message with an emoji, or with `reacted` false takes the
+   * agent's reaction off. Needs Add Reactions in the channel to react.
+   * Resolves with the emoji's reaction as it is now. Others' reactions come
+   * as "reactionUpdated" events (`me` is never set there: compare `userId`).
+   */
+  async react(message: Message, emoji: ReactionEmoji, reacted = true): Promise<Reaction> {
+    const { reaction } = await this.api.messages.react({
+      serverId: message.serverId,
+      channelId: message.channelId,
+      messageId: message.id,
+      ...reactionEmoji(emoji),
+      reacted,
+    });
+    if (!reaction) throw toFuwaError(new Error("the instance didn't return the reaction"));
+    return reaction;
+  }
+
+  /** Who reacted to a message with an emoji, the earliest first (up to 100). */
+  async reactors(message: Message, emoji: ReactionEmoji, options: { limit?: number; afterId?: string } = {}): Promise<User[]> {
+    const { users } = await this.api.messages.listReactors({
+      serverId: message.serverId,
+      channelId: message.channelId,
+      messageId: message.id,
+      ...reactionEmoji(emoji),
+      limit: options.limit ?? 50,
+      afterId: options.afterId ?? "",
+    });
+    return users;
+  }
+
   /** Uploads a picture to the instance (see uploadPicture). */
   upload(options: UploadOptions): Promise<Media> {
     return uploadPicture(this.api, options);
@@ -537,6 +584,7 @@ export class Agent {
       author: () => (message.webhook ? Promise.resolve(undefined) : message.shared?.user ? Promise.resolve(message.shared.user) : this.user(message.authorId)),
       reply: (content) => this.reply(message, content),
       send: (content) => this.send(message.serverId, message.channelId, content),
+      react: (emoji) => this.react(message, emoji),
     };
   }
 
