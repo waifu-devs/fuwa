@@ -320,6 +320,10 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
         c.slider_thumb = p.card.into();
         t.tokens.slider_bar = Hsla::from(p.primary).into();
         t.tokens.slider_thumb = Hsla::from(p.card).into();
+        // Code scrolls sideways under the line numbers, so their column can't be see-through.
+        let solid = |c: Rgba| Rgba { a: 1.0, ..c };
+        std::sync::Arc::make_mut(&mut t.highlight_theme).style.editor_gutter_background =
+            Some(mix(solid(p.background), solid(p.muted), 0.7));
     });
     match prefs.motion {
         MotionChoice::System => gpui_kit::base::apply_system_reduce_motion(cx),
