@@ -207,6 +207,18 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .unwrap();
     assert!(got.secret.starts_with("whsec_"));
     assert!(got.url.is_empty());
+    // After that it's never shown again, only that there is one and how it ends.
+    let again = agents
+        .get_agent_endpoint(authed(&owner, pb::GetAgentEndpointRequest { agent_id: agent_id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .endpoint
+        .unwrap();
+    assert_eq!(again.secret, "");
+    assert!(again.secret_set);
+    assert_eq!(again.secret_hint.len(), 4);
+    assert!(got.secret.ends_with(&again.secret_hint));
     // Agents don't manage endpoints, not even their own.
     let refused = agents
         .get_agent_endpoint(authed(&made.token, pb::GetAgentEndpointRequest { agent_id: agent_id.clone() }))
@@ -238,6 +250,7 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .endpoint
         .unwrap();
     assert_eq!(saved.url, endpoint.url);
+    assert_eq!(saved.secret, "", "setting the URL doesn't show the secret");
 
     // Events come signed, in proto3 JSON.
     let send = |content: &str| {
@@ -310,6 +323,7 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .endpoint
         .unwrap();
     assert_ne!(reset.secret, got.secret);
+    assert!(reset.secret.ends_with(&reset.secret_hint));
     *endpoint.secret.lock().unwrap() = reset.secret;
     messages.send_message(send("new secret")).await.unwrap();
     let event = endpoint.next("messageCreated").await;

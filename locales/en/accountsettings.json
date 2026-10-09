@@ -298,6 +298,8 @@
   "agents.endpoint.newSecret": "New secret",
   "agents.endpoint.newSecretWarning": "Deliveries are signed with the new one at once.",
   "agents.endpoint.copyFailed": "Couldn't copy the secret",
+  "agents.endpoint.secretOnce": "Copy the secret now: it won't be shown again.",
+  "agents.endpoint.secretGone": "Shown only when it's made. Lost it? Make a new one.",
   "agents.endpoint.statusOff": "Off: nothing is posted.",
   "agents.endpoint.statusWaiting": "On, waiting for the first event.",
   "agents.endpoint.statusDelivered": "Last delivery {when}",
