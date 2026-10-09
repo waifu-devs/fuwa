@@ -1,6 +1,6 @@
 //! Fans committed events out to live subscribers, per community server.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{broadcast, mpsc};
@@ -36,8 +36,11 @@ pub struct Hub {
     /// new messages to index (`search::spawn`).
     search: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
     /// Sees every event too, so agents' endpoints hear of new events in the
-    /// servers they're in (`endpoints::spawn_deliveries`).
-    agents: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
+    /// servers they're in (`endpoints::spawn_deliveries`). Bounded: deliveries
+    /// read the server's log themselves, so what doesn't fit is only a word.
+    agents: Mutex<Option<mpsc::Sender<Arc<pb::Event>>>>,
+    /// Servers with events the agents' tap had no room for, to wake later.
+    agents_missed: Mutex<HashSet<String>>,
 }
 
 impl Hub {
@@ -75,12 +78,18 @@ impl Hub {
         rx
     }
 
-    /// Every event published from now on, for agents' endpoints. One at a
-    /// time, like [`tap`](Self::tap).
-    pub fn agents_tap(&self) -> mpsc::UnboundedReceiver<Arc<pb::Event>> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    /// Events published from now on, for agents' endpoints, as many as fit;
+    /// servers whose events didn't are in [`agents_missed`](Self::agents_missed).
+    /// One at a time, like [`tap`](Self::tap).
+    pub fn agents_tap(&self) -> mpsc::Receiver<Arc<pb::Event>> {
+        let (tx, rx) = mpsc::channel(BUFFER);
         *self.agents.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
         rx
+    }
+
+    /// The servers with events the agents' tap had no room for since last asked.
+    pub fn agents_missed(&self) -> Vec<String> {
+        self.agents_missed.lock().unwrap_or_else(|p| p.into_inner()).drain().collect()
     }
 
     /// Sends events to everyone following their server. Callers publish in commit
@@ -103,8 +112,14 @@ impl Hub {
             if search.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
                 *search = None;
             }
-            if agents.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
-                *agents = None;
+            if let Some(t) = agents.as_ref() {
+                match t.try_send(event.clone()) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        self.agents_missed.lock().unwrap_or_else(|p| p.into_inner()).insert(server_id.clone());
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => *agents = None,
+                }
             }
             let idle = match channels.get(&server_id) {
                 None => continue,
@@ -115,5 +130,33 @@ impl Hub {
                 channels.remove(&server_id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(server_id: &str, sequence: i64) -> pb::Event {
+        pb::Event { server_id: server_id.into(), sequence, ..Default::default() }
+    }
+
+    #[test]
+    fn agents_tap_holds_so_much_and_names_the_servers_past_it() {
+        let hub = Hub::default();
+        let mut tap = hub.agents_tap();
+        hub.publish((1..=BUFFER as i64).map(|n| event("a", n)));
+        hub.publish([event("b", 1), event("c", 1), event("b", 2)]);
+        let mut held = 0;
+        while tap.try_recv().is_ok() {
+            held += 1;
+        }
+        assert_eq!(held, BUFFER);
+        let mut missed = hub.agents_missed();
+        missed.sort();
+        assert_eq!(missed, ["b", "c"]);
+        assert!(hub.agents_missed().is_empty(), "asking takes them");
+        hub.publish([event("d", 1)]);
+        assert_eq!(tap.try_recv().unwrap().server_id, "d", "with room again, events come through");
     }
 }

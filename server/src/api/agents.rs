@@ -191,7 +191,7 @@ impl Api {
                     events.push(name);
                 }
             }
-            endpoints::check(policy, &agent.account.id, url, &row.secret).await?;
+            endpoints::check(policy, &owner.id, &agent.account.id, url, &row.secret).await?;
         }
         let row = self.app.node()?.set_agent_endpoint(&agent.account.id, url, &events).await?;
         self.app.agent_endpoint_changed(&agent.account.id);

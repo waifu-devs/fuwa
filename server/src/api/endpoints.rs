@@ -53,8 +53,18 @@ const READ_PAGE: i64 = 200;
 const MAX_ANSWER: usize = 1 << 20;
 /// Longest URL an endpoint may have.
 const MAX_URL: usize = 2048;
-/// Deliveries in flight at once, from this part.
+/// Deliveries in flight at once, from this part. Each agent has one at a
+/// time, whatever the number of its servers (`Run::lane`), so an endpoint that
+/// never answers holds one of these, not all of them.
 static IN_FLIGHT: Semaphore = Semaphore::const_new(64);
+/// Checks of new endpoints in flight at once, apart from deliveries.
+static CHECKS: Semaphore = Semaphore::const_new(8);
+/// Checks one account may have sent in a minute.
+const CHECKS_PER_MINUTE: i64 = 10;
+/// Checks each account sent this minute, kept in memory.
+static CHECKED: Mutex<Option<HashMap<String, (i64, i64)>>> = Mutex::new(None);
+/// How often servers with events the agents' tap had no room for are woken.
+const MISSED_EVERY: Duration = Duration::from_secs(1);
 /// How long an endpoint is remembered without word of a change, in case word
 /// went missing.
 const REMEMBER_FOR: Duration = Duration::from_secs(5 * 60);
@@ -192,14 +202,21 @@ fn client(public_only: bool) -> reqwest::Client {
     builder.build().expect("the endpoint client's settings are valid")
 }
 
-/// Posts a signed delivery; the answer's body, on a 2xx. Otherwise what went
-/// wrong, in a few words for the endpoint's owner.
-async fn post(policy: pb::AgentEndpoints, url: &str, secret: &str, id: &str, body: Vec<u8>) -> Result<Bytes, String> {
+/// Posts a signed delivery, once `pool` has room; the answer's body, on a
+/// 2xx. Otherwise what went wrong, in a few words for the endpoint's owner.
+async fn post(
+    pool: &Semaphore,
+    policy: pb::AgentEndpoints,
+    url: &str,
+    secret: &str,
+    id: &str,
+    body: Vec<u8>,
+) -> Result<Bytes, String> {
     let url = check_url(policy, url)?;
     let client = if policy == pb::AgentEndpoints::Any { &*ANYWHERE } else { &*PUBLIC_ONLY };
     let timestamp = now_ms() / 1000;
     let signed = signature(secret, id, timestamp, &body);
-    let _turn = IN_FLIGHT.acquire().await.map_err(|_| "stopping".to_string())?;
+    let _turn = pool.acquire().await.map_err(|_| "stopping".to_string())?;
     let response = client
         .post(url)
         .header(http::header::CONTENT_TYPE, "application/json")
@@ -237,10 +254,21 @@ async fn post(policy: pb::AgentEndpoints, url: &str, secret: &str, id: &str, bod
 /// Checks an endpoint before it's saved: it must answer a delivery carrying
 /// a challenge with that challenge, which only something written for fuwa
 /// does, so nobody's events are sent to a site that didn't ask for them.
-pub async fn check(policy: pb::AgentEndpoints, agent_id: &str, url: &str, secret: &str) -> Result<()> {
+/// `account_id`, who asked for it, may ask [`CHECKS_PER_MINUTE`] times a minute.
+pub async fn check(
+    policy: pb::AgentEndpoints,
+    account_id: &str,
+    agent_id: &str,
+    url: &str,
+    secret: &str,
+) -> Result<()> {
+    {
+        let mut checked = CHECKED.lock().unwrap_or_else(|p| p.into_inner());
+        take_check(checked.get_or_insert_with(HashMap::new), account_id, now_ms())?;
+    }
     let challenge = crate::auth::new_token();
     let body = delivery_json(agent_id, &challenge, vec![]);
-    let answer = post(policy, url, secret, &new_id(), body)
+    let answer = post(&CHECKS, policy, url, secret, &new_id(), body)
         .await
         .map_err(|why| Error::FailedPrecondition(format!("the endpoint didn't pass the check: it {why}")))?;
     match read_answer(&answer) {
@@ -249,6 +277,24 @@ pub async fn check(policy: pb::AgentEndpoints, agent_id: &str, url: &str, secret
             "the endpoint didn't pass the check: answer it with {\"challenge\": \"...\"} from the delivery".into(),
         )),
     }
+}
+
+/// Counts one check by `account_id` against [`CHECKS_PER_MINUTE`], in a
+/// table of each account's minute and how many it's used.
+fn take_check(counts: &mut HashMap<String, (i64, i64)>, account_id: &str, now: i64) -> Result<()> {
+    let minute = now / 60_000;
+    if counts.len() > 10_000 {
+        counts.retain(|_, (at, _)| *at == minute);
+    }
+    let entry = counts.entry(account_id.to_string()).or_insert((minute, 0));
+    if entry.0 != minute {
+        *entry = (minute, 0);
+    }
+    if entry.1 >= CHECKS_PER_MINUTE {
+        return Err(Error::ResourceExhausted("too many endpoint checks; try again in a minute".into()));
+    }
+    entry.1 += 1;
+    Ok(())
 }
 
 // ── Delivering ──────────────────────────────────────────────────────────────
@@ -368,28 +414,29 @@ struct Deliveries {
     agents: HashMap<String, Vec<String>>,
     /// By (server, agent).
     workers: HashMap<(String, String), Worker>,
+    /// Each agent's one delivery in flight, shared by its workers.
+    lanes: HashMap<String, Arc<Semaphore>>,
 }
 
 impl Deliveries {
     fn new(app: Arc<App>) -> Self {
-        Self { app, known: Arc::default(), agents: HashMap::new(), workers: HashMap::new() }
+        Self { app, known: Arc::default(), agents: HashMap::new(), workers: HashMap::new(), lanes: HashMap::new() }
     }
 
-    async fn run(
-        mut self,
-        mut tap: mpsc::UnboundedReceiver<Arc<pb::Event>>,
-        mut changes: broadcast::Receiver<Arc<str>>,
-    ) {
+    async fn run(mut self, mut tap: mpsc::Receiver<Arc<pb::Event>>, mut changes: broadcast::Receiver<Arc<str>>) {
         // Agents whose deliveries were behind when the instance stopped.
         for sdb in self.app.servers.all() {
             self.wake(&sdb).await;
         }
+        let mut missed = tokio::time::interval(MISSED_EVERY);
+        missed.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 event = tap.recv() => match event {
                     Some(event) => self.note(&event).await,
                     None => return,
                 },
+                _ = missed.tick() => self.wake_missed().await,
                 changed = changes.recv() => match changed {
                     Ok(agent_id) => self.changed(&agent_id),
                     Err(broadcast::error::RecvError::Lagged(_)) => self.changed(""),
@@ -399,9 +446,22 @@ impl Deliveries {
         }
     }
 
+    /// Wakes the servers whose events the tap had no room for.
+    async fn wake_missed(&mut self) {
+        for server_id in self.app.hub.agents_missed() {
+            // Who's in it may have changed among what was missed.
+            self.agents.remove(&server_id);
+            if let Ok(sdb) = self.app.servers.get(&server_id).await {
+                self.wake(&sdb).await;
+            }
+        }
+    }
+
     fn changed(&mut self, agent_id: &str) {
         self.known.forget(agent_id);
         self.workers.retain(|_, worker| !worker.task.is_finished());
+        let working: HashSet<&String> = self.workers.keys().map(|(_, agent)| agent).collect();
+        self.lanes.retain(|agent, _| working.contains(agent));
         for ((_, agent), worker) in &self.workers {
             if agent_id.is_empty() || agent == agent_id {
                 worker.kick.notify_one();
@@ -448,7 +508,9 @@ impl Deliveries {
                 continue;
             }
             let (wake, kick) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
+            let lane = self.lanes.entry(key.1.clone()).or_insert_with(|| Arc::new(Semaphore::new(1))).clone();
             let run = Run {
+                lane,
                 app: self.app.clone(),
                 known: self.known.clone(),
                 server_id: key.0.clone(),
@@ -481,6 +543,8 @@ struct Run {
     agent_id: String,
     wake: Arc<Notify>,
     kick: Arc<Notify>,
+    /// The agent's one delivery in flight, shared with its other servers' workers.
+    lane: Arc<Semaphore>,
 }
 
 /// A batch read from the log, ready to post.
@@ -570,7 +634,14 @@ impl Run {
                 continue;
             }
             let body = delivery_json(&self.agent_id, "", batch.events);
-            match post(policy, &endpoint.url, &endpoint.secret, &batch.id, body).await {
+            let posted = tokio::select! {
+                turn = self.lane.acquire() => match turn {
+                    Ok(_turn) => post(&IN_FLIGHT, policy, &endpoint.url, &endpoint.secret, &batch.id, body).await,
+                    Err(_) => return,
+                },
+                _ = self.app.shutdown.cancelled() => return,
+            };
+            match posted {
                 Ok(answer) => {
                     backoff = FIRST_RETRY;
                     if self.advance(&sdb, endpoint.epoch, batch.through).await.is_err() {
@@ -764,6 +835,18 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checks_are_paced_by_the_account_and_the_minute() {
+        let mut counts = HashMap::new();
+        let minute = 60_000 * 1000;
+        for _ in 0..CHECKS_PER_MINUTE {
+            take_check(&mut counts, "rin", minute).unwrap();
+        }
+        assert!(matches!(take_check(&mut counts, "rin", minute + 59_999), Err(Error::ResourceExhausted(_))));
+        take_check(&mut counts, "mika", minute).expect("each account has its own");
+        take_check(&mut counts, "rin", minute + 60_000).expect("a new minute starts over");
+    }
 
     #[test]
     fn signatures_follow_standard_webhooks() {

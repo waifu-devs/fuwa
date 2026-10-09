@@ -3,7 +3,7 @@
 //! interactions in its answer.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -64,10 +64,13 @@ fn authed<T>(token: &str, message: T) -> Request<T> {
 
 /// A stateless agent: checks each delivery's signature, answers the check,
 /// and answers every interaction with "rolled 4". Down, it answers 500.
+/// Slow, it takes a while over each delivery, noting the most it had at once.
 struct Endpoint {
     url: String,
     secret: Arc<Mutex<String>>,
     down: Arc<AtomicBool>,
+    slow: Arc<AtomicBool>,
+    most_at_once: Arc<AtomicUsize>,
     deliveries: mpsc::UnboundedReceiver<Value>,
 }
 
@@ -84,11 +87,15 @@ fn signed(secret: &str, headers: &HeaderMap, body: &[u8]) -> bool {
 async fn endpoint() -> Endpoint {
     let secret = Arc::new(Mutex::new(String::new()));
     let down = Arc::new(AtomicBool::new(false));
+    let slow = Arc::new(AtomicBool::new(false));
+    let (at_once, most_at_once) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
     let (tx, deliveries) = mpsc::unbounded_channel();
     let handler = {
-        let (secret, down) = (secret.clone(), down.clone());
+        let (secret, down, slow, at_once, most) =
+            (secret.clone(), down.clone(), slow.clone(), at_once, most_at_once.clone());
         move |headers: HeaderMap, body: Bytes| {
             let (secret, down, tx) = (secret.clone(), down.clone(), tx.clone());
+            let (slow, at_once, most) = (slow.clone(), at_once.clone(), most.clone());
             async move {
                 if !signed(&secret.lock().unwrap(), &headers, &body) {
                     return (StatusCode::UNAUTHORIZED, String::new());
@@ -99,6 +106,12 @@ async fn endpoint() -> Endpoint {
                 let delivery: Value = serde_json::from_slice(&body).unwrap();
                 if let Some(challenge) = delivery["challenge"].as_str() {
                     return (StatusCode::OK, json!({ "challenge": challenge }).to_string());
+                }
+                if slow.load(Ordering::SeqCst) {
+                    let now = at_once.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    at_once.fetch_sub(1, Ordering::SeqCst);
                 }
                 let replies: Vec<Value> = delivery["events"]
                     .as_array()
@@ -116,7 +129,7 @@ async fn endpoint() -> Endpoint {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    Endpoint { url: format!("http://{addr}/fuwa"), secret, down, deliveries }
+    Endpoint { url: format!("http://{addr}/fuwa"), secret, down, slow, most_at_once, deliveries }
 }
 
 impl Endpoint {
@@ -361,5 +374,101 @@ async fn endpoints_stay_on_public_addresses_unless_allowed() {
         ))
         .await;
     assert_eq!(set.unwrap_err().code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn an_agent_has_one_delivery_in_flight_whatever_its_servers() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_AGENT_ENDPOINTS", "any")]).await;
+    let channel = instance.channel.clone();
+    let mut auth = pb::auth_service_client::AuthServiceClient::new(channel.clone());
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    let mut channels = pb::channel_service_client::ChannelServiceClient::new(channel.clone());
+    let mut messages = pb::message_service_client::MessageServiceClient::new(channel.clone());
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let owner = auth
+        .sign_up(pb::SignUpRequest {
+            username: "juan".into(),
+            password: "correct horse battery".into(),
+            display_name: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .token;
+    let made = agents
+        .create_agent(authed(&owner, pb::CreateAgentRequest { username: "dice".into(), display_name: "Dice".into() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let agent_id = made.agent.unwrap().user.unwrap().id;
+    // The agent is in two servers.
+    let mut places = Vec::new();
+    for name in ["Waifu Devs", "Rin's Room"] {
+        let server_id = servers
+            .create_server(authed(&owner, pb::CreateServerRequest { name: name.into(), ..Default::default() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .server
+            .unwrap()
+            .id;
+        let general_id = channels
+            .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server_id.clone() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .channels
+            .into_iter()
+            .find(|c| c.name == "general")
+            .unwrap()
+            .id;
+        agents
+            .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into() }))
+            .await
+            .unwrap();
+        places.push((server_id, general_id));
+    }
+    let got = agents
+        .get_agent_endpoint(authed(&owner, pb::GetAgentEndpointRequest { agent_id: agent_id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .endpoint
+        .unwrap();
+    let mut endpoint = endpoint().await;
+    *endpoint.secret.lock().unwrap() = got.secret;
+    agents
+        .set_agent_endpoint(authed(
+            &owner,
+            pb::SetAgentEndpointRequest { agent_id, url: endpoint.url.clone(), events: vec!["message_created".into()] },
+        ))
+        .await
+        .unwrap();
+
+    // A slow endpoint gets its servers' deliveries one after another, never two at once.
+    endpoint.slow.store(true, Ordering::SeqCst);
+    for round in 0..2 {
+        for (server_id, general_id) in &places {
+            let request = pb::SendMessageRequest {
+                server_id: server_id.clone(),
+                channel_id: general_id.clone(),
+                content: format!("round {round}"),
+                ..Default::default()
+            };
+            messages.send_message(authed(&owner, request)).await.unwrap();
+        }
+    }
+    let mut heard = 0;
+    while heard < 4 {
+        let delivery = tokio::time::timeout(Duration::from_secs(15), endpoint.deliveries.recv())
+            .await
+            .expect("nothing came")
+            .unwrap();
+        heard += delivery["events"].as_array().unwrap().iter().filter(|e| e.get("messageCreated").is_some()).count();
+    }
+    assert_eq!(endpoint.most_at_once.load(Ordering::SeqCst), 1);
+
     instance.stop().await;
 }
