@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  FeedbackPace,
   asksForHelp,
   commentBody,
+  defanged,
   feedbackOf,
   feedbackOfPost,
   handled,
@@ -36,6 +38,25 @@ test("quoted feedback names nobody and pings nobody", () => {
   assert.ok(!text.includes("01J"));
   assert.ok(text.includes(":blob:"));
   assert.ok(!/@[\w-]/.test(text));
+});
+
+test("links are broken so GitHub neither links nor loads them", () => {
+  assert.equal(defanged("see https://a.example/x and HTTP://b.example"), "see hxxps[:]//a.example/x and Hxxp[:]//b.example");
+  assert.equal(defanged("ftp://c.example"), "ftp[:]//c.example");
+  assert.equal(defanged("![x](//d.example/p.png) <img src=\"//e.example\">"), "![x]([/]/d.example/p.png) <img src=\"[/]/e.example\">");
+  assert.equal(defanged("www.f.example"), "www[.]f.example");
+  assert.equal(defanged("a/b // comment, 1:2"), "a/b // comment, 1:2", "ordinary text stays as it was");
+});
+
+test("each account sends so much feedback an hour", () => {
+  const pace = new FeedbackPace(2);
+  const h = 60 * 60_000;
+  assert.ok(pace.take("mika", 0) && pace.take("mika", 1));
+  assert.ok(!pace.take("mika", 2), "a third in the hour is one too many");
+  assert.ok(pace.take("rin", 2), "each account has its own");
+  assert.ok(pace.take("mika", h), "an hour after the first, there's room for one");
+  assert.ok(!pace.take("mika", h), "the second is still within the hour");
+  assert.ok(pace.take("mika", h + 1));
 });
 
 test("a team post gives its feedback back, until triage handles it", () => {

@@ -36,6 +36,59 @@ export function neutral(text: string): string {
     .replace(/@(?=[\w-])/g, `@${ZWSP}`);
 }
 
+/**
+ * Links that don't work as links, broken the way security write-ups do it:
+ * `hxxps[:]//`, any other `scheme[:]//`, `[/]/host` for addresses without a
+ * scheme and `www[.]`. GitHub neither links nor loads them: no picture
+ * fetched from someone's server, no link to click in an issue.
+ */
+export function defanged(text: string): string {
+  return text
+    .replace(/\b(h)ttp(?=s?:\/\/)/gi, "$1xxp")
+    .replace(/:\/\//g, "[:]//")
+    .replace(/(^|[\s("'=<])\/\/(?=[\w-])/g, "$1[/]/")
+    .replace(/\b(www)\./gi, "$1[.]");
+}
+
+/**
+ * Text Claude wrote from feedback, as it can go to GitHub: like the feedback
+ * itself, it names and pings nobody ({@link neutral}) and carries no live
+ * links ({@link defanged}), whatever the feedback asked it to write.
+ */
+export function forGitHub(text: string): string {
+  return defanged(neutral(text));
+}
+
+/**
+ * Each account's feedback in the last hour, so one person can't fill the
+ * team's channel (and each triage) on their own. Kept in memory: a restart
+ * starts everyone over.
+ */
+export class FeedbackPace {
+  #perHour: number;
+  #sent = new Map<string, number[]>();
+
+  constructor(perHour: number) {
+    this.#perHour = perHour;
+  }
+
+  /** Counts one piece of feedback from `accountId` at `now`; false when it's one too many. */
+  take(accountId: string, now: number): boolean {
+    const since = now - 60 * 60_000;
+    if (this.#sent.size > 10_000) {
+      for (const [id, times] of this.#sent) if (times.every((t) => t <= since)) this.#sent.delete(id);
+    }
+    const times = (this.#sent.get(accountId) ?? []).filter((t) => t > since);
+    if (times.length >= this.#perHour) {
+      this.#sent.set(accountId, times);
+      return false;
+    }
+    times.push(now);
+    this.#sent.set(accountId, times);
+    return true;
+  }
+}
+
 function quote(text: string): string {
   return text
     .split("\n")
@@ -77,20 +130,21 @@ export function withOutcome(content: string, outcome: string): string {
 
 /**
  * A new issue's body: Claude's summary, then every piece of feedback as it was
- * written. Nobody's name: GitHub gets the words alone.
+ * written. Nobody's name: GitHub gets the words alone, with no pings or live
+ * links ({@link forGitHub}).
  */
 export function issueBody(summary: string, feedback: string[], instance: string): string {
-  const said = feedback.map(quote).join("\n\n");
+  const said = feedback.map((f) => quote(forGitHub(f))).join("\n\n");
   const count = feedback.length === 1 ? "one piece of feedback" : `${feedback.length} pieces of feedback`;
   return (
-    `${summary.trim()}\n\n### What people said\n\n${said}\n\n---\n\n` +
+    `${forGitHub(summary.trim())}\n\n### What people said\n\n${said}\n\n---\n\n` +
     `Grouped from ${count} sent to @${ZWSP}fuwafuwa on ${instance}.\n`
   );
 }
 
 /** A comment adding feedback to an issue that was already open. */
 export function commentBody(feedback: string[], instance: string): string {
-  const said = feedback.map(quote).join("\n\n");
+  const said = feedback.map((f) => quote(forGitHub(f))).join("\n\n");
   const more = feedback.length === 1 ? "More feedback" : `${feedback.length} more pieces of feedback`;
   return `${more} about this, sent to @${ZWSP}fuwafuwa on ${instance}:\n\n${said}\n`;
 }
