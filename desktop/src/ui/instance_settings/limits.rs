@@ -282,7 +282,7 @@ impl InstanceSettingsView {
 }
 
 /// Every cap a page shows: (path, a size), for the boxes they're typed in.
-pub(super) const CAPS: [(&str, bool); 31] = [
+pub(super) const CAPS: [(&str, bool); 32] = [
     ("servers_per_account", false),
     ("default_limits.members", false),
     ("default_limits.channels", false),

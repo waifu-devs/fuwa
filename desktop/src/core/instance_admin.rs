@@ -144,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 58] = [
+pub const PATHS: [&str; 59] = [
     "name",
     "public_url",
     "allowed_origins",
