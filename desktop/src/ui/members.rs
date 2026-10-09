@@ -3,6 +3,7 @@
 //! window's animations), and only the rows in sight are built, so a server
 //! with thousands of people scrolls like one with ten.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 use std::rc::Rc;
@@ -11,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Context, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    AnimationExt as _, Context, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 
 use crate::core::Core;
@@ -29,8 +30,12 @@ const ROW: f32 = 48.0;
 /// A section's heading is a 16px line with 4px under it, and 16px over it after the first.
 const HEADING: f32 = 20.0;
 const SECTION_GAP: f32 = 16.0;
-/// Rows rise in like this while the list is new, not as you scroll to them.
+/// How long someone who just joined is still sliding in.
 const ENTERING: Duration = Duration::from_millis(900);
+/// Lines glide to a new place like this (the web's `.member-line`: 0.4s, ease-out quint).
+const GLIDE: Duration = Duration::from_millis(400);
+/// The list's padding above its first line and below its last.
+const PAD: f32 = 16.0;
 
 pub enum MembersEvent {
     Open {
@@ -81,7 +86,11 @@ pub struct MembersView {
     pub server: String,
     rows: Rc<Vec<Item>>,
     digest: u64,
-    born: Instant,
+    /// Where each line's top was last time, by its key, and each line's in order.
+    tops: HashMap<String, f32>,
+    order: Vec<f32>,
+    /// Lines on their way to a new place: how far off it they started, and when.
+    moving: Rc<HashMap<String, (f32, Instant)>>,
     /// Everyone in the server last time, and who wasn't, since when: they slide in.
     known: std::collections::HashSet<String>,
     joined: Option<Rc<(std::collections::HashSet<String>, Instant)>>,
@@ -109,7 +118,9 @@ impl MembersView {
             server,
             rows: Rc::default(),
             digest: 0,
-            born: Instant::now(),
+            tops: HashMap::new(),
+            order: Vec::new(),
+            moving: Rc::default(),
             known: Default::default(),
             joined: None,
             list,
@@ -164,11 +175,80 @@ impl MembersView {
                 }
             }
             self.known = ids;
-            self.list.reset(rows.len());
+            self.place(&rows, cx.reduce_motion());
             self.rows = Rc::new(rows);
             cx.notify();
         }
     }
+}
+
+impl MembersView {
+    /// Works out where each line now sits, keeps the list where it was scrolled
+    /// to, and sets the lines that were in sight gliding from where they were
+    /// to where they are (the web's `transform` transition). Lines that weren't
+    /// in sight just appear, as they do on the web.
+    fn place(&mut self, rows: &[Item], still: bool) {
+        let mut top = 0.0;
+        let mut order = Vec::with_capacity(rows.len());
+        let mut tops = HashMap::with_capacity(rows.len());
+        for (n, item) in rows.iter().enumerate() {
+            order.push(top);
+            tops.insert(key(item), top);
+            top += height(item, n, rows.len());
+        }
+        // Where the list was scrolled to, in pixels, and how much of it showed.
+        let at = self.list.logical_scroll_top();
+        let scrolled = self.order.get(at.item_ix).copied().unwrap_or(0.0) + f32::from(at.offset_in_item);
+        let seen = f32::from(self.list.viewport_bounds().size.height).max(ROW);
+        let mut moving = HashMap::new();
+        if !still {
+            let now = Instant::now();
+            for (k, &to) in &tops {
+                let Some(&was) = self.tops.get(k) else { continue };
+                // Still on its way somewhere: it carries on from where it is.
+                let off = self.moving.get(k).map_or(0.0, |&(from, at)| glide_offset(from, at));
+                let from = was + off - to;
+                let in_sight = was + off + ROW >= scrolled && was + off <= scrolled + seen;
+                if from.abs() > 0.5 && in_sight {
+                    moving.insert(k.clone(), (from, now));
+                }
+            }
+        }
+        self.list.reset(rows.len());
+        // Back to where it was scrolled to (resetting goes to the top).
+        if scrolled > 0.0 {
+            let ix = order.partition_point(|&t| t <= scrolled).saturating_sub(1);
+            let offset = scrolled - order.get(ix).copied().unwrap_or(0.0);
+            self.list.scroll_to(gpui_kit::ListOffset { item_ix: ix, offset_in_item: px(offset) });
+        }
+        self.tops = tops;
+        self.order = order;
+        self.moving = Rc::new(moving);
+    }
+}
+
+/// A line's key, the same wherever it moves: a person's id, or a heading's name.
+fn key(item: &Item) -> String {
+    match item {
+        Item::Heading(name, ..) => format!("h|{name}"),
+        Item::Member(r) => format!("u|{}", r.user.id),
+    }
+}
+
+/// How tall line `n` of `count` is, with the list's padding on the first and last.
+fn height(item: &Item, n: usize, count: usize) -> f32 {
+    let own = match item {
+        Item::Heading(..) if n == 0 => HEADING,
+        Item::Heading(..) => HEADING + SECTION_GAP,
+        Item::Member(_) => ROW,
+    };
+    own + if n == 0 { PAD } else { 0.0 } + if n + 1 == count { PAD } else { 0.0 }
+}
+
+/// How far off its place a line that started `from` away at `at` is now.
+fn glide_offset(from: f32, at: Instant) -> f32 {
+    let t = (at.elapsed().as_secs_f32() / GLIDE.as_secs_f32()).min(1.0);
+    from * (1.0 - gpui_kit::ease_out_quint()(t))
 }
 
 /// The list's lines, from what's known of a server's people: everyone online
@@ -247,7 +327,7 @@ impl Render for MembersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let rows = self.rows.clone();
-        let entering = self.born.elapsed() < ENTERING;
+        let moving = self.moving.clone();
         let this = cx.entity().downgrade();
         // The web's list: 16px above and below, 8px at the sides.
         let joined = self.joined.clone();
@@ -259,16 +339,23 @@ impl Render for MembersView {
                 Some(Item::Heading(name, color, members)) => heading(name, *color, *members, n, first, &p, window, cx),
                 Some(Item::Member(row)) => {
                     let fresh = joined.as_ref().is_some_and(|j| j.1.elapsed() < ENTERING && j.0.contains(&row.user.id));
-                    member_row(row, n, entering, fresh, &p, this.clone(), window, cx)
+                    member_row(row, fresh, &p, this.clone(), window, cx)
                 }
                 None => div().into_any_element(),
             };
-            div()
-                .px(px(8.0))
-                .when(first, |el| el.pt(px(16.0)))
-                .when(last, |el| el.pb(px(16.0)))
-                .child(el)
-                .into_any_element()
+            let line = div().px(px(8.0)).when(first, |el| el.pt(px(PAD))).when(last, |el| el.pb(px(PAD))).child(el);
+            // A line that moved glides from where it was.
+            let glide = rows.get(n).map(key).and_then(|k| moving.get(&k).map(|&m| (k, m)));
+            match glide {
+                Some((k, (from, at))) if at.elapsed() < GLIDE => line
+                    .with_animation(
+                        SharedString::from(format!("member-glide|{k}|{at:?}")),
+                        gpui_kit::Animation::new(GLIDE),
+                        move |el, _| el.translate_y(px(glide_offset(from, at))),
+                    )
+                    .into_any_element(),
+                _ => line.into_any_element(),
+            }
         })
         .flex_1();
         div().size_full().flex().flex_col().bg(p.side_surface).border_l_1().border_color(p.border).child(list)
@@ -337,8 +424,6 @@ pub(crate) fn around_count(text: &str, count: usize) -> Option<(String, String)>
 #[allow(clippy::too_many_arguments)]
 fn member_row(
     row: &Row,
-    n: usize,
-    entering: bool,
     fresh: bool,
     p: &crate::ui::theme::Palette,
     this: gpui_kit::WeakEntity<MembersView>,
@@ -407,6 +492,7 @@ fn member_row(
                 .flex_none()
                 .mr(px(6.0))
                 .group_hover("member", |s| s.scale(1.05))
+                .group_active("member", |s| s.scale(0.95))
                 .child(crate::ui::widgets::decorated(avatar(Some(user), 32.0, p), 32.0, row.decoration.as_deref()))
                 .when_some(row.status.filter(|s| *s != pb::PresenceStatus::Offline), |el, status| {
                     el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, opaque(p.side_surface).into(), p))
@@ -488,15 +574,6 @@ fn member_row(
         // Someone who just joined slides in from the side.
         motion::slide_in(div().child(el), SharedString::from(format!("member-joined|{}", user.id)), 16.0)
             .into_any_element()
-    } else if entering && n < 24 {
-        // Wrapped, so the rise's opacity doesn't replace the row's own (offline people are faded).
-        motion::rise(
-            div().child(el),
-            SharedString::from(format!("member-in|{}", user.id)),
-            Duration::from_millis((14 * n) as u64),
-            6.0,
-        )
-        .into_any_element()
     } else {
         el.into_any_element()
     }

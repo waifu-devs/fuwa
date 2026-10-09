@@ -16,7 +16,7 @@ use crate::core::backup::{self, Status};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
-use crate::ui::settings_controls::{Look, button, caps, field};
+use crate::ui::settings_controls::{IconHover, Look, button, button_with, caps, field};
 use crate::ui::settings_data::bytes;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::icon;
@@ -471,7 +471,8 @@ impl SettingsView {
                                 .flex_wrap()
                                 .gap(px(8.0))
                                 .child(
-                                    button(
+                                    // The web's arrow stays still here.
+                                    button_with(
                                         "backup-new-key",
                                         if full {
                                             t("accountsettings.backup.startOverHere")
@@ -479,6 +480,7 @@ impl SettingsView {
                                             t("accountsettings.backup.newKey")
                                         },
                                         Some("rotate-ccw"),
+                                        IconHover::Still,
                                         Look::Outline,
                                         true,
                                         p,

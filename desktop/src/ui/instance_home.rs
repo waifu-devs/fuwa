@@ -13,10 +13,10 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, BoxShadow, Context, Div, Entity, FontStyle, FontWeight, HighlightStyle,
-    Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Rgba, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, Task, Window, canvas, div, fill, hsla,
-    point, px, size,
+    Animation, AnimationExt as _, AnyElement, App, AppContext as _, Bounds, BoxShadow, Context, Div, Entity, FontStyle,
+    FontWeight, HighlightStyle, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Point, Rgba,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, Task, Window,
+    canvas, div, fill, hsla, point, px, size,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -444,6 +444,11 @@ impl FuwaApp {
             (format!("fuwa {}", n.version), commit)
         });
         let muted = p.muted_foreground;
+        // "Hosted by Waifu Devs" opens the same card as the sidebar's flower (the web's `HostedBadge`).
+        let hosted = hosted_by_us(&url).then(|| {
+            let host = if streamer { "•••••".to_owned() } else { key.replace('~', "/") };
+            crate::ui::sidebar::with_hosted_card(hosted_chip(p, window), "home", &host, false, window, cx)
+        });
         let status = div()
             .flex()
             .flex_wrap()
@@ -464,7 +469,7 @@ impl FuwaApp {
                     el.child(div().font_family("monospace").font_weight(FontWeight::BOLD).child(format!(" · {commit}")))
                 }))
             })
-            .when(hosted_by_us(&url), |el| el.child(hosted_chip(p)));
+            .when_some(hosted, |el, chip| el.child(chip));
         let welcome = template_text("workspace.home.welcome");
         let (before, after) = welcome.split_once("{name}").unwrap_or((welcome.as_str(), ""));
         let title = div()
@@ -472,7 +477,11 @@ impl FuwaApp {
             .text_size(px(36.0))
             .line_height(px(40.0))
             .font_weight(FontWeight::EXTRA_BOLD)
-            .child(gradient_text(before, &name, after, p));
+            .flex()
+            .flex_wrap()
+            .when(!before.is_empty(), |el| el.child(div().child(tracked(before.to_owned(), TIGHT))))
+            .child(swapped_name(&name, p, window, cx))
+            .when(!after.is_empty(), |el| el.child(div().child(tracked(after.to_owned(), TIGHT))));
         let create = hero_button("home-create", "plus", &t("workspace.home.create"), p).on_click(cx.listener({
             let k = key.to_owned();
             move |this, _, window, cx| this.open_dialog(Dialog::CreateServer { key: k.clone() }, window, cx)
@@ -746,8 +755,9 @@ impl FuwaApp {
         let hover = p.primary;
         let glow = alpha(p.primary, 0.55);
         let r = f32::from(radius_3xl());
-        div()
-            .id(SharedString::from(format!("card|{key}|{}", server.id)))
+        let card_id = SharedString::from(format!("card|{key}|{}", server.id));
+        let card = div()
+            .id(card_id.clone())
             .relative()
             .h_full()
             .flex()
@@ -812,7 +822,12 @@ impl FuwaApp {
                                         .line_height(px(16.0))
                                         .text_color(p.muted_foreground)
                                         .child(icon("users").size(px(14.0)))
-                                        .child(t_with("workspace.home.members", &[("count", Arg::Num(members))])),
+                                        .child(motion::counted(
+                                            format!("browse-members|{}", server.id),
+                                            "workspace.home.members",
+                                            members.max(0) as u64,
+                                            12.0,
+                                        )),
                                 ),
                         ),
                     )
@@ -832,8 +847,8 @@ impl FuwaApp {
                     )
                     .children(server_door(server, p))
                     .child(self.join_button(key, server, "", false, None, p, window, cx)),
-            )
-            .into_any_element()
+            );
+        pointer_glow(card, &card_id, p.primary, window, cx).into_any_element()
     }
 
     /// The one way into a server, as Browse cards and invite pages show it:
@@ -1212,6 +1227,88 @@ fn gradient_text(before: &str, name: &str, after: &str, p: &Palette) -> Tracked 
     tracked(text, TIGHT).letter_colors(colors)
 }
 
+/// A light under the pointer over a Browse card, fading in while it's pointed
+/// at (the web's `.tilt::after`: a 240px radial glow of the primary at 22%,
+/// gone 70% of the way out). GPUI has no radial gradient, so it's rings of
+/// the color laid over each other.
+fn pointer_glow(
+    card: Stateful<Div>,
+    id: &SharedString,
+    color: Rgba,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let at = window.use_keyed_state(SharedString::from(format!("{id}|glow-at")), cx, |_, _| None::<Point<Pixels>>);
+    let spot = *at.read(cx);
+    let (card, now) = motion::pointer(card, id, window, cx);
+    let shown =
+        motion::follow(SharedString::from(format!("{id}|glow")), if now.hovered { 1.0 } else { 0.0 }, window, cx);
+    let card = card.on_mouse_move(move |e: &gpui_kit::MouseMoveEvent, _, cx| {
+        at.update(cx, |a, cx| {
+            *a = Some(e.position);
+            cx.notify();
+        })
+    });
+    let Some(spot) = spot.filter(|_| shown > 0.01) else { return card };
+    let glow = canvas(
+        |_, _, _| (),
+        move |_, (), window, _| {
+            const RINGS: usize = 12;
+            // Each ring adds a little, so the middle comes to 22%.
+            let a = 1.0 - (1.0 - 0.22f32).powf(1.0 / RINGS as f32);
+            for n in 0..RINGS {
+                let radius = 240.0 * 0.7 * (1.0 - n as f32 / RINGS as f32);
+                let b = Bounds::new(
+                    point(spot.x - px(radius), spot.y - px(radius)),
+                    size(px(radius * 2.0), px(radius * 2.0)),
+                );
+                window.paint_quad(fill(b, Rgba { a: a * shown, ..color }).corner_radii(px(radius)));
+            }
+        },
+    )
+    .size_full();
+    card.child(div().absolute().inset_0().overflow_hidden().rounded(radius_3xl()).child(glow))
+}
+
+/// What the welcome's name was, and how many times it has changed.
+struct Named {
+    now: String,
+    before: Option<String>,
+    changes: u64,
+}
+
+/// The instance's name in its colors, sliding to a new one when it changes
+/// (the web's `SwapText` around it): the new name rises `0.6em` into place
+/// while the old one rises out, on the web's `SPRING`. Nothing moves the first time.
+fn swapped_name(name: &str, p: &Palette, window: &mut Window, cx: &mut App) -> AnyElement {
+    let state =
+        window.use_keyed_state("home-name|swap", cx, |_, _| Named { now: name.to_owned(), before: None, changes: 0 });
+    let (before, changes) = state.update(cx, |s, _| {
+        if s.now != name {
+            s.before = Some(std::mem::replace(&mut s.now, name.to_owned()));
+            s.changes += 1;
+        }
+        (s.before.clone(), s.changes)
+    });
+    let now = div().child(gradient_text("", name, "", p));
+    let Some(before) = before else { return now.into_any_element() };
+    let distance = 36.0 * 0.6;
+    let spring = gpui_kit::SpringConfig::new(520.0, 34.0, 1.0);
+    let (duration, easing) = gpui_kit::sampled_easing(spring, 0.002);
+    let (_, out_easing) = gpui_kit::sampled_easing(spring, 0.002);
+    let incoming = now.with_animation(
+        SharedString::from(format!("home-name|in{changes}")),
+        Animation::new(duration).with_easing(easing),
+        move |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * distance)),
+    );
+    let outgoing = div().absolute().top_0().left_0().child(gradient_text("", &before, "", p)).with_animation(
+        SharedString::from(format!("home-name|out{changes}")),
+        Animation::new(duration).with_easing(out_easing),
+        move |el, t| el.opacity((1.0 - t).clamp(0.0, 1.0)).translate_y(px(-t * distance)),
+    );
+    div().relative().child(incoming).child(outgoing).into_any_element()
+}
+
 fn lerp(a: Hsla, b: Hsla, f: f32) -> Hsla {
     let (a, b): (Rgba, Rgba) = (a.into(), b.into());
     Rgba { r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f, a: a.a + (b.a - a.a) * f }
@@ -1291,8 +1388,18 @@ pub(crate) fn hosted_by_us(url: &str) -> bool {
     u.scheme() == "https" && (host == "fuwa.chat" || host.ends_with(".fuwa.chat"))
 }
 
-fn hosted_chip(p: &Palette) -> Div {
+/// The "Hosted by Waifu Devs" pill: pressed, it opens the hosted card; it
+/// brightens on hover and gives under a press.
+fn hosted_chip(p: &Palette, window: &Window) -> Stateful<Div> {
+    let hover = alpha(p.primary, 0.2);
     div()
+        .id("hosted-chip")
+        .group("hosted-chip")
+        .relative()
+        .overflow_hidden()
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .active(|s| s.scale(0.95))
         .flex()
         .items_center()
         .gap(px(6.0))
@@ -1306,7 +1413,14 @@ fn hosted_chip(p: &Palette) -> Div {
         .text_color(p.primary)
         .text_size(px(12.0))
         .font_weight(FontWeight::BOLD)
-        .child(icon("flower").size(px(14.0)))
+        // A glint crosses it every 6 seconds (`.hosted-chip::after`), and the flower turns a fifth on hover.
+        .child(crate::ui::profile_card::glint("hosted-chip-glint", 150.0, (6.0, 1.4, 0.6), window))
+        .child(
+            div()
+                .id("hosted-chip-flower")
+                .group_hover("hosted-chip", |s| s.rotate(gpui_kit::radians(72f32.to_radians())))
+                .child(icon("flower").size(px(14.0))),
+        )
         .child(t("shell.hosted.label"))
 }
 
@@ -1440,6 +1554,7 @@ pub(crate) fn provider_button(
         .when(waiting, |el| el.opacity(0.85))
         // `whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}`.
         .when(!waiting, |el| el.cursor_pointer().hover(|s| s.translate_y(px(-2.0))).active(|s| s.scale(0.97)))
+        .child(crate::ui::connect::shine(SharedString::from(format!("provider-shine|{label}")), p))
         .child(glyph)
         .child(div().min_w_0().truncate().child(label.to_owned()))
         // The arrow nudges along on hover, and slips away while the browser's out.

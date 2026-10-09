@@ -117,6 +117,9 @@ pub struct CallView {
     pub since: Option<Instant>,
     /// Who's speaking now, by account id (yours too).
     pub speaking: HashSet<String>,
+    /// Whose shared screens are playing something now, by account id (the
+    /// web's `useSpeaking(feedOf(id, true))`), found like `speaking`.
+    pub playing: HashSet<String>,
     /// The microphone or speakers that couldn't open.
     pub trouble: Vec<Trouble>,
     pub quality: Quality,
@@ -459,6 +462,7 @@ impl Core {
             instance_camera: ceiling::Ceiling::NONE,
             since: None,
             speaking: HashSet::new(),
+            playing: HashSet::new(),
             trouble: vec![],
             quality: Quality::default(),
             video_suppress: false,
@@ -667,6 +671,7 @@ impl Core {
                 f(view);
                 before.status != view.status
                     || before.speaking != view.speaking
+                    || before.playing != view.playing
                     || before.trouble != view.trouble
                     || before.quality != view.quality
                     || before.server_recordings != view.server_recordings
@@ -996,6 +1001,7 @@ async fn run(
         view(&|v| {
             v.status = if ever_connected { Status::Reconnecting } else { Status::Connecting };
             v.speaking.clear();
+            v.playing.clear();
             v.screen_sounds.clear();
             v.quality = Quality::default();
         });
@@ -1369,6 +1375,7 @@ impl Running<'_> {
             frames.set_secret(epoch, secret);
         }
         let mut speaking = HashSet::new();
+        let mut playing = HashSet::new();
         // A microphone running a touch faster than this clock would pile up
         // delay: past 160 ms behind (more than a device hands over at once),
         // the oldest goes.
@@ -1412,8 +1419,13 @@ impl Running<'_> {
         } else {
             for who in mixer.mix(out) {
                 // A shared screen's sound isn't its sharer speaking.
-                if !who.ends_with("-screen") {
-                    speaking.insert(who);
+                match who.strip_suffix("-screen") {
+                    Some(sharer) => {
+                        playing.insert(sharer.to_string());
+                    }
+                    None => {
+                        speaking.insert(who);
+                    }
                 }
             }
             if volumes.output != 1.0 {
@@ -1441,6 +1453,7 @@ impl Running<'_> {
         }
         (self.view)(&|v| {
             v.speaking = speaking.clone();
+            v.playing = playing.clone();
             v.trouble = trouble.clone();
         });
     }

@@ -427,6 +427,54 @@ impl FuwaApp {
 
 // ───────────────────────── Drawing ─────────────────────────
 
+/// Up to three faces, overlapping, each in a ring of the page's colour (the
+/// web's `Faces`): someone who joins the thread while it's in sight pops in,
+/// while the faces there when it first showed are simply there.
+#[derive(IntoElement)]
+struct Faces {
+    id: SharedString,
+    users: Vec<pb::User>,
+    size: f32,
+    ring: gpui_kit::Rgba,
+}
+
+impl gpui_kit::RenderOnce for Faces {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        let first: std::collections::HashSet<String> = self.users.iter().map(|u| u.id.clone()).collect();
+        let there = window.use_keyed_state(SharedString::from(format!("{}|there", self.id)), cx, |_, _| first);
+        let p = pal(cx);
+        let there = there.read(cx);
+        let (size, ring) = (self.size, self.ring);
+        div().flex().flex_none().children(self.users.iter().enumerate().map(|(n, u)| {
+            let face = div().relative().size(px(size)).when(n > 0, |el| el.ml(px(-6.0))).child(
+                div()
+                    .absolute()
+                    .left(px(-2.0))
+                    .top(px(-2.0))
+                    .size(px(size + 4.0))
+                    .rounded_full()
+                    .bg(ring)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(avatar(Some(u), size, &p)),
+            );
+            if there.contains(&u.id) {
+                face.into_any_element()
+            } else {
+                // `initial={{ scale: 0, opacity: 0 }}` on the `SPRING`, 40ms apart.
+                motion::spring_in(
+                    face,
+                    SharedString::from(format!("{}|in|{}", self.id, u.id)),
+                    (520.0, 34.0),
+                    Duration::from_millis(40 * n as u64),
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(t.max(0.0)),
+                )
+            }
+        }))
+    }
+}
+
 /// The row under a message with replies: who replied, how many, and how
 /// recently. Clicking it opens the thread.
 pub(crate) fn replies_row(
@@ -471,21 +519,12 @@ pub(crate) fn replies_row(
                 let _ = this.update(cx, |this, cx| this.open_thread(open, window, cx));
             })
             // Up to three faces, overlapping, each in a ring of the page's colour.
-            .child(div().flex().flex_none().children(r.faces.iter().enumerate().map(|(n, u)| {
-                div().relative().size(px(20.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
-                    div()
-                        .absolute()
-                        .left(px(-2.0))
-                        .top(px(-2.0))
-                        .size(px(24.0))
-                        .rounded_full()
-                        .bg(p.background)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(avatar(Some(u), 20.0, p)),
-                )
-            })))
+            .child(Faces {
+                id: SharedString::from(format!("faces|{id}")),
+                users: r.faces.clone(),
+                size: 20.0,
+                ring: p.background,
+            })
             // The count rolls when replies come in (the web's `Count`).
             .child(
                 crate::ui::motion::counted(
@@ -697,7 +736,7 @@ impl FuwaApp {
             })
             .when(pins_here, |el| {
                 let open = self.pins.as_ref().is_some_and(|p| p.of_thread(&open.id));
-                el.child(self.pins_button("thread-pins", open, cx))
+                el.child(self.pins_button_in("thread-pins", open, window, cx))
             })
             .child(
                 panel_button("thread-jump", "corner-up-left", t("chat.threads.jump"), false)
@@ -1229,21 +1268,12 @@ impl FuwaApp {
                                 .gap(px(8.0))
                                 .text_xs()
                                 .line_height(px(16.0))
-                                .child(div().flex().flex_none().children(faces.iter().enumerate().map(|(n, u)| {
-                                    div().relative().size(px(16.0)).when(n > 0, |el| el.ml(px(-6.0))).child(
-                                        div()
-                                            .absolute()
-                                            .left(px(-2.0))
-                                            .top(px(-2.0))
-                                            .size(px(20.0))
-                                            .rounded_full()
-                                            .bg(p.background)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(avatar(Some(u), 16.0, &p)),
-                                    )
-                                })))
+                                .child(Faces {
+                                    id: SharedString::from(format!("faces|list|{}", m.id)),
+                                    users: faces,
+                                    size: 16.0,
+                                    ring: p.background,
+                                })
                                 .child(div().font_weight(FontWeight::BOLD).text_color(p.primary).child(t_with(
                                     "chat.threads.replies",
                                     &[("count", Arg::Num(i64::from(summary.reply_count)))],

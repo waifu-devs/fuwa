@@ -3,13 +3,9 @@
 //! what it can do and who has it. @everyone sits at the bottom and holds what
 //! everybody can do. The web's `settings/server/Roles.tsx`.
 
-use std::rc::Rc;
-
-use gpui_kit::component::Disableable as _;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::rgb;
 
-use gpui_kit::{Render, Stateful, point};
+use gpui_kit::{Render, RenderOnce, Stateful, point};
 
 use super::pages::form_row;
 use super::*;
@@ -286,7 +282,8 @@ pub(super) fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
     }
 }
 
-/// A switch that calls back into the page.
+/// A switch that calls back into the page: the settings' own (`settings_controls::switch`),
+/// whose thumb stretches while it's held, drawn once the window is at hand.
 pub(crate) fn switch<V: 'static>(
     id: SharedString,
     on: bool,
@@ -295,11 +292,39 @@ pub(crate) fn switch<V: 'static>(
     set: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
 ) -> impl IntoElement {
     let entity = cx.entity().downgrade();
-    let set = Rc::new(set);
-    Switch::new(id).checked(on).disabled(disabled).on_change(move |checked, _, cx| {
-        let (set, checked) = (set.clone(), *checked);
-        let _ = entity.update(cx, |this, cx| set(this, checked, cx));
-    })
+    PageSwitch {
+        id,
+        on,
+        disabled,
+        flip: Box::new(move |cx| {
+            let _ = entity.update(cx, |this, cx| set(this, !on, cx));
+        }),
+    }
+}
+
+/// A [`switch`] waiting to be drawn.
+#[derive(IntoElement)]
+pub(crate) struct PageSwitch {
+    id: SharedString,
+    on: bool,
+    disabled: bool,
+    flip: Box<dyn Fn(&mut gpui_kit::App)>,
+}
+
+impl RenderOnce for PageSwitch {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        let p = crate::ui::theme::palette(cx);
+        let flip = self.flip;
+        crate::ui::settings_controls::switch_track(self.id, self.on, self.disabled, &p, window, cx).when(
+            !self.disabled,
+            move |el| {
+                el.cursor_pointer().on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    flip(cx)
+                })
+            },
+        )
+    }
 }
 
 impl ServerSettingsView {

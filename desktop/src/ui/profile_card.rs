@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Bounds, BoxShadow, Context, Entity, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Point, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    canvas, div, point, px, rgb,
+    AnyElement, AppContext as _, Bounds, BoxShadow, Context, Div, Entity, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Point, SharedString, Stateful, StatefulInteractiveElement as _,
+    Styled as _, Window, canvas, div, point, px, rgb,
 };
 
 use crate::core::dms::{DmStatus, now_ms};
@@ -113,6 +113,8 @@ pub struct People {
     pub reason: Entity<TextareaState>,
     /// The dialog the reason box was last emptied and focused for.
     pub reason_for: Option<String>,
+    /// When the gavel started swinging before a ban went through.
+    pub swung: Option<Instant>,
     effect: Entity<EffectView>,
 }
 
@@ -127,6 +129,7 @@ impl People {
             closed: None,
             reason: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6)),
             reason_for: None,
+            swung: None,
             effect: cx.new(|_| EffectView::new()),
         }
     }
@@ -153,22 +156,28 @@ pub(crate) fn shadow_md() -> Vec<BoxShadow> {
     ]
 }
 
-/// The web's `.shine`: a soft white band sweeping across a button of `width`
-/// now and then (1.5 seconds of every 7, starting 1.2 seconds in).
-fn glint(id: &'static str, width: f32, window: &Window) -> AnyElement {
+/// The web's `.shine`: a soft white band sweeping across something `width`
+/// wide now and then: the first 22% of every `period` seconds, `after`
+/// seconds in, at `white` at its brightest (`.shine` is 7, 1.2 and 0.45).
+pub(crate) fn glint(
+    id: &'static str,
+    width: f32,
+    (period, after, white): (f32, f32, f32),
+    window: &Window,
+) -> AnyElement {
     let band = width * 0.4;
-    let white = |a: f32| gpui_kit::hsla(0.0, 0.0, 1.0, a);
+    let tint = |a: f32| gpui_kit::hsla(0.0, 0.0, 1.0, a);
     let half = |from: f32, to: f32| {
         div().h_full().w(px(band * 0.5)).bg(gpui_kit::linear_gradient(
             100.0,
-            gpui_kit::linear_color_stop(white(from), 0.0),
-            gpui_kit::linear_color_stop(white(to), 1.0),
+            gpui_kit::linear_color_stop(tint(from), 0.0),
+            gpui_kit::linear_color_stop(tint(to), 1.0),
         ))
     };
-    let el = div().absolute().top_0().bottom_0().w(px(band)).flex().child(half(0.0, 0.45)).child(half(0.45, 0.0));
-    motion::ambient(el, id, Duration::from_millis(7000), window, move |el, t| {
-        // Where in its 7 seconds the glint is, 1.2 seconds behind the clock.
-        let k = ((t * 7.0 - 1.2).rem_euclid(7.0) / 7.0) / 0.22;
+    let el = div().absolute().top_0().bottom_0().w(px(band)).flex().child(half(0.0, white)).child(half(white, 0.0));
+    motion::ambient(el, id, Duration::from_secs_f32(period), window, move |el, t| {
+        // Where in its period the glint is, `after` seconds behind the clock.
+        let k = ((t * period - after).rem_euclid(period) / period) / 0.22;
         let k = if k < 1.0 { 0.5 - 0.5 * (k * std::f32::consts::PI).cos() } else { 1.0 };
         el.left(px(band * (-1.2 + 4.4 * k)))
     })
@@ -370,7 +379,7 @@ impl FuwaApp {
                         .cursor_pointer()
                         .hover(|s| s.opacity(0.92))
                         .active(|s| s.scale(0.96))
-                        .child(glint("profile-message-glint", WIDTH - 24.0, window))
+                        .child(glint("profile-message-glint", WIDTH - 24.0, (7.0, 1.2, 0.45), window))
                         // The bubble tips and grows, and the padlock nudges over, while pointed at.
                         .child(
                             div()
@@ -500,7 +509,13 @@ impl FuwaApp {
             gpui_kit::anchored()
                 .position(point(px(x), px(top.max(EDGE))))
                 .snap_to_window_with_margin(gpui_kit::Edges::all(px(EDGE)))
-                .child(popover),
+                // Closed, it shrinks to 95% and sinks 4px as it fades (the web's `exit`).
+                .child(crate::ui::overlay::leaving_pose(
+                    div().transform_origin(if from_right { 1.0 } else { 0.0 }, 0.0).child(popover),
+                    4.0,
+                    0.95,
+                    cx,
+                )),
         );
         if let (Some(at), Some(sid)) = (self.people.roles_menu, server) {
             layer = layer.child(self.roles_menu(key, sid, user_id, &f, at, &p, cx));
@@ -841,8 +856,38 @@ impl FuwaApp {
         }
         let server = f.member.as_ref().map(|m| m.server_id.clone()).unwrap_or_default();
         let busy = self.people.busy_role.clone();
+        let (fresh, gone) = chip_changes(user_id, &f.held, window, cx);
+        let mut gone = gone.into_iter().peekable();
         let mut chips = div().flex().flex_wrap().gap(px(4.0));
-        for (role, removable) in &f.held {
+        let chip_look = |el: Stateful<Div>| {
+            el.h(px(24.0))
+                .max_w_full()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .rounded_full()
+                .border_1()
+                .border_color(p.border)
+                .bg(alpha(p.background, 0.7))
+                .pl(px(6.0))
+                .pr(px(8.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+        };
+        // A chip taken off shrinks away where it was (the web's `exit: { opacity: 0, scale: 0.6 }`).
+        let leaving = |role: &pb::Role, t: f32| {
+            let k = gpui_kit::ease_out_quint()(t);
+            chip_look(div().id(SharedString::from(format!("role-gone|{}", role.id))))
+                .opacity(1.0 - k)
+                .scale(1.0 - 0.4 * k)
+                .child(role_dot(role, p))
+                .child(div().truncate().child(role.name.clone()))
+                .into_any_element()
+        };
+        for (n, (role, removable)) in f.held.iter().enumerate() {
+            while let Some((role, t)) = gone.next_if(|(at, ..)| *at <= n).map(|(_, r, t)| (r, t)) {
+                chips = chips.child(leaving(&role, t));
+            }
             let dot = role_dot(role, p);
             let group = SharedString::from(format!("role-chip|{}", role.id));
             let lead = if *removable {
@@ -880,31 +925,25 @@ impl FuwaApp {
             } else {
                 dot.into_any_element()
             };
-            let chip = div()
-                .id(group.clone())
-                .group(group)
-                .h(px(24.0))
-                .max_w_full()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .rounded_full()
-                .border_1()
-                .border_color(p.border)
-                .bg(alpha(p.background, 0.7))
-                .pl(px(6.0))
-                .pr(px(8.0))
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
+            let chip = chip_look(div().id(group.clone()).group(group))
                 .when(busy.as_deref() == Some(role.id.as_str()), |el| el.opacity(0.5))
                 .child(lead)
                 .child(div().truncate().child(role.name.clone()));
-            chips = chips.child(motion::rise(
-                chip,
-                SharedString::from(format!("role-in|{user_id}|{}", role.id)),
-                Duration::ZERO,
-                2.0,
-            ));
+            // A chip just given pops in (the web's `initial={false}`: none as the card opens).
+            chips = chips.child(if fresh.contains(&role.id) {
+                motion::spring_in(
+                    div().child(chip),
+                    SharedString::from(format!("role-in|{user_id}|{}", role.id)),
+                    (520.0, 34.0),
+                    Duration::ZERO,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.6 + 0.4 * t),
+                )
+            } else {
+                chip.into_any_element()
+            });
+        }
+        for (_, role, t) in gone {
+            chips = chips.child(leaving(&role, t));
         }
         if !f.assignable.is_empty() {
             let open = self.people.roles_menu.is_some();
@@ -1120,6 +1159,63 @@ fn hue_banner(user_id: &str, w: f32, h: f32) -> std::sync::Arc<gpui_kit::Image> 
 }
 
 /// A role's color as a dot (`RoleDot`, size-3), grey for one without.
+/// The chips a card showed last time, and the ones taken off since, when.
+struct Chips {
+    user: String,
+    before: Vec<pb::Role>,
+    fresh: Vec<(String, Instant)>,
+    gone: Vec<(usize, pb::Role, Instant)>,
+}
+
+/// Which of `held` were just given (they pop in), and which were just taken
+/// off, where they were and how far out they are (0 to 1). Nothing moves as a
+/// card first shows someone's roles.
+fn chip_changes(
+    user_id: &str,
+    held: &[(pb::Role, bool)],
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> (Vec<String>, Vec<(usize, pb::Role, f32)>) {
+    let still = cx.reduce_motion();
+    let state = window.use_keyed_state("profile-role-chips", cx, |_, _| Chips {
+        user: user_id.to_owned(),
+        before: held.iter().map(|(r, _)| r.clone()).collect(),
+        fresh: Vec::new(),
+        gone: Vec::new(),
+    });
+    let (fresh, gone) = state.update(cx, |c, _| {
+        if c.user != user_id {
+            *c = Chips { user: user_id.to_owned(), before: Vec::new(), fresh: Vec::new(), gone: Vec::new() };
+        } else if !still {
+            for (n, r) in c.before.iter().enumerate() {
+                if !held.iter().any(|(h, _)| h.id == r.id) && !c.gone.iter().any(|(_, g, _)| g.id == r.id) {
+                    c.gone.push((n, r.clone(), Instant::now()));
+                }
+            }
+            for (r, _) in held {
+                if !c.before.iter().any(|b| b.id == r.id) {
+                    c.fresh.push((r.id.clone(), Instant::now()));
+                }
+            }
+        }
+        c.gone.retain(|(_, r, at)| at.elapsed() < motion::LEAVE && !held.iter().any(|(h, _)| h.id == r.id));
+        c.gone.sort_by_key(|(n, ..)| *n);
+        // Kept for a while, so the pop plays out across redraws.
+        c.fresh.retain(|(id, at)| at.elapsed() < Duration::from_secs(1) && held.iter().any(|(h, _)| h.id == *id));
+        c.before = held.iter().map(|(r, _)| r.clone()).collect();
+        let gone: Vec<_> = c
+            .gone
+            .iter()
+            .map(|(n, r, at)| (*n, r.clone(), at.elapsed().as_secs_f32() / motion::LEAVE.as_secs_f32()))
+            .collect();
+        (c.fresh.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(), gone)
+    });
+    if !gone.is_empty() {
+        window.request_animation_frame();
+    }
+    (fresh, gone)
+}
+
 pub(crate) fn role_dot(role: &pb::Role, p: &Palette) -> gpui_kit::Div {
     let color: Hsla = role.color.map(|c| rgb(c as u32).into()).unwrap_or(alpha(p.muted_foreground, 0.5));
     div().flex_none().size(px(12.0)).rounded_full().bg(color)

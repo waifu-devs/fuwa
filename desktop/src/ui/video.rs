@@ -201,19 +201,60 @@ pub(crate) fn pop_out_button(id: impl Into<SharedString>, label: String, group: 
 /// The sound button on a shared screen (the web's `ScreenSoundButton`):
 /// yours turns its sound off for everyone, the share going on; someone
 /// else's turns it off for you. Only there while sound comes, top left,
-/// popping in.
+/// popping in and shrinking away (`scale: 0.6`).
 pub(crate) fn screen_sound_button(
     core: &Arc<Core>,
     user_id: &str,
     mine: bool,
     tag: &str,
     p: &Palette,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Option<AnyElement> {
     let call = core.call()?;
-    let on = if mine { call.screen_sound? } else { !call.quiet_screens.contains(user_id) };
-    if !mine && !call.screen_sounds.contains(user_id) {
-        return None;
-    }
+    let playing = call.playing.contains(user_id);
+    let now = if mine {
+        call.screen_sound
+    } else {
+        call.screen_sounds.contains(user_id).then(|| !call.quiet_screens.contains(user_id))
+    };
+    let id = SharedString::from(format!("screen-sound|{tag}|{user_id}"));
+    let corner = div().absolute().top(px(8.0)).left(px(8.0));
+    let Some(on) = now else {
+        let (on, t) = motion::kept(&id, None, window, cx)?;
+        let button = sound_button_body(&id, mine, on, false, p, window);
+        return Some(
+            corner.child(motion::leave_in_place(button, t, |el, t| el.scale(1.0 - 0.4 * t))).into_any_element(),
+        );
+    };
+    motion::kept(&id, Some(&on), window, cx);
+    let button = sound_button_body(&id, mine, on, playing, p, window);
+    let (core, user) = (core.clone(), user_id.to_owned());
+    let button = button.on_click(move |_, _, cx| {
+        // Not the tile under it too.
+        cx.stop_propagation();
+        if mine {
+            core.set_screen_sound(!on);
+        } else {
+            core.toggle_screen_quiet(&user);
+        }
+    });
+    Some(
+        corner
+            .child(motion::pop_in(button, SharedString::from(format!("{id}|in")), (0.5, 0.5), 0.6, 0.0))
+            .into_any_element(),
+    )
+}
+
+/// The sound button itself, as it looks `on` (sound going) or off.
+fn sound_button_body(
+    id: &SharedString,
+    mine: bool,
+    on: bool,
+    playing: bool,
+    p: &Palette,
+    window: &Window,
+) -> Stateful<Div> {
     let label = t(match (mine, on) {
         (true, true) => "dms-calls.calls.video.mySoundOff",
         (true, false) => "dms-calls.calls.video.mySoundOn",
@@ -224,12 +265,8 @@ pub(crate) fn screen_sound_button(
         if on { (alpha(p.background, 0.75), p.foreground.into()) } else { (red().into(), gpui_kit::white()) };
     let hover: Hsla = if on { p.background.into() } else { alpha(red(), 0.85) };
     let glyph = div().child(icon(if on { "volume-2" } else { "volume-x" }).size(px(16.0)));
-    let id = SharedString::from(format!("screen-sound|{tag}|{user_id}"));
-    let button = div()
+    div()
         .id(id.clone())
-        .absolute()
-        .top(px(8.0))
-        .left(px(8.0))
         .h(px(32.0))
         .px(px(8.0))
         .flex()
@@ -245,34 +282,36 @@ pub(crate) fn screen_sound_button(
         .active(|s| s.scale(0.9))
         .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
         // The glyph swaps with a pop whenever it flips.
-        .child(motion::pop(
-            glyph,
-            SharedString::from(format!("screen-sound-glyph|{tag}|{user_id}|{on}")),
-            0.4,
-            -20.0,
-            Duration::ZERO,
-        ))
-        .when(on, |el| el.child(sound_bars(fg)));
-    let (core, user) = (core.clone(), user_id.to_owned());
-    let button = button.on_click(move |_, _, cx| {
-        // Not the tile under it too.
-        cx.stop_propagation();
-        if mine {
-            core.set_screen_sound(!on);
-        } else {
-            core.toggle_screen_quiet(&user);
-        }
-    });
-    Some(motion::pop_in(button, SharedString::from(format!("{id}|in")), (0.5, 0.5), 0.6, 0.0).into_any_element())
+        .child(motion::pop(glyph, SharedString::from(format!("{id}|glyph|{on}")), 0.4, -20.0, Duration::ZERO))
+        .when(on, |el| el.child(sound_bars(fg, playing, id, window)))
 }
 
-/// The web's `SoundBars` beside the speaker, resting: three little bars at
-/// a third of their height. (The web's dance while the screen plays
-/// something; the call doesn't say when a screen's sound plays yet.)
-fn sound_bars(color: Hsla) -> Div {
+/// The web's `SoundBars` beside the speaker: three little bars that bounce
+/// while the screen plays something (`sound-bar`, 0.9 s, each a 0.15 s
+/// step behind the last), and rest at a third of their height when it doesn't.
+fn sound_bars(color: Hsla, playing: bool, key: &str, window: &Window) -> Div {
+    const PERIOD: f32 = 0.9;
     let mut bars = div().h(px(12.0)).flex().items_end().gap(px(2.0));
-    for _ in 0..3 {
-        bars = bars.child(div().w(px(3.0)).h(px(12.0 * 0.3)).rounded_full().bg(color));
+    for i in 0..3 {
+        let bar = div().w(px(3.0)).h(px(12.0 * 0.3)).rounded_full().bg(color);
+        if !playing {
+            bars = bars.child(bar);
+            continue;
+        }
+        let behind = i as f32 * 0.15 / PERIOD;
+        bars = bars.child(motion::ambient(
+            bar,
+            SharedString::from(format!("{key}|bar{i}")),
+            Duration::from_secs_f32(PERIOD),
+            window,
+            move |bar, t| {
+                // Up to full height halfway through, eased both ways, and back.
+                let phase = (t - behind).rem_euclid(1.0);
+                let u = if phase < 0.5 { phase * 2.0 } else { (1.0 - phase) * 2.0 };
+                let eased = u * u * (3.0 - 2.0 * u);
+                bar.h(px(12.0 * (0.3 + 0.7 * eased)))
+            },
+        ));
     }
     bars
 }

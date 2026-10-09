@@ -207,13 +207,18 @@ impl FuwaApp {
             .hover(move |s| s.text_color(fg).scale(1.12).rotate(radians((-10f32).to_radians())))
             .active(|s| s.scale(0.85))
             .child(icon("face-slightly-smiling").size(px(18.0)))
-            .on_click(cx.listener(|this, _, window, cx| {
-                if this.emoji_open {
-                    this.close_emoji(window, cx);
-                } else {
-                    this.open_emoji(window, cx);
-                }
-            }))
+            // It toggles as it's pressed: a press while it's open has already closed it
+            // (the panel's press outside), so it mustn't open it again on release.
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    if open {
+                        this.close_emoji(window, cx);
+                    } else {
+                        this.open_emoji(window, cx);
+                    }
+                }),
+            )
             .into_any_element()
     }
 
@@ -383,7 +388,18 @@ impl FuwaApp {
 
     /// The picker itself, floating above the composer's emoji button (the
     /// web's `top-end` placement: its right edge on the button's, 8px above it).
-    pub(crate) fn emoji_panel(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Once closed, it's drawn a moment more on its way out.
+    pub(crate) fn emoji_panel(
+        &mut self,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let open = self.emoji_open;
+        let going = motion::kept("emoji-panel", open.then_some(&()), window, cx).map(|(_, t)| t);
+        if !open && going.is_none() {
+            return None;
+        }
         let query = self.emoji_query.read(cx).value().to_string();
         let tone = self.core.prefs().skin_tone;
         let layout = self.emoji_layout(&query, tone);
@@ -574,15 +590,24 @@ impl FuwaApp {
             .when_some(rail, |el, rail| el.child(rail))
             .child(grid)
             .child(preview(shown, p, fresh_open));
-        div()
+        let panel = div()
             .id("emoji-panel")
             .absolute()
             .right(px(self.tool_right(crate::ui::composer::Tool::Emoji)))
             .bottom(gpui_kit::relative(1.0))
-            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx)))
+            .when(open, |el| el.on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_emoji(window, cx))))
             // The web's `scale: 0.92, y: 8`, out of its corner over the button.
             .child(motion::pop_in(body.mb(px(-1.0)), "emoji-panel-in", (1.0, 1.0), 0.92, 8.0))
-            .into_any_element()
+            // And out: `opacity: 0, scale: 0.95, y: 6`.
+            .when_some(going, |el, t| {
+                crate::ui::chat::closing(
+                    el,
+                    t,
+                    crate::ui::chat::Gone { scale: 0.95, x: 0.0, y: 6.0, origin: (1.0, 1.0) },
+                )
+            })
+            .into_any_element();
+        Some(panel)
     }
 
     /// One row: a section's title, or its emoji.

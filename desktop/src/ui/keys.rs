@@ -813,8 +813,14 @@ impl FuwaApp {
                     })
                     .when(!active, |el| el.child(icon("corner-down-left").size(px(16.0)))),
             );
-        // Each place slides in as it turns up (the web's `x: -6`).
-        motion::slide_in(row, SharedString::from(format!("switch-in|{place}")), -6.0).into_any_element()
+        // Each place slides in as it turns up (the web's `x: -6`), one after another, 15ms apart.
+        motion::slide_in_after(
+            row,
+            SharedString::from(format!("switch-in|{place}")),
+            -6.0,
+            Duration::from_millis(15 * n.min(10) as u64),
+        )
+        .into_any_element()
     }
 
     // ───────────────────────── The shortcut sheet ─────────────────────────

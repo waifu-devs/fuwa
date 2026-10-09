@@ -443,7 +443,7 @@ impl FuwaApp {
             .child(hero)
             .child(div().id("onb-body").max_h(px(room)).overflow_y_scroll().child(body))
             .child(foot);
-        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}))
+        Some(crate::ui::overlay::dialog_layer("onboarding", panel, &p, |_, _, _| {}, cx))
     }
 
     fn pick_cards(

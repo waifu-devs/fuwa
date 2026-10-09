@@ -13,7 +13,9 @@ use gpui_kit::{
     div, px, uniform_list,
 };
 
-use super::controls::{amber_text, area_box, dialog, dialog_buttons, input_box, segmented, shimmer, switch};
+use super::controls::{
+    amber_text, area_box, dialog, dialog_buttons, input_box, segmented, shimmer, switch, tracked_count,
+};
 use super::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::core::dms::now_ms;
 use crate::core::i18n::{Arg, t, t_with};
@@ -23,7 +25,7 @@ use crate::pb::{self, AccountFilter as Filter};
 use crate::ui::motion;
 use crate::ui::server_settings::spinner;
 use crate::ui::settings_controls::{Look, button};
-use crate::ui::text::{WIDE, WIDER, tracked};
+use crate::ui::text::{WIDER, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_md, radius_sm, radius_xl};
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, name_tint, pal};
 
@@ -433,13 +435,11 @@ impl InstanceSettingsView {
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
                 .child(icon("users").size(px(14.0)))
-                .child(tracked(
-                    t_with(
-                        if more { "instancesettings.accounts.countMore" } else { "instancesettings.accounts.count" },
-                        &[("count", Arg::Num(shown as i64))],
-                    )
-                    .to_uppercase(),
-                    WIDE,
+                .child(tracked_count(
+                    "instance-accounts-count",
+                    if more { "instancesettings.accounts.countMore" } else { "instancesettings.accounts.count" },
+                    shown as u64,
+                    12.0,
                 ));
             let column = div().flex_1().min_h_0().flex().flex_col().gap(px(16.0)).child(header);
             if shown == 0 {

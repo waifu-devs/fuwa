@@ -32,6 +32,7 @@ const RING: Duration = Duration::from_secs(45);
 const RING_EVERY: Duration = Duration::from_millis(2600);
 
 /// A call ringing for you.
+#[derive(Clone)]
 struct Ringing {
     instance: String,
     conversation: String,
@@ -144,7 +145,16 @@ impl FuwaApp {
             Some((conv.users.clone(), i.me.as_ref()?.id.clone(), i.dms.calls.get(conversation).cloned()))
         })?;
         let participants = call.as_ref().map(|c| c.participants.clone()).unwrap_or_default();
-        if !in_call && participants.is_empty() {
+        let shown = in_call || !participants.is_empty();
+        // A call already going as the conversation opens is just there (the
+        // web's `initial={false}`); one that starts while it's open comes in.
+        let strip_first = crate::ui::call_parts::there_at_first(
+            &format!("dm-strip|{conversation}"),
+            shown.then(|| "strip".to_owned()),
+            window,
+            cx,
+        );
+        if !shown {
             return None;
         }
         let mut here: Vec<String> = participants.iter().map(|v| v.user_id.clone()).collect();
@@ -222,7 +232,7 @@ impl FuwaApp {
                 user: user.id.clone(),
                 from: tag.clone(),
             };
-            let open = self.calls.pop.as_ref() == Some(&pop);
+            let pop_of = pop.clone();
             let size = 80.0 * grow;
             let face = div()
                 .id(SharedString::from(tag.clone()))
@@ -247,12 +257,19 @@ impl FuwaApp {
                         .on_click(cx.listener(move |this, _, _, cx| this.toggle_call_pop(pop.clone(), cx)))
                 });
             let mut holder = div().relative().child(face);
-            if open {
-                let card = self.person_card(key, None, None, &user.id, window, cx);
-                holder = holder.child(self.hang(card, Side::Right));
-            }
+            holder = holder.children(self.pop_card(&pop_of, Side::Right, window, cx, |this, window, cx| {
+                this.person_card(key, None, None, &user.id, window, cx)
+            }));
             people = people.child(holder);
         }
+        // Likewise the avatars or cameras in it, as the strip first shows.
+        let look_first = crate::ui::call_parts::there_at_first(
+            &format!("dm-look|{conversation}"),
+            [if filming { "cameras" } else { "people" }.to_owned()],
+            window,
+            cx,
+        );
+        let still = look_first.contains(if filming { "cameras" } else { "people" });
         let people = if filming {
             let mut tiles = div().w_full().max_w(px(768.0)).flex().flex_wrap().gap(px(12.0));
             for user in users.iter().filter(|u| on(&u.id, true)) {
@@ -263,9 +280,15 @@ impl FuwaApp {
                 let talking = speaking.contains(&user.id);
                 tiles = tiles.child(self.dm_camera_tile(key, user, here, on(&user.id, false), talking, &p, window, cx));
             }
-            // The web's `scale: 0.96` as the cameras take the avatars' place.
-            motion::pop_in(tiles, SharedString::from(format!("dm-cameras|{conversation}")), (0.5, 0.5), 0.96, 0.0)
-                .into_any_element()
+            if still {
+                tiles.into_any_element()
+            } else {
+                // The web's `scale: 0.96` as the cameras take the avatars' place.
+                motion::pop_in(tiles, SharedString::from(format!("dm-cameras|{conversation}")), (0.5, 0.5), 0.96, 0.0)
+                    .into_any_element()
+            }
+        } else if still {
+            people.into_any_element()
         } else {
             motion::fade_in(people, SharedString::from(format!("dm-people|{conversation}")), Duration::from_millis(250))
                 .into_any_element()
@@ -352,6 +375,9 @@ impl FuwaApp {
                     )
                     .child(controls),
             );
+        if strip_first.contains("strip") {
+            return Some(strip.into_any_element());
+        }
         Some(
             // The web's `SLIDE_IN`.
             motion::rise(strip, SharedString::from(format!("dm-strip|{conversation}")), Duration::ZERO, -6.0)
@@ -540,7 +566,7 @@ impl FuwaApp {
             .w_full()
             .group(SharedString::from(group.clone()))
             .child(tile)
-            .children(crate::ui::video::screen_sound_button(&self.core, &user.id, mine, "dm", p))
+            .children(crate::ui::video::screen_sound_button(&self.core, &user.id, mine, "dm", p, window, cx))
             .child(
                 pop_out_button(
                     SharedString::from(format!("dm-pop-screen|{}", user.id)),
@@ -604,9 +630,19 @@ impl FuwaApp {
     /// answer or decline.
     pub(crate) fn render_incoming_calls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ringing = self.ringing();
+        // Once the last stops ringing, the cards shrink away (`opacity: 0, scale: 0.9`).
+        let leaving = motion::kept("incoming-calls", (!ringing.is_empty()).then_some(&ringing), window, cx);
         if ringing.is_empty() {
             self.calls.rang_at = None;
-            return None;
+            let (gone, t) = leaving?;
+            let p = pal(cx);
+            let many = self.core.shared.read(|s| s.order.len() > 1);
+            let mut stack = div().flex().flex_col().items_end().gap(px(8.0));
+            for r in gone {
+                let card = self.call_card(r, many, &p, window, cx);
+                stack = stack.child(motion::leave_in_place(div().child(card), t, |el, t| el.scale(1.0 - 0.1 * t)));
+            }
+            return Some(div().absolute().right(px(16.0)).bottom(px(16.0)).child(stack).into_any_element());
         }
         // The ring, every couple of seconds while anything rings.
         if self.calls.rang_at.is_none_or(|at| at.elapsed() >= RING_EVERY) {

@@ -293,7 +293,17 @@ impl SettingsView {
         let hovered = self.state.effect_hover.clone();
         let mut tiles: Vec<(String, Option<fx::Spec>)> = vec![(String::new(), None)];
         tiles.extend(choices(offered).into_iter().map(|(id, s)| (id, Some(s))));
-        let mut rows = div().flex().flex_col().gap(px(gap)).when(!ready, |el| el.opacity(0.5));
+        let picked = tiles.iter().position(|(id, _)| id == value);
+        // A tile: 4px around the card, 6px, then a 16px label.
+        let ring = crate::ui::decoration_picker::Ring {
+            id: format!("effect-ring|{place}"),
+            cols,
+            tile: (tile_w, card_h + 30.0),
+            gap,
+        };
+        let (gliding, ring) =
+            crate::ui::decoration_picker::picked_ring(ring, picked, (card_w, card_h), p.primary.into(), cx);
+        let mut rows = div().relative().flex().flex_col().gap(px(gap)).when(!ready, |el| el.opacity(0.5));
         for chunk in tiles.chunks(cols) {
             let mut row = div().flex().gap(px(gap));
             for (id, spec) in chunk {
@@ -339,7 +349,7 @@ impl SettingsView {
                             card.child(self.effect_layer(&spot, spec, user_id, accent, (card_w, card_h), lively, cx));
                     }
                 }
-                if active {
+                if active && !gliding {
                     card =
                         card.child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
@@ -380,6 +390,7 @@ impl SettingsView {
                             div()
                                 .id("effect-label")
                                 .whitespace_nowrap()
+                                .line_height(px(16.0))
                                 .text_color(if active { p.foreground } else { p.muted_foreground })
                                 .group_hover(group, move |s| s.text_color(fg))
                                 .child(label),
@@ -388,6 +399,6 @@ impl SettingsView {
             }
             rows = rows.child(row);
         }
-        rows.into_any_element()
+        rows.child(ring).into_any_element()
     }
 }

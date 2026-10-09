@@ -402,14 +402,14 @@ impl FuwaApp {
                     .text_size(px(14.0))
                     .line_height(px(20.0))
                     .text_color(p.muted_foreground)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(icon("users").size(px(14.0)))
-                            .child(t_with("workspace.invitePage.members", &[("count", Arg::Num(members))])),
-                    )
+                    .child(div().flex().items_center().gap(px(4.0)).child(icon("users").size(px(14.0))).child(
+                        motion::counted(
+                            format!("invite-members|{}", server.id),
+                            "workspace.invitePage.members",
+                            members.max(0) as u64,
+                            14.0,
+                        ),
+                    ))
                     .when(!found.channel_name.is_empty(), |el| {
                         el.child(
                             div()
@@ -576,6 +576,8 @@ impl FuwaApp {
             )
             .child(
                 filled_button("elsewhere-go", 36.0, p.primary, p.primary_foreground, p)
+                    // `whileHover={{ scale: 1.02 }}` around the button's own lift.
+                    .hover(|s| s.scale(1.02))
                     .flex_1()
                     .child(t_with("workspace.invitePage.elsewhere.continue", &[("host", Arg::Str(&host))]))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -842,7 +844,10 @@ impl FuwaApp {
                     .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
                     .occlude()
                     .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-                    .child(motion::dialog_in(panel, SharedString::from(format!("join-dialog-{tag_name}")))),
+                    .child(
+                        crate::ui::overlay::leaving_pose(div(), 24.0, 0.97, cx)
+                            .child(motion::dialog_in(panel, SharedString::from(format!("join-dialog-{tag_name}")))),
+                    ),
                 SharedString::from(format!("join-dialog-fade-{tag_name}")),
                 Duration::from_millis(200),
             )
@@ -1361,62 +1366,84 @@ impl FuwaApp {
                 .map(|r| r.name.clone())
                 .unwrap_or_else(|| t("workspace.createServer.homeRegion"));
             let picked_name = picked.as_ref().map(|r| r.name.clone()).unwrap_or_default();
+            // Where each chip was drawn last, so the picked one's tint glides between them.
+            let spots = window.use_keyed_state("create-region-spots", cx, |_, _| Spots::default()).read(cx).clone();
+            let lit = picked.as_ref().and_then(|r| spots.at(&r.id));
+            let tint = lit.map(|(x, y, w, h)| {
+                let pill = div().size_full().rounded_full().bg(alpha(p.primary, 0.15));
+                let pill =
+                    motion::glide(div().h(px(h)).child(pill), "create-region|w".into(), w, cx, |el, v| el.w(px(v)));
+                let pill =
+                    motion::glide(div().absolute().top_0().child(pill), "create-region|x".into(), x, cx, |el, v| {
+                        el.left(px(v))
+                    });
+                motion::glide(div().absolute().left_0().child(pill), "create-region|y".into(), y, cx, |el, v| {
+                    el.top(px(v))
+                })
+            });
+            let chips =
+                div().relative().flex().flex_wrap().gap(px(8.0)).child(spots.measure("")).children(tint).children(
+                    regions.iter().map(|r| {
+                        let on = picked.as_ref().is_some_and(|x| x.id == r.id);
+                        let (k, id) = (place_key.clone(), r.id.clone());
+                        let mark: String = region_mark(&r.name);
+                        let hover = alpha(p.primary, 0.5);
+                        div()
+                            .id(SharedString::from(format!("region|{}", r.id)))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .py(px(6.0))
+                            .pl(px(6.0))
+                            .pr(px(12.0))
+                            .rounded_full()
+                            .border_1()
+                            .relative()
+                            .border_color(if on { p.primary.into() } else { Hsla::from(p.border) })
+                            .bg(if on && lit.is_none() { alpha(p.primary, 0.15) } else { hsla(0.0, 0.0, 0.0, 0.0) })
+                            .child(spots.measure(&r.id))
+                            .text_color(if on { p.primary } else { p.foreground })
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .cursor_pointer()
+                            .when(!on, |el| el.hover(move |s| s.border_color(hover)))
+                            .child(
+                                div()
+                                    .size(px(24.0))
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(if on { p.primary } else { p.muted })
+                                    .text_color(if on { p.primary_foreground } else { p.muted_foreground })
+                                    .text_size(px(9.6))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .child(mark),
+                            )
+                            .child(r.name.clone())
+                            .when(r.home, |el| {
+                                el.child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::NORMAL)
+                                        .text_color(p.muted_foreground)
+                                        .child(t("workspace.createServer.home")),
+                                )
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.home.create.region = Some((k.clone(), id.clone()));
+                                cx.notify();
+                            }))
+                    }),
+                );
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
                 .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("workspace.createServer.region")))
-                .child(div().flex().flex_wrap().gap(px(8.0)).children(regions.iter().map(|r| {
-                    let on = picked.as_ref().is_some_and(|x| x.id == r.id);
-                    let (k, id) = (place_key.clone(), r.id.clone());
-                    let mark: String = region_mark(&r.name);
-                    let hover = alpha(p.primary, 0.5);
-                    div()
-                        .id(SharedString::from(format!("region|{}", r.id)))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .py(px(6.0))
-                        .pl(px(6.0))
-                        .pr(px(12.0))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(if on { p.primary.into() } else { Hsla::from(p.border) })
-                        .bg(if on { alpha(p.primary, 0.15) } else { hsla(0.0, 0.0, 0.0, 0.0) })
-                        .text_color(if on { p.primary } else { p.foreground })
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .when(!on, |el| el.hover(move |s| s.border_color(hover)))
-                        .child(
-                            div()
-                                .size(px(24.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if on { p.primary } else { p.muted })
-                                .text_color(if on { p.primary_foreground } else { p.muted_foreground })
-                                .text_size(px(9.6))
-                                .font_weight(FontWeight::EXTRA_BOLD)
-                                .child(mark),
-                        )
-                        .child(r.name.clone())
-                        .when(r.home, |el| {
-                            el.child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::NORMAL)
-                                    .text_color(p.muted_foreground)
-                                    .child(t("workspace.createServer.home")),
-                            )
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.home.create.region = Some((k.clone(), id.clone()));
-                            cx.notify();
-                        }))
-                })))
-                .child(
+                .child(chips)
+                // The note comes in again for each region picked.
+                .child(motion::rise(
                     div()
                         .flex()
                         .items_start()
@@ -1428,7 +1455,10 @@ impl FuwaApp {
                             "workspace.createServer.regionNote",
                             &[("region", Arg::Str(&picked_name)), ("home", Arg::Str(&home))],
                         )),
-                )
+                    SharedString::from(format!("region-note|{}", picked.as_ref().map(|r| r.id.as_str()).unwrap_or(""))),
+                    Duration::ZERO,
+                    4.0,
+                ))
         });
         let toggle = div()
             .id("create-browse")
@@ -1724,13 +1754,14 @@ impl FuwaApp {
                             this.open_context_menu(of, ev.position, window, cx);
                         }),
                     );
-                motion::rise(
+                // It pops in from 30% on the web's spring, as the rail's `Pop` does.
+                motion::spring_in(
                     div().flex().w_full().justify_center().child(face),
                     SharedString::from(format!("{id}|in")),
+                    (520.0, 34.0),
                     Duration::ZERO,
-                    10.0,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.3 + 0.7 * t),
                 )
-                .into_any_element()
             })
             .collect()
     }
@@ -1792,6 +1823,42 @@ impl FuwaApp {
 }
 
 // ───────────────────────── Pieces ─────────────────────────
+
+/// Where things were drawn last frame, by id ("" for the box they're in), for
+/// a tint to glide between them as framer's `layoutId` does.
+#[derive(Clone, Default)]
+struct Spots(std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, gpui_kit::Bounds<gpui_kit::Pixels>>>>);
+
+impl Spots {
+    /// `id`'s place inside the box, as left, top, width and height.
+    fn at(&self, id: &str) -> Option<(f32, f32, f32, f32)> {
+        let spots = self.0.borrow();
+        let (b, outer) = (spots.get(id)?, spots.get("")?);
+        Some((
+            f32::from(b.origin.x - outer.origin.x),
+            f32::from(b.origin.y - outer.origin.y),
+            f32::from(b.size.width),
+            f32::from(b.size.height),
+        ))
+    }
+
+    /// An invisible layer over its parent that notes where it was drawn under
+    /// `id`, drawing again when that moved.
+    fn measure(&self, id: &str) -> impl IntoElement {
+        let (spots, id) = (self.0.clone(), id.to_owned());
+        gpui_kit::canvas(
+            move |bounds, window, _| {
+                let moved = spots.borrow_mut().insert(id.clone(), bounds) != Some(bounds);
+                if moved {
+                    window.request_animation_frame();
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0()
+    }
+}
 
 /// "Europe" → "EU": a region's little mark (the web's `regionMark`).
 fn region_mark(name: &str) -> String {
@@ -2154,7 +2221,12 @@ pub(crate) fn banner_hero_wide(
                                             .child(div().size(px(6.0)).rounded_full().bg(green)),
                                     )
                                     .child(icon("users").ml(px(2.0)).size(px(14.0)))
-                                    .child(t_with("join.banner.members", &[("count", Arg::Num(members))])),
+                                    .child(motion::counted(
+                                        format!("banner-members|{}", server.id),
+                                        "join.banner.members",
+                                        members.max(0) as u64,
+                                        12.0,
+                                    )),
                             )
                         }),
                 ),

@@ -19,7 +19,7 @@ use super::{Found, Page, ServerSettingsEvent, ServerSettingsView, search};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, radius_lg, radius_md};
+use crate::ui::theme::{Palette, alpha, radius_lg};
 use crate::ui::widgets::icon;
 
 /// How long the screen takes to come and go.
@@ -173,33 +173,17 @@ impl ServerSettingsView {
                     .child(icon("search").size(px(16.0))),
             )
             .child(div().flex_1().min_w_0().child(Input::new(&self.query).appearance(false)))
-            .when(!query.is_empty(), |el| {
-                let (hover, fg) = (p.muted, p.foreground);
-                el.child(motion::pop(
-                    div()
-                        .id("server-search-clear")
-                        .absolute()
-                        .right(px(5.0))
-                        .top(px(5.0))
-                        .size(px(24.0))
-                        .rounded(radius_md())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(p.muted_foreground)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(hover).text_color(fg))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.query.update(cx, |q, cx| q.set_value("", window, cx));
-                            cx.notify();
-                        }))
-                        .child(icon("x").size(px(14.0))),
-                    "server-search-clear-in",
-                    0.5,
-                    -90.0,
-                    Duration::ZERO,
-                ))
-            });
+            .children(crate::ui::settings_controls::search_clear(
+                "server-search-clear",
+                !query.is_empty(),
+                p,
+                window,
+                cx,
+                |this, window, cx| {
+                    this.query.update(cx, |q, cx| q.set_value("", window, cx));
+                    cx.notify();
+                },
+            ));
         let shown_for_enter = shown.to_vec();
         let search_box = div()
             .on_key_down(cx.listener(move |this, e: &gpui_kit::KeyDownEvent, _, cx| {
@@ -301,7 +285,11 @@ impl ServerSettingsView {
                     (false, true) => alpha(p.destructive, 0.8),
                     (false, false) => p.muted_foreground.into(),
                 };
+                // A count that runs out shrinks away still showing its last number (the web's
+                // `exit={{ scale: 0 }}`).
                 let badge = badges(section);
+                let shown = (badge > 0).then_some(badge);
+                let going = motion::kept(&format!("smenu-badge-{section:?}"), shown.as_ref(), window, cx);
                 let group = SharedString::from(format!("smenu-{section:?}"));
                 let row = div()
                     .id(group.clone())
@@ -325,6 +313,10 @@ impl ServerSettingsView {
                     }))
                     .child(crate::ui::settings::nudged(&group, section.label()))
                     .when(badge > 0, |el| el.child(count_badge(section, badge, p)))
+                    .when_some(going, |el, (n, t)| {
+                        let e = crate::ui::settings_controls::gone(t);
+                        el.child(div().flex_none().scale(1.0 - e).child(count_badge(section, n, p)))
+                    })
                     .when(trailing, |el| el.child(tipped(&group, page_glyph(section, 16.0, color))));
                 block = block.child(slide(row, SharedString::from(format!("smenu-in-{section:?}")), n));
                 n += 1;

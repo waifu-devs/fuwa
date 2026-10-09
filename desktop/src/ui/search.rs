@@ -108,6 +108,7 @@ struct Suggestion {
     open: bool,
 }
 
+#[derive(Clone)]
 struct Group {
     title: &'static str,
     items: Vec<Suggestion>,
@@ -630,16 +631,25 @@ impl FuwaApp {
             .min_w(px(120.0))
             .flex_shrink(1.0)
             .child(field);
-        if focused && !self.search.hushed {
-            let groups = self.suggestions(cx);
-            if !groups.is_empty() {
-                wrap = wrap.child(self.suggestion_list(groups, &p, cx));
-            }
+        let groups = (focused && !self.search.hushed).then(|| self.suggestions(cx)).filter(|g| !g.is_empty());
+        // Once they close, they're drawn a moment more on their way out.
+        let going = motion::kept("search-suggestions", groups.as_ref(), window, cx);
+        if let Some(groups) = groups {
+            wrap = wrap.child(self.suggestion_list(groups, None, &p, cx));
+        } else if let Some((groups, t)) = going {
+            wrap = wrap.child(self.suggestion_list(groups, Some(t), &p, cx));
         }
         wrap.into_any_element()
     }
 
-    fn suggestion_list(&self, groups: Vec<Group>, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    /// `going` once they've closed, as they leave.
+    fn suggestion_list(
+        &self,
+        groups: Vec<Group>,
+        going: Option<f32>,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let p = *p;
         let mut list = div().id("search-suggestions").flex().flex_col().max_h(px(384.0)).overflow_y_scroll().p(px(6.0));
         let mut row = 0usize;
@@ -780,22 +790,35 @@ impl FuwaApp {
         // Drawn after the messages below it, so it sits over them.
         gpui_kit::deferred(
             // It drops out of the field's corner (the web's `origin-top-right`, `y: -6, scale: 0.97`).
-            div().absolute().top(px(45.0)).right(px(0.0)).w(px(320.0)).child(motion::pop_in(
-                // `rounded-2xl border bg-popover shadow-xl`.
-                div()
-                    .rounded(radius_2xl())
-                    .border_1()
-                    .border_color(p.border)
-                    .bg(p.card)
-                    .text_color(p.foreground)
-                    .shadow(crate::ui::settings_controls::shadow_xl())
-                    .occlude()
-                    .child(list),
-                "search-suggestions-in",
-                (1.0, 0.0),
-                0.97,
-                -6.0,
-            )),
+            div()
+                .absolute()
+                .top(px(45.0))
+                .right(px(0.0))
+                .w(px(320.0))
+                .child(motion::pop_in(
+                    // `rounded-2xl border bg-popover shadow-xl`.
+                    div()
+                        .rounded(radius_2xl())
+                        .border_1()
+                        .border_color(p.border)
+                        .bg(p.card)
+                        .text_color(p.foreground)
+                        .shadow(crate::ui::settings_controls::shadow_xl())
+                        .occlude()
+                        .child(list),
+                    "search-suggestions-in",
+                    (1.0, 0.0),
+                    0.97,
+                    -6.0,
+                ))
+                // And back out the same way.
+                .when_some(going, |el, t| {
+                    crate::ui::chat::closing(
+                        el,
+                        t,
+                        crate::ui::chat::Gone { scale: 0.97, x: 0.0, y: -6.0, origin: (1.0, 0.0) },
+                    )
+                }),
         )
         .with_priority(1)
     }

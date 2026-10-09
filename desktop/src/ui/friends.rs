@@ -4,7 +4,7 @@
 //! `components/friends/FriendActions.tsx`.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -272,12 +272,21 @@ impl FuwaApp {
                     .cursor_pointer()
                     .when(!adding, |el| el.hover(|s| s.opacity(0.92)))
                     .active(|s| s.scale(0.94))
-                    // The web turns its X a quarter of the way round: a plus.
+                    // Opening it, the web's X springs round 45 degrees; closing, the person icon turns back.
                     .child(
                         div()
                             .id("friends-add-icon")
                             .when(!adding, |el| el.group_hover("friends-add", |s| s.scale(1.1)))
-                            .child(icon(if adding { "plus" } else { "user-plus" }).size(px(16.0))),
+                            .child(motion::springing(
+                                "friends-add-turn",
+                                if adding { 45.0 } else { 0.0 },
+                                move |deg| {
+                                    div()
+                                        .rotate(gpui_kit::radians(deg.to_radians()))
+                                        .child(icon(if adding { "x" } else { "user-plus" }).size(px(16.0)))
+                                        .into_any_element()
+                                },
+                            )),
                     )
                     .child(label)
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -291,8 +300,19 @@ impl FuwaApp {
             });
 
         let mut page = div().relative().flex_1().min_h_0().flex().flex_col().child(header);
-        if adding {
-            page = page.child(self.add_friend_box(&p, window, cx));
+        // Closing it, the box lifts away quickly (the web's `exit: { opacity: 0, y: -12 }` in 0.12s).
+        let closing = motion::kept("friends-add-box", adding.then_some(&()), window, cx).map(|(_, t)| t);
+        if adding || closing.is_some() {
+            let k = closing.map_or(0.0, |t| (t * 1.5).min(1.0));
+            let leaving = closing.is_some();
+            page = page.child(
+                div()
+                    .relative()
+                    .opacity(1.0 - k)
+                    .mt(px(-12.0 * k))
+                    .child(self.add_friend_box(&p, window, cx))
+                    .when(leaving, |el| el.child(div().absolute().inset_0().occlude())),
+            );
         }
         if !signed_in {
             return page.into_any_element();
@@ -312,6 +332,9 @@ impl FuwaApp {
         let typed = self.friends.search.read(cx).value().to_string();
         let searching = self.friends.search.read(cx).focus_handle(cx).is_focused(window);
         let shown = friends::in_tab(&list, self.friends.tab, &typed, now);
+        // Emptied, the clear button shrinks away (the web's `exit: { scale: 0 }`).
+        let clearing = motion::kept("friends-search-clear", (!typed.is_empty()).then_some(&()), window, cx);
+        let leaving = leaving_lines(self.friends.tab, &shown, window, cx);
         let tab_label = t(tab_key(self.friends.tab));
         let fg = p.foreground;
         let muted = p.muted;
@@ -334,6 +357,18 @@ impl FuwaApp {
                         .text_sm()
                         .child(icon("search").size(px(16.0)).text_color(p.muted_foreground))
                         .child(div().flex_1().min_w_0().child(Input::new(&self.friends.search).appearance(false)))
+                        .when_some(clearing, |el, (_, t)| {
+                            el.child(
+                                div()
+                                    .size(px(20.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(p.muted_foreground)
+                                    .scale(1.0 - gpui_kit::ease_out_quint()(t))
+                                    .child(icon("x").size(px(14.0))),
+                            )
+                        })
                         .when(!typed.is_empty(), |el| {
                             el.child(motion::pop(
                                 div()
@@ -445,8 +480,15 @@ impl FuwaApp {
             });
             body = body.child(empty(glyph, &t(title), &t(text), action, &p, window));
         } else {
+            let mut gone = leaving.iter().peekable();
             for (n, f) in shown.iter().enumerate() {
+                while let Some((_, f, k)) = gone.next_if(|(at, ..)| *at <= n) {
+                    body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
+                }
                 body = body.child(self.friend_line(key, f, n, dms, &p, window, cx));
+            }
+            for (_, f, k) in gone {
+                body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
             }
         }
         // A new tab slides in from the side.
@@ -623,7 +665,11 @@ impl FuwaApp {
                     .when(typed && !sending, |el| {
                         el.cursor_pointer().hover(|s| s.opacity(0.92)).active(|s| s.scale(0.95))
                     })
-                    .child(icon(if sending { "loader-circle" } else { "user-plus" }).size(px(16.0)))
+                    .child(crate::ui::dm_view::glyph_swap(
+                        "friend-send-icon",
+                        if sending { "loader-circle" } else { "user-plus" },
+                        16.0,
+                    ))
                     .child(t("dms-calls.friends.page.sendRequest"))
                     .on_click(cx.listener(|this, _, window, cx| this.send_typed_request(window, cx))),
             );
@@ -969,6 +1015,32 @@ impl FuwaApp {
         .into_any_element()
     }
 
+    /// Someone who just left the list (unfriended, accepted into another tab,
+    /// searched away), `k` of the way out: sliding right and fading (the web's
+    /// `exit: { opacity: 0, x: 24 }`), while the space they took closes up.
+    #[allow(clippy::too_many_arguments)]
+    fn friend_leaving(
+        &mut self,
+        key: &str,
+        f: &pb::Friend,
+        dms: bool,
+        k: f32,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let eased = gpui_kit::ease_out_quint()(k);
+        // No id of its own, so the line inside keeps the state it had (its entrance stays played).
+        div()
+            .relative()
+            .overflow_hidden()
+            .h(px(LINE * (1.0 - eased)))
+            .child(div().opacity(1.0 - k).ml(px(24.0 * eased)).child(self.friend_line(key, f, 0, dms, p, window, cx)))
+            // Nothing in it can be pressed on its way out.
+            .child(div().absolute().inset_0().occlude())
+            .into_any_element()
+    }
+
     /// A friend's "more" menu: remove them, or block them.
     fn friend_more_menu(
         &mut self,
@@ -1087,7 +1159,7 @@ impl FuwaApp {
                 .font_weight(FontWeight::BOLD)
                 .when(busy || disabled, |el| el.opacity(0.6))
                 .when(!disabled, |el| el.cursor_pointer().hover(move |s| s.bg(hover)).active(|s| s.scale(0.96)))
-                .child(icon(glyph).size(px(16.0)))
+                .child(crate::ui::dm_view::glyph_swap(SharedString::from(format!("{id}-icon")), glyph, 16.0))
                 .child(div().truncate().child(label))
         };
         let on = |act: Act, cx: &mut Context<Self>| act_on(key, user_id, act, cx);
@@ -1224,6 +1296,58 @@ thread_local! {
     /// Where each friend's "more" button was drawn, for its menu.
     static MORE_PLACES: std::cell::RefCell<std::collections::HashMap<String, gpui_kit::Bounds<gpui_kit::Pixels>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// A line in a tab: 8px around a 48px row.
+const LINE: f32 = 64.0;
+
+/// How long a line takes to leave (the web's `duration: 0.18`).
+const LINE_LEAVES: Duration = Duration::from_millis(180);
+
+/// What the tab showed last time, and who has left it since, when.
+struct Lines {
+    tab: Tab,
+    before: Vec<pb::Friend>,
+    gone: Vec<(usize, pb::Friend, Instant)>,
+}
+
+/// The people who just left `tab`'s list: where they were, who, and how far
+/// out they are (0 to 1). Switching tabs lets nobody leave: the new tab's
+/// list just comes in.
+fn leaving_lines(
+    tab: Tab,
+    shown: &[&pb::Friend],
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> Vec<(usize, pb::Friend, f32)> {
+    let still = cx.reduce_motion();
+    let state = window.use_keyed_state("friends-lines", cx, |_, _| Lines { tab, before: Vec::new(), gone: Vec::new() });
+    let leaving = state.update(cx, |lines, _| {
+        let id = |f: &pb::Friend| f.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+        if lines.tab != tab {
+            lines.gone.clear();
+        } else if !still {
+            let now: HashSet<String> = shown.iter().map(|f| id(f)).collect();
+            for (n, f) in lines.before.iter().enumerate() {
+                if !now.contains(&id(f)) && !lines.gone.iter().any(|(_, g, _)| id(g) == id(f)) {
+                    lines.gone.push((n, f.clone(), Instant::now()));
+                }
+            }
+        }
+        lines.gone.retain(|(_, f, at)| at.elapsed() < LINE_LEAVES && !shown.iter().any(|s| id(s) == id(f)));
+        lines.gone.sort_by_key(|(n, ..)| *n);
+        lines.tab = tab;
+        lines.before = shown.iter().map(|f| (*f).clone()).collect();
+        lines
+            .gone
+            .iter()
+            .map(|(n, f, at)| (*n, f.clone(), at.elapsed().as_secs_f32() / LINE_LEAVES.as_secs_f32()))
+            .collect::<Vec<_>>()
+    });
+    if !leaving.is_empty() {
+        window.request_animation_frame();
+    }
+    leaving
 }
 
 fn tab_key(tab: Tab) -> &'static str {

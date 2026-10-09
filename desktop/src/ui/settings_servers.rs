@@ -334,6 +334,7 @@ impl SettingsView {
             self.servers.error.as_deref(),
             alarm,
             p,
+            window,
             cx,
             move |this, _, cx| {
                 let (nickname, effect, decoration) = patch.clone();

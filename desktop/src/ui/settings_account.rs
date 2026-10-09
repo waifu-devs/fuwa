@@ -687,6 +687,7 @@ impl SettingsView {
             self.account.error.as_deref(),
             alarm,
             p,
+            window,
             cx,
             |this, window, cx| this.save_profile(window, cx),
             |this, window, cx| this.discard_profile(window, cx),
@@ -1444,7 +1445,7 @@ impl SettingsView {
                 "current-password",
                 t("accountsettings.password.current"),
                 None,
-                self.password_input("pw-current", &self.account.current.clone(), false, p, cx),
+                self.password_input("pw-current", &self.account.current.clone(), false, p, window, cx),
             ),
             (
                 "new-password",
@@ -1454,7 +1455,7 @@ impl SettingsView {
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .child(self.password_input("pw-new", &self.account.new.clone(), false, p, cx))
+                    .child(self.password_input("pw-new", &self.account.new.clone(), false, p, window, cx))
                     .child(strength_meter(level, !next.is_empty(), p, window, cx))
                     .into_any_element(),
             ),
@@ -1462,7 +1463,14 @@ impl SettingsView {
                 "confirm-password",
                 t("accountsettings.password.again"),
                 mismatch.then(|| warn(t("accountsettings.password.mismatch"), p)),
-                self.password_input("pw-again", &self.account.again.clone(), !again.is_empty() && again == next, p, cx),
+                self.password_input(
+                    "pw-again",
+                    &self.account.again.clone(),
+                    !again.is_empty() && again == next,
+                    p,
+                    window,
+                    cx,
+                ),
             ),
         ];
         let mut form = div().max_w(px(448.0)).flex().flex_col();
@@ -1519,31 +1527,43 @@ impl SettingsView {
         state: &Entity<InputState>,
         matches: bool,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let show = self.account.show_password;
         let (hover_bg, hover_fg) = (p.muted, p.foreground);
+        // The green check while the two match: it springs in from nothing and shrinks away
+        // when they stop matching (the web's `Matches`).
+        let going = motion::kept(&format!("{id}-match"), matches.then_some(&()), window, cx);
+        let check = || {
+            div()
+                .absolute()
+                .top(px(12.0))
+                .right(px(48.0))
+                .size(px(20.0))
+                .rounded_full()
+                .bg(rgb(0x10b981))
+                .text_color(rgb(0xffffff))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon("check").size(px(14.0)))
+        };
         div()
             .relative()
             .child(field(Input::new(state).appearance(false), p).pr(px(80.0)))
             .when(matches, |el| {
-                el.child(motion::once(
-                    div()
-                        .absolute()
-                        .top(px(12.0))
-                        .right(px(48.0))
-                        .size(px(20.0))
-                        .rounded_full()
-                        .bg(rgb(0x10b981))
-                        .text_color(rgb(0xffffff))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(icon("check").size(px(14.0))),
+                el.child(motion::spring_in(
+                    check(),
                     SharedString::from(format!("{id}-match")),
-                    Duration::from_millis(260),
-                    |el, t| el.opacity(t),
+                    (600.0, 18.0),
+                    Duration::ZERO,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(t.max(0.0)),
                 ))
+            })
+            .when_some(going, |el, ((), t)| {
+                let e = crate::ui::settings_controls::gone(t);
+                el.child(check().opacity(1.0 - e).scale(1.0 - e))
             })
             .child(
                 div()

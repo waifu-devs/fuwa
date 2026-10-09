@@ -21,6 +21,7 @@ use gpui_kit::{
 use crate::core::gifs::{self as gifs, KeptGif};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
+use crate::ui::chat::Gone;
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, corner, radius_xl};
@@ -250,13 +251,18 @@ impl FuwaApp {
                 .active(|s| s.scale(0.85))
                 .child(tag)
                 .tooltip(|window, cx| crate::ui::overlay::Tip::new("GIFs").build(window, cx))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    if this.gifs.open {
-                        this.close_gifs(cx);
-                    } else {
-                        this.open_gifs(window, cx);
-                    }
-                }))
+                // It toggles as it's pressed: a press while it's open has already closed it
+                // (the panel's press outside), so it mustn't open it again on release.
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        if open {
+                            this.close_gifs(cx);
+                        } else {
+                            this.open_gifs(window, cx);
+                        }
+                    }),
+                )
                 .into_any_element(),
         )
     }
@@ -292,7 +298,7 @@ impl FuwaApp {
         let g = &mut self.gifs;
         g.open = false;
         g.typing = None;
-        g.results = None;
+        // What it showed stays for its way out; opening starts afresh.
         cx.notify();
     }
 
@@ -548,14 +554,18 @@ impl FuwaApp {
     // ───────────────────────── The picker ─────────────────────────
 
     /// The picker, floating over the composer's right end.
-    pub(crate) fn gif_panel(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.gifs.open {
+    pub(crate) fn gif_panel(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let place = self.gif_place();
+        if place.is_none() {
+            self.gifs.open = false;
+        }
+        // Once closed, it's drawn a moment more on its way out.
+        let open = self.gifs.open;
+        let going = motion::kept("gif-panel", open.then_some(&()), window, cx).map(|(_, t)| t);
+        if !open && going.is_none() {
             return None;
         }
-        let Some((key, _, _)) = self.gif_place() else {
-            self.gifs.open = false;
-            return None;
-        };
+        let (key, _, _) = place?;
         let credit = gifs::provider_name(self.gifs_on(&key).unwrap_or_default());
         let searching = self.gifs.results.is_some();
         let fresh = self.gifs.born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
@@ -595,10 +605,10 @@ impl FuwaApp {
             None => format!("tab|{}", self.gifs.tab as u8),
         };
         let body = match self.gifs.results.as_ref() {
-            Some(_) => self.gif_results(&key, p, cx),
+            Some(_) => self.gif_results(&key, p, window, cx),
             None => match self.gifs.tab {
-                Tab::Browse => self.gif_browse(&key, p, cx),
-                Tab::Saved => self.gif_saved(&key, p, cx),
+                Tab::Browse => self.gif_browse(&key, p, window, cx),
+                Tab::Saved => self.gif_saved(&key, p, window, cx),
                 Tab::Recent => {
                     let tiles: Vec<Tile> = self
                         .core
@@ -612,7 +622,7 @@ impl FuwaApp {
                     if tiles.is_empty() {
                         empty("clock", "Nothing sent yet", "GIFs you send show up here, on this computer.", p)
                     } else {
-                        self.gif_grid("recent", &key, tiles, false, false, p, cx)
+                        self.gif_grid("recent", &key, tiles, false, false, p, window, cx)
                     }
                 }
             },
@@ -652,9 +662,15 @@ impl FuwaApp {
                 .absolute()
                 .right(px(20.0))
                 .bottom(gpui_kit::relative(1.0))
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_gifs(cx)))
+                .when(open, |el| el.on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_gifs(cx))))
                 // The web's `scale: 0.92, y: 10` from the bottom right, over the button.
                 .child(motion::pop_in(panel.mb(px(-8.0)), "gif-panel-in", (1.0, 1.0), 0.92, 10.0))
+                // And out: `opacity: 0, scale: 0.95, y: 8`.
+                .when_some(going, |el, t| {
+                    el.map(|el| {
+                        crate::ui::chat::closing(el, t, Gone { scale: 0.95, x: 0.0, y: 8.0, origin: (1.0, 1.0) })
+                    })
+                })
                 .into_any_element(),
         )
     }
@@ -706,7 +722,7 @@ impl FuwaApp {
     }
 
     /// Moods to browse, and trending first.
-    fn gif_browse(&mut self, key: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn gif_browse(&mut self, key: &str, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let categories = match self.gifs.categories.get(key) {
             Some(Err(err)) => return empty("search-x", "Browsing isn't working", err, p),
             Some(Ok(list)) => Some(list.clone()),
@@ -740,21 +756,24 @@ impl FuwaApp {
             }
             None => {
                 for n in 0..9 {
-                    grid = grid.child(
+                    grid = grid.child(pulse(
                         div()
                             .id(SharedString::from(format!("gif-cat-wait|{n}")))
                             .w(px(tile_w))
                             .h(px(88.0))
                             .rounded(corner(12.0))
                             .bg(p.muted),
-                    );
+                        SharedString::from(format!("gif-cat-pulse|{n}")),
+                        60 * n as u64,
+                        window,
+                    ));
                 }
             }
         }
         div().id("gif-browse").size_full().overflow_y_scroll().child(grid).into_any_element()
     }
 
-    fn gif_results(&mut self, key: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn gif_results(&mut self, key: &str, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(r) = self.gifs.results.as_ref() else { return div().into_any_element() };
         if r.tiles.is_empty() {
             if let Some(err) = &r.failed {
@@ -767,17 +786,17 @@ impl FuwaApp {
         let (tiles, busy, id) = (r.tiles.clone(), r.busy, format!("results|{}", r.run));
         // Near the end, the next page starts loading.
         let (offset, max) = (self.gifs.scroll.offset(), self.gifs.scroll.max_offset());
-        if !busy && !tiles.is_empty() && f32::from(max.y) + f32::from(offset.y) < LOAD_AHEAD {
+        if self.gifs.open && !busy && !tiles.is_empty() && f32::from(max.y) + f32::from(offset.y) < LOAD_AHEAD {
             self.more_gifs(cx);
         }
-        self.gif_grid(&id, key, tiles, busy, false, p, cx)
+        self.gif_grid(&id, key, tiles, busy, false, p, window, cx)
     }
 
     /// Your saved GIFs, after a tile to upload one of your own.
-    fn gif_saved(&mut self, key: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let Some(list) = self.gifs.saved.get(key) else { return skeletons(p) };
+    fn gif_saved(&mut self, key: &str, p: &Palette, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(list) = self.gifs.saved.get(key) else { return skeletons(p, window) };
         let tiles = list.iter().filter_map(|s| s.gif.as_ref()).map(Tile::of_gif).collect();
-        self.gif_grid("saved", key, tiles, false, true, p, cx)
+        self.gif_grid("saved", key, tiles, false, true, p, window, cx)
     }
 
     /// A masonry of GIFs in two columns, each sized from its known width and
@@ -791,10 +810,11 @@ impl FuwaApp {
         busy: bool,
         lead: bool,
         p: &Palette,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if tiles.is_empty() && !lead {
-            return if busy { skeletons(p) } else { div().into_any_element() };
+            return if busy { skeletons(p, window) } else { div().into_any_element() };
         }
         let mut ratios: Vec<f32> = Vec::with_capacity(tiles.len() + 1);
         if lead {
@@ -1096,14 +1116,34 @@ fn empty(glyph: &str, title: &str, text: &str, p: &Palette) -> AnyElement {
     .into_any_element()
 }
 
-fn skeletons(p: &Palette) -> AnyElement {
+fn skeletons(p: &Palette, window: &Window) -> AnyElement {
     let (placed, _) = gifs::masonry(&[0.9, 1.25, 1.15, 0.85, 1.35, 1.0], INNER_W, GAP, PAD);
     let mut inner = div().relative().size_full();
-    for (x, y, w, h) in placed {
-        inner =
-            inner.child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).rounded(corner(12.0)).bg(p.muted));
+    for (n, (x, y, w, h)) in placed.into_iter().enumerate() {
+        inner = inner.child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).child(pulse(
+            div().size_full().rounded(corner(12.0)).bg(p.muted),
+            SharedString::from(format!("gif-wait|{n}")),
+            70 * n as u64,
+            window,
+        )));
     }
     inner.into_any_element()
+}
+
+/// Tailwind's `animate-pulse` (half see-through at the middle of every two
+/// seconds), `delay` milliseconds behind, for tiles still coming.
+fn pulse<E: gpui_kit::IntoElement + Styled + 'static>(
+    el: E,
+    id: SharedString,
+    delay: u64,
+    window: &Window,
+) -> AnyElement {
+    const PERIOD: f32 = 2000.0;
+    motion::ambient(el, id, Duration::from_millis(PERIOD as u64), window, move |el, t| {
+        // `cubic-bezier(0.4, 0, 0.6, 1)`, near enough as a cosine.
+        let t = (t - delay as f32 / PERIOD).rem_euclid(1.0);
+        el.opacity(1.0 - 0.25 * (1.0 - (t * std::f32::consts::TAU).cos()))
+    })
 }
 
 fn spinning(id: impl Into<SharedString>, size: f32) -> AnyElement {

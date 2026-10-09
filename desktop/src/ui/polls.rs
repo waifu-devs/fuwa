@@ -17,8 +17,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window, div, px, rgb,
+    IntoElement, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, WeakEntity, Window, div, px, rgb,
 };
 use prost::Message as _;
 
@@ -258,6 +258,61 @@ fn poll_in<E: IntoElement + gpui_kit::Styled + 'static>(
     .into_any_element()
 }
 
+/// The trophy on an ended poll's winning answer (the web's `WinnerMark`): it
+/// pops in, wiggling, when the answer becomes the winner while you're
+/// looking, and is simply there when it already was as the card first showed.
+#[derive(IntoElement)]
+struct WinnerMark {
+    id: SharedString,
+    winner: bool,
+}
+
+impl RenderOnce for WinnerMark {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        // Whether it was the winner when first drawn, and how many times it has won since.
+        let state =
+            window.use_keyed_state(SharedString::from(format!("{}|won", self.id)), cx, |_, _| (self.winner, 0u32));
+        let wins = state.update(cx, |(was, wins), _| {
+            if self.winner && !*was {
+                *wins += 1;
+            }
+            *was = self.winner;
+            *wins
+        });
+        if !self.winner {
+            return div().into_any_element();
+        }
+        let trophy = div().text_color(rgb(0xf59e0b)).child(icon("trophy").size(px(16.0)));
+        if wins == 0 {
+            return trophy.into_any_element();
+        }
+        // `rotate: [0, -12, 8, 0]` over 0.6s after 0.15s, inside the spring that grows it from nothing.
+        let wiggle = motion::once(
+            trophy,
+            SharedString::from(format!("{}|wiggle{wins}", self.id)),
+            Duration::from_millis(750),
+            |el, t| {
+                let t = ((t * 0.75 - 0.15) / 0.6).clamp(0.0, 1.0);
+                let deg = if t < 1.0 / 3.0 {
+                    -12.0 * t * 3.0
+                } else if t < 2.0 / 3.0 {
+                    -12.0 + 20.0 * (t * 3.0 - 1.0)
+                } else {
+                    8.0 - 8.0 * (t * 3.0 - 2.0)
+                };
+                el.rotate(gpui_kit::radians(f32::to_radians(deg)))
+            },
+        );
+        motion::spring_in(
+            div().child(wiggle),
+            SharedString::from(format!("{}|pop{wins}", self.id)),
+            (520.0, 34.0),
+            Duration::ZERO,
+            |el, t| el.scale(t.max(0.0)).translate_y(px(4.0 * (1.0 - t))),
+        )
+    }
+}
+
 /// A whole number, as a count rolls through it.
 fn whole(v: f64) -> String {
     (v.round() as i64).to_string()
@@ -406,7 +461,7 @@ pub(crate) fn poll_card(mid: &str, c: &PollCard, p: &Palette, this: &WeakEntity<
                         el.child(e)
                     })
                     .child(div().flex_1().min_w_0().font_weight(FontWeight::BOLD).child(a.text.clone()))
-                    .when(winner, |el| el.child(icon("trophy").size(px(16.0)).text_color(rgb(0xf59e0b))))
+                    .child(WinnerMark { id: SharedString::from(format!("poll-trophy|{mid}|{id}")), winner })
                     .when(c.results, |el| {
                         // The web's numbers: the votes muted, then the share in a 36px column.
                         el.child(motion::slide_in(
@@ -742,7 +797,9 @@ impl FuwaApp {
         let first = poll.as_ref().and_then(|p| p.answers.iter().find(|a| a.votes > 0).or(p.answers.first()));
         let Some(answer) = first.map(|a| a.id) else { return };
         self.menu = None;
-        self.polls.voters = Some(Voters { answer, pages: HashMap::new() });
+        static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let opened = OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.polls.voters = Some(Voters { answer, pages: HashMap::new(), spots: Vec::new(), opened });
         self.dialog = Some(Dialog::PollVoters {
             key: place.key,
             server: place.server,
@@ -812,26 +869,53 @@ impl FuwaApp {
         let (Some(poll), Some(voters)) = (poll, self.polls.voters.as_ref()) else { return div().into_any_element() };
         let look = self.core.shared.read(|s| s.instance(key).map(|i| Look::of(i, server)).unwrap_or_default());
         let current = voters.answer;
-        let mut tabs = div().flex().flex_wrap().gap(px(6.0));
+        // The active tab's pill glides between tabs (the web's `layoutId`), once
+        // they've been measured; until then the active tab wears it itself.
+        let spot = poll.answers.iter().position(|a| a.id == current).and_then(|n| voters.spots.get(n).copied());
+        let measure = cx.entity().downgrade();
+        let mut tabs = div().flex().flex_wrap().gap(px(6.0)).on_children_prepainted(move |bounds, window, cx| {
+            let first = bounds.first().map_or(gpui_kit::point(px(0.0), px(0.0)), |b| b.origin);
+            let spots: Vec<_> = bounds
+                .iter()
+                .map(|b| {
+                    let at = b.origin - first;
+                    (f32::from(at.x), f32::from(at.y), f32::from(b.size.width), f32::from(b.size.height))
+                })
+                .collect();
+            let _ = measure.update(cx, |this, _| {
+                if let Some(v) = this.polls.voters.as_mut().filter(|v| v.spots != spots) {
+                    v.spots = spots;
+                    window.request_animation_frame();
+                }
+            });
+        });
         for a in &poll.answers {
             let on = a.id == current;
             let id = a.id;
-            let hover = alpha(p.primary, 0.08);
-            let picture = answer_emoji(&a.emoji, look_picture(&look, &a.emoji).as_ref(), 14.0);
+            let hover = p.foreground;
+            let picture = answer_emoji(&a.emoji, look_picture(&look, &a.emoji).as_ref(), 16.0);
             tabs = tabs.child(
                 div()
                     .id(SharedString::from(format!("voters-tab|{id}")))
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .px(px(10.0))
-                    .h(px(30.0))
+                    .px(px(12.0))
+                    .py(px(6.0))
                     .rounded_full()
-                    .text_sm()
+                    .border_1()
+                    .text_xs()
+                    .line_height(px(16.0))
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
-                    .when(on, |el| el.bg(alpha(p.primary, 0.14)).text_color(p.primary))
-                    .when(!on, |el| el.text_color(p.muted_foreground).hover(move |s| s.bg(hover)))
+                    .when(on, |el| {
+                        el.border_color(gpui_kit::transparent_black())
+                            .text_color(p.primary_foreground)
+                            .when(spot.is_none(), |el| el.bg(p.primary))
+                    })
+                    .when(!on, |el| {
+                        el.border_color(p.border).text_color(p.muted_foreground).hover(move |s| s.text_color(hover))
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(v) = this.polls.voters.as_mut() {
                             v.answer = id;
@@ -848,9 +932,27 @@ impl FuwaApp {
                             .overflow_hidden()
                             .child(a.text.clone()),
                     )
-                    .child(div().text_xs().opacity(0.8).child(a.votes.to_string())),
+                    .child(div().opacity(0.8).child(crate::core::i18n::number(a.votes))),
             );
         }
+        let glider = spot.map(|(x, y, w, h)| {
+            let key = format!("voters-glide|{message}|{}", voters.opened);
+            let pill = motion::glide(
+                div().absolute().left_0().top_0().h(px(h)).rounded_full().bg(p.primary),
+                format!("{key}|w"),
+                w,
+                cx,
+                |el, w| el.w(px(w)),
+            );
+            let pill =
+                motion::glide(div().absolute().left_0().top_0().child(pill), format!("{key}|y"), y, cx, |el, y| {
+                    el.top(px(y))
+                });
+            motion::glide(div().absolute().left_0().top_0().child(pill), format!("{key}|x"), x, cx, |el, x| {
+                el.left(px(x))
+            })
+        });
+        let tabs = div().relative().children(glider).child(tabs);
         let page = voters.pages.get(&current);
         let mut list = div().id("voters-list").max_h(px(320.0)).overflow_y_scroll().flex().flex_col().gap(px(2.0));
         match page {
@@ -1706,6 +1808,11 @@ struct Answer {
 pub struct Voters {
     pub answer: u32,
     pages: HashMap<u32, Page>,
+    /// Where each answer's tab sits (left, top, width, height, from the first
+    /// one's corner), for the active pill to glide between.
+    spots: Vec<(f32, f32, f32, f32)>,
+    /// Which time the dialog was opened, so its pill starts on its tab each time.
+    opened: u64,
 }
 
 #[derive(Default)]

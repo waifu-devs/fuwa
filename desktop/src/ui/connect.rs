@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Div, Entity, EventEmitter, Focusable as _,
-    FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render, Rgba, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div, px,
+    Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Div, ElementId, Entity, EventEmitter,
+    Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render, Rgba,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div, px,
 };
 
 use crate::core::api::instance_key;
@@ -1661,6 +1661,7 @@ fn provider_mark(id: &str, size: f32, color: Rgba) -> AnyElement {
 
 /// A "Continue with …" button with any mark in front.
 fn provider_button_with(id: SharedString, mark: AnyElement, name: &str, p: &Palette) -> Stateful<Div> {
+    let shine_id = SharedString::from(format!("{id}|shine"));
     let glow = gpui_kit::BoxShadow {
         color: p.primary.into(),
         offset: gpui_kit::point(px(0.0), px(14.0)),
@@ -1687,6 +1688,7 @@ fn provider_button_with(id: SharedString, mark: AnyElement, name: &str, p: &Pale
         // `whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}`.
         .hover(|s| s.translate_y(px(-2.0)))
         .active(|s| s.scale(0.97))
+        .child(shine(shine_id, p))
         .child(div().id("provider-mark").group_hover("provider", |s| s.scale(1.1)).child(mark))
         .child(div().min_w_0().truncate().child(t_with("connect.provider.continueWith", &[("name", Arg::Str(name))])))
         .child(provider_arrow())
@@ -1720,6 +1722,7 @@ fn provider_button(id: &'static str, glyph: &str, name: &str, p: &Palette) -> St
         .group("provider")
         .hover(|s| s.translate_y(px(-2.0)))
         .active(|s| s.scale(0.97))
+        .child(shine(SharedString::from(format!("{id}|shine")), p))
         .child(
             // The flower turns a petal's width and the building rises as they grow.
             div()
@@ -1732,6 +1735,77 @@ fn provider_button(id: &'static str, glyph: &str, name: &str, p: &Palette) -> St
         )
         .child(div().min_w_0().truncate().child(t_with("connect.provider.continueWith", &[("name", Arg::Str(name))])))
         .child(provider_arrow())
+}
+
+/// The light that sweeps across a "Continue with …" button as it's pointed at
+/// (the web's skewed band, `-skew-x-12`, crossing in 700ms and back as the
+/// pointer leaves). Put it first in the button, so it passes behind the words.
+pub(crate) fn shine(id: SharedString, p: &Palette) -> Shine {
+    Shine { id, color: alpha(p.primary, 0.55) }
+}
+
+/// See [`shine`].
+#[derive(IntoElement)]
+pub(crate) struct Shine {
+    id: SharedString,
+    color: Hsla,
+}
+
+/// Whether a [`Shine`] was last pointed at, and how many times that changed.
+struct Sweep {
+    hovered: bool,
+    changes: u64,
+}
+
+impl gpui_kit::RenderOnce for Shine {
+    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+        let layer = div().id(self.id.clone()).absolute().inset_0().overflow_hidden().rounded(radius_xl());
+        let (layer, now) = motion::pointer(layer, &self.id, window, cx);
+        let sweep = window.use_keyed_state(SharedString::from(format!("{}|sweep", self.id)), cx, |_, _| Sweep {
+            hovered: false,
+            changes: 0,
+        });
+        let changes = sweep.update(cx, |s, _| {
+            if s.hovered != now.hovered {
+                s.hovered = now.hovered;
+                s.changes += 1;
+            }
+            s.changes
+        });
+        if changes == 0 {
+            return layer.into_any_element();
+        }
+        let color = self.color;
+        let clear = Hsla { a: 0.0, ..color };
+        let half = |from: Hsla, to: Hsla| {
+            div().flex_1().h_full().bg(gpui_kit::linear_gradient(
+                90.0,
+                gpui_kit::linear_color_stop(from, 0.0),
+                gpui_kit::linear_color_stop(to, 1.0),
+            ))
+        };
+        // GPUI can't skew, so a taller band turned 12° stands in, clipped by the button.
+        let band = div()
+            .absolute()
+            .top(px(-16.0))
+            .bottom(px(-16.0))
+            .w(gpui_kit::relative(1.0 / 3.0))
+            .flex()
+            .rotate(gpui_kit::radians(12f32.to_radians()))
+            .child(half(clear, color))
+            .child(half(color, clear));
+        let hovered = now.hovered;
+        // Over: from a third off the left edge to past the right, fading in; left: back again, fading out.
+        let band = band.with_animation(
+            ElementId::Name(format!("{}|sweep{changes}", self.id).into()),
+            Animation::new(Duration::from_millis(700)).with_easing(gpui_kit::ease_in_out),
+            move |el, t| {
+                let t = if hovered { t } else { 1.0 - t };
+                el.left(gpui_kit::relative(-1.0 / 3.0 + t * (1.1 + 1.0 / 3.0))).opacity(t)
+            },
+        );
+        layer.child(band).into_any_element()
+    }
 }
 
 /// The arrow on a "Continue with …" button, nudging along as it's hovered.

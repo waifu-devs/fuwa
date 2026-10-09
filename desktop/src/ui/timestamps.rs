@@ -157,6 +157,21 @@ pub struct TimePicker {
     _subs: Vec<Subscription>,
 }
 
+/// The picker's two fields, and which has the focus: what it's drawn from,
+/// kept a moment after it closes for its way out.
+#[derive(Clone)]
+pub(crate) struct Fields {
+    date: Entity<InputState>,
+    time: Entity<InputState>,
+    focus: Option<u8>,
+}
+
+impl Fields {
+    fn of(picker: &TimePicker) -> Self {
+        Fields { date: picker.date.clone(), time: picker.time.clone(), focus: picker.focus }
+    }
+}
+
 /// The moment the two fields name, on this computer's clock; None while one isn't a date or a time.
 fn from_fields(date: &str, time: &str) -> Option<i64> {
     let date = NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").ok()?;
@@ -209,13 +224,18 @@ impl FuwaApp {
             .hover(|s| s.scale(1.12).rotate(gpui_kit::radians(8f32.to_radians())))
             .active(|s| s.scale(0.85))
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.insert")).build(window, cx))
-            .on_click(cx.listener(|this, _, window, cx| {
-                if this.time_picker.is_some() {
-                    this.close_time_picker(window, cx);
-                } else {
-                    this.open_time_picker(window, cx);
-                }
-            }))
+            // It toggles as it's pressed: a press while it's open has already closed it
+            // (the panel's press outside), so it mustn't open it again on release.
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    if open {
+                        this.close_time_picker(window, cx);
+                    } else {
+                        this.open_time_picker(window, cx);
+                    }
+                }),
+            )
             .into_any_element()
     }
 
@@ -306,11 +326,25 @@ impl FuwaApp {
 
     /// The picker (the web's `TimestampPicker` panel), above the composer's
     /// timestamp button: the day and time with one-tap picks, how it should
-    /// read, and the token that goes in.
-    pub(crate) fn time_picker_panel(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let picker = self.time_picker.as_ref()?;
+    /// read, and the token that goes in; once closed, a moment more on its way out.
+    pub(crate) fn time_picker_leaving(
+        &mut self,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let open = self.time_picker.as_ref().map(Fields::of);
+        let going = motion::kept("time-panel", open.as_ref(), window, cx);
+        match (open, going) {
+            (Some(fields), _) => Some(self.time_panel_of(fields, None, p, cx)),
+            (None, Some((fields, t))) => Some(self.time_panel_of(fields, Some(t), p, cx)),
+            (None, None) => None,
+        }
+    }
+
+    fn time_panel_of(&mut self, picker: Fields, going: Option<f32>, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let now = now_ms();
-        let picked = self.picked(cx);
+        let picked = from_fields(&picker.date.read(cx).value(), &picker.time.read(cx).value());
         let chosen = self.time_style;
 
         let field = |input: &Entity<InputState>, focused: bool| {
@@ -530,19 +564,27 @@ impl FuwaApp {
             .child(footer);
         // Its right edge on the button's: the emoji button and the rest come after it.
         let right = self.tool_right(crate::ui::composer::Tool::Timestamp);
-        Some(
-            div()
-                .id("time-panel")
-                .absolute()
-                .right(px(right))
-                .bottom(gpui_kit::relative(1.0))
-                .on_mouse_down_out(cx.listener(|this, _, window, cx| {
+        div()
+            .id("time-panel")
+            .absolute()
+            .right(px(right))
+            .bottom(gpui_kit::relative(1.0))
+            .when(going.is_none(), |el| {
+                el.on_mouse_down_out(cx.listener(|this, _, window, cx| {
                     this.close_time_picker(window, cx);
                 }))
-                // It grows from 92% as it rises from the button.
-                .child(motion::pop_in(body.mb(px(-1.0)), "time-panel-rise", (1.0, 1.0), 0.92, 8.0))
-                .into_any_element(),
-        )
+            })
+            // It grows from 92% as it rises from the button.
+            .child(motion::pop_in(body.mb(px(-1.0)), "time-panel-rise", (1.0, 1.0), 0.92, 8.0))
+            // And out: `opacity: 0, scale: 0.95, y: 6`.
+            .when_some(going, |el, t| {
+                crate::ui::chat::closing(
+                    el,
+                    t,
+                    crate::ui::chat::Gone { scale: 0.95, x: 0.0, y: 6.0, origin: (1.0, 1.0) },
+                )
+            })
+            .into_any_element()
     }
 
     /// Redraws while relative timestamps are on screen (or the picker's

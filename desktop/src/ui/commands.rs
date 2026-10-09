@@ -633,8 +633,20 @@ impl FuwaApp {
     }
 
     /// The "/" list floating over the composer.
-    pub(crate) fn command_list_view(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (options, loading, empty) = self.command_list(cx)?;
+    /// Once closed, it's drawn a moment more on its way out. The @ list goes first.
+    pub(crate) fn command_list_view(
+        &self,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let now = if self.picker.is_none() { self.command_list(cx) } else { None };
+        let going = motion::kept("commands-list", now.as_ref(), window, cx);
+        let ((options, loading, empty), going) = match (now, going) {
+            (Some(list), _) => (list, None),
+            (None, Some((list, t))) => (list, Some(t)),
+            (None, None) => return None,
+        };
         let mut list = div().relative().flex().flex_col();
         if !options.is_empty() {
             // The lit row's fill glides (the web's `layoutId="command-active"`).
@@ -707,25 +719,34 @@ impl FuwaApp {
                     ),
             );
         }
-        Some(Self::above_composer(list, "commands-list", p))
+        Some(Self::above_composer(list, "commands-list", going, p))
     }
 
     /// The focused option's list, floating over the composer.
     pub(crate) fn command_picks_view(
         &self,
         p: &Palette,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (ix, list) = self.open_picks(window, cx)?;
-        let form = self.commands.form.as_ref()?;
-        let lit = form.lit.min(list.len().saturating_sub(1));
+        // Once closed, it's drawn a moment more on its way out.
+        let now = self.open_picks(window, cx).and_then(|(ix, list)| {
+            let form = self.commands.form.as_ref()?;
+            let lit = form.lit.min(list.len().saturating_sub(1));
+            Some((ix, list, lit, form.fields[ix].option.name.clone()))
+        });
+        let going = motion::kept("command-picks", now.as_ref(), window, cx);
+        let ((ix, list, lit, title), going) = match (now, going) {
+            (Some(open), _) => (open, None),
+            (None, Some((open, t))) => (open, Some(t)),
+            (None, None) => return None,
+        };
         let hover = alpha(p.primary, 0.08);
         let mut rows = div().relative().flex().flex_col();
         if !list.is_empty() {
             rows = rows.child(Self::above_glide(format!("command-pick-lit|{ix}"), lit, p, cx));
         }
-        rows = rows.child(Self::above_title("", &form.fields[ix].option.name, p));
+        rows = rows.child(Self::above_title("", &title, p));
         if list.is_empty() {
             rows = rows.child(
                 div().px(px(8.0)).py(px(8.0)).text_sm().text_color(p.muted_foreground).child("Nothing matches."),
@@ -752,7 +773,7 @@ impl FuwaApp {
                     .child(div().text_xs().text_color(p.muted_foreground).child(hint)),
             );
         }
-        Some(Self::above_composer(rows, format!("command-picks-{ix}"), p))
+        Some(Self::above_composer(rows, format!("command-picks-{ix}"), going, p))
     }
 
     /// In place of the box once a command is picked: its options as fields.

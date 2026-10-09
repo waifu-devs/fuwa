@@ -102,6 +102,9 @@ pub(crate) fn button_glyph(
     motion::pop(div().child(inner), ElementId::Name(swap), from, turn, Duration::ZERO).into_any_element()
 }
 
+/// Where the record menu was drawn: its top, then each row's top and height.
+pub(crate) type RecordRows = (f32, [(f32, f32); 2]);
+
 /// What calls keep in the window: the open voice channel, the open card,
 /// calls turned down, and the recordings dialog.
 #[derive(Default)]
@@ -137,6 +140,14 @@ pub(crate) struct CallsUi {
     pub in_call: bool,
     /// The share dialog: what can be shared, their pictures, what's picked.
     pub picker: crate::ui::screen_share::SharePicker,
+    /// The card open last, and when it closed: drawn fading out for
+    /// `motion::LEAVE` after (the web's popovers' exit).
+    pub leaving: Option<(CallPop, Option<Instant>)>,
+    /// The record menu's row under the pointer, which its highlight glides to.
+    pub record_lit: Option<usize>,
+    /// Where the record menu and its two rows were last drawn: the menu's
+    /// top, then each row's top and height, to place the highlight.
+    pub record_rows: Rc<Cell<RecordRows>>,
 }
 
 impl FuwaApp {
@@ -307,9 +318,36 @@ pub(crate) fn voice_avatar(
     el.into_any_element()
 }
 
+/// What there is at `id` (a list's keys) still there since it was first
+/// drawn, in frames one after another: those show without their entrance,
+/// as under the web's `AnimatePresence initial={false}`, and only what comes
+/// later animates in. One that goes and comes back is new again.
+pub(crate) fn there_at_first(
+    id: &str,
+    now: impl IntoIterator<Item = String>,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> HashSet<String> {
+    let now: HashSet<String> = now.into_iter().collect();
+    let state =
+        window.use_keyed_state(SharedString::from(format!("{id}|at-first")), cx, |_, _| None::<HashSet<String>>);
+    state.update(cx, |first, _| {
+        let first = first.get_or_insert_with(|| now.clone());
+        first.retain(|k| now.contains(k));
+        first.clone()
+    })
+}
+
 /// The web's `VoiceFlags`: camera on, muted, deafened, recording; the ones
-/// a moderator set in red.
-pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
+/// a moderator set in red. Those already up when the row first shows sit
+/// still; ones that go up later pop in. `tag` names the row.
+pub(crate) fn voice_flags(
+    state: &pb::VoiceState,
+    tag: &str,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> Div {
     let mut flags: Vec<(&'static str, &'static str, bool)> = Vec::new();
     if state.server_record {
         flags.push(("server", "dms-calls.calls.flags.serverRecord", true));
@@ -338,6 +376,7 @@ pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
     } else if state.self_deaf {
         flags.push(("headphone-off", "dms-calls.calls.flags.deaf", false));
     }
+    let first = there_at_first(&format!("flags|{tag}"), flags.iter().map(|f| f.1.to_owned()), window, cx);
     let mut row = div().ml_auto().flex_none().flex().items_center().gap(px(2.0));
     for (glyph, label, by_mod) in flags {
         let id = SharedString::from(format!("flag|{}|{glyph}|{label}", state.user_id));
@@ -351,7 +390,11 @@ pub(crate) fn voice_flags(state: &pb::VoiceState, p: &Palette) -> Div {
             .tooltip(move |window, cx| crate::ui::overlay::Tip::new(t(label)).build(window, cx))
             .child(icon(glyph).size(px(14.0)));
         // Each pops in with a little turn (`scale: 0, rotate: -40` on a lively spring).
-        row = row.child(motion::pop(cell, id, 0.0, -40.0, Duration::ZERO));
+        row = if first.contains(label) {
+            row.child(cell)
+        } else {
+            row.child(motion::pop(cell, id, 0.0, -40.0, Duration::ZERO))
+        };
     }
     row
 }
@@ -574,7 +617,16 @@ pub(crate) fn signal(status: &Status, quality: &Quality, p: &Palette, tag: &str,
     };
     let mut bars = div().flex_none().h(px(14.0)).flex().items_end().gap(px(2.0));
     for (n, h) in [5.0f32, 9.0, 13.0].into_iter().enumerate() {
-        let bar = div().w(px(3.0)).h(px(h)).rounded_full().bg(color);
+        // Each grows up into place as it first shows (`scaleY` from 0 on
+        // `SPRING`, 60 ms after the one before).
+        let bar = motion::spring_in(
+            div().w(px(3.0)).h(px(h)).rounded_full().bg(color),
+            SharedString::from(format!("bars-in|{tag}|{n}")),
+            (520.0, 34.0),
+            Duration::from_millis(60 * n as u64),
+            move |el, t| el.h(px(h * t.max(0.0))),
+        );
+        let bar = div().h(px(14.0)).flex().items_end().child(bar);
         let bar = if ok {
             bar.opacity(if n < lit { 1.0 } else { 0.25 }).into_any_element()
         } else {
@@ -674,8 +726,52 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// The card for `pop`, hung `side` of what drew it, while it's open and
+    /// as it fades out once it closes; `card` draws it.
+    pub(crate) fn pop_card(
+        &mut self,
+        pop: &CallPop,
+        side: Side,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        card: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) -> AnyElement,
+    ) -> Option<AnyElement> {
+        if self.calls.pop.as_ref() == Some(pop) {
+            let card = card(self, window, cx);
+            return Some(self.hang(card, side));
+        }
+        let gone = match &self.calls.leaving {
+            Some((last, gone)) if self.calls.pop.is_none() && last == pop && !cx.reduce_motion() => *gone,
+            _ => return None,
+        };
+        let t = gone.map_or(0.0, |at| at.elapsed().as_secs_f32() / motion::LEAVE.as_secs_f32());
+        if t >= 1.0 {
+            return None;
+        }
+        window.request_animation_frame();
+        let shown = 1.0 - gpui_kit::ease_out_quint()(t);
+        // Fading where it was, taking no more clicks.
+        let card = div()
+            .relative()
+            .opacity(shown)
+            .child(card(self, window, cx))
+            .child(div().absolute().inset_0().occlude())
+            .into_any_element();
+        Some(self.hang(card, side))
+    }
+
     /// The clear layer behind an open card that closes it on any click elsewhere.
     pub(crate) fn render_call_pop_layer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // Notes when the open card closes, for it to fade out.
+        match (&self.calls.pop, &mut self.calls.leaving) {
+            (Some(pop), _) => self.calls.leaving = Some((pop.clone(), None)),
+            (None, Some((_, gone))) => {
+                if gone.get_or_insert_with(Instant::now).elapsed() >= motion::LEAVE {
+                    self.calls.leaving = None;
+                }
+            }
+            (None, None) => {}
+        }
         self.calls.pop.as_ref()?;
         Some(
             div()
@@ -1165,11 +1261,58 @@ impl FuwaApp {
         let video = self.core.shared.read(|s| {
             s.instance(&call.instance).and_then(|i| i.server(&call.server_id)).is_some_and(|s| s.record_video)
         });
-        let item = |id: &'static str, glyph: &'static str, title: String, text: String, on: bool, window: &Window| {
-            // The menu's highlight (`bg-accent`).
-            let hover = p.accent;
+        // The menu's highlight (`bg-accent`), gliding from row to row as the
+        // web's menus do.
+        let (card_top, spots) = self.calls.record_rows.get();
+        let lit = self.calls.record_lit;
+        let (top, height) = spots[lit.unwrap_or(0)];
+        let highlight = motion::glide(
+            div().absolute().left(px(4.0)).right(px(4.0)).child(motion::glide(
+                div().size_full().rounded(radius_md()).bg(p.accent),
+                "record-lit|h".to_owned(),
+                height,
+                cx,
+                |el, h| el.h(px(h)),
+            )),
+            "record-lit|top".to_owned(),
+            top - card_top,
+            cx,
+            |el, y| el.top(px(y)),
+        );
+        // Only while the pointer is on a row; it fades in where it lands.
+        let highlight = (lit.is_some() && height > 0.0).then(|| {
+            let layer = div().absolute().top_0().left_0().size_full().child(highlight);
+            motion::fade_in(layer, "record-lit|in", Duration::from_millis(150))
+        });
+        let rows = self.calls.record_rows.clone();
+        let item = |n: usize,
+                    id: &'static str,
+                    glyph: &'static str,
+                    title: String,
+                    text: String,
+                    on: bool,
+                    window: &Window| {
+            let rows = rows.clone();
+            // Where it's drawn, for the highlight that glides behind it.
+            let measure = gpui_kit::canvas(
+                move |bounds, window, _| {
+                    let (top, mut spots) = rows.get();
+                    let spot = (f32::from(bounds.origin.y), f32::from(bounds.size.height));
+                    if spots[n] != spot {
+                        spots[n] = spot;
+                        rows.set((top, spots));
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full();
             div()
                 .id(id)
+                .relative()
                 .flex()
                 .items_start()
                 .gap(px(10.0))
@@ -1177,7 +1320,7 @@ impl FuwaApp {
                 .py(px(8.0))
                 .rounded(radius_md())
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
+                .child(measure)
                 .child(div().mt(px(2.0)).child(icon(glyph).size(px(16.0)).text_color(p.muted_foreground)))
                 .child(
                     div()
@@ -1190,6 +1333,32 @@ impl FuwaApp {
                 .when(on, |el| {
                     el.child(ping_dot(format!("{id}|dot"), 8.0, red(), alpha(red(), 0.6), window).mt(px(6.0)))
                 })
+                .on_hover(cx.listener(move |this, over: &bool, _, cx| {
+                    if *over {
+                        this.calls.record_lit = Some(n);
+                    } else if this.calls.record_lit == Some(n) {
+                        this.calls.record_lit = None;
+                    }
+                    cx.notify();
+                }))
+        };
+        let measure_card = {
+            let rows = self.calls.record_rows.clone();
+            gpui_kit::canvas(
+                move |bounds, window, _| {
+                    let (top, spots) = rows.get();
+                    let at = f32::from(bounds.origin.y);
+                    if top != at {
+                        rows.set((at, spots));
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
         };
         let device = call.self_record;
         let server = call.server_record;
@@ -1202,6 +1371,9 @@ impl FuwaApp {
             .p(px(4.0))
             .shadow(shadow_xl())
             .occlude()
+            .relative()
+            .child(measure_card)
+            .children(highlight)
             .child(
                 div()
                     .px(px(8.0))
@@ -1214,6 +1386,7 @@ impl FuwaApp {
             )
             .child(
                 item(
+                    0,
                     "record-device",
                     "laptop",
                     t(if device { "dms-calls.calls.video.deviceStop" } else { "dms-calls.calls.video.device" }),
@@ -1229,6 +1402,7 @@ impl FuwaApp {
             )
             .child(
                 item(
+                    1,
                     "record-server",
                     "server",
                     t(if server { "dms-calls.calls.video.serverStop" } else { "dms-calls.calls.video.server" }),
@@ -1255,7 +1429,7 @@ impl FuwaApp {
     /// The web's `RecordButton`: on this computer, or (in a voice channel
     /// that may record on the server) a menu of both. Hidden where you can't record.
     pub(crate) fn record_button(
-        &self,
+        &mut self,
         from: &str,
         size: Size,
         grow: bool,
@@ -1281,7 +1455,7 @@ impl FuwaApp {
             (false, Size::Lg) => (Some(p.muted.into()), p.foreground.into(), alpha(p.muted, 0.7), p.foreground.into()),
         };
         let pop = CallPop::Record { from: from.to_owned() };
-        let open = self.calls.pop.as_ref() == Some(&pop);
+        let pop_of = pop.clone();
         let id = SharedString::from(format!("record|{from}"));
         let mut button =
             call_button_frame(id.clone(), size, bg, fg, hover_bg, hover_fg, label).when(grow, |el| el.flex_1());
@@ -1315,9 +1489,10 @@ impl FuwaApp {
             }))
         };
         let mut holder = div().relative().flex().when(grow, |el| el.flex_1()).child(button);
-        if open {
-            holder = holder.child(self.hang(self.record_card(&call, window, cx), Side::AboveCenter));
-        }
+        holder =
+            holder.children(self.pop_card(&pop_of, Side::AboveCenter, window, cx, |this, window, cx| {
+                this.record_card(&call, window, cx)
+            }));
         Some(holder.into_any_element())
     }
 }

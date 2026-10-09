@@ -506,6 +506,20 @@ pub fn leave(el: impl IntoElement, t: f32) -> AnyElement {
         .into_any_element()
 }
 
+/// Draws something that has gone ([`kept`]) `t` of the way out where it
+/// stood, for things in the flow of a page (a panel in the sidebar, a pill):
+/// it keeps its place, fades, and takes the pointer only over itself while
+/// it goes. `pose` adds its own exit (a shrink, a drop) at `t`.
+pub fn leave_in_place<E: IntoElement + Styled + 'static>(
+    el: E,
+    t: f32,
+    pose: impl FnOnce(Div, f32) -> Div,
+) -> AnyElement {
+    let t = gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0));
+    pose(gpui_kit::div().relative().opacity(1.0 - t).child(el).child(gpui_kit::div().absolute().inset_0().occlude()), t)
+        .into_any_element()
+}
+
 /// How something looks while it's pointed at or held: scaled, turned
 /// clockwise by `turn` degrees and lifted `lift` pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]

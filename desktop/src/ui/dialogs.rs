@@ -381,7 +381,7 @@ impl FuwaApp {
         };
         let panel =
             panel.child(dialog_close("dialog-close", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))));
-        Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx))))
+        Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx)), cx))
     }
 
     // ───────────────────────── Inviting people ─────────────────────────
@@ -1312,7 +1312,7 @@ impl FuwaApp {
                     .child(div().mt(px(0.0)).child(body)),
             )
             .child(dialog_close("dialog-close", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))));
-        dialog_layer("welcome", panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx)))
+        dialog_layer("welcome", panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx)), cx)
     }
 
     /// Agrees to the open server's rules (from the rules or the welcome

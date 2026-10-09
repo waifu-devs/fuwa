@@ -218,6 +218,21 @@ pub fn popped<E: IntoElement + Styled + 'static>(
     })
 }
 
+/// What a badge showed, kept a moment after it has gone so it can shrink
+/// away (the web's `exit={{ scale: 0 }}` under `AnimatePresence`): while
+/// `now` is something, that and 1; for [`motion::LEAVE`] after, what it was
+/// and how much of it is left, down to 0. Draw it the same way, with the
+/// same ids, both times, so it doesn't pop in again on its way out.
+///
+/// [`motion::LEAVE`]: crate::ui::motion::LEAVE
+pub fn going<T: Clone + 'static>(id: &str, now: Option<T>, window: &mut Window, cx: &mut App) -> Option<(T, f32)> {
+    let kept = crate::ui::motion::kept(id, now.as_ref(), window, cx);
+    match now {
+        Some(now) => Some((now, 1.0)),
+        None => kept.map(|(was, t)| (was, 1.0 - gpui_kit::ease_out_quint()(t))),
+    }
+}
+
 /// The dot that says how a connection is doing.
 pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
     let color: Hsla = match connection {
@@ -237,6 +252,9 @@ pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, 
     filled_button(id, label, p.primary, p.primary_foreground, p)
 }
 
+/// The web's default `Button` (`hover:bg-primary/90`) with `.btn` on it: on
+/// hover it rises 2px over a glow in the primary (`0 8px 22px -8px`), and a
+/// press brings it down to 94% (the transform on a springy curve).
 fn filled_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -244,7 +262,7 @@ fn filled_button(
     text: Rgba,
     p: &Palette,
 ) -> Stateful<Div> {
-    let glow = alpha(color, 0.45);
+    let glow = p.primary;
     div()
         .id(id)
         .h(px(40.0))
@@ -258,29 +276,19 @@ fn filled_button(
         .text_color(text)
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
-        .shadow(vec![gpui_kit::BoxShadow {
-            color: alpha(color, 0.28),
-            offset: gpui_kit::point(px(0.0), px(6.0)),
-            blur_radius: px(18.0),
-            spread_radius: px(-6.0),
-            inset: false,
-        }])
         .hover({
-            let c = mix(color, p.foreground, 0.08);
+            let c = alpha(color, 0.9);
             move |s| {
                 s.bg(c).translate_y(px(-2.0)).shadow(vec![gpui_kit::BoxShadow {
-                    color: glow,
+                    color: glow.into(),
                     offset: gpui_kit::point(px(0.0), px(8.0)),
-                    blur_radius: px(24.0),
-                    spread_radius: px(-6.0),
+                    blur_radius: px(22.0),
+                    spread_radius: px(-8.0),
                     inset: false,
                 }])
             }
         })
-        .active({
-            let c = mix(color, p.foreground, 0.18);
-            move |s| s.bg(c).translate_y(px(0.0)).scale(0.94)
-        })
+        .active(|s| s.translate_y(px(0.0)).scale(0.94))
         .child(label.into())
 }
 
@@ -330,8 +338,8 @@ pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: 
         .justify_center()
         .cursor_pointer()
         .text_color(p.muted_foreground)
+        // The web's ghost icon buttons answer hover alone, no press.
         .hover(move |s| s.bg(hover).text_color(fg))
-        .active(move |s| s.top(px(1.0)))
         .child(icon(name).size(px(18.0)))
 }
 

@@ -328,10 +328,27 @@ impl FuwaApp {
             let (row, list) = (places.get(h)?, places.get("")?);
             Some((f32::from(row.top() - list.top()), f32::from(row.size.height)))
         });
-        let highlight = at.map(|(top, height)| {
+        // It fades in where it lands and fades out where it was once the pointer
+        // leaves the menu (the web's highlight under `AnimatePresence`).
+        let leaving = motion::kept("um-hl", at.as_ref(), window, cx);
+        let shown = motion::follow("um-hl|shown", if at.is_some() { 1.0 } else { 0.0 }, window, cx);
+        let at = match (at, leaving) {
+            (Some(at), _) => Some((at, shown)),
+            (None, Some((was, t))) => Some((was, shown.min(1.0 - gpui_kit::ease_out_quint()(t)))),
+            _ => None,
+        };
+        let highlight = at.map(|((top, height), shown)| {
             let top = motion::follow("um-hl|top", top, window, cx);
             let height = motion::follow("um-hl|height", height, window, cx);
-            div().absolute().left_0().right_0().top(px(top)).h(px(height)).rounded(radius_sm()).bg(p.accent)
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(top))
+                .h(px(height))
+                .rounded(radius_sm())
+                .bg(p.accent)
+                .opacity(shown.clamp(0.0, 1.0))
         });
         let list = placed(div().id("um-list").relative(), String::new(), &places)
             .when_some(highlight, |el, h| el.child(h))
@@ -355,23 +372,29 @@ impl FuwaApp {
                     .left(px(crate::ui::rail::RAIL + 8.0))
                     .on_click(|_, _, cx| cx.stop_propagation())
                     // The web's menus grow in from the corner they hang from (side="top" align="start").
-                    .child(motion::pop_in(
-                        div()
-                            .w(px(256.0))
-                            .p(px(4.0))
-                            .rounded(radius_md())
-                            .border_1()
-                            .border_color(p.border)
-                            .bg(popover)
-                            .shadow_md()
-                            .text_size(px(14.0))
-                            .line_height(px(20.0))
-                            .text_color(p.foreground)
-                            .child(list),
-                        "menu-status",
-                        (0.0, 1.0),
-                        0.95,
+                    // Closed, it shrinks back toward that corner as it fades (the web's `exit`).
+                    .child(crate::ui::overlay::leaving_pose(
+                        div().transform_origin(0.0, 1.0).child(motion::pop_in(
+                            div()
+                                .w(px(256.0))
+                                .p(px(4.0))
+                                .rounded(radius_md())
+                                .border_1()
+                                .border_color(p.border)
+                                .bg(popover)
+                                .shadow_md()
+                                .text_size(px(14.0))
+                                .line_height(px(20.0))
+                                .text_color(p.foreground)
+                                .child(list),
+                            "menu-status",
+                            (0.0, 1.0),
+                            0.95,
+                            0.0,
+                        )),
                         0.0,
+                        0.95,
+                        cx,
                     )),
             )
             .into_any_element()

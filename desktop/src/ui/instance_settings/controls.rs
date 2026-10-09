@@ -810,20 +810,10 @@ impl InstanceSettingsView {
                 .text_color(fg)
                 .child(text.to_uppercase())
         };
-        if !self.overridden_any(paths) {
-            // Either one pops in from 80% as the other goes (the web's `AnimatePresence`).
-            return motion::pop_in(
-                pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground.into()),
-                SharedString::from(format!("idefault-{key}")),
-                (0.5, 0.5),
-                0.8,
-                0.0,
-            )
-            .into_any_element();
-        }
         let saving = self.saving;
         let (fg, hover) = (p.foreground, p.accent);
-        motion::pop_in(
+        // Changed, with the way back: pressable only while it's the one shown.
+        let changed_look = |live: bool, cx: &mut Context<Self>| {
             div()
                 .flex()
                 .flex_none()
@@ -844,7 +834,7 @@ impl InstanceSettingsView {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(fg)
                         .when(saving, |el| el.opacity(0.5))
-                        .when(!saving, |el| {
+                        .when(!saving && live, |el| {
                             el.cursor_pointer().hover(move |s| s.bg(hover)).on_click(cx.listener(
                                 move |this, _, window, cx| {
                                     this.commit(Vec::new(), paths.iter().map(|p| (*p).to_owned()).collect(), window, cx)
@@ -853,14 +843,43 @@ impl InstanceSettingsView {
                         })
                         .child(crate::ui::settings_controls::spun(SharedString::from(format!("ireset-{key}"))))
                         .child(t("settings.controls.reset")),
-                ),
-            SharedString::from(format!("ichanged-{key}")),
-            (0.5, 0.5),
-            0.8,
-            0.0,
-        )
-        .into_any_element()
+                )
+        };
+        let default_look = || pill(t("settings.controls.default"), p.muted.into(), p.muted_foreground.into());
+        // Either one pops in from 80% as the other shrinks away (the web's `AnimatePresence`).
+        let (now, shown, other): (&'static str, AnyElement, (&'static str, AnyElement)) = if self.overridden_any(paths)
+        {
+            let shown = motion::pop_in(
+                changed_look(true, cx),
+                SharedString::from(format!("ichanged-{key}")),
+                (0.5, 0.5),
+                0.8,
+                0.0,
+            );
+            ("changed", shown.into_any_element(), ("default", default_look().into_any_element()))
+        } else {
+            let shown =
+                motion::pop_in(default_look(), SharedString::from(format!("idefault-{key}")), (0.5, 0.5), 0.8, 0.0);
+            ("default", shown.into_any_element(), ("changed", changed_look(false, cx).into_any_element()))
+        };
+        crate::ui::settings_controls::popped(format!("ibadge-{key}"), now, shown, vec![other]).into_any_element()
     }
+}
+
+/// `key`'s words for `n` in letter-spaced capitals (`tracking-wide uppercase`), the number
+/// rolling as it changes (the web's `<Count>` inside `<T>`). `size` is the text's size in pixels.
+pub(super) fn tracked_count(id: impl Into<SharedString>, key: &str, n: u64, size: f32) -> Div {
+    use crate::ui::text::{WIDE, tracked};
+    let text = crate::core::i18n::t_with(key, &[("count", crate::core::i18n::Arg::Num(n as i64))]).to_uppercase();
+    let number = crate::core::i18n::number(n as i64);
+    let Some(at) = text.find(&number) else { return div().child(tracked(text, WIDE)) };
+    let (before, after) = (text[..at].to_owned(), text[at + number.len()..].to_owned());
+    div()
+        .flex()
+        .whitespace_nowrap()
+        .when(!before.is_empty(), |el| el.child(tracked(before, WIDE)))
+        .child(motion::rolling(id, n, None, size))
+        .when(!after.is_empty(), |el| el.child(tracked(after, WIDE)))
 }
 
 /// Slides something in from the side, after `delay` (a list's lines one after another).

@@ -531,7 +531,12 @@ impl SettingsView {
             )
         });
 
-        let mut pills = div().flex().flex_wrap().gap(px(6.0));
+        // The picked one's pill glides between them (the web's `layoutId`), once they've been
+        // measured; until then the picked one wears it itself.
+        let row = format!("shader-fallbacks-{}", target == Target::App);
+        let (mut pills, spots) =
+            crate::ui::settings_controls::measured(div().flex().flex_wrap().gap(px(6.0)), &row, window, cx);
+        let spot = FALLBACKS.iter().position(|f| *f == shader.fallback).and_then(|n| spots.get(n).copied());
         for fallback in FALLBACKS {
             let on = fallback == shader.fallback;
             let name = if fallback == Effect::None {
@@ -551,7 +556,7 @@ impl SettingsView {
                     .cursor_pointer()
                     .map(|el| {
                         if on {
-                            el.bg(p.primary).text_color(p.primary_foreground)
+                            el.when(spot.is_none(), |el| el.bg(p.primary)).text_color(p.primary_foreground)
                         } else {
                             el.text_color(p.muted_foreground).hover(move |s| s.text_color(fg))
                         }
@@ -562,6 +567,9 @@ impl SettingsView {
                     .child(name),
             );
         }
+        let glider =
+            spot.map(|spot| crate::ui::settings_controls::glider(&row, spot, div().rounded_full().bg(p.primary), cx));
+        let pills = div().relative().children(glider).child(pills);
         let fallback = div().flex().flex_col().gap(px(6.0)).child(label("appsettings.shader.fallback")).child(pills);
 
         motion::rise(

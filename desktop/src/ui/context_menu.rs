@@ -552,6 +552,7 @@ impl FuwaApp {
                 panel,
                 &p,
                 cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
+                cx,
             ));
         }
         let scroll = self.context.as_ref().map(|m| m.scroll.clone()).unwrap_or_default();
@@ -570,25 +571,29 @@ impl FuwaApp {
                     .position(at + gpui_kit::point(px(0.0), px(2.0)))
                     .snap_to_window_with_margin(gpui_kit::Edges::all(px(EDGE)))
                     .child(
-                        div()
-                            .id("context-menu")
-                            .relative()
-                            .occlude()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                            .child(pop(
-                                menu_card(&p).child(
-                                    // Taller than the window, the items scroll.
-                                    div()
-                                        .id("ctx-scroll")
-                                        .max_h(px(tallest(window) - 2.0))
-                                        .overflow_y_scroll()
-                                        .track_scroll(&scroll)
-                                        .child(body),
-                                ),
-                                SharedString::from(format!("ctx|{id}")),
-                            ))
-                            .children(sub),
+                        crate::ui::overlay::leaving_pose(
+                            div().id("context-menu").transform_origin(0.0, 0.0),
+                            0.0,
+                            0.95,
+                            cx,
+                        )
+                        .relative()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                        .child(pop(
+                            menu_card(&p).child(
+                                // Taller than the window, the items scroll.
+                                div()
+                                    .id("ctx-scroll")
+                                    .max_h(px(tallest(window) - 2.0))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&scroll)
+                                    .child(body),
+                            ),
+                            SharedString::from(format!("ctx|{id}")),
+                        ))
+                        .children(sub),
                     ),
             );
         Some(layer.into_any_element())

@@ -90,6 +90,10 @@ Calling `hover` or `active` twice adds the second style to the first (a
 shared button's own hover, then a caller's) rather than replacing it, which
 was a debug assertion before.
 
+**Hiding the cursor.** `App::hide_cursor_until_mouse_moves` is public, so a
+popped-out call can hide the pointer with its controls, as the web's
+`cursor-none` does.
+
 ## Checking the renderers
 
 Only Linux can be built and run here. The wgpu renderer has headless tests

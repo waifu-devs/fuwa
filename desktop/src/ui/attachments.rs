@@ -184,9 +184,10 @@ pub(crate) fn attachments_view(
                         .size_full()
                         .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
                         .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
+                        // `animate-pulse bg-muted` until it's here.
                         .with_loading({
-                            let bg = alpha(p.foreground, 0.04);
-                            move || div().size_full().bg(bg).into_any_element()
+                            let (bg, id) = (p.muted, SharedString::from(format!("pic-wait|{mid}|{n}")));
+                            move || Pulse { id: id.clone(), bg }.into_any_element()
                         })
                         .with_fallback({
                             let fg = p.muted_foreground;
@@ -843,5 +844,25 @@ impl FuwaApp {
             Duration::from_millis(160),
         )
         .into_any_element()
+    }
+}
+
+/// A picture's place while it loads, pulsing as Tailwind's `animate-pulse`
+/// does (half see-through at the middle of every two seconds).
+#[derive(IntoElement)]
+struct Pulse {
+    id: SharedString,
+    bg: gpui_kit::Rgba,
+}
+
+impl gpui_kit::RenderOnce for Pulse {
+    fn render(self, window: &mut gpui_kit::Window, _: &mut gpui_kit::App) -> impl IntoElement {
+        crate::ui::motion::ambient(
+            div().size_full().bg(self.bg),
+            self.id,
+            std::time::Duration::from_secs(2),
+            window,
+            |el, t| el.opacity(1.0 - 0.25 * (1.0 - (t * std::f32::consts::TAU).cos())),
+        )
     }
 }

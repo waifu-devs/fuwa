@@ -33,6 +33,7 @@ pub enum PinPlace {
 }
 
 /// The open list.
+#[derive(Clone)]
 pub struct PinsPanel {
     pub key: String,
     pub place: PinPlace,
@@ -417,8 +418,27 @@ impl FuwaApp {
 
     /// The pin in a header (`PinsPopover`'s button): tilted while closed,
     /// upright on the primary at 10% while its list is open. `open` says
-    /// whether the list hangs from this button; it drops down under it.
-    pub(crate) fn pins_button(&mut self, id: &'static str, open: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// whether the list hangs from this button; it drops down under it, and
+    /// once closed stays a moment more on its way out.
+    pub(crate) fn pins_button_in(
+        &mut self,
+        id: &'static str,
+        open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let now = if open { self.pins.clone() } else { None };
+        let going = motion::kept(&format!("{id}|list"), now.as_ref(), window, cx);
+        self.pins_toggle(id, open, going, cx)
+    }
+
+    fn pins_toggle(
+        &mut self,
+        id: &'static str,
+        open: bool,
+        going: Option<(PinsPanel, f32)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = pal(cx);
         let hover = p.muted;
         let button = div()
@@ -463,11 +483,21 @@ impl FuwaApp {
                         .into_any_element()
                 },
             ));
-        let card = if open { self.pins_card(cx) } else { None };
+        let card = if open { self.pins.clone().and_then(|panel| self.pins_card(&panel, cx)) } else { None };
+        // `exit={{ opacity: 0, scale: 0.96, y: -6 }}`, out of its top right corner.
+        let leaving = going.and_then(|(panel, t)| Some((self.pins_card(&panel, cx)?, t))).map(|(card, t)| {
+            gpui_kit::deferred(div().absolute().top_0().left_0().size_full().child(crate::ui::chat::closing(
+                div().absolute().top(px(42.0)).right_0().child(card),
+                t,
+                crate::ui::chat::Gone { scale: 0.96, x: 0.0, y: -6.0, origin: (1.0, 0.0) },
+            )))
+            .with_priority(1)
+        });
         div()
             .relative()
             .flex_none()
             .child(button)
+            .children(leaving)
             .when_some(card, |el, card| {
                 // A clear layer closes it when you click anywhere else; the list sits over everything.
                 let away = div()
@@ -498,8 +528,7 @@ impl FuwaApp {
     }
 
     /// The open list (`PinsPopover`'s card): what's pinned, the latest first.
-    fn pins_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let panel = self.pins.as_ref()?;
+    fn pins_card(&mut self, panel: &PinsPanel, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = pal(cx);
         let Read { list, rows, can_unpin } = self.listed(panel)?;
         let in_dm = matches!(panel.place, PinPlace::Dm { .. });

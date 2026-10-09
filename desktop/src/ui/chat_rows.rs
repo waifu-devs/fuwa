@@ -790,7 +790,14 @@ pub(crate) fn alert_row(a: &AlertLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElem
 }
 
 /// Back to the newest messages (`JumpButton`), counting the ones that came in meanwhile.
-pub(crate) fn jump_pill(missed: usize, p: &Palette, window: &Window, cx: &mut Context<FuwaApp>) -> AnyElement {
+/// `going` once it's no longer wanted, as it leaves.
+pub(crate) fn jump_pill(
+    missed: usize,
+    going: Option<f32>,
+    p: &Palette,
+    window: &Window,
+    cx: &mut Context<FuwaApp>,
+) -> AnyElement {
     let label = if missed > 0 {
         t_with("chat.messages.newMessages", &[("count", Arg::Num(missed as i64))])
     } else {
@@ -844,6 +851,10 @@ pub(crate) fn jump_pill(missed: usize, p: &Palette, window: &Window, cx: &mut Co
             0.9,
             16.0,
         ))
+        // And back down the same way (`exit={{ opacity: 0, y: 16, scale: 0.9 }}`).
+        .when_some(going, |el, t| {
+            crate::ui::chat::closing(el, t, crate::ui::chat::Gone { scale: 0.9, x: 0.0, y: 16.0, origin: (0.5, 0.5) })
+        })
         .into_any_element()
 }
 

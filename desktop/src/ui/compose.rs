@@ -215,7 +215,14 @@ impl FuwaApp {
     /// The @ list (the web's `MentionPicker`), over the composer: people,
     /// roles and @everyone, or emoji after a colon. The pointer lights a row
     /// as the arrows do.
-    pub(crate) fn picker_list(&self, picker: Picker, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    /// `going` once it has closed, as it leaves ([`motion::kept`]).
+    pub(crate) fn picker_list(
+        &self,
+        picker: Picker,
+        going: Option<f32>,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let emoji = matches!(picker.options.first(), Some(Pick::Emoji(_)));
         // The lit row's fill glides from row to row (the web's `layoutId="mention-active"`).
         let lit = Self::above_glide(format!("mention-lit|{}", picker.start), picker.active, p, cx);
@@ -303,12 +310,18 @@ impl FuwaApp {
                     .children(sub),
             );
         }
-        Self::above_composer(list, format!("picker-{}", picker.start), p)
+        Self::above_composer(list, format!("picker-{}", picker.start), going, p)
     }
 
     /// A list floating just above the composer, as wide as its box (the web's
     /// `absolute inset-x-0 bottom-full mb-2 rounded-2xl border bg-popover p-1.5 shadow-xl`).
-    pub(crate) fn above_composer(list: gpui_kit::Div, id: impl Into<SharedString>, p: &Palette) -> AnyElement {
+    /// `going` once it has closed: it sinks 6px and shrinks to 98% as it fades.
+    pub(crate) fn above_composer(
+        list: gpui_kit::Div,
+        id: impl Into<SharedString>,
+        going: Option<f32>,
+        p: &Palette,
+    ) -> AnyElement {
         let card = div()
             .mb(px(8.0))
             .overflow_hidden()
@@ -340,6 +353,14 @@ impl FuwaApp {
             .bottom(gpui_kit::relative(1.0))
             // The web's `origin-bottom`: it grows up out of the box as it rises.
             .child(motion::pop_in(card, ElementId::Name(id.into()), (0.5, 1.0), 0.97, 8.0))
+            // `exit={{ opacity: 0, y: 6, scale: 0.98 }}`.
+            .when_some(going, |el, t| {
+                crate::ui::chat::closing(
+                    el,
+                    t,
+                    crate::ui::chat::Gone { scale: 0.98, x: 0.0, y: 6.0, origin: (0.5, 1.0) },
+                )
+            })
             .into_any_element()
     }
 

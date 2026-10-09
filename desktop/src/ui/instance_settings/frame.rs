@@ -17,7 +17,7 @@ use super::{InstanceSettingsEvent, InstanceSettingsView, Page};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, radius_lg, radius_md};
+use crate::ui::theme::{Palette, alpha, radius_lg};
 use crate::ui::widgets::icon;
 
 /// How long the screen takes to come and go.
@@ -429,33 +429,17 @@ impl InstanceSettingsView {
                     .child(icon("search").size(px(16.0))),
             )
             .child(div().flex_1().min_w_0().child(Input::new(&self.query).appearance(false)))
-            .when(!query.is_empty(), |el| {
-                let (hover, fg) = (p.muted, p.foreground);
-                el.child(motion::pop(
-                    div()
-                        .id("isettings-search-clear")
-                        .absolute()
-                        .right(px(5.0))
-                        .top(px(5.0))
-                        .size(px(24.0))
-                        .rounded(radius_md())
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(p.muted_foreground)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(hover).text_color(fg))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.query.update(cx, |q, cx| q.set_value("", window, cx));
-                            cx.notify();
-                        }))
-                        .child(icon("x").size(px(14.0))),
-                    "isettings-search-clear-in",
-                    0.5,
-                    -90.0,
-                    Duration::ZERO,
-                ))
-            });
+            .children(crate::ui::settings_controls::search_clear(
+                "isettings-search-clear",
+                !query.is_empty(),
+                p,
+                window,
+                cx,
+                |this, window, cx| {
+                    this.query.update(cx, |q, cx| q.set_value("", window, cx));
+                    cx.notify();
+                },
+            ));
 
         let nav = div()
             .w(px(240.0))

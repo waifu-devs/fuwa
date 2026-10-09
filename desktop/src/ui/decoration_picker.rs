@@ -2,14 +2,18 @@
 //! `settings/account/DecorationPicker.tsx`: None (or "Use my profile's"),
 //! then each decoration offered, drawn around your own avatar.
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    AnyElement, App, Context, FontWeight, Global, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, div, px,
 };
 
 use crate::core::i18n::t;
 use crate::pb;
+use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::theme::{Palette, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, decorated, icon};
@@ -39,7 +43,11 @@ impl SettingsView {
         let mut tiles: Vec<(String, String, Option<&pb::ProfileItem>)> =
             vec![(String::new(), none_label.unwrap_or_else(|| t("accountsettings.effects.none")), None)];
         tiles.extend(items.iter().map(|i| (i.id.clone(), i.name.clone(), Some(i))));
-        let mut rows = div().flex().flex_col().gap(px(gap)).when(!ready, |el| el.opacity(0.5));
+        let picked = tiles.iter().position(|(id, ..)| id == value);
+        // A tile: 4px around the square, 6px, then a 16px label.
+        let ring = Ring { id: format!("decoration-ring|{place}"), cols, tile: (tile_w, face_w + 30.0), gap };
+        let (gliding, ring) = picked_ring(ring, picked, (face_w, face_w), p.primary.into(), cx);
+        let mut rows = div().relative().flex().flex_col().gap(px(gap)).when(!ready, |el| el.opacity(0.5));
         for chunk in tiles.chunks(cols) {
             let mut row = div().flex().gap(px(gap));
             for (id, label, item) in chunk {
@@ -89,7 +97,7 @@ impl SettingsView {
                     .items_center()
                     .justify_center()
                     .child(face);
-                if active {
+                if active && !gliding {
                     square = square
                         .child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
@@ -118,6 +126,7 @@ impl SettingsView {
                                 .id("decoration-label")
                                 .max_w_full()
                                 .truncate()
+                                .line_height(px(16.0))
                                 .text_color(if active { p.foreground } else { p.muted_foreground })
                                 .group_hover(group, move |s| s.text_color(fg))
                                 .child(label.clone()),
@@ -126,6 +135,66 @@ impl SettingsView {
             }
             rows = rows.child(row);
         }
-        rows.into_any_element()
+        rows.child(ring).into_any_element()
     }
+}
+
+/// Where each picker's ring last was, and when it moved.
+#[derive(Default)]
+struct Rings(HashMap<String, (usize, Instant)>);
+
+impl Global for Rings {}
+
+/// About as long as the web's `SPRING` takes to settle.
+const RING_GLIDE: Duration = Duration::from_millis(500);
+
+/// A picker's grid, for placing its ring: `cols` tiles of `tile` (width,
+/// height) to a row, `gap` apart, each with 4px around what's ringed.
+pub(crate) struct Ring {
+    pub id: String,
+    pub cols: usize,
+    pub tile: (f32, f32),
+    pub gap: f32,
+}
+
+/// The ring around the picked tile gliding from the one picked before (the
+/// web's `layoutId`), drawn over the whole grid while it's on its way: says
+/// whether it is (then the tile draws no ring of its own, so the ring rises
+/// and presses with it once settled), and the ring to put last in the grid.
+pub(crate) fn picked_ring(
+    ring: Ring,
+    picked: Option<usize>,
+    (w, h): (f32, f32),
+    color: Hsla,
+    cx: &mut App,
+) -> (bool, AnyElement) {
+    let Some(picked) = picked else { return (false, div().into_any_element()) };
+    let still = cx.reduce_motion();
+    let rings = cx.default_global::<Rings>();
+    let was = rings.0.entry(ring.id.clone()).or_insert((picked, Instant::now() - RING_GLIDE));
+    if was.0 != picked {
+        *was = (picked, Instant::now());
+    }
+    let gliding = !still && was.1.elapsed() < RING_GLIDE;
+    let (col, row) = (picked % ring.cols, picked / ring.cols);
+    let x = col as f32 * (ring.tile.0 + ring.gap) + 4.0;
+    let y = row as f32 * (ring.tile.1 + ring.gap) + 4.0;
+    let line = div()
+        .absolute()
+        .top_0()
+        .w(px(w))
+        .h(px(h))
+        .rounded(radius_xl())
+        .border_2()
+        .border_color(color)
+        .when(!gliding, |el| el.opacity(0.0));
+    let line = motion::glide(line, format!("{}|x", ring.id), x, cx, |el, v| el.left(px(v)));
+    let el = motion::glide(
+        div().absolute().left_0().right_0().h(px(h)).child(line),
+        format!("{}|y", ring.id),
+        y,
+        cx,
+        |el, v| el.top(px(v)),
+    );
+    (gliding, el)
 }

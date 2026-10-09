@@ -330,6 +330,27 @@ impl FuwaApp {
     }
 
     /// The count of characters left, once the message nears the limit.
+    /// As [`chars_left`](Self::chars_left), shrinking and fading away (`exit={{
+    /// opacity: 0, scale: 0.8 }}`) once there's room again.
+    pub(crate) fn chars_left_in(
+        &self,
+        length: usize,
+        p: &Palette,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::App,
+    ) -> Option<AnyElement> {
+        let now = (length > COUNT_FROM).then_some(length);
+        match (now, motion::kept("chars-left", now.as_ref(), window, cx)) {
+            (Some(length), _) => self.chars_left(length, p),
+            (None, Some((was, t))) => {
+                let e = gpui_kit::ease_out_quint()(t);
+                let count = self.chars_left(was, p)?;
+                Some(div().flex_none().opacity(1.0 - e).scale(1.0 - 0.2 * e).child(count).into_any_element())
+            }
+            (None, None) => None,
+        }
+    }
+
     pub(crate) fn chars_left(&self, length: usize, p: &Palette) -> Option<AnyElement> {
         if length <= COUNT_FROM {
             return None;

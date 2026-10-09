@@ -17,7 +17,7 @@ use gpui_kit::{
     relative,
 };
 
-use super::controls::{cap_row, dialog, dialog_buttons, input_box, segmented, shimmer};
+use super::controls::{cap_row, dialog, dialog_buttons, input_box, segmented, shimmer, tracked_count};
 use super::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::core::dms::now_ms;
 use crate::core::i18n::{Arg, t, t_with};
@@ -738,10 +738,7 @@ impl InstanceSettingsView {
             .font_weight(FontWeight::BOLD)
             .text_color(p.muted_foreground)
             .child(icon("server").size(px(14.0)))
-            .child(tracked(
-                t_with("instancesettings.servers.count", &[("count", Arg::Num(count as i64))]).to_uppercase(),
-                WIDE,
-            ));
+            .child(tracked_count("instance-servers-count", "instancesettings.servers.count", count as u64, 12.0));
         let mut rows = div().flex().flex_col().gap(px(6.0));
         let now = now_ms();
         for (n, entry) in shown.iter().enumerate() {
@@ -914,8 +911,10 @@ impl InstanceSettingsView {
             cx,
         );
         let toggle = id.clone();
+        let row = SharedString::from(format!("server-{id}"));
         let head = div()
-            .id(SharedString::from(format!("server-{id}")))
+            .id(row.clone())
+            .group(row.clone())
             .relative()
             .flex()
             .items_center()
@@ -930,7 +929,14 @@ impl InstanceSettingsView {
                     this.open_server(toggle.clone(), window, cx);
                 }
             }))
-            .child(server_icon(s, 40.0, 20.0, p))
+            // The icon grows a little while the row is pointed at (`group-hover:scale-105`).
+            .child(
+                div()
+                    .id(SharedString::from(format!("server-face-{id}")))
+                    .flex_none()
+                    .group_hover(row, |s| s.scale(1.05))
+                    .child(server_icon(s, 40.0, 20.0, p)),
+            )
             .child(
                 div().flex_1().min_w_0().flex().flex_col().child(line).child(
                     div()

@@ -754,8 +754,8 @@ fn float_left(body: gpui_kit::Div, id: &'static str, p: &Palette, cx: &mut Conte
             cx.notify();
         }))
         .child(
-            div()
-                .id(id)
+            // Closed, it shrinks back toward its corner as it fades.
+            crate::ui::overlay::leaving_pose(div().id(id).transform_origin(0.0, 0.0), 0.0, 0.95, cx)
                 .absolute()
                 .top(px(52.0))
                 .left(px(crate::ui::rail::RAIL + 8.0))

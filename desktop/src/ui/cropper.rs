@@ -31,7 +31,7 @@ use crate::core::pictures::{
 use crate::ui::app::CloseOverlay;
 use crate::ui::motion;
 use crate::ui::overlay::{dialog_card, dialog_close, dialog_header, scrim};
-use crate::ui::settings_controls::{Look, button};
+use crate::ui::settings_controls::{IconHover, Look, button, button_with};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
 use crate::ui::widgets::{icon, pal};
 
@@ -362,27 +362,43 @@ impl PictureCropper {
                 },
             )));
 
-        let reset = button("cropper-reset", t("workspace.picture.reset"), Some("rotate-ccw"), Look::Ghost, false, p)
-            .rounded(radius_xl())
-            .when(!ready || saving, |el| el.opacity(0.5))
-            .when(ready && !saving, |el| {
-                el.on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(size) = this.size() {
-                        this.crop = centered(size);
-                        cx.notify();
-                    }
-                }))
-            });
+        let reset = button_with(
+            "cropper-reset",
+            t("workspace.picture.reset"),
+            Some("rotate-ccw"),
+            IconHover::Turn(-180.0),
+            Look::Ghost,
+            false,
+            p,
+        )
+        .rounded(radius_xl())
+        .when(!ready || saving, |el| el.opacity(0.5))
+        .when(ready && !saving, |el| {
+            el.on_click(cx.listener(|this, _, _, cx| {
+                if let Some(size) = this.size() {
+                    this.crop = centered(size);
+                    cx.notify();
+                }
+            }))
+        });
         let cancel = button("cropper-cancel", t("common.cancel"), None, Look::Ghost, false, p)
             .rounded(radius_xl())
             .when(saving, |el| el.opacity(0.5))
             .on_click(cx.listener(|this, _, _, cx| this.cancel(cx)));
-        let done = button("cropper-done", t("workspace.picture.useIt"), Some("check"), Look::Primary, false, p)
-            .rounded(radius_xl())
-            .px(px(16.0))
-            .font_weight(FontWeight::BOLD)
-            .when(!ready || saving, |el| el.opacity(0.5))
-            .when(ready && !saving, |el| el.on_click(cx.listener(|this, _, _, cx| this.use_it(cx))));
+        let done = button_with(
+            "cropper-done",
+            t("workspace.picture.useIt"),
+            Some("check"),
+            IconHover::Grow(1.25),
+            Look::Primary,
+            false,
+            p,
+        )
+        .rounded(radius_xl())
+        .px(px(16.0))
+        .font_weight(FontWeight::BOLD)
+        .when(!ready || saving, |el| el.opacity(0.5))
+        .when(ready && !saving, |el| el.on_click(cx.listener(|this, _, _, cx| this.use_it(cx))));
         // Reset on its own at the start, the other two at the end.
         let actions =
             div().flex().items_center().gap(px(8.0)).child(reset).child(div().flex_1()).child(cancel).child(done);

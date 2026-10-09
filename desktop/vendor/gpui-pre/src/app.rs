@@ -1127,6 +1127,12 @@ impl App {
         self.cursor_hide_mode = mode;
     }
 
+    /// Hides the cursor until the mouse next moves, as typing does: for a
+    /// video's controls going away while it plays (the web's `cursor-none`).
+    pub fn hide_cursor_until_mouse_moves(&self) {
+        self.platform.hide_cursor_until_mouse_moves();
+    }
+
     /// Returns whether the cursor is currently visible according to the
     /// platform. This will report `false` after a keyboard input has hidden
     /// the cursor and the user has not yet moved the mouse to restore it.

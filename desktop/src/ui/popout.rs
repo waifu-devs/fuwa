@@ -47,6 +47,8 @@ pub(crate) struct PopOut {
     core: Arc<Core>,
     pub popped: Popped,
     moved: Instant,
+    /// The cursor was hidden with the controls, until the mouse moves again.
+    cursor_hidden: bool,
     title: String,
 }
 
@@ -63,7 +65,7 @@ impl PopOut {
             })
             .detach();
         }
-        Self { core, popped, moved: Instant::now(), title: String::new() }
+        Self { core, popped, moved: Instant::now(), cursor_hidden: false, title: String::new() }
     }
 
     /// The person's name where the call is.
@@ -129,6 +131,11 @@ impl Render for PopOut {
         let on = self.on();
         let speaking = self.core.call().is_some_and(|c| c.speaking.contains(&p.user));
         let awake = self.moved.elapsed() < AWAKE;
+        // The cursor goes with the controls (the web's `cursor-none`), once each time.
+        if !awake && !self.cursor_hidden {
+            self.cursor_hidden = true;
+            cx.hide_cursor_until_mouse_moves();
+        }
         // The controls and the glow fade in and out (`transition-opacity duration-300`).
         let shown = motion::follow("pop-awake", if awake { 1.0 } else { 0.0 }, window, cx).clamp(0.0, 1.0);
         let glowing = prefs.popout_glow && speaking;
@@ -149,6 +156,7 @@ impl Render for PopOut {
             .on_mouse_move(cx.listener(|this, _, _, cx| {
                 let was = this.moved.elapsed() < AWAKE;
                 this.moved = Instant::now();
+                this.cursor_hidden = false;
                 if !was {
                     cx.notify();
                 }

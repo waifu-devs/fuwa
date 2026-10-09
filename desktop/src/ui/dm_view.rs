@@ -13,9 +13,9 @@ use std::time::Duration;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, BoxShadow, Context, Div, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, point, px,
-    rgb,
+    AnyElement, App, BoxShadow, Context, Div, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, RenderOnce, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div,
+    point, px, rgb,
 };
 
 use crate::core::config::SendWith;
@@ -543,10 +543,10 @@ pub(crate) fn render_line(line: &SysLine, p: &Palette) -> AnyElement {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(gpui_kit::AnimationExt::with_animation(
-                        icon("key-round").size(px(16.0)).text_color(s.icon),
+                    .child(looping(
+                        div().child(icon("key-round").size(px(16.0)).text_color(s.icon)),
                         "joining-key",
-                        gpui_kit::Animation::new(Duration::from_millis(1200)).repeat(),
+                        Duration::from_millis(1200),
                         |el, t| el.rotate(gpui_kit::radians(wobble(t, &[0.0, -16.0, 12.0, 0.0]).to_radians())),
                     )),
             )
@@ -598,6 +598,106 @@ pub(crate) fn render_line(line: &SysLine, p: &Palette) -> AnyElement {
                 .child(div().text_xs().line_height(px(16.0)).whitespace_nowrap().child(clock(line.at))),
         )
         .into_any_element()
+}
+
+/// A loop ([`motion::ambient`]: still while the window's in the background)
+/// for places drawn without the window at hand.
+#[derive(IntoElement)]
+pub(crate) struct Looping {
+    el: Div,
+    id: SharedString,
+    period: Duration,
+    pose: fn(Div, f32) -> Div,
+}
+
+/// `el` posed by `pose` over and over, every `period`.
+pub(crate) fn looping(el: Div, id: impl Into<SharedString>, period: Duration, pose: fn(Div, f32) -> Div) -> Looping {
+    Looping { el, id: id.into(), period, pose }
+}
+
+impl RenderOnce for Looping {
+    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        motion::ambient(self.el, self.id, self.period, window, self.pose)
+    }
+}
+
+/// A button's icon that pops to its new look when it changes (the web's
+/// `AnimatePresence` swaps: a tick after copying, a spinner while busy), and
+/// turns while it's the spinner. Nothing moves when it first shows.
+#[derive(IntoElement)]
+pub(crate) struct GlyphSwap {
+    id: SharedString,
+    glyph: &'static str,
+    size: f32,
+    color: Option<Hsla>,
+    /// How small it starts, and its spring (stiffness, damping).
+    from: f32,
+    spring: (f32, f32),
+}
+
+/// `glyph` at `size`, popping in from 40% on framer's default spring when it changes.
+pub(crate) fn glyph_swap(id: impl Into<SharedString>, glyph: &'static str, size: f32) -> GlyphSwap {
+    GlyphSwap { id: id.into(), glyph, size, color: None, from: 0.4, spring: (500.0, 25.0) }
+}
+
+impl GlyphSwap {
+    pub fn color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+
+    /// Starts at `from` of its size, on a spring of (stiffness, damping).
+    pub fn pop(mut self, from: f32, spring: (f32, f32)) -> Self {
+        (self.from, self.spring) = (from, spring);
+        self
+    }
+}
+
+impl RenderOnce for GlyphSwap {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state =
+            window.use_keyed_state(SharedString::from(format!("{}|glyph", self.id)), cx, |_, _| (self.glyph, 0u64));
+        let changes = state.update(cx, |(was, changes), _| {
+            if *was != self.glyph {
+                *was = self.glyph;
+                *changes += 1;
+            }
+            *changes
+        });
+        let el = div()
+            .flex_none()
+            .child(icon(self.glyph).size(px(self.size)).when_some(self.color, |el, c| el.text_color(c)));
+        let el = if matches!(self.glyph, "loader" | "loader-circle") {
+            let spin = SharedString::from(format!("{}|spin", self.id));
+            div().child(motion::ambient(el, spin, Duration::from_millis(1000), window, |el, t| {
+                el.rotate(gpui_kit::percentage(t))
+            }))
+        } else {
+            el
+        };
+        if changes == 0 {
+            return el.into_any_element();
+        }
+        let from = self.from;
+        motion::spring_in(
+            el,
+            SharedString::from(format!("{}|in{changes}", self.id)),
+            self.spring,
+            Duration::ZERO,
+            move |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(from + (1.0 - from) * t),
+        )
+    }
+}
+
+/// The trust pill coming in (the web's `initial={{ opacity: 0, scale: 0.8 }}` on `SPRING`).
+pub(crate) fn pill_in(pill: Stateful<Div>, id: &str) -> AnyElement {
+    motion::spring_in(
+        div().flex_none().child(pill),
+        SharedString::from(format!("{id}-in")),
+        (520.0, 34.0),
+        Duration::ZERO,
+        |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.8 + 0.2 * t),
+    )
 }
 
 /// A keyframed swing (degrees at evenly spaced times), eased between them.
@@ -768,7 +868,7 @@ impl FuwaApp {
             .child(div().flex_1())
             .when(conversation.is_some() && ready && pins_here, |el| {
                 let open = self.pins.is_some();
-                el.child(self.pins_button("pins-toggle", open, cx))
+                el.child(self.pins_button_in("pins-toggle", open, window, cx))
             })
             .when_some(
                 (conversation.is_some() && ready).then(|| self.dm_call_button(key, id, window, cx)).flatten(),
@@ -782,7 +882,7 @@ impl FuwaApp {
                     Trust::Encrypted => "dms-calls.dm.encrypted",
                 });
                 let (key, id) = (key.to_owned(), id.to_owned());
-                el.child(
+                el.child(pill_in(
                     trust_pill("dm-trust", trust, label, &p)
                         .tooltip(|window, cx| {
                             crate::ui::overlay::Tip::new(t("dms-calls.dm.trust.title")).build(window, cx)
@@ -791,7 +891,8 @@ impl FuwaApp {
                             let dialog = crate::ui::app::Dialog::Safety { key: key.clone(), conversation: id.clone() };
                             this.open_dialog(dialog, window, cx)
                         })),
-                )
+                    "dm-trust",
+                ))
             });
         let body: AnyElement = if conversation.is_some() && me.is_some() {
             let composer = self.encrypted_composer(
@@ -1342,8 +1443,11 @@ impl FuwaApp {
             cx,
         );
         // The time picker opens over the box whose button opened it.
-        let time_panel =
-            if thread == crate::ui::secure_threads::time_in_thread() { self.time_picker_panel(&p, cx) } else { None };
+        let time_panel = if thread == crate::ui::secure_threads::time_in_thread() {
+            self.time_picker_leaving(&p, window, cx)
+        } else {
+            None
+        };
         let recording = !thread && self.recording_here();
         // Voice messages only in conversations: the microphone takes send's place while nothing's typed.
         let voice_here = !thread && matches!(self.target(), Some(Target::Dm { .. }));
@@ -1417,7 +1521,7 @@ impl FuwaApp {
             .gap(px(8.0))
             .when(!recording, |el| el.child(lock))
             .child(field)
-            .children(if recording { None } else { self.chars_left(length, &p) })
+            .children(if recording { None } else { self.chars_left_in(length, &p, window, cx) })
             .children(attach)
             .when(!recording, |el| {
                 el.child(

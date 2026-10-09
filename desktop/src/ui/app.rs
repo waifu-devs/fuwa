@@ -1929,21 +1929,28 @@ impl FuwaApp {
     ) -> (Option<gpui_kit::AnyElement>, Option<gpui_kit::AnyElement>, Option<gpui_kit::AnyElement>) {
         let dialog = crate::ui::motion::kept("dialog", self.dialog.as_ref(), window, cx).and_then(|(dialog, t)| {
             self.dialog = Some(dialog);
+            crate::ui::overlay::set_leaving(Some(t), cx);
             let el = self.render_dialog(window, cx);
+            crate::ui::overlay::set_leaving(None, cx);
             self.dialog = None;
             el.map(|el| crate::ui::motion::leave(el, t))
         });
         let menu = crate::ui::motion::kept("menu", self.menu.as_ref(), window, cx).and_then(|(menu, t)| {
+            crate::ui::overlay::set_leaving(Some(t), cx);
             let el = match menu {
-                Menu::Server { key, server } => self.server_bell_menu(&key, &server, cx),
-                Menu::Status { key } => self.status_menu(&key, window, cx),
-                _ => return None,
+                Menu::Server { key, server } => Some(self.server_bell_menu(&key, &server, cx)),
+                Menu::Status { key } => Some(self.status_menu(&key, window, cx)),
+                _ => None,
             };
+            crate::ui::overlay::set_leaving(None, cx);
+            let el = el?;
             Some(crate::ui::motion::leave(el, t))
         });
         let context = crate::ui::motion::kept("context", self.context.as_ref(), window, cx).and_then(|(menu, t)| {
             self.context = Some(menu);
+            crate::ui::overlay::set_leaving(Some(t), cx);
             let el = self.render_context_menu(window, cx);
+            crate::ui::overlay::set_leaving(None, cx);
             self.context = None;
             el.map(|el| crate::ui::motion::leave(el, t))
         });

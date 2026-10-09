@@ -21,7 +21,7 @@ use crate::core::vault::{Item, ItemKind};
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::chat::Row;
-use crate::ui::dm_view::{Composer, Earlier, Trust, seal, trust_pill};
+use crate::ui::dm_view::{Composer, Earlier, Trust, glyph_swap, pill_in, seal, trust_pill};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
 use crate::ui::widgets::{avatar, icon, pal};
@@ -328,7 +328,7 @@ impl FuwaApp {
                             .text_size(px(16.0))
                             .line_height(px(24.0))
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(channel.name.clone()),
+                            .child(motion::swapping(format!("secure-name|{}", channel.id), channel.name.clone(), 16.0)),
                     ),
                 SharedString::from(format!("secure-title-{}", channel.id)),
                 Duration::ZERO,
@@ -348,7 +348,8 @@ impl FuwaApp {
             })
             .child(div().flex_1())
             .when_some(offline, |el, c| {
-                el.child(
+                // It springs in (the web's `opacity 0, scale 0.9`).
+                el.child(motion::spring_in(
                     div()
                         .flex_none()
                         .flex()
@@ -364,15 +365,20 @@ impl FuwaApp {
                         .text_color(p.muted_foreground)
                         .child(crate::ui::widgets::conn_dot(c, p))
                         .child(crate::ui::instance_home::connection_label(c)),
-                )
+                    "secure-offline",
+                    (520.0, 34.0),
+                    Duration::ZERO,
+                    |el, t| el.opacity(t.clamp(0.0, 1.0)).scale(0.9 + 0.1 * t),
+                ))
             })
             .child(self.bell_button(key, server, &channel.id, cx))
             .when(ready, |el| el.child(self.secure_threads_button(&channel.id, p, cx)))
-            .child(
+            .child(pill_in(
                 trust_pill("secure-pill", Trust::Encrypted, t("chat.secure.encrypted"), p)
                     .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.secure.seeWho")).build(window, cx))
                     .on_click(cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx))),
-            )
+                "secure-pill",
+            ))
     }
 
     /// Under a secure channel's header: what was said and the composer once
@@ -457,13 +463,7 @@ impl FuwaApp {
         };
         let (k, s, c) = (key.to_owned(), server.to_owned(), channel.to_owned());
         let glyph: AnyElement = if busy {
-            gpui_kit::AnimationExt::with_animation(
-                icon("loader").size(px(14.0)),
-                "secure-reset-spin",
-                gpui_kit::Animation::new(Duration::from_millis(1000)).repeat(),
-                |el, t| el.rotate(gpui_kit::percentage(t)),
-            )
-            .into_any_element()
+            glyph_swap(SharedString::from(format!("{id}-spin")), "loader", 14.0).into_any_element()
         } else {
             // The key turns back while the button's pointed at.
             div()
@@ -495,10 +495,10 @@ impl FuwaApp {
                 cx.listener(move |this, _, _, cx| this.reset_secure(k.clone(), s.clone(), c.clone(), in_dialog, cx)),
             )
             .child(glyph)
-            .child(motion::slide_in(
-                div().child(t(if asking { "chat.secure.resetAsk" } else { "chat.secure.reset" })),
-                SharedString::from(format!("{id}-{asking}")),
-                4.0,
+            .child(motion::swapping(
+                format!("{id}-label"),
+                t(if asking { "chat.secure.resetAsk" } else { "chat.secure.reset" }),
+                12.0,
             ))
     }
 

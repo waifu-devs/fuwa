@@ -68,6 +68,30 @@ fn changed_rows(before: &[u64], after: &[u64], shift: usize) -> Vec<std::ops::Ra
 /// hasn't changed is reused rather than worked out again.
 pub type Built = HashMap<String, Rc<Msg>>;
 
+/// How a floating panel looks once it has gone (the web's `exit`): scaled to
+/// `scale` around `origin` (fractions of its size) and moved `(x, y)` pixels.
+#[derive(Clone, Copy)]
+pub(crate) struct Gone {
+    pub scale: f32,
+    pub x: f32,
+    pub y: f32,
+    pub origin: (f32, f32),
+}
+
+/// A floating panel that has closed, `t` of the way out ([`motion::kept`]):
+/// it fades toward `gone`, and a cover over it takes the pointer meanwhile so
+/// nothing in it can be pressed as it goes. It adds no element id, so what's
+/// in it keeps its state (an entrance that has played stays played).
+pub(crate) fn closing<E: gpui_kit::Styled + gpui_kit::ParentElement>(el: E, t: f32, gone: Gone) -> E {
+    let e = gpui_kit::ease_out_quint()(t.clamp(0.0, 1.0));
+    el.opacity(1.0 - e)
+        .transform_origin(gone.origin.0, gone.origin.1)
+        .scale(1.0 + (gone.scale - 1.0) * e)
+        .translate_x(px(gone.x * e))
+        .translate_y(px(gone.y * e))
+        .child(div().absolute().inset_0().occlude())
+}
+
 /// Messages from the same person this close together sit under one header.
 const GROUP_MS: i64 = 7 * 60 * 1000;
 
@@ -828,7 +852,8 @@ impl FuwaApp {
         }
         .when(!secure, |el| el.child(self.search_field(window, cx)));
         // A secure channel's header has its own buttons (`secure_header`).
-        let header = if secure { header } else { header.child(self.header_buttons(key, server, &channel, &p, cx)) };
+        let header =
+            if secure { header } else { header.child(self.header_buttons(key, server, &channel, &p, window, cx)) };
 
         let body = if secure {
             self.secure_body(key, server, &channel, window, cx)
@@ -892,6 +917,7 @@ impl FuwaApp {
         server: &str,
         channel: &pb::Channel,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let p = *p;
@@ -909,7 +935,7 @@ impl FuwaApp {
                 let open = self.pins.as_ref().is_some_and(
                     |p| !matches!(&p.place, crate::ui::pins::PinPlace::Channel { thread, .. } if !thread.is_empty()),
                 );
-                el.child(self.pins_button("pins-toggle", open, cx))
+                el.child(self.pins_button_in("pins-toggle", open, window, cx))
             })
             .when(threads, |el| {
                 let open = self.threads.listing.is_some();
@@ -951,8 +977,14 @@ impl FuwaApp {
         // An encrypted list notes where its start and last row land, to sit at the bottom while short.
         let fits = matches!(rows.first(), Some(Row::DmStart(_)) | Some(Row::Start { icon: "shield-check", .. }));
         // Its pill shows only what came in meanwhile, as the web's `EncryptedMessages` does.
-        let jump = (up && (!fits || self.msg_ui.missed > 0))
-            .then(|| crate::ui::chat_rows::jump_pill(self.msg_ui.missed, &p, window, cx));
+        let shown = (up && (!fits || self.msg_ui.missed > 0)).then_some(self.msg_ui.missed);
+        // Once it's no longer wanted, it sinks away a moment more.
+        let going = motion::kept(&format!("jump-pill|{target}"), shown.as_ref(), window, cx);
+        let jump = match (shown, going) {
+            (Some(missed), _) => Some(crate::ui::chat_rows::jump_pill(missed, None, &p, window, cx)),
+            (None, Some((missed, t))) => Some(crate::ui::chat_rows::jump_pill(missed, Some(t), &p, window, cx)),
+            (None, None) => None,
+        };
         let len = rows.len();
         div()
             .flex_1()
@@ -1065,16 +1097,18 @@ impl FuwaApp {
         let ready = motion::follow("composer-send", if can_send { 1.0 } else { 0.0 }, window, cx);
         // Not ready (and not counting down) sits a little smaller, as on the web.
         let rest = motion::follow("composer-send-scale", if can_send || cooling { 1.0 } else { 0.9 }, window, cx);
-        let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, window, cx));
-        let gif_panel = self.gif_panel(&p, cx);
-        let time_panel = self.time_picker_panel(&p, cx);
+        let emoji_panel = self.emoji_panel(&p, window, cx);
+        let gif_panel = self.gif_panel(&p, window, cx);
+        let time_panel = self.time_picker_leaving(&p, window, cx);
         let tray = self.file_tray(&p, cx);
         let recording = !command && self.recording_here();
         let gif_button = (!command && !recording).then(|| self.gif_button(&p, cx)).flatten();
         // The microphone takes the send button's place while nothing's typed, as on the web.
         let voice = (!command && (recording || (!typed && !files.any && !cooling && self.can_record())))
             .then(|| self.voice_button(&p, cx));
-        let commands_list = if self.picker.is_none() { self.command_list_view(&p, cx) } else { None };
+        let commands_list = self.command_list_view(&p, window, cx);
+        // The @ list, once closed, a moment more on its way out.
+        let mentions_going = motion::kept("mention-picker", self.picker.as_ref(), window, cx);
         let picks = self.command_picks_view(&p, window, cx);
         let form = self.command_form_view(&p, cx);
         let field: AnyElement = if let Some(form) = form {
@@ -1161,7 +1195,7 @@ impl FuwaApp {
             .gap(px(8.0))
             .children(attach)
             .child(field)
-            .children(if command || recording { None } else { self.chars_left(length, &p) })
+            .children(if command || recording { None } else { self.chars_left_in(length, &p, window, cx) })
             .children(tools)
             .children(gif_button)
             .children(poll)
@@ -1206,7 +1240,8 @@ impl FuwaApp {
             .relative()
             .px(px(16.0))
             .pb(px(12.0))
-            .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
+            .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, None, &p, cx)))
+            .when_some(mentions_going, |el, (picker, t)| el.child(self.picker_list(picker, Some(t), &p, cx)))
             .children(commands_list)
             .children(picks)
             .children(emoji_panel)
@@ -1786,6 +1821,15 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                             .id(SharedString::from(format!("edited|{}", m.id)))
                             .text_size(px(11.2))
                             .text_color(p.muted_foreground)
+                            // When it was edited, as the web's `title`: looked up only once pointed at.
+                            .when(m.enc.is_none(), |el| {
+                                let (this, key, id) = (ctx.this.clone(), ctx.key.clone(), m.id.clone());
+                                el.tooltip(move |window, cx| {
+                                    let at = edited_at(&this, &key, &id, cx);
+                                    let tip = at.map_or_else(|| t("chat.messages.edited"), crate::ui::text::full);
+                                    crate::ui::overlay::Tip::new(tip).build(window, cx)
+                                })
+                            })
                             .child(t("chat.messages.edited")),
                     )
                 })
@@ -1838,6 +1882,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     }
     body = body.child(text);
 
+    let lit = author.is_some();
     let left: Option<AnyElement> = if compact {
         None
     } else if m.head {
@@ -1856,6 +1901,21 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                         .on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
                 })
                 .child(crate::ui::widgets::decorated(avatar(m.user.as_ref(), 40.0, p), 40.0, m.decoration.as_deref()))
+                // The web's `hover:brightness-110`, as a faint white veil over the face.
+                .when(lit, |el| {
+                    el.relative().group(SharedString::from("face")).child(
+                        div()
+                            .id(SharedString::from(format!("face-lit|{}", m.id)))
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size(px(40.0))
+                            .rounded_full()
+                            .bg(gpui_kit::white())
+                            .opacity(0.0)
+                            .group_hover("face", |s| s.opacity(0.08)),
+                    )
+                })
                 .into_any_element(),
         )
     } else {
@@ -1988,6 +2048,16 @@ pub(crate) fn chat_markdown(p: &Palette) -> gpui_kit::base::TextViewStyle {
 }
 
 /// Under a message that didn't go: why, and what to do (`PendingRow`'s ends).
+/// When a message on the instance `key` was last edited, if it's loaded.
+fn edited_at(this: &WeakEntity<FuwaApp>, key: &str, id: &str, cx: &App) -> Option<i64> {
+    let app = this.upgrade()?;
+    app.read(cx).core.shared.read(|s| {
+        let i = s.instance(key)?;
+        let m = i.messages.values().find_map(|c| c.items.iter().rev().find(|m| m.id == id))?;
+        m.edited_at.as_ref().map(|t| ms_of(Some(t)))
+    })
+}
+
 fn failed_line(m: &Msg, reason: &str, blocked: Option<&str>, p: &Palette, ctx: &Rc<RowCtx>) -> AnyElement {
     let nonce = m.nonce;
     let dismiss = {
