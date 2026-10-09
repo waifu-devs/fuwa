@@ -1481,7 +1481,7 @@ impl FuwaApp {
                     this.rail.editing = None;
                     cx.notify();
                 }))
-                .child(motion::dialog_in(card, "folder-dialog-in"))
+                .child(crate::ui::overlay::roomy("folder-room", motion::dialog_in(card, "folder-dialog-in")))
                 .into_any_element(),
         )
     }

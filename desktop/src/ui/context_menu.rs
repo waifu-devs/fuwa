@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement, Keystroke, MouseButton,
-    ParentElement as _, Pixels, Point, SharedString, Size, StatefulInteractiveElement as _, Styled as _, Window, div,
-    px,
+    ParentElement as _, Pixels, Point, ScrollHandle, SharedString, Size, StatefulInteractiveElement as _, Styled as _,
+    Window, div, px,
 };
 
 use crate::ui::app::FuwaApp;
@@ -234,6 +234,8 @@ pub(crate) struct ContextMenu {
     asking: Option<usize>,
     typed: (String, Instant),
     opened: Instant,
+    /// The items' scroll, when the window is too short for them all.
+    scroll: ScrollHandle,
 }
 
 const ROW: f32 = 32.0;
@@ -247,6 +249,36 @@ const SUB_WIDTH: f32 = 224.0;
 /// Where an item sits from the top of its card.
 fn top_of(lines: &[bool], ix: usize) -> f32 {
     PAD + ix as f32 * ROW + lines[..=ix.min(lines.len().saturating_sub(1))].iter().filter(|l| **l).count() as f32 * LINE
+}
+
+/// How far menus keep from the window's edges.
+const EDGE: f32 = 8.0;
+
+/// The whole menu's height, its border included.
+fn height(lines: &[bool]) -> f32 {
+    top_of(lines, lines.len().saturating_sub(1)) + ROW + PAD + 2.0
+}
+
+/// The tallest a menu may be: the window, less its edges.
+fn tallest(window: &Window) -> f32 {
+    f32::from(window.viewport_size().height) - 2.0 * EDGE
+}
+
+/// Scrolls a menu taller than the window to the item the keys lit.
+fn reveal(menu: &ContextMenu, lines: &[bool], window: &Window) {
+    let Some(ix) = menu.active else { return };
+    let view = tallest(window) - 2.0;
+    let top = top_of(lines, ix) - PAD;
+    let bottom = top_of(lines, ix) + ROW + PAD;
+    let shown = -f32::from(menu.scroll.offset().y);
+    let to = if top < shown {
+        top
+    } else if bottom > shown + view {
+        bottom - view
+    } else {
+        return;
+    };
+    menu.scroll.set_offset(gpui_kit::point(px(0.0), px(-to.max(0.0))));
 }
 
 /// The next item that can be picked, `by` steps from `from`, round the end.
@@ -296,6 +328,7 @@ impl FuwaApp {
             asking: None,
             typed: (String::new(), Instant::now()),
             opened: Instant::now(),
+            scroll: ScrollHandle::new(),
         });
         cx.notify();
     }
@@ -478,6 +511,9 @@ impl FuwaApp {
                 }
             }
         }
+        if let Some(menu) = &self.context {
+            reveal(menu, &built.lines, window);
+        }
         cx.notify();
         true
     }
@@ -517,7 +553,8 @@ impl FuwaApp {
                 cx.listener(|this, _, _, cx| _ = this.close_context_menu(cx)),
             ));
         }
-        let body = self.items_body(&built, active, sub, &id, at, window, &p, cx);
+        let scroll = self.context.as_ref().map(|m| m.scroll.clone()).unwrap_or_default();
+        let (body, sub) = self.items_body(&built, active, sub, &id, at, &scroll, window, &p, cx);
         let layer = div()
             .id("context-away")
             .absolute()
@@ -530,14 +567,27 @@ impl FuwaApp {
             .child(
                 gpui_kit::anchored()
                     .position(at + gpui_kit::point(px(0.0), px(2.0)))
-                    .snap_to_window_with_margin(gpui_kit::Edges::all(px(8.0)))
+                    .snap_to_window_with_margin(gpui_kit::Edges::all(px(EDGE)))
                     .child(
                         div()
                             .id("context-menu")
+                            .relative()
                             .occlude()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                            .child(pop(menu_card(&p).child(body), SharedString::from(format!("ctx|{id}")))),
+                            .child(pop(
+                                menu_card(&p).child(
+                                    // Taller than the window, the items scroll.
+                                    div()
+                                        .id("ctx-scroll")
+                                        .max_h(px(tallest(window) - 2.0))
+                                        .overflow_y_scroll()
+                                        .track_scroll(&scroll)
+                                        .child(body),
+                                ),
+                                SharedString::from(format!("ctx|{id}")),
+                            ))
+                            .children(sub),
                     ),
             );
         Some(layer.into_any_element())
@@ -551,10 +601,11 @@ impl FuwaApp {
         sub: Option<(usize, Option<usize>)>,
         id: &str,
         at: Point<Pixels>,
+        scroll: &ScrollHandle,
         window: &mut Window,
         p: &Palette,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> (AnyElement, Option<AnyElement>) {
         let lit = active.or(sub.map(|(ix, _)| ix));
         let mut list = div().relative().w(px(WIDTH - 2.0)).py(px(PAD)).px(px(PAD)).flex().flex_col();
         // The highlight glides from item to item.
@@ -603,6 +654,8 @@ impl FuwaApp {
                 list.child(motion::rise(div().child(row), SharedString::from(format!("ctx-in|{id}|{ix}")), delay, 4.0));
         }
         // An open submenu, beside its item; on the left when there's no room on the right.
+        // It sits beside the menu's card rather than in its items, so their scrolling doesn't cut it off.
+        let mut beside = None;
         if let Some((ix, sub_active)) = sub
             && let Some(Kind::Sub(items)) = built.items.get(ix).map(|i| &i.kind)
         {
@@ -611,7 +664,7 @@ impl FuwaApp {
             let mut col = div()
                 .id("ctx-sub-list")
                 .w(px(SUB_WIDTH - 2.0))
-                .max_h(px(384.0))
+                .max_h(px(384.0_f32.min(tallest(window) - 2.0)))
                 .overflow_y_scroll()
                 .py(px(PAD))
                 .px(px(PAD))
@@ -636,9 +689,14 @@ impl FuwaApp {
                     },
                 ));
             }
-            // Level with its item: the card's border where the item's highlight starts.
-            let top = top_of(&built.lines, ix) - 1.0;
-            list = list.child(
+            // Level with its item: the card's border where the item's highlight starts, moved up
+            // as far as it takes to stay in the window.
+            let vh = f32::from(window.viewport_size().height);
+            let menu_top = (f32::from(at.y) + 2.0).min(vh - EDGE - height(&built.lines).min(tallest(window))).max(EDGE);
+            let sub_h = (items.len() as f32 * ROW + 2.0 * PAD + 2.0).min(386.0).min(tallest(window));
+            let top = top_of(&built.lines, ix) + f32::from(scroll.offset().y);
+            let top = top.min(vh - EDGE - sub_h - menu_top).max(EDGE - menu_top);
+            beside = Some(
                 div()
                     .absolute()
                     .top(px(top))
@@ -646,16 +704,17 @@ impl FuwaApp {
                     // Outside the menu's own box: its clicks mustn't reach the layer that closes it.
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                    .when(left, |el| el.left(px(WIDTH + 3.0)))
-                    .when(!left, |el| el.right(px(WIDTH + 3.0)))
+                    .when(left, |el| el.left(px(WIDTH + 4.0)))
+                    .when(!left, |el| el.right(px(WIDTH + 4.0)))
                     .child(motion::slide_in(
                         menu_card(p).child(col),
                         SharedString::from(format!("ctx-sub-in|{id}|{ix}")),
                         if left { -8.0 } else { 8.0 },
-                    )),
+                    ))
+                    .into_any_element(),
             );
         }
-        list.into_any_element()
+        (list.into_any_element(), beside)
     }
 }
 

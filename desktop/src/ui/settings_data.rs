@@ -679,7 +679,10 @@ pub(crate) fn dialog(
             .items_center()
             .justify_center()
             .on_click(cx.listener(move |this, _, _, cx| close(this, cx)))
-            .child(motion::rise(div().child(panel), SharedString::from(format!("{id}-panel")), Duration::ZERO, 16.0)),
+            .child(crate::ui::overlay::roomy(
+                "dialog-room",
+                motion::rise(div().child(panel), SharedString::from(format!("{id}-panel")), Duration::ZERO, 16.0),
+            )),
         SharedString::from(format!("{id}-fade")),
         Duration::from_millis(160),
     )
