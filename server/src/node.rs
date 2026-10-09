@@ -36,6 +36,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0022_federation_moves.sql"),
     include_str!("../migrations/node/0023_sign_in_providers.sql"),
     include_str!("../migrations/node/0024_profile_items.sql"),
+    include_str!("../migrations/node/0025_featured_servers.sql"),
 ];
 
 /// Notes that the instance's profile items changed now (`Node.profile_items_at`).
@@ -1650,6 +1651,40 @@ impl NodeDb {
                 (server_id, channel_id, account_id),
             )
             .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Featured servers ─────────────────────────
+
+    /// The servers featured in Browse, in order, as stored: some may be out
+    /// of Browse now.
+    pub async fn featured_servers(&self) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT server_id FROM featured_servers ORDER BY position", (), |r| r.get::<String>(0)).await
+    }
+
+    /// Replaces the featured servers (already checked) with these, in order.
+    pub async fn set_featured_servers(&self, server_ids: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM featured_servers", ()).await?;
+            for (position, id) in server_ids.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO featured_servers (server_id, position) VALUES (?1, ?2)",
+                    (id.as_str(), position as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Stops featuring a server that's gone.
+    pub async fn unfeature_server(&self, server_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM featured_servers WHERE server_id = ?1", [server_id]).await?;
             Ok(())
         })
         .await

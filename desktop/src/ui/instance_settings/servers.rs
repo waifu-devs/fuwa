@@ -1,5 +1,6 @@
 //! The Servers page: every community server on the instance, with its owner
-//! and what it holds. Admins open one to change its caps, move it to another
+//! and what it holds. Admins open one to feature it in Browse (and put it
+//! earlier or later among the featured), change its caps, move it to another
 //! region, end its shared channels, save its whole file or delete it,
 //! whether or not they're in it. The web's `settings/instance/Servers.tsx`:
 //! a row opens in place, one at a time.
@@ -17,7 +18,7 @@ use gpui_kit::{
     relative,
 };
 
-use super::controls::{cap_row, dialog, dialog_buttons, input_box, segmented, shimmer, tracked_count};
+use super::controls::{cap_row, dialog, dialog_buttons, input_box, segmented, shimmer, switch, tracked_count};
 use super::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::core::dms::now_ms;
 use crate::core::i18n::{Arg, t, t_with};
@@ -65,6 +66,9 @@ pub(super) struct Servers {
     query: Entity<InputState>,
     sort: Sort,
     list: Option<Vec<pb::InstanceServer>>,
+    /// The servers featured in Browse, in their order, and whether a change to it is on its way.
+    featured: Vec<String>,
+    featuring: bool,
     error: Option<String>,
     asked: bool,
     /// Pictures people keep here: how many, and their bytes.
@@ -123,6 +127,8 @@ impl Servers {
                 query,
                 sort: Sort::Biggest,
                 list: None,
+                featured: Vec::new(),
+                featuring: false,
                 error: None,
                 asked: false,
                 pictures: (0, 0),
@@ -227,9 +233,12 @@ impl InstanceSettingsView {
         self.servers.asked = true;
         self.servers.error = None;
         let (core, key) = (self.core.clone(), self.key.clone());
-        self.run(window, cx, async move { core.list_instance_servers(&key).await }, |this, result, _, cx| {
+        self.run(window, cx, async move { core.instance_servers(&key).await }, |this, result, _, cx| {
             match result {
-                Ok(list) => this.servers.list = Some(list),
+                Ok(res) => {
+                    this.servers.list = Some(res.servers);
+                    this.servers.featured = res.featured_server_ids;
+                }
                 Err(problem) => this.servers.error = Some(problem.message),
             }
             cx.notify();
@@ -250,6 +259,41 @@ impl InstanceSettingsView {
 
     fn entry_mut(&mut self, id: &str) -> Option<&mut pb::InstanceServer> {
         self.servers.list.as_mut()?.iter_mut().find(|s| id_of(s) == id)
+    }
+
+    /// Sends the whole featured list as `ids` (the server's own order), and
+    /// keeps what the instance answers.
+    fn set_featured(
+        &mut self,
+        ids: Vec<String>,
+        toast: Option<(bool, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.servers.featuring {
+            return;
+        }
+        self.servers.featuring = true;
+        let (core, key) = (self.core.clone(), self.key.clone());
+        self.run(window, cx, async move { core.set_featured_servers(&key, ids).await }, move |this, result, _, cx| {
+            this.servers.featuring = false;
+            match result {
+                Ok(now) => {
+                    this.servers.featured = now;
+                    if let Some((on, name)) = toast {
+                        let k = if on {
+                            "instancesettings.servers.featuredNow"
+                        } else {
+                            "instancesettings.servers.unfeaturedNow"
+                        };
+                        this.toast("star", t_with(k, &[("server", Arg::Str(&name))]), cx);
+                    }
+                }
+                Err(problem) => this.toast("circle-alert", problem.message, cx),
+            }
+            cx.notify();
+        });
+        cx.notify();
     }
 
     /// Opens one server: its caps and shared channels load as it slides in.
@@ -784,6 +828,7 @@ impl InstanceSettingsView {
         let Some(s) = entry.server.as_ref() else { return div().into_any_element() };
         let id = s.id.clone();
         let open = self.servers.open.as_deref() == Some(id.as_str());
+        let featured = self.servers.featured.contains(&id);
         let storage = storage_of(entry);
         let cap = entry.limits.as_ref().and_then(|l| l.storage_bytes);
         let share = match cap {
@@ -835,6 +880,25 @@ impl InstanceSettingsView {
                         .font_weight(FontWeight::BOLD)
                         .child(icon("map-pin").size(px(10.0)))
                         .child(servers::region_name(regions, &s.region)),
+                )
+            })
+            .when(featured, |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(2.0))
+                        .px(px(6.0))
+                        .py(px(1.0))
+                        .rounded_full()
+                        .bg(alpha(p.primary, 0.15))
+                        .text_color(p.primary)
+                        .text_size(px(10.4))
+                        .line_height(px(14.0))
+                        .font_weight(FontWeight::BOLD)
+                        .child(icon("star").size(px(10.0)))
+                        .child(t("instancesettings.servers.featured").to_uppercase()),
                 )
             })
             .when(entry.member, |el| {
@@ -1042,8 +1106,11 @@ impl InstanceSettingsView {
                     div().text_sm().line_height(px(20.0)).text_color(p.muted_foreground).child(s.description.clone()),
                 )
             })
-            .child(stats)
-            .child(self.server_caps(&id, p, window, cx));
+            .child(stats);
+        if self.instance_has("featured-servers") {
+            body = body.child(self.feature_switch(&s, p, window, cx));
+        }
+        body = body.child(self.server_caps(&id, p, window, cx));
         if servers::has_regions(&regions) {
             body = body.child(self.region_picker(&s, &regions, p, window, cx));
         }
@@ -1052,6 +1119,139 @@ impl InstanceSettingsView {
         }
         body = body.child(self.server_actions(entry, p, window, cx));
         motion::rise(body, SharedString::from(format!("server-open-{id}")), Duration::ZERO, 8.0).into_any_element()
+    }
+
+    /// "Feature in Browse": the switch, a word when the server isn't in
+    /// Browse, and its place among the featured with arrows to move it.
+    fn feature_switch(
+        &mut self,
+        s: &pb::Server,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = s.id.clone();
+        let featured = &self.servers.featured;
+        let place = featured.iter().position(|f| *f == id);
+        let count = featured.len();
+        let busy = self.servers.featuring;
+        let (sid, name) = (id.clone(), s.name.clone());
+        let toggle =
+            switch(format!("feature-{id}"), place.is_some(), busy, p, window, cx, move |this, on, window, cx| {
+                let ids = servers::featuring(&this.servers.featured, &sid, on);
+                this.set_featured(ids, Some((on, name.clone())), window, cx);
+            });
+        let head = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .text_sm()
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(icon("star").size(px(14.0)).text_color(if place.is_some() {
+                                p.primary
+                            } else {
+                                p.muted_foreground
+                            }))
+                            .child(t("instancesettings.servers.feature")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_height(px(16.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("instancesettings.servers.featureAbout")),
+                    ),
+            )
+            .child(toggle);
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .px(px(12.0))
+            .py(px(10.0))
+            .rounded(radius_xl())
+            .border_1()
+            .border_color(if place.is_some() { alpha(p.primary, 0.4) } else { p.border.into() })
+            .child(head);
+        if place.is_some() && !s.discoverable {
+            section = section.child(motion::rise(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(icon("eye-off").size(px(12.0)))
+                    .child(t("instancesettings.servers.featureHidden")),
+                SharedString::from(format!("feature-hidden-{id}")),
+                Duration::ZERO,
+                6.0,
+            ));
+        }
+        if let Some(at) = place.filter(|_| count >= 2) {
+            let where_now = motion::swap_text(
+                SharedString::from(format!("feature-place-{id}")),
+                t_with(
+                    "instancesettings.servers.featurePlace",
+                    &[("place", Arg::Num(at as i64 + 1)), ("count", Arg::Num(count as i64))],
+                ),
+                12.0,
+                window,
+                cx,
+            );
+            let step = |earlier: bool| {
+                let (key, glyph, end) = if earlier {
+                    ("instancesettings.servers.featureEarlier", "arrow-up", at == 0)
+                } else {
+                    ("instancesettings.servers.featureLater", "arrow-down", at + 1 == count)
+                };
+                let off = end || busy;
+                let sid = id.clone();
+                button(
+                    format!("feature-{}-{id}", if earlier { "up" } else { "down" }),
+                    t(key),
+                    Some(glyph),
+                    Look::Outline,
+                    true,
+                    p,
+                )
+                .rounded(radius_xl())
+                .when(off, |el| el.opacity(0.5))
+                .when(!off, |el| {
+                    el.on_click(cx.listener(move |this, _, window, cx| {
+                        let ids = servers::featured_moved(&this.servers.featured, &sid, earlier);
+                        this.set_featured(ids, None, window, cx);
+                    }))
+                })
+            };
+            let order = div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(div().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(where_now))
+                .child(div().flex().gap(px(6.0)).child(step(true)).child(step(false)));
+            section = section.child(motion::rise(
+                order,
+                SharedString::from(format!("feature-order-{id}")),
+                Duration::ZERO,
+                6.0,
+            ));
+        }
+        section.into_any_element()
     }
 
     fn server_caps(&mut self, id: &str, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

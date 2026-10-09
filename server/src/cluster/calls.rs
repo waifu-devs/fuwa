@@ -123,13 +123,22 @@ impl App {
                     tracing::warn!("couldn't forget where a deleted server was");
                 }
                 self.forget_notifications(server_id, None, None).await;
+                self.unfeature(server_id).await;
                 self.drop_server_media(server_id).await;
             }
             Link::Alone => {
                 self.forget_server_presence(server_id);
                 self.forget_notifications(server_id, None, None).await;
+                self.unfeature(server_id).await;
                 self.drop_server_media(server_id).await;
             }
+        }
+    }
+
+    /// Takes a deleted server out of the ones featured in Browse.
+    async fn unfeature(&self, server_id: &str) {
+        if async { self.node()?.unfeature_server(server_id).await }.await.is_err() {
+            tracing::warn!("couldn't stop featuring a deleted server");
         }
     }
 

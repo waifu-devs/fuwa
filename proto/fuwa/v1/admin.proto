@@ -53,6 +53,11 @@ service AdminService {
   // admins' Disconnect does: it goes from the other server, and messages stay
   // at the channel's home. Its audit log says an instance admin did it.
   rpc EndServerShare(EndServerShareRequest) returns (EndServerShareResponse);
+  // Picks the servers Browse shows first, and big, in this order
+  // (DiscoverServersResponse.featured_server_ids). Only servers in Browse
+  // show there: one taken out of Browse stays picked, and shows again once
+  // it's back.
+  rpc SetFeaturedServers(SetFeaturedServersRequest) returns (SetFeaturedServersResponse);
 
   // Puts a banner on every client of this instance, or takes it down.
   rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
@@ -575,6 +580,18 @@ message ListInstanceServersRequest {}
 
 message ListInstanceServersResponse {
   repeated InstanceServer servers = 1;
+  // The servers featured in Browse, in the order they show there, whether
+  // or not they're in Browse now.
+  repeated string featured_server_ids = 2;
+}
+
+message SetFeaturedServersRequest {
+  // Every featured server, in order; empty for none. Each must exist.
+  repeated string server_ids = 1;
+}
+
+message SetFeaturedServersResponse {
+  repeated string featured_server_ids = 1;
 }
 
 message MoveServerRequest {

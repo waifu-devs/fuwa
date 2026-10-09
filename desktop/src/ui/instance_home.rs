@@ -1,6 +1,7 @@
 //! An instance's front page: its welcome (how it's connected, its name,
 //! making a server), opening an invite from any instance, and Browse, the
-//! servers anyone here can find, each with the one button that gets you in
+//! servers anyone here can find (the ones its admins feature first, and
+//! big), each with the one button that gets you in
 //! (open, join, apply, waiting, single sign-on, waifu.dev only). Like the
 //! web app's `pages/InstanceHome.tsx`, `components/join/JoinButton.tsx` and
 //! `ServerDoor.tsx`. Invites, applying and making servers are in
@@ -25,7 +26,7 @@ use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav};
 use crate::ui::motion;
-use crate::ui::text::{TIGHT, Tracked, tracked};
+use crate::ui::text::{TIGHT, Tracked, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
 
@@ -67,7 +68,7 @@ pub struct Home {
 #[derive(Clone)]
 enum Browse {
     Loading,
-    Ready(Vec<pb::Server>),
+    Ready(join::Discovered),
     Failed(String),
 }
 
@@ -156,11 +157,11 @@ impl FuwaApp {
             let key = key.to_owned();
             move |this, result, cx| {
                 let browse = match result {
-                    Ok(list) => {
-                        for s in &list {
+                    Ok(found) => {
+                        for s in &found.servers {
                             this.home.known.insert(tag(&key, &s.id), s.clone());
                         }
-                        Browse::Ready(list)
+                        Browse::Ready(found)
                     }
                     Err(err) => Browse::Failed(err.message),
                 };
@@ -660,7 +661,8 @@ impl FuwaApp {
             .into_any_element()
     }
 
-    /// The servers in Browse that match the search, rising in one after another.
+    /// The servers in Browse that match the search, rising in one after
+    /// another: the ones the instance features first and big, then the rest.
     fn browse_results(
         &mut self,
         key: &str,
@@ -683,18 +685,14 @@ impl FuwaApp {
             Some(Browse::Failed(error)) => {
                 return div().text_sm().text_color(p.muted_foreground).child(capitalized(&error)).into_any_element();
             }
-            Some(Browse::Ready(list)) => list,
+            Some(Browse::Ready(found)) => found,
         };
-        let query = self.home.search.read(cx).value().trim().to_lowercase();
-        let shown: Vec<pb::Server> = servers
-            .into_iter()
-            .filter(|s| {
-                query.is_empty()
-                    || s.name.to_lowercase().contains(&query)
-                    || s.description.to_lowercase().contains(&query)
-            })
-            .collect();
-        if shown.is_empty() {
+        let query = self.home.search.read(cx).value().to_string();
+        let (featured, shown) = join::browse_split(&servers, &query);
+        let (featured, shown): (Vec<pb::Server>, Vec<pb::Server>) =
+            (featured.into_iter().cloned().collect(), shown.into_iter().cloned().collect());
+        let query = query.trim();
+        if featured.is_empty() && shown.is_empty() {
             let searching = !query.is_empty();
             return div()
                 .w_full()
@@ -719,6 +717,10 @@ impl FuwaApp {
                 }))
                 .into_any_element();
         }
+        let mut page = div().flex().flex_col();
+        if !featured.is_empty() {
+            page = page.child(self.featured_section(key, &featured, width, cols, p, window, cx));
+        }
         let card_w = (width - 16.0 * f32::from(cols - 1)) / f32::from(cols);
         let mut rows = div().flex().flex_col().gap(px(16.0));
         for (r, chunk) in shown.chunks(usize::from(cols)).enumerate() {
@@ -735,7 +737,226 @@ impl FuwaApp {
             }
             rows = rows.child(row);
         }
-        rows.into_any_element()
+        page.child(rows).into_any_element()
+    }
+
+    /// The servers the instance's admins feature, over the rest: two to a
+    /// row where there's room, the first across the whole row when there's
+    /// an odd number of them (the web's `BrowseResults`).
+    #[allow(clippy::too_many_arguments)]
+    fn featured_section(
+        &mut self,
+        key: &str,
+        featured: &[pb::Server],
+        width: f32,
+        cols: u16,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = div()
+            .mb(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(12.0))
+            .line_height(px(16.0))
+            .text_color(p.muted_foreground)
+            .child(icon("sparkles").size(px(14.0)).text_color(p.primary))
+            .child(
+                div().font_weight(FontWeight::BOLD).child(tracked(t("workspace.home.featured").to_uppercase(), WIDE)),
+            )
+            .child(div().min_w_0().truncate().child(format!("· {}", t("workspace.home.featuredAbout"))));
+        let two = cols >= 2;
+        let half = (width - 16.0) / 2.0;
+        let mut rows = div().mb(px(32.0)).flex().flex_col().gap(px(16.0));
+        let mut row = div().flex().gap(px(16.0));
+        let mut in_row = 0;
+        for (n, s) in featured.iter().enumerate() {
+            // With an odd number, the first takes a whole row.
+            let wide = !two || (n == 0 && featured.len() % 2 == 1);
+            let w = if wide { width } else { half };
+            let card = self.featured_card(key, s, w, wide && two, p, window, cx);
+            let card = motion::rise(
+                div().w(px(w)).flex_none().flex().flex_col().child(card),
+                SharedString::from(format!("featured|{key}|{}", s.id)),
+                Duration::from_millis(70 * n.min(6) as u64),
+                24.0,
+            );
+            if wide {
+                rows = rows.child(card);
+                continue;
+            }
+            row = row.child(card);
+            in_row += 1;
+            if in_row == 2 {
+                rows = rows.child(std::mem::replace(&mut row, div().flex().gap(px(16.0))));
+                in_row = 0;
+            }
+        }
+        if in_row > 0 {
+            rows = rows.child(row);
+        }
+        motion::rise(
+            div().flex().flex_col().child(label).child(rows),
+            SharedString::from(format!("featured|{key}")),
+            Duration::ZERO,
+            12.0,
+        )
+        .into_any_element()
+    }
+
+    /// A server the instance's admins feature: a tall banner with a star
+    /// on it, the icon and name bigger, and more of the description than a
+    /// plain card (the web's `FeaturedCard`). `wide` is one across a whole row.
+    #[allow(clippy::too_many_arguments)]
+    fn featured_card(
+        &mut self,
+        key: &str,
+        server: &pb::Server,
+        w: f32,
+        wide: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tall = if wide { 208.0 } else { 176.0 };
+        let banner = crate::ui::banner::server_banner(server, w - 2.0, tall, Some(p.card.into()), window, cx);
+        let border = alpha(p.primary, 0.3);
+        let hover = p.primary;
+        let glow = alpha(p.primary, 0.55);
+        let r = f32::from(radius_3xl());
+        let card_id = SharedString::from(format!("featured-card|{key}|{}", server.id));
+        let chip = div()
+            .absolute()
+            .top(px(12.0))
+            .left(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .px(px(10.0))
+            .py(px(4.0))
+            .rounded_full()
+            .bg(alpha(p.background, 0.8))
+            .text_size(px(12.0))
+            .line_height(px(16.0))
+            .font_weight(FontWeight::EXTRA_BOLD)
+            .text_color(p.primary)
+            .child(icon("star").size(px(14.0)))
+            .child(t("workspace.home.featured"));
+        let description = div()
+            .w(px(w - 50.0))
+            .text_size(px(if wide { 16.0 } else { 14.0 }))
+            .line_height(px(if wide { 24.0 } else { 20.0 }))
+            .text_color(p.muted_foreground)
+            .line_clamp(if wide { 3 } else { 4 })
+            .child(if server.description.trim().is_empty() {
+                StyledText::new(t("workspace.home.noDescription")).into_any_element()
+            } else {
+                inline_markdown(&server.description, p.foreground).into_any_element()
+            });
+        let join = self.join_button(key, server, "", false, None, p, window, cx);
+        let door = server_door(server, p);
+        let foot = if wide {
+            div()
+                .flex()
+                .items_end()
+                .justify_between()
+                .gap(px(12.0))
+                .child(div().flex_1().min_w_0().children(door))
+                .child(div().w(px(224.0)).flex_none().child(join))
+        } else {
+            div().flex().flex_col().gap(px(12.0)).children(door).child(join)
+        };
+        let card = div()
+            .id(card_id.clone())
+            .relative()
+            .h_full()
+            .flex()
+            .flex_col()
+            .rounded(radius_3xl())
+            .border_1()
+            .border_color(border)
+            .bg(p.card)
+            .shadow(vec![BoxShadow {
+                color: alpha(p.primary, 0.08),
+                offset: point(px(0.0), px(10.0)),
+                blur_radius: px(15.0),
+                spread_radius: px(-3.0),
+                inset: false,
+            }])
+            .hover(move |s| {
+                s.border_color(hover).translate_y(px(-4.0)).shadow(vec![BoxShadow {
+                    color: glow,
+                    offset: point(px(0.0), px(18.0)),
+                    blur_radius: px(20.0),
+                    spread_radius: px(-22.0),
+                    inset: false,
+                }])
+            })
+            // The banner hangs out of a shorter slot, so the icon and name
+            // sit over its last 48 pixels (the web's `-mt-12`).
+            .child(
+                div().relative().w_full().h(px(tall - 47.0)).flex_none().child(
+                    div()
+                        .absolute()
+                        .top(px(1.0))
+                        .left(px(1.0))
+                        .w(px(w - 2.0))
+                        .h(px(tall))
+                        .overflow_hidden()
+                        .rounded_t(px(r - 1.0))
+                        .child(banner)
+                        .child(chip),
+                ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .px(px(24.0))
+                    .pb(px(24.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(
+                        div().flex().items_end().gap(px(16.0)).child(ringed_icon(server, 80.0, 24.0, 4.0, p)).child(
+                            div()
+                                .min_w_0()
+                                .pb(px(4.0))
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(24.0))
+                                        .line_height(px(32.0))
+                                        .font_weight(FontWeight::EXTRA_BOLD)
+                                        .child(tracked(server.name.clone(), TIGHT)),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .text_size(px(14.0))
+                                        .line_height(px(20.0))
+                                        .text_color(p.muted_foreground)
+                                        .child(icon("users").size(px(16.0)))
+                                        .child(motion::counted(
+                                            format!("featured-members|{}", server.id),
+                                            "workspace.home.members",
+                                            server.member_count.max(0) as u64,
+                                            14.0,
+                                        )),
+                                ),
+                        ),
+                    )
+                    .child(description)
+                    .child(div().flex_1())
+                    .child(foot),
+            );
+        pointer_glow(card, &card_id, p.primary, window, cx).into_any_element()
     }
 
     /// A server in Browse: its banner, icon, name, how many are in it, what

@@ -371,7 +371,32 @@ impl AdminService for Api {
                         server: Some(server),
                     });
                 }
-                Ok(pb::ListInstanceServersResponse { servers })
+                let featured_server_ids = self.app.node()?.featured_servers().await?;
+                Ok(pb::ListInstanceServersResponse { servers, featured_server_ids })
+            }
+            .await,
+        )
+    }
+
+    async fn set_featured_servers(
+        &self,
+        request: Request<pb::SetFeaturedServersRequest>,
+    ) -> Result<Response<pb::SetFeaturedServersResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let mut ids = Vec::new();
+                for id in request.into_inner().server_ids {
+                    if self.app.index.summary(&id).is_none() {
+                        return Err(Error::NotFound("server"));
+                    }
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+                self.app.node()?.set_featured_servers(&ids).await?;
+                tracing::info!(count = ids.len(), "featured servers changed by an admin");
+                Ok(pb::SetFeaturedServersResponse { featured_server_ids: ids })
             }
             .await,
         )

@@ -1,6 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArrowDownIcon,
   ArrowRightIcon,
+  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   DownloadIcon,
@@ -13,6 +15,7 @@ import {
   PlaneIcon,
   SearchIcon,
   ServerIcon as ServersIcon,
+  StarIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UnlinkIcon,
@@ -24,7 +27,19 @@ import type { InstanceServer } from "@/gen/fuwa/v1/admin_pb";
 import { SharedConnectionState, type SharedConnection } from "@/gen/fuwa/v1/channel_pb";
 import type { ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import type { Region } from "@/gen/fuwa/v1/types_pb";
-import { deleteServer, endServerShare, exportServer, listInstanceServers, listServerShares, moveServer, nodeUsage, run, serverUsage, setServerLimits } from "@/fuwa/actions";
+import {
+  deleteServer,
+  endServerShare,
+  exportServer,
+  listInstanceServers,
+  listServerShares,
+  moveServer,
+  nodeUsage,
+  run,
+  serverUsage,
+  setFeaturedServers,
+  setServerLimits,
+} from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
@@ -36,10 +51,12 @@ import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { displayName, formatBytes, formatDay, toDate } from "@/lib/format";
 import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { hasRegions, regionMark, regionName, sameRegion } from "@/lib/regions";
+import { instanceHas } from "@/lib/compat";
 import { cn } from "@/lib/utils";
 import { Cap } from "../controls";
 
@@ -67,15 +84,24 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
   const lang = useI18n();
   const { t } = lang;
   const [servers, setServers] = useState<InstanceServer[] | null>(null);
+  const [featured, setFeatured] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("storage");
   const [open, setOpen] = useState<string | null>(null);
   const [pictures, setPictures] = useState({ count: 0, bytes: 0 });
-  const regions = useInstance(instanceKey)?.node?.regions ?? [];
+  const node = useInstance(instanceKey)?.node;
+  const regions = node?.regions ?? [];
+  const canFeature = instanceHas(node?.versions, "featured-servers");
 
   useEffect(() => {
-    run(listInstanceServers(instanceKey)).then(setServers, (e: FuwaError) => setError(e.message));
+    run(listInstanceServers(instanceKey)).then(
+      (r) => {
+        setServers(r.servers);
+        setFeatured(r.featured);
+      },
+      (e: FuwaError) => setError(e.message),
+    );
     run(nodeUsage(instanceKey)).then(
       (u) => setPictures({ count: Number(u.pictures), bytes: Number(u.pictureBytes) }),
       () => {},
@@ -173,6 +199,8 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
               open={open === s.server?.id}
               onToggle={() => setOpen((o) => (o === s.server?.id ? null : (s.server?.id ?? null)))}
               regions={regions}
+              featured={canFeature ? featured : null}
+              onFeatured={setFeatured}
               onMoved={(server) => setServers((list) => (list ?? []).map((x) => (x.server?.id === server.id ? { ...x, server } : x)))}
               onLimits={(limits) => setServers((list) => (list ?? []).map((x) => (x.server?.id === s.server?.id ? { ...x, limits } : x)))}
               onDeleted={() => setServers((list) => (list ?? []).filter((x) => x.server?.id !== s.server?.id))}
@@ -199,6 +227,8 @@ function ServerRow({
   biggest,
   open,
   regions,
+  featured,
+  onFeatured,
   onToggle,
   onMoved,
   onLimits,
@@ -209,6 +239,9 @@ function ServerRow({
   entry: InstanceServer;
   index: number;
   regions: Region[];
+  /** The featured servers' ids in order, or null where the instance can't feature any. */
+  featured: string[] | null;
+  onFeatured: (ids: string[]) => void;
   onMoved: (server: NonNullable<InstanceServer["server"]>) => void;
   biggest: number;
   open: boolean;
@@ -256,6 +289,20 @@ function ServerRow({
                 </motion.span>
               )}
             </AnimatePresence>
+            <AnimatePresence initial={false}>
+              {featured?.includes(s.id) && (
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.4, rotate: -45 }}
+                  animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                  exit={{ opacity: 0, scale: 0.4, rotate: 45 }}
+                  transition={SPRING}
+                  title={t("instancesettings.servers.featured")}
+                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-px text-[0.65rem] font-bold text-amber-600 uppercase dark:text-amber-400"
+                >
+                  <StarIcon className="size-2.5 fill-current" /> {t("instancesettings.servers.featured")}
+                </motion.span>
+              )}
+            </AnimatePresence>
             {entry.member && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[0.65rem] font-bold text-primary uppercase">{t("instancesettings.servers.youreIn")}</span>}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -288,7 +335,7 @@ function ServerRow({
       <AnimatePresence mode="popLayout" initial={false}>
         {open && (
           <motion.div {...SLIDE_IN} transition={SPRING}>
-            <Details instanceKey={instanceKey} entry={entry} regions={regions} onMoved={onMoved} onLimits={onLimits} onDeleted={onDeleted} onLeave={onLeave} />
+            <Details instanceKey={instanceKey} entry={entry} regions={regions} featured={featured} onFeatured={onFeatured} onMoved={onMoved} onLimits={onLimits} onDeleted={onDeleted} onLeave={onLeave} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -301,6 +348,8 @@ function Details({
   instanceKey,
   entry,
   regions,
+  featured,
+  onFeatured,
   onMoved,
   onLimits,
   onDeleted,
@@ -309,6 +358,8 @@ function Details({
   instanceKey: string;
   entry: InstanceServer;
   regions: Region[];
+  featured: string[] | null;
+  onFeatured: (ids: string[]) => void;
   onMoved: (server: NonNullable<InstanceServer["server"]>) => void;
   onLimits: (limits: ServerLimits) => void;
   onDeleted: () => void;
@@ -414,6 +465,8 @@ function Details({
         </AnimatePresence>
       </div>
 
+      {featured && <FeatureInBrowse instanceKey={instanceKey} server={s} featured={featured} onFeatured={onFeatured} />}
+
       {hasRegions(regions) && <MoveRegion instanceKey={instanceKey} server={s} regions={regions} onMoved={onMoved} />}
 
       <Shares instanceKey={instanceKey} serverId={s.id} />
@@ -449,6 +502,82 @@ function Details({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * Featuring a server in Browse, where it shows first and big, and its place
+ * among the others featured. Every change sends the whole list.
+ */
+function FeatureInBrowse({
+  instanceKey,
+  server,
+  featured,
+  onFeatured,
+}: {
+  instanceKey: string;
+  server: NonNullable<InstanceServer["server"]>;
+  featured: string[];
+  onFeatured: (ids: string[]) => void;
+}) {
+  const lang = useI18n();
+  const { t } = lang;
+  const save = useAction(setFeaturedServers);
+  const place = featured.indexOf(server.id);
+  const on = place >= 0;
+
+  async function change(ids: string[], said?: string) {
+    const saved = await save.go(instanceKey, ids);
+    if (!saved) return;
+    onFeatured(saved);
+    if (said) toast(said);
+  }
+  const swap = (by: number) => {
+    const ids = [...featured];
+    [ids[place], ids[place + by]] = [ids[place + by]!, ids[place]!];
+    void change(ids);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-muted/50 px-3 py-2.5">
+        <motion.span animate={{ rotate: on ? 72 : 0, scale: on ? 1.1 : 1 }} transition={SPRING} className={cn("mt-0.5 shrink-0", on ? "text-amber-500" : "text-muted-foreground")}>
+          <StarIcon className={cn("size-4", on && "fill-current")} />
+        </motion.span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold">{t("instancesettings.servers.feature")}</span>
+          <span className="block text-xs text-muted-foreground">{t("instancesettings.servers.featureAbout")}</span>
+          {on && !server.discoverable && <span className="mt-1 block text-xs font-bold text-amber-600 dark:text-amber-400">{t("instancesettings.servers.featureHidden")}</span>}
+        </span>
+        <Switch
+          checked={on}
+          disabled={save.pending}
+          onCheckedChange={(next) =>
+            change(
+              next ? [...featured, server.id] : featured.filter((id) => id !== server.id),
+              t(next ? "instancesettings.servers.featuredNow" : "instancesettings.servers.unfeaturedNow", { server: server.name }),
+            )
+          }
+          className="mt-0.5"
+        />
+      </label>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {on && featured.length > 1 && (
+          <motion.div {...SLIDE_IN} transition={SPRING} className="flex items-center gap-2 px-1">
+            <span className="flex-1 text-xs text-muted-foreground tabular-nums">
+              {t("instancesettings.servers.featurePlace", { place: lang.number(place + 1), count: lang.number(featured.length) })}
+            </span>
+            <Button type="button" variant="ghost" size="sm" className="group rounded-xl" disabled={save.pending || place === 0} onClick={() => swap(-1)}>
+              <ArrowUpIcon className="transition-transform group-hover:-translate-y-0.5" /> {t("instancesettings.servers.featureEarlier")}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="group rounded-xl" disabled={save.pending || place === featured.length - 1} onClick={() => swap(1)}>
+              <ArrowDownIcon className="transition-transform group-hover:translate-y-0.5" /> {t("instancesettings.servers.featureLater")}
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {save.error && <p className="text-sm text-destructive first-letter:uppercase">{save.error}</p>}
     </div>
   );
 }

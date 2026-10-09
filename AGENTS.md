@@ -49,7 +49,10 @@
     tickets), notification settings, server arrangements (each person's rail
     order and folders, `AccountService.Get/SetServerArrangement`; the web side
     is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
-    meta (the install id, the announcement).
+    the servers admins feature in Browse (`featured_servers`, in order, set
+    with `AdminService.SetFeaturedServers`; `DiscoverServers` puts them
+    first and names them, and apps draw them big), meta (the install id, the
+    announcement).
     Admins can turn an account off (`disabled_at`): it loses its sessions and
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members

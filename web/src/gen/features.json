@@ -26,6 +26,7 @@
     { "id": "live-tiles", "date": "2026-10-05", "title": "Live tiles and app tiles" },
     { "id": "profile-items", "date": "2026-10-07", "title": "Profile effects and decorations from instances and servers" },
     { "id": "camera-quality", "date": "2026-10-08", "title": "Camera quality ceilings for instances and servers" },
-    { "id": "reactions", "date": "2026-10-09", "title": "Reactions to messages" }
+    { "id": "reactions", "date": "2026-10-09", "title": "Reactions to messages" },
+    { "id": "featured-servers", "date": "2026-10-09", "title": "Servers featured in Browse" }
   ]
 }

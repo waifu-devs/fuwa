@@ -76,7 +76,12 @@ message ListServersResponse {
 message DiscoverServersRequest {}
 
 message DiscoverServersResponse {
+  // The featured ones first, in their order, then the rest, most members
+  // first.
   repeated Server servers = 1;
+  // The servers in `servers` the instance's admins feature: apps show them
+  // first, and bigger than the rest.
+  repeated string featured_server_ids = 2;
 }
 
 message UpdateServerRequest {
