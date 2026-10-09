@@ -273,9 +273,13 @@ message InstanceSettings {
   // 144 to 2160, and 1 to 120. FUWA_CAMERA_MAX_HEIGHT, FUWA_CAMERA_MAX_FPS.
   optional int64 camera_max_height = 61;
   optional int64 camera_max_fps = 62;
-  // Most different emoji on one message (MessageService.React); unset for
-  // no cap. FUWA_LIMIT_REACTIONS_PER_MESSAGE.
+  // Most different emoji on one message (MessageService.React). A
+  // protective default, 100 unless FUWA_LIMIT_REACTIONS_PER_MESSAGE says
+  // otherwise; unset for no cap. Messages show at most 100 either way.
   optional int64 reactions_per_message = 63;
+  // How many reactions one account may add or take off in a minute; unset
+  // for no cap. FUWA_LIMIT_REACTIONS_PER_MINUTE.
+  optional int64 reactions_per_minute = 65;
 }
 
 // One sign-in provider, as an instance's admins set it up. Its redirect URI,

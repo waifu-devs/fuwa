@@ -99,6 +99,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "pins_per_channel", get: (s) => s.pinsPerChannel },
   { path: "pins_per_conversation", get: (s) => s.pinsPerConversation },
   { path: "reactions_per_message", get: (s) => s.reactionsPerMessage },
+  { path: "reactions_per_minute", get: (s) => s.reactionsPerMinute },
   { path: "live_tiles_per_channel", get: (s) => s.liveTilesPerChannel },
   { path: "live_tile_updates_per_minute", get: (s) => s.liveTileUpdatesPerMinute },
   { path: "live_tile_publish_ms", get: (s) => s.liveTilePublishMs },
@@ -999,10 +1000,20 @@ function LimitSettings({ draft, defaults, patch, resetter }: TabProps) {
       >
         <Cap
           label={t("instancesettings.shared.upTo")}
-          placeholder="20"
+          placeholder="100"
           value={draft.reactionsPerMessage}
           onChange={(v) => patch((d) => (d.reactionsPerMessage = v))}
         />
+      </Setting>
+      <Setting
+        id="reactions-per-minute"
+        title={t("instancesettings.limits.reactionsPerMinute")}
+        hint={t("instancesettings.limits.reactionsPerMinuteHint")}
+        defaultLabel={perMinute(t, defaults.reactionsPerMinute)}
+        delay={0.275}
+        {...resetter("reactions_per_minute")}
+      >
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="60" value={draft.reactionsPerMinute} onChange={(v) => patch((d) => (d.reactionsPerMinute = v))} />
       </Setting>
       <Setting
         id="live-tiles-per-channel"
@@ -1228,6 +1239,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "reactions_per_message":
         into.reactionsPerMessage = from.reactionsPerMessage;
+        break;
+      case "reactions_per_minute":
+        into.reactionsPerMinute = from.reactionsPerMinute;
         break;
       case "live_tiles_per_channel":
         into.liveTilesPerChannel = from.liveTilesPerChannel;

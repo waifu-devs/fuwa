@@ -31,9 +31,20 @@ message, each with its count, the reader's own marked.
   clash and one runs again: counts in events follow each other, and the cap
   holds. Events that carry a whole message (`MessageCreated`,
   `MessageUpdated`) have no reactions; apps keep the ones they had.
+- **What's an emoji**: a standard one is exactly one emoji, as the web's
+  `isOneEmoji` takes it: a pictograph (with its variation selector, skin
+  tone and tags), several joined by zero-width joiners, a flag (two regional
+  indicators) or a keycap, at most 32 bytes. Letters, words and invisible
+  formatting such as U+202E are refused, so nothing AutoMod would read gets
+  in as a reaction.
 - **Caps**: `reactions_per_message`, the most different emoji on one message,
-  is unlimited unless an admin sets it (`FUWA_LIMIT_REACTIONS_PER_MESSAGE`).
-  More people reacting with an emoji already there is always fine.
+  is 100 unless an admin changes it (`FUWA_LIMIT_REACTIONS_PER_MESSAGE`, a
+  protective default; `unlimited` lifts it, and 0 is refused). However many
+  a message has, reads show the first 100. More people reacting with an
+  emoji already there is always fine. `reactions_per_minute`, how many
+  reactions one account may add or take off in a minute, is unlimited
+  unless set (`FUWA_LIMIT_REACTIONS_PER_MINUTE`); each one rewrites the
+  message's row and reaches everyone in the channel.
 - **Going away**: deleting a message, its thread, its channel, or a ban's
   purge takes the message's reactions along. Deleting an account takes its
   reactions off, with an event for each count that went down. Leaving a

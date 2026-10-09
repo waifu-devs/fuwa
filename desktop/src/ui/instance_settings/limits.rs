@@ -210,7 +210,7 @@ impl InstanceSettingsView {
                 )
             },
             Row {
-                off: Some("20"),
+                off: Some("100"),
                 ..row(
                     "reactions-per-message",
                     "instancesettings.limits.reactionsPerMessage",
@@ -218,6 +218,17 @@ impl InstanceSettingsView {
                     &["reactions_per_message"],
                     false,
                     count(defaults.reactions_per_message),
+                )
+            },
+            Row {
+                off: Some("60"),
+                ..row(
+                    "reactions-per-minute",
+                    "instancesettings.limits.reactionsPerMinute",
+                    "instancesettings.limits.reactionsPerMinuteHint",
+                    &["reactions_per_minute"],
+                    false,
+                    per_minute(defaults.reactions_per_minute),
                 )
             },
             Row {
@@ -293,6 +304,7 @@ pub(super) const CAPS: [(&str, bool); 31] = [
     ("pins_per_channel", false),
     ("pins_per_conversation", false),
     ("reactions_per_message", false),
+    ("reactions_per_minute", false),
     ("live_tiles_per_channel", false),
     ("live_tile_updates_per_minute", false),
     ("live_tile_publish_ms", false),

@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tonic::{Code, Request, Response, Status};
 
 use super::messages::{self, check_slowmode, load_message};
+use super::reactions::MAX_REACTIONS;
 use super::{Api, Seat, automod, respond, users};
 use crate::app::App;
 use crate::cluster::calls::MAX_OUTSIDE_EMOJIS;
@@ -42,8 +43,6 @@ pub const SHAREABLE: Bits = bit(Permission::SendMessages)
 /// The same for a server on another instance: as much, now that files
 /// cross instances too ([`crate::shared_files`]).
 const SHAREABLE_ELSEWHERE: Bits = SHAREABLE;
-/// Most reactions a message from another instance shows.
-const MAX_REACTIONS: usize = 100;
 /// How long a share code works.
 const CODE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Requests from one other instance a server keeps waiting, at most.

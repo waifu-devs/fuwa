@@ -185,8 +185,9 @@ agent.on("reactionUpdated", (payload) => {
   reaction as it is now. An emoji is a standard one's characters ("👍") or
   one of the server's custom emoji (`<:name:id>`, or the `Emoji` itself).
 - Reacting needs Add Reactions in the channel. A message holds at most the
-  instance's `reactions_per_message` different emoji (unlimited unless set):
-  past it, `react` fails with `RateLimitedError` (no `retryAfterMs`).
+  instance's `reactions_per_message` different emoji (100 unless changed):
+  past it, `react` fails with `RateLimitedError` (no `retryAfterMs`), as it
+  does past the instance's `reactions_per_minute` when one is set.
   In a channel shared from another server, the home's custom emoji work,
   and only the home clears reactions.
 - `agent.reactors(message, emoji)` is who reacted, the earliest first.

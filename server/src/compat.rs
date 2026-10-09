@@ -70,6 +70,7 @@ mod tests {
         for f in &LIST.features {
             assert!(is_date(&f.date), "{}: {}", f.id, f.date);
             assert!(!f.title.is_empty() && !f.id.is_empty());
+            assert!(f.title.chars().count() <= 40, "{}: titles fit in 40 characters", f.id);
             assert!(seen.insert(f.id.as_str()), "{} twice", f.id);
             assert!(f.date.as_str() >= last, "{}: features are added at the end, in date order", f.id);
             last = &f.date;
