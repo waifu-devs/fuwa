@@ -370,6 +370,47 @@ impl App {
         }
     }
 
+    /// The endpoints of these agents that are on, for delivering their
+    /// events (`api/endpoints.rs`).
+    pub async fn agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<cpb::DeliveryEndpoint>> {
+        if agent_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        if let Link::Shard(link) = &self.link {
+            let request = cpb::AgentEndpointsRequest { agent_ids: agent_ids.to_vec() };
+            return Ok(link.ask(request, |mut d, r| async move { d.agent_endpoints(r).await }).await?.endpoints);
+        }
+        let found = self.node()?.active_agent_endpoints(agent_ids).await?;
+        Ok(found
+            .into_iter()
+            .map(|(account, row)| cpb::DeliveryEndpoint {
+                agent: Some(super::account_to_pb(&account)),
+                url: row.url,
+                events: row.events,
+                secret: row.secret,
+                epoch: row.epoch,
+                set_at: row.updated_at,
+            })
+            .collect())
+    }
+
+    /// Notes how deliveries to an agent's endpoint at `epoch` went (`error`
+    /// empty when they went through). Whether the endpoint is off now.
+    pub async fn report_agent_delivery(&self, agent_id: &str, epoch: i64, error: &str) -> Result<bool> {
+        if let Link::Shard(link) = &self.link {
+            let request =
+                cpb::ReportAgentDeliveryRequest { agent_id: agent_id.to_string(), epoch, error: error.to_string() };
+            let response = link.directory().report_agent_delivery(request).await.map_err(Error::retried)?;
+            return Ok(response.into_inner().disabled);
+        }
+        let give_up = crate::api::ENDPOINT_GIVE_UP_AFTER.as_millis() as i64;
+        let disabled = self.node()?.report_agent_delivery(agent_id, epoch, error, give_up).await?;
+        if disabled && !error.is_empty() {
+            self.agent_endpoint_changed(agent_id);
+        }
+        Ok(disabled)
+    }
+
     /// Which of the emoji someone wrote from their other servers they may
     /// use: ones of a server they're a member of that it still has, with a
     /// picture that's one of that server's emoji here. They come back as the

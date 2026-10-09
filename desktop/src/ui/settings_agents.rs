@@ -46,6 +46,8 @@ pub(crate) struct AgentsForm {
     edit_for: Option<String>,
     edit_name: Option<Entity<InputState>>,
     edit_bio: Option<Entity<TextareaState>>,
+    /// The open agent's endpoint (`settings_agent_endpoint`).
+    pub(crate) endpoint: crate::ui::settings_agent_endpoint::EndpointForm,
 }
 
 fn valid_username(u: &str) -> bool {
@@ -836,6 +838,9 @@ impl SettingsView {
                 )
             },
         ));
+        // Its endpoint, where the instance has them.
+        let user_id = user.id.clone();
+        body = body.children(self.agent_endpoint(key, &user_id, p, window, cx));
         // Add to a server you manage.
         let managed: Vec<(pb::Server, bool)> = self.core.shared.read(|s| {
             let Some(i) = s.instance(key) else { return Vec::new() };

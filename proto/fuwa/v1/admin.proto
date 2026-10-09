@@ -277,6 +277,10 @@ message InstanceSettings {
   // protective default, 100 unless FUWA_LIMIT_REACTIONS_PER_MESSAGE says
   // otherwise; unset for no cap. Messages show at most 100 either way.
   optional int64 reactions_per_message = 63;
+  // Where agents' endpoints may be (AgentService.SetAgentEndpoint): public
+  // https addresses (unset), any address including this machine and its
+  // network, or nowhere. FUWA_AGENT_ENDPOINTS: public, any or off.
+  AgentEndpoints agent_endpoints = 64;
   // How many reactions one account may add or take off in a minute; unset
   // for no cap. FUWA_LIMIT_REACTIONS_PER_MINUTE.
   optional int64 reactions_per_minute = 65;

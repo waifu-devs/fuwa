@@ -9,7 +9,8 @@ Node 20 or newer and in browsers, as ES modules or CommonJS.
   the protocol.
 - **Agents**: sign in with the agent's token, follow every server it's in,
   answer commands and mentions, send, reply and edit, with reconnecting and
-  catching up handled.
+  catching up handled. Or, for agents that run only when called (Workers,
+  Lambda), events posted to an HTTP endpoint instead of a stream.
 - **Voice**: join a voice channel, hear each person's sound labelled with
   who said it, know who's speaking, and talk, from Opus frames or an Ogg
   Opus file. No WebRTC: it's the instance's voice bridge for programs, so
@@ -271,6 +272,69 @@ Each try gets its own 30-second deadline (`timeoutMs`). Change any of it with
 `retry: { retries, baseDelayMs, maxDelayMs, maxRetryAfterMs }`, or turn it off
 with `retry: false`.
 
+## Endpoints: agents without a stream
+
+An agent can have its events posted to a URL instead of holding a stream
+open ([agent-endpoints.md](agent-endpoints.md)), which suits code that runs
+only when called: Cloudflare Workers, Lambda, Deno Deploy, a small HTTP
+handler. Instances that can list `agent-endpoints` in their features.
+
+`createEndpoint` makes a fetch-style handler, `(request) => Promise<Response>`.
+It checks each delivery's signature (401 if it doesn't match), answers the
+check the instance sends when the URL is saved, hands `onEvent` every event
+in order, and sends what `onInteraction` returns back with its answer, where
+the instance posts it as the agent's reply. No token is needed for that:
+
+```ts
+import { createEndpoint } from "@waifu-devs/fuwa";
+
+export default {
+  fetch(request: Request, env: { FUWA_ENDPOINT_SECRET: string }) {
+    return createEndpoint({
+      secret: env.FUWA_ENDPOINT_SECRET,
+      onEvent: (event) => {
+        if (event.payload.case === "memberJoined") console.log("someone joined");
+      },
+      onInteraction: (ctx) => {
+        if (ctx.command === "roll") return `rolled ${1 + Math.floor(Math.random() * Number(ctx.options.sides ?? 6))}`;
+      },
+    })(request);
+  },
+};
+```
+
+- Its owner sets it up, signed in as themselves (the agent's own token
+  can't): `fuwa.agents.getAgentEndpoint({ agentId })` gives the `secret`
+  (made the first time), `setAgentEndpoint({ agentId, url, events })` saves
+  the URL once it answers the check (`events` picks payload names such as
+  `"message_created"`; empty for all), an empty `url` turns it off, and
+  `resetAgentEndpointSecret` makes a new secret. The app does the same in
+  Settings, Agents. `failingSince`, `lastError` and `disabledAt` say how
+  deliveries are going.
+- The secret is a secret, like a token: keep it in the environment. During
+  a reset, `secret: [newer, older]` takes either.
+- `onInteraction` gets the interaction's `command`, `options`, `customId`
+  and the rest, like an agent's `interaction` handler; return text or
+  `{ content, embeds, components }`, or call `ctx.reply` (up to five times).
+  Anything later than the answer, or anything else, is the API with the
+  agent's token (`createFuwa`).
+- A failed delivery comes again, maybe with more events after it. The
+  handler skips events it has already handled, by server and sequence, in
+  `cursors` (a Map; pass one you keep to remember across restarts: a Worker
+  starts fresh often, so make handlers safe to run twice or keep it in
+  storage). A handler that throws goes to `onError` and the delivery still
+  counts, as with an `Agent`.
+- `verifyDelivery(secret, body, headers)` is the check on its own, for
+  frameworks that hand you the raw body: it returns the `AgentDelivery` or
+  throws `InvalidDeliveryError` (`reason`: `headers`, `signature`,
+  `timestamp` or `body`). Pass the body exactly as it came; the signature
+  covers its bytes. Timestamps more than five minutes off are refused
+  (`toleranceSeconds`). It uses WebCrypto, so it runs anywhere `fetch` does.
+
+In Node, `node:http` needs a few lines around it, turning the request into
+a `Request` (see `sdk/test/agent.test.ts`); Deno, Bun and most frameworks
+take the handler as it is.
+
 ## Voice
 
 An agent joins a voice channel with `agent.joinVoice(serverId, channelId)`.
@@ -456,7 +520,9 @@ FUWA_BIN=../target/debug/fuwa pnpm test:instance   # against a real instance
 The instance tests start the binary on a free port with its data in a
 temporary folder and calls on: a person makes a server and an agent, and the agent answers
 commands, catches up after being stopped, reconnects across a restart of the
-instance, notices a new server, waits out slow mode and uploads a picture.
+instance, notices a new server, waits out slow mode, uploads a picture and
+takes its events at an endpoint (the instance runs with
+`FUWA_AGENT_ENDPOINTS=any`, so it may post to this computer).
 CI runs all of it when `sdk/` or `proto/` change.
 
 Releases: pushing a `v*` tag (the server's release tag) runs

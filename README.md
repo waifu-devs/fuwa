@@ -137,6 +137,7 @@ the log filter are read only from the environment.
 | `FUWA_SSO_ACCOUNTS` | `off` | Single sign-on through the identity provider set up in instance settings: `open`, `closed` (existing SSO accounts only), `off` |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
+| `FUWA_AGENT_ENDPOINTS` | `public` | Where agents' endpoints may point: `public` (https at public addresses), `any` (this machine and its network too), `off` |
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
 | `FUWA_MCP` | `on` | Agents using the instance through MCP at `/mcp` with their token ([docs/mcp.md](docs/mcp.md)); `off` turns the endpoint off |
 | `FUWA_PROFILE_EFFECTS` | `on` | People putting an animated effect on their profile card ([docs/profile-effects.md](docs/profile-effects.md)); `off` hides everyone's |
@@ -366,6 +367,14 @@ made them.
 Agents can give each server slash commands that people run from the
 composer, and put buttons on their messages; the agent hears about each run
 or press, and nobody else does. See [docs/commands.md](docs/commands.md).
+
+An agent that doesn't keep a stream open can be given an endpoint instead:
+a URL the instance posts its events to, in order and signed the
+[Standard Webhooks](https://www.standardwebhooks.com) way, tried again until
+it answers. Its answer can reply to commands and buttons, so an agent on
+Cloudflare Workers or Lambda needs no state at all. Endpoints are https at
+public addresses unless admins allow any (`FUWA_AGENT_ENDPOINTS`). See
+[docs/agent-endpoints.md](docs/agent-endpoints.md).
 
 For JavaScript and TypeScript, the [`@waifu-devs/fuwa`](sdk/) SDK does the
 rest: typed clients, commands and mentions, and an event stream that

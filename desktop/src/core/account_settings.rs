@@ -153,6 +153,43 @@ impl Core {
         Ok(())
     }
 
+    /// An agent's endpoint (docs/agent-endpoints.md), made with its secret the first time it's asked for.
+    pub async fn agent_endpoint(&self, key: &str, agent_id: &str) -> Result<pb::AgentEndpoint, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res =
+            rpc!(api.agents(), get_agent_endpoint(pb::GetAgentEndpointRequest { agent_id: agent_id.into() })).await?;
+        Ok(res.endpoint.unwrap_or_default())
+    }
+
+    /// Sets where an agent's events go (an empty URL turns it off) and which ones; the
+    /// instance checks the URL answers its challenge before it saves.
+    pub async fn set_agent_endpoint(
+        &self,
+        key: &str,
+        agent_id: &str,
+        url: &str,
+        events: Vec<String>,
+    ) -> Result<pb::AgentEndpoint, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.agents(),
+            set_agent_endpoint(pb::SetAgentEndpointRequest { agent_id: agent_id.into(), url: url.into(), events })
+        )
+        .await?;
+        Ok(res.endpoint.unwrap_or_default())
+    }
+
+    /// A new signing secret for an agent's endpoint; the old one stops being used at once.
+    pub async fn reset_agent_endpoint_secret(&self, key: &str, agent_id: &str) -> Result<pb::AgentEndpoint, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.agents(),
+            reset_agent_endpoint_secret(pb::ResetAgentEndpointSecretRequest { agent_id: agent_id.into() })
+        )
+        .await?;
+        Ok(res.endpoint.unwrap_or_default())
+    }
+
     /// Your nickname in a server (empty clears it).
     pub async fn set_nickname(&self, key: &str, server_id: &str, nickname: &str) -> Result<pb::Member, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
@@ -237,5 +274,203 @@ impl Core {
         )
         .await?;
         Ok(())
+    }
+}
+
+/// Every event an endpoint can ask for: the fields of `Event.payload`, read
+/// from the protocol this app was built with (the web takes them from its
+/// generated `EventSchema`), in their order there.
+pub static EVENT_NAMES: std::sync::LazyLock<Vec<String>> =
+    std::sync::LazyLock::new(|| payload_names(include_str!("../../../proto/fuwa/v1/types.proto")));
+
+/// The field names of `Event`'s `payload` oneof in a types.proto.
+fn payload_names(proto: &str) -> Vec<String> {
+    let Some(start) = proto.find("\nmessage Event {") else { return Vec::new() };
+    let rest = &proto[start..];
+    let Some(oneof) = rest.find("oneof payload {") else { return Vec::new() };
+    let body = &rest[oneof + "oneof payload {".len()..];
+    let body = &body[..body.find('}').unwrap_or(body.len())];
+    body.lines()
+        .filter_map(|l| {
+            let l = l.split("//").next()?.trim();
+            let mut words = l.split_whitespace();
+            let (_, name, eq) = (words.next()?, words.next()?, words.next()?);
+            (eq == "=").then(|| name.to_owned())
+        })
+        .collect()
+}
+
+/// Events the instance never stores, so it never posts them to an endpoint.
+pub const UNDELIVERED: [&str; 4] =
+    ["voice_state_updated", "voice_state_removed", "live_tile_updated", "live_tile_ended"];
+
+/// The groups events are offered in, in this order (the web's `lib/agent-events.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventGroup {
+    Messages,
+    Interactions,
+    Members,
+    Reactions,
+    Other,
+}
+
+pub const EVENT_GROUPS: [EventGroup; 5] =
+    [EventGroup::Messages, EventGroup::Interactions, EventGroup::Members, EventGroup::Reactions, EventGroup::Other];
+
+/// The group an event goes under: anything not named here is `Other`.
+pub fn group_of(name: &str) -> EventGroup {
+    match name {
+        "message_created" | "message_updated" | "message_deleted" | "message_pinned" | "thread_updated"
+        | "poll_updated" => EventGroup::Messages,
+        "interaction_created" => EventGroup::Interactions,
+        "member_joined" | "member_left" | "member_updated" => EventGroup::Members,
+        "reaction_updated" | "reactions_cleared" => EventGroup::Reactions,
+        _ => EventGroup::Other,
+    }
+}
+
+/// The names worth offering: what an endpoint can get, plus any already chosen (so they can be taken off).
+pub fn offered(names: &[String], chosen: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = names.iter().filter(|n| !UNDELIVERED.contains(&n.as_str())).cloned().collect();
+    for c in chosen {
+        if !out.contains(c) {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+/// The names in their groups, in `EVENT_GROUPS` order, leaving out empty groups; names keep their order.
+pub fn grouped(names: &[String]) -> Vec<(EventGroup, Vec<String>)> {
+    EVENT_GROUPS
+        .iter()
+        .map(|g| (*g, names.iter().filter(|n| group_of(n) == *g).cloned().collect::<Vec<_>>()))
+        .filter(|(_, n)| !n.is_empty())
+        .collect()
+}
+
+/// A name as words, for events without a label of their own: "shared_channels_updated" → "Shared channels updated".
+pub fn readable(name: &str) -> String {
+    let words = name.split('_').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let mut chars = words.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// Adds the name, or takes it off when it's there.
+pub fn toggle_event(chosen: &[String], name: &str) -> Vec<String> {
+    if chosen.iter().any(|c| c == name) {
+        chosen.iter().filter(|c| *c != name).cloned().collect()
+    } else {
+        chosen.iter().cloned().chain([name.to_owned()]).collect()
+    }
+}
+
+/// Adds every name of a group, or takes them all off when they're all there already.
+pub fn toggle_all_events(chosen: &[String], names: &[String]) -> Vec<String> {
+    if names.iter().all(|n| chosen.contains(n)) {
+        chosen.iter().filter(|c| !names.contains(c)).cloned().collect()
+    } else {
+        chosen.iter().cloned().chain(names.iter().filter(|n| !chosen.contains(n)).cloned()).collect()
+    }
+}
+
+/// Whether two choices are the same events, in any order.
+pub fn same_events(a: &[String], b: &[String]) -> bool {
+    let (a, b): (std::collections::BTreeSet<_>, std::collections::BTreeSet<_>) =
+        (a.iter().collect(), b.iter().collect());
+    a == b
+}
+
+/// How an agent's endpoint is doing, from what the instance says about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndpointStatus {
+    /// No URL.
+    Off,
+    /// A URL, and nothing delivered yet.
+    Waiting,
+    /// Deliveries go through; the last one at this time.
+    Delivered(i64),
+    /// Deliveries have been failing since then, the last for this reason.
+    Failing(i64, String),
+    /// The instance turned it off after a day of failures, the last for this reason.
+    Disabled(String),
+}
+
+fn ms(t: Option<&prost_types::Timestamp>) -> i64 {
+    t.map_or(0, |t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000)
+}
+
+pub fn endpoint_status(e: &pb::AgentEndpoint) -> EndpointStatus {
+    if e.disabled_at.is_some() {
+        EndpointStatus::Disabled(e.last_error.clone())
+    } else if e.url.is_empty() {
+        EndpointStatus::Off
+    } else if e.failing_since.is_some() {
+        EndpointStatus::Failing(ms(e.failing_since.as_ref()), e.last_error.clone())
+    } else if e.last_delivered_at.is_some() {
+        EndpointStatus::Delivered(ms(e.last_delivered_at.as_ref()))
+    } else {
+        EndpointStatus::Waiting
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn events_come_from_the_protocol() {
+        assert!(EVENT_NAMES.contains(&"message_created".to_owned()));
+        assert!(EVENT_NAMES.contains(&"interaction_created".to_owned()));
+        assert!(EVENT_NAMES.contains(&"voice_state_updated".to_owned()));
+        let offered = offered(&EVENT_NAMES, &[]);
+        assert!(!offered.iter().any(|n| n.starts_with("voice_state") || n.starts_with("live_tile")));
+        assert_eq!(offered.len(), EVENT_NAMES.len() - UNDELIVERED.len());
+        assert_eq!(
+            payload_names(
+                "\nmessage Event {\n  string id = 1;\n  oneof payload {\n    A a_b = 2; // x\n    C c = 3;\n  }\n}"
+            ),
+            ["a_b", "c"]
+        );
+    }
+
+    #[test]
+    fn events_group_and_toggle_like_the_web() {
+        let all = names(&["message_created", "member_joined", "role_created", "interaction_created"]);
+        let groups = grouped(&offered(&all, &names(&["future_thing"])));
+        assert_eq!(
+            groups.iter().map(|(g, _)| *g).collect::<Vec<_>>(),
+            [EventGroup::Messages, EventGroup::Interactions, EventGroup::Members, EventGroup::Other]
+        );
+        assert_eq!(groups[3].1, ["role_created", "future_thing"]);
+        assert_eq!(readable("shared_channels_updated"), "Shared channels updated");
+        let chosen = toggle_event(&[], "member_left");
+        assert_eq!(chosen, ["member_left"]);
+        assert!(toggle_event(&chosen, "member_left").is_empty());
+        let group = names(&["member_joined", "member_left"]);
+        assert_eq!(toggle_all_events(&chosen, &group), ["member_left", "member_joined"]);
+        assert!(toggle_all_events(&group, &group).is_empty());
+        assert!(same_events(&names(&["a", "b"]), &names(&["b", "a"])));
+        assert!(!same_events(&names(&["a"]), &names(&["a", "b"])));
+    }
+
+    #[test]
+    fn endpoint_status_reads_the_instance() {
+        let at = |s| Some(prost_types::Timestamp { seconds: s, nanos: 0 });
+        let mut e = pb::AgentEndpoint::default();
+        assert_eq!(endpoint_status(&e), EndpointStatus::Off);
+        e.url = "https://agent.example.com/".into();
+        assert_eq!(endpoint_status(&e), EndpointStatus::Waiting);
+        e.last_delivered_at = at(10);
+        assert_eq!(endpoint_status(&e), EndpointStatus::Delivered(10_000));
+        e.failing_since = at(20);
+        e.last_error = "answered 500".into();
+        assert_eq!(endpoint_status(&e), EndpointStatus::Failing(20_000, "answered 500".into()));
+        e.disabled_at = at(30);
+        assert_eq!(endpoint_status(&e), EndpointStatus::Disabled("answered 500".into()));
     }
 }

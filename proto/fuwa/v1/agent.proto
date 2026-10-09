@@ -42,6 +42,17 @@ service AgentService {
   // Needs MANAGE_SERVER. Kept in the audit log as a server update of
   // "mcp_access".
   rpc SetMcpAccess(SetMcpAccessRequest) returns (SetMcpAccessResponse);
+  // The agent's endpoint (docs/agent-endpoints.md): a URL the instance posts
+  // its events to, for agents that don't hold a stream open. Made, with its
+  // signing secret, the first time its owner asks.
+  rpc GetAgentEndpoint(GetAgentEndpointRequest) returns (GetAgentEndpointResponse);
+  // Sets the URL and which events go there, or turns the endpoint off with
+  // an empty URL. A URL is saved only once it answers a check (an
+  // AgentDelivery with `challenge` set) with that challenge. Deliveries start
+  // from the events after this call.
+  rpc SetAgentEndpoint(SetAgentEndpointRequest) returns (SetAgentEndpointResponse);
+  // A new signing secret. The old one stops being used at once.
+  rpc ResetAgentEndpointSecret(ResetAgentEndpointSecretRequest) returns (ResetAgentEndpointSecretResponse);
 }
 
 message Agent {
@@ -147,4 +158,91 @@ message SetMcpAccessRequest {
 
 message SetMcpAccessResponse {
   McpAccess access = 1;
+}
+
+// Where an agent hears about its events when it doesn't keep a stream open
+// (docs/agent-endpoints.md). The instance posts each server's events to
+// `url` in order, as an AgentDelivery in proto3 JSON, signed with `secret`
+// the Standard Webhooks way (`webhook-id`, `webhook-timestamp`,
+// `webhook-signature` headers).
+message AgentEndpoint {
+  string agent_id = 1;
+  // https (or http where the instance allows any address); empty when off.
+  string url = 2;
+  // Which events go there, by their name in Event's payload
+  // ("message_created", "interaction_created"...). Empty for all of them.
+  repeated string events = 3;
+  // "whsec_" and the key in base64, as Standard Webhooks libraries take it.
+  string secret = 4;
+  // When it was last set.
+  google.protobuf.Timestamp updated_at = 5;
+  // When a delivery last went through; unset if none has.
+  google.protobuf.Timestamp last_delivered_at = 6;
+  // Since when deliveries have been failing; unset while they work.
+  google.protobuf.Timestamp failing_since = 7;
+  // What went wrong last ("answered 500", "timed out"...).
+  string last_error = 8;
+  // When the instance turned it off after a day of failures. Set the URL
+  // again to turn it back on; what happened meanwhile isn't sent.
+  google.protobuf.Timestamp disabled_at = 9;
+}
+
+message GetAgentEndpointRequest {
+  string agent_id = 1;
+}
+
+message GetAgentEndpointResponse {
+  AgentEndpoint endpoint = 1;
+}
+
+message SetAgentEndpointRequest {
+  string agent_id = 1;
+  string url = 2;
+  repeated string events = 3;
+}
+
+message SetAgentEndpointResponse {
+  AgentEndpoint endpoint = 1;
+}
+
+message ResetAgentEndpointSecretRequest {
+  string agent_id = 1;
+}
+
+message ResetAgentEndpointSecretResponse {
+  AgentEndpoint endpoint = 1;
+}
+
+// What the instance posts to an agent's endpoint, as proto3 JSON.
+message AgentDelivery {
+  string agent_id = 1;
+  // Set only on the check sent when the URL is saved, which has no events:
+  // answer it with an AgentDeliveryAnswer carrying the same challenge.
+  string challenge = 2;
+  // One server's events, in order, as EventService.Subscribe would send them
+  // to the agent (the same visibility, and interactions with their
+  // arguments). A delivery that failed comes again, maybe with more events
+  // after it, so skip ones whose (server_id, sequence) you've had. Channels
+  // appearing or going as the agent's permissions change come with sequence
+  // 0, right after the event that caused them. Events that aren't stored
+  // (voice states, live tiles) aren't delivered.
+  repeated Event events = 3;
+}
+
+// What an agent may answer a delivery with (any 2xx says it was received;
+// a body is optional).
+message AgentDeliveryAnswer {
+  // The check's challenge, echoed back.
+  string challenge = 1;
+  // Answers to interactions in this delivery, each posted as if the agent
+  // called SendMessage with interaction_id: the same permissions, slow mode
+  // and AutoMod apply. A refused reply is dropped; the delivery still counts.
+  repeated InteractionReply replies = 2;
+}
+
+message InteractionReply {
+  string interaction_id = 1;
+  string content = 2;
+  repeated Embed embeds = 3;
+  repeated ComponentRow components = 4;
 }

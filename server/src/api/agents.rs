@@ -4,12 +4,13 @@
 
 use tonic::{Request, Response, Status};
 
+use super::endpoints;
 use super::messages::post_join;
 use super::{Api, respond, text};
 use crate::auth;
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
-use crate::node::{Account, AgentRow};
+use crate::node::{Account, AgentRow, EndpointRow};
 use crate::pb::{self, Permission, agent_service_server::AgentService};
 use crate::servers::{self as store, Audit, Payload};
 
@@ -151,6 +152,54 @@ impl Api {
     }
 }
 
+fn endpoint_pb(agent_id: &str, row: EndpointRow) -> pb::AgentEndpoint {
+    pb::AgentEndpoint {
+        agent_id: agent_id.to_string(),
+        url: row.url,
+        events: row.events,
+        secret: row.secret,
+        updated_at: Some(timestamp(row.updated_at)),
+        last_delivered_at: row.last_delivered_at.map(timestamp),
+        failing_since: row.failing_since.map(timestamp),
+        last_error: row.last_error,
+        disabled_at: row.disabled_at.map(timestamp),
+    }
+}
+
+impl Api {
+    /// One of the caller's agents' endpoint, made if it has none.
+    async fn agent_endpoint(&self, owner: &Account, agent_id: &str) -> Result<(AgentRow, EndpointRow)> {
+        let agent = self.own_agent(owner, agent_id).await?;
+        let row = self.app.node()?.agent_endpoint(&agent.account.id, &endpoints::new_secret()).await?;
+        Ok((agent, row))
+    }
+
+    async fn set_agent_endpoint(&self, owner: &Account, req: pb::SetAgentEndpointRequest) -> Result<pb::AgentEndpoint> {
+        let (agent, row) = self.agent_endpoint(owner, &req.agent_id).await?;
+        let url = req.url.trim();
+        let mut events: Vec<String> = Vec::new();
+        if !url.is_empty() {
+            let policy = self.app.settings().agent_endpoints;
+            endpoints::check_url(policy, url).map_err(Error::InvalidArgument)?;
+            let known = endpoints::event_names();
+            for name in req.events {
+                let name = name.trim().to_string();
+                if !known.contains(&name) {
+                    return Err(Error::invalid(format!("{name:?} isn't an event")));
+                }
+                if !events.contains(&name) {
+                    events.push(name);
+                }
+            }
+            endpoints::check(policy, &agent.account.id, url, &row.secret).await?;
+        }
+        let row = self.app.node()?.set_agent_endpoint(&agent.account.id, url, &events).await?;
+        self.app.agent_endpoint_changed(&agent.account.id);
+        tracing::info!(on = !url.is_empty(), "agent endpoint set");
+        Ok(endpoint_pb(&agent.account.id, row))
+    }
+}
+
 impl Api {
     async fn set_mcp_access(&self, account: &Account, req: pb::SetMcpAccessRequest) -> Result<pb::McpAccess> {
         let seat = self.with(account, &req.server_id, Permission::ManageServer).await?;
@@ -224,6 +273,52 @@ impl AgentService for Api {
                 let account = self.person(request.metadata()).await?;
                 let access = Api::set_mcp_access(self, &account, request.into_inner()).await?;
                 Ok(pb::SetMcpAccessResponse { access: Some(access) })
+            }
+            .await,
+        )
+    }
+
+    async fn get_agent_endpoint(
+        &self,
+        request: Request<pb::GetAgentEndpointRequest>,
+    ) -> Result<Response<pb::GetAgentEndpointResponse>, Status> {
+        respond(
+            async {
+                let owner = self.person(request.metadata()).await?;
+                let (agent, row) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
+                Ok(pb::GetAgentEndpointResponse { endpoint: Some(endpoint_pb(&agent.account.id, row)) })
+            }
+            .await,
+        )
+    }
+
+    async fn set_agent_endpoint(
+        &self,
+        request: Request<pb::SetAgentEndpointRequest>,
+    ) -> Result<Response<pb::SetAgentEndpointResponse>, Status> {
+        respond(
+            async {
+                let owner = self.person(request.metadata()).await?;
+                let endpoint = Api::set_agent_endpoint(self, &owner, request.into_inner()).await?;
+                Ok(pb::SetAgentEndpointResponse { endpoint: Some(endpoint) })
+            }
+            .await,
+        )
+    }
+
+    async fn reset_agent_endpoint_secret(
+        &self,
+        request: Request<pb::ResetAgentEndpointSecretRequest>,
+    ) -> Result<Response<pb::ResetAgentEndpointSecretResponse>, Status> {
+        respond(
+            async {
+                let owner = self.person(request.metadata()).await?;
+                let (agent, _) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
+                let row =
+                    self.app.node()?.reset_agent_endpoint_secret(&agent.account.id, &endpoints::new_secret()).await?;
+                self.app.agent_endpoint_changed(&agent.account.id);
+                tracing::info!("agent endpoint secret reset");
+                Ok(pb::ResetAgentEndpointSecretResponse { endpoint: Some(endpoint_pb(&agent.account.id, row)) })
             }
             .await,
         )

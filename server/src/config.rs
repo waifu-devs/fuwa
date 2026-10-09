@@ -43,6 +43,9 @@ pub struct Config {
     /// FUWA_AGENT_CREATION: who may make agents (bot accounts): everyone
     /// (default) | admins | off.
     pub agent_creation: pb::AgentCreation,
+    /// FUWA_AGENT_ENDPOINTS: where agents' endpoints may point: public
+    /// (default, https at public addresses) | any | off.
+    pub agent_endpoints: pb::AgentEndpoints,
     /// FUWA_ADMIN_TOKEN: a bearer token with instance-admin rights, for a control
     /// plane or scripts. Unset means only admin accounts are admins.
     pub admin_token: Option<String>,
@@ -179,6 +182,7 @@ impl std::fmt::Debug for Config {
             .field("linked_issuer", &self.linked_issuer)
             .field("server_creation", &self.server_creation)
             .field("agent_creation", &self.agent_creation)
+            .field("agent_endpoints", &self.agent_endpoints)
             .field("admin_token", &Secret(&self.admin_token))
             .field("limits", &self.limits)
             .field("telemetry", &self.telemetry)
@@ -430,6 +434,15 @@ impl Config {
             Some("off") => pb::AgentCreation::Disabled,
             Some(other) => {
                 return Err(format!("FUWA_AGENT_CREATION must be everyone, admins or off, got {other:?}"));
+            }
+        };
+
+        let agent_endpoints = match get("FUWA_AGENT_ENDPOINTS").as_deref().map(str::trim) {
+            None | Some("public") => pb::AgentEndpoints::Public,
+            Some("any") => pb::AgentEndpoints::Any,
+            Some("off") => pb::AgentEndpoints::Off,
+            Some(other) => {
+                return Err(format!("FUWA_AGENT_ENDPOINTS must be public, any or off, got {other:?}"));
             }
         };
 
@@ -691,6 +704,7 @@ impl Config {
             sso_accounts,
             server_creation,
             agent_creation,
+            agent_endpoints,
             admin_token,
             limits,
             telemetry: Telemetry {

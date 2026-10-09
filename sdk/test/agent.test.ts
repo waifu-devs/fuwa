@@ -2,6 +2,7 @@
 // and an agent, and the agent answers commands, catches up after a restart and
 // reconnects when the instance goes away. Run with `pnpm test:instance`.
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import {
   Agent,
@@ -21,6 +22,7 @@ import {
   readOggOpus,
   RateLimitedError,
   UnauthenticatedError,
+  createEndpoint,
   createFuwa,
   messages,
   listEvents,
@@ -308,6 +310,67 @@ test("an agent answers slash commands and buttons", async () => {
 
   await agent.setCommands(serverId, []);
   await agent.stop();
+});
+
+test("an agent with an endpoint gets its events over HTTP and answers commands in the answer", async () => {
+  const { agents: mine } = await person.agents.listAgents({});
+  const helperId = mine.find((a) => a.user?.username === "helper")!.user!.id;
+  const { endpoint: fresh } = await person.agents.getAgentEndpoint({ agentId: helperId });
+  assert.match(fresh!.secret, /^whsec_/);
+  assert.equal(fresh!.url, "");
+
+  const said: string[] = [];
+  const handle = createEndpoint({
+    secret: fresh!.secret,
+    onEvent: (event) => {
+      if (event.payload.case === "messageCreated") said.push(event.payload.value.message?.content ?? "");
+    },
+    onInteraction: (ctx) => ({ content: `rolled a d${ctx.options.sides} for <@${ctx.userId}>` }),
+    onError: (e) => assert.fail(e as Error),
+  });
+  // node:http in front of the fetch-style handler.
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(name, value);
+    const answer = await handle(new Request(`http://127.0.0.1${req.url}`, { method: req.method, headers, body: req.method === "POST" ? Buffer.concat(chunks) : undefined }));
+    res.writeHead(answer.status, Object.fromEntries(answer.headers));
+    res.end(Buffer.from(await answer.arrayBuffer()));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/fuwa`;
+  try {
+    // Saving it sends the check, which the handler answers.
+    const { endpoint } = await person.agents.setAgentEndpoint({ agentId: helperId, url, events: [] });
+    assert.equal(endpoint!.url, url);
+    // A link that doesn't answer the check isn't saved.
+    await assert.rejects(person.agents.setAgentEndpoint({ agentId: helperId, url: `${instance.url}/healthz`, events: [] }), FuwaError);
+
+    await say("hello, endpoint");
+    await until("the message delivered", () => said.includes("hello, endpoint") || undefined);
+
+    // A slash command, answered in the delivery's answer: no token used.
+    const agentApi = createFuwa({ url: instance.url, token: agentToken });
+    await agentApi.commands.setCommands({
+      serverId,
+      commands: [{ name: "roll", description: "Rolls dice", options: [{ name: "sides", description: "Sides", type: CommandOptionType.INTEGER, required: true }] }],
+    });
+    const ran = await person.commands.runCommand({ serverId, channelId, agentId: helperId, command: "roll", arguments: [{ name: "sides", value: "12" }] });
+    const me = (await person.auth.getMe({})).user!.id;
+    const reply = await until("the reply in the channel", async () => {
+      for await (const { message } of messages(person, { serverId, channelId })) {
+        if (message.interaction?.id === ran.interactionId) return message;
+      }
+      return undefined;
+    });
+    assert.equal(reply.authorId, helperId);
+    assert.equal(reply.content, `rolled a d12 for <@${me}>`);
+    await agentApi.commands.setCommands({ serverId, commands: [] });
+  } finally {
+    await person.agents.setAgentEndpoint({ agentId: helperId, url: "", events: [] });
+    server.close();
+  }
 });
 
 test("an agent keeps a live tile up to date, and a webhook can too", async () => {

@@ -28,6 +28,7 @@
     { "id": "camera-quality", "date": "2026-10-08", "title": "Camera quality ceilings" },
     { "id": "reactions", "date": "2026-10-09", "title": "Reactions to messages" },
     { "id": "featured-servers", "date": "2026-10-09", "title": "Servers featured in Browse" },
+    { "id": "agent-endpoints", "date": "2026-10-09", "title": "Agents that get their events over HTTP" },
     { "id": "live-connection", "date": "2026-10-09", "title": "One live connection per app" }
   ]
 }
