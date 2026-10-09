@@ -177,6 +177,8 @@
   "limits.pinsPerChannelHint": "How many messages can be pinned in one channel, and in one thread. Unpinning one makes room.",
   "limits.pinsPerConversation": "Pins per direct message",
   "limits.pinsPerConversationHint": "How many messages can be pinned in one direct-message conversation. The instance only keeps which messages are pinned, never what they say.",
+  "limits.reactionsPerMessage": "Reactions per message",
+  "limits.reactionsPerMessageHint": "How many different emoji one message can have as reactions. More people reacting with one already there is always fine.",
   "limits.liveTilesPerChannel": "Live tiles per channel",
   "limits.liveTilesPerChannelHint": "How many tiles apps (agents and webhooks) can keep in one channel at once.",
   "limits.liveTileUpdates": "Live tile changes",

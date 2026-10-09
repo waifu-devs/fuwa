@@ -254,5 +254,30 @@
   "pins.failed": "Couldn't load the pins. Try again in a moment.",
   "pins.retry": "Try again",
   "pins.more": "Show more",
-  "pins.thisConversation": "this conversation"
+  "pins.thisConversation": "this conversation",
+  "reactions.add": "Add reaction",
+  "reactions.react": "React",
+  "reactions.more": "More reactions",
+  "reactions.search": "Find an emoji",
+  "reactions.who": "Reacted with {emoji}",
+  "reactions.you": "You",
+  "reactions.andMore": {
+    "one": "and {count} more",
+    "other": "and {count} more"
+  },
+  "reactions.tooltip": "{people} reacted with {emoji}",
+  "reactions.loading": "Loading who reacted...",
+  "reactions.failed": "Couldn't load who reacted.",
+  "reactions.viewAll": "See who reacted",
+  "reactions.title": "Reactions",
+  "reactions.clearOne": "Remove all {emoji}",
+  "reactions.clearAll": "Remove all reactions",
+  "reactions.clearAllConfirm": "Remove every reaction from this message? This can't be undone.",
+  "reactions.cleared": "Reactions removed",
+  "reactions.full": "This message has as many different reactions as it can hold.",
+  "reactions.notHere": "Reactions don't work in channels shared with other servers yet.",
+  "reactions.count": {
+    "one": "{count} reaction",
+    "other": "{count} reactions"
+  }
 }

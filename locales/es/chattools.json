@@ -254,5 +254,30 @@
   "pins.failed": "No se pudieron cargar los fijados. Inténtalo de nuevo en un momento.",
   "pins.retry": "Reintentar",
   "pins.more": "Mostrar más",
-  "pins.thisConversation": "esta conversación"
+  "pins.thisConversation": "esta conversación",
+  "reactions.add": "Añadir reacción",
+  "reactions.react": "Reaccionar",
+  "reactions.more": "Más reacciones",
+  "reactions.search": "Buscar un emoji",
+  "reactions.who": "Reaccionaron con {emoji}",
+  "reactions.you": "Tú",
+  "reactions.andMore": {
+    "one": "y {count} más",
+    "other": "y {count} más"
+  },
+  "reactions.tooltip": "{people} reaccionaron con {emoji}",
+  "reactions.loading": "Cargando quién reaccionó...",
+  "reactions.failed": "No se pudo cargar quién reaccionó.",
+  "reactions.viewAll": "Ver quién reaccionó",
+  "reactions.title": "Reacciones",
+  "reactions.clearOne": "Quitar todos los {emoji}",
+  "reactions.clearAll": "Quitar todas las reacciones",
+  "reactions.clearAllConfirm": "¿Quitar todas las reacciones de este mensaje? No se puede deshacer.",
+  "reactions.cleared": "Reacciones quitadas",
+  "reactions.full": "Este mensaje ya tiene todas las reacciones distintas que admite.",
+  "reactions.notHere": "Las reacciones aún no funcionan en canales compartidos con otros servidores.",
+  "reactions.count": {
+    "one": "{count} reacción",
+    "other": "{count} reacciones"
+  }
 }
