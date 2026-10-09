@@ -417,6 +417,13 @@ once when you mute or deafen), answers the media part's offers on the
 "fuwa" data channel, and rejoins with the same session after a drop or a
 "restarting". Deafening also mutes, as on the web.
 
+The microphone is cleaned up before it's encoded, as a browser does for the
+web app, each part by its own setting: echo cancellation (which hears every
+frame on its way to the speakers and takes it back out), noise suppression
+and automatic gain. It's WebRTC's own audio processing through Sonora, its
+Rust port (`voice/processing.rs`), and voice messages get the noise
+suppression and gain too.
+
 It connects only to the addresses in the media part's answer: over UDP,
 and at the same time over ICE-TCP (RFC 4571 framing) to its TCP addresses,
 which is how it gets through on hosts that only proxy TCP. Its own
