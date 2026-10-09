@@ -38,8 +38,15 @@ message, each with its count, the reader's own marked.
   purge takes the message's reactions along. Deleting an account takes its
   reactions off, with an event for each count that went down. Leaving a
   server keeps them.
-- **Not yet**: channels shared between servers (both the home and the guest
-  refuse, and guests never see reactions from before the share).
+- **Shared channels**: the home keeps every reaction, its guests' too
+  (docs/shared-channels.md). A guest's reaction goes as `GuestReact` and
+  "who reacted" as `GuestReactors`; the home checks its connection lets
+  guests add reactions (`ADD_REACTIONS` is shareable), turns away people it
+  kept out, and its events reach the guest like message events. Guests react
+  with standard emoji or the home's own (`Reaction.emoji_url` carries the
+  picture, through the guest's instance when it's another one); only the
+  home clears reactions. Reactions from before the share show to guests, as
+  the channel's history does.
 
 ## In direct messages and secure channels
 

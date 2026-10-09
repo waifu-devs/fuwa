@@ -61,6 +61,8 @@ export interface MenuContexts {
   server: { instanceKey: string; server: Server };
   member: { instanceKey: string; serverId: string; user: User; member: Member | undefined };
   dm: { instanceKey: string; conversation: Conversation; other: User | undefined };
+  /** A line in a direct message or secure channel, by its place there. */
+  dm_message: { instanceKey: string; conversationId: string; seq: number; mine: boolean };
   composer: { instanceKey: string; serverId: string; channel: Channel; insert: (text: string) => void };
 }
 

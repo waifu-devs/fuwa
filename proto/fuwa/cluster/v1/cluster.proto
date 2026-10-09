@@ -800,6 +800,9 @@ message SharedCall {
     GuestThreads threads = 26;
     GuestFollow follow = 27;
     GuestFollowed followed = 28;
+    // To the home: reactions in the channel.
+    GuestReact react = 29;
+    GuestReactors reactors = 30;
   }
   // Set only by the instance that received the call from another instance
   // (whatever the other instance sent there): that instance's origin and
@@ -829,6 +832,10 @@ message SharedReply {
   fuwa.v1.ListThreadsResponse threads = 11;
   // For GuestFollowed: the threads the guest follows in the channel.
   repeated string thread_ids = 12;
+  // For GuestReact: the emoji's reaction as it is now, `me` for the guest.
+  fuwa.v1.Reaction reaction = 13;
+  // For GuestReactors.
+  fuwa.v1.ListReactorsResponse reactors = 14;
 }
 
 message AdminShares {}
@@ -907,6 +914,26 @@ message GuestVote {
   string message_id = 2;
   // Empty takes the vote back.
   repeated uint32 answer_ids = 3;
+}
+
+// A guest reacting to a message in the channel, or taking theirs off.
+message GuestReact {
+  Guest guest = 1;
+  string message_id = 2;
+  // A standard emoji, or one of the home's custom emoji by id.
+  string emoji = 3;
+  string emoji_id = 4;
+  bool reacted = 5;
+}
+
+// Who reacted to a message in the channel with one emoji.
+message GuestReactors {
+  Guest guest = 1;
+  string message_id = 2;
+  string emoji = 3;
+  string emoji_id = 4;
+  int32 limit = 5;
+  string after_id = 6;
 }
 
 message GuestEndPoll {

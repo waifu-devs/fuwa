@@ -231,9 +231,11 @@
     never carry `me`, and whole-message events carry no reactions (apps keep
     theirs). `ADD_REACTIONS` to react; Manage Messages clears others' (audited).
     Paths that delete messages call `reactions::forget` (or `forget_thread`,
-    `forget_channel`); deleting an account calls `forget_reactor`. Not in
-    shared channels yet; direct messages and secure channels react inside the
-    encryption (`DirectMessageReaction`), so `React` refuses secure channels.
+    `forget_channel`); deleting an account calls `forget_reactor`. In shared
+    channels the home keeps them all (guests' through `GuestReact` and
+    `GuestReactors`, writing with `reactions::apply`); direct messages and
+    secure channels react inside the encryption (`DirectMessageReaction`,
+    in backups and shared history too), so `React` refuses secure channels.
     Live tiles (`api/live_tiles.rs`, `LiveTileService`, docs/live-tiles.md):
     which kinds a server shows is `server.live_tiles` (JSON, NULL for the
     default, resolved in `load_server` with `BIG_SERVER`); the tiles agents

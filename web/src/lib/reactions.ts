@@ -14,7 +14,16 @@
  */
 
 /** What every app reads of a reaction: `Reaction` from the protocol, or a direct message's tally. */
-export type ReactionLike = { emoji: string; emojiId: string; emojiName: string; animated: boolean; count: number; me: boolean };
+export type ReactionLike = {
+  emoji: string;
+  emojiId: string;
+  emojiName: string;
+  animated: boolean;
+  /** A custom emoji's picture (in a shared channel, the home server's). */
+  emojiUrl?: string;
+  count: number;
+  me: boolean;
+};
 
 /** Which emoji: a standard one by its characters, or a server's own by its id. */
 export type EmojiRef = { emoji: string; emojiId: string };

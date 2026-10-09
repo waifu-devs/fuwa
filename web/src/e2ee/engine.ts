@@ -898,7 +898,7 @@ export class DmEngine {
       // Kept as a line of its own, never shown: each device tallies them (lib/reactions.ts), the latest per sender and emoji winning.
       const target = Number(body.value.sequence);
       if (target > 0 && target < seq && isOneEmoji(body.value.emoji)) {
-        put(item(this.vaultKey, c.id, { seq, at, kind: "reaction", senderId, deviceId, reaction: { target, emoji: body.value.emoji, removed: body.value.removed } }));
+        put(item(this.vaultKey, c.id, { seq, at, kind: "reaction", senderId, deviceId, reaction: { target, emoji: body.value.emoji, removed: body.value.removed }, signed }));
       }
     }
     // Anything else is from a newer app: there's nothing to show for it here.
@@ -951,7 +951,7 @@ export class DmEngine {
       try {
         const o = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
         const body = o?.payload.content?.body;
-        if (o && (body?.case === "text" || body?.case === "edit" || body?.case === "thread")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
+        if (o && (body?.case === "text" || body?.case === "edit" || body?.case === "thread" || body?.case === "reaction")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
       } catch {
         // Not a signed payload: left out.
       }
@@ -1007,6 +1007,23 @@ export class DmEngine {
             sharedBy: by,
           }),
         );
+      } else if (body.case === "reaction") {
+        // Checked like a text: its own record, from that device. Tallied with the rest; one to a message this
+        // device doesn't have counts for nothing.
+        const target = Number(body.value.sequence);
+        if (known.has(seq) || !(target > 0 && target < seq) || !isOneEmoji(body.value.emoji)) continue;
+        put(
+          item(this.vaultKey, c.id, {
+            seq,
+            at,
+            kind: "reaction",
+            senderId,
+            deviceId,
+            reaction: { target, emoji: body.value.emoji, removed: body.value.removed },
+            signed: o.signed,
+            sharedBy: by,
+          }),
+        );
       } else if (body.case === "edit") {
         const target = known.get(seq);
         if (target?.sharedBy && target.kind === "text" && target.senderId === senderId && !target.deleted) {
@@ -1047,7 +1064,7 @@ export class DmEngine {
     // What was said while sharing was off stays with those who were there.
     const since = Math.max(0, ...all.filter((i) => i.kind === "setting").map((i) => i.seq));
     const items = all
-      .filter((i) => (i.kind === "text" || i.kind === "thread") && !i.deleted && i.signed && i.seq > since)
+      .filter((i) => (i.kind === "text" || i.kind === "thread" || i.kind === "reaction") && !i.deleted && i.signed && i.seq > since)
       .sort((a, b) => b.seq - a.seq);
     const entries: ReturnType<typeof create<typeof SharedEntrySchema>>[] = [];
     let size = 0;

@@ -23,3 +23,7 @@ CREATE INDEX reactions_by_account ON reactions (account_id);
 UPDATE roles SET permissions = permissions | 268435456 WHERE permissions & 4096 = 4096;
 UPDATE channel_overwrites SET allow = allow | 268435456 WHERE allow & 4096 = 4096;
 UPDATE channel_overwrites SET deny = deny | 268435456 WHERE deny & 4096 = 4096;
+-- Shared channels: a guest server's people who may send there may react
+-- there too, at the home (channel_guests) and the guest (channel_links).
+UPDATE channel_guests SET allowed = allowed | 268435456 WHERE allowed & 4096 = 4096;
+UPDATE channel_links SET allowed = allowed | 268435456 WHERE allowed & 4096 = 4096;

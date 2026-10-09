@@ -187,7 +187,8 @@ agent.on("reactionUpdated", (payload) => {
 - Reacting needs Add Reactions in the channel. A message holds at most the
   instance's `reactions_per_message` different emoji (unlimited unless set):
   past it, `react` fails with `RateLimitedError` (no `retryAfterMs`).
-  Not in channels shared between servers yet (`FailedPreconditionError`).
+  In a channel shared from another server, the home's custom emoji work,
+  and only the home clears reactions.
 - `agent.reactors(message, emoji)` is who reacted, the earliest first.
 - Messages read through the API carry `reactions` (`me` for the agent);
   `reactionUpdated` and `reactionsCleared` events say what changes (`me` is

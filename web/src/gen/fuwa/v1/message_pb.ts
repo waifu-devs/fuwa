@@ -1331,9 +1331,10 @@ export const MessageService: GenService<{
    * Reacts to a message with an emoji, or takes the caller's reaction off.
    * Reacting needs ADD_REACTIONS in the channel; taking it off needs only to
    * see it. At most InstanceSettings.reactions_per_message different emoji
-   * on one message. Not in secure channels (their reactions travel inside
-   * the encryption, as direct messages' do) nor channels shared between
-   * servers, yet.
+   * on one message. In a channel shared between servers, the guest
+   * server's people react with the home's custom emoji or standard ones,
+   * when both servers let them. Not in secure channels: their reactions
+   * travel inside the encryption, as direct messages' do.
    *
    * @generated from rpc fuwa.v1.MessageService.React
    */
@@ -1354,7 +1355,8 @@ export const MessageService: GenService<{
   },
   /**
    * Takes every reaction with one emoji off a message, or every reaction.
-   * Needs MANAGE_MESSAGES in the channel.
+   * Needs MANAGE_MESSAGES in the channel; in a shared channel, only at its
+   * home server.
    *
    * @generated from rpc fuwa.v1.MessageService.ClearReactions
    */

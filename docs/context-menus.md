@@ -44,11 +44,18 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 | Section | Items |
 | --- | --- |
 | target | Copy (selected text) · Open link (shows its host) · Copy link · Open picture · Save picture · Copy picture link (pictures from instances the app talks to only): only for what was right clicked |
-| react | A row of emoji used lately (standard ones and this server's own), each reacting in one press or taking yours off, lit when you reacted with it · Add reaction (opens the emoji picker at the message's toolbar) · See who reacted (when it has reactions: each emoji's people, and "Remove all *emoji*" with Manage Messages). Only where reactions work (not in channels shared with another server); adding needs Add Reactions, taking yours off doesn't |
+| react | A row of emoji used lately (standard ones and this server's own), each reacting in one press or taking yours off, lit when you reacted with it · Add reaction (opens the emoji picker at the message's toolbar) · See who reacted (when it has reactions: each emoji's people, and "Remove all *emoji*" with Manage Messages). Adding needs Add Reactions (in a channel shared from another server, its home must allow it too); taking yours off doesn't. In a channel shared from another server the row offers that server's emoji, never this one's |
 | primary | Reply in thread / Open thread (where the message's own button shows) · Edit message (yours) · Copy text |
-| manage | Pin message / Unpin message (Manage Messages) · Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) · Remove all reactions (Manage Messages, when it has reactions; asks first) |
+| manage | Pin message / Unpin message (Manage Messages) · Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) · Remove all reactions (Manage Messages, when it has reactions; asks first; not on a guest's side of a shared channel, where only the home clears them) |
 | developer | Copy message ID |
 | danger | Delete message (yours, or with Manage Messages): asks in the message's toolbar |
+
+A message in a direct message or secure channel (`dm_message`): target | the
+same react section, standard emoji only, and See who reacted from this
+device's own tally | Reply in thread / Open thread (secure channels) · Edit
+message (yours) · Copy text | Pin message / Unpin message (where pins work) |
+Delete message (yours, or with Manage Messages in a secure channel: asks in
+the toolbar). These lines have no ID of their own, so there's no Copy ID.
 
 A join line: Wave · Copy message ID · Delete message. An AutoMod alert: Copy
 message ID · Delete alert. A message still sending: Retry (failed) · Copy

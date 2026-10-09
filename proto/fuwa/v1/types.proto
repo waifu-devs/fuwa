@@ -1042,12 +1042,13 @@ message Message {
 message Reaction {
   // A standard emoji, as its characters; empty for a custom one.
   string emoji = 1;
-  // A custom emoji of the message's server: its id, name and whether it
-  // moves; its picture is in the server's emoji list (EmojiService).
+  // A custom emoji of the message's server (in a shared channel, of its home
+  // server): its id, name, whether it moves, and its picture.
   // Reactions with a custom emoji that has since been deleted aren't shown.
   string emoji_id = 2;
   string emoji_name = 3;
   bool animated = 4;
+  string emoji_url = 7;
   // How many people reacted with it.
   uint32 count = 5;
   // Whether the person asking is one of them. Never set in events.

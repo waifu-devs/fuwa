@@ -49,10 +49,12 @@ import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import type { FuwaError } from "@/fuwa/errors";
 import { doneDmJump, loadDmPins, pinDm, requestDmJump, useDmJump, useDmPins } from "@/fuwa/pins";
 import { DmPinsButton, PinMark } from "@/components/chat/Pins";
-import { AddReactionTool, NO_CATALOG, ReactionRow } from "@/components/chat/Reactions";
+import { AddReactionTool, NO_CATALOG, QuickReactions, quickReactions, ReactionRow, ReactionsDialog } from "@/components/chat/Reactions";
+import { useContextMenu } from "@/components/ContextMenu";
+import { dmMessageMenu } from "@/components/menus/dm-message";
 import type { PickedEmoji } from "@/components/EmojiPicker";
 import { reactInConversation } from "@/fuwa/reactions";
-import type { DmReaction, ReactionLike } from "@/lib/reactions";
+import { reactedWith, type DmReaction, type ReactionLike } from "@/lib/reactions";
 import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -69,7 +71,7 @@ import { displayName, formatFull, sameDay } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { setTitle } from "@/lib/notify";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
-import { toast } from "@/lib/ui";
+import { copy, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
@@ -441,6 +443,7 @@ export function EncryptedMessages({
       },
       remove: (seq) => deleteDm(instanceKey, id, seq),
       react: (seq, emoji, on) => void reactInConversation(instanceKey, id, seq, emoji, on).catch((err: Error) => toast(err.message)),
+      reactors: (reaction) => ((reaction as DmReaction).userIds ?? []).map((u) => userOf(u)).filter((u): u is User => !!u),
       who: (reaction) => (reaction as DmReaction).userIds?.map((u) => (u === me.id ? t("chattools.reactions.you") : (memberOf?.(u)?.nickname || displayName(userOf(u))))) ?? [],
     }),
     [instanceKey, id, me.id, t, memberOf, userOf],
@@ -652,6 +655,8 @@ type DmActions = {
   react: (seq: number, emoji: string, on: boolean) => void;
   /** Who reacted with an emoji, by name ("You" for yourself), from this device's tally. */
   who: (reaction: ReactionLike) => string[];
+  /** Everyone who reacted with an emoji, from this device's tally, for the dialog. */
+  reactors: (reaction: ReactionLike) => User[];
 };
 
 /**
@@ -710,11 +715,40 @@ const DmRow = memo(function DmRow({
   canReact: boolean;
 }) {
   const [picking, setPicking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const { t } = useI18n();
+  const menu = useContextMenu("dm_message", (trigger) =>
+    item.deleted || editing
+      ? null
+      : dmMessageMenu({ instanceKey, conversationId: item.conversation, seq: item.seq, mine }, trigger, {
+          thread: threads?.canStart(item) ? { open: threads.has(item), go: () => threads.start(item) } : undefined,
+          edit: mine && item.kind === "text" ? () => actions.edit(item.seq) : undefined,
+          copyText: item.kind === "text" && item.content ? () => copy(t, item.content, t("common.copy.text")) : undefined,
+          pin: onPin ? { pinned, toggle: () => onPin(item.seq) } : undefined,
+          react:
+            reactions && (canReact || reactions.some((r) => r.me))
+              ? {
+                  quick: (close) => (
+                    <QuickReactions
+                      choices={quickReactions(null)}
+                      reactions={reactions}
+                      canAdd={canReact}
+                      onToggle={(emoji, on) => actions.react(item.seq, emoji.emoji, on)}
+                      close={close}
+                    />
+                  ),
+                  add: canReact ? () => setPicking(true) : undefined,
+                }
+              : undefined,
+          reactions: reactions?.length ? { view: () => setViewing(true) } : undefined,
+          delete: deletable ? () => setConfirming(true) : undefined,
+        }),
+  );
   const pick = (picked: PickedEmoji) => {
     // Standard emoji only: nobody outside the conversation could draw a server's.
     if (picked.custom) return;
-    if (!reactions?.some((r) => r.me && r.emoji === picked.text)) actions.react(item.seq, picked.text, true);
+    if (!reactedWith(reactions, { emoji: picked.text, emojiId: "" })) actions.react(item.seq, picked.text, true);
   };
   const reactTool =
     reactions && canReact ? (
@@ -729,7 +763,8 @@ const DmRow = memo(function DmRow({
       {...(animate ? enter : {})}
       exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
-      data-confirming={picking ? "" : undefined}
+      {...menu}
+      data-confirming={picking || confirming ? "" : undefined}
       data-dm-seq={item.seq}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
@@ -759,6 +794,16 @@ const DmRow = memo(function DmRow({
           pinned={pinned}
           onPin={onPin}
           react={reactTool}
+          confirming={confirming}
+          setConfirming={setConfirming}
+        />
+      )}
+      {reactions && (
+        <ReactionsDialog
+          open={viewing}
+          onOpenChange={setViewing}
+          reactions={reactions}
+          load={(r) => Promise.resolve({ users: actions.reactors(r), hasMore: false })}
         />
       )}
     </motion.div>
@@ -819,6 +864,8 @@ function DmRowTools({
   pinned,
   onPin,
   react,
+  confirming,
+  setConfirming,
 }: {
   item: Item;
   mine: boolean;
@@ -830,8 +877,10 @@ function DmRowTools({
   onPin?: (seq: number) => void;
   /** The "Add reaction" button, where you may react. */
   react: ReactNode;
+  /** Asking whether to delete it, from its button or its menu. */
+  confirming: boolean;
+  setConfirming: (on: boolean) => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
   const { t } = useI18n();
   return (
     <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">

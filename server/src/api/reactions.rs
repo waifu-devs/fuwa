@@ -3,12 +3,14 @@
 //! message in the server file's `reactions`. Reads add up each message's
 //! (`attach`); writes send `ReactionUpdated` or `ReactionsCleared`. Direct
 //! messages' and secure channels' reactions travel inside the encryption
-//! (`DirectMessageReaction`) and never reach here.
+//! (`DirectMessageReaction`) and never reach here. In a shared channel the
+//! home keeps them: a guest server passes its people's reactions there
+//! (`shared::guest_react`), and the home's `apply` writes them like its own.
 
 use std::collections::HashMap;
 
 use super::messages::load_message;
-use super::{Api, Seat, polls, shared, users};
+use super::{Api, Seat, shared, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::now_ms;
@@ -59,19 +61,51 @@ async fn named(conn: &turso::Connection, emoji: &str, emoji_id: &str) -> Result<
             if !is_custom(emoji_id) {
                 return Err(Error::NotFound("emoji"));
             }
-            let (name, animated) =
-                query_one(conn, "SELECT name, animated FROM emojis WHERE id = ?1", [emoji_id], |r| {
-                    Ok((r.get::<String>(0)?, r.get::<bool>(1)?))
+            let (emoji_name, animated, emoji_url) =
+                query_one(conn, "SELECT name, animated, url FROM emojis WHERE id = ?1", [emoji_id], |r| {
+                    Ok((r.get::<String>(0)?, r.get::<bool>(1)?, r.get::<String>(2)?))
                 })
                 .await?
                 .ok_or(Error::NotFound("emoji"))?;
             Ok((
                 emoji_id.to_string(),
-                pb::Reaction { emoji_id: emoji_id.to_string(), emoji_name: name, animated, ..Default::default() },
+                pb::Reaction { emoji_id: emoji_id.to_string(), emoji_name, animated, emoji_url, ..Default::default() },
             ))
         }
         _ => Err(Error::invalid("name one emoji: emoji or emoji_id")),
     }
+}
+
+/// Checks the emoji a call names looks like one, before it goes to another
+/// server: one standard emoji, or one custom emoji's id.
+pub(super) fn check_emoji(emoji: &str, emoji_id: &str) -> Result<()> {
+    match (emoji.is_empty(), emoji_id.is_empty()) {
+        (false, true) => standard(emoji).map(|_| ()),
+        (true, false) if is_custom(emoji_id) && emoji_id.len() <= 32 => Ok(()),
+        (true, false) => Err(Error::NotFound("emoji")),
+        _ => Err(Error::invalid("name one emoji: emoji or emoji_id")),
+    }
+}
+
+/// A reaction from another instance, as this one keeps it: one emoji (a
+/// standard one, or a custom one with a name and a picture), a count.
+/// `None` for anything else.
+pub(super) fn arrived(reaction: pb::Reaction) -> Option<pb::Reaction> {
+    let custom = !reaction.emoji_id.is_empty();
+    let fits = if custom {
+        is_custom(&reaction.emoji_id)
+            && reaction.emoji_id.len() <= 32
+            && reaction.emoji.is_empty()
+            && (2..=32).contains(&reaction.emoji_name.len())
+            && reaction.emoji_name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && !reaction.emoji_url.is_empty()
+    } else {
+        standard(&reaction.emoji).is_ok()
+            && reaction.emoji_name.is_empty()
+            && reaction.emoji_url.is_empty()
+            && !reaction.animated
+    };
+    fits.then_some(pb::Reaction { me: false, ..reaction })
 }
 
 /// How many reacted to `message_id` with `key`.
@@ -112,7 +146,7 @@ pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mu
         conn,
         &format!(
             "SELECT r.message_id, r.emoji, count(*), min(r.created_at),
-                    sum(CASE WHEN r.account_id = ?1 THEN 1 ELSE 0 END), e.name, e.animated,
+                    sum(CASE WHEN r.account_id = ?1 THEN 1 ELSE 0 END), e.name, e.animated, e.url,
                     (SELECT f.shown FROM reactions f WHERE f.message_id = r.message_id AND f.emoji = r.emoji
                      ORDER BY f.created_at, f.account_id LIMIT 1)
              FROM reactions r LEFT JOIN emojis e ON e.id = r.emoji
@@ -130,15 +164,22 @@ pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mu
                 r.get::<Option<String>>(5)?,
                 r.get::<Option<bool>>(6)?,
                 r.get::<Option<String>>(7)?,
+                r.get::<Option<String>>(8)?,
             ))
         },
     )
     .await?;
     let mut found: HashMap<String, Vec<pb::Reaction>> = HashMap::new();
-    for (message_id, key, count, mine, name, animated, shown) in rows {
+    for (message_id, key, count, mine, name, animated, url, shown) in rows {
         let reaction = if is_custom(&key) {
             let Some(name) = name else { continue };
-            pb::Reaction { emoji_id: key, emoji_name: name, animated: animated.unwrap_or(false), ..Default::default() }
+            pb::Reaction {
+                emoji_id: key,
+                emoji_name: name,
+                animated: animated.unwrap_or(false),
+                emoji_url: url.unwrap_or_default(),
+                ..Default::default()
+            }
         } else {
             let emoji = shown.filter(|s| !s.is_empty()).unwrap_or(key);
             pb::Reaction { emoji, ..Default::default() }
@@ -219,25 +260,142 @@ pub(crate) async fn forget_reactor(
     Ok(())
 }
 
-/// Refuses what reactions don't reach yet: secure channels (whose reactions
-/// travel encrypted) and channels shared between servers.
-async fn refuse_elsewhere(conn: &turso::Connection, channel: &pb::Channel) -> Result<()> {
+/// Refuses secure channels, whose reactions travel encrypted.
+fn refuse_secure(channel: &pb::Channel) -> Result<()> {
     if channel.r#type == pb::ChannelType::Secure as i32 {
         return Err(Error::FailedPrecondition("reactions in secure channels go through their devices".into()));
-    }
-    if polls::shared_out(conn, &channel.id).await? {
-        return Err(Error::FailedPrecondition("reactions don't work in channels shared with other servers yet".into()));
     }
     Ok(())
 }
 
+/// Puts `user_id`'s reaction on `message` or takes it off, inside a write,
+/// telling members: the emoji's reaction as it is now, `me` for them. A
+/// shared channel's home calls this for guests too.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn apply(
+    conn: &turso::Connection,
+    message: &pb::Message,
+    emoji: &str,
+    emoji_id: &str,
+    user_id: &str,
+    reacted: bool,
+    cap: Option<i64>,
+    events: &mut Vec<Payload>,
+) -> Result<pb::Reaction> {
+    let (key, mut reaction) = named(conn, emoji, emoji_id).await?;
+    let sent = std::mem::take(&mut reaction.emoji);
+    let before = shown_as(conn, &message.id, &key, &sent).await?;
+    let had = query_one(
+        conn,
+        "SELECT 1 FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
+        (message.id.as_str(), key.as_str(), user_id),
+        |r| r.get::<i64>(0),
+    )
+    .await?
+    .is_some();
+    if had == reacted {
+        let count = count(conn, &message.id, &key).await?;
+        return Ok(pb::Reaction { count, me: had, emoji: before, ..reaction });
+    }
+    // Every reaction to a message rewrites its row, so two at once clash and
+    // one runs again: the cap holds, and the counts in events follow each other.
+    conn.execute("UPDATE messages SET kind = kind WHERE id = ?1", [message.id.as_str()]).await?;
+    if reacted {
+        if let Some(cap) = cap {
+            let (kinds, used) = query_one(
+                conn,
+                "SELECT count(DISTINCT emoji), sum(CASE WHEN emoji = ?2 THEN 1 ELSE 0 END)
+                 FROM reactions WHERE message_id = ?1",
+                (message.id.as_str(), key.as_str()),
+                |r| Ok((r.get::<i64>(0)?, r.get::<Option<i64>>(1)?.unwrap_or(0))),
+            )
+            .await?
+            .unwrap_or((0, 0));
+            if used == 0 && kinds >= cap {
+                return Err(Error::ResourceExhausted(
+                    "this message has as many different reactions as it can hold".into(),
+                ));
+            }
+        }
+        conn.execute(
+            "INSERT INTO reactions (message_id, emoji, account_id, created_at, shown) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (message.id.as_str(), key.as_str(), user_id, now_ms(), sent.as_str()),
+        )
+        .await?;
+    } else {
+        conn.execute(
+            "DELETE FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
+            (message.id.as_str(), key.as_str(), user_id),
+        )
+        .await?;
+    }
+    let count = count(conn, &message.id, &key).await?;
+    // Shown as before, even once the last one's gone, so apps find the chip
+    // they have.
+    reaction.emoji = shown_as(conn, &message.id, &key, &before).await?;
+    events.push(Payload::ReactionUpdated(pb::ReactionUpdated {
+        channel_id: message.channel_id.clone(),
+        message_id: message.id.clone(),
+        thread_id: message.thread_id.clone(),
+        reaction: Some(pb::Reaction { count, ..reaction.clone() }),
+        user_id: user_id.to_string(),
+        added: reacted,
+    }));
+    Ok(pb::Reaction { count, me: reacted, ..reaction })
+}
+
+/// A page of who reacted to `message_id` with an emoji, the earliest first.
+pub(super) async fn reactor_page(
+    conn: &turso::Connection,
+    message_id: &str,
+    emoji: &str,
+    emoji_id: &str,
+    limit: i32,
+    after_id: &str,
+) -> Result<pb::ListReactorsResponse> {
+    let (key, _) = named(conn, emoji, emoji_id).await?;
+    let limit = if limit <= 0 { 50 } else { limit.min(MAX_PAGE) } as i64;
+    // The page after a person: later reactions, and among those made in the
+    // same millisecond, larger ids. One who took theirs off starts over.
+    let after = if after_id.is_empty() {
+        None
+    } else {
+        query_one(
+            conn,
+            "SELECT created_at FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
+            (message_id, key.as_str(), after_id),
+            |r| r.get::<i64>(0),
+        )
+        .await?
+    };
+    let (cursor, at, id) = match after {
+        Some(at) => ("AND (created_at > ?3 OR (created_at = ?3 AND account_id > ?4))", at, after_id),
+        None => ("AND ?3 = 0 AND ?4 = ''", 0, ""),
+    };
+    let ids = query_all(
+        conn,
+        &format!(
+            "SELECT account_id FROM reactions WHERE message_id = ?1 AND emoji = ?2 {cursor}
+             ORDER BY created_at, account_id LIMIT ?5"
+        ),
+        (message_id, key.as_str(), at, id, limit + 1),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    let has_more = ids.len() as i64 > limit;
+    let ids: Vec<&str> = ids.iter().take(limit as usize).map(String::as_str).collect();
+    let mut found: HashMap<String, pb::User> =
+        users(conn, &ids).await?.into_iter().map(|u| (u.id.clone(), u)).collect();
+    let users = ids.iter().filter_map(|id| found.remove(*id)).collect();
+    Ok(pb::ListReactorsResponse { users, has_more })
+}
+
 impl Api {
-    /// Refuses a channel this server shows from another one.
+    /// Refuses a channel this server shows from another one: only its home
+    /// clears reactions there.
     async fn refuse_shown(&self, sdb: &crate::servers::ServerDb, channel_id: &str) -> Result<()> {
         if shared::link_of(&*sdb.read()?, channel_id).await?.is_some() {
-            return Err(Error::FailedPrecondition(
-                "reactions don't work in channels shared with other servers yet".into(),
-            ));
+            return Err(Error::FailedPrecondition("only the channel's home server can clear its reactions".into()));
         }
         Ok(())
     }
@@ -253,78 +411,24 @@ impl Api {
         if req.reacted {
             access.require_in(&req.channel_id, Permission::AddReactions)?;
         }
-        self.refuse_shown(&sdb, &req.channel_id).await?;
+        if let Some((link, guest)) =
+            shared::locate(&self.app, &*sdb.read()?, &sdb.id, account, &access, &req.channel_id, &req.message_id)
+                .await?
+        {
+            check_emoji(&req.emoji, &req.emoji_id)?;
+            let reaction = shared::guest_react(&self.app, &sdb.id, &link, guest, &req).await?;
+            return Ok(pb::ReactResponse { reaction: Some(reaction) });
+        }
         let cap = self.app.settings().limits.reactions_per_message;
         let reaction = sdb
             .write(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-                refuse_elsewhere(conn, &channel).await?;
+                refuse_secure(&channel)?;
                 let message = load_message(conn, &sdb.id, &req.message_id)
                     .await?
                     .filter(|m| m.channel_id == channel.id)
                     .ok_or(Error::NotFound("message"))?;
-                let (key, mut reaction) = named(conn, &req.emoji, &req.emoji_id).await?;
-                let sent = std::mem::take(&mut reaction.emoji);
-                let before = shown_as(conn, &message.id, &key, &sent).await?;
-                let had = query_one(
-                    conn,
-                    "SELECT 1 FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
-                    (message.id.as_str(), key.as_str(), account.id.as_str()),
-                    |r| r.get::<i64>(0),
-                )
-                .await?
-                .is_some();
-                if had == req.reacted {
-                    let count = count(conn, &message.id, &key).await?;
-                    return Ok(pb::Reaction { count, me: had, emoji: before, ..reaction });
-                }
-                // Every reaction to a message rewrites its row, so two at once
-                // clash and one runs again: the cap holds, and the counts in
-                // events follow each other.
-                conn.execute("UPDATE messages SET kind = kind WHERE id = ?1", [message.id.as_str()]).await?;
-                if req.reacted {
-                    if let Some(cap) = cap {
-                        let (kinds, used) = query_one(
-                            conn,
-                            "SELECT count(DISTINCT emoji), sum(CASE WHEN emoji = ?2 THEN 1 ELSE 0 END)
-                             FROM reactions WHERE message_id = ?1",
-                            (message.id.as_str(), key.as_str()),
-                            |r| Ok((r.get::<i64>(0)?, r.get::<Option<i64>>(1)?.unwrap_or(0))),
-                        )
-                        .await?
-                        .unwrap_or((0, 0));
-                        if used == 0 && kinds >= cap {
-                            return Err(Error::ResourceExhausted(
-                                "this message has as many different reactions as it can hold".into(),
-                            ));
-                        }
-                    }
-                    conn.execute(
-                        "INSERT INTO reactions (message_id, emoji, account_id, created_at, shown)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                        (message.id.as_str(), key.as_str(), account.id.as_str(), now_ms(), sent.as_str()),
-                    )
-                    .await?;
-                } else {
-                    conn.execute(
-                        "DELETE FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
-                        (message.id.as_str(), key.as_str(), account.id.as_str()),
-                    )
-                    .await?;
-                }
-                let count = count(conn, &message.id, &key).await?;
-                // Shown as before, even once the last one's gone, so apps
-                // find the chip they have.
-                reaction.emoji = shown_as(conn, &message.id, &key, &before).await?;
-                events.push(Payload::ReactionUpdated(pb::ReactionUpdated {
-                    channel_id: channel.id.clone(),
-                    message_id: message.id.clone(),
-                    thread_id: message.thread_id.clone(),
-                    reaction: Some(pb::Reaction { count, ..reaction.clone() }),
-                    user_id: account.id.clone(),
-                    added: req.reacted,
-                }));
-                Ok(pb::Reaction { count, me: req.reacted, ..reaction })
+                apply(conn, &message, &req.emoji, &req.emoji_id, &account.id, req.reacted, cap, events).await
             })
             .await?;
         Ok(pb::ReactResponse { reaction: Some(reaction) })
@@ -337,47 +441,19 @@ impl Api {
     ) -> Result<pb::ListReactorsResponse> {
         let Seat { sdb, access, .. } = self.membership(account, &req.server_id).await?;
         access.require_in(&req.channel_id, Permission::ViewChannels)?;
-        self.refuse_shown(&sdb, &req.channel_id).await?;
+        if let Some((link, guest)) =
+            shared::locate(&self.app, &*sdb.read()?, &sdb.id, account, &access, &req.channel_id, &req.message_id)
+                .await?
+        {
+            check_emoji(&req.emoji, &req.emoji_id)?;
+            return shared::guest_reactors(&self.app, &sdb.id, &link, guest, &req).await;
+        }
         let conn = sdb.read()?;
         load_message(&conn, &sdb.id, &req.message_id)
             .await?
             .filter(|m| m.channel_id == req.channel_id)
             .ok_or(Error::NotFound("message"))?;
-        let (key, _) = named(&conn, &req.emoji, &req.emoji_id).await?;
-        let limit = if req.limit <= 0 { 50 } else { req.limit.min(MAX_PAGE) } as i64;
-        // The page after a person: later reactions, and among those made in
-        // the same millisecond, larger ids. One who took theirs off starts over.
-        let after = if req.after_id.is_empty() {
-            None
-        } else {
-            query_one(
-                &conn,
-                "SELECT created_at FROM reactions WHERE message_id = ?1 AND emoji = ?2 AND account_id = ?3",
-                (req.message_id.as_str(), key.as_str(), req.after_id.as_str()),
-                |r| r.get::<i64>(0),
-            )
-            .await?
-        };
-        let (cursor, at, id) = match after {
-            Some(at) => ("AND (created_at > ?3 OR (created_at = ?3 AND account_id > ?4))", at, req.after_id.as_str()),
-            None => ("AND ?3 = 0 AND ?4 = ''", 0, ""),
-        };
-        let ids = query_all(
-            &conn,
-            &format!(
-                "SELECT account_id FROM reactions WHERE message_id = ?1 AND emoji = ?2 {cursor}
-                 ORDER BY created_at, account_id LIMIT ?5"
-            ),
-            (req.message_id.as_str(), key.as_str(), at, id, limit + 1),
-            |r| r.get::<String>(0),
-        )
-        .await?;
-        let has_more = ids.len() as i64 > limit;
-        let ids: Vec<&str> = ids.iter().take(limit as usize).map(String::as_str).collect();
-        let mut found: HashMap<String, pb::User> =
-            users(&conn, &ids).await?.into_iter().map(|u| (u.id.clone(), u)).collect();
-        let users = ids.iter().filter_map(|id| found.remove(*id)).collect();
-        Ok(pb::ListReactorsResponse { users, has_more })
+        reactor_page(&conn, &req.message_id, &req.emoji, &req.emoji_id, req.limit, &req.after_id).await
     }
 
     pub(super) async fn clear_reactions_impl(

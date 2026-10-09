@@ -1,6 +1,8 @@
 import { LoaderCircleIcon, PlusIcon, SmilePlusIcon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useId, useState, type ReactElement } from "react";
+import { useEffect, useId, useMemo, useState, type ReactElement } from "react";
+import { useFuwa } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import type { Emoji, User } from "@/gen/fuwa/v1/types_pb";
 import { EmojiImage } from "@/components/EmojiImage";
 import { EmojiPicker, type PickedEmoji } from "@/components/EmojiPicker";
@@ -34,10 +36,20 @@ export function reactionCatalog(catalog: Catalog): Catalog {
   return { sections, byAlias: new Map(own.map((e) => [e.alias.toLowerCase(), e])), byId: new Map(own.map((e) => [e.emoji.id, e])) };
 }
 
+/**
+ * What reactions may use in a channel: in a guest's shared channel the home's
+ * emoji, once this instance takes them there (else standard ones only), never
+ * this server's own; elsewhere this server's.
+ */
+export function useReactionCatalog(instanceKey: string, catalog: Catalog, guestSide: boolean): Catalog {
+  const homeEmoji = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-emoji"));
+  return useMemo(() => (guestSide && !homeEmoji ? NO_CATALOG : reactionCatalog(catalog)), [catalog, guestSide, homeEmoji]);
+}
+
 /** A picked emoji as a reaction: a standard one, or one of the server's own. */
 export const pickedReaction = (picked: PickedEmoji): ReactEmoji =>
   picked.custom
-    ? { emoji: "", emojiId: picked.custom.emoji.id, emojiName: picked.custom.emoji.name, animated: picked.custom.emoji.animated }
+    ? { emoji: "", emojiId: picked.custom.emoji.id, emojiName: picked.custom.emoji.name, animated: picked.custom.emoji.animated, emojiUrl: picked.custom.emoji.url }
     : { emoji: picked.text, emojiId: "" };
 
 /** How a reaction's emoji reads in words: itself, or `:name:` for a server's. */
@@ -65,19 +77,31 @@ export function quickReactions(emojis: Emoji[] | null): ReactEmoji[] {
     if (key.startsWith("u:")) add({ emoji: key.slice(2), emojiId: "" });
     else if (key.startsWith("c:") && emojis) {
       const e = emojis.find((x) => x.id === key.slice(2));
-      if (e) add({ emoji: "", emojiId: e.id, emojiName: e.name, animated: e.animated });
+      if (e) add({ emoji: "", emojiId: e.id, emojiName: e.name, animated: e.animated, emojiUrl: e.url });
     }
   }
   for (const char of STARTERS) add({ emoji: char, emojiId: "" });
   return out;
 }
 
-/** A reaction's emoji: a standard one as text, a server's own as its picture (its name when it's gone). */
-export function ReactionEmoji({ reaction, emojis, className }: { reaction: Pick<ReactionLike, "emoji" | "emojiId" | "emojiName" | "animated">; emojis?: Emoji[]; className?: string }) {
+/**
+ * A reaction's emoji: a standard one as text, a server's own as its picture
+ * (the link the reaction carries, else the server's list; its name when
+ * there's neither).
+ */
+export function ReactionEmoji({
+  reaction,
+  emojis,
+  className,
+}: {
+  reaction: Pick<ReactionLike, "emoji" | "emojiId" | "emojiName" | "animated" | "emojiUrl">;
+  emojis?: Emoji[];
+  className?: string;
+}) {
   if (!reaction.emojiId) return <span className={cn("inline-grid place-items-center leading-none", className)}>{reaction.emoji}</span>;
-  const emoji = emojis?.find((e) => e.id === reaction.emojiId);
-  if (!emoji) return <span className={cn("text-[0.7rem] text-muted-foreground", className)}>:{reaction.emojiName}:</span>;
-  return <EmojiImage emoji={emoji} className={className} title={false} />;
+  const url = reaction.emojiUrl || emojis?.find((e) => e.id === reaction.emojiId)?.url;
+  if (!url) return <span className={cn("text-[0.7rem] text-muted-foreground", className)}>:{reaction.emojiName}:</span>;
+  return <EmojiImage emoji={{ url, name: reaction.emojiName, animated: reaction.animated }} className={className} title={false} />;
 }
 
 /** Who reacted with one emoji, as names to show first ("You" for yourself), or a promise of them. */
@@ -300,7 +324,11 @@ export function QuickReactions({
             }}
             className={cn("grid size-8 place-items-center rounded-lg text-lg transition-colors hover:bg-muted", on && "bg-primary/15 ring-1 ring-primary/40")}
           >
-            <ReactionEmoji reaction={{ emoji: c.emoji, emojiId: c.emojiId, emojiName: c.emojiName ?? "", animated: !!c.animated }} emojis={emojis} className="size-5" />
+            <ReactionEmoji
+              reaction={{ emoji: c.emoji, emojiId: c.emojiId, emojiName: c.emojiName ?? "", animated: !!c.animated, emojiUrl: c.emojiUrl }}
+              emojis={emojis}
+              className="size-5"
+            />
           </motion.button>
         );
       })}

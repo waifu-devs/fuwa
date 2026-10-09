@@ -666,6 +666,10 @@ message BackupItem {
   // A text's files (DirectMessageText.files). The files themselves stay on
   // the instance, until the message is deleted.
   repeated SealedFile files = 20;
+  // For a REACTION item: the record reacted to, the emoji, and whether it
+  // took the sender's reaction off. Its signed form, in a secure channel,
+  // is in `signed`.
+  DirectMessageReaction reaction = 21;
 }
 
 enum BackupItemKind {
@@ -677,6 +681,9 @@ enum BackupItemKind {
   // A moderator locked or unlocked a thread in a secure channel.
   BACKUP_ITEM_KIND_THREAD = 5;
   BACKUP_ITEM_KIND_VOICE = 6;
+  // A reaction to an earlier message, or taking one off (`reaction`).
+  // Older apps skip it.
+  BACKUP_ITEM_KIND_REACTION = 7;
 }
 
 message BackupDevice {

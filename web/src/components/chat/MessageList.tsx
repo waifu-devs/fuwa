@@ -54,11 +54,11 @@ import { instanceHas } from "@/lib/compat";
 import type { FuwaError } from "@/fuwa/errors";
 import { pinMessage } from "@/fuwa/pins";
 import { PinMark } from "@/components/chat/Pins";
-import { clearReactions, listReactors, react, type ReactEmoji } from "@/fuwa/reactions";
-import { AddReactionTool, pickedReaction, QuickReactions, quickReactions, ReactionRow, ReactionsDialog, reactionCatalog } from "@/components/chat/Reactions";
+import { clearReactions, listReactors, react, whoReacted, type ReactEmoji } from "@/fuwa/reactions";
+import { AddReactionTool, pickedReaction, useReactionCatalog, QuickReactions, quickReactions, ReactionRow, ReactionsDialog } from "@/components/chat/Reactions";
 import { confirmFirst } from "@/components/menus/dialogs";
 import type { PickedEmoji } from "@/components/EmojiPicker";
-import { NAMES_SHOWN, reactionKey, type ReactionLike } from "@/lib/reactions";
+import { reactionKey, type ReactionLike } from "@/lib/reactions";
 import type { Catalog } from "@/lib/emoji-catalog";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
@@ -168,9 +168,10 @@ type RowActions = {
   clearReactions: (message: Message, reaction?: ReactionLike) => Promise<void>;
 };
 
-/** Who reacted, as loaded for the hover over a reaction, kept while its count and yours stay the same. */
-const whoReacted = new Map<string, Promise<string[]>>();
-const WHO_KEPT = 200;
+/** The custom emoji reactions may use here, for the menu's row. */
+const reactEmojis = (catalog: Catalog): Emoji[] => catalog.sections.flatMap((s) => s.emojis.map((e) => e.emoji));
+
+
 
 /**
  * One channel's messages, or one thread's. Each list belongs to one channel
@@ -286,7 +287,7 @@ function useListLook(instanceKey: string, serverId: string, channel: Channel, me
     }),
     [instanceKey, ownerId, roles, members, emojis, otherEmojis, me, myRoleIds],
   );
-  const reactCatalog = useMemo(() => reactionCatalog(catalog), [catalog]);
+  const reactCatalog = useReactionCatalog(instanceKey, catalog, guestSide);
   return { look, pollPlace, catalog, reactCatalog, memberById, myRoleIds };
 }
 
@@ -331,23 +332,7 @@ function useRowActions(
           )
           .catch((err: FuwaError) => toast(err.message)),
       react: (message, emoji, on) => void react(instanceKey, serverId, message, emoji, on).catch((err: FuwaError) => toast(err.message)),
-      who: (message, reaction) => {
-        const key = `${instanceKey}|${store.get().instances[instanceKey]?.me?.id}|${message.id}|${reactionKey(reaction)}|${reaction.count}|${reaction.me}`;
-        let names = whoReacted.get(key);
-        if (!names) {
-          names = listReactors(instanceKey, serverId, message, reaction, { limit: NAMES_SHOWN + 1 }).then(({ users }) => {
-            const i = store.get().instances[instanceKey];
-            const meId = i?.me?.id;
-            const members = i?.members[serverId];
-            const others = users.filter((u) => u.id !== meId).map((u) => members?.find((m) => m.user?.id === u.id)?.nickname || displayName(u));
-            return reaction.me ? [t("chattools.reactions.you"), ...others] : others;
-          });
-          names.catch(() => whoReacted.delete(key));
-          whoReacted.set(key, names);
-          if (whoReacted.size > WHO_KEPT) whoReacted.delete(whoReacted.keys().next().value!);
-        }
-        return names;
-      },
+      who: (message, reaction) => whoReacted(instanceKey, serverId, message, reaction, t("chattools.reactions.you")),
       reactors: (message, reaction, afterId) => listReactors(instanceKey, serverId, message, reaction, { afterId }),
       clearReactions: async (message, reaction) => {
         await clearReactions(instanceKey, serverId, message, reaction);
@@ -526,7 +511,7 @@ type RowContext = {
   canStart: boolean;
   canReply: boolean;
   canPin: boolean;
-  /** Reactions show here: the instance has them, and the channel isn't shared with another server. */
+  /** Reactions show here: the instance has them. */
   reactionsHere: boolean;
   /** May add reactions (taking yours off needs nothing). */
   canReact: boolean;
@@ -571,8 +556,7 @@ function useRowContext({
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   // Pins are the home's in a shared channel, and need this instance to keep them.
   const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
-  // Reactions don't cross to other servers yet: not in shared channels, on either side.
-  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions")) && !channel.shared;
+  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions"));
   const display = usePrefs((p) => p.messageDisplay);
   const developer = usePrefs((p) => p.developerMode);
   const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
@@ -675,7 +659,7 @@ function drawRow(row: Row, c: RowContext): ReactNode {
       canPin={c.canPin && message.kind === MessageKind.UNSPECIFIED}
       reactable={c.reactionsHere && message.kind === MessageKind.UNSPECIFIED}
       canReact={c.canReact}
-      canClearReactions={c.reactionsHere && c.manager}
+      canClearReactions={c.reactionsHere && c.manager && !c.guestSide}
       reactCatalog={c.reactCatalog}
       inThread={!!c.threadId}
       actions={c.actions}
@@ -1048,7 +1032,7 @@ const MessageRow = memo(function MessageRow({
         ? {
             quick: (close) => (
               <QuickReactions
-                choices={quickReactions(emojis ?? [])}
+                choices={quickReactions(reactEmojis(reactCatalog))}
                 reactions={reactions}
                 emojis={emojis}
                 canAdd={canReact}
