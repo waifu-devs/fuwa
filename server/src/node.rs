@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0023_sign_in_providers.sql"),
     include_str!("../migrations/node/0024_profile_items.sql"),
     include_str!("../migrations/node/0025_featured_servers.sql"),
+    include_str!("../migrations/node/0026_agent_endpoints.sql"),
 ];
 
 /// Notes that the instance's profile items changed now (`Node.profile_items_at`).
@@ -2462,6 +2463,7 @@ impl NodeDb {
                 "saved_gifs",
                 "presence_settings",
                 "account_providers",
+                "agent_endpoints",
             ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
@@ -2573,6 +2575,100 @@ impl NodeDb {
         .await
     }
 
+    /// An agent's endpoint, made with `secret` if it has none yet.
+    pub async fn agent_endpoint(&self, agent_id: &str, secret: &str) -> Result<EndpointRow> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO agent_endpoints (account_id, secret, updated_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (account_id) DO NOTHING",
+                (agent_id, secret, now_ms()),
+            )
+            .await?;
+            endpoint_of(conn, agent_id).await
+        })
+        .await
+    }
+
+    /// Sets an agent's endpoint (an empty `url` turns it off) and starts its
+    /// deliveries again from now, as a new epoch.
+    pub async fn set_agent_endpoint(&self, agent_id: &str, url: &str, events: &[String]) -> Result<EndpointRow> {
+        let events = events.join(",");
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE agent_endpoints SET url = ?2, events = ?3, epoch = epoch + 1, updated_at = ?4,
+                 failing_since = NULL, last_error = '', disabled_at = NULL WHERE account_id = ?1",
+                (agent_id, url, events.as_str(), now_ms()),
+            )
+            .await?;
+            endpoint_of(conn, agent_id).await
+        })
+        .await
+    }
+
+    pub async fn reset_agent_endpoint_secret(&self, agent_id: &str, secret: &str) -> Result<EndpointRow> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE agent_endpoints SET secret = ?2 WHERE account_id = ?1", (agent_id, secret)).await?;
+            endpoint_of(conn, agent_id).await
+        })
+        .await
+    }
+
+    /// The endpoints of these agents that are on, with the agents.
+    pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, EndpointRow)>> {
+        let conn = self.read()?;
+        let mut found = Vec::new();
+        for agent_id in agent_ids {
+            let Some(row) = query_one(
+                &conn,
+                &format!("{ENDPOINT_SELECT} WHERE account_id = ?1 AND url != '' AND disabled_at IS NULL"),
+                [agent_id.as_str()],
+                endpoint_row,
+            )
+            .await?
+            else {
+                continue;
+            };
+            if let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) {
+                found.push((account, row));
+            }
+        }
+        Ok(found)
+    }
+
+    /// Notes how a delivery to an endpoint went, if it's still at `epoch`:
+    /// the first failure starts the clock, and failing for `give_up_after`
+    /// ms turns the endpoint off. Whether it's off now.
+    pub async fn report_agent_delivery(
+        &self,
+        agent_id: &str,
+        epoch: i64,
+        error: &str,
+        give_up_after: i64,
+    ) -> Result<bool> {
+        let now = now_ms();
+        db::write(&self.db, async |conn| {
+            if error.is_empty() {
+                conn.execute(
+                    "UPDATE agent_endpoints SET last_delivered_at = ?3, failing_since = NULL, last_error = ''
+                     WHERE account_id = ?1 AND epoch = ?2",
+                    (agent_id, epoch, now),
+                )
+                .await?;
+            } else {
+                conn.execute(
+                    "UPDATE agent_endpoints SET failing_since = coalesce(failing_since, ?3), last_error = ?4,
+                     disabled_at = CASE WHEN ?3 - coalesce(failing_since, ?3) >= ?5 THEN ?3 ELSE disabled_at END
+                     WHERE account_id = ?1 AND epoch = ?2",
+                    (agent_id, epoch, now, error, give_up_after),
+                )
+                .await?;
+            }
+            let row = endpoint_of(conn, agent_id).await?;
+            Ok(row.epoch != epoch || row.url.is_empty() || row.disabled_at.is_some())
+        })
+        .await
+    }
+
     /// Hands an upload to another account, such as an agent's picture its
     /// owner uploaded, so it goes with that account.
     pub async fn give_media(&self, id: &str, account_id: &str) -> Result<()> {
@@ -2642,6 +2738,43 @@ fn agent_row(row: &Row) -> turso::Result<AgentRow> {
         bio: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
         last_active_at: row.get::<Option<i64>>(ACCOUNT_COLUMN_COUNT + 3)?.filter(|at| *at > 0),
     })
+}
+
+/// An agent's endpoint as node.db keeps it (`agent_endpoints`).
+pub struct EndpointRow {
+    pub url: String,
+    pub events: Vec<String>,
+    pub secret: String,
+    pub epoch: i64,
+    pub updated_at: i64,
+    pub last_delivered_at: Option<i64>,
+    pub failing_since: Option<i64>,
+    pub last_error: String,
+    pub disabled_at: Option<i64>,
+}
+
+const ENDPOINT_SELECT: &str = "SELECT url, events, secret, epoch, updated_at, last_delivered_at, failing_since,
+    last_error, disabled_at FROM agent_endpoints";
+
+fn endpoint_row(row: &Row) -> turso::Result<EndpointRow> {
+    let events: String = row.get(1)?;
+    Ok(EndpointRow {
+        url: row.get(0)?,
+        events: events.split(',').filter(|name| !name.is_empty()).map(str::to_string).collect(),
+        secret: row.get(2)?,
+        epoch: row.get(3)?,
+        updated_at: row.get(4)?,
+        last_delivered_at: row.get(5)?,
+        failing_since: row.get(6)?,
+        last_error: row.get(7)?,
+        disabled_at: row.get(8)?,
+    })
+}
+
+async fn endpoint_of(conn: &Connection, agent_id: &str) -> Result<EndpointRow> {
+    query_one(conn, &format!("{ENDPOINT_SELECT} WHERE account_id = ?1"), [agent_id], endpoint_row)
+        .await?
+        .ok_or(Error::NotFound("agent endpoint"))
 }
 
 /// An agent's token as a session (an agent has one at most, so joining

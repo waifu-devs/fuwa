@@ -69,6 +69,17 @@
     `App::find_agent`, the cluster call `FindAgent`), and it skips rules
     (never `pending`). Deleting a person deletes their agents
     (`erase_account`). Who may make agents is the `agent_creation` setting.
+    An agent may have an endpoint instead of a stream (`api/endpoints.rs`,
+    docs/agent-endpoints.md): node.db's `agent_endpoints` (URL, events,
+    secret, an `epoch` each time it's set), checked with a challenge before
+    it's saved. Where servers are kept, a worker per server and agent posts
+    the events after its place in the server file's `agent_deliveries`,
+    through the agent's `View` like `Subscribe`, as proto3 JSON
+    (prost-reflect over the descriptor set), signed Standard Webhooks style,
+    moving on only after a 2xx; an answer's replies go out through
+    `Api::send_as`. Shards learn of changes through the directory's watch
+    (`agent_endpoints_changed`). Where they may point is the
+    `agent_endpoints` setting (public https by default).
   - `presence.rs`: who's online and what they're doing (docs/presence.md),
     in memory only where accounts are: each app's lease (`UpdatePresence`,
     150 seconds), people's saved choices (node.db's `presence_settings`) and

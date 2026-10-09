@@ -9,6 +9,9 @@ import {
   EventService,
   FuwaError,
   CanceledError,
+  InvalidDeliveryError,
+  createEndpoint,
+  verifyDelivery,
   InvalidArgumentError,
   NotFoundError,
   OggOpusReader,
@@ -688,4 +691,119 @@ test("an utterances() loop far behind keeps the newest 100", async () => {
   assert.equal(((await loop.next()).value as Utterance).userId, "u5");
   await loop.return(undefined);
   await voice.leave();
+});
+
+// Agent endpoints: the Standard Webhooks example, and deliveries signed here
+// the way the instance signs them.
+const SPEC_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+const SPEC_HEADERS = {
+  "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+  "webhook-timestamp": "1614265330",
+  "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=",
+};
+const SPEC_NOW = 1614265330 * 1000;
+
+async function signedRequest(secret: string, body: unknown, at = Date.now()): Promise<Request> {
+  const text = JSON.stringify(body);
+  const id = "01JDELIVERY";
+  const timestamp = String(Math.floor(at / 1000));
+  const raw = Uint8Array.from(atob(secret.slice("whsec_".length)), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${id}.${timestamp}.${text}`)));
+  const signature = `v1,${btoa(String.fromCharCode(...mac))}`;
+  return new Request("http://agent.test/fuwa", {
+    method: "POST",
+    headers: { "content-type": "application/json", "webhook-id": id, "webhook-timestamp": timestamp, "webhook-signature": signature },
+    body: text,
+  });
+}
+
+const reason = (r: string) => (e: unknown) => e instanceof InvalidDeliveryError && e.reason === r;
+
+test("deliveries are checked the Standard Webhooks way", async () => {
+  // The spec's own example (its body isn't an AgentDelivery's fields, which are ignored).
+  const delivery = await verifyDelivery(SPEC_SECRET, '{"test": 2432232314}', SPEC_HEADERS, { now: SPEC_NOW });
+  assert.equal(delivery.events.length, 0);
+  // Several signatures (one per secret while one replaces another), and several secrets.
+  const both = { ...SPEC_HEADERS, "webhook-signature": `v1,bm9wZQ== ${SPEC_HEADERS["webhook-signature"]}` };
+  await verifyDelivery(["whsec_bm90IHRoZSBvbmU=", SPEC_SECRET], '{"test": 2432232314}', new Headers(both), { now: SPEC_NOW });
+
+  await assert.rejects(verifyDelivery(SPEC_SECRET, '{"test": 2432232315}', SPEC_HEADERS, { now: SPEC_NOW }), reason("signature"));
+  await assert.rejects(verifyDelivery("whsec_bm90IHRoZSBvbmU=", '{"test": 2432232314}', SPEC_HEADERS, { now: SPEC_NOW }), reason("signature"));
+  await assert.rejects(
+    verifyDelivery(SPEC_SECRET, '{"test": 2432232314}', { ...SPEC_HEADERS, "webhook-id": "msg_other" }, { now: SPEC_NOW }),
+    reason("signature"),
+  );
+  // Six minutes late (or early) is too far off; the clock check can be turned off.
+  await assert.rejects(verifyDelivery(SPEC_SECRET, '{"test": 2432232314}', SPEC_HEADERS, { now: SPEC_NOW + 360_000 }), reason("timestamp"));
+  await assert.rejects(verifyDelivery(SPEC_SECRET, '{"test": 2432232314}', SPEC_HEADERS, { now: SPEC_NOW - 360_000 }), reason("timestamp"));
+  await verifyDelivery(SPEC_SECRET, '{"test": 2432232314}', SPEC_HEADERS, { now: SPEC_NOW + 360_000, toleranceSeconds: 0 });
+  await assert.rejects(verifyDelivery(SPEC_SECRET, "{}", {}), reason("headers"));
+  const err = await verifyDelivery(SPEC_SECRET, "{}", SPEC_HEADERS).catch((e) => e);
+  assert.ok(err instanceof FuwaError && err.code === Code.Unauthenticated);
+  assert.ok(!err.message.includes("MfKQ9r8"), "the secret isn't repeated");
+});
+
+test("an endpoint answers the check, refuses forgeries and replies to interactions", async () => {
+  const secret = "whsec_" + btoa("a secret of thirty-two bytes!!!!");
+  const seen: string[] = [];
+  const errors: unknown[] = [];
+  const handle = createEndpoint({
+    secret,
+    onEvent: (event) => void seen.push(`${event.payload.case}:${event.sequence}`),
+    onInteraction: (ctx) => {
+      if (ctx.command === "boom") throw new Error("boom");
+      ctx.reply({ content: "first", components: [{ buttons: [{ customId: "again", label: "Again" }] }] });
+      return `rolled a d${ctx.options.sides}`;
+    },
+    onError: (e) => void errors.push(e),
+  });
+
+  // The check: its challenge comes back.
+  const check = await handle(await signedRequest(secret, { agentId: "a1", challenge: "c-123" }));
+  assert.equal(check.status, 200);
+  assert.deepEqual(await check.json(), { challenge: "c-123" });
+
+  // Not signed with the secret, signed long ago, or not a POST.
+  const forged = await signedRequest("whsec_" + btoa("someone else's secret, not ours"), { agentId: "a1", challenge: "x" });
+  assert.equal((await handle(forged)).status, 401);
+  assert.equal((await handle(await signedRequest(secret, { agentId: "a1" }, Date.now() - 3_600_000))).status, 401);
+  const tampered = await signedRequest(secret, { agentId: "a1", challenge: "x" });
+  const swapped = new Request(tampered.url, { method: "POST", headers: tampered.headers, body: JSON.stringify({ agentId: "a1", challenge: "y" }) });
+  assert.equal((await handle(swapped)).status, 401);
+  assert.equal((await handle(new Request("http://agent.test/fuwa"))).status, 405);
+
+  const interaction = (id: string, command: string, agentId = "a1") => ({
+    interactionCreated: {
+      interaction: { id, agentId, serverId: "s1", channelId: "c1", userId: "u1", kind: "INTERACTION_KIND_COMMAND", command, arguments: [{ name: "sides", value: "20" }] },
+    },
+  });
+  const delivery = {
+    agentId: "a1",
+    events: [
+      { id: "e1", serverId: "s1", sequence: "7", messageCreated: { message: { id: "m1", content: "hi" } }, somethingNew: 1 },
+      { id: "e2", serverId: "s1", sequence: "8", ...interaction("i1", "roll") },
+      { id: "e3", serverId: "s1", sequence: "9", ...interaction("i2", "boom") },
+      { id: "e4", serverId: "s1", sequence: "10", ...interaction("i3", "roll", "someone-else") },
+    ],
+  };
+  const res = await handle(await signedRequest(secret, delivery));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    replies: [
+      { interactionId: "i1", content: "first", components: [{ buttons: [{ customId: "again", label: "Again" }] }] },
+      { interactionId: "i1", content: "rolled a d20" },
+    ],
+  });
+  assert.deepEqual(seen, ["messageCreated:7", "interactionCreated:8", "interactionCreated:9", "interactionCreated:10"]);
+  assert.equal((errors[0] as Error).message, "boom", "a handler's error is reported, and the delivery still counts");
+
+  // Tried again with one more event: only the new one is handled.
+  delivery.events.push({ id: "e5", serverId: "s1", sequence: "11", ...interaction("i4", "roll") });
+  const again = await handle(await signedRequest(secret, delivery));
+  assert.deepEqual(seen.slice(4), ["interactionCreated:11"]);
+  assert.deepEqual(
+    ((await again.json()) as { replies: { interactionId: string }[] }).replies.map((r) => r.interactionId),
+    ["i4", "i4"],
+  );
 });

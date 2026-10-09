@@ -5,6 +5,8 @@
  * - `Agent` runs an agent: events, messages, mentions and commands.
  * - `joinVoice` (or `agent.joinVoice`) hears and talks in voice channels,
  *   with Ogg Opus files read and written by `readOggOpus` and `OggOpusWriter`.
+ * - `createEndpoint` and `verifyDelivery` take an agent's events over HTTP
+ *   instead (agent endpoints), for agents that run only when called.
  * - `EventFollower`, `messages`, `listEvents` and `uploadPicture` are the
  *   pieces it's built from, for apps that want them on their own.
  *
@@ -42,6 +44,17 @@ export {
   retryAfterOf,
   toFuwaError,
 } from "./errors.js";
+export {
+  InvalidDeliveryError,
+  createEndpoint,
+  verifyDelivery,
+  type DeliveryHeaders,
+  type DeliveryProblem,
+  type EndpointInteractionContext,
+  type EndpointOptions,
+  type EndpointReply,
+  type VerifyOptions,
+} from "./endpoint.js";
 export { EventFollower, listEvents, type EventKind, type EventPayload, type FollowOptions, type FollowUpdate } from "./events.js";
 export { messagePages, messages, type MessagePagesOptions, type MessageWithAuthor } from "./pages.js";
 export { DEFAULT_RETRY, type RetryOptions } from "./retry.js";

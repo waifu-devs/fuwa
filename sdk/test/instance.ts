@@ -49,6 +49,8 @@ export async function startInstance(): Promise<Instance> {
         // Calls on, on a port of the system's choosing: the voice bridge needs the media part.
         FUWA_MEDIA_PORT: "0",
         FUWA_MEDIA_ADDRESSES: "127.0.0.1",
+        // Agents' endpoints may be on this computer, where the tests run them.
+        FUWA_AGENT_ENDPOINTS: "any",
         RUST_LOG: "warn",
       },
       stdio: ["ignore", "pipe", "pipe"],

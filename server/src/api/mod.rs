@@ -10,6 +10,7 @@ mod channels;
 mod commands;
 mod dms;
 mod emoji;
+mod endpoints;
 mod events;
 mod friends;
 mod gifs;
@@ -36,6 +37,7 @@ mod webhooks;
 
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
+pub use endpoints::{ENDPOINT_GIVE_UP_AFTER, spawn_agent_deliveries};
 pub use live_tiles::{LIVE_TILE_PUBLISH_MS, LIVE_TILE_UPDATES_PER_MINUTE};
 pub use media::PictureOwner;
 pub(crate) use polls::{close_due as close_due_polls, forget_voter as forget_poll_voter};

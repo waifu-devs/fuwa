@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Member, User } from "./types_pb.js";
+import type { ComponentRow, Embed, Event, Member, User } from "./types_pb.js";
 import { file_fuwa_v1_types } from "./types_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/agent.proto.
  */
 export const file_fuwa_v1_agent: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUiEwoRTGlzdEFnZW50c1JlcXVlc3QiNAoSTGlzdEFnZW50c1Jlc3BvbnNlEh4KBmFnZW50cxgBIAMoCzIOLmZ1d2EudjEuQWdlbnQiPAoSQ3JlYXRlQWdlbnRSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJDChNDcmVhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudBINCgV0b2tlbhgCIAEoCSK0AQoSVXBkYXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEhkKDGRpc3BsYXlfbmFtZRgCIAEoCUgAiAEBEhcKCmF2YXRhcl91cmwYAyABKAlIAYgBARIQCgNiaW8YBCABKAlIAogBARITCgZwdWJsaWMYBSABKAhIA4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgYKBF9iaW9CCQoHX3B1YmxpYyI0ChNVcGRhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudCIqChZSZXNldEFnZW50VG9rZW5SZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIigKF1Jlc2V0QWdlbnRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJIiYKEkRlbGV0ZUFnZW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSIVChNEZWxldGVBZ2VudFJlc3BvbnNlIjYKD0FkZEFnZW50UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiMwoQQWRkQWdlbnRSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJECglNY3BBY2Nlc3MSJAoEbW9kZRgBIAEoDjIWLmZ1d2EudjEuTWNwQWNjZXNzTW9kZRIRCglhZ2VudF9pZHMYAiADKAkiKAoTR2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoUR2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiTAoTU2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoGYWNjZXNzGAIgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiOgoUU2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MqfgoNTWNwQWNjZXNzTW9kZRIfChtNQ1BfQUNDRVNTX01PREVfVU5TUEVDSUZJRUQQABIXChNNQ1BfQUNDRVNTX01PREVfQUxMEAESGgoWTUNQX0FDQ0VTU19NT0RFX0NIT1NFThACEhcKE01DUF9BQ0NFU1NfTU9ERV9PRkYQAzLkBAoMQWdlbnRTZXJ2aWNlEkUKCkxpc3RBZ2VudHMSGi5mdXdhLnYxLkxpc3RBZ2VudHNSZXF1ZXN0GhsuZnV3YS52MS5MaXN0QWdlbnRzUmVzcG9uc2USSAoLQ3JlYXRlQWdlbnQSGy5mdXdhLnYxLkNyZWF0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuQ3JlYXRlQWdlbnRSZXNwb25zZRJICgtVcGRhdGVBZ2VudBIbLmZ1d2EudjEuVXBkYXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5VcGRhdGVBZ2VudFJlc3BvbnNlElQKD1Jlc2V0QWdlbnRUb2tlbhIfLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVxdWVzdBogLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVzcG9uc2USSAoLRGVsZXRlQWdlbnQSGy5mdXdhLnYxLkRlbGV0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuRGVsZXRlQWdlbnRSZXNwb25zZRI/CghBZGRBZ2VudBIYLmZ1d2EudjEuQWRkQWdlbnRSZXF1ZXN0GhkuZnV3YS52MS5BZGRBZ2VudFJlc3BvbnNlEksKDEdldE1jcEFjY2VzcxIcLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVxdWVzdBodLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVzcG9uc2USSwoMU2V0TWNwQWNjZXNzEhwuZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXF1ZXN0Gh0uZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUiEwoRTGlzdEFnZW50c1JlcXVlc3QiNAoSTGlzdEFnZW50c1Jlc3BvbnNlEh4KBmFnZW50cxgBIAMoCzIOLmZ1d2EudjEuQWdlbnQiPAoSQ3JlYXRlQWdlbnRSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJDChNDcmVhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudBINCgV0b2tlbhgCIAEoCSK0AQoSVXBkYXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEhkKDGRpc3BsYXlfbmFtZRgCIAEoCUgAiAEBEhcKCmF2YXRhcl91cmwYAyABKAlIAYgBARIQCgNiaW8YBCABKAlIAogBARITCgZwdWJsaWMYBSABKAhIA4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgYKBF9iaW9CCQoHX3B1YmxpYyI0ChNVcGRhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudCIqChZSZXNldEFnZW50VG9rZW5SZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIigKF1Jlc2V0QWdlbnRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJIiYKEkRlbGV0ZUFnZW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSIVChNEZWxldGVBZ2VudFJlc3BvbnNlIjYKD0FkZEFnZW50UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiMwoQQWRkQWdlbnRSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJECglNY3BBY2Nlc3MSJAoEbW9kZRgBIAEoDjIWLmZ1d2EudjEuTWNwQWNjZXNzTW9kZRIRCglhZ2VudF9pZHMYAiADKAkiKAoTR2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoUR2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiTAoTU2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoGYWNjZXNzGAIgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiOgoUU2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MirQIKDUFnZW50RW5kcG9pbnQSEAoIYWdlbnRfaWQYASABKAkSCwoDdXJsGAIgASgJEg4KBmV2ZW50cxgDIAMoCRIOCgZzZWNyZXQYBCABKAkSLgoKdXBkYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNQoRbGFzdF9kZWxpdmVyZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKDWZhaWxpbmdfc2luY2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmxhc3RfZXJyb3IYCCABKAkSLwoLZGlzYWJsZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIisKF0dldEFnZW50RW5kcG9pbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIkQKGEdldEFnZW50RW5kcG9pbnRSZXNwb25zZRIoCghlbmRwb2ludBgBIAEoCzIWLmZ1d2EudjEuQWdlbnRFbmRwb2ludCJIChdTZXRBZ2VudEVuZHBvaW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCRILCgN1cmwYAiABKAkSDgoGZXZlbnRzGAMgAygJIkQKGFNldEFnZW50RW5kcG9pbnRSZXNwb25zZRIoCghlbmRwb2ludBgBIAEoCzIWLmZ1d2EudjEuQWdlbnRFbmRwb2ludCIzCh9SZXNldEFnZW50RW5kcG9pbnRTZWNyZXRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIkwKIFJlc2V0QWdlbnRFbmRwb2ludFNlY3JldFJlc3BvbnNlEigKCGVuZHBvaW50GAEgASgLMhYuZnV3YS52MS5BZ2VudEVuZHBvaW50IlQKDUFnZW50RGVsaXZlcnkSEAoIYWdlbnRfaWQYASABKAkSEQoJY2hhbGxlbmdlGAIgASgJEh4KBmV2ZW50cxgDIAMoCzIOLmZ1d2EudjEuRXZlbnQiVAoTQWdlbnREZWxpdmVyeUFuc3dlchIRCgljaGFsbGVuZ2UYASABKAkSKgoHcmVwbGllcxgCIAMoCzIZLmZ1d2EudjEuSW50ZXJhY3Rpb25SZXBseSKGAQoQSW50ZXJhY3Rpb25SZXBseRIWCg5pbnRlcmFjdGlvbl9pZBgBIAEoCRIPCgdjb250ZW50GAIgASgJEh4KBmVtYmVkcxgDIAMoCzIOLmZ1d2EudjEuRW1iZWQSKQoKY29tcG9uZW50cxgEIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93Kn4KDU1jcEFjY2Vzc01vZGUSHwobTUNQX0FDQ0VTU19NT0RFX1VOU1BFQ0lGSUVEEAASFwoTTUNQX0FDQ0VTU19NT0RFX0FMTBABEhoKFk1DUF9BQ0NFU1NfTU9ERV9DSE9TRU4QAhIXChNNQ1BfQUNDRVNTX01PREVfT0ZGEAMyhwcKDEFnZW50U2VydmljZRJFCgpMaXN0QWdlbnRzEhouZnV3YS52MS5MaXN0QWdlbnRzUmVxdWVzdBobLmZ1d2EudjEuTGlzdEFnZW50c1Jlc3BvbnNlEkgKC0NyZWF0ZUFnZW50EhsuZnV3YS52MS5DcmVhdGVBZ2VudFJlcXVlc3QaHC5mdXdhLnYxLkNyZWF0ZUFnZW50UmVzcG9uc2USSAoLVXBkYXRlQWdlbnQSGy5mdXdhLnYxLlVwZGF0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuVXBkYXRlQWdlbnRSZXNwb25zZRJUCg9SZXNldEFnZW50VG9rZW4SHy5mdXdhLnYxLlJlc2V0QWdlbnRUb2tlblJlcXVlc3QaIC5mdXdhLnYxLlJlc2V0QWdlbnRUb2tlblJlc3BvbnNlEkgKC0RlbGV0ZUFnZW50EhsuZnV3YS52MS5EZWxldGVBZ2VudFJlcXVlc3QaHC5mdXdhLnYxLkRlbGV0ZUFnZW50UmVzcG9uc2USPwoIQWRkQWdlbnQSGC5mdXdhLnYxLkFkZEFnZW50UmVxdWVzdBoZLmZ1d2EudjEuQWRkQWdlbnRSZXNwb25zZRJLCgxHZXRNY3BBY2Nlc3MSHC5mdXdhLnYxLkdldE1jcEFjY2Vzc1JlcXVlc3QaHS5mdXdhLnYxLkdldE1jcEFjY2Vzc1Jlc3BvbnNlEksKDFNldE1jcEFjY2VzcxIcLmZ1d2EudjEuU2V0TWNwQWNjZXNzUmVxdWVzdBodLmZ1d2EudjEuU2V0TWNwQWNjZXNzUmVzcG9uc2USVwoQR2V0QWdlbnRFbmRwb2ludBIgLmZ1d2EudjEuR2V0QWdlbnRFbmRwb2ludFJlcXVlc3QaIS5mdXdhLnYxLkdldEFnZW50RW5kcG9pbnRSZXNwb25zZRJXChBTZXRBZ2VudEVuZHBvaW50EiAuZnV3YS52MS5TZXRBZ2VudEVuZHBvaW50UmVxdWVzdBohLmZ1d2EudjEuU2V0QWdlbnRFbmRwb2ludFJlc3BvbnNlEm8KGFJlc2V0QWdlbnRFbmRwb2ludFNlY3JldBIoLmZ1d2EudjEuUmVzZXRBZ2VudEVuZHBvaW50U2VjcmV0UmVxdWVzdBopLmZ1d2EudjEuUmVzZXRBZ2VudEVuZHBvaW50U2VjcmV0UmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.Agent
@@ -414,6 +414,302 @@ export const SetMcpAccessResponseSchema: GenMessage<SetMcpAccessResponse> = /*@_
   messageDesc(file_fuwa_v1_agent, 17);
 
 /**
+ * Where an agent hears about its events when it doesn't keep a stream open
+ * (docs/agent-endpoints.md). The instance posts each server's events to
+ * `url` in order, as an AgentDelivery in proto3 JSON, signed with `secret`
+ * the Standard Webhooks way (`webhook-id`, `webhook-timestamp`,
+ * `webhook-signature` headers).
+ *
+ * @generated from message fuwa.v1.AgentEndpoint
+ */
+export type AgentEndpoint = Message<"fuwa.v1.AgentEndpoint"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * https (or http where the instance allows any address); empty when off.
+   *
+   * @generated from field: string url = 2;
+   */
+  url: string;
+
+  /**
+   * Which events go there, by their name in Event's payload
+   * ("message_created", "interaction_created"...). Empty for all of them.
+   *
+   * @generated from field: repeated string events = 3;
+   */
+  events: string[];
+
+  /**
+   * "whsec_" and the key in base64, as Standard Webhooks libraries take it.
+   *
+   * @generated from field: string secret = 4;
+   */
+  secret: string;
+
+  /**
+   * When it was last set.
+   *
+   * @generated from field: google.protobuf.Timestamp updated_at = 5;
+   */
+  updatedAt?: Timestamp | undefined;
+
+  /**
+   * When a delivery last went through; unset if none has.
+   *
+   * @generated from field: google.protobuf.Timestamp last_delivered_at = 6;
+   */
+  lastDeliveredAt?: Timestamp | undefined;
+
+  /**
+   * Since when deliveries have been failing; unset while they work.
+   *
+   * @generated from field: google.protobuf.Timestamp failing_since = 7;
+   */
+  failingSince?: Timestamp | undefined;
+
+  /**
+   * What went wrong last ("answered 500", "timed out"...).
+   *
+   * @generated from field: string last_error = 8;
+   */
+  lastError: string;
+
+  /**
+   * When the instance turned it off after a day of failures. Set the URL
+   * again to turn it back on; what happened meanwhile isn't sent.
+   *
+   * @generated from field: google.protobuf.Timestamp disabled_at = 9;
+   */
+  disabledAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.AgentEndpoint.
+ * Use `create(AgentEndpointSchema)` to create a new message.
+ */
+export const AgentEndpointSchema: GenMessage<AgentEndpoint> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 18);
+
+/**
+ * @generated from message fuwa.v1.GetAgentEndpointRequest
+ */
+export type GetAgentEndpointRequest = Message<"fuwa.v1.GetAgentEndpointRequest"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetAgentEndpointRequest.
+ * Use `create(GetAgentEndpointRequestSchema)` to create a new message.
+ */
+export const GetAgentEndpointRequestSchema: GenMessage<GetAgentEndpointRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 19);
+
+/**
+ * @generated from message fuwa.v1.GetAgentEndpointResponse
+ */
+export type GetAgentEndpointResponse = Message<"fuwa.v1.GetAgentEndpointResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.AgentEndpoint endpoint = 1;
+   */
+  endpoint?: AgentEndpoint | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetAgentEndpointResponse.
+ * Use `create(GetAgentEndpointResponseSchema)` to create a new message.
+ */
+export const GetAgentEndpointResponseSchema: GenMessage<GetAgentEndpointResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 20);
+
+/**
+ * @generated from message fuwa.v1.SetAgentEndpointRequest
+ */
+export type SetAgentEndpointRequest = Message<"fuwa.v1.SetAgentEndpointRequest"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: string url = 2;
+   */
+  url: string;
+
+  /**
+   * @generated from field: repeated string events = 3;
+   */
+  events: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.SetAgentEndpointRequest.
+ * Use `create(SetAgentEndpointRequestSchema)` to create a new message.
+ */
+export const SetAgentEndpointRequestSchema: GenMessage<SetAgentEndpointRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 21);
+
+/**
+ * @generated from message fuwa.v1.SetAgentEndpointResponse
+ */
+export type SetAgentEndpointResponse = Message<"fuwa.v1.SetAgentEndpointResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.AgentEndpoint endpoint = 1;
+   */
+  endpoint?: AgentEndpoint | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetAgentEndpointResponse.
+ * Use `create(SetAgentEndpointResponseSchema)` to create a new message.
+ */
+export const SetAgentEndpointResponseSchema: GenMessage<SetAgentEndpointResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 22);
+
+/**
+ * @generated from message fuwa.v1.ResetAgentEndpointSecretRequest
+ */
+export type ResetAgentEndpointSecretRequest = Message<"fuwa.v1.ResetAgentEndpointSecretRequest"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ResetAgentEndpointSecretRequest.
+ * Use `create(ResetAgentEndpointSecretRequestSchema)` to create a new message.
+ */
+export const ResetAgentEndpointSecretRequestSchema: GenMessage<ResetAgentEndpointSecretRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 23);
+
+/**
+ * @generated from message fuwa.v1.ResetAgentEndpointSecretResponse
+ */
+export type ResetAgentEndpointSecretResponse = Message<"fuwa.v1.ResetAgentEndpointSecretResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.AgentEndpoint endpoint = 1;
+   */
+  endpoint?: AgentEndpoint | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ResetAgentEndpointSecretResponse.
+ * Use `create(ResetAgentEndpointSecretResponseSchema)` to create a new message.
+ */
+export const ResetAgentEndpointSecretResponseSchema: GenMessage<ResetAgentEndpointSecretResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 24);
+
+/**
+ * What the instance posts to an agent's endpoint, as proto3 JSON.
+ *
+ * @generated from message fuwa.v1.AgentDelivery
+ */
+export type AgentDelivery = Message<"fuwa.v1.AgentDelivery"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * Set only on the check sent when the URL is saved, which has no events:
+   * answer it with an AgentDeliveryAnswer carrying the same challenge.
+   *
+   * @generated from field: string challenge = 2;
+   */
+  challenge: string;
+
+  /**
+   * One server's events, in order, as EventService.Subscribe would send them
+   * to the agent (the same visibility, and interactions with their
+   * arguments). A delivery that failed comes again, maybe with more events
+   * after it, so skip ones whose (server_id, sequence) you've had. Channels
+   * appearing or going as the agent's permissions change come with sequence
+   * 0, right after the event that caused them. Events that aren't stored
+   * (voice states, live tiles) aren't delivered.
+   *
+   * @generated from field: repeated fuwa.v1.Event events = 3;
+   */
+  events: Event[];
+};
+
+/**
+ * Describes the message fuwa.v1.AgentDelivery.
+ * Use `create(AgentDeliverySchema)` to create a new message.
+ */
+export const AgentDeliverySchema: GenMessage<AgentDelivery> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 25);
+
+/**
+ * What an agent may answer a delivery with (any 2xx says it was received;
+ * a body is optional).
+ *
+ * @generated from message fuwa.v1.AgentDeliveryAnswer
+ */
+export type AgentDeliveryAnswer = Message<"fuwa.v1.AgentDeliveryAnswer"> & {
+  /**
+   * The check's challenge, echoed back.
+   *
+   * @generated from field: string challenge = 1;
+   */
+  challenge: string;
+
+  /**
+   * Answers to interactions in this delivery, each posted as if the agent
+   * called SendMessage with interaction_id: the same permissions, slow mode
+   * and AutoMod apply. A refused reply is dropped; the delivery still counts.
+   *
+   * @generated from field: repeated fuwa.v1.InteractionReply replies = 2;
+   */
+  replies: InteractionReply[];
+};
+
+/**
+ * Describes the message fuwa.v1.AgentDeliveryAnswer.
+ * Use `create(AgentDeliveryAnswerSchema)` to create a new message.
+ */
+export const AgentDeliveryAnswerSchema: GenMessage<AgentDeliveryAnswer> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 26);
+
+/**
+ * @generated from message fuwa.v1.InteractionReply
+ */
+export type InteractionReply = Message<"fuwa.v1.InteractionReply"> & {
+  /**
+   * @generated from field: string interaction_id = 1;
+   */
+  interactionId: string;
+
+  /**
+   * @generated from field: string content = 2;
+   */
+  content: string;
+
+  /**
+   * @generated from field: repeated fuwa.v1.Embed embeds = 3;
+   */
+  embeds: Embed[];
+
+  /**
+   * @generated from field: repeated fuwa.v1.ComponentRow components = 4;
+   */
+  components: ComponentRow[];
+};
+
+/**
+ * Describes the message fuwa.v1.InteractionReply.
+ * Use `create(InteractionReplySchema)` to create a new message.
+ */
+export const InteractionReplySchema: GenMessage<InteractionReply> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 27);
+
+/**
  * @generated from enum fuwa.v1.McpAccessMode
  */
 export enum McpAccessMode {
@@ -554,6 +850,41 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof SetMcpAccessRequestSchema;
     output: typeof SetMcpAccessResponseSchema;
+  },
+  /**
+   * The agent's endpoint (docs/agent-endpoints.md): a URL the instance posts
+   * its events to, for agents that don't hold a stream open. Made, with its
+   * signing secret, the first time its owner asks.
+   *
+   * @generated from rpc fuwa.v1.AgentService.GetAgentEndpoint
+   */
+  getAgentEndpoint: {
+    methodKind: "unary";
+    input: typeof GetAgentEndpointRequestSchema;
+    output: typeof GetAgentEndpointResponseSchema;
+  },
+  /**
+   * Sets the URL and which events go there, or turns the endpoint off with
+   * an empty URL. A URL is saved only once it answers a check (an
+   * AgentDelivery with `challenge` set) with that challenge. Deliveries start
+   * from the events after this call.
+   *
+   * @generated from rpc fuwa.v1.AgentService.SetAgentEndpoint
+   */
+  setAgentEndpoint: {
+    methodKind: "unary";
+    input: typeof SetAgentEndpointRequestSchema;
+    output: typeof SetAgentEndpointResponseSchema;
+  },
+  /**
+   * A new signing secret. The old one stops being used at once.
+   *
+   * @generated from rpc fuwa.v1.AgentService.ResetAgentEndpointSecret
+   */
+  resetAgentEndpointSecret: {
+    methodKind: "unary";
+    input: typeof ResetAgentEndpointSecretRequestSchema;
+    output: typeof ResetAgentEndpointSecretResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_agent, 0);

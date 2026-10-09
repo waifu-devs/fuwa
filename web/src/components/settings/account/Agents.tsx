@@ -26,6 +26,7 @@ import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
+import { AgentEndpointSection } from "@/components/settings/account/AgentEndpoint";
 import { Count } from "@/components/motion";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
@@ -34,6 +35,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { T, useI18n } from "@/i18n/react";
+import { instanceHas } from "@/lib/compat";
 import { ago, displayName, toDate } from "@/lib/format";
 import { accessOf, has } from "@/lib/permissions";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
@@ -397,6 +399,8 @@ function AgentCard({
   useEffect(() => setBio(a.bio), [a.bio]);
   const servers = useMemo(() => (open ? managedServers(instanceKey) : []), [open, instanceKey]);
   const inst = useInstance(instanceKey);
+  // Endpoints only where the instance has them (docs/agent-endpoints.md).
+  const endpointsHere = instanceHas(inst?.node?.versions, "agent-endpoints");
 
   async function save(change: { displayName?: string; avatarUrl?: string; bio?: string; public?: boolean }) {
     setBusy("save");
@@ -530,6 +534,8 @@ function AgentCard({
                   hint={t("accountsettings.agents.publicHint")}
                 />
               </motion.div>
+
+              {endpointsHere && <AgentEndpointSection instanceKey={instanceKey} agentId={user.id} />}
 
               <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-center gap-2">
                 <AddToServer servers={servers} busy={busy} added={added} inServer={inServer} onAdd={(server) => void addTo(server)} />

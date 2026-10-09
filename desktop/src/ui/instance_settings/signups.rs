@@ -33,6 +33,15 @@ fn creation_label(v: i32) -> String {
     }
 }
 
+/// Where agents' endpoints may be, as the default reads.
+fn endpoints_label(v: i32) -> String {
+    match pb::AgentEndpoints::try_from(v) {
+        Ok(pb::AgentEndpoints::Any) => t("instancesettings.signUps.endpointsAny"),
+        Ok(pb::AgentEndpoints::Off) => t("instancesettings.signUps.endpointsOff"),
+        _ => t("instancesettings.signUps.endpointsPublic"),
+    }
+}
+
 impl InstanceSettingsView {
     pub(super) fn signups_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (Some(draft), Some(config)) = (self.draft.clone(), self.config.clone()) else {
@@ -250,6 +259,51 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
+        if self.instance_has("agent-endpoints") {
+            let value = admin::endpoints_of(&draft);
+            let endpoints = self.choice(
+                "agent-endpoints",
+                value,
+                vec![
+                    Opt::new(
+                        pb::AgentEndpoints::Public as i32,
+                        t("instancesettings.signUps.endpointsPublic"),
+                        t("instancesettings.signUps.endpointsPublicHint"),
+                        "globe",
+                    ),
+                    Opt::new(
+                        pb::AgentEndpoints::Any as i32,
+                        t("instancesettings.signUps.endpointsAny"),
+                        t("instancesettings.signUps.endpointsAnyHint"),
+                        "network",
+                    ),
+                    Opt::new(
+                        pb::AgentEndpoints::Off as i32,
+                        t("instancesettings.signUps.endpointsOff"),
+                        t("instancesettings.signUps.endpointsOffHint"),
+                        "ban",
+                    ),
+                ],
+                p,
+                window,
+                cx,
+                |this, v, _, cx| this.patch(cx, |d| d.agent_endpoints = v),
+            );
+            let anywhere = value == pb::AgentEndpoints::Any as i32;
+            page = page.child(self.setting(
+                "agent-endpoints",
+                &t("instancesettings.nav.agentEndpoints"),
+                Some(&t("instancesettings.signUps.endpointsHint")),
+                &["agent_endpoints"],
+                &endpoints_label(admin::endpoints_of(&defaults)),
+                5,
+                div().flex().flex_col().gap(px(12.0)).child(endpoints).when(anywhere, |el| {
+                    el.child(self.notice("endpoints-any", &t("instancesettings.signUps.endpointsAnyNotice"), p))
+                }),
+                p,
+                cx,
+            ));
+        }
         page = page.child(self.setting(
             "mcp",
             &t("instancesettings.nav.mcp"),

@@ -90,6 +90,9 @@ pub struct App {
     /// Accounts joining servers, as (account, server), for streams that
     /// follow new servers. See [`App::joined_server`].
     joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
+    /// Agents whose endpoint changed (an empty id: maybe any of them), for
+    /// what deliveries remember of it. See [`App::agent_endpoint_changed`].
+    endpoints_changed: tokio::sync::broadcast::Sender<Arc<str>>,
     /// Whether a newer fuwa is out (`releases.rs`); checked by a single
     /// process and a split instance's directory, which answers GetNode.
     pub releases: Arc<crate::releases::Releases>,
@@ -242,6 +245,7 @@ impl App {
             ended: tokio::sync::broadcast::Sender::new(256),
             session_epoch: std::sync::atomic::AtomicU64::new(0),
             joined: tokio::sync::broadcast::Sender::new(256),
+            endpoints_changed: tokio::sync::broadcast::Sender::new(256),
             releases: crate::releases::Releases::new(update_check, release_cache),
         });
         if app.node.is_some() {
@@ -254,6 +258,8 @@ impl App {
         // Shared channels' messages reach the servers showing them from the start.
         if matches!(app.link, Link::Alone | Link::Shard(_)) {
             crate::api::spawn_shared_fanout(app.clone());
+            // Agents' endpoints hear of what happened while the instance was down.
+            crate::api::spawn_agent_deliveries(app.clone());
         }
         Ok(app)
     }
@@ -292,6 +298,18 @@ impl App {
     /// Accounts joining servers from now on, as (account, server).
     pub fn joined_servers(&self) -> tokio::sync::broadcast::Receiver<(Arc<str>, Arc<str>)> {
         self.joined.subscribe()
+    }
+
+    /// Says an agent's endpoint was set, turned off or given a new secret
+    /// (an empty id: any may have been), where deliveries run, and from a
+    /// directory to its shards.
+    pub fn agent_endpoint_changed(&self, agent_id: &str) {
+        let _ = self.endpoints_changed.send(agent_id.into());
+    }
+
+    /// Agents whose endpoint changes from now on.
+    pub fn agent_endpoint_changes(&self) -> tokio::sync::broadcast::Receiver<Arc<str>> {
+        self.endpoints_changed.subscribe()
     }
 
     pub fn node(&self) -> Result<&NodeDb> {

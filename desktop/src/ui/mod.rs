@@ -65,6 +65,7 @@ mod secure_threads;
 mod server_settings;
 mod settings;
 mod settings_account;
+mod settings_agent_endpoint;
 mod settings_agents;
 mod settings_app;
 mod settings_backup;

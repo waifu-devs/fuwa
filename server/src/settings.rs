@@ -22,6 +22,7 @@ pub const FIELDS: &[&str] = &[
     "sign_in_providers",
     "server_creation",
     "agent_creation",
+    "agent_endpoints",
     "servers_per_account",
     "default_limits.members",
     "default_limits.channels",
@@ -91,6 +92,8 @@ pub struct Settings {
     pub sign_in_providers: Vec<crate::sso::providers::Setting>,
     pub server_creation: pb::ServerCreation,
     pub agent_creation: pb::AgentCreation,
+    /// Where agents' endpoints may point (docs/agent-endpoints.md).
+    pub agent_endpoints: pb::AgentEndpoints,
     pub limits: Limits,
     pub telemetry: bool,
     pub web: bool,
@@ -163,6 +166,7 @@ impl Settings {
             sign_in_providers: Vec::new(),
             server_creation: config.server_creation,
             agent_creation: config.agent_creation,
+            agent_endpoints: config.agent_endpoints,
             limits: config.limits.clone(),
             telemetry: config.telemetry.enabled,
             web: config.web,
@@ -304,6 +308,7 @@ impl Settings {
             sign_in_providers: self.sign_in_providers.iter().map(|setting| setting.to_pb()).collect(),
             server_creation: self.server_creation as i32,
             agent_creation: self.agent_creation as i32,
+            agent_endpoints: self.agent_endpoints as i32,
             servers_per_account: limits.servers_per_account,
             default_limits: Some(pb::ServerLimits {
                 members: limits.members,
@@ -446,6 +451,14 @@ impl Settings {
                     pb::AgentCreation::Unspecified => "",
                 },
             ),
+            "agent_endpoints" => Value::from(
+                match pb::AgentEndpoints::try_from(from.agent_endpoints).unwrap_or(pb::AgentEndpoints::Unspecified) {
+                    pb::AgentEndpoints::Public => "public",
+                    pb::AgentEndpoints::Any => "any",
+                    pb::AgentEndpoints::Off => "off",
+                    pb::AgentEndpoints::Unspecified => "",
+                },
+            ),
             "servers_per_account" => Value::from(from.servers_per_account),
             "default_limits.members" => Value::from(limits.members),
             "default_limits.channels" => Value::from(limits.channels),
@@ -551,6 +564,11 @@ impl Settings {
                 pb::AgentCreation::Disabled => "off",
                 _ => "everyone",
             }),
+            "agent_endpoints" => Value::from(match self.agent_endpoints {
+                pb::AgentEndpoints::Any => "any",
+                pb::AgentEndpoints::Off => "off",
+                _ => "public",
+            }),
             "servers_per_account" => Value::from(limits.servers_per_account),
             "default_limits.members" => Value::from(limits.members),
             "default_limits.channels" => Value::from(limits.channels),
@@ -650,6 +668,14 @@ impl Settings {
                     Some("admins") => pb::AgentCreation::Admins,
                     Some("off") => pb::AgentCreation::Disabled,
                     _ => return Err(Error::invalid("agent_creation must be everyone, admins or off")),
+                }
+            }
+            "agent_endpoints" => {
+                self.agent_endpoints = match value.as_str() {
+                    Some("public") => pb::AgentEndpoints::Public,
+                    Some("any") => pb::AgentEndpoints::Any,
+                    Some("off") => pb::AgentEndpoints::Off,
+                    _ => return Err(Error::invalid("agent_endpoints must be public, any or off")),
                 }
             }
             "servers_per_account" => self.limits.servers_per_account = cap(field, value)?,
