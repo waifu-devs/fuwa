@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
@@ -138,8 +137,9 @@ struct Fake {
     base: String,
     /// code → (provider, PKCE challenge, who)
     codes: Mutex<HashMap<String, (String, String, String)>>,
-    /// Token requests seen, answered or not.
-    token_calls: AtomicUsize,
+    /// The codes token requests came with, answered or not. Shared by every
+    /// test in the file, so each looks for its own.
+    token_codes: Mutex<Vec<String>>,
 }
 
 /// Where a provider says `who`'s picture is. Some people's pictures misbehave:
@@ -210,8 +210,8 @@ async fn answer(State(fake): State<Arc<Fake>>, uri: Uri, headers: HeaderMap, bod
         return ([("content-type", "image/png")], "not a picture at all").into_response();
     }
     if rest.ends_with("token") {
-        fake.token_calls.fetch_add(1, Ordering::SeqCst);
         let form: HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
+        fake.token_codes.lock().unwrap().push(form.get("code").cloned().unwrap_or_default());
         let Some(code) = form.get("code") else { return StatusCode::BAD_REQUEST.into_response() };
         let basic = format!("Basic {}", STANDARD.encode(format!("client-{provider}:{CLIENT_SECRET}")));
         let client_ok = match provider {
@@ -645,7 +645,6 @@ async fn a_used_answer_never_reaches_the_provider_again() {
     let back = landed(&fake.sign_in(&instance, &started.authorize_url, "hal").await);
     assert!(back.contains_key("code"));
     // The same state again, with any code: refused before a token is asked for.
-    let before = fake.token_calls.load(Ordering::SeqCst);
     let again = browser()
         .get(format!("http://{}/sso/instance/providers/twitch", instance.addr))
         .query(&[("state", started.state.as_str()), ("code", "replayed")])
@@ -653,7 +652,7 @@ async fn a_used_answer_never_reaches_the_provider_again() {
         .await
         .unwrap();
     assert!(landed(&again).contains_key("error"));
-    assert_eq!(fake.token_calls.load(Ordering::SeqCst), before, "no call to Twitch");
+    assert!(!fake.token_codes.lock().unwrap().iter().any(|code| code == "replayed"), "no call to Twitch");
     // The answer it already gave still finishes, once.
     assert!(finish(&mut c, &back, SECRET, Some(("hal", false))).await.unwrap().created);
 
