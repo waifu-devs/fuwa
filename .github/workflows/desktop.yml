@@ -6,8 +6,9 @@ name: Desktop installers
 #            (.app.zip), which the installed app updates itself from
 #   Windows  fuwa-desktop-<version>-x86_64-windows-setup.exe
 # and the bare program for each, as before. cargo-packager does the packing,
-# from [package.metadata.packager] in desktop/Cargo.toml. They aren't signed
-# yet, so macOS and Windows warn the first time they open.
+# from [package.metadata.packager] in desktop/Cargo.toml, which also signs the
+# macOS app ad hoc. Neither has a publisher Apple or Microsoft knows, so they
+# warn the first time they open (docs/self-hosting.md says what to press).
 #
 # Release runs this for each tag and attaches what it makes. A pull request
 # that changes the packaging or our copy of GPUI (desktop/vendor, whose Metal
