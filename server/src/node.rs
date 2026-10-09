@@ -2613,7 +2613,6 @@ impl NodeDb {
         .await
     }
 
-    /// The endpoints of these agents that are on, with the agents.
     /// Agents' endpoints that are on, each with its agent and the agent's owner.
     pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, String, EndpointRow)>> {
         let conn = self.read()?;
