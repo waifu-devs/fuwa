@@ -2614,7 +2614,8 @@ impl NodeDb {
     }
 
     /// The endpoints of these agents that are on, with the agents.
-    pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, EndpointRow)>> {
+    /// Agents' endpoints that are on, each with its agent and the agent's owner.
+    pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, String, EndpointRow)>> {
         let conn = self.read()?;
         let mut found = Vec::new();
         for agent_id in agent_ids {
@@ -2628,9 +2629,16 @@ impl NodeDb {
             else {
                 continue;
             };
-            if let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) {
-                found.push((account, row));
-            }
+            let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) else {
+                continue;
+            };
+            let owner_id = query_one(&conn, "SELECT owner_id FROM accounts WHERE id = ?1", [agent_id.as_str()], |r| {
+                r.get::<Option<String>>(0)
+            })
+            .await?
+            .flatten()
+            .unwrap_or_default();
+            found.push((account, owner_id, row));
         }
         Ok(found)
     }

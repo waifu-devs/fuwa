@@ -383,13 +383,14 @@ impl App {
         let found = self.node()?.active_agent_endpoints(agent_ids).await?;
         Ok(found
             .into_iter()
-            .map(|(account, row)| cpb::DeliveryEndpoint {
+            .map(|(account, owner_id, row)| cpb::DeliveryEndpoint {
                 agent: Some(super::account_to_pb(&account)),
                 url: row.url,
                 events: row.events,
                 secret: row.secret,
                 epoch: row.epoch,
                 set_at: row.updated_at,
+                owner_id,
             })
             .collect())
     }

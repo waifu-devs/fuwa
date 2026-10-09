@@ -54,9 +54,13 @@ const MAX_ANSWER: usize = 1 << 20;
 /// Longest URL an endpoint may have.
 const MAX_URL: usize = 2048;
 /// Deliveries in flight at once, from this part. Each agent has one at a
-/// time, whatever the number of its servers (`Run::lane`), so an endpoint that
-/// never answers holds one of these, not all of them.
+/// time, whatever the number of its servers (`Run::lane`), and an owner's agents
+/// [`OWNER_IN_FLIGHT`] between them (`Run::owner`), so an account's
+/// endpoints that never answer hold a few of these, not all of them.
 static IN_FLIGHT: Semaphore = Semaphore::const_new(64);
+/// Deliveries in flight at once for one owner's agents, so an account's many
+/// agents can't hold all of [`IN_FLIGHT`] either.
+const OWNER_IN_FLIGHT: usize = 4;
 /// Checks of new endpoints in flight at once, apart from deliveries.
 static CHECKS: Semaphore = Semaphore::const_new(8);
 /// Checks one account may have sent in a minute.
@@ -315,6 +319,8 @@ pub fn spawn_agent_deliveries(app: Arc<App>) {
 /// An endpoint that's on, as deliveries need it.
 struct Endpoint {
     agent: Account,
+    /// Whose agent it is; the agent itself where the directory didn't say.
+    owner_id: String,
     url: String,
     /// Empty for every event.
     events: HashSet<String>,
@@ -327,8 +333,10 @@ struct Endpoint {
 impl Endpoint {
     fn from_cluster(found: cpb::DeliveryEndpoint) -> Option<(String, Arc<Self>)> {
         let agent = crate::cluster::account_from_pb(found.agent?);
+        let owner_id = if found.owner_id.is_empty() { agent.id.clone() } else { found.owner_id };
         let endpoint = Self {
             agent,
+            owner_id,
             url: found.url,
             events: found.events.into_iter().collect(),
             secret: found.secret,
@@ -416,11 +424,20 @@ struct Deliveries {
     workers: HashMap<(String, String), Worker>,
     /// Each agent's one delivery in flight, shared by its workers.
     lanes: HashMap<String, Arc<Semaphore>>,
+    /// Each owner's few deliveries in flight, shared by their agents' workers.
+    owners: HashMap<String, Arc<Semaphore>>,
 }
 
 impl Deliveries {
     fn new(app: Arc<App>) -> Self {
-        Self { app, known: Arc::default(), agents: HashMap::new(), workers: HashMap::new(), lanes: HashMap::new() }
+        Self {
+            app,
+            known: Arc::default(),
+            agents: HashMap::new(),
+            workers: HashMap::new(),
+            lanes: HashMap::new(),
+            owners: HashMap::new(),
+        }
     }
 
     async fn run(mut self, mut tap: mpsc::Receiver<Arc<pb::Event>>, mut changes: broadcast::Receiver<Arc<str>>) {
@@ -462,6 +479,8 @@ impl Deliveries {
         self.workers.retain(|_, worker| !worker.task.is_finished());
         let working: HashSet<&String> = self.workers.keys().map(|(_, agent)| agent).collect();
         self.lanes.retain(|agent, _| working.contains(agent));
+        // Held by a worker's run, or by no one.
+        self.owners.retain(|_, owner| Arc::strong_count(owner) > 1);
         for ((_, agent), worker) in &self.workers {
             if agent_id.is_empty() || agent == agent_id {
                 worker.kick.notify_one();
@@ -499,7 +518,7 @@ impl Deliveries {
             tracing::info!("couldn't look agents' endpoints up; trying with the next event");
             return;
         };
-        for agent_id in endpoints.into_keys() {
+        for (agent_id, endpoint) in endpoints {
             let key = (sdb.id.clone(), agent_id);
             if let Some(worker) = self.workers.get(&key)
                 && !worker.task.is_finished()
@@ -509,8 +528,14 @@ impl Deliveries {
             }
             let (wake, kick) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
             let lane = self.lanes.entry(key.1.clone()).or_insert_with(|| Arc::new(Semaphore::new(1))).clone();
+            let owner = self
+                .owners
+                .entry(endpoint.owner_id.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(OWNER_IN_FLIGHT)))
+                .clone();
             let run = Run {
                 lane,
+                owner,
                 app: self.app.clone(),
                 known: self.known.clone(),
                 server_id: key.0.clone(),
@@ -545,6 +570,8 @@ struct Run {
     kick: Arc<Notify>,
     /// The agent's one delivery in flight, shared with its other servers' workers.
     lane: Arc<Semaphore>,
+    /// Its owner's few, shared with their other agents' workers.
+    owner: Arc<Semaphore>,
 }
 
 /// A batch read from the log, ready to post.
@@ -634,10 +661,14 @@ impl Run {
                 continue;
             }
             let body = delivery_json(&self.agent_id, "", batch.events);
+            // The agent's turn, then its owner's: always in that order.
+            let turns = async { (self.lane.acquire().await, self.owner.acquire().await) };
             let posted = tokio::select! {
-                turn = self.lane.acquire() => match turn {
-                    Ok(_turn) => post(&IN_FLIGHT, policy, &endpoint.url, &endpoint.secret, &batch.id, body).await,
-                    Err(_) => return,
+                turns = turns => match turns {
+                    (Ok(_agent), Ok(_owner)) => {
+                        post(&IN_FLIGHT, policy, &endpoint.url, &endpoint.secret, &batch.id, body).await
+                    }
+                    _ => return,
                 },
                 _ = self.app.shutdown.cancelled() => return,
             };

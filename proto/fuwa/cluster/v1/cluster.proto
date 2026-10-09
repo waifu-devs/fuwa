@@ -586,6 +586,8 @@ message DeliveryEndpoint {
   int64 epoch = 5;
   // When the URL was set, in unix ms.
   int64 set_at = 6;
+  // The agent's owner, whose agents share a few deliveries in flight.
+  string owner_id = 7;
 }
 
 message ReportAgentDeliveryRequest {
