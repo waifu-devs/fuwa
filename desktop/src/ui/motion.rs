@@ -6,11 +6,13 @@
 
 use std::time::Duration;
 
+use gpui_kit::prelude::FluentBuilder as _;
+
 use gpui_kit::base::motion::{Spring, spring};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Entity, InteractiveElement as _, IntoElement,
-    MouseButton, SharedString, SpringConfig, Stateful, StatefulInteractiveElement as _, Styled, Window, px, radians,
-    sampled_easing,
+    MouseButton, ParentElement as _, SharedString, SpringConfig, Stateful, StatefulInteractiveElement as _, Styled,
+    Window, px, radians, sampled_easing,
 };
 
 /// The spring things enter with: quick, with a touch of overshoot.
@@ -175,6 +177,115 @@ pub fn count_up(id: impl Into<ElementId>, value: f64, delay: Duration, format: f
             move |el, t| gpui_kit::ParentElement::child(el, format(value * f64::from(t.clamp(0.0, 1.0)))),
         )
         .into_any_element()
+}
+
+/// The web's `SPRING` (`stiffness: 520, damping: 34`), for text that swaps and counts that roll.
+const SWAP: SpringConfig = SpringConfig::new(520.0, 34.0, 1.0);
+
+/// What a swapping text showed, and how many times it has changed.
+struct Swapped {
+    now: SharedString,
+    before: Option<SharedString>,
+    up: bool,
+    changes: u64,
+}
+
+/// Remembers `text` under `id` and says what it was before, if it just
+/// changed: the web's `AnimatePresence` with `initial={false}`, so nothing
+/// moves when it first shows.
+fn swapped(
+    id: &SharedString,
+    text: SharedString,
+    up: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> (Option<SharedString>, bool, u64) {
+    let state = window.use_keyed_state(SharedString::from(format!("{id}|swap")), cx, |_, _| Swapped {
+        now: text.clone(),
+        before: None,
+        up,
+        changes: 0,
+    });
+    state.update(cx, |s, _| {
+        if s.now != text {
+            s.before = Some(std::mem::replace(&mut s.now, text));
+            s.up = up;
+            s.changes += 1;
+        }
+        (s.before.clone(), s.up, s.changes)
+    })
+}
+
+/// Text that slides and fades to its new value when it changes, like a
+/// renamed server (the web's `SwapText`): the new one rises `0.6em` into
+/// place while the old one rises out. `size` is the text's size in pixels.
+pub fn swap_text(
+    id: impl Into<SharedString>,
+    text: impl Into<SharedString>,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let text = text.into();
+    let (before, _, changes) = swapped(&id, text.clone(), true, window, cx);
+    roll(id, text, before, true, changes, size * 0.6, false)
+}
+
+/// A small count, like an unread badge, that rolls to its new value: up when
+/// it grows, down when it shrinks (the web's `Count`). Past `max` it reads
+/// "max+". `size` is the text's size in pixels.
+pub fn count(
+    id: impl Into<SharedString>,
+    value: u64,
+    max: Option<u64>,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id = id.into();
+    let text: SharedString = match max {
+        Some(max) if value > max => format!("{max}+").into(),
+        _ => value.to_string().into(),
+    };
+    let last = window.use_keyed_state(SharedString::from(format!("{id}|count")), cx, |_, _| value);
+    let up = value >= *last.read(cx);
+    last.update(cx, |v, _| *v = value);
+    let (before, up_then, changes) = swapped(&id, text.clone(), up, window, cx);
+    roll(id, text, before, up_then, changes, size * 1.25, true)
+}
+
+/// Draws `text` coming in and `before` going out, `distance` pixels apart,
+/// rising when `up`. A count clips to its line, as the web's `overflow-hidden`.
+fn roll(
+    id: SharedString,
+    text: SharedString,
+    before: Option<SharedString>,
+    up: bool,
+    changes: u64,
+    distance: f32,
+    clip: bool,
+) -> AnyElement {
+    let Some(before) = before else {
+        return gpui_kit::div().child(text).into_any_element();
+    };
+    let (duration, easing) = sampled_easing(SWAP, 0.002);
+    let easing = std::rc::Rc::new(easing);
+    let sign = if up { 1.0 } else { -1.0 };
+    let incoming = {
+        let easing = easing.clone();
+        gpui_kit::div().child(text).with_animation(
+            ElementId::Name(format!("{id}|in{changes}").into()),
+            Animation::new(duration).with_easing(move |t| easing(t)),
+            move |el, t| el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * distance * sign)),
+        )
+    };
+    let outgoing = gpui_kit::div().absolute().top_0().left_0().child(before).with_animation(
+        ElementId::Name(format!("{id}|out{changes}").into()),
+        Animation::new(duration).with_easing(move |t| easing(t)),
+        move |el, t| el.opacity((1.0 - t).clamp(0.0, 1.0)).translate_y(px(-t * distance * sign)),
+    );
+    gpui_kit::div().relative().when(clip, |el| el.overflow_hidden()).child(incoming).child(outgoing).into_any_element()
 }
 
 /// How something looks while it's pointed at or held: scaled, turned
