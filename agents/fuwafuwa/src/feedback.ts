@@ -36,6 +36,82 @@ export function neutral(text: string): string {
     .replace(/@(?=[\w-])/g, `@${ZWSP}`);
 }
 
+/**
+ * Links that don't work as links, broken the way security write-ups do it:
+ * `hxxps[:]//`, any other `scheme[:]//`, `[/]/host` for addresses without a
+ * scheme and `www[.]`. GitHub neither links nor loads them: no picture
+ * fetched from someone's server, no link to click in an issue.
+ */
+export function defanged(text: string): string {
+  return text
+    .replace(/\b(h)ttp(?=s?:\/\/)/gi, "$1xxp")
+    .replace(/:\/\//g, "[:]//")
+    .replace(/(^|[\s("'=<])\/\/(?=[\w-])/g, "$1[/]/")
+    .replace(/\b(www)\./gi, "$1[.]");
+}
+
+/**
+ * Text Claude wrote from feedback, as it can go to GitHub: like the feedback
+ * itself, it names and pings nobody ({@link neutral}) and carries no live
+ * links ({@link defanged}), whatever the feedback asked it to write.
+ */
+export function forGitHub(text: string): string {
+  return defanged(neutral(text));
+}
+
+/**
+ * FEEDBACK_PER_HOUR as set: unset or empty is 5, `unlimited` is no limit
+ * (Infinity), a whole number from 1 up is itself. Anything else (0, a typo)
+ * is undefined, for the agent to refuse at start rather than run without
+ * the limit it was meant to have.
+ */
+export function perHourOf(value: string | undefined): number | undefined {
+  const v = (value ?? "").trim();
+  if (!v) return 5;
+  if (v.toLowerCase() === "unlimited") return Infinity;
+  if (!/^[0-9]+$/.test(v)) return undefined;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= 1 ? n : undefined;
+}
+
+/**
+ * Each account's feedback in the last hour, so one person can't fill the
+ * team's channel (and each triage) on their own. Kept in memory: a restart
+ * starts everyone over.
+ */
+export class FeedbackPace {
+  #perHour: number;
+  #sent = new Map<string, { times: number[]; told: number }>();
+
+  constructor(perHour: number) {
+    this.#perHour = perHour;
+  }
+
+  /**
+   * Counts one piece of feedback from `accountId` at `now`: "ok", or "over"
+   * when it's one too many, or "quiet" when it's over again and the account
+   * was already told within the hour (so a flood isn't answered message for
+   * message).
+   */
+  take(accountId: string, now: number): "ok" | "over" | "quiet" {
+    if (this.#perHour === Infinity) return "ok";
+    const since = now - 60 * 60_000;
+    if (this.#sent.size > 10_000) {
+      for (const [id, e] of this.#sent) if (e.times.every((t) => t <= since) && e.told <= since) this.#sent.delete(id);
+    }
+    const entry = this.#sent.get(accountId) ?? { times: [], told: -Infinity };
+    entry.times = entry.times.filter((t) => t > since);
+    this.#sent.set(accountId, entry);
+    if (entry.times.length < this.#perHour) {
+      entry.times.push(now);
+      return "ok";
+    }
+    if (entry.told > since) return "quiet";
+    entry.told = now;
+    return "over";
+  }
+}
+
 function quote(text: string): string {
   return text
     .split("\n")
@@ -77,20 +153,21 @@ export function withOutcome(content: string, outcome: string): string {
 
 /**
  * A new issue's body: Claude's summary, then every piece of feedback as it was
- * written. Nobody's name: GitHub gets the words alone.
+ * written. Nobody's name: GitHub gets the words alone, with no pings or live
+ * links ({@link forGitHub}).
  */
 export function issueBody(summary: string, feedback: string[], instance: string): string {
-  const said = feedback.map(quote).join("\n\n");
+  const said = feedback.map((f) => quote(forGitHub(f))).join("\n\n");
   const count = feedback.length === 1 ? "one piece of feedback" : `${feedback.length} pieces of feedback`;
   return (
-    `${summary.trim()}\n\n### What people said\n\n${said}\n\n---\n\n` +
+    `${forGitHub(summary.trim())}\n\n### What people said\n\n${said}\n\n---\n\n` +
     `Grouped from ${count} sent to @${ZWSP}fuwafuwa on ${instance}.\n`
   );
 }
 
 /** A comment adding feedback to an issue that was already open. */
 export function commentBody(feedback: string[], instance: string): string {
-  const said = feedback.map(quote).join("\n\n");
+  const said = feedback.map((f) => quote(forGitHub(f))).join("\n\n");
   const more = feedback.length === 1 ? "More feedback" : `${feedback.length} more pieces of feedback`;
   return `${more} about this, sent to @${ZWSP}fuwafuwa on ${instance}:\n\n${said}\n`;
 }

@@ -35,9 +35,11 @@
   file; `checkPlan` checks the plan before anything reaches GitHub, and each
   post is then edited with what happened, which is all the state it keeps.
   `src/feedback.ts` (pure) decides what goes out: people's words, no ids,
-  pings or names. Its service `fuwafuwa` in `.railway/railway.ts` is built by
-  Railway from this repository (its Dockerfile, on master, once checks pass);
-  fuwa's image and redeploys don't include it.
+  pings, names or live links (Claude's titles and summaries too), and how
+  much feedback one account may send an hour. Its service `fuwafuwa` in
+  `.railway/railway.ts` is built by Railway from this repository (its
+  Dockerfile, on master, once checks pass); fuwa's image and redeploys don't
+  include it.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.

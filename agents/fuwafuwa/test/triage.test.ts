@@ -96,3 +96,31 @@ test("nothing pending asks nobody", async () => {
   d.grouper = { group: async () => assert.fail("asked Claude") };
   assert.deepEqual(await triage(d), { filed: 0, added: 0, skipped: 0, waiting: 0 });
 });
+
+test("what Claude writes reaches GitHub with no pings or live links", async () => {
+  const { d, marks, created } = deps({
+    groups: [
+      group({
+        items: [0, 1],
+        action: "new_issue",
+        title: "Dark mode @waifu-devs/core see https://evil.example",
+        body: "cc @octocat ![x](https://evil.example/pixel.png) [docs](//evil.example) www.evil.example",
+      }),
+      group({ items: [3], action: "skip", reason: "ask @everyone at <@01JPERSON>" }),
+    ],
+  });
+  d.pending = async () =>
+    ["dark mode please http://evil.example", "a dark theme would be nice @someteam"].map((feedback, i) => ({ id: `p${i}`, feedback })).concat([
+      { id: "p2", feedback: "upload broke" },
+      { id: "p3", feedback: "love it" },
+    ]);
+  await triage(d);
+  const { title, body } = created[0]!;
+  for (const text of [title, body]) {
+    assert.ok(!/@[\w-]/.test(text), text);
+    assert.ok(!/https?:\/\/|\(\/\/|www\./i.test(text), text);
+  }
+  assert.ok(title.startsWith("Dark mode @\u200bwaifu-devs/core see hxxps[:]//evil.example"));
+  assert.ok(body.includes("> dark mode please hxxp[:]//evil.example"));
+  assert.equal(marks.at(-1)![1], "Not filed: ask @\u200beveryone at @\u200bsomeone");
+});

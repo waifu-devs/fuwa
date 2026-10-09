@@ -7,7 +7,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { commentBody, issueBody } from "./feedback.ts";
+import { commentBody, forGitHub, issueBody, neutral } from "./feedback.ts";
 import type { Issue, OpenIssue } from "./github.ts";
 
 export const Plan = z.object({
@@ -152,7 +152,7 @@ export async function triage(deps: TriageDeps, batch = 200): Promise<TriageResul
     let outcome: string;
     try {
       if (step.action === "new_issue") {
-        const issue = await deps.createIssue(step.title, issueBody(step.body, words, deps.instance));
+        const issue = await deps.createIssue(forGitHub(step.title), issueBody(step.body, words, deps.instance));
         outcome = `Filed as #${issue.number}: ${issue.url}`;
         result.filed++;
       } else if (step.action === "existing_issue") {
@@ -160,16 +160,16 @@ export async function triage(deps: TriageDeps, batch = 200): Promise<TriageResul
         outcome = `Added to #${step.issue}: ${c.url}`;
         result.added++;
       } else {
-        outcome = `Not filed: ${step.reason}`;
+        outcome = `Not filed: ${neutral(step.reason)}`;
         result.skipped += group.length;
       }
-    } catch (err) {
-      deps.log(`A group of ${group.length} waits for the next run: ${err instanceof Error ? err.message : "error"}`);
+    } catch {
+      deps.log(`A group of ${group.length} waits for the next run: GitHub didn't take it.`);
       continue;
     }
     for (const [n, p] of group.entries()) {
       done.add(step.items[n]!);
-      await deps.mark(p, outcome).catch((err) => deps.log(`Couldn't mark a post: ${err instanceof Error ? err.message : "error"}`));
+      await deps.mark(p, outcome).catch(() => deps.log("Couldn't mark a post."));
     }
   }
   result.waiting = pending.length - done.size;
