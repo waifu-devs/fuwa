@@ -295,8 +295,13 @@ pub struct Limits {
     /// FUWA_LIMIT_PINS_PER_CONVERSATION: most pinned messages in one
     /// direct-message conversation.
     pub pins_per_conversation: Option<i64>,
-    /// FUWA_LIMIT_REACTIONS_PER_MESSAGE: most different emoji on one message.
+    /// FUWA_LIMIT_REACTIONS_PER_MESSAGE: most different emoji on one
+    /// message, default 100 (a protective default, what a message shows at
+    /// most); `unlimited` for none.
     pub reactions_per_message: Option<i64>,
+    /// FUWA_LIMIT_REACTIONS_PER_MINUTE: how many reactions one account may
+    /// add or take off in a minute.
+    pub reactions_per_minute: Option<i64>,
     /// FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE: messages a minute all the
     /// people of one server on another instance may send together.
     pub shared_remote_sends_per_minute: Option<i64>,
@@ -312,9 +317,15 @@ pub struct Limits {
 }
 
 impl Limits {
+    /// The caps when nothing is set: unlimited but for the protective
+    /// defaults.
+    pub fn unset() -> Self {
+        Self { reactions_per_message: Some(crate::api::MAX_REACTIONS as i64), ..Self::default() }
+    }
+
     /// Whether any cap differs from the defaults.
     pub fn any(&self) -> bool {
-        *self != Self::default()
+        *self != Self::unset()
     }
 }
 
@@ -453,6 +464,18 @@ impl Config {
                 _ => bytes(key),
             }
         };
+        // A cap with a protective default: `unlimited` lifts it, and 0 would
+        // turn the thing off, so it's refused.
+        let protective = |key: &str, default: i64| -> Result<Option<i64>, String> {
+            match get(key).as_deref().map(str::trim) {
+                None => Ok(Some(default)),
+                Some(value) if value.eq_ignore_ascii_case("unlimited") => Ok(None),
+                Some(value) => match value.parse::<i64>() {
+                    Ok(n) if n >= 1 => Ok(Some(n)),
+                    _ => Err(format!("{key} must be a whole number, 1 or more, or unlimited, got {value:?}")),
+                },
+            }
+        };
         let limits = Limits {
             servers_per_account: count("FUWA_LIMIT_SERVERS_PER_ACCOUNT")?,
             members: count("FUWA_LIMIT_MEMBERS")?,
@@ -473,7 +496,8 @@ impl Config {
             commands_per_minute: count("FUWA_LIMIT_COMMANDS_PER_MINUTE")?,
             pins_per_channel: count("FUWA_LIMIT_PINS_PER_CHANNEL")?,
             pins_per_conversation: count("FUWA_LIMIT_PINS_PER_CONVERSATION")?,
-            reactions_per_message: count("FUWA_LIMIT_REACTIONS_PER_MESSAGE")?,
+            reactions_per_message: protective("FUWA_LIMIT_REACTIONS_PER_MESSAGE", crate::api::MAX_REACTIONS as i64)?,
+            reactions_per_minute: count("FUWA_LIMIT_REACTIONS_PER_MINUTE")?,
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
             shared_remote_file_bytes_per_day: upload_bytes("FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY")?,
@@ -962,6 +986,22 @@ mod tests {
         assert_eq!(set("30").unwrap(), Some(30));
         assert_eq!(set("unlimited").unwrap(), None);
         assert!(set("0").unwrap_err().contains("FUWA_LIVE_TILE_UPDATES_PER_MINUTE"));
+    }
+
+    #[test]
+    fn reactions_per_message_start_capped_and_can_be_changed_or_lifted() {
+        let set = |v: &str| config(&[("FUWA_LIMIT_REACTIONS_PER_MESSAGE", v)]).map(|c| c.limits.reactions_per_message);
+        assert_eq!(config(&[]).unwrap().limits.reactions_per_message, Some(100));
+        assert_eq!(set("20").unwrap(), Some(20));
+        assert_eq!(set("unlimited").unwrap(), None);
+        assert!(set("0").unwrap_err().contains("FUWA_LIMIT_REACTIONS_PER_MESSAGE"));
+        assert!(set("-1").is_err());
+        assert!(!config(&[]).unwrap().limits.any(), "the protective default isn't a change");
+        assert!(config(&[("FUWA_LIMIT_REACTIONS_PER_MESSAGE", "unlimited")]).unwrap().limits.any());
+        assert_eq!(config(&[]).unwrap().limits.reactions_per_minute, None, "unlimited unless set");
+        let paced = config(&[("FUWA_LIMIT_REACTIONS_PER_MINUTE", "30")]).unwrap();
+        assert_eq!(paced.limits.reactions_per_minute, Some(30));
+        assert!(paced.limits.any());
     }
 
     #[test]

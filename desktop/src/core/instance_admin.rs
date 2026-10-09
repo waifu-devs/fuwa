@@ -144,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 59] = [
+pub const PATHS: [&str; 60] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -180,6 +180,7 @@ pub const PATHS: [&str; 59] = [
     "pins_per_channel",
     "pins_per_conversation",
     "reactions_per_message",
+    "reactions_per_minute",
     "live_tiles_per_channel",
     "live_tile_updates_per_minute",
     "live_tile_publish_ms",
@@ -244,6 +245,7 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "pins_per_channel" => s.pins_per_channel,
         "pins_per_conversation" => s.pins_per_conversation,
         "reactions_per_message" => s.reactions_per_message,
+        "reactions_per_minute" => s.reactions_per_minute,
         "live_tiles_per_channel" => s.live_tiles_per_channel,
         "live_tile_updates_per_minute" => s.live_tile_updates_per_minute,
         "live_tile_publish_ms" => s.live_tile_publish_ms,
@@ -278,6 +280,7 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "pins_per_channel" => &mut s.pins_per_channel,
         "pins_per_conversation" => &mut s.pins_per_conversation,
         "reactions_per_message" => &mut s.reactions_per_message,
+        "reactions_per_minute" => &mut s.reactions_per_minute,
         "live_tiles_per_channel" => &mut s.live_tiles_per_channel,
         "live_tile_updates_per_minute" => &mut s.live_tile_updates_per_minute,
         "live_tile_publish_ms" => &mut s.live_tile_publish_ms,

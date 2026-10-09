@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  FeedbackPace,
   asksForHelp,
   commentBody,
+  defanged,
   feedbackOf,
   feedbackOfPost,
   handled,
   issueBody,
   neutral,
   nextRun,
+  perHourOf,
   teamPost,
   withOutcome,
 } from "../src/feedback.ts";
@@ -36,6 +39,38 @@ test("quoted feedback names nobody and pings nobody", () => {
   assert.ok(!text.includes("01J"));
   assert.ok(text.includes(":blob:"));
   assert.ok(!/@[\w-]/.test(text));
+});
+
+test("links are broken so GitHub neither links nor loads them", () => {
+  assert.equal(defanged("see https://a.example/x and HTTP://b.example"), "see hxxps[:]//a.example/x and Hxxp[:]//b.example");
+  assert.equal(defanged("ftp://c.example"), "ftp[:]//c.example");
+  assert.equal(defanged("![x](//d.example/p.png) <img src=\"//e.example\">"), "![x]([/]/d.example/p.png) <img src=\"[/]/e.example\">");
+  assert.equal(defanged("www.f.example"), "www[.]f.example");
+  assert.equal(defanged("a/b // comment, 1:2"), "a/b // comment, 1:2", "ordinary text stays as it was");
+});
+
+test("each account sends so much feedback an hour, and hears so once", () => {
+  const pace = new FeedbackPace(2);
+  const h = 60 * 60_000;
+  assert.equal(pace.take("mika", 0), "ok");
+  assert.equal(pace.take("mika", 1), "ok");
+  assert.equal(pace.take("mika", 2), "over", "a third in the hour is one too many");
+  assert.equal(pace.take("mika", 3), "quiet", "and it's said once, not to every one after");
+  assert.equal(pace.take("rin", 2), "ok", "each account has its own");
+  assert.equal(pace.take("mika", h), "ok", "an hour after the first, there's room for one");
+  assert.equal(pace.take("mika", h), "quiet", "the second is still within the hour, and so is the telling");
+  assert.equal(pace.take("mika", h + 2), "ok");
+  assert.equal(pace.take("mika", h + 3), "over", "told again once the last telling is an hour old");
+  const open = new FeedbackPace(Infinity);
+  for (let i = 0; i < 100; i++) assert.equal(open.take("mika", i), "ok");
+});
+
+test("FEEDBACK_PER_HOUR is 5 unless set, a whole number or unlimited", () => {
+  assert.equal(perHourOf(undefined), 5);
+  assert.equal(perHourOf(" "), 5);
+  assert.equal(perHourOf("30"), 30);
+  assert.equal(perHourOf("Unlimited"), Infinity);
+  for (const bad of ["0", "-1", "5/h", "1.5", "1e3", "lots"]) assert.equal(perHourOf(bad), undefined, bad);
 });
 
 test("a team post gives its feedback back, until triage handles it", () => {

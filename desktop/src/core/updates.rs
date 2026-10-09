@@ -540,20 +540,42 @@ fn put_bundle_in_place(zip: &Path, bundle: &Path) -> std::io::Result<()> {
 }
 
 /// Starts the .deb's install once this app has gone: pkexec asks for the
-/// password, dpkg installs it, and the app starts again either way, on
-/// whichever version is then installed (still the old one if the password
-/// was refused, with the download still waiting).
-fn install_deb(deb: &Path, program: &Path) -> std::io::Result<()> {
+/// password, the install script checks and installs it, and the app starts
+/// again either way, on whichever version is then installed (still the old
+/// one if the password was refused, with the download still waiting).
+fn install_deb(deb: &Path, sha256: &[u8; 32], program: &Path) -> std::io::Result<()> {
     std::process::Command::new("/bin/sh")
         .arg("-c")
-        .arg(format!(r#"{PKEXEC} {DPKG} -i "$0" && rm -f "$0"; exec "$@""#))
+        .arg(format!(r#"{PKEXEC} /bin/sh -c "$1" sh "$0" "$2" && rm -f "$0"; shift 2; exec "$@""#))
         .arg(deb)
+        .arg(deb_script(DPKG))
+        .arg(hex(sha256))
         .arg(program)
         .args(std::env::args_os().skip(1))
         .env(AFTER_UPDATE, "1")
         .stdin(std::process::Stdio::null())
         .spawn()
         .map(|_| ())
+}
+
+/// What runs as root to install the download (`$1`, its SHA-256 in hex
+/// `$2`): a copy in a new folder only root can write to, checked there, is
+/// what dpkg installs, so nothing running as the person can swap the file
+/// between the check and the install.
+fn deb_script(dpkg: &str) -> String {
+    format!(
+        r#"set -e
+dir=$(/bin/mktemp -d)
+trap '/bin/rm -rf "$dir"' EXIT
+/bin/cp -- "$1" "$dir/update.deb"
+echo "$2  $dir/update.deb" | /usr/bin/sha256sum -c --status
+{dpkg} -i "$dir/update.deb""#
+    )
+}
+
+/// A hash as sha256sum writes it.
+fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The SHA-256 of a file, or None when it can't be read.
@@ -581,7 +603,7 @@ pub fn restart() -> std::io::Result<()> {
         let placed = match staged.target.install {
             // The new app is at the same place, so `program` is in it.
             Install::Bundle => put_bundle_in_place(&staged.file, &staged.target.file),
-            Install::Deb => return install_deb(&staged.file, &program),
+            Install::Deb => return install_deb(&staged.file, &staged.sha256, &program),
             Install::Program | Install::AppImage => put_in_place(&staged.file, &staged.target.file),
         };
         if placed.is_err() {
@@ -996,6 +1018,45 @@ mod tests {
         assert_eq!(sha256_of(&part), Some(abc));
         std::fs::write(&part, b"abd").unwrap();
         assert_ne!(sha256_of(&part), Some(abc), "a changed download isn't the checked one");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_deb_installed_is_a_checked_copy_of_the_download() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path();
+        // Stands in for dpkg: keeps what it was given to install, and where it was.
+        let dpkg = out.join("dpkg");
+        std::fs::write(
+            &dpkg,
+            format!("#!/bin/sh\ncp \"$2\" '{0}/installed'\necho \"$2\" > '{0}/from'\n", out.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&dpkg, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let deb = out.join("update.deb");
+        std::fs::write(&deb, b"abc").unwrap();
+        let run = |hash: &str| {
+            std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(deb_script(dpkg.to_str().unwrap()))
+                .arg("sh")
+                .arg(&deb)
+                .arg(hash)
+                .status()
+                .unwrap()
+        };
+
+        assert!(!run(&hex(&[0; 32])).success(), "a download that isn't the checked one isn't installed");
+        assert!(!out.join("installed").exists());
+
+        assert_eq!(hex(&hex32(HASH).unwrap()), HASH);
+        assert!(run(HASH).success());
+        assert_eq!(std::fs::read(out.join("installed")).unwrap(), b"abc");
+        let from = std::fs::read_to_string(out.join("from")).unwrap();
+        let from = Path::new(from.trim());
+        assert_ne!(from, deb, "dpkg gets the copy, never the download itself");
+        assert!(!from.parent().unwrap().exists(), "the copy's folder is cleared away");
     }
 
     #[test]

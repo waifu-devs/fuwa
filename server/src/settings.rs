@@ -43,6 +43,7 @@ pub const FIELDS: &[&str] = &[
     "pins_per_channel",
     "pins_per_conversation",
     "reactions_per_message",
+    "reactions_per_minute",
     "shared_remote_sends_per_minute",
     "shared_remote_people",
     "telemetry",
@@ -334,6 +335,7 @@ impl Settings {
             pins_per_channel: limits.pins_per_channel,
             pins_per_conversation: limits.pins_per_conversation,
             reactions_per_message: limits.reactions_per_message,
+            reactions_per_minute: limits.reactions_per_minute,
             shared_remote_sends_per_minute: limits.shared_remote_sends_per_minute,
             shared_remote_people: limits.shared_remote_people,
             shared_remote_file_bytes_per_day: limits.shared_remote_file_bytes_per_day,
@@ -477,6 +479,7 @@ impl Settings {
             "pins_per_channel" => Value::from(from.pins_per_channel),
             "pins_per_conversation" => Value::from(from.pins_per_conversation),
             "reactions_per_message" => Value::from(from.reactions_per_message),
+            "reactions_per_minute" => Value::from(from.reactions_per_minute),
             "shared_remote_sends_per_minute" => Value::from(from.shared_remote_sends_per_minute),
             "shared_remote_people" => Value::from(from.shared_remote_people),
             "telemetry" => Value::from(from.telemetry),
@@ -586,6 +589,7 @@ impl Settings {
             "pins_per_channel" => Value::from(limits.pins_per_channel),
             "pins_per_conversation" => Value::from(limits.pins_per_conversation),
             "reactions_per_message" => Value::from(limits.reactions_per_message),
+            "reactions_per_minute" => Value::from(limits.reactions_per_minute),
             "shared_remote_sends_per_minute" => Value::from(limits.shared_remote_sends_per_minute),
             "shared_remote_people" => Value::from(limits.shared_remote_people),
             "telemetry" => Value::from(self.telemetry),
@@ -693,7 +697,15 @@ impl Settings {
             "commands_per_minute" => self.limits.commands_per_minute = cap(field, value)?,
             "pins_per_channel" => self.limits.pins_per_channel = cap(field, value)?,
             "pins_per_conversation" => self.limits.pins_per_conversation = cap(field, value)?,
-            "reactions_per_message" => self.limits.reactions_per_message = cap(field, value)?,
+            "reactions_per_message" => {
+                self.limits.reactions_per_message = match cap(field, value)? {
+                    Some(0) => {
+                        return Err(Error::invalid("reactions_per_message must be 1 or more, or unset for no limit"));
+                    }
+                    per_message => per_message,
+                }
+            }
+            "reactions_per_minute" => self.limits.reactions_per_minute = cap(field, value)?,
             "shared_remote_sends_per_minute" => self.limits.shared_remote_sends_per_minute = cap(field, value)?,
             "shared_remote_people" => self.limits.shared_remote_people = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
@@ -1113,6 +1125,19 @@ mod tests {
         assert_eq!(s.streams_per_account(), Some(8));
         assert!(s.set_json("streams_per_account", &Value::Null).is_ok());
         assert_eq!(s.streams_per_account(), None, "unset is no limit");
+    }
+
+    #[test]
+    fn reaction_caps_start_protective_and_never_go_to_zero() {
+        let mut s = Settings::defaults(&config());
+        assert_eq!((s.limits.reactions_per_message, s.limits.reactions_per_minute), (Some(100), None));
+        assert!(s.set_json("reactions_per_message", &Value::from(0)).is_err(), "0 would stop every reaction");
+        assert!(s.set_json("reactions_per_message", &Value::from(20)).is_ok());
+        assert_eq!(s.limits.reactions_per_message, Some(20));
+        assert!(s.set_json("reactions_per_message", &Value::Null).is_ok());
+        assert_eq!(s.limits.reactions_per_message, None, "unset is no limit");
+        assert!(s.set_json("reactions_per_minute", &Value::from(30)).is_ok());
+        assert_eq!(s.limits.reactions_per_minute, Some(30));
     }
 
     #[test]

@@ -24,8 +24,8 @@
     { "id": "role-permission-changes", "date": "2026-10-05", "title": "Role edits keep each other's changes" },
     { "id": "sign-in-providers", "date": "2026-10-05", "title": "Sign in with Google, X and Twitch" },
     { "id": "live-tiles", "date": "2026-10-05", "title": "Live tiles and app tiles" },
-    { "id": "profile-items", "date": "2026-10-07", "title": "Profile effects and decorations from instances and servers" },
-    { "id": "camera-quality", "date": "2026-10-08", "title": "Camera quality ceilings for instances and servers" },
+    { "id": "profile-items", "date": "2026-10-07", "title": "Profile effects and decorations" },
+    { "id": "camera-quality", "date": "2026-10-08", "title": "Camera quality ceilings" },
     { "id": "reactions", "date": "2026-10-09", "title": "Reactions to messages" },
     { "id": "featured-servers", "date": "2026-10-09", "title": "Servers featured in Browse" },
     { "id": "agent-endpoints", "date": "2026-10-09", "title": "Agents that get their events over HTTP" }

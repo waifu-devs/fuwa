@@ -1331,7 +1331,8 @@ export const MessageService: GenService<{
    * Reacts to a message with an emoji, or takes the caller's reaction off.
    * Reacting needs ADD_REACTIONS in the channel; taking it off needs only to
    * see it. At most InstanceSettings.reactions_per_message different emoji
-   * on one message. In a channel shared between servers, the guest
+   * on one message (100 unless set), and reactions_per_minute from one
+   * account when set. In a channel shared between servers, the guest
    * server's people react with the home's custom emoji or standard ones,
    * when both servers let them. Not in secure channels: their reactions
    * travel inside the encryption, as direct messages' do.

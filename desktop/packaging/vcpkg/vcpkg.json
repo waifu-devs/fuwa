@@ -1,0 +1,5 @@
+{
+  "$comment": "libvpx for the Windows build (.github/workflows/desktop.yml), from the vcpkg ports at builtin-baseline (the 2026.06.24 release), so a newer runner image can't change what's linked in.",
+  "dependencies": ["libvpx"],
+  "builtin-baseline": "cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3"
+}

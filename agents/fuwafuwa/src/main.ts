@@ -13,6 +13,7 @@
 // TRIAGE_HOURS       how often triage runs, on the hour from midnight UTC (6; 0 never)
 // TRIAGE_DAYS        how far back it looks for feedback it hasn't handled (14)
 // TRIAGE_NOW         1: also run once right after starting
+// FEEDBACK_PER_HOUR  how much feedback one account may send in an hour (5; unlimited for no limit)
 // ANTHROPIC_API_KEY  for Claude, which groups the feedback; without it, no triage
 // ANTHROPIC_MODEL    claude-opus-5-5
 // GITHUB_TOKEN       a fine-grained token with Issues: read and write on GITHUB_REPO;
@@ -28,7 +29,17 @@ import {
   type Message,
   type MessageContext,
 } from "@waifu-devs/fuwa";
-import { asksForHelp, feedbackOf, feedbackOfPost, handled, nextRun, teamPost, withOutcome } from "./feedback.ts";
+import {
+  FeedbackPace,
+  asksForHelp,
+  feedbackOf,
+  feedbackOfPost,
+  handled,
+  nextRun,
+  perHourOf,
+  teamPost,
+  withOutcome,
+} from "./feedback.ts";
 import { GitHub } from "./github.ts";
 import { ClaudeGrouper, triage, type Pending } from "./triage.ts";
 
@@ -54,6 +65,12 @@ const grouper = env.ANTHROPIC_API_KEY
   : undefined;
 const hours = Number(env.TRIAGE_HOURS || 6);
 const lookbackMs = Number(env.TRIAGE_DAYS || 14) * 24 * 60 * 60_000;
+const perHour = perHourOf(env.FEEDBACK_PER_HOUR);
+if (perHour === undefined) {
+  console.error("Set FEEDBACK_PER_HOUR to a whole number from 1 up, or unlimited.");
+  process.exit(1);
+}
+const pace = new FeedbackPace(perHour);
 
 const HELP =
   "Hi! I take feedback about fuwa. Mention me with what you think, what broke or what you wish it did, " +
@@ -62,7 +79,7 @@ const HELP =
 const agent = new Agent({
   url,
   token,
-  onError: (err) => console.error(err instanceof Error ? `${err.name}: ${err.message}` : "error"),
+  onError: () => console.error("A handler failed."),
 });
 
 agent.on("mention", async (ctx: MessageContext) => {
@@ -72,10 +89,16 @@ agent.on("mention", async (ctx: MessageContext) => {
     return;
   }
   const author = await ctx.author();
+  // Per account, never per address: the instance says who wrote it.
+  const turn = pace.take(author?.id ?? ctx.message.authorId, Date.now());
+  if (turn !== "ok") {
+    if (turn === "over") await ctx.reply("Thanks! You've sent me a lot this hour, so I'll take more in a little while.");
+    return;
+  }
   try {
     await agent.send(team.serverId, team.channelId, teamPost(author?.username, feedback));
   } catch (err) {
-    report(err);
+    report("Passing feedback on", err);
     await ctx.reply("Sorry, I couldn't pass that on just now. Could you try again in a little while?");
     return;
   }
@@ -125,7 +148,7 @@ async function runTriage() {
         `${result.skipped} not filed, ${result.waiting} waiting.`,
     );
   } catch (err) {
-    report(err);
+    report("Triage", err);
   } finally {
     running = false;
   }
@@ -144,9 +167,10 @@ function parseChannel(value: string | undefined): { serverId: string; channelId:
   return { serverId, channelId };
 }
 
-function report(err: unknown) {
-  if (err instanceof RateLimitedError) console.log(`Slowed down: ${err.message}`);
-  else console.error(err instanceof Error ? `${err.name}: ${err.message}` : "error");
+/** Says what failed, in fixed words: an error's own message can carry what people wrote or where. */
+function report(what: string, err: unknown) {
+  if (err instanceof RateLimitedError) console.log(`${what} was slowed down by the instance.`);
+  else console.error(`${what} failed.`);
 }
 
 const triaging = github !== undefined && grouper !== undefined && hours > 0;
@@ -158,8 +182,8 @@ agent.on("ready", ({ me, servers }) =>
         : "No triage (it needs ANTHROPIC_API_KEY, GITHUB_TOKEN and TRIAGE_HOURS above 0)."),
   ),
 );
-agent.on("disconnected", ({ error, retryInMs }) =>
-  console.log(`Lost the connection (${error.message}); trying again in ${Math.round(retryInMs / 1000)}s.`),
+agent.on("disconnected", ({ retryInMs }) =>
+  console.log(`Lost the connection; trying again in ${Math.round(retryInMs / 1000)}s.`),
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -177,7 +201,7 @@ for (let wait = 1000; ; wait = Math.min(wait * 2, 60_000)) {
     break;
   } catch (err) {
     if (err instanceof UnauthenticatedError) fail();
-    report(err);
+    report("Signing in", err);
     console.log(`Trying again in ${wait / 1000}s.`);
     await new Promise((r) => setTimeout(r, wait));
   }
@@ -190,13 +214,15 @@ try {
     console.error("FEEDBACK_CHANNEL isn't a channel the agent can see: add it to that server.");
     process.exit(1);
   }
-  report(err);
+  report("Finding FEEDBACK_CHANNEL", err);
 }
 if (triaging) {
   schedule();
   if (env.TRIAGE_NOW === "1") void runTriage();
 }
-await agent.closed.catch((err) => (err instanceof UnauthenticatedError ? fail() : (report(err), process.exit(1))));
+await agent.closed.catch((err) =>
+  err instanceof UnauthenticatedError ? fail() : (report("The connection", err), process.exit(1)),
+);
 
 function fail(): never {
   console.error("FUWA_TOKEN doesn't sign in (reset, or the agent was deleted). Set a new one from Settings > Agents.");
