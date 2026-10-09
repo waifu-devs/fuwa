@@ -471,7 +471,7 @@ for await (const { message, author } of messages(fuwa, { serverId, channelId }))
 `fuwa.node`, `auth`, `account`, `servers`, `channels`, `messages`, `events`,
 `admin`, `media`, `roles`, `invites`, `join`, `dms`, `friends`, `secure`,
 `automod`, `emojis`, `calls`, `webhooks`, `agents`, `sso`, `shared`,
-`commands`, `gifs`, `presence` and `search` are the services;
+`commands`, `gifs`, `presence`, `search` and `live` are the services;
 every message type and enum is exported from the package too. `token` can be
 a function, read on every call.
 
@@ -484,6 +484,9 @@ The other pieces:
 - `EventFollower` is the reconnecting stream the agent uses: iterate it for
   `event`, `ready` and `disconnected` updates, and `setServers` to change what
   it follows.
+- `fuwa.live.open({ servers, messages: MessageIntent.MENTIONS })` is one
+  stream with only the messages that mention the agent, and channel heads
+  for the rest ([live](live.md)), on instances with `live-connection`.
 - `uploadPicture(fuwa, { purpose, data, contentType })` (or `agent.upload`)
   uploads a picture the way the apps do (`MediaService.CreateUpload`, then a
   PUT of the bytes) and returns its `url`, for an avatar, an emoji or a server

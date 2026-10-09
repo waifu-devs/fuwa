@@ -76,6 +76,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.DirectMessageService"
         | "fuwa.v1.FriendService" => Target::Directory,
         "fuwa.v1.PresenceService" => Target::Directory,
+        // Answered here (Open, see [`Events`]); focus is kept by the directory.
+        "fuwa.v1.LiveService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
         // Other instances' calls go where the instance's key is.
@@ -272,6 +274,7 @@ impl Gateway {
             .expect("the embedded descriptor set is valid");
         let forward = self.clone();
         let grpc = tonic::service::Routes::new(pb::event_service_server::EventServiceServer::new(Events(self.clone())))
+            .add_service(pb::live_service_server::LiveServiceServer::new(Events(self.clone())))
             .add_service(health)
             .add_service(reflection)
             .into_axum_router()
@@ -637,13 +640,25 @@ impl Gateway {
     /// Which account is calling, as the directory says. Only signed-in
     /// accounts follow servers.
     async fn caller(&self, metadata: &MetadataMap) -> Result<String, Status> {
+        Ok(self.caller_account(metadata).await?.id)
+    }
+
+    async fn caller_account(&self, metadata: &MetadataMap) -> Result<cpb::Account, Status> {
         let token = crate::auth::bearer(metadata).ok_or_else(|| Status::from(Error::Unauthenticated))?;
         let found = self.directory.clone().authenticate(cpb::AuthenticateRequest { token: token.to_string() }).await;
         let found = found.map_err(|status| Status::from(Error::retried(status)))?.into_inner();
         match found.account {
-            Some(account) => Ok(account.id),
+            Some(account) => Ok(account),
             None => Err(Error::denied("the admin token can't act as an account; sign in instead").into()),
         }
+    }
+
+    fn live_client(&self) -> pb::live_service_client::LiveServiceClient<Keyed> {
+        let channel = tonic::service::interceptor::InterceptedService::new(
+            self.directory_channel.clone(),
+            WithKey(self.key.clone()),
+        );
+        pb::live_service_client::LiveServiceClient::new(channel).max_decoding_message_size(MAX_EVENT)
     }
 }
 
@@ -1176,6 +1191,113 @@ impl EventService for Events {
             }
             refresh = true;
         }
+    }
+}
+
+type LiveStream = Pin<Box<dyn Stream<Item = Result<pb::OpenResponse, Status>> + Send>>;
+
+/// The live stream, answered by the gateway: the directory's (the
+/// connection, direct messages, friends, presence and focus) with the
+/// gateway's own merge of server events, held back by focus here.
+#[tonic::async_trait]
+impl pb::live_service_server::LiveService for Events {
+    type OpenStream = LiveStream;
+
+    async fn open(&self, request: tonic::Request<pb::OpenRequest>) -> Result<tonic::Response<LiveStream>, Status> {
+        use crate::live::{HEADS_EVERY, Intent, Interest};
+        use pb::open_response::Item;
+        let gateway = self.0.clone();
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let account = ride_out(gateway.config.cluster.ride_out, || gateway.caller_account(&metadata)).await?;
+        let agent = account.kind == pb::AccountKind::Agent as i32;
+        let first = crate::live::check_focus(req.focus.clone().unwrap_or_default())?;
+        let upstream = pb::OpenRequest {
+            direct_messages: req.direct_messages,
+            friends: req.friends,
+            presence: req.presence,
+            focus: Some(first.clone()),
+            ..Default::default()
+        };
+        let mut directory = gateway.live_client().open(forward_metadata(&metadata, upstream)).await?.into_inner();
+        let hello = match directory.message().await? {
+            Some(hello @ pb::OpenResponse { item: Some(Item::ConnectionId(_)) }) => hello,
+            _ => return Err(unreachable_part()),
+        };
+        let (focus, focused) = watch::channel(Arc::new(first));
+        let mut interest = Interest::new(Intent::of(req.messages, agent), &account.id, focused);
+        let mut events: EventStream = match !req.servers.is_empty() || req.follow_new_servers {
+            true => {
+                let subscribe =
+                    pb::SubscribeRequest { servers: req.servers, follow_new_servers: req.follow_new_servers };
+                self.subscribe(forward_metadata(&metadata, subscribe)).await?.into_inner()
+            }
+            false => Box::pin(futures::stream::pending()),
+        };
+
+        let (tx, rx) = mpsc::channel::<Result<pb::OpenResponse, Status>>(256);
+        let shutdown = gateway.shutdown();
+        tokio::spawn(async move {
+            if tx.send(Ok(hello)).await.is_err() {
+                return;
+            }
+            let mut heartbeat = tokio::time::interval(HEARTBEAT_EVERY);
+            heartbeat.tick().await;
+            let mut heads_due = tokio::time::interval(HEADS_EVERY);
+            loop {
+                let item = tokio::select! {
+                    _ = shutdown.cancelled() => {
+                        let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
+                        return;
+                    }
+                    _ = tx.closed() => return,
+                    _ = heartbeat.tick() => Ok(pb::OpenResponse::default()),
+                    _ = heads_due.tick() => match interest.take_heads() {
+                        Some(heads) => Ok(pb::OpenResponse { item: Some(Item::Heads(heads)) }),
+                        None => continue,
+                    },
+                    next = directory.message() => match next {
+                        // The focus now in effect, for the events here too.
+                        Ok(Some(pb::OpenResponse { item: Some(Item::Focus(now)) })) => {
+                            focus.send_replace(Arc::new(now.clone()));
+                            Ok(pb::OpenResponse { item: Some(Item::Focus(now)) })
+                        }
+                        // Its heartbeat; the gateway sends its own.
+                        Ok(Some(pb::OpenResponse { item: None })) => continue,
+                        Ok(Some(response)) => Ok(response),
+                        Ok(None) => Err(Status::unavailable("lost touch with part of this instance; connect again")),
+                        Err(status) => Err(status),
+                    },
+                    next = events.next() => match next {
+                        Some(Ok(response)) if response == pb::SubscribeResponse::default() => continue,
+                        // What's out of focus moves its channel's head instead.
+                        Some(Ok(pb::SubscribeResponse { event: Some(event), .. }))
+                            if !interest.take(&event, None, true) => continue,
+                        Some(Ok(response)) => Ok(pb::OpenResponse { item: Some(Item::Events(Box::new(response))) }),
+                        Some(Err(status)) => Err(status),
+                        // Everything followed is gone: the rest carries on.
+                        None => {
+                            events = Box::pin(futures::stream::pending());
+                            continue;
+                        }
+                    },
+                };
+                let failed = item.is_err();
+                if tx.send(item).await.is_err() || failed {
+                    return;
+                }
+            }
+        });
+        Ok(tonic::Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+
+    async fn focus(
+        &self,
+        request: tonic::Request<pb::FocusRequest>,
+    ) -> Result<tonic::Response<pb::FocusResponse>, Status> {
+        // Kept where the connection's other half is, which tells this one.
+        let metadata = request.metadata().clone();
+        self.0.live_client().focus(forward_metadata(&metadata, request.into_inner())).await
     }
 }
 

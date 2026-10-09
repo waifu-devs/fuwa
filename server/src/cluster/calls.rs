@@ -106,7 +106,7 @@ impl App {
     fn forget_server_presence(&self, server_id: &str) {
         let members = self.index.members_where(server_id, |_| true);
         self.index.remove(server_id);
-        self.presence.server_gone(&self.index, &members);
+        self.presence.server_gone(&self.index, server_id, &members);
     }
 
     /// Forgets a deleted server: its place in the index, and notification
