@@ -79,6 +79,7 @@ mod settings_privacy;
 mod settings_security;
 mod settings_servers;
 mod settings_shader;
+mod settings_sounds;
 mod settings_themes;
 mod settings_updates;
 mod settings_voice;

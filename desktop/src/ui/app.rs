@@ -714,9 +714,12 @@ impl FuwaApp {
                 });
                 // fuwa's little sounds, made on the spot (`core::sounds`).
                 if !busy && self.prefs.sounds_on() {
-                    let sound =
-                        if mention { crate::core::sounds::Sound::Mention } else { crate::core::sounds::Sound::Message };
-                    let on = if mention { self.prefs.sounds.mention } else { self.prefs.sounds.message };
+                    use crate::core::sounds::Sound;
+                    let (sound, on) = match (&server_id, mention) {
+                        (None, _) => (Sound::Dm, self.prefs.sounds.dm),
+                        (Some(_), true) => (Sound::Mention, self.prefs.sounds.mention),
+                        (Some(_), false) => (Sound::Message, self.prefs.sounds.message),
+                    };
                     if on {
                         crate::core::sounds::play(sound, self.prefs.volume, &self.prefs.output_device);
                     }

@@ -462,74 +462,47 @@ impl SettingsView {
                 |this, on, cx| this.set(cx, |pr| pr.unread_badge = on),
             ))
             .child(tab_preview(prefs.unread_badge, p));
-        type Get = fn(&Sounds) -> bool;
+        use crate::core::sounds::Sound;
         type Put = fn(&mut Sounds, bool);
-        let kinds: [(&'static str, &str, &str, crate::core::sounds::Sound, Get, Put); 3] = [
+        let kinds: [(Sound, &str, &str, bool, Put); 4] = [
             (
-                "sound-message",
+                Sound::Message,
                 "appsettings.notifications.soundMessage",
                 "appsettings.notifications.soundMessageHint",
-                crate::core::sounds::Sound::Message,
-                |s| s.message,
+                prefs.sounds.message,
                 |s, v| s.message = v,
             ),
             (
-                "sound-mention",
+                Sound::Mention,
                 "appsettings.notifications.soundMention",
                 "appsettings.notifications.soundMentionHint",
-                crate::core::sounds::Sound::Mention,
-                |s| s.mention,
+                prefs.sounds.mention,
                 |s, v| s.mention = v,
             ),
+            (Sound::Dm, "desktop.sounds.dm", "desktop.sounds.dmHint", prefs.sounds.dm, |s, v| s.dm = v),
             (
-                "sound-join",
+                Sound::Join,
                 "appsettings.notifications.soundJoin",
                 "appsettings.notifications.soundJoinHint",
-                crate::core::sounds::Sound::Join,
-                |s| s.join,
+                prefs.sounds.join,
                 |s, v| s.join = v,
             ),
         ];
         let mut sounds = div().flex().flex_col().gap(px(12.0));
-        for (id, label, hint, sound, get, put) in kinds {
-            let (hover_bg, hover_fg) = (p.primary, p.primary_foreground);
-            let volume = prefs.volume;
-            let device = prefs.output_device.clone();
-            sounds = sounds.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("play-{id}")))
-                            .size(px(36.0))
-                            .flex_none()
-                            .rounded_full()
-                            .bg(p.muted)
-                            .text_color(p.muted_foreground)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_pointer()
-                            .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-                            .active(|s| s.top(px(1.0)))
-                            .on_click(move |_, _, _| crate::core::sounds::play(sound, volume, &device))
-                            .child(div().ml(px(1.0)).child(icon("play").size(px(16.0)))),
-                    )
-                    .child(div().flex_1().min_w_0().child(toggle(
-                        id,
-                        &t(label),
-                        Some(&t(hint)),
-                        get(&prefs.sounds),
-                        false,
-                        p,
-                        window,
-                        cx,
-                        move |this, on, cx| this.set(cx, |pr| put(&mut pr.sounds, on)),
-                    ))),
-            );
+        for (sound, label, hint, on, put) in kinds {
+            sounds = sounds.child(self.sound_row(
+                sound,
+                t(label),
+                Some(t(hint)),
+                Some((on, put)),
+                false,
+                prefs,
+                p,
+                window,
+                cx,
+            ));
         }
+        sounds = sounds.child(crate::ui::settings_controls::hint(t("desktop.sounds.filesHint"), p));
         let volume = self.slider(
             "volume",
             (0.0, 100.0, 5.0),
@@ -551,7 +524,12 @@ impl SettingsView {
                 .child(div().text_color(p.muted_foreground).child(icon("volume-2").size(px(20.0))))
                 .child(div().flex_1().child(volume)),
         );
-        let sounds_changed = prefs.sounds != Sounds::default() || prefs.volume != Prefs::default().volume;
+        const MESSAGE_SOUNDS: [Sound; 4] = [Sound::Message, Sound::Mention, Sound::Dm, Sound::Join];
+        let d = Sounds::default();
+        let sounds_changed = (prefs.sounds.message, prefs.sounds.mention, prefs.sounds.dm, prefs.sounds.join)
+            != (d.message, d.mention, d.dm, d.join)
+            || prefs.volume != Prefs::default().volume
+            || crate::ui::settings_sounds::picks_changed(prefs, &MESSAGE_SOUNDS);
         let list = self.stack(
             [
                 (
@@ -574,8 +552,11 @@ impl SettingsView {
                     t("appsettings.notifications.sounds"),
                     None,
                     Badge::pref(sounds_changed, |pr| {
-                        pr.sounds = Sounds::default();
+                        let d = Sounds::default();
+                        (pr.sounds.message, pr.sounds.mention, pr.sounds.dm, pr.sounds.join) =
+                            (d.message, d.mention, d.dm, d.join);
                         pr.volume = Prefs::default().volume;
+                        crate::ui::settings_sounds::reset_picks(pr, &MESSAGE_SOUNDS);
                     }),
                     sounds.into_any_element(),
                 ),
