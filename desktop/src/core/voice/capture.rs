@@ -298,7 +298,6 @@ fn take_camera(name: &str, ceiling: Ceiling, stop: &AtomicBool, latest: &Latest)
         .into_iter()
         .chain([RequestedFormatType::None]);
     let mut camera = None;
-    let mut last = None;
     for ask in asks {
         match nokhwa::Camera::new(info.index().clone(), RequestedFormat::with_formats(ask, &FORMATS)) {
             Ok(opened) => {
@@ -306,15 +305,15 @@ fn take_camera(name: &str, ceiling: Ceiling, stop: &AtomicBool, latest: &Latest)
                 break;
             }
             Err(why) if in_use(&why) => return Err(Failure::Busy),
-            Err(why) => last = Some(why),
+            Err(_) => {}
         }
     }
     let Some(mut camera) = camera else {
-        tracing::warn!(error = ?last, "no camera format would open");
+        tracing::warn!("no camera format would open");
         return Err(Failure::Failed);
     };
     camera.open_stream().map_err(|why| {
-        tracing::warn!(error = %why, "camera wouldn't start");
+        tracing::warn!("camera wouldn't start");
         if in_use(&why) { Failure::Busy } else { Failure::Failed }
     })?;
     let mut yuv = Yuv::default();
