@@ -63,16 +63,16 @@ jobs:
     env:
       VERSION: ${{ inputs.version || format('0.0.0-{0}', github.run_number) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: What GPUI needs on Linux
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libfuse2t64 libasound2-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       # The version is pinned so a new cargo-packager can't change the installers by surprise.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
         with:
           tool: cargo-packager@0.11.8
       # libvpx (VP8 for cameras) is linked in statically. On Linux and macOS
@@ -84,15 +84,22 @@ jobs:
         run: echo "LIBVPX_TARGET=ubuntu-24.04_x86_64" >> "$GITHUB_ENV"
       # Its Windows build is MinGW's, which MSVC can't link, so there it's
       # vcpkg's, static with the C runtime Rust links (-static-md), and the
-      # bindings are made from its headers with the runner's LLVM.
+      # bindings are made from its headers with the runner's LLVM. Which
+      # libvpx is packaging/vcpkg/vcpkg.json's builtin-baseline, not
+      # whatever ports the runner image came with.
       - name: libvpx from vcpkg
         if: runner.os == 'Windows'
         run: |
-          vcpkg install libvpx:x64-windows-static-md
-          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          baseline=$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' packaging/vcpkg/vcpkg.json)
+          git -C "$VCPKG_INSTALLATION_ROOT" cat-file -e "$baseline^{commit}" 2>/dev/null ||
+            git -C "$VCPKG_INSTALLATION_ROOT" fetch --quiet origin "$baseline"
+          installed="$RUNNER_TEMP/vcpkg"
+          (cd packaging/vcpkg && vcpkg install --triplet x64-windows-static-md --x-install-root="$installed")
+          root="$installed/x64-windows-static-md"
           # env-libvpx-sys links libvpx.lib; vcpkg names it vpx.lib.
           cp "$root/lib/vpx.lib" "$root/lib/libvpx.lib"
-          version=$(vcpkg list libvpx:x64-windows-static-md | awk '{print $2}' | cut -d'#' -f1)
+          version=$(awk '/^Package: libvpx$/ { found = 1 } found && /^Version: / { print $2; exit }' "$installed/vcpkg/status")
+          test -n "$version"
           {
             echo "VPX_LIB_DIR=$root/lib"
             echo "VPX_INCLUDE_DIR=$root/include"
@@ -122,7 +129,7 @@ jobs:
             macOS) test -f "dist/$base.dmg" && test -f "dist/$base.app.zip" ;;
             Windows) test -f "dist/$base-setup.exe" ;;
           esac
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fuwa-desktop-${{ matrix.file }}
           path: desktop/dist/*

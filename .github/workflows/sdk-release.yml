@@ -10,6 +10,11 @@ name: Release SDK
 # this workflow file and the "npm" environment (limited to v* tags), and the
 # job proves who it is with GitHub's OIDC token, so there's no npm token to
 # keep. Trusted publishing needs npm 11.5.1 or later.
+#
+# Two jobs, so the OIDC token never meets the build: "build" installs, checks,
+# builds, tests and packs with no token that can publish anything, and
+# "publish", the only job with id-token, runs no code from this repository or
+# its dependencies. It takes the packed tarball and hands it to an exact npm.
 on:
   push:
     tags: ["v*"]
@@ -18,31 +23,24 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    name: Publish @waifu-devs/fuwa
+  build:
+    name: Build @waifu-devs/fuwa
     runs-on: ubuntu-latest
-    # npm's trusted publisher names this environment; its deployment rule
-    # lets only v* tags in.
-    environment: npm
     permissions:
       contents: read
-      # For trusted publishing (and its provenance).
-      id-token: write
     defaults:
       run:
         working-directory: sdk
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           package_json_file: sdk/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: sdk/pnpm-lock.yaml
-      - name: npm that can publish through OIDC
-        run: npm install -g npm@^11.5.1
       - run: pnpm install --frozen-lockfile
       - name: Version from the tag
         run: |
@@ -59,8 +57,46 @@ jobs:
           test -z "$(git status --porcelain -- src/gen)"
       - run: pnpm run build
       - run: pnpm test
-      - run: npm pack --dry-run
+      - name: Pack
+        run: |
+          mkdir ../package
+          npm pack --pack-destination ../package
+          ls -l ../package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sdk-package
+          path: package/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish @waifu-devs/fuwa
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # npm's trusted publisher names this environment; its deployment rule
+    # lets only v* tags in.
+    environment: npm
+    permissions:
+      # For trusted publishing (and its provenance). Nothing else: no checkout.
+      id-token: write
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: npm that can publish through OIDC
+        run: npm install --global --ignore-scripts npm@11.19.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sdk-package
+          path: package
       - name: Publish
-        if: startsWith(github.ref, 'refs/tags/v')
         # Provenance comes with trusted publishing.
-        run: npm publish --access public
+        run: |
+          shopt -s nullglob
+          tarballs=(package/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ] || [ "${tarballs[0]}" != "package/waifu-devs-fuwa-${GITHUB_REF_NAME#v}.tgz" ]; then
+            echo "::error::expected exactly the tag's package, found: ${tarballs[*]}"
+            exit 1
+          fi
+          npm publish "${tarballs[0]}" --access public
