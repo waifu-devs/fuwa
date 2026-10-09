@@ -8,6 +8,7 @@
 //! (`shared::guest_react`), and the home's `apply` writes them like its own.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use super::messages::load_message;
 use super::{Api, Seat, shared, users};
@@ -22,6 +23,10 @@ const MAX_PAGE: i32 = 100;
 /// Longest standard emoji taken, in bytes: families and flags with their
 /// joiners fit.
 const MAX_EMOJI_BYTES: usize = 32;
+/// Most different emoji a message shows, whatever its reactions: the
+/// instance's `reactions_per_message` starts here, and one set higher or
+/// lifted still shows the first this many.
+pub const MAX_REACTIONS: usize = 100;
 
 /// Whether a stored key names a custom emoji (its id) rather than a standard
 /// one, which never has a letter in it.
@@ -35,17 +40,135 @@ fn key_of(emoji: &str) -> String {
     emoji.replace('\u{FE0F}', "")
 }
 
-/// A standard emoji as sent: a few characters, at least one beyond ASCII,
-/// with no letters, spaces or the marks Markdown and mentions use.
+/// A standard emoji as sent: one emoji, as the web's `isOneEmoji` takes it
+/// and one grapheme cluster: a pictograph (with its variation selector, skin
+/// tone and tags) or several joined by zero-width joiners, a pair of
+/// regional indicators (a flag), or a keycap. Letters, words and invisible
+/// formatting (U+202E and the like) aren't reactions, so nothing AutoMod
+/// would read gets in this way.
 fn standard(value: &str) -> Result<String> {
     let value = value.trim();
-    let fits = !key_of(value).is_empty()
-        && value.len() <= MAX_EMOJI_BYTES
-        && !value.is_ascii()
-        && value.chars().all(|c| {
-            !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphabetic() && !"<>:@_`~|[]()\\".contains(c)
-        });
-    if fits { Ok(value.to_string()) } else { Err(Error::invalid("react with one emoji")) }
+    if value.len() <= MAX_EMOJI_BYTES && one_emoji(value) {
+        Ok(value.to_string())
+    } else {
+        Err(Error::invalid("react with one emoji"))
+    }
+}
+
+const ZWJ: char = '\u{200D}';
+const VS16: char = '\u{FE0F}';
+const KEYCAP: char = '\u{20E3}';
+
+/// Whether `value` is exactly one emoji (see [`standard`]).
+fn one_emoji(value: &str) -> bool {
+    let mut chars = value.chars().peekable();
+    let Some(first) = chars.next() else { return false };
+    if regional(first) {
+        return chars.next().is_some_and(regional) && chars.next().is_none();
+    }
+    if matches!(first, '0'..='9' | '#' | '*') {
+        chars.next_if_eq(&VS16);
+        return chars.next() == Some(KEYCAP) && chars.next().is_none();
+    }
+    let mut base = first;
+    loop {
+        if !pictographic(base) {
+            return false;
+        }
+        chars.next_if_eq(&VS16);
+        if chars.next_if(|&c| matches!(c, '\u{1F3FB}'..='\u{1F3FF}')).is_some() {
+            chars.next_if_eq(&VS16);
+        }
+        if chars.peek().is_some_and(|&c| tag(c)) {
+            while chars.next_if(|&c| tag(c)).is_some() {}
+            if chars.next() != Some('\u{E007F}') {
+                return false;
+            }
+        }
+        match chars.next() {
+            None => return true,
+            Some(ZWJ) => match chars.next() {
+                Some(next) => base = next,
+                None => return false,
+            },
+            Some(_) => return false,
+        }
+    }
+}
+
+/// A regional indicator, half of a flag.
+fn regional(c: char) -> bool {
+    matches!(c, '\u{1F1E6}'..='\u{1F1FF}')
+}
+
+/// A tag character, as subdivision flags (England, Scotland) spell theirs.
+fn tag(c: char) -> bool {
+    matches!(c, '\u{E0020}'..='\u{E007E}')
+}
+
+/// Unicode's Extended_Pictographic property (emoji-data.txt, Unicode 15.1,
+/// the same as JavaScript's `\p{Extended_Pictographic}`).
+fn pictographic(c: char) -> bool {
+    #[rustfmt::skip]
+    const RANGES: &[(u32, u32)] = &[
+        (0xA9, 0xA9), (0xAE, 0xAE), (0x203C, 0x203C), (0x2049, 0x2049), (0x2122, 0x2122), (0x2139, 0x2139),
+        (0x2194, 0x2199), (0x21A9, 0x21AA), (0x231A, 0x231B), (0x2328, 0x2328), (0x2388, 0x2388),
+        (0x23CF, 0x23CF), (0x23E9, 0x23F3), (0x23F8, 0x23FA), (0x24C2, 0x24C2), (0x25AA, 0x25AB),
+        (0x25B6, 0x25B6), (0x25C0, 0x25C0), (0x25FB, 0x25FE), (0x2600, 0x2605), (0x2607, 0x2612),
+        (0x2614, 0x2685), (0x2690, 0x2705), (0x2708, 0x2712), (0x2714, 0x2714), (0x2716, 0x2716),
+        (0x271D, 0x271D), (0x2721, 0x2721), (0x2728, 0x2728), (0x2733, 0x2734), (0x2744, 0x2744),
+        (0x2747, 0x2747), (0x274C, 0x274C), (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757),
+        (0x2763, 0x2767), (0x2795, 0x2797), (0x27A1, 0x27A1), (0x27B0, 0x27B0), (0x27BF, 0x27BF),
+        (0x2934, 0x2935), (0x2B05, 0x2B07), (0x2B1B, 0x2B1C), (0x2B50, 0x2B50), (0x2B55, 0x2B55),
+        (0x3030, 0x3030), (0x303D, 0x303D), (0x3297, 0x3297), (0x3299, 0x3299), (0x1F000, 0x1F0FF),
+        (0x1F10D, 0x1F10F), (0x1F12F, 0x1F12F), (0x1F16C, 0x1F171), (0x1F17E, 0x1F17F), (0x1F18E, 0x1F18E),
+        (0x1F191, 0x1F19A), (0x1F1AD, 0x1F1E5), (0x1F201, 0x1F20F), (0x1F21A, 0x1F21A), (0x1F22F, 0x1F22F),
+        (0x1F232, 0x1F23A), (0x1F23C, 0x1F23F), (0x1F249, 0x1F3FA), (0x1F400, 0x1F53D), (0x1F546, 0x1F64F),
+        (0x1F680, 0x1F6FF), (0x1F774, 0x1F77F), (0x1F7D5, 0x1F7FF), (0x1F80C, 0x1F80F), (0x1F848, 0x1F84F),
+        (0x1F85A, 0x1F85F), (0x1F888, 0x1F88F), (0x1F8AE, 0x1F8FF), (0x1F90C, 0x1F93A), (0x1F93C, 0x1F945),
+        (0x1F947, 0x1FAFF), (0x1FC00, 0x1FFFD),
+    ];
+    let c = c as u32;
+    RANGES
+        .binary_search_by(|&(lo, hi)| {
+            if hi < c {
+                std::cmp::Ordering::Less
+            } else if lo > c {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+/// Reactions each account added or took off this minute, for the
+/// instance's `reactions_per_minute` (unlimited unless set), kept in memory.
+static PACE: Mutex<Option<HashMap<String, (i64, i64)>>> = Mutex::new(None);
+
+/// Counts one reaction by `account_id` against `per_minute`.
+fn pace(account_id: &str, now: i64, per_minute: Option<i64>) -> Result<()> {
+    let Some(per_minute) = per_minute else { return Ok(()) };
+    let mut guard = PACE.lock().unwrap_or_else(|e| e.into_inner());
+    take_turn(guard.get_or_insert_with(HashMap::new), account_id, now, per_minute)
+}
+
+/// [`pace`] over a given table of counts: each account's minute and how
+/// many it's used.
+fn take_turn(counts: &mut HashMap<String, (i64, i64)>, account_id: &str, now: i64, per_minute: i64) -> Result<()> {
+    let minute = now / 60_000;
+    if counts.len() > 10_000 {
+        counts.retain(|_, (at, _)| *at == minute);
+    }
+    let entry = counts.entry(account_id.to_string()).or_insert((minute, 0));
+    if entry.0 != minute {
+        *entry = (minute, 0);
+    }
+    if entry.1 >= per_minute {
+        return Err(Error::ResourceExhausted("you're reacting too fast; try again in a minute".into()));
+    }
+    entry.1 += 1;
+    Ok(())
 }
 
 /// The key a request names (`emoji` or `emoji_id`, one of the two), and the
@@ -134,7 +257,8 @@ async fn shown_as(conn: &turso::Connection, message_id: &str, key: &str, fallbac
 }
 
 /// Each message's reactions, in the order each emoji was first used, with
-/// `me` for `viewer`. Custom emoji the server no longer has are left out.
+/// `me` for `viewer`, the first [`MAX_REACTIONS`] of them. Custom emoji the
+/// server no longer has are left out.
 pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mut [pb::Message]) -> Result<()> {
     if messages.is_empty() {
         return Ok(());
@@ -184,7 +308,10 @@ pub(super) async fn attach(conn: &turso::Connection, viewer: &str, messages: &mu
             let emoji = shown.filter(|s| !s.is_empty()).unwrap_or(key);
             pb::Reaction { emoji, ..Default::default() }
         };
-        found.entry(message_id).or_default().push(pb::Reaction { count: count as u32, me: mine > 0, ..reaction });
+        let shown = found.entry(message_id).or_default();
+        if shown.len() < MAX_REACTIONS {
+            shown.push(pb::Reaction { count: count as u32, me: mine > 0, ..reaction });
+        }
     }
     for message in messages {
         message.reactions = found.remove(&message.id).unwrap_or_default();
@@ -411,11 +538,12 @@ impl Api {
         if req.reacted {
             access.require_in(&req.channel_id, Permission::AddReactions)?;
         }
+        check_emoji(&req.emoji, &req.emoji_id)?;
+        pace(&account.id, now_ms(), self.app.settings().limits.reactions_per_minute)?;
         if let Some((link, guest)) =
             shared::locate(&self.app, &*sdb.read()?, &sdb.id, account, &access, &req.channel_id, &req.message_id)
                 .await?
         {
-            check_emoji(&req.emoji, &req.emoji_id)?;
             let reaction = shared::guest_react(&self.app, &sdb.id, &link, guest, &req).await?;
             return Ok(pb::ReactResponse { reaction: Some(reaction) });
         }
@@ -521,17 +649,91 @@ mod tests {
 
     #[test]
     fn takes_one_emoji() {
-        for ok in ["🍕", "1️⃣", "👩‍👩‍👧", "🇯🇵", "❤️", " 👍🏽 "] {
+        let england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+        for ok in [
+            "🍕",
+            "1️⃣",
+            "1\u{20E3}",
+            "#️⃣",
+            "👩‍👩‍👧",
+            "🇯🇵",
+            "❤️",
+            "❤",
+            " 👍🏽 ",
+            "👋🏿",
+            "🏳️‍🌈",
+            "❤️‍🔥",
+            "👁️‍🗨️",
+            "🧑🏽‍🚀",
+            "©️",
+            "☺️",
+            england,
+        ] {
             assert!(standard(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "pizza", "1", "🍕 🍕", ":pizza:", "<:x:1>", "@everyone", "🍕🍕🍕🍕🍕🍕🍕🍕🍕"]
-        {
-            assert!(standard(bad).is_err(), "{bad}");
+        for bad in [
+            "",
+            "pizza",
+            "1",
+            "🍕 🍕",
+            "🍕🍕",
+            ":pizza:",
+            "<:x:1>",
+            "@everyone",
+            "🍕🍕🍕🍕🍕🍕🍕🍕🍕",
+            // Words in any script, and letters dressed up with emoji.
+            "日本語",
+            "привет",
+            "é",
+            "a🍕",
+            "🍕a",
+            "a\u{20E3}",
+            // Invisible formatting: right-to-left overrides, isolates, other joiners.
+            "\u{202E}🍕",
+            "🍕\u{202E}",
+            "\u{2066}🍕",
+            "🍕\u{200B}",
+            "🍕\u{200C}🍕",
+            "\u{200D}",
+            // Halves and pieces: one regional indicator, three, a skin tone or joiner alone,
+            // a dangling joiner, tags that never end, a flag joined to something.
+            "\u{1F1EF}",
+            "🇯🇵\u{1F1EF}",
+            "\u{1F3FD}",
+            "🍕\u{200D}",
+            "\u{1F3F4}\u{E0067}\u{E0062}",
+            "🇯🇵\u{200D}🍕",
+            "1️⃣\u{200D}🍕",
+            "\u{E0067}",
+        ] {
+            assert!(standard(bad).is_err(), "{bad:?}");
         }
         assert_eq!(standard(" 👍🏽 ").unwrap(), "👍🏽");
         assert!(standard("\u{FE0F}").is_err(), "a variation selector alone is nothing");
         assert_eq!(key_of("👍\u{FE0F}"), key_of("👍"));
         assert_eq!(key_of("❤\u{FE0F}"), "❤");
+    }
+
+    #[test]
+    fn pictographs_match_unicode() {
+        for yes in ['\u{A9}', '\u{2764}', '\u{1F300}', '\u{1F3FA}', '\u{1F947}', '\u{1FAFF}', '\u{1FFFD}'] {
+            assert!(pictographic(yes), "{yes:?}");
+        }
+        for no in ['a', '1', '\u{1F1EF}', '\u{1F3FB}', '\u{1F3FF}', '\u{200D}', '\u{FE0F}', '\u{1F946}', '\u{1FFFE}'] {
+            assert!(!pictographic(no), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn paces_each_account_by_the_minute() {
+        let mut counts = HashMap::new();
+        let minute = 60_000 * 1000;
+        for _ in 0..3 {
+            take_turn(&mut counts, "mika", minute, 3).unwrap();
+        }
+        assert!(matches!(take_turn(&mut counts, "mika", minute + 59_999, 3), Err(Error::ResourceExhausted(_))));
+        take_turn(&mut counts, "rin", minute, 3).expect("each account has its own");
+        take_turn(&mut counts, "mika", minute + 60_000, 3).expect("a new minute starts over");
     }
 
     #[test]

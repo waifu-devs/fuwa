@@ -217,6 +217,15 @@ can change, without restarting:
 What's set there is kept in the data folder and wins over the environment
 variables, which stay as the defaults underneath.
 
+Caps on use are unlimited unless you set them, except a few protective
+defaults that each stop one person from swamping everyone else. One of them:
+a message holds at most 100 different emoji as reactions
+(`FUWA_LIMIT_REACTIONS_PER_MESSAGE`, also in the instance settings; up to
+0.4.1 it was unlimited unless set). `unlimited` lifts it, though messages
+still show the first 100; 0 isn't taken. How many reactions one
+account may add or take off a minute (`FUWA_LIMIT_REACTIONS_PER_MINUTE`) is
+unlimited unless set.
+
 Direct messages are end-to-end encrypted with nothing to set up: the instance
 keeps only ciphertext and public keys for them (`dms.db`), and can't read them.
 If a proxy in front of fuwa sets its own `Content-Security-Policy`, let scripts

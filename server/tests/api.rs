@@ -11257,6 +11257,40 @@ async fn members_react_to_messages() {
     instance.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_holds_a_hundred_different_reactions_unless_lifted() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let sid = create_server(&mut c, &juan, "Many", true).await.id;
+    let general = new_channel(&mut c, &juan, &sid, "general", pb::ChannelType::Text).await.id;
+    let hello = send(&mut c, &juan, &sid, &general, "hello").await.unwrap();
+    let emoji: Vec<String> = (0x1F400..0x1F400 + 101).map(|c| char::from_u32(c).unwrap().to_string()).collect();
+
+    // A hundred different emoji fit by default; the next is refused.
+    for one in &emoji[..100] {
+        react(&mut c, &juan, &sid, &general, &hello.id, one, true).await.unwrap();
+    }
+    assert_eq!(
+        react(&mut c, &juan, &sid, &general, &hello.id, &emoji[100], true).await.unwrap_err(),
+        Code::ResourceExhausted
+    );
+
+    // An admin lifts the cap: the message takes more, and shows the first hundred.
+    let lifted = pb::InstanceSettings { reactions_per_message: None, ..Default::default() };
+    c.admin.update_settings(authed(&juan, settings_update(lifted, &["reactions_per_message"], &[]))).await.unwrap();
+    react(&mut c, &juan, &sid, &general, &hello.id, &emoji[100], true).await.unwrap();
+    let shown = reactions_on(&mut c, &juan, &sid, &general, &hello.id).await;
+    assert_eq!(shown.iter().map(|(e, ..)| e.clone()).collect::<Vec<_>>(), emoji[..100]);
+
+    // No cap of 0: that would stop every reaction.
+    let zero = pb::InstanceSettings { reactions_per_message: Some(0), ..Default::default() };
+    let refused = c.admin.update_settings(authed(&juan, settings_update(zero, &["reactions_per_message"], &[]))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
 fn tile_content(title: &str, score: &str) -> pb::LiveTileContent {
     pb::LiveTileContent {
         title: title.into(),
