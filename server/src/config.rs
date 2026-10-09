@@ -127,6 +127,15 @@ pub struct Config {
     /// may hold open at once on this part, default 32 (a protective default);
     /// `unlimited` for none. Admins can change it in the instance settings.
     pub streams_per_account: Option<usize>,
+    /// FUWA_LARGE_SERVER_MEMBERS: servers with at least this many members are
+    /// large, default 2,500 (a protective default): live connections
+    /// (LiveService) get presence there only for the people on screen.
+    /// `unlimited` for no server being large. Read where accounts are.
+    pub large_server_members: Option<usize>,
+    /// FUWA_ON_SCREEN_MEMBERS: members of smaller servers one live
+    /// connection follows the presence of at most, its smallest servers
+    /// first, default 5,000 (a protective default); `unlimited` for none.
+    pub on_screen_members: Option<usize>,
     /// FUWA_SHARED_FILE_FETCHES_IN_FLIGHT: files fetched from other
     /// instances at once for shared channels, default 8 (a protective
     /// default), each instance at most half; `unlimited` for none. Admins
@@ -178,6 +187,8 @@ impl std::fmt::Debug for Config {
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
             .field("streams_per_account", &self.streams_per_account)
+            .field("large_server_members", &self.large_server_members)
+            .field("on_screen_members", &self.on_screen_members)
             .field("max_streams", &self.max_streams)
             .field("write_queue", &self.write_queue)
             .field("sign_in_queue", &self.sign_in_queue)
@@ -642,6 +653,8 @@ impl Config {
             }
         };
         let streams_per_account = count("FUWA_STREAMS_PER_ACCOUNT", Some(crate::streams::PER_ACCOUNT))?;
+        let large_server_members = count("FUWA_LARGE_SERVER_MEMBERS", Some(crate::presence::LARGE_SERVER_MEMBERS))?;
+        let on_screen_members = count("FUWA_ON_SCREEN_MEMBERS", Some(crate::presence::ON_SCREEN_MEMBERS))?;
         let max_streams = count("FUWA_MAX_STREAMS", None)?;
         let shared_file_fetches_in_flight =
             count("FUWA_SHARED_FILE_FETCHES_IN_FLIGHT", Some(crate::federation::FETCHES_IN_FLIGHT))?;
@@ -717,6 +730,8 @@ impl Config {
             media_urls,
             replica,
             streams_per_account,
+            large_server_members,
+            on_screen_members,
             shared_file_fetches_in_flight,
             live_tile_publish_ms,
             live_tile_updates_per_minute,

@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "command",
         "live_tile",
         "profile_item",
+        "live",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
@@ -40,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let includes = [PathBuf::from("../proto"), protoc_bin_vendored::include_path()?];
     tonic_prost_build::configure()
         .build_client(true)
+        .boxed(".fuwa.v1.OpenResponse.item.events")
         .file_descriptor_set_path(out_dir.join("fuwa_descriptor.bin"))
         .compile_with_config(config, &protos, &includes)?;
 

@@ -12,6 +12,7 @@ import {
   type InteractionContext,
   FailedPreconditionError,
   LiveTileKind,
+  MessageIntent,
   LiveTileSource,
   MediaPurpose,
   FuwaError,
@@ -129,6 +130,42 @@ test("an agent answers commands, mentions and messages", async () => {
   assert.equal(edited.content, "hello there (edited)");
   assert.ok(edited.editedAt);
   await agent.stop();
+});
+
+test("a live connection can carry only the messages that mention the agent", async () => {
+  const agent = createFuwa({ url: instance.url, token: agentToken });
+  const me = (await agent.auth.getMe({})).user!;
+  const done = new AbortController();
+  const stream = agent.live.open(
+    { servers: [{ serverId }], messages: MessageIntent.MENTIONS },
+    { signal: done.signal, timeoutMs: 0 },
+  );
+  const whole: string[] = [];
+  const heads: string[] = [];
+  let ready = () => {};
+  const isReady = new Promise<void>((resolve) => (ready = resolve));
+  const reading = (async () => {
+    try {
+      for await (const res of stream) {
+        const item = res.item;
+        if (item.case === "events" && item.value.ready) ready();
+        if (item.case === "events" && item.value.event?.payload.case === "messageCreated") {
+          whole.push(item.value.event.payload.value.message!.content);
+        }
+        if (item.case === "heads") heads.push(...item.value.servers.flatMap((s) => s.channels.map((c) => c.channelId)));
+      }
+    } catch {
+      // stopped
+    }
+  })();
+  await isReady;
+  await say("not for the agent");
+  await say(`for <@${me.id}>`);
+  await until("the mention whole and the rest as heads", () => (whole.length && heads.length) || undefined);
+  assert.deepEqual(whole, [`for <@${me.id}>`]);
+  assert.deepEqual(heads, [channelId]);
+  done.abort();
+  await reading;
 });
 
 test("an agent reacts to messages and hears others react", async () => {

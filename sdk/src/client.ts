@@ -20,6 +20,7 @@ import { JoinService } from "./gen/fuwa/v1/join_pb.js";
 import { MediaService } from "./gen/fuwa/v1/media_pb.js";
 import { MessageService } from "./gen/fuwa/v1/message_pb.js";
 import { NodeService } from "./gen/fuwa/v1/node_pb.js";
+import { LiveService } from "./gen/fuwa/v1/live_pb.js";
 import { PresenceService } from "./gen/fuwa/v1/presence_pb.js";
 import { RoleService } from "./gen/fuwa/v1/role_pb.js";
 import { SearchService } from "./gen/fuwa/v1/search_pb.js";
@@ -94,6 +95,12 @@ export interface Fuwa {
   liveTiles: Client<typeof LiveTileService>;
   gifs: Client<typeof GifService>;
   presence: Client<typeof PresenceService>;
+  /**
+   * One stream for everything (instances with the `live-connection`
+   * feature): agents can ask for only the messages that mention them
+   * (`messages: MessageIntent.MENTIONS`) and get channel heads for the rest.
+   */
+  live: Client<typeof LiveService>;
   search: Client<typeof SearchService>;
   /** What the instance says it runs: its version and build, from NodeService.GetNode. */
   serverVersion(): Promise<ServerVersion>;
@@ -216,6 +223,7 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     liveTiles: client(LiveTileService),
     gifs: client(GifService),
     presence: client(PresenceService),
+    live: client(LiveService),
     search: client(SearchService),
     async serverVersion() {
       const { node: n } = await node.getNode({});

@@ -69,6 +69,16 @@
     `App::find_agent`, the cluster call `FindAgent`), and it skips rules
     (never `pending`). Deleting a person deletes their agents
     (`erase_account`). Who may make agents is the `agent_creation` setting.
+  - `live.rs` and `api/live.rs`: `LiveService` (docs/live.md), one stream
+    per app made of the event, DM, friend and presence streams. Focus (the
+    channels and people on screen) is kept per connection (`Connections`,
+    by a random id bound to its session); `Interest` holds back messages out
+    of focus inside the event stream's task (`events::held_back`) and sends
+    channel heads instead. On a split instance the gateway answers Open,
+    merging shard events itself, and the directory keeps the focus and
+    echoes it down the connection's stream. On-screen presence streams
+    (`Presence::watch_on_screen`) follow small servers up to a bound and
+    large ones only through focus (`Index::audience`).
   - `presence.rs`: who's online and what they're doing (docs/presence.md),
     in memory only where accounts are: each app's lease (`UpdatePresence`,
     150 seconds), people's saved choices (node.db's `presence_settings`) and

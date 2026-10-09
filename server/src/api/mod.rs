@@ -15,6 +15,7 @@ mod friends;
 mod gifs;
 mod invites;
 mod join;
+mod live;
 mod live_tiles;
 mod media;
 mod messages;

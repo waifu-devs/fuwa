@@ -249,6 +249,78 @@ impl Index {
         found
     }
 
+    /// Everyone who shares a server with `account_id` and passes `keep`, with
+    /// the servers they share (0 `large`: no server is large). A large server's members aren't
+    /// walked: only people found through a smaller one, or in `also`, are
+    /// looked for in it, so a change there costs what's on screen, not its size.
+    pub fn audience(
+        &self,
+        account_id: &str,
+        large: usize,
+        keep: impl Fn(&str) -> bool,
+        also: &HashSet<String>,
+    ) -> HashMap<String, Vec<String>> {
+        let inner = self.read();
+        let mut found: HashMap<String, Vec<String>> = HashMap::new();
+        let Some(servers) = inner.memberships.get(account_id) else { return found };
+        let mut big = Vec::new();
+        for server_id in servers {
+            let Some(members) = inner.members.get(server_id) else { continue };
+            if large > 0 && members.len() >= large {
+                big.push((server_id, members));
+                continue;
+            }
+            for member in members {
+                if member != account_id && keep(member) {
+                    found.entry(member.clone()).or_default().push(server_id.clone());
+                }
+            }
+        }
+        for (server_id, members) in big {
+            let candidates: Vec<String> =
+                found.keys().chain(also.iter()).filter(|id| members.contains(*id)).cloned().collect();
+            for member in candidates {
+                if member != account_id && keep(&member) {
+                    let entry = found.entry(member).or_default();
+                    if !entry.contains(server_id) {
+                        entry.push(server_id.clone());
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// The servers of `account_id` smaller than `large` (0: every one),
+    /// smallest first while their members add up to at most `budget`, and
+    /// the room left.
+    pub fn smallest_servers(&self, account_id: &str, large: usize, budget: usize) -> (HashSet<String>, usize) {
+        let inner = self.read();
+        let mut sizes: Vec<(usize, &String)> = inner
+            .memberships
+            .get(account_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| inner.members.get(id).map(|m| (m.len(), id)))
+            .filter(|(size, _)| large == 0 || *size < large)
+            .collect();
+        sizes.sort();
+        let (mut shown, mut room) = (HashSet::new(), budget);
+        for (size, id) in sizes {
+            if size > room {
+                break;
+            }
+            room -= size;
+            shown.insert(id.clone());
+        }
+        (shown, room)
+    }
+
+    /// How many members a server has here.
+    pub fn size(&self, server_id: &str) -> usize {
+        self.read().members.get(server_id).map_or(0, HashSet::len)
+    }
+
     /// The servers two accounts share.
     pub fn shared_servers(&self, a: &str, b: &str) -> Vec<String> {
         let inner = self.read();

@@ -55,6 +55,8 @@ pub struct App {
     pub index: Index,
     /// Who's online and what they're doing, where `node` is; memory only.
     pub presence: crate::presence::Presence,
+    /// Live connections open here (`LiveService`), for Focus to find.
+    pub connections: Arc<crate::live::Connections>,
     /// The servers whose files are here: all of them, or a shard's share.
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -216,6 +218,8 @@ impl App {
         crate::db::set_write_queue(config.write_queue);
         crate::auth::set_sign_in_queue(config.sign_in_queue);
 
+        let large_server_members = config.large_server_members.unwrap_or(0);
+        let on_screen_members = config.on_screen_members.unwrap_or(usize::MAX);
         let app = Arc::new(Self {
             config,
             settings: watch::Sender::new(Arc::new(settings)),
@@ -225,7 +229,8 @@ impl App {
             media,
             friends,
             index,
-            presence: crate::presence::Presence::default(),
+            presence: crate::presence::Presence::with_large(large_server_members, on_screen_members),
+            connections: Arc::default(),
             servers,
             hub,
             limiter: SignInLimiter::default(),
@@ -442,6 +447,7 @@ impl App {
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
             .add_service(crate::pb::presence_service_server::PresenceServiceServer::new(api.clone()))
+            .add_service(crate::pb::live_service_server::LiveServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))

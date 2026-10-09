@@ -2060,3 +2060,85 @@ async fn only_instance_admins_set_a_servers_caps_through_a_gateway() {
     assert_eq!(set_by_admin.limits.unwrap().members, Some(1_000));
     cluster.stop().await;
 }
+
+/// A live stream through one gateway takes focus sent through another: the
+/// directory keeps it and tells the gateway holding the stream, which holds
+/// back messages out of focus as heads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_focus_reaches_the_gateway_holding_the_stream() {
+    use pb::open_response::Item;
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let (listener, addr) = listen().await;
+    let (other_gateway, _other) = start_gateway(&root.path().join("gateway-2"), &cluster.directory, listener, addr);
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Games").await;
+    join(&mut c, &mika, &server.id).await.unwrap();
+    let general = general(&mut c, &juan, &server.id).await;
+    let request = pb::CreateChannelRequest {
+        server_id: server.id.clone(),
+        name: "other".into(),
+        r#type: pb::ChannelType::Text as i32,
+        ..Default::default()
+    };
+    let other = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+
+    let here = Channel::from_shared(cluster.gateway.url()).unwrap().connect().await.unwrap();
+    let there = Channel::from_shared(other_gateway.url()).unwrap().connect().await.unwrap();
+    let open = pb::OpenRequest {
+        servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+        presence: true,
+        ..Default::default()
+    };
+    let mut stream =
+        pb::live_service_client::LiveServiceClient::new(here).open(authed(&mika, open)).await.unwrap().into_inner();
+    let next = async |stream: &mut Streaming<pb::OpenResponse>| loop {
+        let message = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap().unwrap().unwrap();
+        if let Some(item) = message.item {
+            return item;
+        }
+    };
+    let Item::ConnectionId(id) = next(&mut stream).await else { panic!("no connection id first") };
+    let mut ready = false;
+    while !ready {
+        ready = matches!(next(&mut stream).await, Item::Events(r) if r.ready.is_some());
+    }
+    let focus = pb::Focus { channel_ids: vec![general.id.clone()], ..Default::default() };
+    pb::live_service_client::LiveServiceClient::new(there)
+        .focus(authed(&mika, pb::FocusRequest { connection_id: id, focus: Some(focus) }))
+        .await
+        .unwrap();
+    loop {
+        if let Item::Focus(now) = next(&mut stream).await {
+            assert_eq!(now.channel_ids, std::slice::from_ref(&general.id));
+            break;
+        }
+    }
+
+    let quiet = send(&mut c, &juan, &server.id, &other.id, "elsewhere").await;
+    send(&mut c, &juan, &server.id, &general.id, "here").await;
+    let (mut whole, mut heads) = (Vec::new(), None);
+    while heads.is_none() || whole.is_empty() {
+        match next(&mut stream).await {
+            Item::Heads(h) => heads = Some(h),
+            Item::Events(r) => {
+                if let Some(pb::event::Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) =
+                    r.event.and_then(|event| event.payload)
+                {
+                    whole.push(m.content);
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(whole, ["here"]);
+    let heads = heads.unwrap();
+    assert_eq!(heads.servers[0].channels[0].channel_id, other.id);
+    assert_eq!(heads.servers[0].channels[0].last_message_id, quiet.id);
+    // A stream passed through the gateway would hold its shutdown open.
+    drop(stream);
+    other_gateway.stop().await;
+    cluster.stop().await;
+}

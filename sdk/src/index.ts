@@ -98,6 +98,7 @@ export * from "./gen/fuwa/v1/media_pb.js";
 export * from "./gen/fuwa/v1/message_pb.js";
 export * from "./gen/fuwa/v1/node_pb.js";
 export * from "./gen/fuwa/v1/presence_pb.js";
+export * from "./gen/fuwa/v1/live_pb.js";
 export * from "./gen/fuwa/v1/role_pb.js";
 export * from "./gen/fuwa/v1/search_pb.js";
 export * from "./gen/fuwa/v1/secure_pb.js";
