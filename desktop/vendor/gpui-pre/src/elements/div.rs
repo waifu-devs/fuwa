@@ -3564,10 +3564,17 @@ impl Interactivity {
                 .clicked_state
                 .get_or_insert_with(Default::default)
                 .borrow();
-            if clicked_state.group
-                && let Some(group) = self.group_active_style.as_ref()
-            {
-                style.refine(&group.style)
+            if let Some(group) = self.group_active_style.as_ref() {
+                style = fade_into(
+                    style,
+                    &group.style,
+                    clicked_state.group,
+                    FadeSlot::GroupActive,
+                    true,
+                    &mut Some(&mut **element_state),
+                    window,
+                    cx,
+                );
             }
 
             if let Some(active_style) = self.active_style.as_ref() {
@@ -3685,7 +3692,7 @@ pub struct InteractiveElementState {
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
     long_press_tooltip_active: Option<Rc<Cell<bool>>>,
     /// How far its focus, group hover, hover and active styles have faded in.
-    fades: [Option<StyleFade>; 6],
+    fades: [Option<StyleFade>; 7],
 }
 
 /// How long a hover, focus or active style takes to fade in or out:
@@ -3700,6 +3707,7 @@ enum FadeSlot {
     InFocus = 3,
     Focus = 4,
     FocusVisible = 5,
+    GroupActive = 6,
 }
 
 /// A style fading in or out, as CSS transitions a `:hover`.

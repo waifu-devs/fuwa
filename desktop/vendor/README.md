@@ -76,7 +76,7 @@ before since layout asked for the upright face's own style. Shaping uses the
 upright face, so widths don't change. (`gpui-pre-macos` is vendored for this.)
 
 **Hover transitions.** A div with an id fades its `hover`, `group_hover`,
-`active` and focus styles in and out over 150ms (`cubic-bezier(0.4, 0, 0.2, 1)`),
+`active`, `group_active` and focus styles in and out over 150ms (`cubic-bezier(0.4, 0, 0.2, 1)`),
 as Tailwind's `transition` does on the web: background colors, border and
 text colors, opacity, box shadows and transforms (scale, turn, move) are
 mixed between the two styles (colors in premultiplied sRGB, as browsers do),
