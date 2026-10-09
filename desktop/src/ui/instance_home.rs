@@ -1123,11 +1123,12 @@ impl FuwaApp {
             .id("instance-page")
             .size_full()
             .overflow_y_scroll()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p(px(16.0))
-            .child(motion::rise(card, SharedString::from(format!("signed-out|{key}")), Duration::ZERO, 18.0))
+            .child(div().w_full().min_h_full().flex().items_center().justify_center().p(px(16.0)).child(motion::rise(
+                card,
+                SharedString::from(format!("signed-out|{key}")),
+                Duration::ZERO,
+                18.0,
+            )))
             .into_any_element()
     }
 }

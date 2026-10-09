@@ -943,6 +943,8 @@ impl Render for InstanceSettingsView {
                     .h_full()
                     .flex()
                     .justify_end()
+                    // Its own height, not the column's, so a menu taller than the window scrolls.
+                    .items_start()
                     .bg(p.side_surface)
                     .border_r_1()
                     .border_color(p.border)
