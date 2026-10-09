@@ -120,6 +120,25 @@ async fn endpoint() -> Endpoint {
 }
 
 impl Endpoint {
+    /// What the messages delivered from now said, through the first that says `last`.
+    async fn said_until(&mut self, last: &str) -> Vec<String> {
+        let mut said = Vec::new();
+        while said.last().is_none_or(|s| s != last) {
+            let delivery = tokio::time::timeout(Duration::from_secs(15), self.deliveries.recv())
+                .await
+                .expect("nothing came")
+                .unwrap();
+            for event in delivery["events"].as_array().unwrap() {
+                if let Some(content) = event["messageCreated"]["message"]["content"].as_str()
+                    && said.last().is_none_or(|s| s != last)
+                {
+                    said.push(content.to_string());
+                }
+            }
+        }
+        said
+    }
+
     /// The next event delivered whose payload is `kind`.
     async fn next(&mut self, kind: &str) -> Value {
         loop {
@@ -361,5 +380,126 @@ async fn endpoints_stay_on_public_addresses_unless_allowed() {
         ))
         .await;
     assert_eq!(set.unwrap_err().code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn a_turned_off_agent_stops_hearing_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_AGENT_ENDPOINTS", "any")]).await;
+    let channel = instance.channel.clone();
+    let mut auth = pb::auth_service_client::AuthServiceClient::new(channel.clone());
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    let mut channels = pb::channel_service_client::ChannelServiceClient::new(channel.clone());
+    let mut messages = pb::message_service_client::MessageServiceClient::new(channel.clone());
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let mut admin = pb::admin_service_client::AdminServiceClient::new(channel.clone());
+    let mut sign_up = async |username: &str| {
+        auth.sign_up(pb::SignUpRequest {
+            username: username.into(),
+            password: "correct horse battery".into(),
+            display_name: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+    };
+    // Juan runs the instance and the server; Rin's agent is in it.
+    let juan = sign_up("juan").await.token;
+    let rin = sign_up("rin").await;
+    let (rin_id, rin) = (rin.user.unwrap().id, rin.token);
+    let server_id = servers
+        .create_server(authed(&juan, pb::CreateServerRequest { name: "Waifu Devs".into(), ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    let general_id = channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server_id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    let made = agents
+        .create_agent(authed(&rin, pb::CreateAgentRequest { username: "dice".into(), display_name: "Dice".into() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let agent_id = made.agent.unwrap().user.unwrap().id;
+    agents
+        .update_agent(authed(
+            &rin,
+            pb::UpdateAgentRequest { agent_id: agent_id.clone(), public: Some(true), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    agents
+        .add_agent(authed(&juan, pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into() }))
+        .await
+        .unwrap();
+    let got = agents
+        .get_agent_endpoint(authed(&rin, pb::GetAgentEndpointRequest { agent_id: agent_id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .endpoint
+        .unwrap();
+    let mut endpoint = endpoint().await;
+    *endpoint.secret.lock().unwrap() = got.secret;
+    agents
+        .set_agent_endpoint(authed(
+            &rin,
+            pb::SetAgentEndpointRequest {
+                agent_id: agent_id.clone(),
+                url: endpoint.url.clone(),
+                events: vec!["message_created".into()],
+            },
+        ))
+        .await
+        .unwrap();
+    let send = |content: &str| {
+        authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server_id.clone(),
+                channel_id: general_id.clone(),
+                content: content.into(),
+                ..Default::default()
+            },
+        )
+    };
+    let turn = |account_id: &str, disabled: bool| {
+        authed(
+            &juan,
+            pb::UpdateAccountRequest { account_id: account_id.into(), disabled: Some(disabled), ..Default::default() },
+        )
+    };
+    messages.send_message(send("hello dice")).await.unwrap();
+    assert_eq!(endpoint.next("messageCreated").await["messageCreated"]["message"]["content"], "hello dice");
+
+    // Its owner turned off, the agent hears nothing more, without waiting for
+    // deliveries to look its endpoint up again.
+    admin.update_account(turn(&rin_id, true)).await.unwrap();
+    messages.send_message(send("rin's gone")).await.unwrap();
+    let quiet = tokio::time::timeout(Duration::from_secs(2), endpoint.deliveries.recv()).await;
+    assert!(quiet.is_err(), "a delivery came after the agent's owner was turned off");
+
+    // Back on, it hears again: what came while it was off first, as the log is its queue.
+    admin.update_account(turn(&rin_id, false)).await.unwrap();
+    messages.send_message(send("rin's back")).await.unwrap();
+    assert_eq!(endpoint.said_until("rin's back").await, ["rin's gone", "rin's back"]);
+
+    // The agent itself turned off: the same.
+    admin.update_account(turn(&agent_id, true)).await.unwrap();
+    messages.send_message(send("dice is off")).await.unwrap();
+    let quiet = tokio::time::timeout(Duration::from_secs(2), endpoint.deliveries.recv()).await;
+    assert!(quiet.is_err(), "a delivery came after the agent was turned off");
+
     instance.stop().await;
 }

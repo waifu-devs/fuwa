@@ -271,6 +271,9 @@ impl App {
     /// theirs at once, and a directory passes it on to its shards for theirs.
     pub fn sessions_ended(&self, account_id: &str) {
         let _ = self.ended.send(account_id.into());
+        // An agent turned off or deleted stops hearing through its endpoint now,
+        // not when deliveries next look it up.
+        self.agent_endpoint_changed(account_id);
     }
 
     /// The accounts whose sessions end from now on, for a live stream to follow.
@@ -300,9 +303,9 @@ impl App {
         self.joined.subscribe()
     }
 
-    /// Says an agent's endpoint was set, turned off or given a new secret
-    /// (an empty id: any may have been), where deliveries run, and from a
-    /// directory to its shards.
+    /// Says an agent's endpoint was set, turned off or given a new secret, or
+    /// the agent or its owner was turned off, on or deleted (an empty id: any
+    /// may have been), where deliveries run, and from a directory to its shards.
     pub fn agent_endpoint_changed(&self, agent_id: &str) {
         let _ = self.endpoints_changed.send(agent_id.into());
     }

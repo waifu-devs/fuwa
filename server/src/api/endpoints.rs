@@ -581,7 +581,7 @@ impl Run {
                         reported = Some((Instant::now(), false));
                         let _ = self.app.report_agent_delivery(&self.agent_id, endpoint.epoch, "").await;
                     }
-                    self.reply(&endpoint.agent, &batch.interactions, &answer).await;
+                    self.reply(&batch.interactions, &answer).await;
                     if batch.gone {
                         self.forget(&sdb).await;
                         return;
@@ -736,11 +736,26 @@ impl Run {
         Ok(Some(batch))
     }
 
-    /// Sends the replies an answer carried, for interactions it was given.
-    async fn reply(&self, agent: &Account, interactions: &HashMap<String, String>, answer: &[u8]) {
+    /// Sends the replies an answer carried, for interactions it was given, as
+    /// the agent as it is now: one turned off (or whose owner is) since the
+    /// endpoint was looked up sends none.
+    async fn reply(&self, interactions: &HashMap<String, String>, answer: &[u8]) {
         let Some(answer) = read_answer(answer) else {
             tracing::info!("an agent's endpoint answered with something that isn't an AgentDeliveryAnswer");
             return;
+        };
+        if !answer.replies.iter().any(|reply| interactions.contains_key(&reply.interaction_id)) {
+            return;
+        }
+        let agent = match self.app.agent_endpoints(std::slice::from_ref(&self.agent_id)).await {
+            Ok(found) => match found.into_iter().find_map(Endpoint::from_cluster) {
+                Some((_, endpoint)) => endpoint.agent.clone(),
+                None => return,
+            },
+            Err(_) => {
+                tracing::info!("couldn't look an agent up to send its endpoint's replies");
+                return;
+            }
         };
         let api = Api::new(self.app.clone());
         for reply in answer.replies.into_iter().take(MAX_EVENTS) {
