@@ -5,6 +5,8 @@
 //! a draft here, with the error at its line, so the backdrop never shows a
 //! broken shader.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::base::input::{Diagnostic as Mark, DiagnosticSeverity, Position};
@@ -24,6 +26,7 @@ use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_themes::Target;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
+use crate::ui::wgsl;
 use crate::ui::widgets::icon;
 
 /// How long typing has to pause before the shader is compiled and tried.
@@ -59,6 +62,8 @@ pub(crate) struct ShaderForm {
     /// Counts edits, so only the latest one's check counts.
     edits: u64,
     reference: bool,
+    /// The code's colors, kept in step with the theme.
+    colors: Rc<Cell<wgsl::Colors>>,
 }
 
 /// The badge's look.
@@ -160,7 +165,10 @@ impl SettingsView {
                     .searchable(false)
                     .soft_wrap(false)
             });
-            code.update(cx, |s, cx| s.set_value(shader.code.clone(), window, cx));
+            code.update(cx, |s, cx| {
+                s.set_highlighter_factory(wgsl::factory(form.colors.clone()), cx);
+                s.set_value(shader.code.clone(), window, cx);
+            });
             cx.subscribe(&code, move |this: &mut SettingsView, s, e: &InputEvent, cx| {
                 if !matches!(e, InputEvent::Change) {
                     return;
@@ -204,6 +212,7 @@ impl SettingsView {
                 checked: (shader.code.clone(), Vec::new()),
                 edits: 0,
                 reference: form.reference,
+                colors: form.colors.clone(),
             };
             return;
         }
@@ -233,6 +242,10 @@ impl SettingsView {
         let (Some(name), Some(code)) = (form.name.clone(), form.code.clone()) else {
             return div().into_any_element();
         };
+        let colors = wgsl::Colors::of(p);
+        if form.colors.replace(colors) != colors {
+            code.update(cx, |_, cx| cx.notify());
+        }
         let dirty = form.draft != shader.code;
         let checking = dirty && form.checked.0 != form.draft;
         let errors: Vec<Diagnostic> = if dirty && !checking { form.checked.1.clone() } else { Vec::new() };

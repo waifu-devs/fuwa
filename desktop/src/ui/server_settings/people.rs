@@ -1211,7 +1211,10 @@ impl ServerSettingsView {
                         cx.notify();
                     }),
                 )
-                .child(crate::ui::motion::sheet_up(card, "nickname-dialog-in"))
+                .child(crate::ui::overlay::roomy(
+                    "nickname-room",
+                    crate::ui::motion::sheet_up(card, "nickname-dialog-in"),
+                ))
                 .into_any_element(),
         )
     }

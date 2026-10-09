@@ -303,7 +303,10 @@ impl Render for PictureCropper {
                             cx.notify();
                         }),
                     )
-                    .child(motion::dialog_in(div().child(card), "cropper-panel")),
+                    .child(crate::ui::overlay::roomy(
+                        "cropper-room",
+                        motion::dialog_in(div().child(card), "cropper-panel"),
+                    )),
                 "cropper-fade",
                 Duration::from_millis(200),
             ))

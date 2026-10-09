@@ -94,6 +94,7 @@ mod user_menu;
 mod video;
 mod voice_notes;
 mod voice_stage;
+mod wgsl;
 mod widgets;
 
 use std::fs::File;

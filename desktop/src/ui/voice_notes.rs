@@ -16,6 +16,7 @@ use gpui_kit::{
 
 use crate::core::i18n::{t, t_with};
 use crate::core::vault::VoiceFile;
+use crate::core::voice::processing::Choice;
 use crate::core::voice_notes::{self, Clip, Limits, Player, Progress, Recorder};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
@@ -204,7 +205,8 @@ impl FuwaApp {
                 return;
             }
             let dm = matches!(target, Target::Dm { .. });
-            this.voice.recording = Some(Recording { target, recorder: Recorder::start(limits.max_ms) });
+            this.voice.recording =
+                Some(Recording { target, recorder: Recorder::start(limits.max_ms, Choice::of(&this.core.prefs())) });
             crate::core::reports::used(if dm { "dm.voice.record" } else { "message.voice.record" });
             this.voice_tick(cx);
             this.sync_list(cx);

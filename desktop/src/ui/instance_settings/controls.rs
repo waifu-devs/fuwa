@@ -958,7 +958,10 @@ pub(super) fn dialog(
             .bg(gpui_kit::hsla(0.0, 0.0, 0.0, 0.5))
             .backdrop_blur(px(crate::ui::overlay::SCRIM_BLUR))
             .on_click(cx.listener(move |this, _, _, cx| outside(this, cx)))
-            .child(motion::dialog_in(panel, SharedString::from(format!("{id}-rise")))),
+            .child(crate::ui::overlay::roomy(
+                "dialog-room",
+                motion::dialog_in(panel, SharedString::from(format!("{id}-rise"))),
+            )),
         SharedString::from(format!("{id}-fade")),
         Duration::from_millis(200),
     )

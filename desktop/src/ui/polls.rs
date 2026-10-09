@@ -1663,9 +1663,12 @@ fn dialog_head(
 fn dialog_frame(panel: gpui_kit::Div, tag: &'static str, p: &Palette, cx: &mut Context<FuwaApp>) -> AnyElement {
     motion::fade_in(
         scrim("dialog-scrim", p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-            motion::dialog_in(
-                div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-                SharedString::from(format!("dialog-{tag}")),
+            crate::ui::overlay::roomy(
+                "dialog-room",
+                motion::dialog_in(
+                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
+                    SharedString::from(format!("dialog-{tag}")),
+                ),
             ),
         ),
         SharedString::from(format!("dialog-fade-{tag}")),

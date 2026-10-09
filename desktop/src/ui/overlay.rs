@@ -65,6 +65,19 @@ pub fn scrim(id: impl Into<ElementId>, _p: &Palette) -> Stateful<Div> {
     shade(id, 0.5, SCRIM_BLUR)
 }
 
+/// Holds a dialog in the middle of the window, and lets it scroll when the window
+/// is too short for it (the web's `overflow-y-auto` overlay). The whole layer
+/// scrolls, so the card's shadow isn't cut off; clicks beside the card still
+/// reach the scrim under it.
+pub fn roomy(id: impl Into<ElementId>, panel: impl IntoElement) -> Stateful<Div> {
+    div()
+        .id(id.into())
+        .absolute()
+        .inset_0()
+        .overflow_y_scroll()
+        .child(div().w_full().min_h_full().flex().items_center().justify_center().py(px(16.0)).child(panel))
+}
+
 /// A layer over the whole window darkened by `dim` and blurred by `blur`.
 pub fn shade(id: impl Into<ElementId>, dim: f32, blur: f32) -> Stateful<Div> {
     div()
@@ -182,9 +195,12 @@ pub fn dialog_layer(
     close: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 ) -> AnyElement {
     motion::fade_in(
-        scrim("dialog-scrim", p).on_click(close).child(motion::dialog_in(
-            div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
-            SharedString::from(format!("dialog-{tag}")),
+        scrim("dialog-scrim", p).on_click(close).child(roomy(
+            "dialog-room",
+            motion::dialog_in(
+                div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
+                SharedString::from(format!("dialog-{tag}")),
+            ),
         )),
         SharedString::from(format!("dialog-fade-{tag}")),
         Duration::from_millis(200),
