@@ -26,7 +26,7 @@ jobs:
       # The plan comment.
       pull-requests: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: railwayapp/config@9e17d413dbe219f19d62538d9c06b5dbb5e9abf8 # v1
         with:
           command: plan
@@ -47,7 +47,7 @@ jobs:
       # The plan job's artifact, which is what gets applied.
       actions: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
       - uses: railwayapp/config@9e17d413dbe219f19d62538d9c06b5dbb5e9abf8 # v1
