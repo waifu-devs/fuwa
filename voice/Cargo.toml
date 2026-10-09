@@ -1,6 +1,6 @@
 [package]
 name = "fuwa-voice"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Hear and talk in fuwa voice channels from a program: agents, bots and apps, without WebRTC"

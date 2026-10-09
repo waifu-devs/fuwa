@@ -1,6 +1,6 @@
 [package]
 name = "fuwa-server"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.88"
 description = "The fuwa server: a self-hostable, Discord-like chat server with one database per community server"
