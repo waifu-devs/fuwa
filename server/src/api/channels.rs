@@ -307,6 +307,7 @@ impl ChannelService for Api {
                 )
                 .await?
                 .unwrap_or_default();
+                super::reactions::forget_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 let files = crate::attachments::forget_channel(conn, &req.channel_id).await?;
                 conn.execute(

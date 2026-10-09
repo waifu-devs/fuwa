@@ -4,7 +4,7 @@
 //! by record instead, in `dms.rs`.
 
 use super::messages::{MESSAGE_COLUMNS, load_message, message_row, with_extras};
-use super::{Api, Seat, polls, shared, threads, users};
+use super::{Api, Seat, polls, reactions, shared, threads, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -156,6 +156,7 @@ impl Api {
         shared::mark_guests(&conn, &mut messages).await?;
         polls::attach(&conn, &mut messages).await?;
         polls::mark_mine(&conn, &account.id, &mut messages).await?;
+        reactions::attach(&conn, &account.id, &mut messages).await?;
         threads::attach(&conn, &mut messages).await?;
         let authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
         Ok(pb::ListPinsResponse { messages, authors, has_more })

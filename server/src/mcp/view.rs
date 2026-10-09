@@ -194,7 +194,19 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
         "pinned_at": time(&m.pinned_at),
+        "reactions": m.reactions.iter().map(reaction).collect::<Vec<_>>(),
     }))
+}
+
+/// A reaction: the emoji as it's written in a message (`<:name:id>` for a
+/// custom one), how many, and whether the agent is one of them.
+pub fn reaction(r: &pb::Reaction) -> Value {
+    let emoji = if r.emoji_id.is_empty() {
+        r.emoji.clone()
+    } else {
+        format!("<{}:{}:{}>", if r.animated { "a" } else { "" }, r.emoji_name, r.emoji_id)
+    };
+    trim(json!({ "emoji": emoji, "count": r.count, "me": r.me }))
 }
 
 pub fn messages(list: &[pb::Message], authors: &[pb::User]) -> Vec<Value> {
@@ -355,6 +367,27 @@ pub fn event(e: &pb::Event) -> Value {
                 "thread_id": p.thread_id,
                 "reply_count": p.thread.as_ref().map_or(0, |t| t.reply_count),
                 "locked": p.thread.as_ref().is_some_and(|t| t.locked),
+            }),
+        ),
+        Some(Payload::ReactionUpdated(p)) => (
+            "reaction_updated",
+            json!({
+                "channel_id": p.channel_id,
+                "message_id": p.message_id,
+                "thread_id": p.thread_id,
+                "reaction": p.reaction.as_ref().map(reaction),
+                "user_id": p.user_id,
+                "added": p.added,
+            }),
+        ),
+        Some(Payload::ReactionsCleared(p)) => (
+            "reactions_cleared",
+            json!({
+                "channel_id": p.channel_id,
+                "message_id": p.message_id,
+                "thread_id": p.thread_id,
+                "emoji": p.emoji,
+                "emoji_id": p.emoji_id,
             }),
         ),
         Some(Payload::MessagePinned(p)) => (

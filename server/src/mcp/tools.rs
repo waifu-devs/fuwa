@@ -254,6 +254,43 @@ const TOOLS: &[Tool] = &[
         destructive: false,
     },
     Tool {
+        name: "react",
+        title: "React to a message",
+        description: "Reacts to a message with an emoji, or takes this agent's reaction off with reacted false. \
+                      A standard emoji as its characters (\"👍\"), or one of the server's custom emoji as \
+                      <:name:id>. Needs a role that can add reactions there.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "message_id": message_id(),
+                "emoji": { "type": "string", "description": "\"👍\", or <:name:id> for a custom emoji." },
+                "reacted": { "type": "boolean", "description": "False takes the reaction off. Defaults to true." }
+            })
+        },
+        required: &["server_id", "channel_id", "message_id", "emoji"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
+        name: "list_reactors",
+        title: "Who reacted",
+        description: "Who reacted to a message with one emoji, the earliest first.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "message_id": message_id(),
+                "emoji": { "type": "string", "description": "\"👍\", or <:name:id> for a custom emoji." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Defaults to 50." },
+                "after_id": { "type": "string", "description": "The page after this person." }
+            })
+        },
+        required: &["server_id", "channel_id", "message_id", "emoji"],
+        read_only: true,
+        destructive: false,
+    },
+    Tool {
         name: "set_live_tile",
         title: "Set a live tile",
         description: "Puts up, or changes, one of this agent's live tiles in a channel: a small card above the \
@@ -671,6 +708,22 @@ pub(crate) async fn may_use(cx: &Cx, server_id: &str) -> Result<(), Status> {
     Ok(())
 }
 
+/// A reaction's emoji as an agent writes it: `<:name:id>` (or `<a:name:id>`)
+/// names a custom one by its id, anything else is a standard emoji.
+fn reaction_emoji(text: &str) -> (String, String) {
+    let text = text.trim();
+    let custom = text
+        .strip_prefix("<a:")
+        .or_else(|| text.strip_prefix("<:"))
+        .and_then(|rest| rest.strip_suffix('>'))
+        .and_then(|rest| rest.rsplit_once(':'))
+        .map(|(_, id)| id.to_string());
+    match custom {
+        Some(id) => (String::new(), id),
+        None => (text.to_string(), String::new()),
+    }
+}
+
 fn done(value: Value) -> Value {
     json!({ "content": [{ "type": "text", "text": value.to_string() }], "structuredContent": value })
 }
@@ -817,6 +870,39 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             };
             call!(cx, message_service_client::MessageServiceClient.list_pins(req))
                 .map(|r| json!({ "messages": view::messages(&r.messages, &r.authors), "has_more": r.has_more }))
+        }
+        "react" => {
+            let reacted = match args.0.get("reacted") {
+                None | Some(Value::Null) => true,
+                Some(Value::Bool(reacted)) => *reacted,
+                _ => return Err(RpcError::invalid("reacted must be true or false")),
+            };
+            let (emoji, emoji_id) = reaction_emoji(&args.text("emoji")?);
+            let req = pb::ReactRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                message_id: args.text("message_id")?,
+                emoji,
+                emoji_id,
+                reacted,
+            };
+            call!(cx, message_service_client::MessageServiceClient.react(req))
+                .map(|r| json!({ "reaction": r.reaction.as_ref().map(view::reaction) }))
+        }
+        "list_reactors" => {
+            let (emoji, emoji_id) = reaction_emoji(&args.text("emoji")?);
+            let req = pb::ListReactorsRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                message_id: args.text("message_id")?,
+                emoji,
+                emoji_id,
+                limit: args.number("limit")?.unwrap_or(50).clamp(1, 100) as i32,
+                after_id: args.optional("after_id")?,
+            };
+            call!(cx, message_service_client::MessageServiceClient.list_reactors(req)).map(|r| {
+                json!({ "users": r.users.iter().map(view::user).collect::<Vec<_>>(), "has_more": r.has_more })
+            })
         }
         "set_live_tile" => {
             let rows = match args.0.get("rows") {

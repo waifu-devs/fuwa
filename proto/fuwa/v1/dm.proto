@@ -419,6 +419,9 @@ message DirectMessageContent {
     ThreadChange thread = 6;
     // A recorded voice message (direct messages only, for now).
     DirectMessageVoice voice = 5;
+    // A reaction to an earlier message, or taking one off. In a secure
+    // channel it's sent signed (inside `signed`), like a text.
+    DirectMessageReaction reaction = 7;
   }
 }
 
@@ -486,6 +489,19 @@ message ThreadChange {
 message DirectMessageEdit {
   int64 sequence = 1;
   string content = 2;
+}
+
+// The sender reacting to a message with an emoji, or taking their reaction
+// off. Each device tallies these itself; the server never learns who reacted
+// to what, or with which emoji. The latest one from a sender for an emoji
+// wins.
+message DirectMessageReaction {
+  // The record of the message reacted to.
+  int64 sequence = 1;
+  // A standard emoji, as its characters (up to 32 bytes).
+  string emoji = 2;
+  // True takes the sender's reaction off.
+  bool removed = 3;
 }
 
 // A voice message: Ogg Opus, sealed as a SealedFile. What it sounds like

@@ -24,6 +24,7 @@ mod polls;
 mod presence;
 mod profile_items;
 mod providers;
+mod reactions;
 mod roles;
 mod search;
 mod secure;
@@ -38,6 +39,7 @@ pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub use live_tiles::{LIVE_TILE_PUBLISH_MS, LIVE_TILE_UPDATES_PER_MINUTE};
 pub use media::PictureOwner;
 pub(crate) use polls::{close_due as close_due_polls, forget_voter as forget_poll_voter};
+pub(crate) use reactions::forget_reactor;
 pub use search::spawn_search_indexer;
 pub use secure::MAX_SECURE_MEMBERS;
 pub use shared::{

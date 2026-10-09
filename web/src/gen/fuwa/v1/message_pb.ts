@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Attachment, ComponentRow, Embed, Emoji, Message as Message$1, MessageGif, Poll, ThreadSummary, User } from "./types_pb";
+import type { Attachment, ComponentRow, Embed, Emoji, Message as Message$1, MessageGif, Poll, Reaction, ThreadSummary, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEigQMKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaRIRCgl0aHJlYWRfaWQYCCABKAkSHAoUYWxzb19zZW5kX3RvX2NoYW5uZWwYCSABKAgSHgoEcG9sbBgKIAEoCzIQLmZ1d2EudjEuTmV3UG9sbBIgCgNnaWYYCyABKAsyEy5mdXdhLnYxLk1lc3NhZ2VHaWYSFgoOaW50ZXJhY3Rpb25faWQYDCABKAkSKQoKY29tcG9uZW50cxgNIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93IoEBCgdOZXdQb2xsEhAKCHF1ZXN0aW9uGAEgASgJEicKB2Fuc3dlcnMYAiADKAsyFi5mdXdhLnYxLk5ld1BvbGxBbnN3ZXISEAoIbXVsdGlwbGUYAyABKAgSEQoJYW5vbnltb3VzGAQgASgIEhYKDmR1cmF0aW9uX2hvdXJzGAUgASgFIiwKDU5ld1BvbGxBbnN3ZXISDAoEdGV4dBgBIAEoCRINCgVlbW9qaRgCIAEoCSI4ChNTZW5kTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiTgoRR2V0TWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSJWChJHZXRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZRIdCgZhdXRob3IYAiABKAsyDS5mdXdhLnYxLlVzZXIigwEKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJEhEKCXRocmVhZF9pZBgGIAEoCSKOAQoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIgCgZwYXJlbnQYBCABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiggEKFFVwZGF0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKY2hhbm5lbF9pZBgEIAEoCRIeCgZlbW9qaXMYBSADKAsyDi5mdXdhLnYxLkVtb2ppIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlIoQBChJMaXN0VGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFcXVlcnkYAyABKAkSEAoIYXJjaGl2ZWQYBCABKAgSDQoFbGltaXQYBSABKAUSFwoPYWZ0ZXJfdGhyZWFkX2lkGAYgASgJIogBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEiEKB3RocmVhZHMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIcChRuZXh0X2FmdGVyX3RocmVhZF9pZBgEIAEoCSJvChNVcGRhdGVUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRITCgZsb2NrZWQYBCABKAhIAIgBAUIJCgdfbG9ja2VkIj4KFFVwZGF0ZVRocmVhZFJlc3BvbnNlEiYKBnRocmVhZBgBIAEoCzIWLmZ1d2EudjEuVGhyZWFkU3VtbWFyeSJfChNGb2xsb3dUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRIOCgZmb2xsb3cYBCABKAgiFgoURm9sbG93VGhyZWFkUmVzcG9uc2UiLwoaTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjEKG0xpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRISCgp0aHJlYWRfaWRzGAEgAygJImAKD1ZvdGVQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgphbnN3ZXJfaWRzGAMgAygNEhIKCmNoYW5uZWxfaWQYBCABKAkiLwoQVm90ZVBvbGxSZXNwb25zZRIbCgRwb2xsGAEgASgLMg0uZnV3YS52MS5Qb2xsIksKDkVuZFBvbGxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiLgoPRW5kUG9sbFJlc3BvbnNlEhsKBHBvbGwYASABKAsyDS5mdXdhLnYxLlBvbGwihgEKFUxpc3RQb2xsVm90ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIRCglhbnN3ZXJfaWQYAyABKA0SDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkSEgoKY2hhbm5lbF9pZBgGIAEoCSJIChZMaXN0UG9sbFZvdGVyc1Jlc3BvbnNlEhwKBXVzZXJzGAEgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAIgASgIIl4KEVBpbk1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDgoGcGlubmVkGAQgASgIIjcKElBpbk1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlImwKD0xpc3RQaW5zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgl0aHJlYWRfaWQYAyABKAkSDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkiaAoQTGlzdFBpbnNSZXNwb25zZRIiCghtZXNzYWdlcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIMq4ICg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2USSAoLTGlzdFRocmVhZHMSGy5mdXdhLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFRocmVhZHNSZXNwb25zZRJLCgxVcGRhdGVUaHJlYWQSHC5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlc3BvbnNlEksKDEZvbGxvd1RocmVhZBIcLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVzcG9uc2USYAoTTGlzdEZvbGxvd2VkVGhyZWFkcxIjLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QaJC5mdXdhLnYxLkxpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRI/CghWb3RlUG9sbBIYLmZ1d2EudjEuVm90ZVBvbGxSZXF1ZXN0GhkuZnV3YS52MS5Wb3RlUG9sbFJlc3BvbnNlEjwKB0VuZFBvbGwSFy5mdXdhLnYxLkVuZFBvbGxSZXF1ZXN0GhguZnV3YS52MS5FbmRQb2xsUmVzcG9uc2USUQoOTGlzdFBvbGxWb3RlcnMSHi5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXNwb25zZRJFCgpQaW5NZXNzYWdlEhouZnV3YS52MS5QaW5NZXNzYWdlUmVxdWVzdBobLmZ1d2EudjEuUGluTWVzc2FnZVJlc3BvbnNlEj8KCExpc3RQaW5zEhguZnV3YS52MS5MaXN0UGluc1JlcXVlc3QaGS5mdXdhLnYxLkxpc3RQaW5zUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEigQMKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaRIRCgl0aHJlYWRfaWQYCCABKAkSHAoUYWxzb19zZW5kX3RvX2NoYW5uZWwYCSABKAgSHgoEcG9sbBgKIAEoCzIQLmZ1d2EudjEuTmV3UG9sbBIgCgNnaWYYCyABKAsyEy5mdXdhLnYxLk1lc3NhZ2VHaWYSFgoOaW50ZXJhY3Rpb25faWQYDCABKAkSKQoKY29tcG9uZW50cxgNIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93IoEBCgdOZXdQb2xsEhAKCHF1ZXN0aW9uGAEgASgJEicKB2Fuc3dlcnMYAiADKAsyFi5mdXdhLnYxLk5ld1BvbGxBbnN3ZXISEAoIbXVsdGlwbGUYAyABKAgSEQoJYW5vbnltb3VzGAQgASgIEhYKDmR1cmF0aW9uX2hvdXJzGAUgASgFIiwKDU5ld1BvbGxBbnN3ZXISDAoEdGV4dBgBIAEoCRINCgVlbW9qaRgCIAEoCSI4ChNTZW5kTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiTgoRR2V0TWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSJWChJHZXRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZRIdCgZhdXRob3IYAiABKAsyDS5mdXdhLnYxLlVzZXIigwEKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJEhEKCXRocmVhZF9pZBgGIAEoCSKOAQoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIgCgZwYXJlbnQYBCABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiggEKFFVwZGF0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSEgoKY2hhbm5lbF9pZBgEIAEoCRIeCgZlbW9qaXMYBSADKAsyDi5mdXdhLnYxLkVtb2ppIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlIoQBChJMaXN0VGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFcXVlcnkYAyABKAkSEAoIYXJjaGl2ZWQYBCABKAgSDQoFbGltaXQYBSABKAUSFwoPYWZ0ZXJfdGhyZWFkX2lkGAYgASgJIogBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEiEKB3RocmVhZHMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCBIcChRuZXh0X2FmdGVyX3RocmVhZF9pZBgEIAEoCSJvChNVcGRhdGVUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRITCgZsb2NrZWQYBCABKAhIAIgBAUIJCgdfbG9ja2VkIj4KFFVwZGF0ZVRocmVhZFJlc3BvbnNlEiYKBnRocmVhZBgBIAEoCzIWLmZ1d2EudjEuVGhyZWFkU3VtbWFyeSJfChNGb2xsb3dUaHJlYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRIOCgZmb2xsb3cYBCABKAgiFgoURm9sbG93VGhyZWFkUmVzcG9uc2UiLwoaTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjEKG0xpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRISCgp0aHJlYWRfaWRzGAEgAygJImAKD1ZvdGVQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgphbnN3ZXJfaWRzGAMgAygNEhIKCmNoYW5uZWxfaWQYBCABKAkiLwoQVm90ZVBvbGxSZXNwb25zZRIbCgRwb2xsGAEgASgLMg0uZnV3YS52MS5Qb2xsIksKDkVuZFBvbGxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiLgoPRW5kUG9sbFJlc3BvbnNlEhsKBHBvbGwYASABKAsyDS5mdXdhLnYxLlBvbGwihgEKFUxpc3RQb2xsVm90ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIRCglhbnN3ZXJfaWQYAyABKA0SDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkSEgoKY2hhbm5lbF9pZBgGIAEoCSJIChZMaXN0UG9sbFZvdGVyc1Jlc3BvbnNlEhwKBXVzZXJzGAEgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAIgASgIIl4KEVBpbk1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDgoGcGlubmVkGAQgASgIIjcKElBpbk1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlImwKD0xpc3RQaW5zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgl0aHJlYWRfaWQYAyABKAkSDQoFbGltaXQYBCABKAUSEAoIYWZ0ZXJfaWQYBSABKAkiaAoQTGlzdFBpbnNSZXNwb25zZRIiCghtZXNzYWdlcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIInsKDFJlYWN0UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRISCgptZXNzYWdlX2lkGAMgASgJEg0KBWVtb2ppGAQgASgJEhAKCGVtb2ppX2lkGAUgASgJEg8KB3JlYWN0ZWQYBiABKAgiNAoNUmVhY3RSZXNwb25zZRIjCghyZWFjdGlvbhgBIAEoCzIRLmZ1d2EudjEuUmVhY3Rpb24ikgEKE0xpc3RSZWFjdG9yc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEgoKbWVzc2FnZV9pZBgDIAEoCRINCgVlbW9qaRgEIAEoCRIQCghlbW9qaV9pZBgFIAEoCRINCgVsaW1pdBgGIAEoBRIQCghhZnRlcl9pZBgHIAEoCSJGChRMaXN0UmVhY3RvcnNSZXNwb25zZRIcCgV1c2VycxgBIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgCIAEoCCJzChVDbGVhclJlYWN0aW9uc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEgoKbWVzc2FnZV9pZBgDIAEoCRINCgVlbW9qaRgEIAEoCRIQCghlbW9qaV9pZBgFIAEoCSIYChZDbGVhclJlYWN0aW9uc1Jlc3BvbnNlMoYKCg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2USSAoLTGlzdFRocmVhZHMSGy5mdXdhLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFRocmVhZHNSZXNwb25zZRJLCgxVcGRhdGVUaHJlYWQSHC5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZVRocmVhZFJlc3BvbnNlEksKDEZvbGxvd1RocmVhZBIcLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuRm9sbG93VGhyZWFkUmVzcG9uc2USYAoTTGlzdEZvbGxvd2VkVGhyZWFkcxIjLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1JlcXVlc3QaJC5mdXdhLnYxLkxpc3RGb2xsb3dlZFRocmVhZHNSZXNwb25zZRI/CghWb3RlUG9sbBIYLmZ1d2EudjEuVm90ZVBvbGxSZXF1ZXN0GhkuZnV3YS52MS5Wb3RlUG9sbFJlc3BvbnNlEjwKB0VuZFBvbGwSFy5mdXdhLnYxLkVuZFBvbGxSZXF1ZXN0GhguZnV3YS52MS5FbmRQb2xsUmVzcG9uc2USUQoOTGlzdFBvbGxWb3RlcnMSHi5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXNwb25zZRJFCgpQaW5NZXNzYWdlEhouZnV3YS52MS5QaW5NZXNzYWdlUmVxdWVzdBobLmZ1d2EudjEuUGluTWVzc2FnZVJlc3BvbnNlEj8KCExpc3RQaW5zEhguZnV3YS52MS5MaXN0UGluc1JlcXVlc3QaGS5mdXdhLnYxLkxpc3RQaW5zUmVzcG9uc2USNgoFUmVhY3QSFS5mdXdhLnYxLlJlYWN0UmVxdWVzdBoWLmZ1d2EudjEuUmVhY3RSZXNwb25zZRJLCgxMaXN0UmVhY3RvcnMSHC5mdXdhLnYxLkxpc3RSZWFjdG9yc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RSZWFjdG9yc1Jlc3BvbnNlElEKDkNsZWFyUmVhY3Rpb25zEh4uZnV3YS52MS5DbGVhclJlYWN0aW9uc1JlcXVlc3QaHy5mdXdhLnYxLkNsZWFyUmVhY3Rpb25zUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -979,6 +979,200 @@ export const ListPinsResponseSchema: GenMessage<ListPinsResponse> = /*@__PURE__*
   messageDesc(file_fuwa_v1_message, 29);
 
 /**
+ * @generated from message fuwa.v1.ReactRequest
+ */
+export type ReactRequest = Message<"fuwa.v1.ReactRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string message_id = 3;
+   */
+  messageId: string;
+
+  /**
+   * A standard emoji, as its characters (up to 32 bytes), or the id of one
+   * of the server's custom emoji: one of the two.
+   *
+   * @generated from field: string emoji = 4;
+   */
+  emoji: string;
+
+  /**
+   * @generated from field: string emoji_id = 5;
+   */
+  emojiId: string;
+
+  /**
+   * False takes the caller's reaction off.
+   *
+   * @generated from field: bool reacted = 6;
+   */
+  reacted: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ReactRequest.
+ * Use `create(ReactRequestSchema)` to create a new message.
+ */
+export const ReactRequestSchema: GenMessage<ReactRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 30);
+
+/**
+ * @generated from message fuwa.v1.ReactResponse
+ */
+export type ReactResponse = Message<"fuwa.v1.ReactResponse"> & {
+  /**
+   * The emoji's reaction as it is now (count 0 when nobody's left).
+   *
+   * @generated from field: fuwa.v1.Reaction reaction = 1;
+   */
+  reaction?: Reaction | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ReactResponse.
+ * Use `create(ReactResponseSchema)` to create a new message.
+ */
+export const ReactResponseSchema: GenMessage<ReactResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 31);
+
+/**
+ * @generated from message fuwa.v1.ListReactorsRequest
+ */
+export type ListReactorsRequest = Message<"fuwa.v1.ListReactorsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string message_id = 3;
+   */
+  messageId: string;
+
+  /**
+   * The emoji, as in ReactRequest.
+   *
+   * @generated from field: string emoji = 4;
+   */
+  emoji: string;
+
+  /**
+   * @generated from field: string emoji_id = 5;
+   */
+  emojiId: string;
+
+  /**
+   * 1 to 100; defaults to 50.
+   *
+   * @generated from field: int32 limit = 6;
+   */
+  limit: number;
+
+  /**
+   * The page after this person, from the last page.
+   *
+   * @generated from field: string after_id = 7;
+   */
+  afterId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListReactorsRequest.
+ * Use `create(ListReactorsRequestSchema)` to create a new message.
+ */
+export const ListReactorsRequestSchema: GenMessage<ListReactorsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 32);
+
+/**
+ * @generated from message fuwa.v1.ListReactorsResponse
+ */
+export type ListReactorsResponse = Message<"fuwa.v1.ListReactorsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.User users = 1;
+   */
+  users: User[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ListReactorsResponse.
+ * Use `create(ListReactorsResponseSchema)` to create a new message.
+ */
+export const ListReactorsResponseSchema: GenMessage<ListReactorsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 33);
+
+/**
+ * @generated from message fuwa.v1.ClearReactionsRequest
+ */
+export type ClearReactionsRequest = Message<"fuwa.v1.ClearReactionsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string message_id = 3;
+   */
+  messageId: string;
+
+  /**
+   * The emoji whose reactions go, as in ReactRequest; both empty for every
+   * reaction.
+   *
+   * @generated from field: string emoji = 4;
+   */
+  emoji: string;
+
+  /**
+   * @generated from field: string emoji_id = 5;
+   */
+  emojiId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ClearReactionsRequest.
+ * Use `create(ClearReactionsRequestSchema)` to create a new message.
+ */
+export const ClearReactionsRequestSchema: GenMessage<ClearReactionsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 34);
+
+/**
+ * @generated from message fuwa.v1.ClearReactionsResponse
+ */
+export type ClearReactionsResponse = Message<"fuwa.v1.ClearReactionsResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.ClearReactionsResponse.
+ * Use `create(ClearReactionsResponseSchema)` to create a new message.
+ */
+export const ClearReactionsResponseSchema: GenMessage<ClearReactionsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 35);
+
+/**
  * Messages in a channel.
  *
  * @generated from service fuwa.v1.MessageService
@@ -1132,6 +1326,42 @@ export const MessageService: GenService<{
     methodKind: "unary";
     input: typeof ListPinsRequestSchema;
     output: typeof ListPinsResponseSchema;
+  },
+  /**
+   * Reacts to a message with an emoji, or takes the caller's reaction off.
+   * Reacting needs ADD_REACTIONS in the channel; taking it off needs only to
+   * see it. At most InstanceSettings.reactions_per_message different emoji
+   * on one message. Not in secure channels (their reactions travel inside
+   * the encryption, as direct messages' do) nor channels shared between
+   * servers, yet.
+   *
+   * @generated from rpc fuwa.v1.MessageService.React
+   */
+  react: {
+    methodKind: "unary";
+    input: typeof ReactRequestSchema;
+    output: typeof ReactResponseSchema;
+  },
+  /**
+   * Who reacted to a message with one emoji, the earliest first.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ListReactors
+   */
+  listReactors: {
+    methodKind: "unary";
+    input: typeof ListReactorsRequestSchema;
+    output: typeof ListReactorsResponseSchema;
+  },
+  /**
+   * Takes every reaction with one emoji off a message, or every reaction.
+   * Needs MANAGE_MESSAGES in the channel.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ClearReactions
+   */
+  clearReactions: {
+    methodKind: "unary";
+    input: typeof ClearReactionsRequestSchema;
+    output: typeof ClearReactionsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_message, 0);

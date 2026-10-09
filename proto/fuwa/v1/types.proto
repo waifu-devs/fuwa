@@ -438,6 +438,9 @@ enum Permission {
   // Send polls (SendMessageRequest.poll). Voting needs only to see the
   // channel.
   PERMISSION_CREATE_POLLS = 27;
+  // React to messages with emoji (MessageService.React). Taking your own
+  // reaction off needs nothing.
+  PERMISSION_ADD_REACTIONS = 28;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -1029,6 +1032,26 @@ message Message {
   MessageInteraction interaction = 25;
   // When someone pinned it (MessageService.PinMessage); unset when it isn't.
   google.protobuf.Timestamp pinned_at = 26;
+  // Its reactions, in the order each emoji was first used. Events that carry
+  // a whole message (MessageCreated, MessageUpdated) leave them out: apps keep
+  // what they had and follow ReactionUpdated and ReactionsCleared.
+  repeated Reaction reactions = 27;
+}
+
+// One emoji people reacted to a message with, and how many did.
+message Reaction {
+  // A standard emoji, as its characters; empty for a custom one.
+  string emoji = 1;
+  // A custom emoji of the message's server: its id, name and whether it
+  // moves; its picture is in the server's emoji list (EmojiService).
+  // Reactions with a custom emoji that has since been deleted aren't shown.
+  string emoji_id = 2;
+  string emoji_name = 3;
+  bool animated = 4;
+  // How many people reacted with it.
+  uint32 count = 5;
+  // Whether the person asking is one of them. Never set in events.
+  bool me = 6;
 }
 
 // A row of up to 5 buttons under an agent's message.
@@ -1356,6 +1379,8 @@ message Event {
     InteractionCreated interaction_created = 32;
     MessagePinned message_pinned = 33;
     ProfileItemsUpdated profile_items_updated = 34;
+    ReactionUpdated reaction_updated = 35;
+    ReactionsCleared reactions_cleared = 36;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1516,6 +1541,33 @@ message MessageCreated {
 
 message MessageUpdated {
   Message message = 1;
+}
+
+// Someone reacted to a message or took their reaction off
+// (MessageService.React).
+message ReactionUpdated {
+  string channel_id = 1;
+  string message_id = 2;
+  // A reply in a thread: the message the thread is under.
+  string thread_id = 3;
+  // The emoji and its count now (`me` unset: compare user_id with yourself).
+  Reaction reaction = 4;
+  // Who reacted, or took theirs off.
+  string user_id = 5;
+  // True when they reacted, false when they took it off.
+  bool added = 6;
+}
+
+// A moderator took reactions off a message (MessageService.ClearReactions):
+// one emoji's, or every one.
+message ReactionsCleared {
+  string channel_id = 1;
+  string message_id = 2;
+  string thread_id = 3;
+  // The emoji whose reactions went, as in Reaction (one of the two); both
+  // empty when every reaction went.
+  string emoji = 4;
+  string emoji_id = 5;
 }
 
 // Someone pinned a message or unpinned it (MessageService.PinMessage).

@@ -203,6 +203,7 @@ pub(super) async fn remove(
     })
     .await?;
     super::polls::forget_thread(conn, thread_id).await?;
+    super::reactions::forget_thread(conn, thread_id).await?;
     let files = crate::attachments::forget_thread(conn, thread_id).await?;
     conn.execute("DELETE FROM messages WHERE thread_id = ?1", [thread_id]).await?;
     conn.execute("DELETE FROM threads WHERE id = ?1", [thread_id]).await?;
