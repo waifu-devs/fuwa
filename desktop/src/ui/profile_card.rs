@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnimationExt as _, AnyElement, AppContext as _, Bounds, BoxShadow, Context, Entity, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Point, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point, px, rgb,
+    AnyElement, AppContext as _, Bounds, BoxShadow, Context, Entity, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Point, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    canvas, div, point, px, rgb,
 };
 
 use crate::core::dms::{DmStatus, now_ms};
@@ -172,28 +172,6 @@ fn glint(id: &'static str, width: f32, window: &Window) -> AnyElement {
         let k = if k < 1.0 { 0.5 - 0.5 * (k * std::f32::consts::PI).cos() } else { 1.0 };
         el.left(px(band * (-1.2 + 4.4 * k)))
     })
-}
-
-/// Springs `el` from `pose(el, 0.0)` to `pose(el, 1.0)` after `delay`, on a
-/// spring of `stiffness` and `damping` (the web's `initial`/`animate` with
-/// `type: "spring"`). `t` overshoots past 1 on lively springs.
-pub(crate) fn spring_in<E: IntoElement + gpui_kit::Styled + 'static>(
-    el: E,
-    id: impl Into<gpui_kit::ElementId>,
-    (stiffness, damping): (f32, f32),
-    delay: Duration,
-    pose: impl Fn(E, f32) -> E + 'static,
-) -> AnyElement {
-    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(stiffness, damping, 1.0), 0.002);
-    let total = delay + duration;
-    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
-    el.with_animation(
-        id,
-        gpui_kit::Animation::new(total)
-            .with_easing(move |t| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) }),
-        pose,
-    )
-    .into_any_element()
 }
 
 /// "Oct 7, 2026".
@@ -506,7 +484,7 @@ impl FuwaApp {
         let scroller = div().id("profile-scroll").max_h(px(vh - 2.0 * EDGE)).overflow_y_scroll().child(column);
         // It grows out of the side it opens from (Radix's transform origin), rising 6px as it fades in.
         let from_right = x < left;
-        let popover = spring_in(
+        let popover = motion::spring_in(
             div().child(scroller),
             SharedString::from(format!("profile-pop|{user_id}")),
             (520.0, 32.0),
@@ -602,7 +580,7 @@ impl FuwaApp {
                     .children(dot),
             );
         // Their picture springs in, growing and turning upright.
-        let picture = spring_in(
+        let picture = motion::spring_in(
             div().child(picture),
             SharedString::from(format!("profile-face|{user_id}")),
             (420.0, 18.0),
@@ -611,7 +589,7 @@ impl FuwaApp {
         );
         let status = status.map(|s| motion::swap_text(format!("profile-status-text|{user_id}"), s, 14.0, window, cx));
         let top = div().mt(px(-44.0)).flex().items_end().gap(px(8.0)).child(picture).when_some(status, |el, status| {
-            el.child(spring_in(
+            el.child(motion::spring_in(
                 div()
                     .mb(px(36.0))
                     .min_w_0()
@@ -681,7 +659,7 @@ impl FuwaApp {
                             format!("@{username}")
                         }))
                         .when_some(pronouns, |el, pronouns| {
-                            el.child(spring_in(
+                            el.child(motion::spring_in(
                                 div()
                                     .rounded_full()
                                     .bg(p.muted)
@@ -1040,7 +1018,7 @@ impl FuwaApp {
                     .child(role_dot(role, p))
                     .child(div().flex_1().truncate().child(role.name.clone()))
                     .when(on, |el| {
-                        el.child(spring_in(
+                        el.child(motion::spring_in(
                             div().text_color(p.primary).child(icon("check").size(px(16.0))),
                             SharedString::from(format!("roles-menu-on|{}", role.id)),
                             (520.0, 34.0),

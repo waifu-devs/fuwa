@@ -222,6 +222,7 @@ impl Built {
 }
 
 /// The open menu.
+#[derive(Clone)]
 pub(crate) struct ContextMenu {
     pub of: MenuOf,
     at: Point<Pixels>,

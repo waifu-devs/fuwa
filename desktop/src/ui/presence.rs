@@ -321,7 +321,7 @@ pub fn popping(
     under: gpui_kit::Hsla,
     p: &Palette,
 ) -> impl IntoElement {
-    crate::ui::profile_card::spring_in(
+    crate::ui::motion::spring_in(
         ringed_dot(status, size, ring, under, p),
         SharedString::from(format!("presence-dot|{}", status as i32)),
         (600.0, 16.0),

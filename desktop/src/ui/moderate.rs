@@ -184,7 +184,7 @@ impl FuwaApp {
             )
             .when_some(until, |el, until| {
                 let amber = amber(&p);
-                el.child(crate::ui::profile_card::spring_in(
+                el.child(crate::ui::motion::spring_in(
                     div()
                         .flex()
                         .items_center()
@@ -515,7 +515,7 @@ impl FuwaApp {
                     })
                     .active(|s| s.scale(0.92))
                     .when(on, |el| {
-                        el.child(crate::ui::profile_card::spring_in(
+                        el.child(crate::ui::motion::spring_in(
                             div().mr(px(4.0)).child(icon("check").size(px(12.0))),
                             SharedString::from(format!("{id}-on-{value}")),
                             (520.0, 34.0),

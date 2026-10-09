@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat,
-    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Rgba, SharedString, SpringConfig,
-    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, point, px, relative, sampled_easing,
+    AnyElement, BoxShadow, Context, FontWeight, Image, ImageFormat, InteractiveElement as _, IntoElement, ObjectFit,
+    ParentElement as _, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window,
+    div, point, px, relative,
 };
 
 use crate::core::i18n::{Arg, t, t_with};
@@ -800,17 +800,10 @@ impl FuwaApp {
     }
 }
 
-/// The web's `SPRING` (`stiffness: 520, damping: 34`), for tiles coming in.
-const SPRING: SpringConfig = SpringConfig::new(520.0, 34.0, 1.0);
-
 /// A person's tile coming in (the web's `Tile`): it fades in, growing from
 /// 80% and rising 16 px, `delay` after the one before it.
 fn tile_in(el: gpui_kit::Div, id: SharedString, delay: Duration) -> impl IntoElement {
-    let (duration, easing) = sampled_easing(SPRING, 0.002);
-    let total = delay + duration;
-    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
-    let ease = move |t: f32| if t <= start { 0.0 } else { easing(((t - start) / (1.0 - start)).clamp(0.0, 1.0)) };
-    el.with_animation(id, Animation::new(total).with_easing(ease), |el, t| {
+    motion::spring_in(el, id, (520.0, 34.0), delay, |el, t| {
         el.opacity(t.clamp(0.0, 1.0)).translate_y(px((1.0 - t) * 16.0)).scale(0.8 + 0.2 * t)
     })
 }

@@ -306,7 +306,7 @@ impl FuwaApp {
         let copied = COPIED.with(|c| c.borrow().is_some_and(|at| at.elapsed() < Duration::from_millis(1200)));
 
         let chip = |id: &'static str, glyph: &str, label: String, bg: Hsla, fg: Hsla| {
-            crate::ui::profile_card::spring_in(
+            crate::ui::motion::spring_in(
                 div()
                     .flex()
                     .items_center()

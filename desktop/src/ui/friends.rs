@@ -1199,7 +1199,7 @@ impl FuwaApp {
                     .text_xs()
                     .text_color(p.muted_foreground)
                     .child(div().flex().children(mutual.iter().take(3).enumerate().map(|(n, u)| {
-                        div().when(n > 0, |el| el.ml(px(-6.0))).child(crate::ui::profile_card::spring_in(
+                        div().when(n > 0, |el| el.ml(px(-6.0))).child(crate::ui::motion::spring_in(
                             div().rounded_full().border_2().border_color(p.card).child(avatar(Some(u), 20.0, p)),
                             SharedString::from(format!("mutual-face|{}", u.id)),
                             (520.0, 34.0),

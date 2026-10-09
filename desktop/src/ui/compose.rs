@@ -1,14 +1,10 @@
 //! Writing, beyond typing: the @ list, editing a message in place, and the
 //! keys both take before the text fields see them.
 
-use std::collections::HashMap;
-use std::time::Instant;
-
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, Context, ElementId, Focusable as _, FontWeight, Global, Hsla,
-    InteractiveElement as _, IntoElement, Keystroke, ParentElement as _, SharedString, StatefulInteractiveElement as _,
-    Styled, Window, div, px, rgb,
+    AnyElement, Context, ElementId, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, Keystroke,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled, Window, div, px, rgb,
 };
 
 use crate::core::dms::Content;
@@ -353,7 +349,7 @@ impl FuwaApp {
     pub(crate) fn above_glide(id: String, n: usize, p: &Palette, cx: &mut gpui_kit::App) -> AnyElement {
         // The list's 6px, then the title's 20.
         let top = 6.0 + 20.0 + n as f32 * ABOVE_ROW;
-        glide(
+        motion::glide(
             div()
                 .absolute()
                 .left(px(6.0))
@@ -514,58 +510,4 @@ impl FuwaApp {
             None => {}
         }
     }
-}
-
-/// Where each glide was last sent, so the next one starts from where it is.
-#[derive(Default)]
-struct Glides(HashMap<String, Glide>);
-
-impl Global for Glides {}
-
-struct Glide {
-    from: f32,
-    to: f32,
-    at: Instant,
-    /// How many times it has moved, which names its animation.
-    moves: u64,
-}
-
-/// A selection gliding to `to` (a lit row's top, a tab's left) on the web's
-/// `SPRING` whenever it changes, as framer's `layoutId` does, for places
-/// drawn without the window at hand ([`motion::follow`] needs it). `place`
-/// puts the value on `el`. A glide cut short carries on from where it was.
-pub(crate) fn glide<E: IntoElement + Styled + 'static>(
-    el: E,
-    id: String,
-    to: f32,
-    cx: &mut gpui_kit::App,
-    place: impl Fn(E, f32) -> E + 'static,
-) -> AnyElement {
-    let spring = gpui_kit::SpringConfig::new(520.0, 34.0, 1.0);
-    let (duration, easing) = gpui_kit::sampled_easing(spring, 0.002);
-    let glides = cx.default_global::<Glides>();
-    // Lists come and go; what they left behind needn't pile up.
-    if glides.0.len() > 64 && !glides.0.contains_key(&id) {
-        glides.0.clear();
-    }
-    let g = glides.0.entry(id.clone()).or_insert(Glide { from: to, to, at: Instant::now(), moves: 0 });
-    if g.to == to && g.at.elapsed() >= duration {
-        // Settled: it stays put, even if the list closes and opens again.
-        g.from = to;
-    } else if g.to != to {
-        let t = (g.at.elapsed().as_secs_f32() / duration.as_secs_f32()).min(1.0);
-        let now = g.from + (g.to - g.from) * easing(t);
-        *g = Glide { from: now, to, at: Instant::now(), moves: g.moves + 1 };
-    }
-    let (from, moves) = (g.from, g.moves);
-    if from == to {
-        return place(el, to).into_any_element();
-    }
-    let (_, easing) = gpui_kit::sampled_easing(spring, 0.002);
-    el.with_animation(
-        ElementId::Name(format!("{id}|{moves}").into()),
-        Animation::new(duration).with_easing(easing),
-        move |el, t| place(el, from + (to - from) * t),
-    )
-    .into_any_element()
 }

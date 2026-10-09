@@ -665,7 +665,7 @@ impl FuwaApp {
         let mut row = div().relative().flex().gap(px(4.0)).px(px(8.0)).pt(px(8.0));
         // The open tab's fill glides between them (the web's `layoutId="gif-tab"`).
         let w = (INNER_W - PAD * 2.0 - 8.0) / 3.0;
-        row = row.child(crate::ui::compose::glide(
+        row = row.child(crate::ui::motion::glide(
             div().absolute().top(px(8.0)).w(px(w)).h(px(32.0)).rounded(corner(9.0)).bg(alpha(p.primary, 0.1)),
             format!("gif-tab|{:?}", self.gifs.born),
             PAD + self.gifs.tab as u8 as f32 * (w + 4.0),

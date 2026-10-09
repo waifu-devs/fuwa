@@ -526,7 +526,7 @@ fn subtitle(
     if changes == 0 {
         return line.into_any_element();
     }
-    crate::ui::profile_card::spring_in(
+    crate::ui::motion::spring_in(
         line,
         SharedString::from(format!("member-sub-in|{user_id}|{changes}")),
         (500.0, 32.0),

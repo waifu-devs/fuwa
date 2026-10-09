@@ -1919,6 +1919,38 @@ impl FuwaApp {
     }
 }
 
+impl FuwaApp {
+    /// The dialog, menu and right-click menu that just closed, drawn once more
+    /// as they fade out ([`motion::kept`]), as the web's leave under `AnimatePresence`.
+    fn render_leaving(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Option<gpui_kit::AnyElement>, Option<gpui_kit::AnyElement>, Option<gpui_kit::AnyElement>) {
+        let dialog = crate::ui::motion::kept("dialog", self.dialog.as_ref(), window, cx).and_then(|(dialog, t)| {
+            self.dialog = Some(dialog);
+            let el = self.render_dialog(window, cx);
+            self.dialog = None;
+            el.map(|el| crate::ui::motion::leave(el, t))
+        });
+        let menu = crate::ui::motion::kept("menu", self.menu.as_ref(), window, cx).and_then(|(menu, t)| {
+            let el = match menu {
+                Menu::Server { key, server } => self.server_bell_menu(&key, &server, cx),
+                Menu::Status { key } => self.status_menu(&key, window, cx),
+                _ => return None,
+            };
+            Some(crate::ui::motion::leave(el, t))
+        });
+        let context = crate::ui::motion::kept("context", self.context.as_ref(), window, cx).and_then(|(menu, t)| {
+            self.context = Some(menu);
+            let el = self.render_context_menu(window, cx);
+            self.context = None;
+            el.map(|el| crate::ui::motion::leave(el, t))
+        });
+        (dialog, menu, context)
+    }
+}
+
 /// How long a new theme takes to wash in.
 const THEME_FADE: Duration = Duration::from_millis(420);
 
@@ -1994,6 +2026,7 @@ impl FuwaApp {
         // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
         let streamer = self.render_streamer_banner(window, cx);
         let sign_in = if covered { None } else { self.render_sign_in_notice(window, cx) };
+        let (dialog_leaving, menu_leaving, context_leaving) = self.render_leaving(window, cx);
         base.child(
             div()
                 .size_full()
@@ -2025,6 +2058,7 @@ impl FuwaApp {
             },
             |el, menu| el.child(menu),
         )
+        .when_some(menu_leaving, |el, menu| el.child(menu))
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
         .when_some(self.server_settings.clone(), |el, settings| {
             // Drawn again only when it changes, not on every frame of the window.
@@ -2040,9 +2074,11 @@ impl FuwaApp {
             )
         })
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+        .when_some(dialog_leaving, |el, d| el.child(d))
         .when_some(crate::ui::cropper::layer(&self.home.create.cropper), |el, c| el.child(c))
         .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
         .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
+        .when_some(context_leaving, |el, menu| el.child(menu))
         .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))
         .when_some(self.render_switcher(window, cx), |el, switcher| el.child(switcher))
         .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
