@@ -224,7 +224,20 @@ impl ServerService for Api {
         respond(
             async {
                 self.account(request.metadata()).await?;
-                Ok(pb::DiscoverServersResponse { servers: self.app.index.discoverable() })
+                let mut servers = self.app.index.discoverable();
+                let featured: Vec<String> = self
+                    .app
+                    .node()?
+                    .featured_servers()
+                    .await?
+                    .into_iter()
+                    .filter(|id| servers.iter().any(|s| &s.id == id))
+                    .collect();
+                // Featured first, in their order; the sort is stable, so the
+                // rest keep theirs.
+                let place = |id: &str| featured.iter().position(|f| f == id).unwrap_or(featured.len());
+                servers.sort_by_key(|s| place(&s.id));
+                Ok(pb::DiscoverServersResponse { servers, featured_server_ids: featured })
             }
             .await,
         )

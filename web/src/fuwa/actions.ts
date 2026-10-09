@@ -865,7 +865,9 @@ export const createServer = (key: string, name: string, description: string, dis
   });
 
 export const discover = (key: string) =>
-  call((signal) => api(key).servers.discoverServers({}, { signal })).pipe(Effect.map((r) => r.servers));
+  call((signal) => api(key).servers.discoverServers({}, { signal })).pipe(
+    Effect.map((r) => ({ servers: r.servers, featured: r.featuredServerIds })),
+  );
 
 /** Joins a server from Browse, or with one of its invites. */
 export const joinServer = (key: string, serverId: string, inviteCode = "") =>
@@ -1178,7 +1180,13 @@ export const resetAccountPassword = (key: string, accountId: string, turnOffTwoF
 
 /** Every server on the instance, with its owner, usage and caps. */
 export const listInstanceServers = (key: string) =>
-  call((signal) => api(key).admin.listInstanceServers({}, { signal })).pipe(Effect.map((r) => r.servers));
+  call((signal) => api(key).admin.listInstanceServers({}, { signal })).pipe(
+    Effect.map((r) => ({ servers: r.servers, featured: r.featuredServerIds })),
+  );
+
+/** Replaces the servers featured in Browse with these, in order. */
+export const setFeaturedServers = (key: string, serverIds: string[]) =>
+  call((signal) => api(key).admin.setFeaturedServers({ serverIds }, { signal })).pipe(Effect.map((r) => r.featuredServerIds));
 
 /**
  * A server's whole database as one SQLite file. `progress` hears the bytes so

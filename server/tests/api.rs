@@ -699,6 +699,64 @@ async fn limits_are_unlimited_by_default_and_configurable() {
 }
 
 #[tokio::test]
+async fn admins_feature_servers_in_browse() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, is_admin) = sign_up(&mut c, "admin").await;
+    assert!(is_admin);
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let big = create_server(&mut c, &mika, "Big", true).await;
+    let small = create_server(&mut c, &mika, "Small", true).await;
+    let hidden = create_server(&mut c, &mika, "Hidden", false).await;
+    c.servers
+        .join_server(authed(&admin, pb::JoinServerRequest { server_id: big.id.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let browse = async |c: &mut Clients| {
+        let found =
+            c.servers.discover_servers(authed(&mika, pb::DiscoverServersRequest {})).await.unwrap().into_inner();
+        (found.servers.into_iter().map(|s| s.name).collect::<Vec<_>>(), found.featured_server_ids)
+    };
+    assert_eq!(browse(&mut c).await, (vec!["Big".to_string(), "Small".into()], vec![]));
+
+    // Only admins pick, only servers that exist.
+    let set = |token: &str, ids: Vec<String>| authed(token, pb::SetFeaturedServersRequest { server_ids: ids });
+    let denied = c.admin.set_featured_servers(set(&mika, vec![small.id.clone()])).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let missing = c.admin.set_featured_servers(set(&admin, vec!["nope".into()])).await.unwrap_err();
+    assert_eq!(missing.code(), Code::NotFound);
+
+    // Featured first, in order; a hidden one stays picked but never shows.
+    let picked = vec![hidden.id.clone(), small.id.clone(), small.id.clone()];
+    let saved = c.admin.set_featured_servers(set(&admin, picked)).await.unwrap().into_inner().featured_server_ids;
+    assert_eq!(saved, [hidden.id.clone(), small.id.clone()]);
+    assert_eq!(browse(&mut c).await, (vec!["Small".to_string(), "Big".into()], vec![small.id.clone()]));
+    let listed = c
+        .admin
+        .list_instance_servers(authed(&admin, pb::ListInstanceServersRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .featured_server_ids;
+    assert_eq!(listed, [hidden.id.clone(), small.id.clone()]);
+
+    // A deleted server stops being featured.
+    c.servers.delete_server(authed(&mika, pb::DeleteServerRequest { server_id: hidden.id.clone() })).await.unwrap();
+    let listed = c
+        .admin
+        .list_instance_servers(authed(&admin, pb::ListInstanceServersRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .featured_server_ids;
+    assert_eq!(listed, std::slice::from_ref(&small.id));
+
+    c.admin.set_featured_servers(set(&admin, vec![])).await.unwrap();
+    assert_eq!(browse(&mut c).await, (vec!["Big".to_string(), "Small".into()], vec![]));
+}
+
+#[tokio::test]
 async fn operators_choose_which_accounts_exist() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_LOCAL_ACCOUNTS", "closed"), ("FUWA_SERVER_CREATION", "admins")]).await;

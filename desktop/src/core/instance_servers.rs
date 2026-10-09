@@ -59,6 +59,31 @@ pub fn shown<'a>(servers: &'a [pb::InstanceServer], query: &str, sort: Sort) -> 
     kept
 }
 
+/// The featured list with `id` added at the end (where it isn't already), or taken out.
+pub fn featuring(featured: &[String], id: &str, on: bool) -> Vec<String> {
+    if on && featured.iter().any(|f| f == id) {
+        return featured.to_vec();
+    }
+    let mut list: Vec<String> = featured.iter().filter(|f| *f != id).cloned().collect();
+    if on {
+        list.push(id.to_owned());
+    }
+    list
+}
+
+/// The featured list with `id` moved one place earlier (`earlier`) or
+/// later; unchanged at either end, or when it isn't featured.
+pub fn featured_moved(featured: &[String], id: &str, earlier: bool) -> Vec<String> {
+    let mut list = featured.to_vec();
+    if let Some(at) = list.iter().position(|f| f == id) {
+        let to = if earlier { at.checked_sub(1) } else { Some(at + 1).filter(|&n| n < list.len()) };
+        if let Some(to) = to {
+            list.swap(at, to);
+        }
+    }
+    list
+}
+
 /// Whether there's a region to pick: more than one.
 pub fn has_regions(regions: &[pb::Region]) -> bool {
     regions.len() > 1
@@ -137,6 +162,20 @@ impl Core {
     pub async fn list_instance_servers(&self, key: &str) -> Result<Vec<pb::InstanceServer>, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
         Ok(rpc!(api.admin(), list_instance_servers(pb::ListInstanceServersRequest {})).await?.servers)
+    }
+
+    /// Every server here and the ones featured in Browse, in order. Admins only.
+    pub async fn instance_servers(&self, key: &str) -> Result<pb::ListInstanceServersResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.admin(), list_instance_servers(pb::ListInstanceServersRequest {})).await
+    }
+
+    /// Replaces the servers featured in Browse with `ids`, in that order;
+    /// gives back the list now in force.
+    pub async fn set_featured_servers(&self, key: &str, ids: Vec<String>) -> Result<Vec<String>, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.admin(), set_featured_servers(pb::SetFeaturedServersRequest { server_ids: ids })).await?;
+        Ok(res.featured_server_ids)
     }
 
     /// The instance's totals: default caps, and the pictures people keep here.
@@ -289,6 +328,19 @@ mod tests {
         assert_eq!(names(shown(&list, "", Sort::Members)), ["Rust", "Cozy", "Busy"]);
         assert_eq!(names(shown(&list, "", Sort::Newest)), ["Busy", "Rust", "Cozy"]);
         assert_eq!(names(shown(&list, " MIKA", Sort::Biggest)), ["Rust", "Cozy"]);
+    }
+
+    #[test]
+    fn featuring_adds_at_the_end_and_moves_one_place() {
+        let list: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        assert_eq!(featuring(&list, "d", true), ["a", "b", "c", "d"]);
+        assert_eq!(featuring(&list, "a", true), list);
+        assert_eq!(featuring(&list, "b", false), ["a", "c"]);
+        assert_eq!(featured_moved(&list, "b", true), ["b", "a", "c"]);
+        assert_eq!(featured_moved(&list, "b", false), ["a", "c", "b"]);
+        assert_eq!(featured_moved(&list, "a", true), list);
+        assert_eq!(featured_moved(&list, "c", false), list);
+        assert_eq!(featured_moved(&list, "z", true), list);
     }
 
     #[test]

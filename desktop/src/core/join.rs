@@ -198,6 +198,33 @@ pub struct NewServer {
     pub region: String,
 }
 
+/// Browse on an instance: its servers, featured ones first in the order the
+/// admins put them, and the ids of those featured (empty on an instance
+/// from before featuring).
+#[derive(Debug, Clone, Default)]
+pub struct Discovered {
+    pub servers: Vec<pb::Server>,
+    pub featured: Vec<String>,
+}
+
+/// The servers matching a search (name or description), split into the
+/// featured ones, in the admins' order, and the rest, in Browse's order.
+/// Like the web's `InstanceHome.tsx`.
+pub fn browse_split<'a>(found: &'a Discovered, query: &str) -> (Vec<&'a pb::Server>, Vec<&'a pb::Server>) {
+    let q = query.trim().to_lowercase();
+    let matches = |s: &pb::Server| {
+        q.is_empty() || s.name.to_lowercase().contains(&q) || s.description.to_lowercase().contains(&q)
+    };
+    let featured: Vec<&pb::Server> = found
+        .featured
+        .iter()
+        .filter_map(|id| found.servers.iter().find(|s| &s.id == id))
+        .filter(|s| matches(s))
+        .collect();
+    let rest = found.servers.iter().filter(|s| !found.featured.contains(&s.id) && matches(s)).collect();
+    (featured, rest)
+}
+
 /// What asking about your applications found.
 #[derive(Debug, Default)]
 pub struct Checked {
@@ -260,10 +287,11 @@ impl Core {
         }
     }
 
-    /// The servers in the instance's Browse.
-    pub async fn discover(&self, key: &str) -> Result<Vec<pb::Server>, Problem> {
+    /// The servers in the instance's Browse, featured ones first, and which are featured.
+    pub async fn discover(&self, key: &str) -> Result<Discovered, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
-        Ok(rpc!(api.servers(), discover_servers(pb::DiscoverServersRequest {})).await?.servers)
+        let res = rpc!(api.servers(), discover_servers(pb::DiscoverServersRequest {})).await?;
+        Ok(Discovered { servers: res.servers, featured: res.featured_server_ids })
     }
 
     /// Makes a server, with all the web form's choices.
@@ -433,6 +461,26 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn featured_servers_come_first_and_stay_featured_in_a_search() {
+        let server = |id: &str, name: &str| pb::Server { id: id.into(), name: name.into(), ..Default::default() };
+        let found = Discovered {
+            servers: vec![server("b", "Cozy Books"), server("a", "Art"), server("c", "Cozy Cats"), server("d", "Dogs")],
+            featured: vec!["b".into(), "a".into(), "gone".into()],
+        };
+        let ids = |v: Vec<&pb::Server>| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        let (featured, rest) = browse_split(&found, "");
+        assert_eq!(ids(featured), ["b", "a"]);
+        assert_eq!(ids(rest), ["c", "d"]);
+        let (featured, rest) = browse_split(&found, " cozy");
+        assert_eq!(ids(featured), ["b"]);
+        assert_eq!(ids(rest), ["c"]);
+        let none = Discovered { servers: found.servers.clone(), featured: vec![] };
+        let (featured, rest) = browse_split(&none, "");
+        assert!(featured.is_empty());
+        assert_eq!(rest.len(), 4);
+    }
 
     #[test]
     fn invites_from_codes_and_links() {

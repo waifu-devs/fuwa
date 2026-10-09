@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, ChevronLeftIcon, PlusIcon, SearchIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronLeftIcon, PlusIcon, SearchIcon, SparklesIcon, StarIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -97,18 +97,22 @@ function UnknownInstance({ instanceKey }: { instanceKey: string }) {
 function Browse({ instanceKey }: { instanceKey: string }) {
   const { t } = useI18n();
   const inst = useInstance(instanceKey)!;
-  const [servers, setServers] = useState<Server[] | null>(null);
+  const [found, setFound] = useState<{ servers: Server[]; featured: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!inst.me) return;
-    run(discover(instanceKey)).then(setServers, (e) => setError(e.message));
+    run(discover(instanceKey)).then(setFound, (e) => setError(e.message));
   }, [instanceKey, inst.me]);
 
   const q = query.trim().toLowerCase();
-  const shown = (servers ?? []).filter((s) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+  const matching = (found?.servers ?? []).filter((s) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+  // The instance sends featured servers first, in their order.
+  const featured = new Set(found?.featured);
+  const shownFeatured = matching.filter((s) => featured.has(s.id));
+  const shown = matching.filter((s) => !featured.has(s.id));
 
   return (
     <div className="mx-auto max-w-5xl px-4 pt-6 pb-16 sm:px-8">
@@ -124,7 +128,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         </div>
       </div>
 
-      <BrowseResults instanceKey={instanceKey} servers={servers} error={error} searching={!!q} shown={shown} />
+      <BrowseResults instanceKey={instanceKey} loaded={found !== null} error={error} searching={!!q} featured={shownFeatured} shown={shown} />
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={instanceKey} />
     </div>
   );
@@ -161,23 +165,28 @@ function BrowseHero({ instanceKey, onCreate }: { instanceKey: string; onCreate: 
   );
 }
 
-/** The servers in Browse that match the search, gliding in and out as it changes. */
+/**
+ * The servers in Browse that match the search, gliding in and out as it
+ * changes: the ones the instance features first and big, then the rest.
+ */
 function BrowseResults({
   instanceKey,
-  servers,
+  loaded,
   error,
   searching,
+  featured,
   shown,
 }: {
   instanceKey: string;
-  servers: Server[] | null;
+  loaded: boolean;
   error: string | null;
   searching: boolean;
+  featured: Server[];
   shown: Server[];
 }) {
   const { t } = useI18n();
   if (error) return <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>;
-  if (servers === null)
+  if (!loaded)
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2].map((n) => (
@@ -187,7 +196,42 @@ function BrowseResults({
     );
   return (
     <>
-      {shown.length === 0 && (
+      <AnimatePresence initial={false}>
+        {featured.length > 0 && (
+          <motion.section
+            key="featured"
+            layout
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+              <SparklesIcon className="size-3.5 text-primary" /> {t("workspace.home.featured")}
+              <span className="font-normal tracking-normal normal-case">· {t("workspace.home.featuredAbout")}</span>
+            </p>
+            <motion.div layout className="mb-8 grid gap-4 md:grid-cols-2">
+              <AnimatePresence>
+                {featured.map((s, n) => (
+                  <motion.div
+                    key={s.id}
+                    layout
+                    initial={{ opacity: 0, y: 24, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1, pointerEvents: "auto" }}
+                    exit={{ opacity: 0, scale: 0.95, pointerEvents: "none" }}
+                    transition={{ duration: 0.5, delay: Math.min(n, 6) * 0.07, ease: [0.22, 1, 0.36, 1], pointerEvents: { delay: 0 } }}
+                    // With an odd number, the first takes a whole row.
+                    className={cn(n === 0 && featured.length % 2 === 1 && "md:col-span-2")}
+                  >
+                    <FeaturedCard instanceKey={instanceKey} server={s} wide={n === 0 && featured.length % 2 === 1} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          </motion.section>
+        )}
+      </AnimatePresence>
+      {featured.length === 0 && shown.length === 0 && (
         <div className="grid place-items-center rounded-3xl border border-dashed p-10 text-center">
           <p className="font-bold">{searching ? t("workspace.home.noMatch") : t("workspace.home.noServers")}</p>
           <p className="mt-1 text-sm text-muted-foreground">{searching ? t("workspace.home.tryAnother") : t("workspace.home.makeFirst")}</p>
@@ -290,6 +334,48 @@ function ServerCard({ instanceKey, server }: { instanceKey: string; server: Serv
           server={server}
           onOpen={(s) => navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: s.id } })}
         />
+      </div>
+    </Tilt>
+  );
+}
+
+/**
+ * A server the instance's admins feature: a tall banner that pans, the
+ * icon and name bigger, and more of the description than a plain card.
+ */
+function FeaturedCard({ instanceKey, server, wide }: { instanceKey: string; server: Server; wide: boolean }) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  return (
+    <Tilt max={wide ? 3 : 5} className="card-pop tilt h-full overflow-hidden rounded-3xl border border-primary/30 bg-card shadow-lg shadow-primary/5">
+      <ServerBanner server={server} className={wide ? "h-40 sm:h-52" : "h-36 sm:h-44"}>
+        <span className="absolute top-3 left-3 flex items-center gap-1 rounded-full bg-background/80 px-2.5 py-1 text-xs font-extrabold text-primary backdrop-blur">
+          <StarIcon className="size-3.5 fill-current" /> {t("workspace.home.featured")}
+        </span>
+      </ServerBanner>
+      <div style={accentVars(server)} className="relative -mt-12 flex flex-col gap-3 p-5 pt-0 sm:p-6 sm:pt-0">
+        <div className="flex items-end gap-4">
+          <ServerIcon server={server} active className="size-20 shrink-0 text-2xl ring-4 ring-card" />
+          <div className="min-w-0 pb-1">
+            <p className="truncate text-2xl font-extrabold tracking-tight">{server.name}</p>
+            <p className="flex items-center gap-1 text-sm text-muted-foreground">
+              <UsersIcon className="size-4" /> <T k="workspace.home.members" values={{ count: <Count value={Number(server.memberCount)} /> }} count={Number(server.memberCount)} />
+            </p>
+          </div>
+        </div>
+        <p className={cn("text-muted-foreground", wide ? "line-clamp-3 sm:text-base" : "line-clamp-4 text-sm")}>
+          {server.description ? <InlineMarkdown>{server.description}</InlineMarkdown> : t("workspace.home.noDescription")}
+        </p>
+        <div className={cn("flex flex-col gap-3", wide && "sm:flex-row sm:items-end sm:justify-between")}>
+          <ServerDoor server={server} />
+          <div className={cn(wide && "sm:ml-auto sm:w-56 sm:shrink-0")}>
+            <JoinButton
+              instanceKey={instanceKey}
+              server={server}
+              onOpen={(s) => navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: s.id } })}
+            />
+          </div>
+        </div>
       </div>
     </Tilt>
   );
