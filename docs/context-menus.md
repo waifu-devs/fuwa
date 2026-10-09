@@ -44,9 +44,9 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 | Section | Items |
 | --- | --- |
 | target | Copy (selected text) · Open link (shows its host) · Copy link · Open picture · Save picture · Copy picture link (pictures from instances the app talks to only): only for what was right clicked |
-| react | (reactions, once they exist) |
+| react | A row of emoji used lately (standard ones and this server's own), each reacting in one press or taking yours off, lit when you reacted with it · Add reaction (opens the emoji picker at the message's toolbar) · See who reacted (when it has reactions: each emoji's people, and "Remove all *emoji*" with Manage Messages). Only where reactions work (not in channels shared with another server); adding needs Add Reactions, taking yours off doesn't |
 | primary | Reply in thread / Open thread (where the message's own button shows) · Edit message (yours) · Copy text |
-| manage | Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) |
+| manage | Pin message / Unpin message (Manage Messages) · Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) · Remove all reactions (Manage Messages, when it has reactions; asks first) |
 | developer | Copy message ID |
 | danger | Delete message (yours, or with Manage Messages): asks in the message's toolbar |
 
@@ -105,8 +105,7 @@ phone's own menu.
 Features add their items without touching the menus: `extendMenu(kind, {
 section, at, build })` from `web/src/lib/context-menu.ts`, with the sections
 named above. A section a menu doesn't have yet is added before `danger`.
-Planned: reactions (a row of recent emoji in `react`), Reply at the start of
-`primary`, Pin and Mark unread in `primary`, Report in
+Planned: Reply at the start of `primary`, Mark unread in `primary`, Report in
 `danger`, Add friend in `social`, attachments and polls in the composer's
 `insert`.
 

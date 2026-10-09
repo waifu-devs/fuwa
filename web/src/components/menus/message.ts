@@ -1,4 +1,20 @@
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, MessageSquareReplyIcon, PencilIcon, PinIcon, PinOffIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
+import {
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  ImageIcon,
+  LinkIcon,
+  MessageSquareReplyIcon,
+  PencilIcon,
+  PinIcon,
+  PinOffIcon,
+  SmilePlusIcon,
+  SmileIcon,
+  TextSelectIcon,
+  Trash2Icon,
+  UserXIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import type { MenuTrigger } from "@/components/ContextMenu";
 import { copyIdItem } from "@/components/menus/common";
 import { i18n } from "@/i18n/i18n";
@@ -82,20 +98,31 @@ export type MessageMenuActions = {
   keepOut?: { name: string; ask: () => void };
   /** Pin it to its channel or thread, or unpin it. */
   pin?: { pinned: boolean; toggle: () => void };
+  /** Reacting: a row of emoji used lately (drawn by the message's list), and the picker for any other. */
+  react?: { quick: (close: () => void) => ReactNode; add?: () => void };
+  /** Its reactions: who reacted, and taking them all off (moderators, asked first). */
+  reactions?: { view: () => void; clear?: () => void };
   delete?: () => void;
 };
 
 /**
  * A message's menu. Sections, in order: target (selection, link, picture),
- * react, primary, manage, developer, danger. Reactions, replies, pins and
- * reports join through `extendMenu("message", …)` once they exist.
+ * react, primary, manage, developer, danger. Replies and reports join
+ * through `extendMenu("message", …)` once they exist.
  */
 export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, actions: MessageMenuActions): MenuSection[] {
   const { t } = i18n();
   return [
     targetSection(trigger),
     ...withExtensions("message", ctx, [
-      { id: "react", items: [] },
+      {
+        id: "react",
+        items: items(
+          actions.react && { kind: "custom", id: "quick-reactions", render: actions.react.quick },
+          actions.react?.add && { id: "add-reaction", label: t("chattools.reactions.add"), icon: SmilePlusIcon, onSelect: actions.react.add },
+          actions.reactions && { id: "view-reactions", label: t("chattools.reactions.viewAll"), icon: SmileIcon, onSelect: actions.reactions.view },
+        ),
+      },
       {
         id: "primary",
         items: items(
@@ -114,6 +141,7 @@ export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, 
             onSelect: actions.pin.toggle,
           },
           actions.keepOut && { id: "keep-out", label: t("workspace.menu.message.keepOut", { name: actions.keepOut.name }), icon: UserXIcon, danger: true, onSelect: actions.keepOut.ask },
+          actions.reactions?.clear && { id: "clear-reactions", label: t("chattools.reactions.clearAll"), icon: Trash2Icon, danger: true, onSelect: actions.reactions.clear },
         ),
       },
       { id: "developer", items: items(copyIdItem(ctx.message.id, "message")) },

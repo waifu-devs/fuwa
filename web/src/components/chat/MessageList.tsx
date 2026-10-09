@@ -13,6 +13,7 @@ import {
   RotateCwIcon,
   ShieldAlertIcon,
   ShieldIcon,
+  SmilePlusIcon,
   SparklesIcon,
   TimerIcon,
   Trash2Icon,
@@ -53,6 +54,12 @@ import { instanceHas } from "@/lib/compat";
 import type { FuwaError } from "@/fuwa/errors";
 import { pinMessage } from "@/fuwa/pins";
 import { PinMark } from "@/components/chat/Pins";
+import { clearReactions, listReactors, react, type ReactEmoji } from "@/fuwa/reactions";
+import { AddReactionTool, pickedReaction, QuickReactions, quickReactions, ReactionRow, ReactionsDialog, reactionCatalog } from "@/components/chat/Reactions";
+import { confirmFirst } from "@/components/menus/dialogs";
+import type { PickedEmoji } from "@/components/EmojiPicker";
+import { NAMES_SHOWN, reactionKey, type ReactionLike } from "@/lib/reactions";
+import type { Catalog } from "@/lib/emoji-catalog";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
@@ -151,7 +158,19 @@ type RowActions = {
   thread: (id: string) => void;
   /** Pins a message, or unpins it if it's pinned. */
   pin: (message: Message) => void;
+  /** Reacts to a message, or takes your reaction off. */
+  react: (message: Message, emoji: ReactEmoji, on: boolean) => void;
+  /** The first few people who reacted with an emoji, by name ("You" for yourself). */
+  who: (message: Message, reaction: ReactionLike) => Promise<string[]>;
+  /** A page of who reacted with an emoji. */
+  reactors: (message: Message, reaction: ReactionLike, afterId: string) => Promise<{ users: User[]; hasMore: boolean }>;
+  /** Takes one emoji's reactions off a message, or every one: moderators. */
+  clearReactions: (message: Message, reaction?: ReactionLike) => Promise<void>;
 };
+
+/** Who reacted, as loaded for the hover over a reaction, kept while its count and yours stay the same. */
+const whoReacted = new Map<string, Promise<string[]>>();
+const WHO_KEPT = 200;
 
 /**
  * One channel's messages, or one thread's. Each list belongs to one channel
@@ -178,7 +197,7 @@ export const MessageList = forwardRef<
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
   const items = state?.items ?? EMPTY;
   const [editing, setEditing] = useState<string | null>(null);
-  const { look, pollPlace, catalog, memberById, myRoleIds } = useListLook(instanceKey, serverId, channel, me);
+  const { look, pollPlace, catalog, reactCatalog, memberById, myRoleIds } = useListLook(instanceKey, serverId, channel, me);
   const actions = useRowActions(instanceKey, serverId, channel, threadId, at, catalog, setEditing);
   const rows = useMemo(() => buildRows(items, pending, me?.id), [items, pending, me?.id]);
   const scroll = useListScroll({ instanceKey, serverId, channel, threadId, state, items, rows });
@@ -196,7 +215,7 @@ export const MessageList = forwardRef<
     run(loadMessages(instanceKey, serverId, channel.id, false, threadId)).catch(() => {});
   }, [instanceKey, serverId, channel.id, threadId]);
 
-  const draw = useRowContext({ instanceKey, serverId, channel, threadId, me, memberById, myRoleIds, editing, initial: scroll.initial, actions });
+  const draw = useRowContext({ instanceKey, serverId, channel, threadId, me, memberById, myRoleIds, editing, initial: scroll.initial, actions, reactCatalog });
   const beginning = state && !state.loading && !state.hasMore && scroll.skipped === 0;
 
   return (
@@ -267,7 +286,8 @@ function useListLook(instanceKey: string, serverId: string, channel: Channel, me
     }),
     [instanceKey, ownerId, roles, members, emojis, otherEmojis, me, myRoleIds],
   );
-  return { look, pollPlace, catalog, memberById, myRoleIds };
+  const reactCatalog = useMemo(() => reactionCatalog(catalog), [catalog]);
+  return { look, pollPlace, catalog, reactCatalog, memberById, myRoleIds };
 }
 
 /** What rows do to their messages, one object for the whole list. */
@@ -310,6 +330,29 @@ function useRowActions(
             toast(message.pinnedAt ? t("chattools.pins.unpinnedToast") : t("chattools.pins.pinnedToast", { place: threadId ? t("chat.threads.thread") : `#${channel.name}` })),
           )
           .catch((err: FuwaError) => toast(err.message)),
+      react: (message, emoji, on) => void react(instanceKey, serverId, message, emoji, on).catch((err: FuwaError) => toast(err.message)),
+      who: (message, reaction) => {
+        const key = `${instanceKey}|${store.get().instances[instanceKey]?.me?.id}|${message.id}|${reactionKey(reaction)}|${reaction.count}|${reaction.me}`;
+        let names = whoReacted.get(key);
+        if (!names) {
+          names = listReactors(instanceKey, serverId, message, reaction, { limit: NAMES_SHOWN + 1 }).then(({ users }) => {
+            const i = store.get().instances[instanceKey];
+            const meId = i?.me?.id;
+            const members = i?.members[serverId];
+            const others = users.filter((u) => u.id !== meId).map((u) => members?.find((m) => m.user?.id === u.id)?.nickname || displayName(u));
+            return reaction.me ? [t("chattools.reactions.you"), ...others] : others;
+          });
+          names.catch(() => whoReacted.delete(key));
+          whoReacted.set(key, names);
+          if (whoReacted.size > WHO_KEPT) whoReacted.delete(whoReacted.keys().next().value!);
+        }
+        return names;
+      },
+      reactors: (message, reaction, afterId) => listReactors(instanceKey, serverId, message, reaction, { afterId }),
+      clearReactions: async (message, reaction) => {
+        await clearReactions(instanceKey, serverId, message, reaction);
+        toast(t("chattools.reactions.cleared"));
+      },
     }),
     [instanceKey, serverId, channel, catalog, at, threadId, openThread, t, setEditing],
   );
@@ -483,6 +526,12 @@ type RowContext = {
   canStart: boolean;
   canReply: boolean;
   canPin: boolean;
+  /** Reactions show here: the instance has them, and the channel isn't shared with another server. */
+  reactionsHere: boolean;
+  /** May add reactions (taking yours off needs nothing). */
+  canReact: boolean;
+  /** What reactions may use: the standard set and this server's own emoji. */
+  reactCatalog: Catalog;
   guestSide: boolean;
   keepsOut: boolean;
 };
@@ -498,6 +547,7 @@ function useRowContext({
   editing,
   initial,
   actions,
+  reactCatalog,
 }: {
   instanceKey: string;
   serverId: string;
@@ -509,6 +559,7 @@ function useRowContext({
   editing: string | null;
   initial: Set<string> | null;
   actions: RowActions;
+  reactCatalog: Catalog;
 }): RowContext {
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
@@ -520,6 +571,8 @@ function useRowContext({
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   // Pins are the home's in a shared channel, and need this instance to keep them.
   const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
+  // Reactions don't cross to other servers yet: not in shared channels, on either side.
+  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions")) && !channel.shared;
   const display = usePrefs((p) => p.messageDisplay);
   const developer = usePrefs((p) => p.developerMode);
   const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
@@ -547,6 +600,9 @@ function useRowContext({
     canStart: threads && hasIn(access, channel.id, Permission.CREATE_THREADS),
     canReply: threads && canSend,
     canPin: pinsHere && manager && !(channel.shared && !channel.shared.home),
+    reactionsHere,
+    canReact: reactionsHere && hasIn(access, channel.id, Permission.ADD_REACTIONS),
+    reactCatalog,
     // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
     // only the home keeps someone from another server out.
     guestSide: !!channel.shared && !channel.shared.home,
@@ -617,6 +673,10 @@ function drawRow(row: Row, c: RowContext): ReactNode {
       editing={c.editing === message.id}
       canThread={!message.threadId && (message.thread ? c.canReply : c.canStart)}
       canPin={c.canPin && message.kind === MessageKind.UNSPECIFIED}
+      reactable={c.reactionsHere && message.kind === MessageKind.UNSPECIFIED}
+      canReact={c.canReact}
+      canClearReactions={c.reactionsHere && c.manager}
+      reactCatalog={c.reactCatalog}
       inThread={!!c.threadId}
       actions={c.actions}
       clock={c.clock}
@@ -932,6 +992,10 @@ const MessageRow = memo(function MessageRow({
   editing,
   canThread,
   canPin,
+  reactable,
+  canReact,
+  canClearReactions,
+  reactCatalog,
   inThread,
   actions,
 }: Redraw & {
@@ -955,12 +1019,24 @@ const MessageRow = memo(function MessageRow({
   canThread: boolean;
   /** Can pin it or unpin it. */
   canPin: boolean;
+  /** Reactions show on it (the instance has them, the channel isn't shared, it's an ordinary message). */
+  reactable: boolean;
+  /** May add reactions here. */
+  canReact: boolean;
+  /** May take others' reactions off (Manage Messages). */
+  canClearReactions: boolean;
+  reactCatalog: Catalog;
   /** Drawn in a thread's own list, where replies don't get threads of their own. */
   inThread: boolean;
   actions: RowActions;
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
+  // The picker opened from the toolbar, or from the menu's "Add reaction", which opens it there too.
+  const [picking, setPicking] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const { emojis } = useServerLook();
+  const reactions = reactable ? message.reactions : EMPTY;
   const menu = useContextMenu("message", (trigger) =>
     messageMenu({ instanceKey, serverId: actions.serverId, channel: actions.channel, message, mine }, trigger, {
       thread: canThread ? { open: !!message.thread, go: () => actions.thread(message.id) } : undefined,
@@ -968,14 +1044,49 @@ const MessageRow = memo(function MessageRow({
       copyText: message.content ? () => copy(t, message.content, t("common.copy.text")) : undefined,
       keepOut: canKeepOut ? { name: displayName(author), ask: () => setConfirming("keep-out") } : undefined,
       pin: canPin ? { pinned: !!message.pinnedAt, toggle: () => actions.pin(message) } : undefined,
+      react: reactable && (canReact || reactions.some((r) => r.me))
+        ? {
+            quick: (close) => (
+              <QuickReactions
+                choices={quickReactions(emojis ?? [])}
+                reactions={reactions}
+                emojis={emojis}
+                canAdd={canReact}
+                onToggle={(emoji, on) => actions.react(message, emoji, on)}
+                close={close}
+              />
+            ),
+            add: canReact ? () => setPicking(true) : undefined,
+          }
+        : undefined,
+      reactions: reactions.length
+        ? {
+            view: () => setViewing(true),
+            clear: canClearReactions
+              ? () =>
+                  confirmFirst({
+                    title: t("chattools.reactions.clearAll"),
+                    body: t("chattools.reactions.clearAllConfirm"),
+                    action: t("chattools.reactions.clearAll"),
+                    run: () => actions.clearReactions(message),
+                  })
+              : undefined,
+          }
+        : undefined,
       delete: canDelete ? () => setConfirming("delete") : undefined,
     }),
   );
+  const pick = (picked: PickedEmoji) => {
+    const emoji = pickedReaction(picked);
+    const had = reactions.find((r) => reactionKey(r) === reactionKey(emoji));
+    // Picking one you already reacted with keeps it, as other apps do.
+    if (!had?.me) actions.react(message, emoji, true);
+  };
   return (
     <motion.div
       {...(animate ? enter : {})}
       {...menu}
-      data-confirming={confirming ? "" : undefined}
+      data-confirming={confirming || picking ? "" : undefined}
       exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       data-message-id={message.id}
@@ -993,6 +1104,17 @@ const MessageRow = memo(function MessageRow({
         ) : (
           <MessageContent message={message} instanceKey={instanceKey} display={display} mine={mine} animate={animate} inThread={inThread} actions={actions} />
         )}
+        {reactions.length > 0 && (
+          <ReactionRow
+            reactions={reactions}
+            emojis={emojis}
+            canAdd={canReact}
+            catalog={reactCatalog}
+            onToggle={(r, on) => actions.react(message, r, on)}
+            onPick={pick}
+            who={(r) => actions.who(message, r)}
+          />
+        )}
       </MessageLine>
       {!editing && (
         <MessageTools
@@ -1002,11 +1124,30 @@ const MessageRow = memo(function MessageRow({
           setConfirming={setConfirming}
           canThread={canThread}
           canPin={canPin}
+          react={
+            reactable && canReact ? (
+              <AddReactionTool catalog={reactCatalog} open={picking} onOpenChange={setPicking} onPick={pick}>
+                <ToolButton label={t("chattools.reactions.add")} onClick={() => {}}>
+                  <SmilePlusIcon />
+                </ToolButton>
+              </AddReactionTool>
+            ) : null
+          }
           developer={developer}
           mine={mine}
           canKeepOut={canKeepOut}
           canDelete={canDelete}
           actions={actions}
+        />
+      )}
+      {reactable && (
+        <ReactionsDialog
+          open={viewing}
+          onOpenChange={setViewing}
+          reactions={reactions}
+          emojis={emojis}
+          load={(r, afterId) => actions.reactors(message, r, afterId)}
+          onClear={canClearReactions ? (r) => actions.clearReactions(message, r) : undefined}
         />
       )}
     </motion.div>
@@ -1062,6 +1203,7 @@ function MessageTools({
   setConfirming,
   canThread,
   canPin,
+  react,
   developer,
   mine,
   canKeepOut,
@@ -1074,6 +1216,8 @@ function MessageTools({
   setConfirming: (confirming: "delete" | "keep-out" | false) => void;
   canThread: boolean;
   canPin: boolean;
+  /** The "Add reaction" button, where you may react. */
+  react: ReactNode;
   developer: boolean;
   mine: boolean;
   canKeepOut: boolean;
@@ -1087,6 +1231,7 @@ function MessageTools({
         <ConfirmTools message={message} author={author} confirming={confirming} setConfirming={setConfirming} actions={actions} />
       ) : (
         <>
+          {react}
           <CopyTextButton content={message.content} />
           {canThread && (
             <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>

@@ -48,6 +48,7 @@ export const KNOWN: P[] = [
   P.RECORD,
   P.CREATE_THREADS,
   P.CREATE_POLLS,
+  P.ADD_REACTIONS,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -69,6 +70,7 @@ export const CHANNEL: Bits = [
   P.VIDEO,
   P.RECORD,
   P.CREATE_POLLS,
+  P.ADD_REACTIONS,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
 ].reduce((bits, p) => bits | bit(p), 0);
@@ -76,6 +78,7 @@ export const CHANNEL: Bits = [
 /** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
 export const TALK: Bits = [
   P.SEND_MESSAGES,
+  P.ADD_REACTIONS,
   P.CREATE_THREADS,
   P.CREATE_POLLS,
   P.EMBED_LINKS,
@@ -133,6 +136,11 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "serversettings.permission.createPollsAbout",
     channel: "serversettings.permission.createPollsChannel",
   },
+  [P.ADD_REACTIONS]: {
+    label: "serversettings.permission.addReactions",
+    about: "serversettings.permission.addReactionsAbout",
+    channel: "serversettings.permission.addReactionsChannel",
+  },
   [P.EMBED_LINKS]: { label: "serversettings.permission.embedLinks", about: "serversettings.permission.embedLinksAbout" },
   [P.ATTACH_FILES]: { label: "serversettings.permission.attachFiles", about: "serversettings.permission.attachFilesAbout" },
   [P.MENTION_EVERYONE]: { label: "serversettings.permission.mentionEveryone", about: "serversettings.permission.mentionEveryoneAbout" },
@@ -180,7 +188,7 @@ export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
   },
   {
     title: "serversettings.permission.group.textChannels",
-    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "serversettings.permission.group.advanced", permissions: [P.ADMINISTRATOR] },
@@ -192,7 +200,7 @@ export const CHANNEL_GROUPS: { kind: "general" | "text" | "voice"; title: Key; p
   {
     kind: "text",
     title: "serversettings.permission.group.text",
-    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { kind: "voice", title: "serversettings.permission.group.voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];

@@ -67,9 +67,10 @@ export type Item = {
    * off ("off"), in content. voice: a voice message (`voice`), with a
    * line about it in content for previews and notifications. thread: someone
    * locked ("locked") or unlocked ("unlocked") the thread under the message
-   * `thread` names.
+   * `thread` names. reaction: someone reacted to a message, or took their
+   * reaction off (`reaction`); never shown as a line, only tallied.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice" | "thread";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice" | "thread" | "reaction";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -91,6 +92,8 @@ export type Item = {
   voice?: Voice;
   /** Files a text carries (its content is then their caption, maybe empty). */
   files?: FileRef[];
+  /** A reaction: the record of the message it's to, the emoji, and whether it takes the sender's off. */
+  reaction?: { target: number; emoji: string; removed: boolean };
 };
 
 /** A file inside an encrypted message, sealed in chunks: what fetching, opening and showing it takes. */

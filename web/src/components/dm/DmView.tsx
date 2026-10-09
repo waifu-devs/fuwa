@@ -17,6 +17,7 @@ import {
   SendHorizontalIcon,
   ShieldAlertIcon,
   ShieldOffIcon,
+  SmilePlusIcon,
   Trash2Icon,
   UserRoundXIcon,
   XIcon,
@@ -48,6 +49,10 @@ import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import type { FuwaError } from "@/fuwa/errors";
 import { doneDmJump, loadDmPins, pinDm, requestDmJump, useDmJump, useDmPins } from "@/fuwa/pins";
 import { DmPinsButton, PinMark } from "@/components/chat/Pins";
+import { AddReactionTool, NO_CATALOG, ReactionRow } from "@/components/chat/Reactions";
+import type { PickedEmoji } from "@/components/EmojiPicker";
+import { reactInConversation } from "@/fuwa/reactions";
+import type { DmReaction, ReactionLike } from "@/lib/reactions";
 import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -78,6 +83,7 @@ import { DropOverlay } from "@/components/chat/ComposerFiles";
 const GROUP_GAP_MS = 7 * 60 * 1000;
 const NO_ITEMS: Item[] = [];
 const NO_PENDING: PendingMessage[] = [];
+const NO_REACTIONS: DmReaction[] = [];
 const drafts = new Map<string, string>();
 
 /** An encrypted conversation: its people, what was said, and where you write. */
@@ -290,11 +296,13 @@ function DmMessages({
   const { t } = useI18n();
   const describe = useCallback((item: Item) => deviceLine(t, item, users, me, earlier), [t, users, me, earlier]);
   const pins = useDmPinHooks(instanceKey, conversation.id);
+  const reactionsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "reactions"));
   return (
     <EncryptedMessages
       instanceKey={instanceKey}
       id={conversation.id}
       pins={pins}
+      reacting={reactionsHere ? REACT_FREELY : undefined}
       me={me}
       userOf={userOf}
       describe={describe}
@@ -348,6 +356,7 @@ export function EncryptedMessages({
   pendingIn,
   threads,
   pins,
+  reacting,
 }: {
   instanceKey: string;
   id: string;
@@ -369,14 +378,18 @@ export function EncryptedMessages({
   threads?: ThreadHooks;
   /** A conversation's pins: which lines are pinned, and pinning one. */
   pins?: PinHooks;
+  /** Reactions show on its messages (the instance has them), and whether you may add them. */
+  reacting?: Reacting;
 }) {
   const stored = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
+  const tally = useFuwa((s) => s.instances[instanceKey]?.dms.reactions[id]);
   const items = stored && (lines ?? stored);
   const allPending = useFuwa((s) => s.instances[instanceKey]?.dms.pending[id] ?? NO_PENDING);
   const pending = useMemo(() => (pendingIn ? allPending.filter(pendingIn) : allPending), [allPending, pendingIn]);
   const joining = useFuwa((s) => !!s.instances[instanceKey]?.dms.joining[id]);
   const display = usePrefs((p) => p.messageDisplay);
   usePrefs((p) => p.clock);
+  const { t } = useI18n();
   const [editing, setEditing] = useState<number | null>(null);
   const list = items ?? NO_ITEMS;
 
@@ -427,8 +440,10 @@ export function EncryptedMessages({
         setEditing(null);
       },
       remove: (seq) => deleteDm(instanceKey, id, seq),
+      react: (seq, emoji, on) => void reactInConversation(instanceKey, id, seq, emoji, on).catch((err: Error) => toast(err.message)),
+      who: (reaction) => (reaction as DmReaction).userIds?.map((u) => (u === me.id ? t("chattools.reactions.you") : (memberOf?.(u)?.nickname || displayName(userOf(u))))) ?? [],
     }),
-    [instanceKey, id],
+    [instanceKey, id, me.id, t, memberOf, userOf],
   );
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -527,6 +542,8 @@ export function EncryptedMessages({
                   threads={threads}
                   pinned={!!pins?.pinned(item.seq)}
                   onPin={pins && !item.deleted ? pins.toggle : undefined}
+                  reactions={reacting && !item.deleted ? (tally?.[item.seq] ?? NO_REACTIONS) : undefined}
+                  canReact={!!reacting?.canAdd}
                 />
               );
             })}
@@ -615,6 +632,10 @@ const dateOf = (item: Item) => {
   return d;
 };
 
+/** Reactions in an encrypted list: whether you may add them (taking yours off is always fine). */
+export type Reacting = { canAdd: boolean };
+const REACT_FREELY: Reacting = { canAdd: true };
+
 /** What a conversation's list knows of its pins: whether a line is pinned, and pinning or unpinning one. */
 export type PinHooks = {
   pinned: (seq: number) => boolean;
@@ -627,6 +648,10 @@ type DmActions = {
   cancelEdit: () => void;
   save: (seq: number, text: string) => Promise<void>;
   remove: (seq: number) => Promise<void>;
+  /** Reacts to a line with a standard emoji, or takes your reaction off. */
+  react: (seq: number, emoji: string, on: boolean) => void;
+  /** Who reacted with an emoji, by name ("You" for yourself), from this device's tally. */
+  who: (reaction: ReactionLike) => string[];
 };
 
 /**
@@ -661,6 +686,8 @@ const DmRow = memo(function DmRow({
   threads,
   pinned,
   onPin,
+  reactions,
+  canReact,
 }: {
   item: Item;
   first: boolean;
@@ -678,22 +705,61 @@ const DmRow = memo(function DmRow({
   threads?: ThreadHooks;
   pinned: boolean;
   onPin?: (seq: number) => void;
+  /** Its reactions as this device tallied them; undefined where reactions don't show. */
+  reactions?: DmReaction[];
+  canReact: boolean;
 }) {
+  const [picking, setPicking] = useState(false);
+  const { t } = useI18n();
+  const pick = (picked: PickedEmoji) => {
+    // Standard emoji only: nobody outside the conversation could draw a server's.
+    if (picked.custom) return;
+    if (!reactions?.some((r) => r.me && r.emoji === picked.text)) actions.react(item.seq, picked.text, true);
+  };
+  const reactTool =
+    reactions && canReact ? (
+      <AddReactionTool catalog={NO_CATALOG} open={picking} onOpenChange={setPicking} onPick={pick}>
+        <ToolButton label={t("chattools.reactions.add")} onClick={() => {}}>
+          <SmilePlusIcon />
+        </ToolButton>
+      </AddReactionTool>
+    ) : null;
   return (
     <motion.div
       {...(animate ? enter : {})}
       exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      data-confirming={picking ? "" : undefined}
       data-dm-seq={item.seq}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         <DmRowBody item={item} display={display} instanceKey={instanceKey} animate={animate} editing={editing} actions={actions} />
         {pinned && !item.deleted && !editing && <PinMark />}
+        {!!reactions?.length && !editing && (
+          <ReactionRow
+            reactions={reactions}
+            canAdd={canReact}
+            catalog={NO_CATALOG}
+            onToggle={(r, on) => actions.react(item.seq, r.emoji, on)}
+            onPick={pick}
+            who={actions.who}
+          />
+        )}
         {!editing && threads?.under(item)}
       </MessageLine>
       {!editing && !item.deleted && (
-        <DmRowTools item={item} mine={mine} deletable={deletable} deleteQuestion={deleteQuestion} actions={actions} threads={threads} pinned={pinned} onPin={onPin} />
+        <DmRowTools
+          item={item}
+          mine={mine}
+          deletable={deletable}
+          deleteQuestion={deleteQuestion}
+          actions={actions}
+          threads={threads}
+          pinned={pinned}
+          onPin={onPin}
+          react={reactTool}
+        />
       )}
     </motion.div>
   );
@@ -752,6 +818,7 @@ function DmRowTools({
   threads,
   pinned,
   onPin,
+  react,
 }: {
   item: Item;
   mine: boolean;
@@ -761,6 +828,8 @@ function DmRowTools({
   threads?: ThreadHooks;
   pinned: boolean;
   onPin?: (seq: number) => void;
+  /** The "Add reaction" button, where you may react. */
+  react: ReactNode;
 }) {
   const [confirming, setConfirming] = useState(false);
   const { t } = useI18n();
@@ -783,6 +852,7 @@ function DmRowTools({
         </motion.span>
       ) : (
         <>
+          {react}
           {item.kind === "text" && !!item.content && <CopyTool text={item.content} />}
           {threads?.canStart(item) && (
             <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
