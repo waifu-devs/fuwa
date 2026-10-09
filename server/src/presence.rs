@@ -113,15 +113,24 @@ struct Watcher {
     /// and those in focus.
     on_screen: bool,
     /// On screen: the servers whose members it follows (smaller than large,
-    /// up to `budget` members in all), and room left for more.
-    shown: HashSet<String>,
+    /// up to `budget` members in all) with the members each took, and room
+    /// left for more. A followed server that grows past large stays
+    /// followed, but its members are no longer walked for it.
+    shown: HashMap<String, usize>,
     room: usize,
 }
 
 impl Watcher {
     /// Whether it sees someone it shares `shared` with, focus aside.
     fn sees_through(&self, shared: &[String]) -> bool {
-        !self.on_screen || shared.iter().any(|id| self.shown.contains(id))
+        !self.on_screen || shared.iter().any(|id| self.shown.contains_key(id))
+    }
+
+    /// Stops following a server, giving back the room it took.
+    fn unfollow(&mut self, server_id: &str) {
+        if let Some(size) = self.shown.remove(server_id) {
+            self.room += size;
+        }
     }
 }
 
@@ -303,7 +312,7 @@ impl Inner {
             for stream in streams.iter().filter(|w| w.on_screen) {
                 let focused = self.focus.get(&stream.id).is_some_and(|people| people.contains(from));
                 let shown = !shared.is_empty() && (stream.sees_through(&shared) || focused);
-                if shown || stream.shown.contains(server_id) || focused {
+                if shown || stream.shown.contains_key(server_id) || focused {
                     let presence = if shown { presence.clone() } else { offline(from) };
                     send_where(std::slice::from_ref(stream), &presence, behind, |_| true);
                 }
@@ -549,7 +558,7 @@ impl Presence {
         }
         let (shown, room) = match on_screen {
             true => index.smallest_servers(user_id, inner.large, inner.budget),
-            false => (HashSet::new(), 0),
+            false => (HashMap::new(), 0),
         };
         inner.watchers.entry(user_id.to_string()).or_default().push(Watcher { id, tx, on_screen, shown, room });
         if !on_screen {
@@ -625,14 +634,14 @@ impl Presence {
             for stream in inner.watchers.get_mut(user_id).into_iter().flatten().filter(|w| w.on_screen) {
                 if size <= stream.room {
                     stream.room -= size;
-                    stream.shown.insert(server_id.to_string());
+                    stream.shown.insert(server_id.to_string(), size);
                 }
             }
         }
         // On screen, a server not followed shows only who's in focus.
         let shows = |stream: &Watcher, other: &str| {
             !stream.on_screen
-                || stream.shown.contains(server_id)
+                || stream.shown.contains_key(server_id)
                 || inner.focus.get(&stream.id).is_some_and(|people| people.contains(other))
         };
         // The server's members who are watching see the newcomer, as last sent.
@@ -676,7 +685,7 @@ impl Presence {
             }
         }
         for stream in inner.watchers.get_mut(user_id).into_iter().flatten() {
-            stream.shown.remove(server_id);
+            stream.unfollow(server_id);
         }
         inner.drop_streams(&behind);
     }
@@ -697,7 +706,7 @@ impl Presence {
                 let still = |w: &Watcher| !shared.is_empty() && (w.sees_through(&shared) || focused(w));
                 let gone = |w: &Watcher| match w.on_screen {
                     false => shared.is_empty(),
-                    true => !still(w) && (w.shown.contains(server_id) || focused(w)),
+                    true => !still(w) && (w.shown.contains_key(server_id) || focused(w)),
                 };
                 if to == from {
                     continue;
@@ -708,7 +717,7 @@ impl Presence {
         let watching: Vec<String> = watching.into_iter().cloned().collect();
         for to in watching {
             for stream in inner.watchers.get_mut(&to).into_iter().flatten() {
-                stream.shown.remove(server_id);
+                stream.unfollow(server_id);
             }
         }
         inner.drop_streams(&behind);
@@ -1200,6 +1209,16 @@ mod tests {
         assert_eq!(heard, ["a1", "b1"], "the third server counts as large");
         presence.focus(&index, "ann", on_screen.id, vec!["c1".into()]);
         assert_eq!(drain(&mut on_screen.rx)[0].user_id, "c1");
+        // Leaving a followed server gives its room back for the next one.
+        index.leave("ann", "three");
+        presence.left(&index, "ann", "three");
+        index.insert(server("other"), vec!["d1".into(), "d2".into(), "d3".into()], vec![], None);
+        index.join("ann", "other");
+        presence.joined(&index, "ann", "other");
+        drain(&mut on_screen.rx);
+        presence.update(&index, "d1", "d1", "web", false, vec![], Some(default_settings()));
+        let heard: Vec<String> = drain(&mut on_screen.rx).into_iter().map(|p| p.user_id).collect();
+        assert_eq!(heard, ["d1"]);
     }
 
     #[test]

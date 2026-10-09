@@ -20,8 +20,8 @@ ends the stream; the app opens it again.
 
 ## Focus
 
-`Focus` names the connection and what the app shows: up to 8 channels (a
-channel and a thread, say) and up to 500 people (member list rows, authors on
+`Focus` names the connection and what the app shows: up to 8 channels and
+up to 500 people (member list rows, authors on
 screen). Each call replaces the last, and calls in quick succession fold
 together (the latest wins), so apps needn't hold back while scrolling. The
 stream echoes the focus in effect as `focus`; from the echo on, those
@@ -45,7 +45,11 @@ polls, pins and thread changes come whole only:
   everyone),
 - always for agents, unless they ask for `MESSAGE_INTENT_MENTIONS`.
 
-Mentions count for new and edited messages; a deleted one moves its head.
+A thread's replies come with its parent channel, so focusing the channel
+covers its threads. Mentions count for new and edited messages; a deleted
+message moves only the server's sequence. On a split instance the gateway
+doesn't know the caller's roles, so a message mentioning any role the caller
+can see comes whole.
 Nothing comes, whole or as a head, from a channel the caller can't see.
 
 The rest move `heads`: at most every 2 seconds, for each server, the newest
@@ -68,8 +72,11 @@ otherwise), and the people in focus who share any server with the caller.
 Smaller servers are followed smallest first, up to `FUWA_ON_SCREEN_MEMBERS`
 members in all (5,000 unless the instance says otherwise); past that a
 server counts as large for that connection, so someone in hundreds of
-servers still holds a bounded stream. Whether someone is shown is worked out
-each time they change, from the servers shared then.
+servers still holds a bounded stream. Servers are chosen when the stream
+opens and as the caller joins or leaves them; a followed server that later
+grows past the large size may miss its people out of focus until the app
+opens a new stream. Whether someone is shown is worked out each time they
+change, from the servers shared then.
 Someone coming into focus is sent at once if they're online; someone going
 out of it gets no more updates. Leaving the last server shared with someone
 shown sends them offline. In a large server, a person coming online then

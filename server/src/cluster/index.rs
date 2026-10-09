@@ -277,8 +277,13 @@ impl Index {
             }
         }
         for (server_id, members) in big {
-            let candidates: Vec<String> =
-                found.keys().chain(also.iter()).filter(|id| members.contains(*id)).cloned().collect();
+            // Walk whichever side is smaller: the server, or the people
+            // already found plus `also`.
+            let candidates: Vec<String> = if found.len() + also.len() < members.len() {
+                found.keys().chain(also.iter()).filter(|id| members.contains(*id)).cloned().collect()
+            } else {
+                members.iter().filter(|id| found.contains_key(*id) || also.contains(*id)).cloned().collect()
+            };
             for member in candidates {
                 if member != account_id && keep(&member) {
                     let entry = found.entry(member).or_default();
@@ -294,7 +299,7 @@ impl Index {
     /// The servers of `account_id` smaller than `large` (0: every one),
     /// smallest first while their members add up to at most `budget`, and
     /// the room left.
-    pub fn smallest_servers(&self, account_id: &str, large: usize, budget: usize) -> (HashSet<String>, usize) {
+    pub fn smallest_servers(&self, account_id: &str, large: usize, budget: usize) -> (HashMap<String, usize>, usize) {
         let inner = self.read();
         let mut sizes: Vec<(usize, &String)> = inner
             .memberships
@@ -305,13 +310,13 @@ impl Index {
             .filter(|(size, _)| large == 0 || *size < large)
             .collect();
         sizes.sort();
-        let (mut shown, mut room) = (HashSet::new(), budget);
+        let (mut shown, mut room) = (HashMap::new(), budget);
         for (size, id) in sizes {
             if size > room {
                 break;
             }
             room -= size;
-            shown.insert(id.clone());
+            shown.insert(id.clone(), size);
         }
         (shown, room)
     }
@@ -375,6 +380,19 @@ mod tests {
             member_ids: members.iter().map(|m| m.to_string()).collect(),
             invite_codes: vec![format!("{id}-invite")],
         }
+    }
+
+    #[test]
+    fn audience_in_large_servers_is_only_their_members() {
+        let index = Index::default();
+        index.insert(server("big", 3), vec!["owner".into(), "mika".into(), "nana".into()], vec![], None);
+        index.insert(server("small", 2), vec!["mika".into(), "kai".into()], vec![], None);
+        let mut also: HashSet<String> = (0..100).map(|n| format!("elsewhere{n}")).collect();
+        also.insert("nana".into());
+        let audience = index.audience("mika", 3, |_| true, &also);
+        let mut got: Vec<_> = audience.into_iter().collect();
+        got.sort();
+        assert_eq!(got, vec![("kai".to_string(), vec!["small".to_string()]), ("nana".into(), vec!["big".into()])]);
     }
 
     #[test]
