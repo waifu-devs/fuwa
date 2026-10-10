@@ -160,6 +160,15 @@ impl SettingsView {
         }
         form.some = !endpoint.events.is_empty();
         form.chosen = endpoint.events.clone();
+        // The secret comes only in the answer that made it: it stays while the card is open, and never again.
+        let mut endpoint = endpoint;
+        if let Some(held) = form.endpoint.as_ref()
+            && endpoint.secret.is_empty()
+            && !held.secret.is_empty()
+            && held.secret_hint == endpoint.secret_hint
+        {
+            endpoint.secret = held.secret.clone();
+        }
         form.endpoint = Some(endpoint);
     }
 
@@ -241,6 +250,7 @@ impl SettingsView {
                         form.secret_shown = false;
                         if let Some(e) = form.endpoint.as_mut() {
                             e.secret = fresh.secret;
+                            e.secret_hint = fresh.secret_hint;
                         }
                     }
                     Err(e) => this.toast("circle-alert", e.message, cx),
@@ -547,7 +557,13 @@ impl SettingsView {
         let visible = form.secret_shown && !streaming;
         let (copied, confirm, busy) = (form.copied, form.confirm_secret, form.busy);
         let value = endpoint.secret.clone();
-        let shown = if visible { value.clone() } else { format!("whsec_{}", "•".repeat(28)) };
+        // The instance gives the secret out once, when it's made; after that only its last four characters show.
+        let held = !value.is_empty();
+        let shown = if visible {
+            value.clone()
+        } else {
+            format!("whsec_{}{}", "•".repeat(24), if held { "••••" } else { endpoint.secret_hint.as_str() })
+        };
         let row = div()
             .flex()
             .items_center()
@@ -567,59 +583,61 @@ impl SettingsView {
                     ),
                 ),
             )
-            .child(
-                button(
-                    SharedString::from(format!("endpoint-eye-{agent_id}")),
-                    "",
-                    Some(if visible { "eye-off" } else { "eye" }),
-                    Look::Ghost,
-                    true,
-                    p,
-                )
-                .w(px(32.0))
-                .px(px(0.0))
-                .rounded(radius_lg())
-                .when(streaming, |el| el.opacity(0.4))
-                .when(!streaming, |el| {
-                    el.on_click(cx.listener(|this, _, _, cx| {
-                        this.agents.endpoint.secret_shown = !this.agents.endpoint.secret_shown;
-                        cx.notify();
-                    }))
-                }),
-            )
-            .child(
-                button(SharedString::from(format!("endpoint-copy-{agent_id}")), "", None, Look::Outline, true, p)
+            .when(held, |row| {
+                row.child(
+                    button(
+                        SharedString::from(format!("endpoint-eye-{agent_id}")),
+                        "",
+                        Some(if visible { "eye-off" } else { "eye" }),
+                        Look::Ghost,
+                        true,
+                        p,
+                    )
+                    .w(px(32.0))
+                    .px(px(0.0))
                     .rounded(radius_lg())
-                    .font_weight(FontWeight::BOLD)
-                    .child(motion::rise(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(icon(if copied { "check" } else { "copy" }).size(px(14.0)))
-                            .child(if copied {
-                                t("accountsettings.shared.copied")
-                            } else {
-                                t("accountsettings.shared.copy")
-                            }),
-                        SharedString::from(format!("endpoint-copy-label-{agent_id}-{copied}")),
-                        Duration::ZERO,
-                        12.0,
-                    ))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
-                        this.agents.endpoint.copied = true;
-                        cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(Duration::from_millis(1400)).await;
-                            let _ = this.update(cx, |this, cx| {
-                                this.agents.endpoint.copied = false;
-                                cx.notify();
-                            });
-                        })
-                        .detach();
-                        cx.notify();
-                    })),
-            );
+                    .when(streaming, |el| el.opacity(0.4))
+                    .when(!streaming, |el| {
+                        el.on_click(cx.listener(|this, _, _, cx| {
+                            this.agents.endpoint.secret_shown = !this.agents.endpoint.secret_shown;
+                            cx.notify();
+                        }))
+                    }),
+                )
+                .child(
+                    button(SharedString::from(format!("endpoint-copy-{agent_id}")), "", None, Look::Outline, true, p)
+                        .rounded(radius_lg())
+                        .font_weight(FontWeight::BOLD)
+                        .child(motion::rise(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(icon(if copied { "check" } else { "copy" }).size(px(14.0)))
+                                .child(if copied {
+                                    t("accountsettings.shared.copied")
+                                } else {
+                                    t("accountsettings.shared.copy")
+                                }),
+                            SharedString::from(format!("endpoint-copy-label-{agent_id}-{copied}")),
+                            Duration::ZERO,
+                            12.0,
+                        ))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+                            this.agents.endpoint.copied = true;
+                            cx.spawn(async move |this, cx| {
+                                cx.background_executor().timer(Duration::from_millis(1400)).await;
+                                let _ = this.update(cx, |this, cx| {
+                                    this.agents.endpoint.copied = false;
+                                    cx.notify();
+                                });
+                            })
+                            .detach();
+                            cx.notify();
+                        })),
+                )
+            });
         let (k, id) = (key.to_owned(), agent_id.to_owned());
         let renew: AnyElement = if confirm {
             motion::slide_in(
@@ -716,6 +734,11 @@ impl SettingsView {
                     .child(label_caps(&t("accountsettings.agents.endpoint.secret"), p)),
             )
             .child(row)
+            .child(div().text_xs().text_color(p.muted_foreground).child(if held {
+                t("accountsettings.agents.endpoint.secretOnce")
+            } else {
+                t("accountsettings.agents.endpoint.secretGone")
+            }))
             .when(streaming, |el| {
                 el.child(
                     div()

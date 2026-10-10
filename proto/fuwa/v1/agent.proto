@@ -173,6 +173,9 @@ message AgentEndpoint {
   // ("message_created", "interaction_created"...). Empty for all of them.
   repeated string events = 3;
   // "whsec_" and the key in base64, as Standard Webhooks libraries take it.
+  // Only in the answer that made it: the first GetAgentEndpoint or
+  // SetAgentEndpoint for an agent, and ResetAgentEndpointSecret. Empty
+  // otherwise; a lost secret is replaced, not shown again.
   string secret = 4;
   // When it was last set.
   google.protobuf.Timestamp updated_at = 5;
@@ -185,6 +188,10 @@ message AgentEndpoint {
   // When the instance turned it off after a day of failures. Set the URL
   // again to turn it back on; what happened meanwhile isn't sent.
   google.protobuf.Timestamp disabled_at = 9;
+  // Whether it has a secret, which it always does once made.
+  bool secret_set = 10;
+  // The secret's last four characters, to tell secrets apart.
+  string secret_hint = 11;
 }
 
 message GetAgentEndpointRequest {

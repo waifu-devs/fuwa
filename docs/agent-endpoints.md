@@ -13,17 +13,20 @@ the instance setting `agent_endpoints`.
 
 Only the agent's owner (a person, never an agent) manages its endpoint:
 
-- `GetAgentEndpoint(agent_id)` gives the endpoint and its signing secret. The
-  first time it's asked for, the endpoint is made (off, with no URL) with a
-  new secret, so the agent can be set up to check signatures before it has a
-  URL.
+- `GetAgentEndpoint(agent_id)` gives the endpoint. The first time it's asked
+  for, the endpoint is made (off, with no URL) with a new signing secret,
+  and that answer is the only one with the secret in it, so the agent can be
+  set up to check signatures before it has a URL. Later answers say only
+  that there is one (`secret_set`) and its last four characters
+  (`secret_hint`); a lost secret is replaced, not shown again.
 - `SetAgentEndpoint(agent_id, url, events)` sets the URL and which events go
   there. `events` names payloads of `Event` (`message_created`,
   `interaction_created`, `member_joined`...); empty sends all of them. Before
   it saves, the instance sends a check (below); a URL that doesn't pass isn't
   saved. An empty URL turns the endpoint off. Every successful call starts
   deliveries again from the events after it, in every server.
-- `ResetAgentEndpointSecret(agent_id)` makes a new secret, used from then on.
+- `ResetAgentEndpointSecret(agent_id)` makes a new secret, used from then on,
+  and gives it this once.
 
 The token keeps working alongside: an agent with an endpoint can still call
 the API (and still has to, for anything but answering interactions).

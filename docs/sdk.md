@@ -305,10 +305,11 @@ export default {
 
 - Its owner sets it up, signed in as themselves (the agent's own token
   can't): `fuwa.agents.getAgentEndpoint({ agentId })` gives the `secret`
-  (made the first time), `setAgentEndpoint({ agentId, url, events })` saves
+  the first time, when it's made, and only then (later, `secretHint` is its
+  last four characters), `setAgentEndpoint({ agentId, url, events })` saves
   the URL once it answers the check (`events` picks payload names such as
   `"message_created"`; empty for all), an empty `url` turns it off, and
-  `resetAgentEndpointSecret` makes a new secret. The app does the same in
+  `resetAgentEndpointSecret` makes a new secret and gives it once. The app does the same in
   Settings, Agents. `failingSince`, `lastError` and `disabledAt` say how
   deliveries are going.
 - The secret is a secret, like a token: keep it in the environment. During

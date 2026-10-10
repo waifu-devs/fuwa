@@ -2575,16 +2575,18 @@ impl NodeDb {
         .await
     }
 
-    /// An agent's endpoint, made with `secret` if it has none yet.
-    pub async fn agent_endpoint(&self, agent_id: &str, secret: &str) -> Result<EndpointRow> {
+    /// An agent's endpoint, made with `secret` if it has none yet, and
+    /// whether it was made just now.
+    pub async fn agent_endpoint(&self, agent_id: &str, secret: &str) -> Result<(EndpointRow, bool)> {
         db::write(&self.db, async |conn| {
-            conn.execute(
-                "INSERT INTO agent_endpoints (account_id, secret, updated_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (account_id) DO NOTHING",
-                (agent_id, secret, now_ms()),
-            )
-            .await?;
-            endpoint_of(conn, agent_id).await
+            let made = conn
+                .execute(
+                    "INSERT INTO agent_endpoints (account_id, secret, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id) DO NOTHING",
+                    (agent_id, secret, now_ms()),
+                )
+                .await?;
+            Ok((endpoint_of(conn, agent_id).await?, made > 0))
         })
         .await
     }
