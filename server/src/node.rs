@@ -2575,16 +2575,18 @@ impl NodeDb {
         .await
     }
 
-    /// An agent's endpoint, made with `secret` if it has none yet.
-    pub async fn agent_endpoint(&self, agent_id: &str, secret: &str) -> Result<EndpointRow> {
+    /// An agent's endpoint, made with `secret` if it has none yet, and
+    /// whether it was made just now.
+    pub async fn agent_endpoint(&self, agent_id: &str, secret: &str) -> Result<(EndpointRow, bool)> {
         db::write(&self.db, async |conn| {
-            conn.execute(
-                "INSERT INTO agent_endpoints (account_id, secret, updated_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (account_id) DO NOTHING",
-                (agent_id, secret, now_ms()),
-            )
-            .await?;
-            endpoint_of(conn, agent_id).await
+            let made = conn
+                .execute(
+                    "INSERT INTO agent_endpoints (account_id, secret, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id) DO NOTHING",
+                    (agent_id, secret, now_ms()),
+                )
+                .await?;
+            Ok((endpoint_of(conn, agent_id).await?, made > 0))
         })
         .await
     }
@@ -2613,7 +2615,8 @@ impl NodeDb {
         .await
     }
 
-    /// Agents' endpoints that are on, each with its agent and the agent's owner.
+    /// Agents' endpoints that are on, each with its agent and the agent's
+    /// owner. An agent turned off, or whose owner is, has none.
     pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, String, EndpointRow)>> {
         let conn = self.read()?;
         let mut found = Vec::new();
@@ -2628,16 +2631,22 @@ impl NodeDb {
             else {
                 continue;
             };
-            let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) else {
+            let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) else { continue };
+            let Some((owner_id, owner_off)) = query_one(
+                &conn,
+                "SELECT agents.owner_id, owners.disabled_at IS NOT NULL
+                 FROM accounts AS agents LEFT JOIN accounts AS owners ON owners.id = agents.owner_id
+                 WHERE agents.id = ?1",
+                [agent_id.as_str()],
+                |r| Ok((r.get::<Option<String>>(0)?, r.get::<i64>(1)? != 0)),
+            )
+            .await?
+            else {
                 continue;
             };
-            let owner_id = query_one(&conn, "SELECT owner_id FROM accounts WHERE id = ?1", [agent_id.as_str()], |r| {
-                r.get::<Option<String>>(0)
-            })
-            .await?
-            .flatten()
-            .unwrap_or_default();
-            found.push((account, owner_id, row));
+            if !owner_off {
+                found.push((account, owner_id.unwrap_or_default(), row));
+            }
         }
         Ok(found)
     }

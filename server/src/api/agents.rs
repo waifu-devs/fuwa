@@ -152,12 +152,18 @@ impl Api {
     }
 }
 
-fn endpoint_pb(agent_id: &str, row: EndpointRow) -> pb::AgentEndpoint {
+/// An endpoint as its owner sees it: the secret itself only when `fresh`
+/// (just made), otherwise whether there is one and its last four characters.
+fn endpoint_pb(agent_id: &str, row: EndpointRow, fresh: bool) -> pb::AgentEndpoint {
+    // Secrets are ASCII ("whsec_" and base64).
+    let secret_hint = row.secret.get(row.secret.len().saturating_sub(4)..).unwrap_or_default().to_string();
     pb::AgentEndpoint {
         agent_id: agent_id.to_string(),
         url: row.url,
         events: row.events,
-        secret: row.secret,
+        secret_set: !row.secret.is_empty(),
+        secret_hint,
+        secret: if fresh { row.secret } else { String::new() },
         updated_at: Some(timestamp(row.updated_at)),
         last_delivered_at: row.last_delivered_at.map(timestamp),
         failing_since: row.failing_since.map(timestamp),
@@ -167,15 +173,16 @@ fn endpoint_pb(agent_id: &str, row: EndpointRow) -> pb::AgentEndpoint {
 }
 
 impl Api {
-    /// One of the caller's agents' endpoint, made if it has none.
-    async fn agent_endpoint(&self, owner: &Account, agent_id: &str) -> Result<(AgentRow, EndpointRow)> {
+    /// One of the caller's agents' endpoint, made if it has none, and
+    /// whether it was made just now.
+    async fn agent_endpoint(&self, owner: &Account, agent_id: &str) -> Result<(AgentRow, EndpointRow, bool)> {
         let agent = self.own_agent(owner, agent_id).await?;
-        let row = self.app.node()?.agent_endpoint(&agent.account.id, &endpoints::new_secret()).await?;
-        Ok((agent, row))
+        let (row, made) = self.app.node()?.agent_endpoint(&agent.account.id, &endpoints::new_secret()).await?;
+        Ok((agent, row, made))
     }
 
     async fn set_agent_endpoint(&self, owner: &Account, req: pb::SetAgentEndpointRequest) -> Result<pb::AgentEndpoint> {
-        let (agent, row) = self.agent_endpoint(owner, &req.agent_id).await?;
+        let (agent, row, made) = self.agent_endpoint(owner, &req.agent_id).await?;
         let url = req.url.trim();
         let mut events: Vec<String> = Vec::new();
         if !url.is_empty() {
@@ -196,7 +203,7 @@ impl Api {
         let row = self.app.node()?.set_agent_endpoint(&agent.account.id, url, &events).await?;
         self.app.agent_endpoint_changed(&agent.account.id);
         tracing::info!(on = !url.is_empty(), "agent endpoint set");
-        Ok(endpoint_pb(&agent.account.id, row))
+        Ok(endpoint_pb(&agent.account.id, row, made))
     }
 }
 
@@ -285,8 +292,8 @@ impl AgentService for Api {
         respond(
             async {
                 let owner = self.person(request.metadata()).await?;
-                let (agent, row) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
-                Ok(pb::GetAgentEndpointResponse { endpoint: Some(endpoint_pb(&agent.account.id, row)) })
+                let (agent, row, made) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
+                Ok(pb::GetAgentEndpointResponse { endpoint: Some(endpoint_pb(&agent.account.id, row, made)) })
             }
             .await,
         )
@@ -313,12 +320,12 @@ impl AgentService for Api {
         respond(
             async {
                 let owner = self.person(request.metadata()).await?;
-                let (agent, _) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
+                let (agent, ..) = self.agent_endpoint(&owner, &request.get_ref().agent_id).await?;
                 let row =
                     self.app.node()?.reset_agent_endpoint_secret(&agent.account.id, &endpoints::new_secret()).await?;
                 self.app.agent_endpoint_changed(&agent.account.id);
                 tracing::info!("agent endpoint secret reset");
-                Ok(pb::ResetAgentEndpointSecretResponse { endpoint: Some(endpoint_pb(&agent.account.id, row)) })
+                Ok(pb::ResetAgentEndpointSecretResponse { endpoint: Some(endpoint_pb(&agent.account.id, row, true)) })
             }
             .await,
         )

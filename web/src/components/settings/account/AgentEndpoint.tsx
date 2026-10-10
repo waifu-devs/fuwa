@@ -65,7 +65,8 @@ export function AgentEndpointSection({ instanceKey, agentId }: { instanceKey: st
   const privateField = usePrivateField();
 
   const take = (e: AgentEndpoint) => {
-    setEndpoint(e);
+    // The secret comes only in the answer that made it: it stays here while the card is open, and never again.
+    setEndpoint((was) => (!e.secret && was?.secret && was.secretHint === e.secretHint ? { ...e, secret: was.secret } : e));
     setUrl(e.url);
     setSome(e.events.length > 0);
     setChosen([...e.events]);
@@ -238,7 +239,7 @@ export function AgentEndpointSection({ instanceKey, agentId }: { instanceKey: st
             </AnimatePresence>
           </div>
 
-          <SecretField secret={endpoint.secret} busy={busy === "secret"} disabled={!!busy} onReset={() => void newSecret()} />
+          <SecretField secret={endpoint.secret} hint={endpoint.secretHint} busy={busy === "secret"} disabled={!!busy} onReset={() => void newSecret()} />
 
           <HowTo open={howTo} onToggle={() => setHowTo((h) => !h)} />
         </motion.div>
@@ -365,8 +366,11 @@ function EventGroupPicker({
   );
 }
 
-/** The signing secret: dotted out until shown, always blurred in streamer mode, with copy and a new one. */
-function SecretField({ secret, busy, disabled, onReset }: { secret: string; busy: boolean; disabled: boolean; onReset: () => void }) {
+/**
+ * The signing secret: dotted out until shown, always blurred in streamer mode, with copy and a new one. The
+ * instance gives it out once, when it's made; after that only its last four characters show.
+ */
+function SecretField({ secret, hint, busy, disabled, onReset }: { secret: string; hint: string; busy: boolean; disabled: boolean; onReset: () => void }) {
   const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const [shown, setShown] = useState(false);
@@ -407,29 +411,36 @@ function SecretField({ secret, busy, disabled, onReset }: { secret: string; busy
             title={streaming ? t("accountsettings.agents.endpoint.streamerHidden") : undefined}
             className={cn("min-w-0 flex-1 font-mono text-xs transition-[filter] duration-300", visible ? "break-all" : "truncate", streaming && "blur-sm select-none")}
           >
-            {visible ? secret : `whsec_${"•".repeat(28)}`}
+            {visible ? secret : `whsec_${"•".repeat(24)}${secret ? "••••" : hint}`}
           </motion.code>
         </AnimatePresence>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-8 shrink-0 rounded-lg"
-          disabled={streaming}
-          title={streaming ? t("accountsettings.agents.endpoint.streamerHidden") : undefined}
-          aria-label={visible ? t("accountsettings.agents.endpoint.hideSecret") : t("accountsettings.agents.endpoint.showSecret")}
-          onClick={() => setShown((s) => !s)}
-        >
-          {visible ? <EyeOffIcon /> : <EyeIcon />}
-        </Button>
-        <Button type="button" size="sm" variant="secondary" className="h-8 shrink-0 rounded-lg px-3 font-bold" onClick={copy}>
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.span key={copied ? "done" : "copy"} initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -12, opacity: 0 }} transition={SPRING} className="flex items-center gap-1.5">
-              {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("accountsettings.shared.copied") : t("accountsettings.shared.copy")}
-            </motion.span>
-          </AnimatePresence>
-        </Button>
+        {secret && (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg"
+              disabled={streaming}
+              title={streaming ? t("accountsettings.agents.endpoint.streamerHidden") : undefined}
+              aria-label={visible ? t("accountsettings.agents.endpoint.hideSecret") : t("accountsettings.agents.endpoint.showSecret")}
+              onClick={() => setShown((s) => !s)}
+            >
+              {visible ? <EyeOffIcon /> : <EyeIcon />}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" className="h-8 shrink-0 rounded-lg px-3 font-bold" onClick={copy}>
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.span key={copied ? "done" : "copy"} initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -12, opacity: 0 }} transition={SPRING} className="flex items-center gap-1.5">
+                  {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("accountsettings.shared.copied") : t("accountsettings.shared.copy")}
+                </motion.span>
+              </AnimatePresence>
+            </Button>
+          </>
+        )}
       </div>
+      <p className="text-xs text-muted-foreground">
+        {secret ? t("accountsettings.agents.endpoint.secretOnce") : t("accountsettings.agents.endpoint.secretGone")}
+      </p>
       <AnimatePresence mode="popLayout" initial={false}>
         {confirm ? (
           <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex flex-wrap items-center gap-1">

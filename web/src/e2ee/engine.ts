@@ -17,11 +17,13 @@ import {
   SignedContentSchema,
   SignedPayloadSchema,
   ThreadChangeSchema,
+  WatchResponseSchema,
   type Conversation,
   type ConversationRecord,
   type DirectMessageContent,
   type DirectMessageEvent,
   type SharedHistory,
+  type WatchResponse,
 } from "@/gen/fuwa/v1/dm_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { Device as DeviceInfo } from "@/gen/fuwa/v1/dm_pb";
@@ -272,6 +274,8 @@ export class DmEngine {
   /** Catch-ups waiting their turn, so a burst of records reads each conversation once. */
   private queued = new Set<string>();
   private work: Promise<void> = Promise.resolve();
+  /** The live connection's responses, taken one after another (`deliver`). */
+  private delivered: Promise<void> = Promise.resolve();
   /** The account's message backup, as this device takes part in it. */
   readonly backup: BackupSync;
 
@@ -378,9 +382,8 @@ export class DmEngine {
           if (res.ready) {
             delay = 400;
             onProblem(null);
-            await this.resync();
           }
-          if (res.event) this.onEvent(res.event);
+          await this.receive(res);
         }
       } catch (err) {
         if (signal.aborted) return;
@@ -399,6 +402,26 @@ export class DmEngine {
       await new Promise((resolve) => setTimeout(resolve, delay * (0.75 + Math.random() / 2)));
       delay = Math.min(delay * 2, 20_000);
     }
+  }
+
+  /**
+   * One response from the direct-message feed: at `ready` (listening again)
+   * the conversations are listed and caught up on, so nothing said while
+   * away is missed; after that, each event.
+   */
+  async receive(res: WatchResponse) {
+    if (res.ready) await this.resync();
+    if (res.event) this.onEvent(res.event);
+  }
+
+  /**
+   * The same, for responses that come over the instance's live connection,
+   * which doesn't wait for them: each is taken in order, after the last.
+   */
+  deliver(res: WatchResponse) {
+    this.delivered = this.delivered
+      .then(() => (this.stopped ? undefined : this.receive(res)))
+      .catch((err: unknown) => console.warn("fuwa: couldn't catch up on direct messages", err));
   }
 
   /** Lists the conversations again and catches up on each. */
@@ -1544,8 +1567,12 @@ const starting = new Map<string, symbol>();
 
 export const dmEngine = (key: string): DmEngine | undefined => engines.get(key);
 
-/** Starts direct messages for an instance's signed-in account. Failing leaves the rest of the app alone. */
-export function startDms(key: string, api: Api, me: User, token: string) {
+/**
+ * Starts direct messages for an instance's signed-in account. Failing leaves
+ * the rest of the app alone. With `live`, the feed comes over the instance's
+ * live connection (`DmEngine.deliver`) instead of a stream of its own.
+ */
+export function startDms(key: string, api: Api, me: User, token: string, live = false) {
   stopDms(key);
   if (typeof indexedDB === "undefined" || typeof WebAssembly === "undefined") {
     updateDms(key, (d) => ({ ...d, status: "unsupported", problem: i18n().t("system.e2ee.unsupported") }));
@@ -1560,7 +1587,10 @@ export function startDms(key: string, api: Api, me: User, token: string) {
       starting.delete(key);
       engines.set(key, engine);
       updateDms(key, (d) => ({ ...d, status: "ready", deviceId: engine.deviceId }));
-      void engine.follow((problem) => updateDms(key, (d) => ({ ...d, problem })));
+      // On a live connection, the feed's `ready` may have come before the
+      // device was ready, so it catches up once by itself.
+      if (live) engine.deliver(create(WatchResponseSchema, { ready: true }));
+      else void engine.follow((problem) => updateDms(key, (d) => ({ ...d, problem })));
       engine.backup.start().catch((err: unknown) => {
         console.warn("fuwa: couldn't check the message backup", err);
         updateDms(key, (d) => ({ ...d, backup: { ...d.backup, problem: toFuwaError(err).message } }));

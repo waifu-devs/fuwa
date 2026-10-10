@@ -213,6 +213,7 @@ clients! {
     gifs => "GifService" pb::gif_service_client::GifServiceClient<Transport>,
     live_tiles => "LiveTileService" pb::live_tile_service_client::LiveTileServiceClient<Transport>,
     profile_items => "ProfileItemService" pb::profile_item_service_client::ProfileItemServiceClient<Transport>,
+    live => "LiveService" pb::live_service_client::LiveServiceClient<Transport>,
 }
 
 impl Api {

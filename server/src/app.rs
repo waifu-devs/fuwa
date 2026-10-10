@@ -55,6 +55,8 @@ pub struct App {
     pub index: Index,
     /// Who's online and what they're doing, where `node` is; memory only.
     pub presence: crate::presence::Presence,
+    /// Live connections open here (`LiveService`), for Focus to find.
+    pub connections: Arc<crate::live::Connections>,
     /// The servers whose files are here: all of them, or a shard's share.
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -219,6 +221,8 @@ impl App {
         crate::db::set_write_queue(config.write_queue);
         crate::auth::set_sign_in_queue(config.sign_in_queue);
 
+        let large_server_members = config.large_server_members.unwrap_or(0);
+        let on_screen_members = config.on_screen_members.unwrap_or(usize::MAX);
         let app = Arc::new(Self {
             config,
             settings: watch::Sender::new(Arc::new(settings)),
@@ -228,7 +232,8 @@ impl App {
             media,
             friends,
             index,
-            presence: crate::presence::Presence::default(),
+            presence: crate::presence::Presence::with_large(large_server_members, on_screen_members),
+            connections: Arc::default(),
             servers,
             hub,
             limiter: SignInLimiter::default(),
@@ -271,6 +276,9 @@ impl App {
     /// theirs at once, and a directory passes it on to its shards for theirs.
     pub fn sessions_ended(&self, account_id: &str) {
         let _ = self.ended.send(account_id.into());
+        // An agent turned off or deleted stops hearing through its endpoint now,
+        // not when deliveries next look it up.
+        self.agent_endpoint_changed(account_id);
     }
 
     /// The accounts whose sessions end from now on, for a live stream to follow.
@@ -300,9 +308,9 @@ impl App {
         self.joined.subscribe()
     }
 
-    /// Says an agent's endpoint was set, turned off or given a new secret
-    /// (an empty id: any may have been), where deliveries run, and from a
-    /// directory to its shards.
+    /// Says an agent's endpoint was set, turned off or given a new secret, or
+    /// the agent or its owner was turned off, on or deleted (an empty id: any
+    /// may have been), where deliveries run, and from a directory to its shards.
     pub fn agent_endpoint_changed(&self, agent_id: &str) {
         let _ = self.endpoints_changed.send(agent_id.into());
     }
@@ -460,6 +468,7 @@ impl App {
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
             .add_service(crate::pb::presence_service_server::PresenceServiceServer::new(api.clone()))
+            .add_service(crate::pb::live_service_server::LiveServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))

@@ -12,8 +12,10 @@ use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tonic::{Request, Response, Status};
 
 use super::{Api, Seat, commands, respond};
+use crate::auth::Caller;
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
+use crate::live::{HEADS_EVERY, Interest};
 use crate::pb::{self, event_service_server::EventService};
 use crate::permissions::Access;
 use crate::servers::{self as store, Payload, ServerDb};
@@ -28,6 +30,36 @@ const REPLAY_PAGE: i64 = 500;
 const RESTARTING: &str = "this instance is restarting; subscribe again from your last sequence";
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<pb::SubscribeResponse, Status>> + Send>>;
+
+/// What a stream of server events sends: events, and with an `Interest`,
+/// the heads of what it held back.
+pub(super) type Sent = Result<pb::OpenResponse, Status>;
+
+fn events_item(response: pb::SubscribeResponse) -> pb::OpenResponse {
+    pb::OpenResponse { item: Some(pb::open_response::Item::Events(Box::new(response))) }
+}
+
+/// Whether `interest` holds `event` back from `view`'s member, moving its
+/// channel's head instead.
+fn held_back(interest: Option<&mut Interest>, view: &View, event: &pb::Event) -> bool {
+    let (Some(interest), Some(payload)) = (interest, &event.payload) else { return false };
+    if changes_access(payload, &view.account_id) {
+        return false;
+    }
+    let visible = shown_to(&view.account_id, &view.access, payload);
+    !interest.take(event, Some(&view.member.role_ids), visible)
+}
+
+/// Sends the heads `interest` owes before `event` goes out whole, if any;
+/// false once the client is gone.
+async fn send_owed(tx: &mpsc::Sender<Sent>, interest: &mut Option<Interest>, event: &pb::Event) -> bool {
+    match interest.as_mut().and_then(|i| i.heads_before(event)) {
+        Some(heads) => {
+            tx.send(Ok(pb::OpenResponse { item: Some(pb::open_response::Item::Heads(heads)) })).await.is_ok()
+        }
+        None => true,
+    }
+}
 
 /// The channel an event is about, if it's about one.
 fn channel_of(payload: &Payload) -> Option<&str> {
@@ -230,15 +262,20 @@ impl View {
     }
 }
 
-#[tonic::async_trait]
-impl EventService for Api {
-    type SubscribeStream = EventStream;
-
-    async fn subscribe(&self, request: Request<pb::SubscribeRequest>) -> Result<Response<EventStream>, Status> {
+impl Api {
+    /// Server events for `caller` as Subscribe sends them, or for a live
+    /// connection with `interest`, which holds back messages out of focus
+    /// and sends their heads instead.
+    pub(super) async fn events(
+        &self,
+        caller: Caller,
+        request: pb::SubscribeRequest,
+        mut interest: Option<Interest>,
+    ) -> Result<mpsc::Receiver<Sent>, Status> {
         let started = std::time::Instant::now();
-        let caller = self.caller(request.metadata()).await?;
         let account = caller.account;
-        let pb::SubscribeRequest { servers: cursors, follow_new_servers } = request.into_inner();
+        let pb::SubscribeRequest { servers: cursors, follow_new_servers } = request;
+
         if cursors.len() > MAX_SERVERS || (cursors.is_empty() && !follow_new_servers) {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
@@ -288,7 +325,7 @@ impl EventService for Api {
             });
         }
 
-        let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
+        let (tx, rx) = mpsc::channel::<Sent>(256);
         let shutdown = self.app.shutdown.clone();
         let app = self.app.clone();
         let token_hash = caller.token_hash;
@@ -296,7 +333,7 @@ impl EventService for Api {
         let api = self.clone();
         tokio::spawn(async move {
             let _ticket = ticket;
-            let send = async |item| tx.send(item).await.is_ok();
+            let send = async |item: Result<pb::SubscribeResponse, Status>| tx.send(item.map(events_item)).await.is_ok();
             for event in gone {
                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                     return;
@@ -351,6 +388,12 @@ impl EventService for Api {
                         let Some(last) = page.last() else { break };
                         sequence = last.sequence.min(head);
                         for event in page.into_iter().filter(|e| e.sequence <= head) {
+                            if held_back(interest.as_mut(), &view, &event) {
+                                continue;
+                            }
+                            if !send_owed(&tx, &mut interest, &event).await {
+                                return;
+                            }
                             let out = match view.pass(&event).await {
                                 Ok(out) => out,
                                 Err(status) => {
@@ -372,6 +415,17 @@ impl EventService for Api {
                 live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
                 views.insert(sdb.id.clone(), view);
             }
+            let send_heads =
+                async |interest: &mut Option<Interest>| match interest.as_mut().and_then(Interest::take_heads) {
+                    Some(heads) => {
+                        let item = pb::OpenResponse { item: Some(pb::open_response::Item::Heads(heads)) };
+                        tx.send(Ok(item)).await.is_ok()
+                    }
+                    None => true,
+                };
+            if !send_heads(&mut interest).await {
+                return;
+            }
             let ready = pb::SubscribeReady { servers: heads };
             crate::reports::server_timing("subscribe.ready", started.elapsed());
             if !send(Ok(pb::SubscribeResponse { ready: Some(ready), ..Default::default() })).await {
@@ -382,6 +436,7 @@ impl EventService for Api {
             }
 
             let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
+            let mut heads_due = tokio::time::interval(HEADS_EVERY);
             let mut session = crate::streams::SessionCheck::new(&app, &token_hash);
             loop {
                 tokio::select! {
@@ -392,6 +447,11 @@ impl EventService for Api {
                         return;
                     }
                     _ = tx.closed() => return,
+                    _ = heads_due.tick(), if interest.is_some() => {
+                        if !send_heads(&mut interest).await {
+                            return;
+                        }
+                    }
                     _ = heartbeat.tick() => {
                         // A session signed out from another device ends its streams too.
                         if !session.still_live(&app).await {
@@ -480,6 +540,7 @@ impl EventService for Api {
                                 _ => false,
                             };
                             let out = match views.get_mut(&server_id) {
+                                Some(view) if !ends && held_back(interest.as_mut(), view, &event) => continue,
                                 Some(view) if !ends => match view.pass(&event).await {
                                     Ok(out) => out,
                                     Err(status) => {
@@ -489,6 +550,9 @@ impl EventService for Api {
                                 },
                                 _ => vec![(*event).clone()],
                             };
+                            if !send_owed(&tx, &mut interest, &event).await {
+                                return;
+                            }
                             for event in out {
                                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;
@@ -507,7 +571,25 @@ impl EventService for Api {
             }
         });
 
-        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+        Ok(rx)
+    }
+}
+
+#[tonic::async_trait]
+impl EventService for Api {
+    type SubscribeStream = EventStream;
+
+    async fn subscribe(&self, request: Request<pb::SubscribeRequest>) -> Result<Response<EventStream>, Status> {
+        let caller = self.caller(request.metadata()).await?;
+        let rx = self.events(caller, request.into_inner(), None).await?;
+        let stream = ReceiverStream::new(rx).filter_map(|item| async move {
+            match item {
+                Ok(pb::OpenResponse { item: Some(pb::open_response::Item::Events(response)) }) => Some(Ok(*response)),
+                Ok(_) => None,
+                Err(status) => Some(Err(status)),
+            }
+        });
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn list_events(

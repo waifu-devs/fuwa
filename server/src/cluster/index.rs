@@ -249,6 +249,83 @@ impl Index {
         found
     }
 
+    /// Everyone who shares a server with `account_id` and passes `keep`, with
+    /// the servers they share (0 `large`: no server is large). A large server's members aren't
+    /// walked: only people found through a smaller one, or in `also`, are
+    /// looked for in it, so a change there costs what's on screen, not its size.
+    pub fn audience(
+        &self,
+        account_id: &str,
+        large: usize,
+        keep: impl Fn(&str) -> bool,
+        also: &HashSet<String>,
+    ) -> HashMap<String, Vec<String>> {
+        let inner = self.read();
+        let mut found: HashMap<String, Vec<String>> = HashMap::new();
+        let Some(servers) = inner.memberships.get(account_id) else { return found };
+        let mut big = Vec::new();
+        for server_id in servers {
+            let Some(members) = inner.members.get(server_id) else { continue };
+            if large > 0 && members.len() >= large {
+                big.push((server_id, members));
+                continue;
+            }
+            for member in members {
+                if member != account_id && keep(member) {
+                    found.entry(member.clone()).or_default().push(server_id.clone());
+                }
+            }
+        }
+        for (server_id, members) in big {
+            // Walk whichever side is smaller: the server, or the people
+            // already found plus `also`.
+            let candidates: Vec<String> = if found.len() + also.len() < members.len() {
+                found.keys().chain(also.iter()).filter(|id| members.contains(*id)).cloned().collect()
+            } else {
+                members.iter().filter(|id| found.contains_key(*id) || also.contains(*id)).cloned().collect()
+            };
+            for member in candidates {
+                if member != account_id && keep(&member) {
+                    let entry = found.entry(member).or_default();
+                    if !entry.contains(server_id) {
+                        entry.push(server_id.clone());
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// The servers of `account_id` smaller than `large` (0: every one),
+    /// smallest first while their members add up to at most `budget`, and
+    /// the room left.
+    pub fn smallest_servers(&self, account_id: &str, large: usize, budget: usize) -> (HashMap<String, usize>, usize) {
+        let inner = self.read();
+        let mut sizes: Vec<(usize, &String)> = inner
+            .memberships
+            .get(account_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| inner.members.get(id).map(|m| (m.len(), id)))
+            .filter(|(size, _)| large == 0 || *size < large)
+            .collect();
+        sizes.sort();
+        let (mut shown, mut room) = (HashMap::new(), budget);
+        for (size, id) in sizes {
+            if size > room {
+                break;
+            }
+            room -= size;
+            shown.insert(id.clone(), size);
+        }
+        (shown, room)
+    }
+
+    /// How many members a server has here.
+    pub fn size(&self, server_id: &str) -> usize {
+        self.read().members.get(server_id).map_or(0, HashSet::len)
+    }
+
     /// The servers two accounts share.
     pub fn shared_servers(&self, a: &str, b: &str) -> Vec<String> {
         let inner = self.read();
@@ -303,6 +380,19 @@ mod tests {
             member_ids: members.iter().map(|m| m.to_string()).collect(),
             invite_codes: vec![format!("{id}-invite")],
         }
+    }
+
+    #[test]
+    fn audience_in_large_servers_is_only_their_members() {
+        let index = Index::default();
+        index.insert(server("big", 3), vec!["owner".into(), "mika".into(), "nana".into()], vec![], None);
+        index.insert(server("small", 2), vec!["mika".into(), "kai".into()], vec![], None);
+        let mut also: HashSet<String> = (0..100).map(|n| format!("elsewhere{n}")).collect();
+        also.insert("nana".into());
+        let audience = index.audience("mika", 3, |_| true, &also);
+        let mut got: Vec<_> = audience.into_iter().collect();
+        got.sort();
+        assert_eq!(got, vec![("kai".to_string(), vec!["small".to_string()]), ("nana".into(), vec!["big".into()])]);
     }
 
     #[test]

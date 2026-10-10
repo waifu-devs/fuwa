@@ -22,6 +22,7 @@ pub mod gifs;
 pub mod hub;
 pub mod id;
 pub mod linked;
+pub mod live;
 pub mod mcp;
 pub mod media;
 pub mod node;

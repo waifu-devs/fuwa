@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/dm.proto";
+import "fuwa/v1/event.proto";
+import "fuwa/v1/friend.proto";
+import "fuwa/v1/presence.proto";
+
+// One stream for everything an app hears from an instance, instead of one
+// per feed (docs/live.md). Apps that show one channel at a time say which
+// with Focus: a busy server's messages elsewhere then come as channel heads
+// (where each channel stands), not one by one.
+service LiveService {
+  // Opens the stream. First comes `connection_id`, then each feed asked for,
+  // as its own stream sends it today: server events (EventService.Subscribe),
+  // direct messages (DirectMessageService.Watch), friends
+  // (FriendService.WatchFriends) and presence (below). Each feed says
+  // `ready` as its own stream does. A response with nothing set is a
+  // heartbeat. Any feed's error ends the whole stream; connect again, with
+  // each server's cursor where it got to (the highest of its events'
+  // sequences and its heads' `sequence`).
+  //
+  // Messages, reactions, polls, pins and thread changes come whole only for
+  // the channels in focus, and for new or edited messages that mention the
+  // caller (as @username or <@id>, by a role they have, or everyone) or
+  // that the caller wrote; the rest move `heads`. Either way only channels the caller can see. Agents get every
+  // one unless they ask for less (`messages`).
+  //
+  // Presence here is what's on screen: everyone in servers smaller than the
+  // instance's large-server size (2,500 members unless it says otherwise),
+  // its smallest servers first and up to 5,000 members in all (the rest
+  // count as large), and the people named
+  // in Focus who share any server with the caller. A
+  // person named in Focus who goes out of it stops getting updates; keep
+  // what was last shown or show nothing. Agents can't ask for presence.
+  rpc Open(OpenRequest) returns (stream OpenResponse);
+  // What the app shows now, on the stream `connection_id`. Each call
+  // replaces the last, and only the latest matters: calls in quick
+  // succession are folded together. The stream echoes it as `focus` once
+  // it's in effect; from then on messages in those channels come whole, so
+  // an app that opens a channel calls Focus, waits for the echo, then loads
+  // the channel's messages, and misses nothing in between. An unknown id,
+  // or one opened by another session, is NOT_FOUND.
+  rpc Focus(FocusRequest) returns (FocusResponse);
+}
+
+enum MessageIntent {
+  // People: FOCUSED. Agents: ALL.
+  MESSAGE_INTENT_UNSPECIFIED = 0;
+  // Every message in every channel the caller can see, as Subscribe gives.
+  MESSAGE_INTENT_ALL = 1;
+  // Whole messages in the channels in focus and messages that mention the
+  // caller; heads for the rest.
+  MESSAGE_INTENT_FOCUSED = 2;
+  // Only messages that mention the caller; heads for the rest.
+  MESSAGE_INTENT_MENTIONS = 3;
+}
+
+message OpenRequest {
+  // As SubscribeRequest: up to 200 servers, each with its cursor. With
+  // none and no `follow_new_servers`, no server events come.
+  repeated ServerCursor servers = 1;
+  bool follow_new_servers = 2;
+  // Also the direct-message feed.
+  bool direct_messages = 3;
+  // Also the friends feed.
+  bool friends = 4;
+  // Also presence (people only).
+  bool presence = 5;
+  MessageIntent messages = 6;
+  // What's in focus from the start, so catching up from a cursor already
+  // sends the channel on screen whole.
+  Focus focus = 7;
+}
+
+message OpenResponse {
+  oneof item {
+    // First, once: name it in Focus.
+    string connection_id = 1;
+    SubscribeResponse events = 2;
+    WatchResponse direct_messages = 3;
+    WatchFriendsResponse friends = 4;
+    WatchPresenceResponse presence = 5;
+    ChannelHeads heads = 6;
+    // The focus now in effect.
+    Focus focus = 7;
+  }
+}
+
+// What moved in channels out of focus since the last heads, at most every 2
+// seconds and only when something did.
+message ChannelHeads {
+  repeated ServerHeads servers = 1;
+}
+
+message ServerHeads {
+  string server_id = 1;
+  // Events up to this sequence are accounted for: a cursor may move here.
+  int64 sequence = 2;
+  // Channels with new messages: unread marks can light up from these.
+  repeated ChannelHead channels = 3;
+}
+
+message ChannelHead {
+  string channel_id = 1;
+  // The newest message's id.
+  string last_message_id = 2;
+}
+
+message Focus {
+  // Up to 8: the channel open, and a thread or a second panel. A thread's
+  // replies come with its channel.
+  repeated string channel_ids = 1;
+  // Up to 500: the people on screen (member list rows, authors shown).
+  repeated string user_ids = 2;
+}
+
+message FocusRequest {
+  string connection_id = 1;
+  Focus focus = 2;
+}
+
+message FocusResponse {}

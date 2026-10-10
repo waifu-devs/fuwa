@@ -63,7 +63,9 @@ impl InstanceState {
         if message.author_id == me.id {
             return false;
         }
-        if mentions(&message.content, &me.username) {
+        // The instance names who a message mentions by @username too; older
+        // ones only by id, so the text is read as well.
+        if message.mention_user_ids.contains(&me.id) || mentions(&message.content, &me.username) {
             return true;
         }
         if message.mentions_everyone && !suppress_everyone {

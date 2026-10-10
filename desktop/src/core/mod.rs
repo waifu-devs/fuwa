@@ -32,6 +32,7 @@ pub mod invites;
 pub mod join;
 pub mod keybinds;
 pub mod linked;
+mod live;
 pub mod live_tiles;
 pub mod moderation;
 pub mod notifications;
@@ -232,6 +233,8 @@ pub struct Core {
     pub idle: Arc<presence::Idle>,
     /// The accounts kept on each instance, by its key (`accounts.rs`).
     kept: Mutex<HashMap<String, Vec<config::SavedAccount>>>,
+    /// Follows every instance over its separate streams, even one with live connections.
+    separate_streams: std::sync::atomic::AtomicBool,
 }
 
 /// Messages per page, as the web app reads them.
@@ -308,6 +311,7 @@ impl Core {
             games_listener: Mutex::new(None),
             idle: presence::Idle::new(),
             kept: Mutex::new(HashMap::new()),
+            separate_streams: std::sync::atomic::AtomicBool::new(false),
         });
         core.listen_for_games(game_activity);
         let idle = core.idle.clone();
@@ -733,6 +737,37 @@ impl Core {
         }
     }
 
+    /// The member list's rows in sight (none while it's hidden), which a live
+    /// connection's focus names. Changes the store only when they changed.
+    pub fn set_in_view(&self, key: &str, server: &str, people: &[String]) {
+        let same = self.shared.read(|s| match &s.in_view {
+            Some(v) => v.instance == key && v.server == server && v.people == people,
+            None => people.is_empty(),
+        });
+        if !same {
+            let now = (!people.is_empty()).then(|| store::InView {
+                instance: key.to_owned(),
+                server: server.to_owned(),
+                people: people.to_vec(),
+            });
+            self.shared.update(|s| s.in_view = now);
+        }
+    }
+
+    /// Follows instances added from now on over their separate streams
+    /// (events, direct messages, friends, presence), even where they have
+    /// live connections: how apps from before those follow them, kept working
+    /// and checked against current instances.
+    #[doc(hidden)]
+    pub fn use_separate_streams(&self) {
+        self.separate_streams.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether instances that have live connections are followed over one.
+    fn live_connections(&self) -> bool {
+        !self.separate_streams.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Marks channels and conversations as read on this computer, with the
     /// followed threads under the channels. How many had something unread.
     pub fn mark_read(self: &Arc<Self>, key: &str, ids: &[String]) -> usize {
@@ -903,6 +938,10 @@ impl Core {
                 }
                 let Some(message) = &sent.message else { return };
                 store::add_shared_authors(&mut i.users, std::slice::from_ref(message));
+                // Known here, so a live connection's head for it isn't news.
+                if thread.is_none() || message.also_in_channel {
+                    store::heard_of(i, channel_id, &message.id);
+                }
                 if let Some(loaded) = i.messages.get_mut(&at) {
                     upsert_message(&mut loaded.items, message.clone());
                 }

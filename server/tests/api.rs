@@ -1532,6 +1532,32 @@ async fn ends_with<T>(stream: &mut tonic::Streaming<T>) -> Code {
 }
 
 #[tokio::test]
+async fn a_stream_following_new_servers_follows_the_ones_you_make() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let mut events = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { follow_new_servers: true, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(events.message().await.unwrap().unwrap().ready.is_some());
+
+    let made = create_server(&mut c, &juan, "Waifu Devs", false).await;
+    let followed = loop {
+        let next = tokio::time::timeout(Duration::from_secs(5), events.message()).await.unwrap().unwrap().unwrap();
+        if let Some(head) = next.followed {
+            break head;
+        }
+    };
+    assert_eq!(followed.server_id, made.id);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn signing_out_a_device_ends_its_live_streams_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
@@ -1566,8 +1592,14 @@ async fn signing_out_a_device_ends_its_live_streams_at_once() {
         .unwrap()
         .into_inner();
     while !presence.message().await.unwrap().unwrap().ready {}
+    let mut live = pb::live_service_client::LiveServiceClient::new(instance.channel().await)
+        .open(authed(&phone, pb::OpenRequest::default()))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(live.message().await.unwrap().unwrap().item.is_some());
 
-    // Signed out from the other device: all four end well before a heartbeat,
+    // Signed out from the other device: all five end well before a heartbeat,
     // which no longer asks the database each time.
     let sessions =
         c.account.list_sessions(authed(&first, pb::ListSessionsRequest {})).await.unwrap().into_inner().sessions;
@@ -1578,6 +1610,7 @@ async fn signing_out_a_device_ends_its_live_streams_at_once() {
     assert_eq!(tokio::time::timeout(soon, ends_with(&mut dms)).await.unwrap(), Code::Unauthenticated);
     assert_eq!(tokio::time::timeout(soon, ends_with(&mut friends)).await.unwrap(), Code::Unauthenticated);
     assert_eq!(tokio::time::timeout(soon, ends_with(&mut presence)).await.unwrap(), Code::Unauthenticated);
+    assert_eq!(tokio::time::timeout(soon, ends_with(&mut live)).await.unwrap(), Code::Unauthenticated);
 
     instance.stop().await;
 }
@@ -11552,4 +11585,174 @@ async fn servers_choose_their_live_tile_kinds() {
     let back = pb::LiveTileSettings { customized: false, kinds: vec![] };
     let reset = kinds(c.servers.update_server(update(&juan, back)).await.unwrap().into_inner().server.unwrap());
     assert!(!reset.customized && reset.kinds.contains(&(K::Voice as i32)));
+}
+
+/// The next thing a live stream says that isn't a heartbeat.
+async fn next_live(stream: &mut tonic::Streaming<pb::OpenResponse>) -> pb::open_response::Item {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(5), stream.message()).await.unwrap().unwrap().unwrap();
+        if let Some(item) = message.item {
+            return item;
+        }
+    }
+}
+
+/// The next server event, or heads, a live stream sends.
+async fn next_event_or_heads(stream: &mut tonic::Streaming<pb::OpenResponse>) -> pb::open_response::Item {
+    use pb::open_response::Item;
+    loop {
+        match next_live(stream).await {
+            Item::Events(r) if r.event.is_some() => return Item::Events(r),
+            item @ Item::Heads(_) => return item,
+            _ => continue,
+        }
+    }
+}
+
+fn created_in(item: &pb::open_response::Item) -> Option<(String, String)> {
+    match item {
+        pb::open_response::Item::Events(r) => match r.event.as_ref().and_then(|event| event.payload.as_ref()) {
+            Some(pb::event::Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) => {
+                Some((m.channel_id.clone(), m.content.clone()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// One live stream: messages come whole in the channel in focus and when
+/// they mention you, the rest as channel heads, also when catching up; only
+/// the session that opened a connection focuses it.
+#[tokio::test]
+async fn live_streams_send_whole_messages_only_in_focus() {
+    use pb::open_response::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let mut live = pb::live_service_client::LiveServiceClient::new(instance.channel().await);
+    let (ann, _, _) = sign_up(&mut c, "ann").await;
+    let (bo, bo_user, _) = sign_up(&mut c, "bo").await;
+    let server = create_server(&mut c, &ann, "Games", true).await;
+    join(&mut c, &bo, &server.id).await;
+    let a = new_channel(&mut c, &ann, &server.id, "a", pb::ChannelType::Text).await;
+    let b = new_channel(&mut c, &ann, &server.id, "b", pb::ChannelType::Text).await;
+
+    let open = |cursor: Option<i64>| pb::OpenRequest {
+        servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: cursor }],
+        ..Default::default()
+    };
+    let mut stream = live.open(authed(&bo, open(None))).await.unwrap().into_inner();
+    let Item::ConnectionId(id) = next_live(&mut stream).await else { panic!("no connection id first") };
+    let Item::Events(response) = next_live(&mut stream).await else { panic!("not ready") };
+    let ready = response.ready.unwrap();
+    let start = ready.servers[0].sequence;
+    let focus_on = |channel: &str| pb::FocusRequest {
+        connection_id: id.clone(),
+        focus: Some(pb::Focus { channel_ids: vec![channel.to_string()], ..Default::default() }),
+    };
+    live.focus(authed(&bo, focus_on(&a.id))).await.unwrap();
+    assert!(matches!(next_live(&mut stream).await, Item::Focus(f) if f.channel_ids == [a.id.clone()]));
+
+    send(&mut c, &ann, &server.id, &a.id, "in a").await.unwrap();
+    assert_eq!(created_in(&next_event_or_heads(&mut stream).await), Some((a.id.clone(), "in a".into())));
+    let quiet = send(&mut c, &ann, &server.id, &b.id, "in b").await.unwrap();
+    let ping = format!("<@{}> look", bo_user.id);
+    send(&mut c, &ann, &server.id, &b.id, &ping).await.unwrap();
+    // The mention comes whole; the other only moves b's head.
+    let (mut mention, mut heads) = (None, None);
+    while mention.is_none() || heads.is_none() {
+        match next_event_or_heads(&mut stream).await {
+            Item::Heads(h) => heads = Some(h),
+            item => mention = created_in(&item),
+        }
+    }
+    assert_eq!(mention, Some((b.id.clone(), ping.clone())));
+    let heads = heads.unwrap();
+    let server_heads = &heads.servers[0];
+    assert_eq!(server_heads.channels.len(), 1);
+    assert_eq!((&server_heads.channels[0].channel_id, &server_heads.channels[0].last_message_id), (&b.id, &quiet.id));
+    assert!(server_heads.sequence > start);
+
+    // Focus is the opening session's alone; anyone else, or an unknown id, is told the same.
+    let other_session = sign_in(&mut c, "bo", "correct horse battery").await.unwrap().token;
+    let refused = live.focus(authed(&other_session, focus_on(&b.id))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound);
+    let unknown = pb::FocusRequest { connection_id: "0".repeat(32), ..focus_on(&b.id) };
+    assert_eq!(live.focus(authed(&bo, unknown)).await.unwrap_err().code(), Code::NotFound);
+    let too_many = pb::FocusRequest {
+        focus: Some(pb::Focus { channel_ids: (0..9).map(|n| format!("c{n}")).collect(), ..Default::default() }),
+        ..focus_on(&b.id)
+    };
+    assert_eq!(live.focus(authed(&bo, too_many)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Catching up from before them goes by the same rule, with the channel
+    // on screen in focus from the start. b's head goes out before the later
+    // mention does, so a cursor moved to the mention can't skip it.
+    drop(stream);
+    let focused = pb::Focus { channel_ids: vec![a.id.clone()], ..Default::default() };
+    let resume = pb::OpenRequest { focus: Some(focused), ..open(Some(start)) };
+    let mut again = live.open(authed(&bo, resume)).await.unwrap().into_inner();
+    assert!(matches!(next_live(&mut again).await, Item::ConnectionId(_)));
+    let mut seen = Vec::new();
+    loop {
+        match next_live(&mut again).await {
+            Item::Heads(heads) => {
+                let channels: Vec<_> = heads.servers[0].channels.iter().map(|h| h.channel_id.clone()).collect();
+                seen.push(format!("heads {channels:?}"));
+            }
+            Item::Events(r) if r.ready.is_some() => break,
+            item => seen.extend(created_in(&item).map(|(_, content)| content)),
+        }
+    }
+    assert_eq!(seen, ["in a".to_string(), format!("heads {:?}", [&b.id]), ping]);
+    instance.stop().await;
+}
+
+/// On a live stream, presence in a large server comes only for the people in
+/// focus; smaller servers' members come as always.
+#[tokio::test]
+async fn live_presence_in_large_servers_follows_focus() {
+    use pb::open_response::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LARGE_SERVER_MEMBERS", "3")]).await;
+    let mut c = clients(&instance).await;
+    let mut live = pb::live_service_client::LiveServiceClient::new(instance.channel().await);
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(instance.channel().await);
+    let (ann, ann_user, _) = sign_up(&mut c, "ann").await;
+    let (bo, _, _) = sign_up(&mut c, "bo").await;
+    let (cy, _, _) = sign_up(&mut c, "cy").await;
+    let (dee, dee_user, _) = sign_up(&mut c, "dee").await;
+    let large = create_server(&mut c, &ann, "Large", true).await;
+    join(&mut c, &bo, &large.id).await;
+    join(&mut c, &cy, &large.id).await;
+    let small = create_server(&mut c, &dee, "Small", true).await;
+    join(&mut c, &bo, &small.id).await;
+
+    let open = pb::OpenRequest { presence: true, ..Default::default() };
+    let mut stream = live.open(authed(&bo, open)).await.unwrap().into_inner();
+    let Item::ConnectionId(id) = next_live(&mut stream).await else { panic!("no connection id first") };
+    assert!(matches!(next_live(&mut stream).await, Item::Presence(r) if r.ready));
+    let online = |token: &str| authed(token, pb::UpdatePresenceRequest { app: "web".into(), ..Default::default() });
+    let next_seen = async |stream: &mut tonic::Streaming<pb::OpenResponse>| loop {
+        if let Item::Presence(pb::WatchPresenceResponse { presence: Some(p), .. }) = next_live(stream).await {
+            return p.user_id;
+        }
+    };
+
+    // Ann and cy share only the large server with bo: neither comes until in focus.
+    presence.update_presence(online(&ann)).await.unwrap();
+    presence.update_presence(online(&cy)).await.unwrap();
+    presence.update_presence(online(&dee)).await.unwrap();
+    assert_eq!(next_seen(&mut stream).await, dee_user.id);
+    let focus = pb::Focus { user_ids: vec![ann_user.id.clone()], ..Default::default() };
+    live.focus(authed(&bo, pb::FocusRequest { connection_id: id, focus: Some(focus) })).await.unwrap();
+    assert_eq!(next_seen(&mut stream).await, ann_user.id);
+    // Her changes follow while she's in focus; cy's still don't.
+    let idle =
+        |token: &str| authed(token, pb::UpdatePresenceRequest { app: "web".into(), idle: true, ..Default::default() });
+    presence.update_presence(idle(&cy)).await.unwrap();
+    presence.update_presence(idle(&ann)).await.unwrap();
+    assert_eq!(next_seen(&mut stream).await, ann_user.id);
+    instance.stop().await;
 }

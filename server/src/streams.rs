@@ -28,6 +28,8 @@ pub enum Kind {
     Events,
     /// Direct messages (`DmService.Watch`).
     Dms,
+    /// A live connection (`LiveService.Open`), whatever it carries.
+    Live,
 }
 
 const TOO_MANY: &str = "this account has too many apps or tabs open at once; close one and try again";

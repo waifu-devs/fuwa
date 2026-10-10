@@ -2477,9 +2477,9 @@ export type Message = Message$1<"fuwa.v1.Message"> & {
   gif?: MessageGif | undefined;
 
   /**
-   * The members it names as <@id> (or <@!id>), once each, in order: the
-   * people a client highlights it for. Up to 50; ids of anyone not in the
-   * server are left out.
+   * The members it names as <@id> (or <@!id>), then as @username, once
+   * each, in order: the people a client highlights it for. Up to 50; ids of
+   * anyone not in the server are left out.
    *
    * @generated from field: repeated string mention_user_ids = 23;
    */

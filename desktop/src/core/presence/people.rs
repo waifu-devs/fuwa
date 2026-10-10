@@ -1,5 +1,7 @@
 //! Who's online and what they're doing, as the web app's `fuwa/presence.ts`:
-//! one `WatchPresence` stream per instance, read into
+//! one `WatchPresence` stream per instance (or the presence its live
+//! connection carries, `sync.rs`, which is only who's on screen: people out
+//! of sight in a large server show as having none), read into
 //! [`InstanceState::people`], and whether you've stepped away, which goes out
 //! with this app's presence.
 //!
@@ -122,40 +124,62 @@ pub(crate) async fn follow(core: Arc<Core>, key: String, api: Api) {
 async fn watch_once(core: &Arc<Core>, key: &str, api: &Api, wait: &mut Duration) -> Result<(), Problem> {
     let mut stream =
         api.presence().watch_presence(pb::WatchPresenceRequest {}).await.map_err(Problem::from)?.into_inner();
-    let mut gathered = Vec::new();
-    let mut ready = false;
-    // Changes not put in yet, and when they go in.
-    let mut due: Option<tokio::time::Instant> = None;
+    let mut feed = Feed::default();
     loop {
-        let limit = due.unwrap_or_else(|| tokio::time::Instant::now() + SILENCE);
+        let limit = feed.due.unwrap_or_else(|| tokio::time::Instant::now() + SILENCE);
         let next = match tokio::time::timeout_at(limit, stream.message()).await {
-            Err(_) if due.is_some() => {
-                due = None;
-                let changes = std::mem::take(&mut gathered);
-                core.shared.instance(key, |i| put(i.people.get_or_insert_with(HashMap::new), changes));
+            Err(_) if feed.due.is_some() => {
+                feed.flush(core, key);
                 continue;
             }
             Err(_) => return Err(Problem::new(Code::Unavailable, "Lost the connection.")),
             Ok(next) => next.map_err(Problem::from)?,
         };
         let Some(res) = next else { return Ok(()) };
+        if feed.take(core, key, res) {
+            *wait = Duration::from_millis(500);
+        }
+    }
+}
+
+/// Where one presence stream is: its own, or a live connection's
+/// (`sync.rs`), which hands it the same responses.
+#[derive(Default)]
+pub(crate) struct Feed {
+    gathered: Vec<pb::Presence>,
+    ready: bool,
+    /// Changes not put in yet go in then.
+    pub due: Option<tokio::time::Instant>,
+}
+
+impl Feed {
+    /// Takes one response. True when it's the stream saying it's ready.
+    pub fn take(&mut self, core: &Core, key: &str, res: pb::WatchPresenceResponse) -> bool {
         if let Some(presence) = res.presence {
-            gathered.push(presence);
-            if ready && due.is_none() {
-                due = Some(tokio::time::Instant::now() + BATCH);
+            self.gathered.push(presence);
+            if self.ready && self.due.is_none() {
+                self.due = Some(tokio::time::Instant::now() + BATCH);
             }
         }
-        if res.ready && !ready {
-            ready = true;
-            *wait = Duration::from_millis(500);
-            // Everyone at once: whoever went offline while away is gone too.
-            let list = std::mem::take(&mut gathered);
-            core.shared.instance(key, |i| {
-                let mut people = HashMap::new();
-                put(&mut people, list);
-                i.people = Some(people);
-            });
+        if !res.ready || self.ready {
+            return false;
         }
+        self.ready = true;
+        // Everyone at once: whoever went offline while away is gone too.
+        let list = std::mem::take(&mut self.gathered);
+        core.shared.instance(key, |i| {
+            let mut people = HashMap::new();
+            put(&mut people, list);
+            i.people = Some(people);
+        });
+        true
+    }
+
+    /// Puts in the changes gathered since the last time.
+    pub fn flush(&mut self, core: &Core, key: &str) {
+        self.due = None;
+        let changes = std::mem::take(&mut self.gathered);
+        core.shared.instance(key, |i| put(i.people.get_or_insert_with(HashMap::new), changes));
     }
 }
 

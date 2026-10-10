@@ -594,15 +594,32 @@ impl DmEngine {
                 .map_err(|_| Problem::new(Code::Unavailable, "lost the connection"))?
                 .map_err(Problem::from)?;
             let Some(res) = next else { return Ok(()) };
-            if res.ready {
-                self.update(|d| d.problem = None);
-                if self.resync().await.is_err() {
-                    tracing::warn!("couldn't list conversations");
-                }
-            }
-            if let Some(event) = res.event.and_then(|e| e.payload) {
-                self.on_event(event);
-            }
+            self.take(res).await;
+        }
+    }
+
+    /// One response from the direct-message feed, from its own stream or a
+    /// live connection's (`sync.rs`): when it's ready, whatever came while
+    /// away is read.
+    pub async fn take(self: &Arc<Self>, res: pb::WatchResponse) {
+        if res.ready {
+            self.caught_up().await;
+        }
+        self.take_event(res);
+    }
+
+    /// The event a response from the feed carries, if any.
+    pub fn take_event(self: &Arc<Self>, res: pb::WatchResponse) {
+        if let Some(event) = res.event.and_then(|e| e.payload) {
+            self.on_event(event);
+        }
+    }
+
+    /// Listening again: the conversations are listed and each caught up on.
+    pub async fn caught_up(self: &Arc<Self>) {
+        self.update(|d| d.problem = None);
+        if self.resync().await.is_err() {
+            tracing::warn!("couldn't list conversations");
         }
     }
 

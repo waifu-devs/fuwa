@@ -234,6 +234,15 @@ async fn messages_name_their_mentions_and_slow_mode_says_how_long_to_wait() {
         .messages;
     let stored = listed.iter().find(|m| m.id == sent.id).unwrap();
     assert_eq!(stored.mention_user_ids, [w.agent_id.as_str()], "kept with the message");
+    // Named as apps write them too: @username, any case, but not inside a word.
+    let by_name = messages
+        .send_message(send(&w.owner, "thanks @Helper. and mail@helper @nobody"))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert_eq!(by_name.mention_user_ids, [w.agent_id.as_str()]);
     let edited = messages
         .update_message(authed(
             &w.owner,

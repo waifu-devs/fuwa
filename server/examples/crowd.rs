@@ -61,7 +61,10 @@ crowd: what one huge server with everyone online costs
                       one) instead of starting one; memory and CPU then come from its host
   --bin PATH          the fuwa binary (target/release/fuwa)
   --out PATH          JSON lines
-  --env K=V           an extra variable for every process";
+  --env K=V           an extra variable for every process
+  --live              each person holds one live connection (LiveService.Open) with
+                      every feed instead of four streams; half focus on the busy
+                      channel, half on a quiet one";
 
 const PASSWORD: &str = "crowd test password 0123456789";
 const KEY: &str = "crowd-cluster-key-0123456789abcdef0123456789abcdef";
@@ -83,6 +86,7 @@ struct Options {
     bin: PathBuf,
     out: Option<PathBuf>,
     env: Vec<(String, String)>,
+    live: bool,
 }
 
 impl Options {
@@ -103,6 +107,7 @@ impl Options {
             bin: root.join("target/release/fuwa"),
             out: None,
             env: vec![],
+            live: false,
         };
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
@@ -126,6 +131,7 @@ impl Options {
                     let (k, v) = kv.split_once('=').expect("--env KEY=VALUE");
                     o.env.push((k.into(), v.into()));
                 }
+                "--live" => o.live = true,
                 "--help" | "-h" => {
                     println!("{HELP}");
                     std::process::exit(0);
@@ -197,6 +203,8 @@ struct Tally {
     topic_lag: Hist,
     topics: AtomicU64,
     presences: AtomicU64,
+    /// Channel heads frames (live connections).
+    heads: AtomicU64,
     errors: Mutex<BTreeMap<String, u64>>,
 }
 
@@ -210,6 +218,7 @@ impl Tally {
             topic_lag: Hist::new(),
             topics: AtomicU64::new(0),
             presences: AtomicU64::new(0),
+            heads: AtomicU64::new(0),
             errors: Mutex::new(BTreeMap::new()),
         }
     }
@@ -762,6 +771,150 @@ async fn follow(
     }
 }
 
+/// One live connection for one person, focused on `focus`, until the end:
+/// events, direct messages, friends and presence on one stream, opened
+/// again from its last sequence whenever the generation moves on.
+async fn follow_live(
+    channel: Channel,
+    token: String,
+    server_id: String,
+    focus: String,
+    shared: Arc<Shared>,
+    storm: Arc<Semaphore>,
+    ready_tx: tokio::sync::mpsc::UnboundedSender<()>,
+) {
+    let mut last: Option<i64> = None;
+    loop {
+        let generation = shared.generation.load(Ordering::Acquire);
+        let permit = storm.acquire().await.unwrap();
+        let started = Instant::now();
+        let cursor = pb::ServerCursor { server_id: server_id.clone(), after_sequence: last };
+        let request = pb::OpenRequest {
+            servers: vec![cursor],
+            direct_messages: true,
+            friends: true,
+            presence: true,
+            ..Default::default()
+        };
+        let stream = match open_raw(&channel, &token, "/fuwa.v1.LiveService/Open", request).await {
+            Ok(s) => s,
+            Err(status) => {
+                drop(permit);
+                shared.tally().error("open", &status);
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+        };
+        let mut permit = Some(permit);
+        tokio::pin!(stream);
+        let mut live = false;
+        loop {
+            let item = tokio::select! {
+                item = stream.next() => item,
+                _ = shared.regen.notified() => {
+                    if shared.generation.load(Ordering::Acquire) != generation { None } else { continue }
+                }
+            };
+            let Some(item) = item else { break };
+            let frame = match item {
+                Ok(frame) => frame,
+                Err(status) => {
+                    shared.tally().error("stream", &status);
+                    break;
+                }
+            };
+            if shared.generation.load(Ordering::Acquire) != generation {
+                break;
+            }
+            let tally = shared.tally();
+            tally.frames.fetch_add(1, Ordering::Relaxed);
+            tally.bytes.fetch_add(frame.len() as u64, Ordering::Relaxed);
+            if let Some(sent) = stamp(&frame, b"lg:") {
+                tally.delivered.fetch_add(1, Ordering::Relaxed);
+                tally.lag.record(Duration::from_micros(now_us().saturating_sub(sent)));
+            } else if let Some(sent) = stamp(&frame, b"tp:") {
+                tally.topics.fetch_add(1, Ordering::Relaxed);
+                tally.topic_lag.record(Duration::from_micros(now_us().saturating_sub(sent)));
+            }
+            for (field, value) in fields(&frame) {
+                match (field, value) {
+                    // connection_id: say what's on screen
+                    (1, Err(id)) => {
+                        let request = pb::FocusRequest {
+                            connection_id: String::from_utf8_lossy(id).into_owned(),
+                            focus: Some(pb::Focus { channel_ids: vec![focus.clone()], ..Default::default() }),
+                        };
+                        let mut client = pb::live_service_client::LiveServiceClient::new(channel.clone());
+                        if let Err(status) = client.focus(authed(&token, request)).await {
+                            tally.error("focus", &status);
+                        }
+                    }
+                    (2, Err(events)) => {
+                        for (field, value) in fields(events) {
+                            match (field, value) {
+                                (1, Err(event)) => {
+                                    for (f, v) in fields(event) {
+                                        if let (3, Ok(seq)) = (f, v)
+                                            && seq as i64 > 0
+                                        {
+                                            last = Some(seq as i64);
+                                        }
+                                    }
+                                }
+                                (2, Err(ready)) => {
+                                    for (_, head) in fields(ready) {
+                                        if let Err(head) = head {
+                                            for (f, v) in fields(head) {
+                                                if let (2, Ok(seq)) = (f, v) {
+                                                    last = Some(seq as i64);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if !live {
+                                        live = true;
+                                        shared.ready.record(started.elapsed());
+                                        shared.live.fetch_add(1, Ordering::AcqRel);
+                                        permit.take();
+                                        let _ = ready_tx.send(());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    (5, Err(presence)) => {
+                        if fields(presence).iter().any(|(f, v)| *f == 1 && v.is_err()) {
+                            tally.presences.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    // heads: each server's sequence moves the cursor
+                    (6, Err(heads)) => {
+                        tally.heads.fetch_add(1, Ordering::Relaxed);
+                        for (_, server) in fields(heads) {
+                            if let Err(server) = server {
+                                for (f, v) in fields(server) {
+                                    if let (2, Ok(seq)) = (f, v) {
+                                        last = Some(last.unwrap_or(0).max(seq as i64));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        drop(permit);
+        if live {
+            shared.live.fetch_sub(1, Ordering::AcqRel);
+        }
+        if shared.generation.load(Ordering::Acquire) == generation {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+}
+
 /// Holds a plain stream open, counting what comes, until the process ends.
 async fn hold(
     channel: Channel,
@@ -930,14 +1083,14 @@ async fn main() {
     let t = shared.fresh();
     let started = Instant::now();
     for (i, token) in tokens.iter().enumerate() {
-        tokio::spawn(follow(
-            conn_of(i),
-            token.clone(),
-            setup.server_id.clone(),
-            shared.clone(),
-            storm.clone(),
-            ready_tx.clone(),
-        ));
+        let server_id = setup.server_id.clone();
+        if o.live {
+            let focus = if i % 2 == 0 { setup.text.clone() } else { setup.quiet.clone() };
+            let (shared, storm, ready_tx) = (shared.clone(), storm.clone(), ready_tx.clone());
+            tokio::spawn(follow_live(conn_of(i), token.clone(), server_id, focus, shared, storm, ready_tx));
+        } else {
+            tokio::spawn(follow(conn_of(i), token.clone(), server_id, shared.clone(), storm.clone(), ready_tx.clone()));
+        }
     }
     let got = wait_for(&mut ready_rx, people, Duration::from_secs(600)).await;
     let took = started.elapsed();
@@ -951,7 +1104,8 @@ async fn main() {
         "errors": t.errors()}));
 
     // tab: what else a web tab holds open.
-    if o.has("tab") {
+    // A live connection already carries them.
+    if o.has("tab") && !o.live {
         for kind in [Kind::Dms, Kind::Friends, Kind::Presence] {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let before = instance.sample();
@@ -1082,7 +1236,9 @@ async fn main() {
             let drained =
                 settle(|| t.delivered.load(Ordering::Relaxed), Duration::from_secs(3), Duration::from_secs(120)).await;
             let after = instance.sample();
-            let expected = sent.load(Ordering::Relaxed) * people as u64;
+            // Live connections: only the half focused on the busy channel get it whole.
+            let readers = if o.live { people.div_ceil(2) } else { people };
+            let expected = sent.load(Ordering::Relaxed) * readers as u64;
             let delivered = t.delivered.load(Ordering::Relaxed);
             report.line(serde_json::json!({"phase": "fanout", "rate": rate, "sent": sent.load(Ordering::Relaxed),
                 "send_p99_ms": send_lag.quantile(0.99),
@@ -1090,6 +1246,7 @@ async fn main() {
                 "deliveries_per_sec": (delivered as f64 / sending.as_secs_f64()).round(),
                 "lag_p50_ms": t.lag.quantile(0.5), "lag_p99_ms": t.lag.quantile(0.99),
                 "drain_secs": drained.as_secs_f64(), "live": shared.live.load(Ordering::Relaxed),
+                "heads": t.heads.load(Ordering::Relaxed), "bytes": t.bytes.load(Ordering::Relaxed),
                 "rss_mb": rss_mb(&after), "cpu_pct": cpu_between(&before, &after), "errors": t.errors()}));
             if t.lag.quantile(0.99) > 10_000.0 || delivered < expected * 9 / 10 {
                 break;

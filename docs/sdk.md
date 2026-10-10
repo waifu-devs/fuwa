@@ -305,10 +305,11 @@ export default {
 
 - Its owner sets it up, signed in as themselves (the agent's own token
   can't): `fuwa.agents.getAgentEndpoint({ agentId })` gives the `secret`
-  (made the first time), `setAgentEndpoint({ agentId, url, events })` saves
+  the first time, when it's made, and only then (later, `secretHint` is its
+  last four characters), `setAgentEndpoint({ agentId, url, events })` saves
   the URL once it answers the check (`events` picks payload names such as
   `"message_created"`; empty for all), an empty `url` turns it off, and
-  `resetAgentEndpointSecret` makes a new secret. The app does the same in
+  `resetAgentEndpointSecret` makes a new secret and gives it once. The app does the same in
   Settings, Agents. `failingSince`, `lastError` and `disabledAt` say how
   deliveries are going.
 - The secret is a secret, like a token: keep it in the environment. During
@@ -471,7 +472,7 @@ for await (const { message, author } of messages(fuwa, { serverId, channelId }))
 `fuwa.node`, `auth`, `account`, `servers`, `channels`, `messages`, `events`,
 `admin`, `media`, `roles`, `invites`, `join`, `dms`, `friends`, `secure`,
 `automod`, `emojis`, `calls`, `webhooks`, `agents`, `sso`, `shared`,
-`commands`, `gifs`, `presence` and `search` are the services;
+`commands`, `gifs`, `presence`, `search` and `live` are the services;
 every message type and enum is exported from the package too. `token` can be
 a function, read on every call.
 
@@ -484,6 +485,9 @@ The other pieces:
 - `EventFollower` is the reconnecting stream the agent uses: iterate it for
   `event`, `ready` and `disconnected` updates, and `setServers` to change what
   it follows.
+- `fuwa.live.open({ servers, messages: MessageIntent.MENTIONS })` is one
+  stream with only the messages that mention the agent, and channel heads
+  for the rest ([live](live.md)), on instances with `live-connection`.
 - `uploadPicture(fuwa, { purpose, data, contentType })` (or `agent.upload`)
   uploads a picture the way the apps do (`MediaService.CreateUpload`, then a
   PUT of the bytes) and returns its `url`, for an avatar, an emoji or a server

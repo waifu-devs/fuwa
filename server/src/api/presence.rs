@@ -5,11 +5,14 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use futures::Stream;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use super::{Api, respond};
+use crate::auth::Caller;
 use crate::error::{Error, Result};
+use crate::live::FocusRx;
 use crate::pb::{self, presence_service_server::PresenceService};
 use crate::presence::{self, RENEW};
 
@@ -27,6 +30,111 @@ impl Api {
             return Ok(None);
         }
         Ok(Some(self.app.node()?.presence_settings(account_id).await?))
+    }
+}
+
+impl Api {
+    /// Presence for `caller`, as WatchPresence streams it, or on screen
+    /// (LiveService.Open) with what's in `focus`.
+    pub(super) async fn presence_feed(
+        &self,
+        caller: Caller,
+        focus: Option<FocusRx>,
+    ) -> Result<mpsc::Receiver<Result<pb::WatchPresenceResponse, Status>>, Status> {
+        // Listening before anything else, so an end said meanwhile isn't missed.
+        let mut ended = self.app.ended_sessions();
+        // Agents report their own presence but don't watch anyone's.
+        if caller.account.kind == pb::AccountKind::Agent {
+            return Err(Error::PermissionDenied("agents can't watch presence".into()).into());
+        }
+        let account_id = caller.account.id.clone();
+        let settings = self.presence_settings_if_new(&account_id).await?;
+        let (index, presence) = (&self.app.index, &self.app.presence);
+        let watch = match &focus {
+            None => presence.watch(index, &account_id, settings),
+            Some(focus) => {
+                let watch = presence.watch_on_screen(index, &account_id, settings);
+                let people = focus.borrow().user_ids.clone();
+                presence.focus(index, &account_id, watch.id, people);
+                watch
+            }
+        };
+        let (tx, rx) = mpsc::channel::<Result<pb::WatchPresenceResponse, Status>>(64);
+        let app = self.app.clone();
+        tokio::spawn(async move {
+            let presence::Watch { id, snapshot, rx: mut changes } = watch;
+            let on_screen = focus.is_some();
+            // A plain stream's focus never changes.
+            let (_never, unfocused) = tokio::sync::watch::channel(Default::default());
+            let mut focus = focus.unwrap_or(unfocused);
+            // Gives the stream's place back however this task ends.
+            let _watching = Watching { app: app.clone(), account_id: account_id.clone(), id };
+            let followed = async {
+                let send = async |item| tx.send(item).await.is_ok();
+                for presence in snapshot {
+                    if !send(Ok(pb::WatchPresenceResponse { presence: Some(presence), ready: false })).await {
+                        return;
+                    }
+                }
+                if !send(Ok(pb::WatchPresenceResponse { presence: None, ready: true })).await {
+                    return;
+                }
+                let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
+                let mut session = crate::streams::SessionCheck::new(&app, &caller.token_hash);
+                loop {
+                    tokio::select! {
+                        _ = app.shutdown.cancelled() => {
+                            let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
+                            return;
+                        }
+                        _ = tx.closed() => return,
+                        // Some session of the caller's just ended: if it's this one, the
+                        // stream ends now rather than at a later check.
+                        ended = ended.recv() => match ended {
+                            Ok(id) if *id == *caller.account.id => {
+                                if matches!(app.session_live(&caller.token_hash).await, Ok(false)) {
+                                    let _ = tx.send(Err(Error::Unauthenticated.into())).await;
+                                    return;
+                                }
+                            }
+                            Ok(_) => {}
+                            // Fell behind: ask at this stream's next heartbeat.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => session.due(),
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        },
+                        _ = heartbeat.tick() => {
+                            // A session signed out elsewhere stops hearing.
+                            if !session.still_live(&app).await {
+                                let _ = tx.send(Err(Error::Unauthenticated.into())).await;
+                                return;
+                            }
+                            if !send(Ok(pb::WatchPresenceResponse::default())).await {
+                                return;
+                            }
+                        }
+                        // The app shows other people: they're sent as they come into focus.
+                        Ok(()) = focus.changed(), if on_screen => {
+                            let people = focus.borrow_and_update().user_ids.clone();
+                            app.presence.focus(&app.index, &account_id, id, people);
+                        }
+                        change = changes.recv() => match change {
+                            Some(presence) => {
+                                if !send(Ok(pb::WatchPresenceResponse { presence: Some(presence), ready: false })).await {
+                                    return;
+                                }
+                            }
+                            // Fell behind, or a newer stream took its place.
+                            None => {
+                                let _ = tx.send(Err(Status::aborted("this stream ended; watch again"))).await;
+                                return;
+                            }
+                        },
+                    }
+                }
+            };
+            followed.await;
+        });
+        Ok(rx)
     }
 }
 
@@ -91,81 +199,7 @@ impl PresenceService for Api {
         request: Request<pb::WatchPresenceRequest>,
     ) -> Result<Response<WatchStream>, Status> {
         let caller = self.caller(request.metadata()).await?;
-        // Listening before anything else, so an end said meanwhile isn't missed.
-        let mut ended = self.app.ended_sessions();
-        // Agents report their own presence but don't watch anyone's.
-        if caller.account.kind == pb::AccountKind::Agent {
-            return Err(Error::PermissionDenied("agents can't watch presence".into()).into());
-        }
-        let account_id = caller.account.id.clone();
-        let settings = self.presence_settings_if_new(&account_id).await?;
-        let watch = self.app.presence.watch(&self.app.index, &account_id, settings);
-        let (tx, rx) = tokio::sync::mpsc::channel::<Result<pb::WatchPresenceResponse, Status>>(64);
-        let app = self.app.clone();
-        tokio::spawn(async move {
-            let presence::Watch { id, snapshot, rx: mut changes } = watch;
-            // Gives the stream's place back however this task ends.
-            let _watching = Watching { app: app.clone(), account_id, id };
-            let followed = async {
-                let send = async |item| tx.send(item).await.is_ok();
-                for presence in snapshot {
-                    if !send(Ok(pb::WatchPresenceResponse { presence: Some(presence), ready: false })).await {
-                        return;
-                    }
-                }
-                if !send(Ok(pb::WatchPresenceResponse { presence: None, ready: true })).await {
-                    return;
-                }
-                let mut heartbeat = crate::streams::heartbeat(HEARTBEAT);
-                let mut session = crate::streams::SessionCheck::new(&app, &caller.token_hash);
-                loop {
-                    tokio::select! {
-                        _ = app.shutdown.cancelled() => {
-                            let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
-                            return;
-                        }
-                        _ = tx.closed() => return,
-                        // Some session of the caller's just ended: if it's this one, the
-                        // stream ends now rather than at a later check.
-                        ended = ended.recv() => match ended {
-                            Ok(id) if *id == *caller.account.id => {
-                                if matches!(app.session_live(&caller.token_hash).await, Ok(false)) {
-                                    let _ = tx.send(Err(Error::Unauthenticated.into())).await;
-                                    return;
-                                }
-                            }
-                            Ok(_) => {}
-                            // Fell behind: ask at this stream's next heartbeat.
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => session.due(),
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                        },
-                        _ = heartbeat.tick() => {
-                            // A session signed out elsewhere stops hearing.
-                            if !session.still_live(&app).await {
-                                let _ = tx.send(Err(Error::Unauthenticated.into())).await;
-                                return;
-                            }
-                            if !send(Ok(pb::WatchPresenceResponse::default())).await {
-                                return;
-                            }
-                        }
-                        change = changes.recv() => match change {
-                            Some(presence) => {
-                                if !send(Ok(pb::WatchPresenceResponse { presence: Some(presence), ready: false })).await {
-                                    return;
-                                }
-                            }
-                            // Fell behind, or a newer stream took its place.
-                            None => {
-                                let _ = tx.send(Err(Status::aborted("this stream ended; watch again"))).await;
-                                return;
-                            }
-                        },
-                    }
-                }
-            };
-            followed.await;
-        });
+        let rx = self.presence_feed(caller, None).await?;
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
