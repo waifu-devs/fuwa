@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "gif",
         "live_tile",
         "profile_item",
+        "live",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let mut config = tonic_prost_build::Config::new();

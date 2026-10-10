@@ -36,14 +36,20 @@ struct Instance {
 }
 
 fn start_instance(dir: &std::path::Path) -> Instance {
+    start_instance_with(dir, &[])
+}
+
+/// An instance with some of its settings (`vars`) changed.
+fn start_instance_with(dir: &std::path::Path, vars: &[(&str, &str)]) -> Instance {
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     let dir = dir.to_str().unwrap().to_string();
+    let vars: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let (app, url) = runtime.block_on(async {
         let config = Config::from_lookup(|key| match key {
             "FUWA_DATA_PATH" => Some(dir.clone()),
             "FUWA_TELEMETRY" => Some("off".into()),
             "FUWA_UPDATE_CHECK" => Some("off".into()),
-            _ => None,
+            _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
         })
         .unwrap();
         let app = App::open(config).await.unwrap();
@@ -86,6 +92,9 @@ fn two_people_talk_in_a_server_and_in_private() {
     let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let alice = Core::start(Paths::under(home_a.path())).unwrap();
     let bob = Core::start(Paths::under(home_b.path())).unwrap();
+    // Bob's app follows the instance as apps from before live connections
+    // do, each feed on its own stream: that path keeps working beside the new one.
+    bob.use_separate_streams();
     let url = instance.url.clone();
 
     let key = {
@@ -183,6 +192,8 @@ fn two_people_talk_in_a_server_and_in_private() {
         let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
         wait(&alice, async move { core.load_messages(&key, &sid, &cid, false).await }).unwrap();
     }
+    // Alice has it open: on her live connection, that's what comes whole.
+    alice.set_focus(Some(Focus { instance: key.clone(), channel: general.clone(), thread: None }));
     let reactions_on = |core: &Core, id: &str| {
         core.shared.read(|s| {
             s.instance(&key).unwrap().messages[&general]
@@ -983,6 +994,7 @@ fn servers_share_a_channel() {
     // Bob writes there and edits it, naming the channel his server doesn't hold.
     let (core, k, sid, cid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone());
     wait(&bob, async move { core.load_messages(&k, &sid, &cid, false).await }).unwrap();
+    bob.set_focus(Some(Focus { instance: key.clone(), channel: shown.id.clone(), thread: None }));
     let (core, k, sid, cid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone());
     wait(&bob, async move { core.send_message(&k, &sid, &cid, "hi from the owls").await }).unwrap();
     until(&bob, "Bob's message", |s| {
@@ -995,6 +1007,7 @@ fn servers_share_a_channel() {
     // At the home it's tagged with Bob's server, and his name is known though he isn't a member.
     let (core, k, sid, cid) = (alice.clone(), key.clone(), tea.id.clone(), general.clone());
     wait(&alice, async move { core.load_messages(&k, &sid, &cid, false).await }).unwrap();
+    alice.set_focus(Some(Focus { instance: key.clone(), channel: general.clone(), thread: None }));
     until(&alice, "Bob's edited message", |s| {
         s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "hi from the owls!")
     });
@@ -1105,7 +1118,7 @@ fn secure_channels_stay_between_devices() {
         until(core, "the server's channels", |s| s.instance(&key).is_some_and(|i| i.synced.contains(&sid)));
     };
     join(&bob);
-    until(&alice, "Bob in the server", |s| s.instance(&key).unwrap().members[&sid].len() == 2);
+    until(&alice, "Bob in the server", |s| s.instance(&key).unwrap().members.get(&sid).is_some_and(|m| m.len() == 2));
 
     // Alice opens it, which starts its group with Bob's device in it, and writes.
     let send = |core: &Arc<Core>, text: &str| {
@@ -1198,6 +1211,154 @@ fn secure_channels_stay_between_devices() {
     }
     assert!(!found, "the instance kept a secure channel's words");
 
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn one_live_connection_follows_whats_on_screen() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    // Every server counts as large, so presence too is only who's on screen.
+    let instance = start_instance_with(data.path(), &[("FUWA_LARGE_SERVER_MEMBERS", "1")]);
+    let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let alice = Core::start(Paths::under(home_a.path())).unwrap();
+    let bob = Core::start(Paths::under(home_b.path())).unwrap();
+    let key = {
+        let (core, url) = (alice.clone(), instance.url.clone());
+        wait(&alice, async move { core.sign_up(&url, "alice", "correct horse battery", "Alice").await }).unwrap()
+    };
+    {
+        let (core, url) = (bob.clone(), instance.url.clone());
+        wait(&bob, async move { core.sign_up(&url, "bob", "correct horse battery", "Bob").await }).unwrap();
+    }
+    for core in [&alice, &bob] {
+        until(core, "live over one connection", |s| {
+            s.instance(&key).is_some_and(|i| {
+                i.connection == Connection::Live && i.live.is_some() && i.dms.status == DmStatus::Ready
+            })
+        });
+    }
+    let connection = |core: &Core| core.shared.read(|s| s.instance(&key).unwrap().live.clone().unwrap());
+    let (alice_live, bob_live) = (connection(&alice).id, connection(&bob).id);
+
+    // Alice makes a server with two channels and Bob joins: the connections
+    // follow it without opening again.
+    let server = {
+        let (core, key) = (alice.clone(), key.clone());
+        wait(&alice, async move { core.create_server(&key, "Two rooms").await }).unwrap()
+    };
+    {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.create_channel(&key, &sid, "random", pb::ChannelType::Text, "").await })
+            .unwrap();
+    }
+    let invite = {
+        let (core, key, id) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.create_invite(&key, &id).await }).unwrap()
+    };
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.join_by_invite(&key, &invite).await }).unwrap();
+    }
+    let channels = |core: &Core| {
+        until(core, "both channels", |s| {
+            s.instance(&key).is_some_and(|i| {
+                i.synced.contains(&server.id)
+                    && i.channels[&server.id].iter().filter(|c| c.r#type == pb::ChannelType::Text as i32).count() == 2
+            })
+        });
+        core.shared.read(|s| {
+            let list = &s.instance(&key).unwrap().channels[&server.id];
+            let id = |name: &str| list.iter().find(|c| c.name == name).unwrap().id.clone();
+            (id("general"), id("random"))
+        })
+    };
+    let (general, random) = channels(&alice);
+    assert_eq!(channels(&bob), (general.clone(), random.clone()));
+    until(&alice, "Bob in the member list", |s| s.instance(&key).unwrap().members[&server.id].len() == 2);
+    assert_eq!(connection(&alice).id, alice_live, "making a server opened the connection again");
+    assert_eq!(connection(&bob).id, bob_live, "joining a server opened the connection again");
+    // One stream each, holding the event and direct-message feeds it carries
+    // (each counted by the instance as well), where the separate streams were two.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while instance.app.streams.count() != 2 * 3 {
+        assert!(Instant::now() < deadline, "{} streams open", instance.app.streams.count());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let send = |text: &str, channel: &str| {
+        let (core, key, sid, cid, text) =
+            (alice.clone(), key.clone(), server.id.clone(), channel.to_owned(), text.to_owned());
+        wait(&alice, async move { core.send_message(&key, &sid, &cid, &text).await }).unwrap();
+    };
+    let has = |core: &Core, channel: &str, text: &str| {
+        core.shared.read(|s| {
+            s.instance(&key).unwrap().messages.get(channel).is_some_and(|c| c.items.iter().any(|m| m.content == text))
+        })
+    };
+    // Bob has both channels loaded, and general open; Alice has random loaded, to see what she says there.
+    send("an early word", &general);
+    for (core, channel) in [(&bob, &general), (&bob, &random), (&alice, &random)] {
+        let (c, key, sid, cid) = (core.clone(), key.clone(), server.id.clone(), channel.clone());
+        wait(core, async move { c.load_messages(&key, &sid, &cid, false).await }).unwrap();
+    }
+    bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone(), thread: None }));
+    until(&bob, "general in focus", |s| {
+        s.instance(&key).unwrap().live.as_ref().is_some_and(|l| l.focus.channel_ids == [general.clone()])
+    });
+    // The people on screen are in focus too: Alice wrote there, so Bob sees her online.
+    let alice_id = alice.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    assert!(connection(&bob).focus.user_ids.contains(&alice_id));
+    until(&bob, "Alice online, on screen", |s| s.instance(&key).unwrap().presence_of(&alice_id).is_some());
+
+    // A message in the channel in focus comes whole.
+    let mut notices = bob.take_notices().unwrap();
+    send("in general", &general);
+    until(&bob, "the message in general", |s| {
+        s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "in general")
+    });
+
+    // One in the other channel only moves its head: unread, but not loaded.
+    send("in random", &random);
+    let said = alice.shared.read(|s| {
+        s.instance(&key).unwrap().messages[&random].items.iter().find(|m| m.content == "in random").unwrap().id.clone()
+    });
+    until(&bob, "random's head", |s| s.instance(&key).unwrap().newest.get(&random) == Some(&said));
+    assert!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&random).copied().unwrap_or(0) >= 1));
+    assert!(!has(&bob, &random, "in random"), "a message out of focus came whole");
+
+    // A mention out of focus still comes whole, and notifies.
+    let bob_name = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().username);
+    let ping = format!("@{bob_name} over here");
+    send(&ping, &random);
+    until(&bob, "the mention in random", |s| {
+        s.instance(&key).unwrap().messages[&random].items.iter().any(|m| m.content == ping)
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let notice = loop {
+        match notices.try_recv() {
+            Ok(notice) => break notice,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => panic!("the mention didn't notify"),
+        }
+    };
+    assert!(matches!(notice, Notice::Message { ref body, mention: true, .. } if *body == ping), "{notice:?}");
+    assert!(!has(&bob, &random, "in random"));
+
+    // Opening random brings it into focus, and what it missed is read in, in order.
+    bob.set_focus(Some(Focus { instance: key.clone(), channel: random.clone(), thread: None }));
+    until(&bob, "the missed message", |s| {
+        s.instance(&key).unwrap().messages[&random].items.iter().any(|m| m.content == "in random")
+    });
+    let order: Vec<String> = bob.shared.read(|s| {
+        let items = &s.instance(&key).unwrap().messages[&random].items;
+        items.iter().map(|m| m.content.clone()).filter(|c| *c == "in random" || *c == ping).collect()
+    });
+    assert_eq!(order, ["in random".to_owned(), ping.clone()]);
+    assert_eq!(connection(&bob).id, bob_live, "focusing opened the connection again");
+    assert_eq!(connection(&alice).id, alice_live);
     instance.app.shutdown.cancel();
     drop(instance.runtime);
 }

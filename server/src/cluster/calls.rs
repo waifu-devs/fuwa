@@ -541,6 +541,7 @@ impl App {
             }
             let server = self.servers.create(owner, new).await?;
             self.index.insert(server.clone(), vec![owner.id.clone()], vec![], None);
+            self.made_server(&owner.id, &server.id);
             return Ok(server);
         };
         let (shard_id, mut client) = shards.emptiest_in(region, &self.index.shard_sizes())?;
@@ -559,7 +560,16 @@ impl App {
             .ok_or_else(|| Error::internal("the shard didn't say what it made"))?;
         self.node()?.place(&server.id, Some(&shard_id)).await?;
         self.index.insert(server.clone(), vec![owner.id.clone()], vec![], Some(&shard_id));
+        self.made_server(&owner.id, &server.id);
         Ok(server)
+    }
+
+    /// The owner of a new server is in it as if they'd joined: their streams
+    /// following new servers pick it up (`followed`), and their on-screen
+    /// presence may follow it.
+    fn made_server(&self, owner_id: &str, server_id: &str) {
+        self.joined_server(owner_id, server_id);
+        self.presence.joined(&self.index, owner_id, server_id);
     }
 
     /// Copies someone's new profile into every server they're in.

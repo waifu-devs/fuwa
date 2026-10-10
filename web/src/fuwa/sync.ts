@@ -1,18 +1,38 @@
+import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
-import { ChannelType, type Event, type ProfileItem, type User } from "@/gen/fuwa/v1/types_pb";
+import type { WatchFriendsResponse } from "@/gen/fuwa/v1/friend_pb";
+import type { ChannelHeads, Focus, OpenResponse } from "@/gen/fuwa/v1/live_pb";
+import { ChannelType, EventSchema, type Event, type ProfileItem, type User } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine, startDms, stopDms } from "@/e2ee/engine";
 import { loadApplied } from "@/lib/applied";
 import { adoptInstanceKeys, forgetAccount } from "./accounts";
 import { closeNotifications, onLiveEvent, onRemoved } from "@/lib/notify";
+import { effectiveNotifications } from "@/lib/notifications";
+import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
-import { forgetPins, onPinEvent } from "./pins";
+import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
-import { followFriends } from "./friends";
-import { startPresence } from "./presence";
+import { followFriends, friendsLoading, onFriendsResponse, readFriends, setFriends } from "./friends";
+import {
+  chooseFocus,
+  cursorAfterHeads,
+  mergeNewest,
+  newerHeads,
+  queueHead,
+  readDone,
+  readsDue,
+  sameFocus,
+  touchedBy,
+  wantsEveryMessage,
+  withHeads,
+  type LiveFocus,
+  type NotifyRead,
+} from "./live";
+import { presenceReader, shownPeople, startPresence, watchShown } from "./presence";
 import { FuwaError, call, toFuwaError } from "./errors";
 import {
   accountKey,
@@ -43,8 +63,10 @@ import {
   patchInstance,
   removeServer,
   store,
+  threadKey,
   updateInstance,
   upsertMessage,
+  without,
   withChannels,
   withSharedAuthors,
   withUsers,
@@ -54,7 +76,9 @@ import {
  * Keeps every instance in the store in step with its server: loads who you
  * are and which servers you're in, follows all of them over one event
  * stream, and reconnects with backoff, resuming from the last event seen so
- * nothing is missed or applied twice.
+ * nothing is missed or applied twice. On instances with live connections
+ * (docs/live.md) that stream also carries direct messages, friends and
+ * presence, and says what's on screen so busy servers send the rest as heads.
  */
 
 /** How often the instance's public details (and its announcement) are read again. */
@@ -298,6 +322,9 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       patchInstance(key, { connection: "signed-out" });
       return;
     }
+    // Decided from the Node just read, before any feed starts: one live
+    // connection for everything, or a stream per feed as before.
+    const live = instanceHas(node?.versions, "live-connection");
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
     patchInstance(key, { me: me.user ?? null, admin: me.admin, recentSignIns: me.recentSignInMethods });
@@ -323,15 +350,16 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     if (me.user) {
       const user = me.user;
       yield* Effect.acquireRelease(
-        Effect.sync(() => startDms(key, api, user, token)),
+        Effect.sync(() => startDms(key, api, user, token, live)),
         () => Effect.sync(() => stopDms(key)),
       );
     }
     // Friends too: listening is also what shows you online to them.
-    if (me.user) yield* Effect.forkScoped(followFriends(key, api));
+    if (me.user && live) friendsLoading(key);
+    else if (me.user) yield* Effect.forkScoped(followFriends(key, api));
     // Presence (who's online, what they're doing) runs alongside too.
     yield* Effect.acquireRelease(
-      Effect.sync(() => startPresence(key, api)),
+      Effect.sync(() => startPresence(key, api, live)),
       (stop) => Effect.sync(stop),
     );
     // Notification settings follow the account; an older instance without them just has none.
@@ -374,7 +402,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.forkScoped,
     );
 
-    yield* followEvents(key, api, e.followed);
+    yield* followEvents(key, api, e.followed, live ? { person: !!me.user } : null);
   }).pipe(
     Effect.scoped,
     Effect.catchAll((err) =>
@@ -400,7 +428,28 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     ),
   );
 
-const followEvents = (key: string, api: Api, followed: SubscriptionRef.SubscriptionRef<readonly string[]>) =>
+/** How long the screen settles before a live connection is told what's on it. */
+const FOCUS_SETTLE_MS = 150;
+/** How long a server added to the followed ones may take to come as `followed` before the live connection opens again. */
+const FOLLOW_GRACE = "10 seconds";
+/** A channel's newest page, read again when it comes into focus; the same as a channel's first load. */
+const PAGE = 50;
+/** Messages that came whole kept in mind, so reading a channel for notifications doesn't notify them twice. */
+const WHOLE_KEPT = 500;
+
+/**
+ * Follows the instance's servers: over EventService.Subscribe, opened again
+ * whenever the followed servers change, or with `live` (an instance with
+ * live connections) over one LiveService.Open that carries every feed (the
+ * friends and direct messages only for a `person`) and is told what's on
+ * screen.
+ */
+const followEvents = (
+  key: string,
+  api: Api,
+  followed: SubscriptionRef.SubscriptionRef<readonly string[]>,
+  live: { person: boolean } | null,
+) =>
   Effect.gen(function* () {
     const snapshots = yield* FiberSet.make<void, never>();
     /** The last event applied (or skipped as already known) per server. */
@@ -413,6 +462,18 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
     const relisting = new Map<string, Event[]>();
     /** When the stream last started, to time how long catching up takes. */
     let subscribedAt = 0;
+    // A live connection's own state, started over each time it opens (see below).
+    /** The servers it covers: what it opened with, and what it said it followed since. */
+    let covered = new Set<string>();
+    /** Its id once it says, for Focus. */
+    let connectionId = "";
+    /** The channels in focus as it last echoed. */
+    let echoed = new Set<string>();
+    let readPresence = presenceReader(key);
+    /** Messages that came whole lately (see WHOLE_KEPT). */
+    const whole = new Set<string>();
+    /** Channels whose newest page is being read again, with what came live for them meanwhile. */
+    const rereading = new Map<string, { changed: Set<string>; deleted: Set<string> }>();
 
     const subscribe = (ids: readonly string[]) =>
       Stream.suspend(() => {
@@ -600,6 +661,21 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           patchInstance(key, { connection: "live", problem: null });
           reportTiming("catch_up", performance.now() - subscribedAt);
           reportStartup();
+          // Out of focus while away, a channel's cached messages missed what
+          // came as heads: the one on screen reads its newest page again.
+          if (live) for (const channelId of echoed) yield* FiberSet.run(snapshots, reread(channelId));
+        }
+        // A server joined while the live connection is open: loaded like a
+        // new one at `ready`, then what follows applies.
+        if (res.followed) {
+          const { serverId, sequence } = res.followed;
+          covered.add(serverId);
+          if (!cursors.has(serverId)) {
+            cursors.set(serverId, sequence);
+            held.set(serverId, []);
+            yield* FiberSet.run(snapshots, snapshot(serverId));
+            yield* follow(key, serverId);
+          }
         }
         const event = res.event;
         if (!event) return;
@@ -615,6 +691,10 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           event.payload.case === "memberLeft" && event.payload.value.userId === me
             ? { name: store.get().instances[key]?.servers.find((s) => s.id === sid)?.name, reason: event.payload.value.reason }
             : null;
+        if (live && event.payload.case === "messageCreated" && event.payload.value.message) {
+          whole.add(event.payload.value.message.id);
+          if (whole.size > WHOLE_KEPT) whole.delete(whole.values().next().value!);
+        }
         if (buffer) buffer.push(event);
         else {
           store.update((s) => {
@@ -624,6 +704,10 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
             return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus, thread) } };
           });
+          // A channel being read again: what this changed wins over the page.
+          const touched = live && touchedBy(event);
+          const during = touched && rereading.get(touched.channelId);
+          if (touched && during) (touched.deleted ? during.deleted : during.changed).add(touched.messageId);
           onLiveEvent(key, event);
           dmEngine(key)?.onServerEvent(event);
           onPinEvent(key, event);
@@ -642,9 +726,322 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         }
       });
 
+    if (!live) {
+      yield* followed.changes.pipe(
+        Stream.changesWith((a, b) => a.length === b.length && a.every((id, n) => id === b[n])),
+        Stream.flatMap((ids) => (ids.length ? subscribe(ids) : Stream.empty), { switch: true }),
+        Stream.runForEach(handle),
+      );
+      return;
+    }
+
+    // ─────────────── One live connection (docs/live.md) ───────────────
+
+    // What's on screen, as the connection was last told (in Open or Focus).
+    const wanted = (): LiveFocus => chooseFocus(store.get(), key, shownPeople(key));
+    /** When to look again for reads for notifications held back by their wait (see below). */
+    let notifyWake: ReturnType<typeof setTimeout> | null = null;
+    let told: LiveFocus | null = null;
+    let telling: ReturnType<typeof setTimeout> | null = null;
+    /** The account left (or the instance stopped): nothing more is told or read. */
+    let closed = false;
+    const tellSoon = (after = FOCUS_SETTLE_MS) => {
+      if (!telling && !closed) telling = setTimeout(tell, after);
+    };
+    // Focus never holds anything up: it's sent on its own, and a connection
+    // that's gone meanwhile (NOT_FOUND) opens again with the focus in Open.
+    function tell() {
+      telling = null;
+      const id = connectionId;
+      const focus = wanted();
+      if (!id || sameFocus(focus, told)) return;
+      told = focus;
+      api.live.focus({ connectionId: id, focus }).catch((err: unknown) => {
+        const e = toFuwaError(err);
+        if (closed || e.code === Code.NotFound || e.signedOut || id !== connectionId) return;
+        told = null;
+        tellSoon(2000);
+      });
+    }
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        let focus = store.get().focus;
+        let channels = store.get().instances[key]?.channels;
+        const stopStore = store.subscribe(() => {
+          const s = store.get();
+          // Only what chooseFocus reads: the channel open, and the channels it may be.
+          if (s.focus === focus && s.instances[key]?.channels === channels) return;
+          focus = s.focus;
+          channels = s.instances[key]?.channels;
+          tellSoon();
+        });
+        const stopShown = watchShown(key, () => tellSoon());
+        return () => {
+          closed = true;
+          connectionId = "";
+          stopStore();
+          stopShown();
+          if (telling) clearTimeout(telling);
+          if (notifyWake) clearTimeout(notifyWake);
+        };
+      }),
+      (stop) => Effect.sync(stop),
+    );
+
+    const serverOf = (channelId: string) =>
+      Object.entries(store.get().instances[key]?.channels ?? {}).find(([, list]) => list.some((c) => c.id === channelId))?.[0];
+
+    // A channel that came into focus (or moved while coming in) reads its
+    // newest page again, over what it missed out of focus; a channel never
+    // opened just loads when it is. Its threads' replies went stale with it:
+    // the one open beside it reads again, the rest load fresh when opened.
+    const reread = (channelId: string): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const serverId = serverOf(channelId);
+        if (!serverId || rereading.has(channelId) || !store.get().instances[key]?.messages[channelId]) return Effect.void;
+        const during = { changed: new Set<string>(), deleted: new Set<string>() };
+        rereading.set(channelId, during);
+        refreshChannelPins(key, serverId, channelId);
+        const open = store.get().focus;
+        const thread = open?.instance === key && open.channel === channelId ? open.thread : undefined;
+        updateInstance(key, (i) => {
+          let messages = i.messages;
+          for (const [threadId, parent] of Object.entries(i.threadParents)) {
+            if (parent.channelId === channelId && threadId !== thread) messages = without(messages, threadKey(threadId));
+          }
+          return messages === i.messages ? i : { ...i, messages };
+        });
+        const page = (threadId = "") =>
+          call((signal) => api.messages.listMessages({ serverId, channelId, limit: PAGE, threadId }, { signal })).pipe(
+            Effect.tap((res) =>
+              Effect.sync(() =>
+                updateInstance(key, (i) => {
+                  const at = threadId ? threadKey(threadId) : channelId;
+                  const cached = i.messages[at];
+                  if (!cached) return i;
+                  const next = {
+                    ...i,
+                    users: withSharedAuthors(withUsers(i.users, res.authors), [...res.messages, res.parent]),
+                    messages: { ...i.messages, [at]: mergeNewest(cached, res, upsertMessage, during) },
+                  };
+                  return res.parent ? { ...next, threadParents: { ...next.threadParents, [res.parent.id]: res.parent } } : next;
+                }),
+              ),
+            ),
+          );
+        const thisThread = thread && store.get().instances[key]?.messages[threadKey(thread)] ? page(thread) : Effect.void;
+        return Effect.all([page(), thisThread], { concurrency: "unbounded", discard: true }).pipe(
+          Effect.ignore,
+          Effect.ensuring(Effect.sync(() => rereading.delete(channelId))),
+        );
+      });
+
+    // The newest message known per channel, from heads and reads (live.ts).
+    const known = new Map<string, string>();
+    // Channels whose every message notifies, out of focus: what's still to
+    // read for notifications (live.ts). Reads are few at once and spaced out
+    // per channel; heads that come meanwhile fold into the next one.
+    const notifyReads = new Map<string, NotifyRead>();
+
+    const pumpReads = (): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (closed) return;
+        if (notifyWake) clearTimeout(notifyWake);
+        notifyWake = null;
+        const { start, wake } = readsDue(notifyReads, Date.now());
+        for (const channelId of start) yield* FiberSet.run(snapshots, readForNotifications(channelId));
+        if (wake !== null) notifyWake = setTimeout(() => Effect.runFork(pumpReads()), Math.max(0, wake - Date.now()));
+      });
+
+    // What came after the last message read (one page) goes to the notifier
+    // as if it had come live. Mentions and your own messages came whole already.
+    const readForNotifications = (channelId: string): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const r = notifyReads.get(channelId);
+        if (!r) return Effect.void;
+        r.busy = true;
+        r.lastRead = Date.now();
+        const head = r.head;
+        let read: { newest: string | undefined } | null = null;
+        return call((signal) =>
+          api.messages.listMessages({ serverId: r.serverId, channelId, limit: PAGE, afterId: r.from ?? "" }, { signal }),
+        ).pipe(
+          Effect.tap((res) =>
+            Effect.sync(() => {
+              updateInstance(key, (i) => ({ ...i, users: withSharedAuthors(withUsers(i.users, res.authors), res.messages) }));
+              let newest: string | undefined;
+              for (const message of [...res.messages].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+                newest = message.id;
+                if (message.id > (known.get(channelId) ?? "")) known.set(channelId, message.id);
+                if (whole.has(message.id)) continue;
+                onLiveEvent(
+                  key,
+                  create(EventSchema, {
+                    serverId: r.serverId,
+                    createdAt: message.createdAt,
+                    payload: { case: "messageCreated", value: { message } },
+                  }),
+                );
+              }
+              read = { newest };
+            }),
+          ),
+          Effect.ignore,
+          // A read that failed is tried again later from the same place.
+          Effect.ensuring(
+            Effect.suspend(() => {
+              if (read) readDone(notifyReads, channelId, read.newest, head);
+              else r.busy = false;
+              return pumpReads();
+            }),
+          ),
+        );
+      });
+
+    // Where the channels out of focus stand: cursors move on, unread marks
+    // light up, and a channel in focus that moved anyway (it came into focus
+    // just then) reads its newest page again.
+    const onHeads = (heads: ChannelHeads) =>
+      Effect.gen(function* () {
+        for (const server of heads.servers) {
+          const cursor = cursorAfterHeads(cursors.get(server.serverId), server.sequence);
+          if (cursor !== undefined) cursors.set(server.serverId, cursor);
+        }
+        const s = store.get();
+        const inst = s.instances[key];
+        if (!inst) return;
+        const open = s.focus?.instance === key ? s.focus.channel : null;
+        const news = newerHeads(inst, heads, known);
+        updateInstance(key, (i) => withHeads(i, news, open));
+        for (const n of news) {
+          known.set(n.channelId, n.lastMessageId);
+          if (n.channelId === open || echoed.has(n.channelId)) {
+            yield* FiberSet.run(snapshots, reread(n.channelId));
+            continue;
+          }
+          if (wantsEveryMessage(effectiveNotifications(inst, n.serverId, n.channelId), getPrefs().notifyFor)) queueHead(notifyReads, n);
+        }
+        yield* pumpReads();
+      });
+
+    // The focus in effect: channels new to it read what they missed.
+    const onFocus = (focus: Focus) =>
+      Effect.gen(function* () {
+        const before = echoed;
+        echoed = new Set(focus.channelIds);
+        for (const channelId of echoed) if (!before.has(channelId)) yield* FiberSet.run(snapshots, reread(channelId));
+      });
+
+    // Friends at `ready` are listed again without holding up the rest of the
+    // connection. Changes that come meanwhile wait for the newest list and
+    // apply on top of it; an older list landing late is passed over.
+    let friendsReads = 0;
+    let friendsHeld: WatchFriendsResponse[] | null = null;
+    const relistFriends = (n: number) =>
+      readFriends(api).pipe(
+        Effect.retry(retryPolicy),
+        Effect.tap((read) => Effect.sync(() => n === friendsReads && setFriends(key, read))),
+        Effect.ignore,
+        Effect.ensuring(
+          Effect.suspend(() => {
+            if (n !== friendsReads) return Effect.void;
+            const held = friendsHeld ?? [];
+            friendsHeld = null;
+            return Effect.forEach(held, (res) => onFriendsResponse(key, api, res).pipe(Effect.ignore), { discard: true });
+          }),
+        ),
+      );
+
+    const person = live.person;
+    const onLive = (res: OpenResponse) =>
+      Effect.gen(function* () {
+        const item = res.item;
+        switch (item.case) {
+          case "connectionId":
+            connectionId = item.value;
+            tellSoon(0);
+            return;
+          case "events":
+            return yield* handle(item.value);
+          case "directMessages":
+            dmEngine(key)?.deliver(item.value);
+            return;
+          case "friends":
+            if (item.value.ready) {
+              friendsHeld ??= [];
+              yield* FiberSet.run(snapshots, relistFriends(++friendsReads));
+            } else if (friendsHeld) friendsHeld.push(item.value);
+            else yield* onFriendsResponse(key, api, item.value).pipe(Effect.ignore);
+            return;
+          case "presence":
+            readPresence(item.value);
+            return;
+          case "heads":
+            return yield* onHeads(item.value);
+          case "focus":
+            return yield* onFocus(item.value);
+        }
+        // Nothing set: the heartbeat, which only keeps the silence timeout away.
+      });
+
+    const open = Stream.unwrap(
+      SubscriptionRef.get(followed).pipe(
+        Effect.map((ids) =>
+          Stream.suspend(() => {
+            const controller = new AbortController();
+            subscribedAt = performance.now();
+            resumedFrom.clear();
+            for (const [serverId, sequence] of cursors) resumedFrom.set(serverId, sequence);
+            // Each feed starts over with the connection, as its own stream would.
+            covered = new Set(ids);
+            connectionId = "";
+            readPresence = presenceReader(key);
+            told = wanted();
+            echoed = new Set(told.channelIds);
+            const request = {
+              servers: ids.map((serverId) => ({ serverId, afterSequence: cursors.get(serverId) })),
+              followNewServers: true,
+              directMessages: person,
+              friends: person,
+              presence: true,
+              focus: told,
+            };
+            return Stream.fromAsyncIterable<OpenResponse, FuwaError>(api.live.open(request, { signal: controller.signal }), toFuwaError).pipe(
+              Stream.concat(Stream.fail(ENDED)),
+              Stream.ensuring(
+                Effect.sync(() => {
+                  controller.abort();
+                  connectionId = "";
+                }),
+              ),
+            );
+          }),
+        ),
+      ),
+    ).pipe(
+      Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.lost") }), SILENCE),
+      Stream.tapError((err) =>
+        Effect.sync(() => err !== ENDED && err.retryable && patchInstance(key, { connection: "reconnecting", problem: err.message })),
+      ),
+      Stream.retry(retryPolicy),
+    );
+
+    // Joining or leaving a server needn't open the connection again: joins
+    // come as `followed`, leaving as memberLeft or serverDeleted. Only a
+    // server followed here that the connection still doesn't cover after a
+    // while (it said nothing of it) does.
+    const reopen = yield* SubscriptionRef.make(0);
+    const uncovered = (ids: readonly string[]) => ids.some((id) => !covered.has(id));
     yield* followed.changes.pipe(
-      Stream.changesWith((a, b) => a.length === b.length && a.every((id, n) => id === b[n])),
-      Stream.flatMap((ids) => (ids.length ? subscribe(ids) : Stream.empty), { switch: true }),
-      Stream.runForEach(handle),
+      Stream.flatMap((ids) => (uncovered(ids) ? Stream.fromEffect(Effect.sleep(FOLLOW_GRACE).pipe(Effect.as(ids))) : Stream.empty), {
+        switch: true,
+      }),
+      Stream.filter(uncovered),
+      Stream.runForEach(() => SubscriptionRef.update(reopen, (n) => n + 1)),
+      Effect.forkScoped,
+    );
+    yield* reopen.changes.pipe(
+      Stream.flatMap(() => open, { switch: true }),
+      Stream.runForEach(onLive),
     );
   });

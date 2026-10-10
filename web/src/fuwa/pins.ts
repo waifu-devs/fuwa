@@ -115,6 +115,18 @@ export function onPinEvent(instanceKey: string, event: Event) {
   }
 }
 
+/**
+ * A channel came into a live connection's focus: pins changed while it was
+ * out of focus never came, so the lists loaded for it (and its threads) are
+ * read again.
+ */
+export function refreshChannelPins(instanceKey: string, serverId: string, channelId: string) {
+  const prefix = channelKey(instanceKey, channelId, "");
+  for (const key of [...lists.keys()]) {
+    if (key.startsWith(prefix)) void loadChannelPins(instanceKey, serverId, channelId, key.slice(prefix.length));
+  }
+}
+
 /** Loads a conversation's pins, the latest first; `more` adds the next page. */
 export async function loadDmPins(instanceKey: string, conversationId: string, more = false) {
   const key = dmKey(instanceKey, conversationId);

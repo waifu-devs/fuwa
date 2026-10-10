@@ -49,14 +49,15 @@ export function shouldAlert(e: Effective, mention: boolean, prefs: Prefs): { sou
 }
 
 /**
- * Whether a message pings you: by your @username, or through @everyone,
- * @here (unless you hid those) or one of your roles. The server works out
- * who may ping everyone and which roles a message reached.
+ * Whether a message pings you: by your @username or your id (`<@id>`, as
+ * apps write it), or through @everyone, @here (unless you hid those) or one
+ * of your roles. The server works out who may ping everyone, which roles a
+ * message reached and which ids name members.
  */
 export function pingsMe(
   inst: InstanceState,
   serverId: string,
-  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds">,
+  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds"> & Partial<Pick<Message, "mentionUserIds">>,
   suppressEveryone: boolean,
 ) {
   const me = inst.me;
@@ -68,11 +69,11 @@ export function pingsMe(
 export function pingsUser(
   me: Pick<User, "id" | "username"> | undefined,
   myRoleIds: readonly string[],
-  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds">,
+  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds"> & Partial<Pick<Message, "mentionUserIds">>,
   suppressEveryone: boolean,
 ) {
   if (!me || message.authorId === me.id) return false;
-  if (mentions(message.content, me.username)) return true;
+  if (mentions(message.content, me.username) || message.mentionUserIds?.includes(me.id)) return true;
   if (message.mentionsEveryone && !suppressEveryone) return true;
   if (!message.mentionRoleIds.length) return false;
   const mine = new Set(myRoleIds);

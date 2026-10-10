@@ -526,7 +526,11 @@
   - `src/core/`: everything that isn't drawing, ported from `web/src/fuwa` and
     `web/src/e2ee`: `api.rs` (clients, the `rpc!` macro, addresses),
     `store.rs` (state and reducers), `sync.rs` (one task per instance:
-    subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
+    subscribe, snapshot, apply, reconnect; on instances with
+    `live-connection` one `LiveService.Open` stream carries DMs, friends and
+    presence too), `live.rs` (its Focus: the open channel, the member rows
+    in sight and the authors shown; heads, re-reading a channel when it
+    comes into focus), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it;
     a `Room` is a direct message or a secure channel, which share
@@ -749,7 +753,12 @@
     instance that subscribes, loads state after `ready`, applies events and
     reconnects with the last sequences, and reads the instance's public
     details (name, sign-ups, announcement) again every minute, since those
-    change without an event; `store.ts` holds the state and its
+    change without an event. On instances with `live-connection` that one
+    stream is `LiveService.Open` (docs/live.md), carrying DMs, friends and
+    presence too, and `sync.ts` keeps its Focus (the open channel, the
+    people with presence subscriptions); `live.ts` is the pure part
+    (choosing the focus, applying heads, merging a re-read page). Elsewhere
+    the four streams stay as they were; `store.ts` holds the state and its
     reducers (idempotent, since events can arrive twice); `actions.ts` are the
     calls the UI makes; `saved.ts` is the instance list kept in localStorage.
   - `src/components/`, `src/pages/`: the UI. Routes are

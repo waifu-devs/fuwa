@@ -6,6 +6,7 @@ import {
   PresenceStatus,
   type Presence,
   type PresenceSettings,
+  type WatchPresenceResponse,
 } from "@/gen/fuwa/v1/presence_pb";
 import { reportError, reportUsage } from "@/lib/reports";
 import type { Api } from "./client";
@@ -37,6 +38,9 @@ type Instance = {
 const instances = new Map<string, Instance>();
 const personListeners = new Map<string, Set<() => void>>();
 const instanceListeners = new Map<string, Set<() => void>>();
+/** Who something on screen shows, per instance (a live connection's focus): each person's count of what shows them. */
+const shown = new Map<string, Map<string, number>>();
+const shownListeners = new Map<string, Set<() => void>>();
 const NO_ONE = new Set<string>();
 
 const instance = (key: string) => {
@@ -106,10 +110,34 @@ function forget(key: string) {
   notify(instanceListeners, key);
 }
 
+/** Counts one more (or one less) thing on screen showing someone; the people shown changing is told. */
+function show(key: string, userId: string, by: 1 | -1) {
+  let people = shown.get(key);
+  if (!people) shown.set(key, (people = new Map()));
+  const n = (people.get(userId) ?? 0) + by;
+  if (n > 0) people.set(userId, n);
+  else people.delete(userId);
+  if (n === 0 || (n === 1 && by === 1)) notify(shownListeners, key);
+}
+
+/** Whose presence something on screen shows: the people a live connection puts in focus. */
+export const shownPeople = (key: string): string[] => [...(shown.get(key)?.keys() ?? [])];
+
+/** Calls `fn` when the people shown on an instance change. */
+export const watchShown = (key: string, fn: () => void) => listen(shownListeners, key, fn);
+
 /** Someone's presence on an instance; undefined while they're offline. */
 export function usePresence(key: string | undefined, userId: string | undefined): Presence | undefined {
   return useSyncExternalStore(
-    (fn) => (key && userId ? listen(personListeners, personKey(key, userId), fn) : () => {}),
+    (fn) => {
+      if (!key || !userId) return () => {};
+      const stop = listen(personListeners, personKey(key, userId), fn);
+      show(key, userId, 1);
+      return () => {
+        stop();
+        show(key, userId, -1);
+      };
+    },
     () => (key && userId ? instances.get(key)?.people.get(userId) : undefined),
   );
 }
@@ -185,11 +213,34 @@ const sleep = (ms: number, signal: AbortSignal) =>
   });
 
 /**
+ * Reads one presence stream's responses, from WatchPresence or a live
+ * connection: everyone online comes first and replaces what was known at
+ * `ready`, then each change. Make a new one for each stream. Returns whether
+ * this response was the `ready`.
+ */
+export function presenceReader(key: string): (res: WatchPresenceResponse) => boolean {
+  const gathered: Presence[] = [];
+  let ready = false;
+  return (res) => {
+    if (res.presence) {
+      if (ready) put(key, res.presence);
+      else gathered.push(res.presence);
+    }
+    if (!res.ready || ready) return false;
+    ready = true;
+    replaceAll(key, gathered);
+    return true;
+  };
+}
+
+/**
  * Keeps this app's presence on an instance (every minute, and at once when
  * you go idle or come back) and follows everyone you can see. Returns a stop
- * function. An instance without presence is left alone.
+ * function. An instance without presence is left alone. On a live
+ * connection (`live`) presence comes over it instead (`presenceReader`), so
+ * only your own is kept here.
  */
-export function startPresence(key: string, api: Api): () => void {
+export function startPresence(key: string, api: Api, live = false): () => void {
   const abort = new AbortController();
   const { signal } = abort;
   watchInput();
@@ -224,19 +275,10 @@ export function startPresence(key: string, api: Api): () => void {
   const watch = async () => {
     let delay = 500;
     while (!signal.aborted) {
-      const gathered: Presence[] = [];
-      let ready = false;
+      const read = presenceReader(key);
       try {
         for await (const res of api.presence.watchPresence({}, { signal })) {
-          if (res.presence) {
-            if (ready) put(key, res.presence);
-            else gathered.push(res.presence);
-          }
-          if (res.ready && !ready) {
-            ready = true;
-            delay = 500;
-            replaceAll(key, gathered);
-          }
+          if (read(res)) delay = 500;
         }
       } catch (err) {
         if (signal.aborted) return;
@@ -261,7 +303,7 @@ export function startPresence(key: string, api: Api): () => void {
       if (!i.supported) return;
     }
     void heartbeat();
-    void watch();
+    if (!live) void watch();
   })();
 
   return () => {

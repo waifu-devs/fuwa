@@ -340,8 +340,8 @@ export const LiveService: GenService<{
    *
    * Messages, reactions, polls, pins and thread changes come whole only for
    * the channels in focus, and for new or edited messages that mention the
-   * caller (by name, by a role they have, or everyone); the rest move
-   * `heads`. Either way only channels the caller can see. Agents get every
+   * caller (as @username or <@id>, by a role they have, or everyone) or
+   * that the caller wrote; the rest move `heads`. Either way only channels the caller can see. Agents get every
    * one unless they ask for less (`messages`).
    *
    * Presence here is what's on screen: everyone in servers smaller than the

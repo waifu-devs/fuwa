@@ -182,10 +182,12 @@ impl Interest {
         let whole = match self.intent {
             Intent::All => true,
             Intent::Focused | Intent::Mentions => {
+                // The caller's own messages come whole too: sent from another
+                // device, they'd otherwise light the caller's own unread marks.
                 let mentioned = match payload {
                     Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
                     | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }) => {
-                        mentions(m, &self.account_id, roles)
+                        m.author_id == self.account_id || mentions(m, &self.account_id, roles)
                     }
                     _ => false,
                 };
@@ -199,10 +201,26 @@ impl Interest {
         }
         let heads = self.heads.entry(event.server_id.clone()).or_default();
         heads.sequence = heads.sequence.max(event.sequence);
-        if visible && let Payload::MessageCreated(pb::MessageCreated { message: Some(m) }) = payload {
+        // A reply only in its thread isn't new in the channel (apps don't
+        // count it as unread there), so only the sequence moves for it.
+        if visible
+            && let Payload::MessageCreated(pb::MessageCreated { message: Some(m) }) = payload
+            && (m.thread_id.is_empty() || m.also_in_channel)
+        {
             heads.channels.insert(channel_id.to_string(), m.id.clone());
         }
         false
+    }
+
+    /// The heads owed before `event` may go out whole: any held back for its
+    /// server. A client moves its cursor to the newest event it got, so a
+    /// later event sent before the heads of earlier ones would let a
+    /// reconnect skip them.
+    pub fn heads_before(&mut self, event: &pb::Event) -> Option<pb::ChannelHeads> {
+        match event.sequence > 0 && self.heads.contains_key(&event.server_id) {
+            true => self.take_heads(),
+            false => None,
+        }
     }
 
     /// The heads moved since last time, if any.
@@ -266,6 +284,28 @@ mod tests {
     }
 
     #[test]
+    fn heads_go_before_a_later_whole_event_and_thread_replies_move_only_the_sequence() {
+        let (_tx, rx) = watch::channel(Arc::new(pb::Focus { channel_ids: vec!["a".into()], ..Default::default() }));
+        let mut interest = Interest::new(Intent::Focused, "me", rx);
+        let whole = created("a", "m2", 2);
+        assert!(interest.heads_before(&whole).is_none(), "nothing owed yet");
+        assert!(!interest.take(&created("b", "m1", 1), None, true));
+        assert!(interest.take(&whole, None, true));
+        let owed = interest.heads_before(&whole).expect("b's head before m2");
+        assert_eq!(owed.servers[0].sequence, 1);
+        assert!(interest.heads_before(&whole).is_none(), "sent once");
+
+        let mut reply = created("b", "r1", 3);
+        if let Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = &mut reply.payload {
+            m.thread_id = "m1".into();
+        }
+        assert!(!interest.take(&reply, None, true));
+        let heads = interest.take_heads().unwrap();
+        assert_eq!(heads.servers[0].sequence, 3);
+        assert!(heads.servers[0].channels.is_empty(), "a reply only in its thread isn't new in b");
+    }
+
+    #[test]
     fn mentions_come_whole_and_agents_get_everything() {
         let (_tx, rx) = watch::channel(Arc::new(pb::Focus::default()));
         let mut interest = Interest::new(Intent::Mentions, "me", rx.clone());
@@ -287,6 +327,12 @@ mod tests {
         assert!(interest.take(&by_role, Some(&["mods".into()]), true));
         // Roles unknown: any role mention comes, so none is missed.
         assert!(interest.take(&by_role, None, true));
+        // The caller's own, from another device, so it lights no unread mark.
+        let mut mine = created("b", "m5", 5);
+        if let Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = &mut mine.payload {
+            m.author_id = "me".into();
+        }
+        assert!(interest.take(&mine, Some(&[]), true));
 
         assert_eq!(Intent::of(0, true), Intent::All);
         assert_eq!(Intent::of(0, false), Intent::Focused);

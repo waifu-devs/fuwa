@@ -96,6 +96,8 @@ pub struct MembersView {
     joined: Option<Rc<(std::collections::HashSet<String>, Instant)>>,
     /// Lines of two heights (headings and people), drawn only while in sight.
     list: gpui_kit::ListState,
+    /// The people in the rows in sight, which a live connection's focus names (`core/live.rs`).
+    pub in_view: Vec<String>,
 }
 
 impl EventEmitter<MembersEvent> for MembersView {}
@@ -112,6 +114,14 @@ impl MembersView {
         })
         .detach();
         let list = gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(240.0));
+        // Scrolling says which rows are in sight; they're read once the list lets go of itself.
+        let weak = cx.entity().downgrade();
+        list.set_scroll_handler(move |event, _, cx| {
+            let (weak, range) = (weak.clone(), event.visible_range.clone());
+            cx.defer(move |cx| {
+                let _ = weak.update(cx, |this, _| this.sight(range));
+            });
+        });
         let mut this = Self {
             core,
             key,
@@ -124,6 +134,7 @@ impl MembersView {
             known: Default::default(),
             joined: None,
             list,
+            in_view: Vec::new(),
         };
         this.refresh(cx);
         this
@@ -178,6 +189,28 @@ impl MembersView {
             self.place(&rows, cx.reduce_motion());
             self.rows = Rc::new(rows);
             cx.notify();
+        }
+        // Until the list scrolls, the rows in sight run from where it's
+        // scrolled to for as many as fit (before it's laid out, a tall window's worth).
+        let from = self.list.logical_scroll_top().item_ix;
+        let seen = f32::from(self.list.viewport_bounds().size.height);
+        let fit = if seen > 0.0 { (seen / ROW).ceil() as usize + 2 } else { 24 };
+        self.sight(from..from + fit);
+    }
+
+    /// The rows in `range` are in sight: their people are on screen.
+    fn sight(&mut self, range: std::ops::Range<usize>) {
+        let end = range.end.min(self.rows.len());
+        let people: Vec<String> = self.rows[range.start.min(end)..end]
+            .iter()
+            .filter_map(|item| match item {
+                Item::Member(r) => Some(r.user.id.clone()),
+                Item::Heading(..) => None,
+            })
+            .collect();
+        if people != self.in_view {
+            self.in_view = people;
+            self.core.set_in_view(&self.key, &self.server, &self.in_view);
         }
     }
 }
