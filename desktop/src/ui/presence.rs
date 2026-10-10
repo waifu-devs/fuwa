@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, div, img, px,
+    StatefulInteractiveElement as _, Styled as _, div, px,
 };
 
 use crate::core::i18n::{Arg, t, t_with};

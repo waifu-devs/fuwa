@@ -117,6 +117,7 @@ impl ServerSettingsView {
         if open {
             let mut list = div()
                 .id(SharedString::from(format!("{id}-menu")))
+                .occlude()
                 .w(px(width))
                 .max_h(px(288.0))
                 .overflow_y_scroll()

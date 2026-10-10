@@ -659,6 +659,7 @@ impl FuwaApp {
         }
         let panel = div()
             .id("emoji-panel")
+            .occlude()
             .absolute()
             .right(px(self.tool_right(crate::ui::composer::Tool::Emoji)))
             .bottom(gpui_kit::relative(1.0))
@@ -814,14 +815,20 @@ impl FuwaApp {
                     Duration::from_millis(25 * k as u64),
                 ));
             }
-            // It drops out of the hand's corner (the web's `scale: 0.85, y: -4`).
-            wrap = wrap.child(div().absolute().top(px(40.0)).right_0().child(motion::pop_in(
-                row,
-                "emoji-tones-in",
-                (1.0, 0.0),
-                0.85,
-                -4.0,
-            )));
+            // It drops out of the hand's corner (the web's `scale: 0.85, y: -4`), drawn after
+            // the grid it hangs over so the grid neither scrolls nor takes clicks under it.
+            wrap = wrap.child(
+                div().absolute().top(px(40.0)).right_0().child(
+                    gpui_kit::deferred(div().occlude().child(motion::pop_in(
+                        row,
+                        "emoji-tones-in",
+                        (1.0, 0.0),
+                        0.85,
+                        -4.0,
+                    )))
+                    .with_priority(1),
+                ),
+            );
         }
         wrap.into_any_element()
     }

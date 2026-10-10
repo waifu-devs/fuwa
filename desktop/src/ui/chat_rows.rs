@@ -634,7 +634,13 @@ fn duration(seconds: i64) -> String {
 }
 
 /// What AutoMod caught (`AutoModAlertRow`): who, where, what they said and what was done.
-pub(crate) fn alert_row(a: &AlertLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElement {
+pub(crate) fn alert_row(
+    a: &AlertLine,
+    ctx: &Rc<RowCtx>,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> AnyElement {
     let alert = &a.alert;
     let amber = rgb(AMBER_500);
     let amber_fg: Hsla = if p.dark { rgb(AMBER_400).into() } else { rgb(AMBER_600).into() };
@@ -720,11 +726,9 @@ pub(crate) fn alert_row(a: &AlertLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElem
         );
         let name = places.into_iter().find(|(k, _)| k == "name").map(|(_, r)| r);
         lines = lines.child(naming_line(format!("alert-text|{}", a.id), text, styles, name, &a.user_id, ctx)).child(
-            div()
-                .id(SharedString::from(format!("alert-quote|{}", a.id)))
+            crate::ui::widgets::inner_scroll(format!("alert-quote|{}", a.id), window, cx)
                 .mt(px(8.0))
                 .max_h(px(160.0))
-                .overflow_y_scroll()
                 .rounded(radius_xl())
                 .bg(alpha(p.muted, 0.6))
                 .px(px(12.0))

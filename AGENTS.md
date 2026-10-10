@@ -1099,3 +1099,11 @@
   mirrors `web/src/fuwa` and `web/src/e2ee` file for file where it can. Its
   settings are this computer's and apply to every instance, like
   `web/src/lib/prefs.ts`. Pictures in messages show as links, as on the web.
+- In the desktop app, GPUI gives a scroll-wheel event to every scrolling box
+  under the pointer, not only the front one. Anything floating over a page
+  that takes the mouse (menus, pickers, cards, panels over the chat)
+  `.occlude()`s, and is drawn after what it covers; a box that scrolls
+  inside something else that scrolls is `widgets::inner_scroll`. Otherwise
+  scrolling it scrolls the page too. `desktop/tests/scrolling.rs` counts
+  the scroll boxes and floating layers per file and fails on a new one
+  until it's been looked at.

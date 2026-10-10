@@ -378,7 +378,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
     ) -> Option<gpui_kit::component::text::InlineElement> {
         use gpui_kit::{
             InteractiveElement as _, IntoElement as _, ObjectFit, ParentElement as _, Styled as _, StyledImage as _,
-            div, img, px, radians,
+            div, px, radians,
         };
         let picture = node.data::<Picture>()?;
         let size = context.font_size() * 1.375;

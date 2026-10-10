@@ -779,7 +779,9 @@ impl FuwaApp {
                     .when(loading, |el| el.child(crate::ui::chat_rows::skeleton(2, &p)))
                     .when(!loading, |el| {
                         el.children(
-                            rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, cx)),
+                            rows.iter()
+                                .enumerate()
+                                .map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, window, cx)),
                         )
                     }),
             );

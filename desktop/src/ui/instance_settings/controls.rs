@@ -220,6 +220,7 @@ pub(super) fn save_bar(
             .into_any_element()
     };
     let bar = div()
+        .occlude()
         .flex()
         .flex_wrap()
         .items_center()

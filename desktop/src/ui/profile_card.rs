@@ -490,7 +490,8 @@ impl FuwaApp {
             _ => beside_right,
         }
         .clamp(EDGE, (vw - EDGE - WIDTH).max(EDGE));
-        let scroller = div().id("profile-scroll").max_h(px(vh - 2.0 * EDGE)).overflow_y_scroll().child(column);
+        let scroller =
+            div().id("profile-scroll").occlude().max_h(px(vh - 2.0 * EDGE)).overflow_y_scroll().child(column);
         // It grows out of the side it opens from (Radix's transform origin), rising 6px as it fades in.
         let from_right = x < left;
         let popover = motion::spring_in(
@@ -1013,6 +1014,7 @@ impl FuwaApp {
         let busy = self.people.busy_role.is_some();
         let mut list = div()
             .id("roles-menu")
+            .occlude()
             .w(px(224.0))
             .max_h(px(288.0))
             .overflow_y_scroll()

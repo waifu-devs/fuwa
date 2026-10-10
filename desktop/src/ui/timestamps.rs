@@ -566,6 +566,7 @@ impl FuwaApp {
         let right = self.tool_right(crate::ui::composer::Tool::Timestamp);
         div()
             .id("time-panel")
+            .occlude()
             .absolute()
             .right(px(right))
             .bottom(gpui_kit::relative(1.0))

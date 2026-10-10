@@ -12,8 +12,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, img,
-    px, rgb,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, px,
+    rgb,
 };
 
 use crate::core::config::Prefs;

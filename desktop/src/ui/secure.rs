@@ -564,7 +564,8 @@ impl FuwaApp {
                 )
             }));
         let count = rows.len();
-        let mut list = div().id("secure-people").max_h(px(256.0)).overflow_y_scroll().mx(px(-4.0)).px(px(4.0));
+        let mut list =
+            crate::ui::widgets::inner_scroll("secure-people", window, cx).max_h(px(256.0)).mx(px(-4.0)).px(px(4.0));
         for (n, (id, devices, shown, user)) in rows.into_iter().enumerate() {
             let ok = verified.contains(&id);
             let hover = alpha(p.muted, 0.6);

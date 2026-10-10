@@ -347,6 +347,7 @@ impl FuwaApp {
             ])
             .child(list.p(px(6.0)));
         div()
+            .occlude()
             .absolute()
             .left(px(16.0))
             .right(px(16.0))

@@ -137,10 +137,21 @@ fn chips(
 }
 
 /// A server's rules, numbered (`RulesList`), scrolling past `max_h`.
-pub(crate) fn rules_list(rules: &[String], max_h: f32, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub(crate) fn rules_list(
+    rules: &[String],
+    max_h: f32,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let muted = alpha(p.muted, 0.5);
-    div().id("rules-list").max_h(px(max_h)).overflow_y_scroll().pr(px(4.0)).flex().flex_col().gap(px(8.0)).children(
-        rules.iter().enumerate().map(|(n, rule)| {
+    crate::ui::widgets::inner_scroll("rules-list", window, cx)
+        .max_h(px(max_h))
+        .pr(px(4.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .children(rules.iter().enumerate().map(|(n, rule)| {
             motion::rise(
                 div()
                     .flex()
@@ -182,8 +193,7 @@ pub(crate) fn rules_list(rules: &[String], max_h: f32, p: &Palette) -> gpui_kit:
                 Duration::from_millis(45 * n.min(10) as u64),
                 0.0,
             )
-        }),
-    )
+        }))
 }
 
 /// "I've read the rules and agree to them" (`AgreeCheck`): a card that fills
@@ -987,7 +997,7 @@ impl FuwaApp {
                 .text_color(p.muted_foreground)
                 .child(t(if agreeing { "join.rules.noneTalk" } else { "join.rules.none" }))
                 .into_any_element(),
-            Some(rules) => rules_list(rules, 360.0, p).into_any_element(),
+            Some(rules) => rules_list(rules, 360.0, p, window, cx).into_any_element(),
         };
         let has_rules = self.rules.as_ref().is_some_and(|r| !r.is_empty());
         let mut col = div().flex().flex_col().gap(px(16.0)).child(band).child(content);
@@ -1274,7 +1284,7 @@ impl FuwaApp {
                             .map(|w| div().h(px(48.0)).w(gpui_kit::relative(w)).rounded(radius_2xl()).bg(p.muted)),
                     )
                     .into_any_element(),
-                Some(rules) => rules_list(&rules, 224.0, &p).into_any_element(),
+                Some(rules) => rules_list(&rules, 224.0, &p, window, cx).into_any_element(),
             });
             section = section.child(self.agree_and_talk(&p, window, cx));
             body = body.child(motion::rise(section, "welcome-rules", Duration::from_millis(300), 12.0));

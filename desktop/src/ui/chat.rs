@@ -1033,11 +1033,11 @@ impl FuwaApp {
                 let list = MessageScroller::new(
                     SharedString::from(format!("list|{target}")),
                     self.scroller.clone(),
-                    move |ix, _window, cx| match rows.get(ix) {
+                    move |ix, window, cx| match rows.get(ix) {
                         Some(row) if fits => {
-                            crate::ui::dm_view::placed(render_row(row, ix, &ctx, cx), ix == 0, ix + 1 == len)
+                            crate::ui::dm_view::placed(render_row(row, ix, &ctx, window, cx), ix == 0, ix + 1 == len)
                         }
-                        Some(row) => render_row(row, ix, &ctx, cx),
+                        Some(row) => render_row(row, ix, &ctx, window, cx),
                         None => div().into_any_element(),
                     },
                 )
@@ -1403,7 +1403,7 @@ pub(crate) struct RowCtx {
     pub(crate) send_keys: String,
 }
 
-pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
+pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, window: &mut Window, cx: &mut App) -> AnyElement {
     let p = pal(cx);
     let is_fresh = ctx.fresh.contains_key(row.id_str());
     let el: AnyElement = match row {
@@ -1508,7 +1508,7 @@ pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -
         Row::DmStart(start) => crate::ui::dm_view::render_start(start, &p),
         Row::Line(line) => crate::ui::dm_view::render_line(line, &p),
         Row::Join(j) => crate::ui::chat_rows::join_row(j, ctx, &p),
-        Row::AutoMod(a) => crate::ui::chat_rows::alert_row(a, ctx, &p),
+        Row::AutoMod(a) => crate::ui::chat_rows::alert_row(a, ctx, &p, window, cx),
         Row::Msg(m) => message(m, &p, ctx, cx),
     };
     // A message of yours the server took glows once (the web's `.landed`).

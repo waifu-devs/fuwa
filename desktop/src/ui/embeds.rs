@@ -8,7 +8,7 @@ use gpui_kit::component::text::TextView;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, SharedString, SpringConfig, Stateful, Styled as _, StyledImage as _, div, img, px, rgb,
+    ParentElement as _, SharedString, SpringConfig, Stateful, Styled as _, StyledImage as _, div, px, rgb,
     sampled_easing,
 };
 

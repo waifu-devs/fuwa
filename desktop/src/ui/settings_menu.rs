@@ -1,6 +1,7 @@
 //! Menus under a button on the settings pages (shadcn's `DropdownMenu`, as
 //! the web uses it): one open at a time, closed by picking or clicking
-//! anywhere else, drawn above the page.
+//! anywhere else, drawn above the page, which it hides from the mouse (so
+//! scrolling the menu never scrolls the page too).
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -68,6 +69,7 @@ impl SettingsView {
         if open {
             let mut list = div()
                 .id(SharedString::from(format!("{id}-menu")))
+                .occlude()
                 .absolute()
                 .top(px(40.0))
                 .w(px(width))

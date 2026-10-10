@@ -189,11 +189,9 @@ impl ServerSettingsView {
                 None => empty(server, &t("serversettings.welcome.emptyOnboarding"), width, p, window, cx),
             },
         };
-        div()
-            .id("stage-card")
+        crate::ui::widgets::inner_scroll("stage-card", window, cx)
             .w(px(width))
             .max_h(px(if phone { PHONE.1 * scale * 0.92 } else { DESKTOP.1 * scale * 0.92 }))
-            .overflow_y_scroll()
             .border_1()
             .border_color(p.border)
             .bg(p.card)
