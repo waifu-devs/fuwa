@@ -2615,9 +2615,9 @@ impl NodeDb {
         .await
     }
 
-    /// The endpoints of these agents that are on, with the agents. An agent
-    /// turned off, or whose owner is, has none.
-    pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, EndpointRow)>> {
+    /// Agents' endpoints that are on, each with its agent and the agent's
+    /// owner. An agent turned off, or whose owner is, has none.
+    pub async fn active_agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<(Account, String, EndpointRow)>> {
         let conn = self.read()?;
         let mut found = Vec::new();
         for agent_id in agent_ids {
@@ -2632,17 +2632,20 @@ impl NodeDb {
                 continue;
             };
             let Some(account) = self.account(agent_id).await?.filter(|account| !account.disabled) else { continue };
-            let owner_off = query_one(
+            let Some((owner_id, owner_off)) = query_one(
                 &conn,
-                "SELECT 1 FROM accounts AS agents JOIN accounts AS owners ON owners.id = agents.owner_id
-                 WHERE agents.id = ?1 AND owners.disabled_at IS NOT NULL",
+                "SELECT agents.owner_id, owners.disabled_at IS NOT NULL
+                 FROM accounts AS agents LEFT JOIN accounts AS owners ON owners.id = agents.owner_id
+                 WHERE agents.id = ?1",
                 [agent_id.as_str()],
-                |r| r.get::<i64>(0),
+                |r| Ok((r.get::<Option<String>>(0)?, r.get::<i64>(1)? != 0)),
             )
             .await?
-            .is_some();
+            else {
+                continue;
+            };
             if !owner_off {
-                found.push((account, row));
+                found.push((account, owner_id.unwrap_or_default(), row));
             }
         }
         Ok(found)
