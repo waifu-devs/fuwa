@@ -49,7 +49,10 @@ pub struct SignalConfig {
 /// between two signals from the same instance is the activity in between.
 #[derive(Debug, Default, Serialize)]
 pub struct Totals {
+    /// Every account, agents included.
     pub accounts: i64,
+    /// Accounts that are agents (bots and apps).
+    pub agents: i64,
     pub accounts_active_1d: i64,
     pub accounts_active_30d: i64,
     pub servers: i64,
@@ -70,6 +73,7 @@ pub async fn collect(app: &App) -> Result<Signal> {
     let (servers, discoverable_servers) = app.index.count();
     let mut totals = Totals {
         accounts: accounts.total,
+        agents: accounts.agents,
         accounts_active_1d: accounts.active_1d,
         accounts_active_30d: accounts.active_30d,
         servers,

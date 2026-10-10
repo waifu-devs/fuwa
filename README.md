@@ -595,7 +595,8 @@ also written to the log, so you can see exactly what left. It contains:
   told apart from other instances' signals. It says nothing about you.
 - `config`: whether standalone accounts are open, closed or off; whether linked
   accounts are on; who can create servers; whether encryption and limits are set
-- `totals`: counts of accounts (total, active in the last day and 30 days),
+- `totals`: counts of accounts (total, how many of them are agents, active in
+  the last day and 30 days),
   servers, members, channels, messages (stored and ever sent), message bytes,
   attachments, events and storage bytes
 
