@@ -497,12 +497,13 @@ const TOOLS: &[Tool] = &[
     Tool {
         name: "upload_picture",
         title: "Upload a picture",
-        description: "Stores a picture on the instance and returns its URL, for create_emoji (purpose emoji) or a \
-                      server icon (purpose server_icon). PNG, JPEG, GIF, WebP or AVIF, at most the instance's \
-                      picture size limit.",
+        description: "Stores a picture on the instance and returns its URL, for create_emoji (purpose emoji), \
+                      update_server's icon_url (server_icon) or banner_url (server_banner), a webhook's avatar_url \
+                      (webhook_avatar) or create_profile_item (decoration). PNG, JPEG, GIF, WebP or AVIF, at most \
+                      the instance's picture size limit.",
         properties: || {
             json!({
-                "purpose": { "type": "string", "enum": ["emoji", "server_icon"] },
+                "purpose": { "type": "string", "enum": ["emoji", "server_icon", "server_banner", "webhook_avatar", "decoration"] },
                 "server_id": server_id(),
                 "content_type": { "type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"] },
                 "data_base64": { "type": "string", "description": "The file's bytes, base64." }
@@ -529,9 +530,9 @@ const TOOLS: &[Tool] = &[
     },
 ];
 
-/// Every tool, as `tools/list` answers.
+/// Every tool, as `tools/list` answers: these, then the ones for running a server.
 pub fn list() -> Vec<Value> {
-    TOOLS
+    let mut tools: Vec<Value> = TOOLS
         .iter()
         .map(|tool| {
             json!({
@@ -553,7 +554,15 @@ pub fn list() -> Vec<Value> {
                 }
             })
         })
-        .collect()
+        .collect();
+    tools.extend(super::manage::list());
+    tools
+}
+
+/// Whether there's a tool by that name here (not in `manage`).
+#[cfg(test)]
+pub(crate) fn has(name: &str) -> bool {
+    TOOLS.iter().any(|tool| tool.name == name)
 }
 
 /// A tool's arguments.
@@ -666,14 +675,21 @@ fn buttons(value: Option<&Value>) -> Result<Vec<pb::ComponentRow>, RpcError> {
 /// `isError`, so the model reads why; bad arguments are a protocol error.
 pub async fn call(cx: &Cx, params: &Value) -> Result<Value, RpcError> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-    let Some(tool) = TOOLS.iter().find(|tool| tool.name == name) else {
-        return Err(RpcError::invalid(format!("there's no tool {name:?}")));
-    };
     let empty = Map::new();
     let args = match params.get("arguments") {
         None | Some(Value::Null) => Args(&empty),
         Some(Value::Object(map)) => Args(map),
         Some(_) => return Err(RpcError::invalid("arguments must be an object")),
+    };
+    let Some(tool) = TOOLS.iter().find(|tool| tool.name == name) else {
+        if !super::manage::has(name) {
+            return Err(RpcError::invalid(format!("there's no tool {name:?}")));
+        }
+        crate::reports::server_used(&format!("mcp.{name}"), 1);
+        return Ok(match super::manage::call(cx, name, args.0).await? {
+            Ok(value) => done(value),
+            Err(status) => failed(&status),
+        });
     };
     crate::reports::server_used(&format!("mcp.{}", tool.name), 1);
     if tool.required.contains(&"server_id") {
@@ -1101,7 +1117,14 @@ async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status
     let purpose = match args.text("purpose")?.as_str() {
         "emoji" => pb::MediaPurpose::Emoji,
         "server_icon" => pb::MediaPurpose::ServerIcon,
-        _ => return Err(RpcError::invalid("purpose must be emoji or server_icon")),
+        "server_banner" => pb::MediaPurpose::Banner,
+        "webhook_avatar" => pb::MediaPurpose::Avatar,
+        "decoration" => pb::MediaPurpose::Decoration,
+        _ => {
+            return Err(RpcError::invalid(
+                "purpose must be emoji, server_icon, server_banner, webhook_avatar or decoration",
+            ));
+        }
     };
     let encoded = match args.0.get("data_base64") {
         Some(Value::String(s)) if !s.trim().is_empty() => s.trim(),

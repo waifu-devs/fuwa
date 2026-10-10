@@ -559,6 +559,252 @@ async fn managers_pick_which_agents_and_admins_turn_it_off() {
     instance.stop().await;
 }
 
+/// An agent whose roles let it run the server does it all through MCP, and
+/// one whose roles don't is refused, exactly as through the gRPC API.
+#[tokio::test]
+async fn agents_run_a_server_as_far_as_their_roles_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let w = world(&instance).await;
+    let sid = w.server_id.as_str();
+    let manage = |name: &'static str, arguments: Value| {
+        let (instance, agent) = (&instance, w.agent.clone());
+        async move { tool(instance, &agent, name, arguments).await }
+    };
+
+    let tools = rpc(&instance, &w.agent, "tools/list", json!({})).await;
+    let listed = tools["result"]["tools"].as_array().unwrap();
+    let find = |name: &str| listed.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("{name}")).clone();
+    assert_eq!(find("delete_channel")["annotations"]["destructiveHint"], true);
+    assert_eq!(find("list_invites")["annotations"]["readOnlyHint"], true);
+    assert_eq!(find("create_channel")["inputSchema"]["required"], json!(["server_id"]));
+    assert!(
+        find("create_channel")["inputSchema"]["properties"]["type"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("category"))
+    );
+
+    // Without the roles for it, nothing changes.
+    let refused = manage("create_channel", json!({ "server_id": sid, "name": "nope" })).await.unwrap_err();
+    assert!(refused.starts_with("not allowed:"), "{refused}");
+    let refused = manage("update_server", json!({ "server_id": sid, "name": "Mine now" })).await.unwrap_err();
+    assert!(refused.starts_with("not allowed:"), "{refused}");
+    // Unknown fields are bad arguments, not a quiet no-op.
+    let json = rpc(
+        &instance,
+        &w.agent,
+        "tools/call",
+        json!({ "name": "update_channel", "arguments": { "server_id": sid, "channel_id": w.general_id, "nmae": "x" } }),
+    )
+    .await;
+    assert_eq!(json["error"]["code"], -32602);
+
+    // The owner gives it a role that runs the server, short of Administrator.
+    let mut roles = pb::role_service_client::RoleServiceClient::new(w.channel.clone());
+    let managers = roles
+        .create_role(authed(
+            &w.owner,
+            pb::CreateRoleRequest {
+                server_id: sid.into(),
+                name: "Managers".into(),
+                permissions: [
+                    pb::Permission::ManageServer,
+                    pb::Permission::ManageChannels,
+                    pb::Permission::ManageRoles,
+                    pb::Permission::CreateInvite,
+                    pb::Permission::ManageWebhooks,
+                    pb::Permission::ManageEmoji,
+                    pb::Permission::ViewAuditLog,
+                    pb::Permission::ViewChannels,
+                    pb::Permission::SendMessages,
+                ]
+                .map(|p| p as i32)
+                .to_vec(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .role
+        .unwrap();
+    roles
+        .add_member_role(authed(
+            &w.owner,
+            pb::AddMemberRoleRequest {
+                server_id: sid.into(),
+                user_id: w.agent_id.clone(),
+                role_id: managers.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+
+    // The server's settings.
+    let updated = manage(
+        "update_server",
+        json!({ "server_id": sid, "description": "Where we build fuwa", "thread_archive_hours": 48 }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["server"]["description"], "Where we build fuwa");
+    assert_eq!(updated["server"]["name"], "Waifu Devs", "left out, left alone");
+
+    // Channels: a category, a private channel in it, then changes and order.
+    let category =
+        manage("create_channel", json!({ "server_id": sid, "name": "Team", "type": "category" })).await.unwrap();
+    let category_id = category["channel"]["id"].as_str().unwrap().to_string();
+    assert_eq!(category["channel"]["type"], "category");
+    let private = manage(
+        "create_channel",
+        json!({
+            "server_id": sid,
+            "name": "plans",
+            "type": "text",
+            "parent_id": category_id,
+            "permission_overwrites": [{ "target_id": sid, "target": "role", "deny": ["send_messages"] }]
+        }),
+    )
+    .await
+    .unwrap();
+    let plans_id = private["channel"]["id"].as_str().unwrap().to_string();
+    let own_role = manage(
+        "set_channel_permissions",
+        json!({
+            "server_id": sid,
+            "channel_id": plans_id,
+            "overwrites": [{ "target_id": managers.id, "target": "role", "allow": ["send_messages"] }]
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert!(own_role.starts_with("not allowed:"), "only below its own rank: {own_role}");
+    assert_eq!(private["channel"]["parent_id"], category_id.as_str());
+    let got = manage("get_channel", json!({ "server_id": sid, "channel_id": plans_id })).await.unwrap();
+    assert_eq!(got["channel"]["permission_overwrites"][0]["deny"], json!(["send_messages"]));
+    let changed = manage(
+        "update_channel",
+        json!({ "server_id": sid, "channel_id": plans_id, "topic": "What's next", "slowmode_seconds": 5 }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(changed["channel"]["topic"], "What's next");
+    assert_eq!(changed["channel"]["slowmode_seconds"], 5);
+    // It can't send there now, so it can't change who may.
+    let locked =
+        manage("set_channel_permissions", json!({ "server_id": sid, "channel_id": plans_id, "overwrites": [] }))
+            .await
+            .unwrap_err();
+    assert!(locked.starts_with("not allowed:"), "{locked}");
+    let closed = manage(
+        "set_channel_permissions",
+        json!({
+            "server_id": sid,
+            "channel_id": category_id,
+            "overwrites": [{ "target_id": sid, "target": "role", "deny": ["create_invite"] }]
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(closed["channel"]["permission_overwrites"][0]["deny"], json!(["create_invite"]));
+    let channels = tool(&instance, &w.agent, "list_channels", json!({ "server_id": sid })).await.unwrap();
+    // Every channel in its place: loose ones first (in reverse), then the category and its channel.
+    let mut placed: Vec<Value> = channels["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["id"] != category_id.as_str() && c["id"] != plans_id.as_str())
+        .map(|c| json!({ "channel_id": c["id"] }))
+        .collect();
+    placed.reverse();
+    placed.push(json!({ "channel_id": category_id }));
+    placed.push(json!({ "channel_id": plans_id, "parent_id": category_id }));
+    let reordered = manage("reorder_channels", json!({ "server_id": sid, "channels": placed })).await.unwrap();
+    assert_eq!(reordered["channels"].as_array().unwrap().len(), placed.len());
+
+    // Roles: made below its own, changed, but never past what it has.
+    let made = manage(
+        "create_role",
+        json!({ "server_id": sid, "name": "Helpers", "color": 0xff88cc, "permissions": ["send_messages"] }),
+    )
+    .await
+    .unwrap();
+    let helpers_id = made["role"]["id"].as_str().unwrap().to_string();
+    let granted = manage(
+        "update_role",
+        json!({ "server_id": sid, "role_id": helpers_id, "grant": ["create_invite"], "hoist": true }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(granted["role"]["permissions"], json!(["send_messages", "create_invite"]));
+    assert_eq!(granted["role"]["hoist"], true);
+    let too_much =
+        manage("update_role", json!({ "server_id": sid, "role_id": helpers_id, "grant": ["administrator"] }))
+            .await
+            .unwrap_err();
+    assert!(too_much.starts_with("not allowed:"), "{too_much}");
+    let above =
+        manage("update_role", json!({ "server_id": sid, "role_id": managers.id, "name": "Mine" })).await.unwrap_err();
+    assert!(above.starts_with("not allowed:"), "its own role isn't below it: {above}");
+    manage("delete_role", json!({ "server_id": sid, "role_id": helpers_id })).await.unwrap();
+
+    // Invites, webhooks and AutoMod.
+    let invite = manage("create_invite", json!({ "server_id": sid, "max_uses": 5 })).await.unwrap();
+    let code = invite["invite"]["code"].as_str().unwrap().to_string();
+    let invites = manage("list_invites", json!({ "server_id": sid })).await.unwrap();
+    assert!(invites["invites"].as_array().unwrap().iter().any(|i| i["code"] == code.as_str()));
+    manage("delete_invite", json!({ "server_id": sid, "code": code })).await.unwrap();
+    let hook = manage("create_webhook", json!({ "server_id": sid, "channel_id": w.general_id, "name": "Deploys" }))
+        .await
+        .unwrap();
+    let hook_id = hook["webhook"]["id"].as_str().unwrap().to_string();
+    assert!(hook["webhook"]["token"].is_string());
+    let hooks = manage("list_webhooks", json!({ "server_id": sid })).await.unwrap();
+    assert_eq!(hooks["webhooks"].as_array().unwrap().len(), 1);
+    let deleted = manage("delete_webhook", json!({ "server_id": sid, "webhook_id": hook_id })).await.unwrap();
+    assert_eq!(deleted, json!({ "done": true }));
+    let rule = manage(
+        "save_automod_rule",
+        json!({
+            "server_id": sid,
+            "rule": { "name": "No spoilers", "enabled": true, "trigger": "keywords", "keywords": ["spoiler*"], "actions": [{ "kind": "block" }] }
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(rule["rule"]["trigger"], "keywords");
+    let rules = manage("list_automod_rules", json!({ "server_id": sid })).await.unwrap();
+    assert_eq!(rules["rules"].as_array().unwrap().len(), 1);
+    manage("delete_automod_rule", json!({ "server_id": sid, "rule_id": rule["rule"]["id"] })).await.unwrap();
+
+    // The way in, and what's been done.
+    let form = manage("set_join_form", json!({ "server_id": sid, "form": { "rules": ["Be kind"] } })).await.unwrap();
+    assert_eq!(form["form"]["rules"], json!(["Be kind"]));
+    let log = manage("list_audit_log", json!({ "server_id": sid, "limit": 100 })).await.unwrap();
+    assert!(log["entries"].as_array().unwrap().iter().any(|e| e["actor_id"] == w.agent_id.as_str()));
+    manage("delete_channel", json!({ "server_id": sid, "channel_id": plans_id })).await.unwrap();
+    let gone = manage("get_channel", json!({ "server_id": sid, "channel_id": plans_id })).await.unwrap_err();
+    assert!(gone.starts_with("not found:"), "{gone}");
+
+    // A server that closed its MCP door to the agent closes these too.
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(w.channel.clone());
+    agents
+        .set_mcp_access(authed(
+            &w.owner,
+            pb::SetMcpAccessRequest {
+                server_id: sid.into(),
+                access: Some(pb::McpAccess { mode: pb::McpAccessMode::Off as i32, agent_ids: vec![] }),
+            },
+        ))
+        .await
+        .unwrap();
+    let off = manage("create_channel", json!({ "server_id": sid, "name": "later" })).await.unwrap_err();
+    assert!(off.contains("haven't let this agent"), "{off}");
+
+    instance.stop().await;
+}
+
 /// The official MCP client (the TypeScript SDK) connects, lists and calls
 /// tools, reads a resource and gets a prompt. CI installs it with the web
 /// app's packages; elsewhere, without them, this says so and passes.
