@@ -670,11 +670,25 @@ async fn limits_are_unlimited_by_default_and_configurable() {
         Code::PermissionDenied
     );
 
+    // An agent counts as an account, and on its own as an agent.
+    c.agents
+        .create_agent(authed(
+            &owner,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap();
     let signal = fuwa_server::telemetry::collect(&instance.app).await.unwrap();
     assert_eq!(signal.schema, "fuwa.signal.v1");
     assert_eq!(
-        (signal.totals.accounts, signal.totals.servers, signal.totals.members, signal.totals.channels),
-        (3, 1, 2, 3)
+        (
+            signal.totals.accounts,
+            signal.totals.agents,
+            signal.totals.servers,
+            signal.totals.members,
+            signal.totals.channels
+        ),
+        (4, 1, 1, 2, 3)
     );
     assert!(signal.config.limits_configured);
     assert_eq!(signal.hosting, "self_hosted");
@@ -690,7 +704,8 @@ async fn limits_are_unlimited_by_default_and_configurable() {
         keys(&value["config"]),
         ["encryption", "limits_configured", "linked_accounts", "local_accounts", "server_creation"]
     );
-    assert_eq!(value["totals"].as_object().unwrap().len(), 14);
+    assert_eq!(value["totals"].as_object().unwrap().len(), 15);
+    assert_eq!(value["totals"]["agents"], 1);
     assert_eq!(value["install_id"].as_str().unwrap().len(), 26);
     for private in ["owner", "guest", "Capped", server.id.as_str()] {
         assert!(!json.contains(private), "the usage signal must not contain {private:?}");

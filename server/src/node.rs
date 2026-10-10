@@ -342,6 +342,8 @@ struct StoredAnnouncement {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AccountCounts {
     pub total: i64,
+    /// Accounts that are agents (bots and apps), counted in `total` too.
+    pub agents: i64,
     pub active_1d: i64,
     pub active_30d: i64,
 }
@@ -2729,10 +2731,11 @@ impl NodeDb {
             &conn,
             "SELECT count(*),
                     coalesce(sum(CASE WHEN last_seen_at > ?1 THEN 1 ELSE 0 END), 0),
-                    coalesce(sum(CASE WHEN last_seen_at > ?2 THEN 1 ELSE 0 END), 0)
+                    coalesce(sum(CASE WHEN last_seen_at > ?2 THEN 1 ELSE 0 END), 0),
+                    coalesce(sum(CASE WHEN kind = ?3 THEN 1 ELSE 0 END), 0)
              FROM accounts",
-            (now - day, now - 30 * day),
-            |r| Ok(AccountCounts { total: r.get(0)?, active_1d: r.get(1)?, active_30d: r.get(2)? }),
+            (now - day, now - 30 * day, pb::AccountKind::Agent as i64),
+            |r| Ok(AccountCounts { total: r.get(0)?, active_1d: r.get(1)?, active_30d: r.get(2)?, agents: r.get(3)? }),
         )
         .await?
         .unwrap_or_default())
