@@ -1532,6 +1532,32 @@ async fn ends_with<T>(stream: &mut tonic::Streaming<T>) -> Code {
 }
 
 #[tokio::test]
+async fn a_stream_following_new_servers_follows_the_ones_you_make() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let mut events = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { follow_new_servers: true, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(events.message().await.unwrap().unwrap().ready.is_some());
+
+    let made = create_server(&mut c, &juan, "Waifu Devs", false).await;
+    let followed = loop {
+        let next = tokio::time::timeout(Duration::from_secs(5), events.message()).await.unwrap().unwrap().unwrap();
+        if let Some(head) = next.followed {
+            break head;
+        }
+    };
+    assert_eq!(followed.server_id, made.id);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn signing_out_a_device_ends_its_live_streams_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
@@ -11660,23 +11686,26 @@ async fn live_streams_send_whole_messages_only_in_focus() {
     };
     assert_eq!(live.focus(authed(&bo, too_many)).await.unwrap_err().code(), Code::InvalidArgument);
 
-    // Catching up from before them goes by the same rule, heads before
-    // `ready`, with the channel on screen in focus from the start.
+    // Catching up from before them goes by the same rule, with the channel
+    // on screen in focus from the start. b's head goes out before the later
+    // mention does, so a cursor moved to the mention can't skip it.
     drop(stream);
     let focused = pb::Focus { channel_ids: vec![a.id.clone()], ..Default::default() };
     let resume = pb::OpenRequest { focus: Some(focused), ..open(Some(start)) };
     let mut again = live.open(authed(&bo, resume)).await.unwrap().into_inner();
     assert!(matches!(next_live(&mut again).await, Item::ConnectionId(_)));
-    let mut whole = Vec::new();
-    let caught_up = loop {
+    let mut seen = Vec::new();
+    loop {
         match next_live(&mut again).await {
-            Item::Heads(heads) => break heads,
-            item => whole.extend(created_in(&item)),
+            Item::Heads(heads) => {
+                let channels: Vec<_> = heads.servers[0].channels.iter().map(|h| h.channel_id.clone()).collect();
+                seen.push(format!("heads {channels:?}"));
+            }
+            Item::Events(r) if r.ready.is_some() => break,
+            item => seen.extend(created_in(&item).map(|(_, content)| content)),
         }
-    };
-    assert_eq!(whole, [(a.id.clone(), "in a".to_string()), (b.id.clone(), ping)]);
-    assert_eq!(caught_up.servers[0].channels.iter().map(|h| &h.channel_id).collect::<Vec<_>>(), [&b.id]);
-    assert!(matches!(next_live(&mut again).await, Item::Events(r) if r.ready.is_some()));
+    }
+    assert_eq!(seen, ["in a".to_string(), format!("heads {:?}", [&b.id]), ping]);
     instance.stop().await;
 }
 

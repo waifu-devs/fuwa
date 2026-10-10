@@ -894,9 +894,12 @@ impl FuwaApp {
 
         let mut view = div().size_full().relative().flex().child(column);
         if secure {
+            // No member list beside it: nobody's in sight there.
+            self.core.set_in_view(key, server, &[]);
             // A secure channel's threads are its own (`secure_threads.rs`).
             return view.children(self.secure_side(window, cx)).into_any_element();
         }
+        let mut members = false;
         if let Some(panel) = self.search_panel(window, cx) {
             view = view.child(panel);
         } else if let Some(panel) = self.thread_panel(window, cx) {
@@ -904,7 +907,12 @@ impl FuwaApp {
         } else if let Some(panel) = self.threads_list_panel(window, cx) {
             view = view.child(panel);
         } else if self.members_open {
+            members = true;
             view = view.child(self.members_panel(key, server, window, cx));
+        }
+        // The member list hidden: its people aren't on screen (a live connection's focus).
+        if !members {
+            self.core.set_in_view(key, server, &[]);
         }
         view.into_any_element()
     }
@@ -1312,6 +1320,8 @@ impl FuwaApp {
                 view
             }
         };
+        // Its rows in sight, again on screen after it was hidden (it says so itself as it scrolls).
+        self.core.set_in_view(key, server, &view.read(cx).in_view);
         gpui_kit::AnyView::from(view).cached(gpui_kit::StyleRefinement::default().w(px(240.0)).h_full().flex_none())
     }
 

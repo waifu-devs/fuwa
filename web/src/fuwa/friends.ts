@@ -27,13 +27,58 @@ const SILENCE = "70 seconds";
 const ENDED = new FuwaError({ code: Code.Unavailable, message: "the server closed the connection" });
 
 /**
+ * One response from the friends feed, on WatchFriends or a live connection:
+ * at `ready` (listening again) the whole list is read, so whatever happened
+ * while away is in; after that, each change.
+ */
+export const onFriendsResponse = (key: string, api: Api, res: WatchFriendsResponse) =>
+  res.ready
+    ? readFriends(api).pipe(Effect.tap((read) => Effect.sync(() => setFriends(key, read))), Effect.asVoid)
+    : Effect.sync(() => {
+        const event = res.event;
+        if (!event) return;
+        const before = store.get().instances[key]?.friends.list ?? [];
+        if (event.payload.case === "settings") {
+          const settings = event.payload.value;
+          updateFriends(key, (f) => ({ ...f, settings }));
+          return;
+        }
+        updateFriends(key, (f) => {
+          const list = applyFriendEvent(f.list, event);
+          return list === f.list ? f : { ...f, list };
+        });
+        if (event.payload.case === "changed") {
+          const friend = event.payload.value;
+          const was = stateWith(before, friend.user?.id);
+          if (friend.state === INCOMING && was !== INCOMING) onFriendNews(key, friend.user, "asked");
+          if (friend.state === FRIEND && was === OUTGOING) onFriendNews(key, friend.user, "accepted");
+        }
+      });
+
+/** Your friends and settings, read whole (at a feed's `ready`). */
+export const readFriends = (api: Api) =>
+  Effect.all([
+    call((signal) => api.friends.listFriends({}, { signal })),
+    call((signal) => api.friends.getFriendSettings({}, { signal })),
+  ]).pipe(Effect.map(([list, settings]) => ({ list: sortFriends(list.friends), settings: settings.settings ?? null })));
+
+/** Puts what `readFriends` read in place of what was known. */
+export const setFriends = (key: string, read: { list: FriendsState["list"]; settings: FriendSettings | null }) =>
+  updateFriends(key, () => ({ status: "ready", ...read }));
+
+/** Friends are loading, until the friends feed's `ready` lists them. */
+export const friendsLoading = (key: string) =>
+  updateFriends(key, (f) => ({ ...f, status: f.status === "ready" ? "ready" : "loading" }));
+
+/**
  * Lists your friends, then follows changes for as long as the instance is
  * synced, listing again after each reconnect so nothing is missed. An
- * instance from before friends simply has none.
+ * instance from before friends simply has none. On a live connection the
+ * same responses come over it instead (`onFriendsResponse`).
  */
 export const followFriends = (key: string, api: Api) =>
   Effect.gen(function* () {
-    updateFriends(key, (f) => ({ ...f, status: f.status === "ready" ? "ready" : "loading" }));
+    friendsLoading(key);
     const watch = Stream.suspend(() => {
       const controller = new AbortController();
       return Stream.fromAsyncIterable<WatchFriendsResponse, FuwaError>(
@@ -45,41 +90,7 @@ export const followFriends = (key: string, api: Api) =>
       );
     }).pipe(
       Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.lost") }), SILENCE),
-      Stream.mapEffect((res) =>
-        res.ready
-          ? // Listening: read the whole list, so whatever happened while away is in.
-            Effect.all([
-              call((signal) => api.friends.listFriends({}, { signal })),
-              call((signal) => api.friends.getFriendSettings({}, { signal })),
-            ]).pipe(
-              Effect.tap(([list, settings]) =>
-                Effect.sync(() =>
-                  updateFriends(key, () => ({ status: "ready", list: sortFriends(list.friends), settings: settings.settings ?? null })),
-                ),
-              ),
-              Effect.asVoid,
-            )
-          : Effect.sync(() => {
-              const event = res.event;
-              if (!event) return;
-              const before = store.get().instances[key]?.friends.list ?? [];
-              if (event.payload.case === "settings") {
-                const settings = event.payload.value;
-                updateFriends(key, (f) => ({ ...f, settings }));
-                return;
-              }
-              updateFriends(key, (f) => {
-                const list = applyFriendEvent(f.list, event);
-                return list === f.list ? f : { ...f, list };
-              });
-              if (event.payload.case === "changed") {
-                const friend = event.payload.value;
-                const was = stateWith(before, friend.user?.id);
-                if (friend.state === INCOMING && was !== INCOMING) onFriendNews(key, friend.user, "asked");
-                if (friend.state === FRIEND && was === OUTGOING) onFriendNews(key, friend.user, "accepted");
-              }
-            }),
-      ),
+      Stream.mapEffect((res) => onFriendsResponse(key, api, res)),
       Stream.retry(backoff.pipe(Schedule.whileInput((e: FuwaError) => e.retryable))),
     );
     yield* Stream.runDrain(watch);

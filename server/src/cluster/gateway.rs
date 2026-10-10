@@ -1273,7 +1273,16 @@ impl pb::live_service_server::LiveService for Events {
                         // What's out of focus moves its channel's head instead.
                         Some(Ok(pb::SubscribeResponse { event: Some(event), .. }))
                             if !interest.take(&event, None, true) => continue,
-                        Some(Ok(response)) => Ok(pb::OpenResponse { item: Some(Item::Events(Box::new(response))) }),
+                        Some(Ok(response)) => {
+                            // Heads held back for this server go first, so a
+                            // cursor moved past them can't skip them.
+                            if let Some(heads) = response.event.as_ref().and_then(|e| interest.heads_before(e))
+                                && tx.send(Ok(pb::OpenResponse { item: Some(Item::Heads(heads)) })).await.is_err()
+                            {
+                                return;
+                            }
+                            Ok(pb::OpenResponse { item: Some(Item::Events(Box::new(response))) })
+                        }
                         Some(Err(status)) => Err(status),
                         // Everything followed is gone: the rest carries on.
                         None => {

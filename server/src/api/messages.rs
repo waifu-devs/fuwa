@@ -198,8 +198,51 @@ fn user_tokens(content: &str) -> Vec<&str> {
     ids
 }
 
-/// The members `content` names, for [`pb::Message::mention_user_ids`]: ids
-/// of anyone not in the server are left out, so a client can trust them.
+/// The usernames written as `@name` in `content`, lowercased, once each, in
+/// order: what apps write when someone picks a person (and what they ping
+/// for). The `@` starts the text, a line or a word (after a space or an
+/// opening bracket or quote), so addresses and links (`mail@alice`,
+/// `site/@alice`) don't count, and neither does anything inside backticks.
+/// A name ending in dots is also tried without them ("thanks @alice.").
+fn name_tokens(content: &str) -> Vec<String> {
+    let bytes = content.as_bytes();
+    let starts_word =
+        |at: usize| at == 0 || bytes[at - 1].is_ascii_whitespace() || b"([{<\"'*~>".contains(&bytes[at - 1]);
+    let name_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'.';
+    let mut names: Vec<String> = Vec::new();
+    let mut code = false;
+    for (at, &b) in bytes.iter().enumerate() {
+        if b == b'`' {
+            code = !code;
+        }
+        if b != b'@' || code || !starts_word(at) {
+            continue;
+        }
+        let rest = &content[at + 1..];
+        let end = rest.bytes().position(|b| !name_byte(b)).unwrap_or(rest.len());
+        let name = rest[..end].to_ascii_lowercase();
+        let trimmed = name.trim_end_matches('.').to_string();
+        for name in [name, trimmed] {
+            // Usernames are 2 to 32 characters (auth.rs).
+            if (2..=32).contains(&name.len())
+                && name.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+                && name != "everyone"
+                && name != "here"
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+        if names.len() >= MAX_USER_MENTIONS {
+            break;
+        }
+    }
+    names
+}
+
+/// The members `content` names, for [`pb::Message::mention_user_ids`]: as
+/// `<@id>` or as `@username`. Anyone not in the server is left out, so a
+/// client can trust them.
 async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
     let mut ids = Vec::new();
     // Looked up one by one, so only so many names are looked at.
@@ -213,6 +256,31 @@ async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<
             && !ids.contains(&id)
         {
             ids.push(id);
+        }
+    }
+    // Names in one read, then in the order the message has them.
+    let names = name_tokens(content);
+    if names.is_empty() || ids.len() >= MAX_USER_MENTIONS {
+        return Ok(ids);
+    }
+    let marks = (1..=names.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    let found = query_all(
+        conn,
+        &format!(
+            "SELECT u.username, m.user_id FROM members m JOIN users u ON u.id = m.user_id WHERE u.username IN ({marks})"
+        ),
+        names.iter().map(|name| turso::Value::from(name.as_str())).collect::<Vec<_>>(),
+        |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?)),
+    )
+    .await?;
+    for name in &names {
+        if ids.len() >= MAX_USER_MENTIONS {
+            break;
+        }
+        if let Some((_, id)) = found.iter().find(|(n, _)| n == name)
+            && !ids.contains(id)
+        {
+            ids.push(id.clone());
         }
     }
     Ok(ids)
@@ -1537,6 +1605,12 @@ mod tests {
         assert!(!says_everyone("@@here"));
         assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
         assert_eq!(user_tokens("<@AB> <@!AB> <@!CD> <@&EF> <@> <@G-H> <@IJ"), ["AB", "CD"]);
+        assert_eq!(
+            name_tokens("hi @Alice and @bob.smith. a@carol @@dave @everyone @x @alice"),
+            ["alice", "bob.smith.", "bob.smith"]
+        );
+        assert_eq!(name_tokens("(@eve_1)! **@fay**"), ["eve_1", "fay"]);
+        assert!(name_tokens("youtube.com/@gus mail:@hal `@ivy` ```\n@jo\n```").is_empty());
     }
 
     /// AutoMod reads what a sender wrote anywhere in the message, once,

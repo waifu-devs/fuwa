@@ -50,6 +50,17 @@ fn held_back(interest: Option<&mut Interest>, view: &View, event: &pb::Event) ->
     !interest.take(event, Some(&view.member.role_ids), visible)
 }
 
+/// Sends the heads `interest` owes before `event` goes out whole, if any;
+/// false once the client is gone.
+async fn send_owed(tx: &mpsc::Sender<Sent>, interest: &mut Option<Interest>, event: &pb::Event) -> bool {
+    match interest.as_mut().and_then(|i| i.heads_before(event)) {
+        Some(heads) => {
+            tx.send(Ok(pb::OpenResponse { item: Some(pb::open_response::Item::Heads(heads)) })).await.is_ok()
+        }
+        None => true,
+    }
+}
+
 /// The channel an event is about, if it's about one.
 fn channel_of(payload: &Payload) -> Option<&str> {
     match payload {
@@ -380,6 +391,9 @@ impl Api {
                             if held_back(interest.as_mut(), &view, &event) {
                                 continue;
                             }
+                            if !send_owed(&tx, &mut interest, &event).await {
+                                return;
+                            }
                             let out = match view.pass(&event).await {
                                 Ok(out) => out,
                                 Err(status) => {
@@ -536,6 +550,9 @@ impl Api {
                                 },
                                 _ => vec![(*event).clone()],
                             };
+                            if !send_owed(&tx, &mut interest, &event).await {
+                                return;
+                            }
                             for event in out {
                                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;

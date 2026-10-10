@@ -2,20 +2,28 @@
 //! are and which servers you're in, follows all of them over one event
 //! stream, and reconnects with backoff, resuming from the last event seen so
 //! nothing is missed or applied twice. A port of `web/src/fuwa/sync.ts`.
+//!
+//! An instance with live connections (docs/live.md) sends that stream, and
+//! the direct-message, friends and presence feeds, over one connection
+//! (`follow_live`); each feed's responses go to the same code as its own
+//! stream's. Messages out of focus then come as heads (`live.rs`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 use tonic::Code;
 
 use crate::core::api::{Api, Problem};
+use crate::core::config::Prefs;
 use crate::core::dms::{self, DmEngine, DmStatus};
+use crate::core::live;
 use crate::core::notifications;
 use crate::core::reports;
-use crate::core::store::{self, Connection, Outcome};
+use crate::core::store::{self, Connection, InstanceState, Outcome};
 use crate::core::threads;
 use crate::core::{Core, Notice};
 use crate::pb;
@@ -106,6 +114,10 @@ async fn follow_instance(
         core.shared.instance(key, |i| i.connection = Connection::SignedOut);
         return Ok(());
     };
+    // Where the instance has them, one live connection carries every feed
+    // (docs/live.md); elsewhere each has its own stream, as before.
+    let live =
+        core.live_connections() && core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("live-connection")));
 
     let me = retrying(core, key, || rpc!(api.auth(), get_me(pb::GetMeRequest {}))).await?;
     core.shared.instance(key, |i| {
@@ -123,7 +135,7 @@ async fn follow_instance(
     }
     // Encrypted direct messages run alongside, for as long as this does.
     if let Some(user) = me.user.clone() {
-        start_dms(core, key, api, user, &token, dms);
+        start_dms(core, key, api, user, &token, dms, live);
     }
 
     // Notification settings follow the account; an older instance without them just has none.
@@ -173,15 +185,21 @@ async fn follow_instance(
     };
     // What games report goes out with this app's presence.
     let presence = tokio::spawn(crate::core::presence::keep(api.clone(), core.games.clone(), core.idle.away()));
-    // Who's online and what they're doing, while synced.
-    let people = tokio::spawn(crate::core::presence::people::follow(core.clone(), key.to_owned(), api.clone()));
-    // Friends follow alongside; having that stream open is what shows you online to them.
-    let friends = tokio::spawn(crate::core::friends::follow(core.clone(), key.to_owned(), api.clone()));
-    let result = follow_events(core, key, api, followed).await;
+    let result = if live {
+        crate::core::friends::loading(core, key);
+        follow_live(core, key, api, followed, dms).await
+    } else {
+        // Who's online and what they're doing, while synced.
+        let people = tokio::spawn(crate::core::presence::people::follow(core.clone(), key.to_owned(), api.clone()));
+        // Friends follow alongside; having that stream open is what shows you online to them.
+        let friends = tokio::spawn(crate::core::friends::follow(core.clone(), key.to_owned(), api.clone()));
+        let result = follow_events(core, key, api, followed).await;
+        people.abort();
+        friends.abort();
+        result
+    };
     refresh.abort();
     presence.abort();
-    people.abort();
-    friends.abort();
     result
 }
 
@@ -192,6 +210,7 @@ fn start_dms(
     user: pb::User,
     token: &str,
     slot: &Arc<Mutex<Option<Arc<DmEngine>>>>,
+    live: bool,
 ) {
     core.shared.instance(key, |i| {
         i.dms.status = DmStatus::Starting;
@@ -218,7 +237,13 @@ fn start_dms(
                 for (server_id, channels) in servers {
                     follow_secure(&core, &key, &server_id, &channels);
                 }
-                engine.follow().await;
+                // On a live connection its feed comes through the connection
+                // (`follow_live`), which may have said it's ready already.
+                if live {
+                    engine.caught_up().await;
+                } else {
+                    engine.follow().await;
+                }
             }
             Err(err) => {
                 tracing::warn!("direct messages didn't start");
@@ -246,6 +271,9 @@ struct Follow {
     resumed_from: HashMap<String, i64>,
     /// Channel events that arrived while a server's channels were being listed again.
     relisting: HashMap<String, Vec<pb::Event>>,
+    /// The servers a live connection follows: those it was opened with, and
+    /// those it said it followed since.
+    covered: HashSet<String>,
 }
 
 async fn follow_events(
@@ -301,6 +329,215 @@ async fn follow_events(
     }
 }
 
+/// Every feed over one live connection (docs/live.md): server events,
+/// direct messages, friends and presence, each handed to what its own stream
+/// would have fed. It reconnects as `follow_events` does, from the same
+/// cursors, and keeps the connection's focus on what's on screen (`live.rs`).
+async fn follow_live(
+    core: &Arc<Core>,
+    key: &str,
+    api: &Api,
+    mut followed: watch::Receiver<Vec<String>>,
+    dms: &Arc<Mutex<Option<Arc<DmEngine>>>>,
+) -> Result<(), Problem> {
+    let state = Arc::new(Mutex::new(Follow::default()));
+    let mut backoff = Backoff::new();
+    loop {
+        let ids = followed.borrow_and_update().clone();
+        let focus = core.shared.read(|s| live::choose_focus(s, key));
+        // Only while there's a device here to read them with.
+        let direct_messages = core.shared.read(|s| s.instance(key).is_some_and(|i| i.dms.status != DmStatus::Failed));
+        let request = {
+            let mut s = state.lock();
+            s.resumed_from = s.cursors.clone();
+            s.covered = ids.iter().cloned().collect();
+            pb::OpenRequest {
+                servers: ids
+                    .iter()
+                    .map(|id| pb::ServerCursor { server_id: id.clone(), after_sequence: s.cursors.get(id).copied() })
+                    .collect(),
+                // Servers joined meanwhile come as `followed`, without opening again.
+                follow_new_servers: true,
+                direct_messages,
+                friends: true,
+                presence: true,
+                messages: pb::MessageIntent::Unspecified as i32,
+                focus: Some(focus),
+            }
+        };
+        let outcome = live_once(core, key, api, request, &state, &mut backoff, &mut followed, dms).await;
+        core.shared.instance(key, |i| i.live = None);
+        match outcome {
+            // The server stopped (an older one, for a deploy), or a server
+            // has to be added by hand: open again at once, quietly.
+            Ok(()) => {}
+            Err(err) if err.signed_out() => return Err(err),
+            Err(err) => {
+                core.shared.instance(key, |i| {
+                    i.connection = Connection::Reconnecting;
+                    i.problem = Some(err.message.clone());
+                });
+            }
+        }
+        if followed.has_changed().is_err() {
+            return Ok(());
+        }
+        backoff.wait().await;
+    }
+}
+
+/// How long a server added to the followed list waits for the live
+/// connection to say it follows it too (servers joined or made are
+/// announced, on a split instance after the directory hears of them),
+/// before the connection opens again with it.
+const COVER_WAIT: Duration = Duration::from_secs(10);
+
+/// One response from a live connection's direct-message feed. After `ready`
+/// the engine catches up in the background (`tasks`), and what follows
+/// waits in `queue` until it has, so it's taken in order, as the feed's own
+/// stream would.
+fn take_dms(
+    dms: &Arc<Mutex<Option<Arc<DmEngine>>>>,
+    res: pb::WatchResponse,
+    queue: &mut Option<VecDeque<pb::WatchResponse>>,
+    tasks: &mut JoinSet<live::Done>,
+) {
+    if let Some(waiting) = queue {
+        waiting.push_back(res);
+        return;
+    }
+    // Not started yet: it catches up by itself once it is.
+    let Some(engine) = dms.lock().clone() else { return };
+    if res.ready {
+        let rest = res.event.map(|event| pb::WatchResponse { ready: false, event: Some(event) });
+        *queue = Some(rest.into_iter().collect());
+        tasks.spawn(async move {
+            engine.caught_up().await;
+            live::Done::DmsCaughtUp
+        });
+    } else {
+        engine.take_event(res);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn live_once(
+    core: &Arc<Core>,
+    key: &str,
+    api: &Api,
+    request: pb::OpenRequest,
+    state: &Arc<Mutex<Follow>>,
+    backoff: &mut Backoff,
+    followed: &mut watch::Receiver<Vec<String>>,
+    dms: &Arc<Mutex<Option<Arc<DmEngine>>>>,
+) -> Result<(), Problem> {
+    use pb::open_response::Item;
+    let mut catching_up = Some(std::time::Instant::now());
+    let mut focus = live::Focuser::new(core, key, request.focus.clone().unwrap_or_default());
+    let mut stream = api.live().open(request).await.map_err(Problem::from)?.into_inner();
+    let mut presence = crate::core::presence::people::Feed::default();
+    // What the connection starts (reads, catching up) ends with it.
+    let mut tasks: JoinSet<live::Done> = JoinSet::new();
+    let mut notifier = live::Notifier::default();
+    let mut dm_queue: Option<VecDeque<pb::WatchResponse>> = None;
+    let mut heard = tokio::time::Instant::now();
+    // When a server the connection doesn't cover yet was added.
+    let mut uncovered: Option<tokio::time::Instant> = None;
+    let missing = |followed: &watch::Receiver<Vec<String>>| {
+        let s = state.lock();
+        followed.borrow().iter().any(|id| !s.covered.contains(id))
+    };
+    loop {
+        let (presence_due, focus_due, cover_due, notify_due) = (presence.due, focus.due, uncovered, notifier.due());
+        tokio::select! {
+            next = stream.message() => {
+                let Some(res) = next.map_err(Problem::from)? else { return Ok(()) };
+                heard = tokio::time::Instant::now();
+                match res.item {
+                    // The heartbeat.
+                    None => {}
+                    Some(Item::ConnectionId(id)) => focus.connected(api, id),
+                    Some(Item::Events(res)) => {
+                        if take_events(core, key, api, res, state, &mut catching_up) {
+                            *backoff = Backoff::new();
+                            focus.ready(api, &mut tasks);
+                        }
+                    }
+                    // Catching up takes a while; the other feeds go on meanwhile.
+                    Some(Item::DirectMessages(res)) => take_dms(dms, res, &mut dm_queue, &mut tasks),
+                    Some(Item::Friends(res)) => {
+                        crate::core::friends::take(core, key, api, res).await?;
+                    }
+                    Some(Item::Presence(res)) => {
+                        presence.take(core, key, res);
+                    }
+                    Some(Item::Heads(heads)) => {
+                        {
+                            let mut s = state.lock();
+                            for server in &heads.servers {
+                                if let Some(cursor) = s.cursors.get_mut(&server.server_id) {
+                                    *cursor = (*cursor).max(server.sequence);
+                                }
+                            }
+                        }
+                        live::take_heads(core, key, &heads, &mut notifier);
+                        notifier.pump(core, key, api, &mut tasks);
+                    }
+                    Some(Item::Focus(now)) => focus.echoed(api, now, &mut tasks),
+                }
+            }
+            Some(done) = tasks.join_next(), if !tasks.is_empty() => {
+                match done {
+                    Ok(live::Done::Notified(channel_id)) => {
+                        notifier.finished(&channel_id);
+                        notifier.pump(core, key, api, &mut tasks);
+                    }
+                    Ok(live::Done::DmsCaughtUp) => {
+                        for res in dm_queue.take().unwrap_or_default() {
+                            take_dms(dms, res, &mut dm_queue, &mut tasks);
+                        }
+                    }
+                    Ok(live::Done::Nothing) | Err(_) => {}
+                }
+            }
+            () = tokio::time::sleep_until(notify_due.unwrap_or(heard)), if notify_due.is_some() => {
+                notifier.pump(core, key, api, &mut tasks);
+            }
+            () = tokio::time::sleep_until(heard + SILENCE) => {
+                return Err(Problem::new(Code::Unavailable, "Lost the connection."));
+            }
+            () = tokio::time::sleep_until(presence_due.unwrap_or(heard)), if presence_due.is_some() => {
+                presence.flush(core, key);
+            }
+            changed = focus.changes.changed() => {
+                if changed.is_ok() {
+                    focus.changed();
+                }
+            }
+            () = tokio::time::sleep_until(focus_due.unwrap_or(heard)), if focus_due.is_some() => {
+                focus.settle();
+            }
+            // Joining or making a server adds it here, and the connection
+            // says it follows it too; leaving one ends it there. Only a
+            // server it never mentions needs the connection opened again.
+            changed = followed.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+                if uncovered.is_none() && missing(followed) {
+                    uncovered = Some(tokio::time::Instant::now() + COVER_WAIT);
+                }
+            }
+            () = tokio::time::sleep_until(cover_due.unwrap_or(heard)), if cover_due.is_some() => {
+                uncovered = None;
+                if missing(followed) {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 async fn stream_once(
     core: &Arc<Core>,
     key: &str,
@@ -318,51 +555,80 @@ async fn stream_once(
             .map_err(|_| Problem::new(Code::Unavailable, "Lost the connection."))?
             .map_err(Problem::from)?;
         let Some(res) = next else { return Ok(()) };
-        if let Some(ready) = res.ready {
+        if take_events(core, key, api, res, state, &mut catching_up) {
             *backoff = Backoff::new();
-            if let Some(began) = catching_up.take() {
-                reports::timing("catch_up", began.elapsed());
-            }
-            for head in ready.servers {
-                let known = {
-                    let mut s = state.lock();
-                    if s.cursors.contains_key(&head.server_id) {
-                        let from = s.resumed_from.get(&head.server_id).copied();
-                        Some(from.is_some_and(|from| head.sequence > from))
-                    } else {
-                        s.cursors.insert(head.server_id.clone(), head.sequence);
-                        s.held.insert(head.server_id.clone(), Vec::new());
-                        None
-                    }
-                };
-                if known.is_some() {
-                    tokio::spawn(relist_voice(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
-                    tokio::spawn(reread_shown(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
-                }
-                match known {
-                    Some(true) => {
-                        tokio::spawn(relist(core.clone(), key.to_owned(), api.clone(), head.server_id, state.clone()));
-                    }
-                    Some(false) => {}
-                    None => {
-                        tokio::spawn(snapshot(
-                            core.clone(),
-                            key.to_owned(),
-                            api.clone(),
-                            head.server_id,
-                            state.clone(),
-                        ));
-                    }
-                }
-            }
-            core.shared.instance(key, |i| {
-                i.connection = Connection::Live;
-                i.problem = None;
-            });
         }
-        let Some(event) = res.event else { continue };
+    }
+}
+
+/// One response from the server-event feed, from its own stream or a live
+/// connection's. True when it's the stream saying it's ready.
+fn take_events(
+    core: &Arc<Core>,
+    key: &str,
+    api: &Api,
+    res: pb::SubscribeResponse,
+    state: &Arc<Mutex<Follow>>,
+    catching_up: &mut Option<std::time::Instant>,
+) -> bool {
+    let ready = res.ready.is_some();
+    if let Some(ready) = res.ready {
+        if let Some(began) = catching_up.take() {
+            reports::timing("catch_up", began.elapsed());
+        }
+        for head in ready.servers {
+            let known = {
+                let mut s = state.lock();
+                if s.cursors.contains_key(&head.server_id) {
+                    let from = s.resumed_from.get(&head.server_id).copied();
+                    Some(from.is_some_and(|from| head.sequence > from))
+                } else {
+                    s.cursors.insert(head.server_id.clone(), head.sequence);
+                    s.held.insert(head.server_id.clone(), Vec::new());
+                    None
+                }
+            };
+            if known.is_some() {
+                tokio::spawn(relist_voice(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
+                tokio::spawn(reread_shown(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
+            }
+            match known {
+                Some(true) => {
+                    tokio::spawn(relist(core.clone(), key.to_owned(), api.clone(), head.server_id, state.clone()));
+                }
+                Some(false) => {}
+                None => {
+                    tokio::spawn(snapshot(core.clone(), key.to_owned(), api.clone(), head.server_id, state.clone()));
+                }
+            }
+        }
+        core.shared.instance(key, |i| {
+            i.connection = Connection::Live;
+            i.problem = None;
+        });
+    }
+    // A server joined while a live connection was open: loaded like a new
+    // one at `ready`, then what follows applies.
+    if let Some(head) = res.followed {
+        let new = {
+            let mut s = state.lock();
+            s.covered.insert(head.server_id.clone());
+            let new = !s.cursors.contains_key(&head.server_id);
+            if new {
+                s.cursors.insert(head.server_id.clone(), head.sequence);
+                s.held.insert(head.server_id.clone(), Vec::new());
+            }
+            new
+        };
+        if new {
+            core.follow(key, &head.server_id, true);
+            tokio::spawn(snapshot(core.clone(), key.to_owned(), api.clone(), head.server_id, state.clone()));
+        }
+    }
+    if let Some(event) = res.event {
         handle_event(core, key, event, state);
     }
+    ready
 }
 
 fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex<Follow>>) {
@@ -402,45 +668,11 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             ) => {
                 // A thread reply reaches the people following the thread and the people it mentions.
                 let thread = match &outcome {
-                    Outcome::ThreadReply { thread_id, .. } => Some(thread_id.clone()),
+                    Outcome::ThreadReply { thread_id, .. } => Some(thread_id.as_str()),
                     _ => None,
                 };
                 created.message.as_ref().and_then(|m| {
-                    // Join messages and catching up after a reconnect stay quiet.
-                    let fresh = event.created_at.as_ref().is_none_or(|t| dms::now_ms() - t.seconds * 1000 < FRESH_MS);
-                    if m.kind != pb::MessageKind::Unspecified as i32 || !fresh {
-                        return None;
-                    }
-                    let settings = i.effective_notifications(&sid, channel_id, dms::now_ms());
-                    let mention = i.pings_me(&sid, m, settings.suppress_everyone);
-                    let following = thread.as_ref().is_some_and(|t| threads::follows(i, &sid, t) == Some(true));
-                    if thread.is_some() && !mention && !following {
-                        return None;
-                    }
-                    notifications::should_notify(settings, mention || following, &prefs).then(|| Notice::Message {
-                        instance: key.to_owned(),
-                        server_id: Some(sid.clone()),
-                        channel_id: channel_id.clone(),
-                        title: format!(
-                            "{}{} in #{}",
-                            match &m.webhook {
-                                Some(w) => w.name.clone(),
-                                None => i.display_name(Some(&sid), &m.author_id),
-                            },
-                            if thread.is_some() { " replied in a thread" } else { "" },
-                            i.channel(&sid, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
-                        ),
-                        // An app may post only a card.
-                        body: [&m.content]
-                            .into_iter()
-                            .chain(m.embeds.first().map(|e| &e.title))
-                            .chain(m.embeds.first().map(|e| &e.description))
-                            .find(|t| !t.is_empty())
-                            .map(|t| t.chars().take(160).collect())
-                            .unwrap_or_default(),
-                        mention,
-                        thread: thread.clone(),
-                    })
+                    message_notice(i, key, &sid, channel_id, thread, m, event.created_at.as_ref(), &prefs)
                 })
             }
             _ => None,
@@ -480,6 +712,58 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
         }
         core.follow(key, &sid, false);
     }
+}
+
+/// What a new message from someone else in a channel that isn't on screen
+/// says out loud: a notification, by the channel's settings, when it should.
+/// A thread reply (`thread`) reaches only the people following the thread
+/// and the people it mentions.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn message_notice(
+    i: &InstanceState,
+    key: &str,
+    sid: &str,
+    channel_id: &str,
+    thread: Option<&str>,
+    m: &pb::Message,
+    at: Option<&prost_types::Timestamp>,
+    prefs: &Prefs,
+) -> Option<Notice> {
+    // Join messages and catching up after a reconnect stay quiet.
+    let fresh = at.is_none_or(|t| dms::now_ms() - t.seconds * 1000 < FRESH_MS);
+    if m.kind != pb::MessageKind::Unspecified as i32 || !fresh {
+        return None;
+    }
+    let settings = i.effective_notifications(sid, channel_id, dms::now_ms());
+    let mention = i.pings_me(sid, m, settings.suppress_everyone);
+    let following = thread.is_some_and(|t| threads::follows(i, sid, t) == Some(true));
+    if thread.is_some() && !mention && !following {
+        return None;
+    }
+    notifications::should_notify(settings, mention || following, prefs).then(|| Notice::Message {
+        instance: key.to_owned(),
+        server_id: Some(sid.to_owned()),
+        channel_id: channel_id.to_owned(),
+        title: format!(
+            "{}{} in #{}",
+            match &m.webhook {
+                Some(w) => w.name.clone(),
+                None => i.display_name(Some(sid), &m.author_id),
+            },
+            if thread.is_some() { " replied in a thread" } else { "" },
+            i.channel(sid, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
+        ),
+        // An app may post only a card.
+        body: [&m.content]
+            .into_iter()
+            .chain(m.embeds.first().map(|e| &e.title))
+            .chain(m.embeds.first().map(|e| &e.description))
+            .find(|t| !t.is_empty())
+            .map(|t| t.chars().take(160).collect())
+            .unwrap_or_default(),
+        mention,
+        thread: thread.map(str::to_owned),
+    })
 }
 
 /// A server's state, loaded in one go once the stream says where it stands.

@@ -1,5 +1,6 @@
 //! Friends on one instance (docs/friends.md): the list kept in step over
-//! `WatchFriends` (which is also what shows you online to your friends), and
+//! `WatchFriends` or a live connection's friends feed (either is also what
+//! shows you online to your friends), and
 //! what people do with it. A port of `web/src/fuwa/friends.ts` and
 //! `web/src/lib/friends.ts`.
 //!
@@ -201,11 +202,7 @@ fn drop_from(i: &mut InstanceState, user_id: &str) {
 /// synced, listing again after each reconnect so nothing is missed. An
 /// instance from before friends simply has none.
 pub(super) async fn follow(core: Arc<Core>, key: String, api: Api) {
-    core.shared.instance(&key, |i| {
-        if i.friends.status != FriendsStatus::Ready {
-            i.friends.status = FriendsStatus::Loading;
-        }
-    });
+    loading(&core, &key);
     let mut wait = Duration::from_millis(500);
     loop {
         match watch_once(&core, &key, &api, &mut wait).await {
@@ -223,6 +220,15 @@ pub(super) async fn follow(core: Arc<Core>, key: String, api: Api) {
     }
 }
 
+/// Shows the list as loading until it's first read.
+pub(super) fn loading(core: &Core, key: &str) {
+    core.shared.instance(key, |i| {
+        if i.friends.status != FriendsStatus::Ready {
+            i.friends.status = FriendsStatus::Loading;
+        }
+    });
+}
+
 async fn watch_once(core: &Arc<Core>, key: &str, api: &Api, wait: &mut Duration) -> Result<(), Problem> {
     let mut stream = api.friends().watch_friends(pb::WatchFriendsRequest {}).await.map_err(Problem::from)?.into_inner();
     loop {
@@ -231,55 +237,63 @@ async fn watch_once(core: &Arc<Core>, key: &str, api: &Api, wait: &mut Duration)
             .map_err(|_| Problem::new(Code::Unavailable, "Lost the connection."))?
             .map_err(Problem::from)?;
         let Some(res) = next else { return Ok(()) };
-        if res.ready {
+        if take(core, key, api, res).await? {
             *wait = Duration::from_millis(500);
-            // Listening: read the whole list, so whatever happened while away is in.
-            let list = rpc!(api.friends(), list_friends(pb::ListFriendsRequest {})).await?;
-            let settings = rpc!(api.friends(), get_friend_settings(pb::GetFriendSettingsRequest {})).await?;
-            core.shared.instance(key, |i| {
-                let mut friends = list.friends;
-                for user in friends.iter().filter_map(|f| f.user.as_ref()) {
-                    store::update_user(i, user);
-                }
-                sort(&mut friends);
-                i.friends = FriendsState { status: FriendsStatus::Ready, list: friends, settings: settings.settings };
-            });
-            continue;
-        }
-        let Some(event) = res.event else { continue };
-        if let Some(pb::friend_event::Payload::Settings(settings)) = &event.payload {
-            core.shared.instance(key, |i| i.friends.settings = Some(*settings));
-            continue;
-        }
-        let news = core.shared.instance(key, |i| {
-            let now = crate::core::dms::now_ms();
-            let news = match &event.payload {
-                Some(pb::friend_event::Payload::Changed(friend)) => {
-                    let id = friend.user.as_ref().map(|u| u.id.as_str()).unwrap_or("");
-                    let was = state_with(&i.friends.list, id, now);
-                    let name = friend.user.as_ref().map(store::user_name).unwrap_or_else(|| "Someone".into());
-                    if friend.state == INCOMING && was != INCOMING {
-                        Some(format!("{name} wants to be friends"))
-                    } else if friend.state == FRIEND && was == OUTGOING {
-                        Some(format!("{name} accepted your friend request"))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-            match &event.payload {
-                Some(pb::friend_event::Payload::Changed(friend)) => put(i, friend),
-                _ => {
-                    apply(&mut i.friends.list, &event);
-                }
-            }
-            news
-        });
-        if let Some(Some(title)) = news {
-            core.shared.notice(Notice::Friend { instance: key.to_owned(), title });
         }
     }
+}
+
+/// One response from the friends feed, from its own stream or a live
+/// connection's (`sync.rs`). True when it's the stream saying it's ready.
+pub(super) async fn take(core: &Core, key: &str, api: &Api, res: pb::WatchFriendsResponse) -> Result<bool, Problem> {
+    if res.ready {
+        // Listening: read the whole list, so whatever happened while away is in.
+        let list = rpc!(api.friends(), list_friends(pb::ListFriendsRequest {})).await?;
+        let settings = rpc!(api.friends(), get_friend_settings(pb::GetFriendSettingsRequest {})).await?;
+        core.shared.instance(key, |i| {
+            let mut friends = list.friends;
+            for user in friends.iter().filter_map(|f| f.user.as_ref()) {
+                store::update_user(i, user);
+            }
+            sort(&mut friends);
+            i.friends = FriendsState { status: FriendsStatus::Ready, list: friends, settings: settings.settings };
+        });
+        return Ok(true);
+    }
+    let Some(event) = res.event else { return Ok(false) };
+    if let Some(pb::friend_event::Payload::Settings(settings)) = &event.payload {
+        core.shared.instance(key, |i| i.friends.settings = Some(*settings));
+        return Ok(false);
+    }
+    let news = core.shared.instance(key, |i| {
+        let now = crate::core::dms::now_ms();
+        let news = match &event.payload {
+            Some(pb::friend_event::Payload::Changed(friend)) => {
+                let id = friend.user.as_ref().map(|u| u.id.as_str()).unwrap_or("");
+                let was = state_with(&i.friends.list, id, now);
+                let name = friend.user.as_ref().map(store::user_name).unwrap_or_else(|| "Someone".into());
+                if friend.state == INCOMING && was != INCOMING {
+                    Some(format!("{name} wants to be friends"))
+                } else if friend.state == FRIEND && was == OUTGOING {
+                    Some(format!("{name} accepted your friend request"))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        match &event.payload {
+            Some(pb::friend_event::Payload::Changed(friend)) => put(i, friend),
+            _ => {
+                apply(&mut i.friends.list, &event);
+            }
+        }
+        news
+    });
+    if let Some(Some(title)) = news {
+        core.shared.notice(Notice::Friend { instance: key.to_owned(), title });
+    }
+    Ok(false)
 }
 
 impl Core {

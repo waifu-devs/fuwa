@@ -6,6 +6,7 @@ import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
 import { CallService } from "@/gen/fuwa/v1/call_pb";
+import { LiveService } from "@/gen/fuwa/v1/live_pb";
 import { LiveTileService } from "@/gen/fuwa/v1/live_tile_pb";
 import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { CommandService } from "@/gen/fuwa/v1/command_pb";
@@ -38,6 +39,7 @@ export type Api = {
   channels: Client<typeof ChannelService>;
   messages: Client<typeof MessageService>;
   events: Client<typeof EventService>;
+  live: Client<typeof LiveService>;
   admin: Client<typeof AdminService>;
   media: Client<typeof MediaService>;
   gifs: Client<typeof GifService>;
@@ -81,6 +83,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     channels: createClient(ChannelService, transport),
     messages: createClient(MessageService, transport),
     events: createClient(EventService, transport),
+    live: createClient(LiveService, transport),
     admin: createClient(AdminService, transport),
     media: createClient(MediaService, transport),
     gifs: createClient(GifService, transport),

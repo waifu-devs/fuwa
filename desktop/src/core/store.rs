@@ -43,12 +43,22 @@ pub struct PendingMessage {
     pub failed: Option<String>,
 }
 
+/// The live connection open to an instance (docs/live.md).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveConnection {
+    pub id: String,
+    /// What the instance has in focus, as it last said.
+    pub focus: pb::Focus,
+}
+
 #[derive(Debug, Clone)]
 pub struct InstanceState {
     pub key: String,
     pub url: String,
     pub connection: Connection,
     pub problem: Option<String>,
+    /// While the instance is followed over a live connection, that connection.
+    pub live: Option<LiveConnection>,
     pub node: Option<pb::Node>,
     pub me: Option<pb::User>,
     pub admin: bool,
@@ -69,6 +79,13 @@ pub struct InstanceState {
     pub pending: HashMap<String, Vec<PendingMessage>>,
     /// Per channel: messages from others that arrived while it wasn't open.
     pub unread: HashMap<String, u32>,
+    /// Per channel: the newest message id heard of, whole or as a live
+    /// connection's head (`live.rs`), beyond what's loaded.
+    pub newest: HashMap<String, String>,
+    /// Per channel that notifies for every message, on a live connection:
+    /// the newest message notified for, or known not to need it. What a head
+    /// says came after it is read to notify (`live.rs`).
+    pub notified: HashMap<String, String>,
     /// Servers whose channels and members are loaded.
     pub synced: HashSet<String>,
     pub dms: DmState,
@@ -120,6 +137,7 @@ impl InstanceState {
             url: url.to_owned(),
             connection: Connection::Connecting,
             problem: None,
+            live: None,
             node: None,
             me: None,
             admin: false,
@@ -132,6 +150,8 @@ impl InstanceState {
             messages: HashMap::new(),
             pending: HashMap::new(),
             unread: HashMap::new(),
+            newest: HashMap::new(),
+            notified: HashMap::new(),
             synced: HashSet::new(),
             dms: DmState::default(),
             notifications: HashMap::new(),
@@ -223,6 +243,15 @@ pub fn user_name(user: &pb::User) -> String {
     if user.display_name.is_empty() { user.username.clone() } else { user.display_name.clone() }
 }
 
+/// The people in sight in a server's member list, for a live connection's
+/// focus (`live.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InView {
+    pub instance: String,
+    pub server: String,
+    pub people: Vec<String>,
+}
+
 /// What the app is looking at, so it doesn't collect unread counts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Focus {
@@ -239,6 +268,8 @@ pub struct Store {
     /// Instance keys, in the order they were added.
     pub order: Vec<String>,
     pub focus: Option<Focus>,
+    /// The member list's rows in sight, while it shows.
+    pub in_view: Option<InView>,
 }
 
 impl Store {
@@ -365,6 +396,8 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
         i.messages.remove(&id);
         i.pending.remove(&id);
         i.unread.remove(&id);
+        i.newest.remove(&id);
+        i.notified.remove(&id);
     }
 }
 
@@ -376,6 +409,8 @@ pub fn set_channels(i: &mut InstanceState, server_id: &str, mut channels: Vec<pb
         for id in &gone {
             i.messages.remove(id);
             i.unread.remove(id);
+            i.newest.remove(id);
+            i.notified.remove(id);
         }
         threads::forget_threads_in(i, &gone.iter().map(String::as_str).collect());
     }
@@ -457,6 +492,8 @@ pub fn apply_event(
             }
             i.messages.remove(&p.channel_id);
             i.unread.remove(&p.channel_id);
+            i.newest.remove(&p.channel_id);
+            i.notified.remove(&p.channel_id);
             threads::forget_threads_in(i, &HashSet::from([p.channel_id.as_str()]));
             if let Some(list) = i.voice.get_mut(sid) {
                 list.retain(|v| v.channel_id != p.channel_id);
@@ -469,6 +506,10 @@ pub fn apply_event(
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }) => {
             let created = matches!(payload, Payload::MessageCreated(_));
             add_shared_authors(&mut i.users, std::slice::from_ref(message));
+            // Replies kept to their thread aren't the channel's news, nor in its heads.
+            if created && (message.thread_id.is_empty() || message.also_in_channel) {
+                heard_of(i, &message.channel_id, &message.id);
+            }
             let mine = i.me.as_ref().is_some_and(|me| me.id == message.author_id);
             if !message.thread_id.is_empty() {
                 let mut seen = false;
@@ -608,6 +649,28 @@ pub fn apply_event(
         _ => {}
     }
     Outcome::Nothing
+}
+
+/// The newest message id known in a channel: heard of, or loaded.
+pub fn newest_known<'a>(i: &'a InstanceState, channel_id: &str) -> Option<&'a str> {
+    let heard = i.newest.get(channel_id).map(String::as_str);
+    let loaded = i.messages.get(channel_id).and_then(|c| c.items.last()).map(|m| m.id.as_str());
+    heard.max(loaded)
+}
+
+/// Notes a message heard of in a channel (ids sort by time), whether or not the channel is loaded.
+pub fn heard_of(i: &mut InstanceState, channel_id: &str, message_id: &str) {
+    let known = newest_known(i, channel_id).map(str::to_owned);
+    if known.as_deref().is_none_or(|known| message_id > known) {
+        // Nothing waits to be read for notifying (no head moved past the
+        // mark), so this whole message, which notified as it came, moves it on.
+        if let Some(mark) = i.notified.get_mut(channel_id)
+            && known.as_deref() == Some(mark.as_str())
+        {
+            *mark = message_id.to_owned();
+        }
+        i.newest.insert(channel_id.to_owned(), message_id.to_owned());
+    }
 }
 
 /// A message gone: off its channel, out of any thread holding it, and a thread under it gone too.
