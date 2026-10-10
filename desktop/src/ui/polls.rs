@@ -176,7 +176,7 @@ fn answer_emoji(emoji: &str, picture: Option<&String>, size: f32) -> Option<AnyE
         use gpui_kit::StyledImage as _;
         return Some(
             base.child(
-                gpui_kit::img(SharedString::from(url.clone())).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain),
+                crate::ui::widgets::picture(url.clone()).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain),
             )
             .into_any_element(),
         );

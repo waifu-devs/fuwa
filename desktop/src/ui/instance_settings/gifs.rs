@@ -230,7 +230,7 @@ impl InstanceSettingsView {
             for (n, gif) in r.results.iter().enumerate() {
                 grid = grid.child(motion::once(
                     div().size(px(size)).rounded(radius_lg()).overflow_hidden().bg(p.muted).child(
-                        img(SharedString::from(gif.preview_url.clone()))
+                        crate::ui::widgets::picture(gif.preview_url.clone())
                             .size_full()
                             .rounded(radius_lg())
                             .object_fit(ObjectFit::Cover),

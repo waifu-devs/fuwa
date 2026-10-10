@@ -105,14 +105,14 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette, animate: bool) -> Stateful<gpu
         text = text.child(fields);
     }
     let thumbnail = safe(&embed.thumbnail_url).map(|url| {
-        img(SharedString::from(url.to_owned()))
+        crate::ui::widgets::picture(url.to_owned())
             .size(px(64.0))
             .flex_none()
             .rounded(crate::ui::theme::radius_lg())
             .object_fit(ObjectFit::Cover)
     });
     let image = safe(&embed.image_url).map(|url| {
-        img(SharedString::from(url.to_owned()))
+        crate::ui::widgets::picture(url.to_owned())
             .w_full()
             .max_h(px(288.0))
             .mt(px(8.0))

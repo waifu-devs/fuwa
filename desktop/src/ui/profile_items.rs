@@ -760,6 +760,7 @@ impl ProfileItemsView {
                 let local = decorated(avatar(Some(me), 80.0, p), 80.0, None)
                     .child(
                         img(path.clone())
+                            .id("decoration-draft")
                             .absolute()
                             .left(px(-8.0))
                             .top(px(-8.0))

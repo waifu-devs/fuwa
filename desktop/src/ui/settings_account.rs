@@ -982,7 +982,7 @@ impl SettingsView {
             .on_click(cx.listener(move |this, _, _, cx| this.pick_picture(kind, cx)))
             .child(match &shown {
                 // Rounded itself: the tile doesn't clip it to its corners.
-                Some(url) => img(SharedString::from(url.clone()))
+                Some(url) => crate::ui::widgets::picture(url.clone())
                     .size_full()
                     .object_fit(ObjectFit::Cover)
                     .map(|el| match kind {
@@ -1994,7 +1994,7 @@ pub(crate) fn banner_of(user_id: &str, picture: String, accent: i32, p: &Palette
             )))
         })
         .when(!picture.is_empty(), |el| {
-            el.child(img(SharedString::from(picture)).absolute().inset_0().size_full().object_fit(ObjectFit::Cover))
+            el.child(crate::ui::widgets::picture(picture).absolute().inset_0().size_full().object_fit(ObjectFit::Cover))
         })
 }
 

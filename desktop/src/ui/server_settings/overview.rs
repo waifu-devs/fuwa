@@ -396,7 +396,7 @@ impl ServerSettingsView {
             .active(|s| s.opacity(0.9))
             .on_click(cx.listener(|this, _, _, cx| this.pick_icon(cx)))
             .child(if !shown.icon_url.is_empty() {
-                img(SharedString::from(shown.icon_url.clone()))
+                crate::ui::widgets::picture(shown.icon_url.clone())
                     .size_full()
                     .object_fit(ObjectFit::Cover)
                     .into_any_element()

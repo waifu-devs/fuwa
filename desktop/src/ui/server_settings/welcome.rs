@@ -634,7 +634,7 @@ impl ServerSettingsView {
             grid = grid.child(cell(
                 format!("welcome-e-{key}-{}", e.id),
                 crate::ui::emoji::token(e),
-                gpui_kit::img(SharedString::from(e.url.clone()))
+                crate::ui::widgets::picture(e.url.clone())
                     .size(px(22.0))
                     .object_fit(gpui_kit::ObjectFit::Contain)
                     .into_any_element(),

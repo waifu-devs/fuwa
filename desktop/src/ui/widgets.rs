@@ -2,7 +2,7 @@
 //! buttons and fields, each with its hover and press.
 
 use gpui_kit::{
-    AnyElement, App, Div, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
+    AnyElement, App, Div, ElementId, FontWeight, Hsla, Img, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _,
     Window, div, hsla, img, px, svg,
 };
@@ -13,6 +13,17 @@ use gpui_kit::prelude::FluentBuilder as _;
 use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::theme::{self, Palette, alpha, corner, mix};
+
+/// A picture by its link. GPUI keeps which frame an animated GIF or WebP is
+/// on in the image's element state, which only an image with an id has, so
+/// an `img` without one stays on its first frame: every picture people upload
+/// (avatars, icons, banners, emoji, decorations, attachments) goes through
+/// here and moves as it does on the web. Two images of the same link share
+/// the id, and so the frame they're on.
+pub fn picture(url: impl Into<SharedString>) -> Stateful<Img> {
+    let url = url.into();
+    img(url.clone()).id(ElementId::Name(format!("picture|{url}").into()))
+}
 
 /// A Lucide icon by name (`hash`, `plus`, `settings`...).
 /// It takes the color of the text around it unless given one.
@@ -100,7 +111,7 @@ pub fn avatar(user: Option<&pb::User>, size: f32, _p: &Palette) -> Div {
     } else {
         let fallback2 = fallback.clone();
         base.child(
-            img(SharedString::from(url.to_owned()))
+            picture(url.to_owned())
                 .size_full()
                 .rounded_full()
                 .object_fit(ObjectFit::Cover)
@@ -118,7 +129,7 @@ pub fn decorated(avatar: Div, size: f32, decoration: Option<&str>) -> Div {
     match decoration.filter(|url| !url.is_empty()) {
         None => el,
         Some(url) => el.child(
-            img(SharedString::from(url.to_owned()))
+            picture(url.to_owned())
                 .absolute()
                 .left(px(-size * 0.1))
                 .top(px(-size * 0.1))
@@ -150,7 +161,7 @@ pub fn server_icon(server: &pb::Server, size: f32, radius: f32, _p: &Palette) ->
     } else {
         let fallback2 = fallback.clone();
         base.child(
-            img(SharedString::from(server.icon_url.clone()))
+            picture(server.icon_url.clone())
                 .size_full()
                 .rounded(px(radius))
                 .object_fit(ObjectFit::Cover)

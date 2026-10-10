@@ -666,9 +666,12 @@ impl ServerSettingsView {
                 .when(failed, |el| el.bg(alpha(p.destructive, 0.05)))
                 .children(bar)
                 .child(match pending.preview.clone() {
-                    Some(picture) => {
-                        img(picture).size(px(40.0)).flex_none().object_fit(ObjectFit::Contain).into_any_element()
-                    }
+                    Some(picture) => img(picture)
+                        .id(SharedString::from(format!("emoji-new-{}", pending.id)))
+                        .size(px(40.0))
+                        .flex_none()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
                     None => div()
                         .size(px(40.0))
                         .flex_none()
@@ -832,7 +835,9 @@ impl ServerSettingsView {
                         .flex_none()
                         .hover(|s| s.scale(1.25).rotate(gpui_kit::radians(-8f32.to_radians())))
                         .child(
-                            img(SharedString::from(emoji.url.clone())).size(px(40.0)).object_fit(ObjectFit::Contain),
+                            crate::ui::widgets::picture(emoji.url.clone())
+                                .size(px(40.0))
+                                .object_fit(ObjectFit::Contain),
                         ),
                 )
                 .child(

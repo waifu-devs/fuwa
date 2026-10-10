@@ -393,7 +393,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
                 .mx(px(1.0))
                 .hover(|s| s.scale(1.35).rotate(radians((-6.0f32).to_radians())))
                 .child(
-                    img(gpui_kit::SharedString::from(picture.url.clone()))
+                    crate::ui::widgets::picture(picture.url.clone())
                         .size(size)
                         .object_fit(ObjectFit::Contain)
                         .with_fallback(move || alt.clone().into_any_element()),

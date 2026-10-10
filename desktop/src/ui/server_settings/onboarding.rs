@@ -517,7 +517,7 @@ impl ServerSettingsView {
             .child(if url.is_empty() {
                 crate::ui::banner::server_banner(&drafted, 238.0, 94.0, None, window, cx)
             } else {
-                img(SharedString::from(url.clone()))
+                crate::ui::widgets::picture(url.clone())
                     .size_full()
                     .object_fit(gpui_kit::ObjectFit::Cover)
                     .into_any_element()
@@ -709,7 +709,7 @@ impl ServerSettingsView {
                             .rounded(corner(12.0))
                             .overflow_hidden()
                             .cursor_crosshair()
-                            .child(img(SharedString::from(url.clone())).absolute().inset_0().size_full())
+                            .child(crate::ui::widgets::picture(url.clone()).absolute().inset_0().size_full())
                             .child(
                                 canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {})
                                     .absolute()
@@ -742,7 +742,7 @@ impl ServerSettingsView {
                             .gap(px(4.0))
                             .child(
                                 div().relative().w(px(w)).h(px(h)).rounded(corner(8.0)).overflow_hidden().child(
-                                    img(SharedString::from(url.clone()))
+                                    crate::ui::widgets::picture(url.clone())
                                         .absolute()
                                         .left(px(l))
                                         .top(px(t))
@@ -1288,7 +1288,7 @@ impl ServerSettingsView {
                 let own = emojis.iter().map(|e| (crate::ui::emoji::token(e), Some(e.url.clone())));
                 for (n, (value, url)) in own.chain(everyday).enumerate() {
                     let face = match url {
-                        Some(url) => img(SharedString::from(url)).size(px(22.0)).into_any_element(),
+                        Some(url) => crate::ui::widgets::picture(url).size(px(22.0)).into_any_element(),
                         None => div().text_size(px(19.0)).child(value.clone()).into_any_element(),
                     };
                     let hover = alpha(p.primary, 0.12);

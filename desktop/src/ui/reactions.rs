@@ -341,7 +341,7 @@ fn glyph(c: &Chip, size: f32) -> AnyElement {
         Some(url) => base
             .child({
                 use gpui_kit::StyledImage as _;
-                gpui_kit::img(SharedString::from(url.clone())).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
+                crate::ui::widgets::picture(url.clone()).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
             })
             .into_any_element(),
         None => base.in_color().text_size(px(size * 0.9)).child(c.key.emoji.clone()).into_any_element(),

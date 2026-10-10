@@ -108,7 +108,7 @@ pub fn server_banner(
             };
             let shown = div().absolute().inset_0().child({
                 let (l, t, sw, sh) = place(0.0);
-                img(url.clone()).absolute().left(px(l)).top(px(t)).w(px(sw)).h(px(sh))
+                crate::ui::widgets::picture(url.clone()).absolute().left(px(l)).top(px(t)).w(px(sw)).h(px(sh))
             });
             let moving = if still {
                 shown.into_any_element()
@@ -117,7 +117,9 @@ pub fn server_banner(
                     // There and back again over one period.
                     let t = 0.5 - 0.5 * (t * std::f32::consts::TAU).cos();
                     let (l, tp, sw, sh) = place(t);
-                    el.child(img(url.clone()).absolute().left(px(l)).top(px(tp)).w(px(sw)).h(px(sh)))
+                    el.child(
+                        crate::ui::widgets::picture(url.clone()).absolute().left(px(l)).top(px(tp)).w(px(sw)).h(px(sh)),
+                    )
                 })
             };
             el.child(motion::fade_in(div().absolute().inset_0().child(moving), "banner-in", Duration::from_millis(600)))

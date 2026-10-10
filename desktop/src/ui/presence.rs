@@ -127,7 +127,7 @@ pub fn activity_cards(
         .enumerate()
         .map(|(n, a)| {
             let picture = |url: &str, size: f32, round: bool| {
-                let el = img(SharedString::from(url.to_owned())).size(px(size));
+                let el = crate::ui::widgets::picture(url.to_owned()).size(px(size));
                 if round { el.rounded_full() } else { el.rounded(radius_xl()) }
             };
             // The web's `.activity-tile`: the theme's color sweeping toward a sky blue.

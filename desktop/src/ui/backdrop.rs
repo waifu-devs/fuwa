@@ -96,7 +96,7 @@ fn picture(url: &str, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, c
         return (tw >= 1.0 && th >= 1.0).then(|| tiled(Tile::Uri(url), tw, th, w, h).into_any_element());
     }
     Some(
-        img(url)
+        crate::ui::widgets::picture(url)
             .absolute()
             .inset_0()
             .size_full()
@@ -285,8 +285,8 @@ fn tiled(tile: Tile, tw: f32, th: f32, w: f32, h: f32) -> gpui_kit::Div {
     let mut grid = div().absolute().top_0().left_0().w(px(cols as f32 * tw)).flex().flex_wrap();
     for _ in 0..cols * rows {
         let el = match &tile {
-            Tile::Uri(u) => img(u.clone()),
-            Tile::Image(i) => img(i.clone()),
+            Tile::Uri(u) => crate::ui::widgets::picture(u.clone()),
+            Tile::Image(i) => img(i.clone()).id("texture-tile"),
         };
         grid = grid.child(el.flex_none().w(px(tw)).h(px(th)).object_fit(ObjectFit::Fill));
     }

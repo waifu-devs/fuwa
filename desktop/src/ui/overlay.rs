@@ -592,10 +592,8 @@ pub(crate) fn emoji_tile(
     match own {
         Some(url) => {
             use gpui_kit::StyledImage as _;
-            base.child(
-                gpui_kit::img(SharedString::from(url.clone())).size(px(24.0)).object_fit(gpui_kit::ObjectFit::Contain),
-            )
-            .into_any_element()
+            base.child(crate::ui::widgets::picture(url.clone()).size(px(24.0)).object_fit(gpui_kit::ObjectFit::Contain))
+                .into_any_element()
         }
         None if !emoji.is_empty() && !emoji.starts_with('<') => {
             base.text_size(px(20.0)).child(emoji.to_owned()).into_any_element()
