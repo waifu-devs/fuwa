@@ -1,6 +1,6 @@
 {
   "name": "@waifu-devs/fuwa",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "The official TypeScript SDK for fuwa: typed clients for every service, and agents (bots) that follow events, answer commands and post messages.",
   "license": "Apache-2.0",
   "repository": {
