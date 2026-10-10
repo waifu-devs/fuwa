@@ -628,7 +628,14 @@
     "used /name" and message buttons (over `core/commands.rs`, the web's
     `chat/Commands.tsx`; only where the instance has `agent-commands`),
     `notify.rs` the system
-    notifications (clicks come back through a channel), `settings_account.rs`
+    notifications (clicks come back through a channel), `game_overlay.rs`
+    the game overlay (docs/game-overlay.md: a second window over the game,
+    transparent and above it, whose clicks go through by `click_through.rs`,
+    with the call and messages in a corner, and in use by its key), over
+    `core/hotkeys.rs` (push to talk and the overlay's key heard while a game
+    is in front, by reading the watched keys' state, never a hook) and
+    `core/foreground.rs` (whether a program covers its screen),
+    `settings_overlay.rs` its settings page, `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
     `settings_privacy.rs` the Privacy page ("Help fix bugs", what a report

@@ -84,6 +84,9 @@ wgpu = "29.0.4"
 # The frames those shaders make, and video as it's decoded, as pictures for
 # GPUI (the version GPUI uses).
 image = { version = "0.25", default-features = false }
+# The system's own window under a GPUI one, for what GPUI can't do: letting
+# clicks through the game overlay (ui/game_overlay.rs).
+raw-window-handle = "0.6"
 
 # Asking macOS for the microphone and camera (core/voice/access.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -102,6 +105,10 @@ objc2-screen-capture-kit = { version = "0.3", default-features = false, features
 # speaks too, in Rust (no libpulse to install).
 [target.'cfg(target_os = "linux")'.dependencies]
 pulseaudio = "0.3"
+# Keys heard while a game is in front, the window in front, and the game
+# overlay letting clicks through (core/hotkeys.rs, core/foreground.rs): X11's
+# protocol in Rust, the version GPUI uses.
+x11rb = { version = "0.13", features = ["shape"] }
 
 # Cameras and shared screens in calls are VP8, through libvpx: a static
 # build, fetched prebuilt for each system (checked against its SHA-256), so
@@ -120,7 +127,9 @@ windows-capture = "=1.4.4"
 # bindings made from its headers.
 env-libvpx-sys = { version = "=5.1.3", features = ["generate"] }
 # A shared screen's sound: WASAPI's process loopback, which leaves the app's own sound out.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Threading", "Win32_System_Variant"] }
+# Keys heard while a game is in front, the window in front, and the game
+# overlay letting clicks through: KeyboardAndMouse, WindowsAndMessaging, Gdi.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # What  expands to names it.
 windows-core = "0.62"
 

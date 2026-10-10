@@ -25,6 +25,14 @@ pub fn clicks() -> mpsc::UnboundedReceiver<Clicked> {
     rx
 }
 
+/// Opens where a notification points, as clicking it would (the game
+/// overlay's cards).
+pub fn click(target: Clicked) {
+    if let Some(tx) = CLICKS.lock().as_ref() {
+        let _ = tx.unbounded_send(target);
+    }
+}
+
 /// Shows a notification. It never blocks the window: the system is asked
 /// from a thread of its own, which also waits for a click where it can.
 pub fn show(title: String, body: String, target: Clicked) {

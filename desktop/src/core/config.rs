@@ -227,6 +227,41 @@ pub enum PopoutFit {
     Contain,
 }
 
+/// When the game overlay shows (`ui/game_overlay.rs`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayShow {
+    /// While a game is in front: one covering its screen, or one reporting what you play.
+    #[default]
+    Games,
+    /// Whenever you're in a call and fuwa isn't in front.
+    Calls,
+}
+
+/// The corner of the screen the game overlay keeps to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayCorner {
+    #[default]
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl OverlayCorner {
+    pub const ALL: [OverlayCorner; 4] =
+        [OverlayCorner::TopLeft, OverlayCorner::TopRight, OverlayCorner::BottomLeft, OverlayCorner::BottomRight];
+
+    pub fn top(self) -> bool {
+        matches!(self, OverlayCorner::TopLeft | OverlayCorner::TopRight)
+    }
+
+    pub fn left(self) -> bool {
+        matches!(self, OverlayCorner::TopLeft | OverlayCorner::BottomLeft)
+    }
+}
+
 /// Which sounds play (the web app's `sounds`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -409,6 +444,16 @@ pub struct Prefs {
     /// How sharp and smooth a shared screen goes out (`voice::vp8::Share`).
     pub share_height: u32,
     pub share_fps: u32,
+    /// The game overlay: who's in your call and what would notify you, over a game.
+    pub overlay: bool,
+    pub overlay_show: OverlayShow,
+    pub overlay_corner: OverlayCorner,
+    /// How solid its cards are, in percent (30 to 100).
+    pub overlay_opacity: u8,
+    /// Only the people talking show in its call card.
+    pub overlay_speakers_only: bool,
+    /// Messages that would notify you show in it, instead of the system's notifications.
+    pub overlay_notifications: bool,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -495,6 +540,12 @@ impl Default for Prefs {
             share_sound: true,
             share_height: crate::core::voice::vp8::Share::DEFAULT.height,
             share_fps: crate::core::voice::vp8::Share::DEFAULT.fps,
+            overlay: true,
+            overlay_show: OverlayShow::Games,
+            overlay_corner: OverlayCorner::TopLeft,
+            overlay_opacity: 85,
+            overlay_speakers_only: false,
+            overlay_notifications: true,
         }
     }
 }
@@ -579,6 +630,7 @@ impl Prefs {
         self.output_volume = self.output_volume.min(200);
         self.sensitivity = self.sensitivity.clamp(-100, 0);
         self.ptt_release = self.ptt_release.min(2000);
+        self.overlay_opacity = self.overlay_opacity.clamp(30, 100);
         self.user_volumes.retain(|_, v| *v <= 200);
         if self.skin_tone > 5 {
             self.skin_tone = 0;
