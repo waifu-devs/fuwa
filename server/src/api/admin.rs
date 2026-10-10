@@ -304,6 +304,12 @@ impl AdminService for Api {
                             self.app.sessions_ended(&agent.account.id);
                         }
                         self.app.sessions_ended(&req.account_id);
+                    } else {
+                        // Back on, their agents' endpoints are again.
+                        for agent in self.app.node()?.agents(&req.account_id).await? {
+                            self.app.agent_endpoint_changed(&agent.account.id);
+                        }
+                        self.app.agent_endpoint_changed(&req.account_id);
                     }
                 }
                 if req.admin == Some(true) {
