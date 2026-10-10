@@ -564,7 +564,10 @@ impl FuwaApp {
                     Row::Msg(c) if c.id == seq => c.reactions.clone(),
                     _ => None,
                 });
-                crate::ui::chat::render_row(&Row::Msg(Rc::new(msg)), 0, &self.row_ctx(Some("secure".into()), cx), cx)
+                {
+                    let ctx = self.row_ctx(Some("secure".into()), cx);
+                    crate::ui::chat::render_row(&Row::Msg(Rc::new(msg)), 0, &ctx, window, cx)
+                }
             }
             _ => div()
                 .mx(px(16.0))
@@ -626,7 +629,9 @@ impl FuwaApp {
                     .pb(px(12.0))
                     .child(div().pt(px(12.0)).child(top).child(separator))
                     .children(
-                        rows.iter().enumerate().map(|(ix, row)| crate::ui::chat::render_row(row, ix + 1, &ctx, cx)),
+                        rows.iter()
+                            .enumerate()
+                            .map(|(ix, row)| crate::ui::chat::render_row(row, ix + 1, &ctx, window, cx)),
                     ),
             );
         let composer = self.encrypted_composer(

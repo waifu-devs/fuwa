@@ -1080,6 +1080,7 @@ impl FuwaApp {
             };
         let list = div()
             .id("friend-more-menu")
+            .occlude()
             .w(px(192.0))
             .rounded(radius_md())
             .border_1()

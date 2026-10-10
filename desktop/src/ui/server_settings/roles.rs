@@ -1528,8 +1528,11 @@ impl ServerSettingsView {
                     })
                     .take(30)
                     .collect();
-                let mut list =
-                    div().id("role-others").flex().flex_col().gap(px(2.0)).max_h(px(240.0)).overflow_y_scroll();
+                let mut list = crate::ui::widgets::inner_scroll("role-others", window, cx)
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .max_h(px(240.0));
                 if others.is_empty() {
                     list = list.child(
                         div().px(px(8.0)).py(px(12.0)).text_center().text_sm().text_color(p.muted_foreground).child(

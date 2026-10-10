@@ -3,8 +3,8 @@
 
 use gpui_kit::{
     AnyElement, App, Div, ElementId, FontWeight, Hsla, Img, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _,
-    Window, div, hsla, img, px, svg,
+    ParentElement as _, Rgba, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, Styled,
+    StyledImage as _, Window, div, hsla, img, px, svg,
 };
 
 use gpui_kit::component::Icon;
@@ -23,6 +23,24 @@ use crate::ui::theme::{self, Palette, alpha, corner, mix};
 pub fn picture(url: impl Into<SharedString>) -> Stateful<Img> {
     let url = url.into();
     img(url.clone()).id(ElementId::Name(format!("picture|{url}").into()))
+}
+
+/// A box that scrolls inside something else that scrolls (a page, a dialog, the chat). GPUI
+/// hands the wheel to every scrolling box under the pointer, so on its own the page would
+/// scroll along with it; while this one has more to show it keeps the wheel to itself, and
+/// otherwise lets it through so the page still scrolls over it.
+pub fn inner_scroll(id: impl Into<SharedString>, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+    let id = id.into();
+    let handle = window
+        .use_keyed_state(SharedString::from(format!("{id}|inner-scroll")), cx, |_, _| ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let held = handle.clone();
+    div().id(id).overflow_y_scroll().track_scroll(&handle).on_scroll_wheel(move |_, _, cx| {
+        if held.max_offset().y > px(0.0) {
+            cx.stop_propagation();
+        }
+    })
 }
 
 /// A Lucide icon by name (`hash`, `plus`, `settings`...).

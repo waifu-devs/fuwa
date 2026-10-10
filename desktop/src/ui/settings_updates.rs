@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, div, px,
 };
 
 use crate::core::compat;
@@ -256,10 +256,8 @@ impl SettingsView {
             page = page.child(section(&t("desktop.updates.needsNewer"), rows, p));
         }
         if let Some(release) = status.release().filter(|r| !r.notes.trim().is_empty()) {
-            let notes = div()
-                .id("updates-notes")
+            let notes = crate::ui::widgets::inner_scroll("updates-notes", window, cx)
                 .max_h(px(360.0))
-                .overflow_y_scroll()
                 .p(px(16.0))
                 .rounded(corner(16.0))
                 .bg(p.card)

@@ -5,7 +5,7 @@
 //! the floating bar, beside previews of the server as Browse shows it, its
 //! join message, and three accounts at the door.
 
-use gpui_kit::{ObjectFit, StyledImage as _, img};
+use gpui_kit::{ObjectFit, StyledImage as _};
 
 use super::pages::{boxed, focused, heading, label, part, preview_card};
 use super::*;
@@ -584,6 +584,7 @@ impl ServerSettingsView {
             items.extend(channels.iter().map(|c| (c.id.clone(), format!("#{}", c.name))));
             let mut list = div()
                 .id("join-messages-menu")
+                .occlude()
                 .absolute()
                 .top(px(48.0))
                 .left_0()

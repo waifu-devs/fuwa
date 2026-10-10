@@ -900,10 +900,8 @@ impl FuwaApp {
                             .gap(px(8.0))
                             .child(section_label(&t("join.applyDialog.rules"), p))
                             .child(
-                                div()
-                                    .id("apply-rules")
+                                crate::ui::widgets::inner_scroll("apply-rules", window, cx)
                                     .max_h(px(224.0))
-                                    .overflow_y_scroll()
                                     .child(rules_list(&form.rules, p)),
                             ),
                     );

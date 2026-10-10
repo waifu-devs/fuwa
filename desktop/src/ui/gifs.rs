@@ -659,6 +659,7 @@ impl FuwaApp {
         Some(
             div()
                 .id("gif-panel")
+                .occlude()
                 .absolute()
                 .right(px(20.0))
                 .bottom(gpui_kit::relative(1.0))

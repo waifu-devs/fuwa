@@ -10,7 +10,7 @@ use std::time::Duration;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Div, Hsla, ImgResourceLoader, IntoElement, ParentElement as _, Resource, SharedString,
-    Styled as _, Window, div, hsla, img, linear_color_stop, linear_gradient, px,
+    Styled as _, Window, div, hsla, linear_color_stop, linear_gradient, px,
 };
 
 use crate::pb;

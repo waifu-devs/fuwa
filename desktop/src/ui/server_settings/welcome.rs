@@ -331,7 +331,7 @@ impl ServerSettingsView {
         let mut list = div().flex().flex_col().gap(px(8.0));
         let count = self.welcome.rows.len();
         for at in 0..count {
-            list = list.child(self.welcome_row(at, count, &channels, &unused, &emojis, &look, p, cx));
+            list = list.child(self.welcome_row(at, count, &channels, &unused, &emojis, &look, p, window, cx));
         }
         let mut suggested = div()
             .flex()
@@ -446,6 +446,7 @@ impl ServerSettingsView {
         emojis: &[pb::Emoji],
         look: &crate::ui::mentions::Look,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let row = &self.welcome.rows[at];
@@ -562,7 +563,7 @@ impl ServerSettingsView {
                 }
                 chips.into_any_element()
             }
-            Pick::Emoji => self.emoji_choices(key, emojis, p, cx),
+            Pick::Emoji => self.emoji_choices(key, emojis, p, window, cx),
         });
 
         let body = div()
@@ -600,7 +601,14 @@ impl ServerSettingsView {
     }
 
     /// The server's own emoji, then everyday ones, and a way back to none.
-    fn emoji_choices(&self, key: u64, emojis: &[pb::Emoji], p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn emoji_choices(
+        &self,
+        key: u64,
+        emojis: &[pb::Emoji],
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let hover = alpha(p.primary, 0.12);
         let cell = |id: String, value: String, face: AnyElement, cx: &mut Context<Self>| {
             div()
@@ -650,10 +658,8 @@ impl ServerSettingsView {
                 cx,
             ));
         }
-        div()
-            .id(SharedString::from(format!("welcome-grid-{key}")))
+        crate::ui::widgets::inner_scroll(format!("welcome-grid-{key}"), window, cx)
             .max_h(px(168.0))
-            .overflow_y_scroll()
             .child(grid)
             .into_any_element()
     }

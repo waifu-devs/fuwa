@@ -204,6 +204,7 @@ impl crate::ui::app::FuwaApp {
             .child(close);
         Some(
             div()
+                .occlude()
                 .absolute()
                 .left(px(RAIL + 8.0))
                 .bottom(px(ME_PANEL + 8.0))

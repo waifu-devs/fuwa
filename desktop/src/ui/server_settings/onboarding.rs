@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::StyledImage as _;
-use gpui_kit::{Bounds, ImgResourceLoader, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Resource, canvas, img};
+use gpui_kit::{Bounds, ImgResourceLoader, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Resource, canvas};
 
 use super::roles::switch;
 use super::*;
@@ -946,7 +946,7 @@ impl ServerSettingsView {
         let count = self.onboard.steps.len();
         let mut list = div().flex().flex_col().gap(px(10.0));
         for at in 0..count {
-            list = list.child(self.step_card(at, &roles, &channels, &emojis, &look, &access, p, cx));
+            list = list.child(self.step_card(at, &roles, &channels, &emojis, &look, &access, p, window, cx));
         }
         let has_rules_step = self.onboard.steps.iter().any(|s| s.step.kind == RULES);
         let first_text = channels.iter().find(|c| c.r#type == pb::ChannelType::Text as i32).map(|c| c.id.clone());
@@ -1015,6 +1015,7 @@ impl ServerSettingsView {
         look: &crate::ui::mentions::Look,
         access: &crate::core::permissions::Access,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let s = &self.onboard.steps[at];
@@ -1103,6 +1104,7 @@ impl ServerSettingsView {
                         look,
                         access,
                         p,
+                        window,
                         cx,
                     ));
                 }
@@ -1170,6 +1172,7 @@ impl ServerSettingsView {
         look: &crate::ui::mentions::Look,
         access: &crate::core::permissions::Access,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open = self.onboard.open.filter(|(k, _)| *k == key).map(|(_, o)| o);
@@ -1311,10 +1314,8 @@ impl ServerSettingsView {
                             .child(face),
                     );
                 }
-                div()
-                    .id(SharedString::from(format!("onb-egrid-{key}")))
+                crate::ui::widgets::inner_scroll(format!("onb-egrid-{key}"), window, cx)
                     .max_h(px(150.0))
-                    .overflow_y_scroll()
                     .child(grid)
                     .into_any_element()
             }

@@ -483,6 +483,7 @@ impl FuwaApp {
             let thread = toast.thread.clone();
             let item = card(&p)
                 .id(SharedString::from(format!("toast-{id}")))
+                .occlude()
                 .p(px(14.0))
                 .flex()
                 .gap(px(12.0))

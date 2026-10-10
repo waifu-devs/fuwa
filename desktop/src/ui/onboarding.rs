@@ -356,7 +356,7 @@ impl FuwaApp {
             );
             content = match step.kind {
                 PICK => content.child(self.pick_cards(&step, &roles, &look, tint, &p, cx)),
-                RULES => content.child(self.rules_box(&p, cx)),
+                RULES => content.child(self.rules_box(&p, window, cx)),
                 _ => {
                     let name = channels
                         .iter()
@@ -563,7 +563,7 @@ impl FuwaApp {
     }
 
     /// The rules step: the numbered rules (`RulesList`, `max-h-60`) and "I agree" (`AgreeCheck`).
-    fn rules_box(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn rules_box(&self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(flow) = self.onboarding.flow.as_ref() else { return div().into_any_element() };
         let list = if flow.rules.is_empty() {
             div()
@@ -572,7 +572,7 @@ impl FuwaApp {
                 .child(crate::core::i18n::t("join.rules.none"))
                 .into_any_element()
         } else {
-            crate::ui::dialogs::rules_list(&flow.rules, 240.0, p).into_any_element()
+            crate::ui::dialogs::rules_list(&flow.rules, 240.0, p, window, cx).into_any_element()
         };
         div()
             .flex()

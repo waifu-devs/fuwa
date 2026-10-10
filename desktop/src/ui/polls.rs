@@ -1221,8 +1221,9 @@ impl FuwaApp {
                 .unwrap_or_default();
             (look, catalog, self.prefs.skin_tone)
         });
-        let focused =
-            |input: &Entity<InputState>, cx: &gpui_kit::App| input.read(cx).focus_handle(cx).is_focused(window);
+        let focused = |input: &Entity<InputState>, window: &Window, cx: &gpui_kit::App| {
+            input.read(cx).focus_handle(cx).is_focused(window)
+        };
         let left = QUESTION as i64 - draft.question.chars().count() as i64;
         let amber = if p.dark { gpui_kit::rgb(0xfbbf24) } else { gpui_kit::rgb(0xd97706) };
         let question = div()
@@ -1246,7 +1247,7 @@ impl FuwaApp {
                     ),
             )
             .child(
-                field(&e.question, 44.0, focused(&e.question, cx), &p)
+                field(&e.question, 44.0, focused(&e.question, window, cx), &p)
                     .text_size(px(15.2))
                     .font_weight(FontWeight::BOLD),
             );
@@ -1340,12 +1341,12 @@ impl FuwaApp {
                 .items_center()
                 .gap(px(8.0))
                 .child(emoji_button)
-                .child(div().flex_1().min_w_0().child(field(&a.text, 40.0, focused(&a.text, cx), &p)))
+                .child(div().flex_1().min_w_0().child(field(&a.text, 40.0, focused(&a.text, window, cx), &p)))
                 .child(remove);
             answers =
                 answers.child(motion::rise(row, SharedString::from(format!("poll-row|{id}")), Duration::ZERO, -8.0));
             if picking {
-                answers = answers.child(self.answer_picker(n, &catalog, tone, &p, cx));
+                answers = answers.child(self.answer_picker(n, &catalog, tone, &p, window, cx));
             }
         }
         if e.answers.len() < MAX_ANSWERS {
@@ -1567,7 +1568,15 @@ impl FuwaApp {
     }
 
     /// A small emoji picker under an answer: this server's emoji and the standard set, searchable.
-    fn answer_picker(&self, n: usize, catalog: &Catalog, tone: u8, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn answer_picker(
+        &self,
+        n: usize,
+        catalog: &Catalog,
+        tone: u8,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(e) = self.polls.editor.as_ref() else { return div().into_any_element() };
         let query = e.emoji_query.read(cx).value().to_string();
         let choices: Vec<Choice> = if query.trim().is_empty() {
@@ -1637,7 +1646,7 @@ impl FuwaApp {
                             ))
                         }),
                 )
-                .child(div().id("poll-pick-grid").max_h(px(152.0)).overflow_y_scroll().child(grid)),
+                .child(crate::ui::widgets::inner_scroll("poll-pick-grid", window, cx).max_h(px(152.0)).child(grid)),
             SharedString::from(format!("poll-picker|{n}")),
             Duration::ZERO,
             6.0,

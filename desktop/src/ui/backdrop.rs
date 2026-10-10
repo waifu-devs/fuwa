@@ -15,8 +15,9 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, App, Image, ImageFormat, ImgResourceLoader, IntoElement, ObjectFit,
-    ParentElement as _, RenderImage, Resource, SharedString, Styled as _, StyledImage as _, Window, div, img, px,
+    Animation, AnimationExt as _, AnyElement, App, Image, ImageFormat, ImgResourceLoader, InteractiveElement as _,
+    IntoElement, ObjectFit, ParentElement as _, RenderImage, Resource, SharedString, Styled as _, StyledImage as _,
+    Window, div, img, px,
 };
 use parking_lot::Mutex;
 

@@ -10,7 +10,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, IntoElement as _, ObjectFit, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, Window, div, img, px,
+    SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, Window, div, px,
 };
 
 use super::InstanceSettingsView;
