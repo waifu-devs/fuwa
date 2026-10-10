@@ -7,7 +7,8 @@
 //! Alt, Shift and the key, joined with "+", such as "Mod+K" or
 //! "Alt+Shift+ArrowUp". Keys use the web's names (`KeyboardEvent.code`
 //! without its prefix), so a combo set in one app means the same in the other.
-//! The voice actions come with calls, which the desktop app doesn't have yet.
+//! The voice actions and the game overlay's are heard while a game is in
+//! front too (`core::hotkeys`); the overlay's is the desktop's alone.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -60,7 +61,7 @@ const fn action(
     Action { id, label, group, combo, while_typing, repeats }
 }
 
-pub const ACTIONS: [Action; 19] = [
+pub const ACTIONS: [Action; 20] = [
     action("quickSwitcher", "Find a server or channel", Group::Navigation, Some("Mod+K"), true, false),
     action("searchServer", "Search this server's messages", Group::Navigation, Some("Mod+F"), true, false),
     action("previousServer", "Previous server", Group::Navigation, Some("Mod+Alt+ArrowUp"), true, true),
@@ -77,6 +78,7 @@ pub const ACTIONS: [Action; 19] = [
     action("toggleDeafen", "Deafen or undeafen yourself", Group::Voice, Some("Mod+Shift+D"), true, false),
     action("pushToTalk", "Push to talk (hold)", Group::Voice, None, true, false),
     action("toggleRecording", "Record the call, or stop and save it", Group::Voice, None, true, false),
+    action("toggleOverlay", "Use the game overlay", Group::Voice, Some("Shift+Backquote"), true, false),
     action("openSettings", "Open settings", Group::App, Some("Mod+Comma"), true, false),
     action("shortcuts", "Show keyboard shortcuts", Group::App, Some("Mod+Slash"), true, false),
     action("toggleStreamer", "Turn streamer mode on or off", Group::App, None, true, false),

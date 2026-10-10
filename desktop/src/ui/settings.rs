@@ -53,6 +53,7 @@ pub(crate) enum Page {
     Notifications,
     Voice,
     Keybinds,
+    Overlay,
     Streamer,
     Advanced,
     Instances,
@@ -231,6 +232,14 @@ fn desktop_sections() -> Vec<Section> {
             t("desktop.settings.accountsAbout"),
             "instances accounts add remove sign in",
         ),
+        Section::new(
+            Page::Overlay,
+            "gamepad-2",
+            t("desktop.overlay.title"),
+            t("desktop.overlay.about"),
+            "game overlay in-game push to talk",
+        )
+        .with(crate::ui::settings_overlay::overlay_settings()),
         Section::new(
             Page::Updates,
             "refresh-cw",
@@ -657,6 +666,7 @@ impl SettingsView {
             Page::Notifications => self.notifications_page(prefs, p, window, cx),
             Page::Voice => self.voice_page(prefs, p, window, cx),
             Page::Keybinds => self.keyboard_page(prefs, p, window, cx),
+            Page::Overlay => self.overlay_page(prefs, p, window, cx),
             Page::Streamer => self.streamer_page(prefs, p, window, cx),
             Page::Advanced => self.advanced_page(prefs, p, window, cx),
             Page::Instances => self.instances_page(prefs, p, cx),

@@ -149,13 +149,16 @@ impl FuwaApp {
         }
         cx.stop_propagation();
         if action.id == "pushToTalk" {
-            self.push_to_talk(&ev.keystroke, cx);
+            // Heard by `core::hotkeys` wherever it can be, fuwa in front or not.
+            if !self.ptt_heard_anywhere() {
+                self.push_to_talk(&ev.keystroke, cx);
+            }
             return;
         }
         self.run_shortcut(action, window, cx);
     }
 
-    fn run_shortcut(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn run_shortcut(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         match action.id {
             "quickSwitcher" => {
                 if self.switcher.is_some() {
@@ -188,6 +191,7 @@ impl FuwaApp {
                 let (_, deaf) = self.core.selves();
                 self.core.set_self_deaf(!deaf);
             }
+            "toggleOverlay" => self.toggle_overlay(window, cx),
             "toggleRecording" => {
                 if let Some(call) = self.core.call() {
                     self.core.set_recording(!call.self_record);

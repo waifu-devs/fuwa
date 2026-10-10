@@ -390,6 +390,8 @@ pub struct FuwaApp {
     covers: usize,
     /// The page's color before the theme changed, fading out over the new one.
     theme_fade: Option<(gpui_kit::Rgba, Instant)>,
+    /// The game overlay's window and what it waits for (`game_overlay.rs`).
+    pub(crate) overlay: crate::ui::game_overlay::OverlayUi,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -647,8 +649,12 @@ impl FuwaApp {
             profile_leaving: None,
             profile_tick: None,
             rules: None,
+            overlay: Default::default(),
             _subscriptions: subscriptions,
         };
+        // Keys heard while a game is in front, and the overlay over it.
+        app.listen_for_hotkeys(window, cx);
+        app.sync_overlay(cx);
         // Shortcuts are read on the way to whatever has focus, so something always has it.
         app.focus.focus(window, cx);
         if first.is_none() {
@@ -704,6 +710,7 @@ impl FuwaApp {
         self.core.watch_video_moderation();
         // A new ceiling on cameras (yours, the instance's, the server's) reopens yours at it.
         self.core.watch_camera_ceiling();
+        self.sync_overlay(cx);
         let in_call = self.core.call().is_some();
         if std::mem::replace(&mut self.calls.in_call, in_call) && !in_call {
             self.close_pop_outs(cx);
@@ -746,13 +753,18 @@ impl FuwaApp {
                 } else {
                     crate::ui::notify::plain(&body)
                 };
-                // In the background, the system's own; in front, a card in the corner.
+                // In the background, the game overlay's or the system's own; in front, a card in the corner.
                 if !window.is_window_active() {
-                    crate::ui::notify::show(
-                        title,
-                        body,
-                        crate::ui::notify::Clicked { instance, server: server_id, channel: channel_id, thread },
-                    );
+                    let target =
+                        crate::ui::notify::Clicked { instance, server: server_id.clone(), channel: channel_id, thread };
+                    let glyph = match (&server_id, mention) {
+                        (None, _) => "lock",
+                        (Some(_), true) => "at-sign",
+                        (Some(_), false) => "message-circle",
+                    };
+                    if !self.overlay_notice(glyph, &title, &body, &target, cx) {
+                        crate::ui::notify::show(title, body, target);
+                    }
                     return;
                 }
                 self.toast(
@@ -787,11 +799,11 @@ impl FuwaApp {
                 };
                 if !window.is_window_active() {
                     // An empty channel opens Friends.
-                    crate::ui::notify::show(
-                        title,
-                        body,
-                        crate::ui::notify::Clicked { instance, server: None, channel: String::new(), thread: None },
-                    );
+                    let target =
+                        crate::ui::notify::Clicked { instance, server: None, channel: String::new(), thread: None };
+                    if !self.overlay_notice("user-plus", &title, &body, &target, cx) {
+                        crate::ui::notify::show(title, body, target);
+                    }
                     return;
                 }
                 self.toast("user-plus", title, body, Some(Nav::Friends { key: instance }), None, cx);

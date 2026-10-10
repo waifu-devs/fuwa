@@ -21,9 +21,11 @@ pub mod config;
 pub mod dms;
 pub mod effects;
 pub mod emoji;
+pub mod foreground;
 pub mod friends;
 pub mod gifs;
 pub mod history;
+pub mod hotkeys;
 pub mod i18n;
 pub mod instance_admin;
 pub mod instance_manage;
@@ -229,6 +231,8 @@ pub struct Core {
     pub games: Arc<presence::Games>,
     /// Listening for games, while that's on.
     games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Keys heard while another program is in front (push to talk, the overlay).
+    pub hotkeys: Arc<hotkeys::Hotkeys>,
     /// Whether you've stepped away, which goes out with this app's presence.
     pub idle: Arc<presence::Idle>,
     /// The accounts kept on each instance, by its key (`accounts.rs`).
@@ -309,6 +313,7 @@ impl Core {
             voice: voice::Voice::default(),
             games,
             games_listener: Mutex::new(None),
+            hotkeys: hotkeys::Hotkeys::start(),
             idle: presence::Idle::new(),
             kept: Mutex::new(HashMap::new()),
             separate_streams: std::sync::atomic::AtomicBool::new(false),

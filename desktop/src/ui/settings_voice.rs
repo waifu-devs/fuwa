@@ -18,8 +18,8 @@ use gpui_kit::{
 use crate::core::config::{InputMode, Prefs, Sounds};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::sounds::{self, MicTest, Sound};
+use crate::ui::motion;
 use crate::ui::settings::SettingsView;
-use crate::ui::settings_app::pref;
 use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, segmented, toggle};
 use crate::ui::settings_menu::Item;
 use crate::ui::settings_sounds;
@@ -380,8 +380,7 @@ impl SettingsView {
             });
 
         let mode_at = if prefs.input_mode == InputMode::Voice { 0 } else { 1 };
-        let mut ptt = Opt::new(t("appsettings.voice.pushToTalk"), t("appsettings.voice.pushToTalkHint"), "keyboard");
-        ptt.disabled = Some(t("desktop.voice.pttLater"));
+        let ptt = Opt::new(t("appsettings.voice.pushToTalk"), t("appsettings.voice.pushToTalkHint"), "keyboard");
         let mode = choice(
             "input-mode",
             Some(mode_at),
@@ -398,6 +397,12 @@ impl SettingsView {
                 this.set(cx, |pr| pr.input_mode = m)
             },
         );
+        let mode = if prefs.input_mode == InputMode::Ptt {
+            let ptt = self.push_to_talk_key(prefs, p, window, cx);
+            div().flex().flex_col().gap(px(12.0)).child(mode).child(ptt).into_any_element()
+        } else {
+            mode
+        };
         let sensitivity_slider = (!prefs.auto_sensitivity).then(|| {
             self.slider(
                 "sensitivity",
@@ -639,7 +644,17 @@ impl SettingsView {
                 Badge::pref(false, |_| {}),
                 mic_test.into_any_element(),
             ),
-            ("input-mode", t("appsettings.voice.inputMode"), None, pref!(prefs, input_mode), mode),
+            (
+                "input-mode",
+                t("appsettings.voice.inputMode"),
+                None,
+                Badge::pref(prefs.input_mode != d.input_mode || prefs.ptt_release != d.ptt_release, |pr| {
+                    let d = Prefs::default();
+                    pr.input_mode = d.input_mode;
+                    pr.ptt_release = d.ptt_release;
+                }),
+                mode,
+            ),
         ];
         if prefs.input_mode == InputMode::Voice {
             rows.push((
@@ -792,4 +807,90 @@ impl SettingsView {
 /// The meter's level, eased so it glides between readings.
 fn motion_level(db: f32, window: &mut Window, cx: &mut Context<SettingsView>) -> f32 {
     crate::ui::motion::follow("mic-level", db, window, cx)
+}
+
+impl SettingsView {
+    /// Push to talk's key and how long it keeps going after it comes up (the
+    /// web's), and where it's heard: everywhere (`core::hotkeys`), or only
+    /// while fuwa is in front.
+    fn push_to_talk_key(
+        &mut self,
+        prefs: &Prefs,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let combo = crate::core::keybinds::action_by_id("pushToTalk")
+            .and_then(|a| crate::core::keybinds::binding_of(a, &prefs.keybinds));
+        let key = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.0))
+            .text_sm()
+            .child(div().text_color(p.muted_foreground).child(t("appsettings.voice.yourKey")))
+            .child(match &combo {
+                Some(c) => crate::ui::settings_controls::keycaps(c, p),
+                None => div()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.destructive)
+                    .child(t("appsettings.voice.noKey"))
+                    .into_any_element(),
+            })
+            .child(
+                button(
+                    "ptt-change-key",
+                    if combo.is_some() { t("appsettings.voice.changeKey") } else { t("appsettings.voice.pickKey") },
+                    Some("keyboard"),
+                    Look::Outline,
+                    false,
+                    p,
+                )
+                .rounded(radius_xl())
+                .on_click(cx.listener(|this, _, _, cx| this.show_keyboard(cx))),
+            );
+        let release = self.slider(
+            "ptt-release",
+            (0.0, 2000.0, 20.0),
+            f32::from(prefs.ptt_release),
+            Vec::new(),
+            |v| t_with("desktop.voice.milliseconds", &[("value", Arg::Num(v.round() as i64))]),
+            false,
+            p,
+            window,
+            cx,
+            |pr, v| pr.ptt_release = v.round() as u16,
+        );
+        let release = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(div().text_sm().font_weight(FontWeight::BOLD).child(t("appsettings.voice.releaseDelay")))
+            .child(release);
+        use crate::core::hotkeys::{Hotkeys, Reach};
+        let reach = Hotkeys::reach();
+        let (glyph, line) = match reach {
+            Reach::Yes => ("gamepad-2", t("desktop.voice.pttEverywhere")),
+            Reach::NotAllowed => ("keyboard", t("desktop.voice.pttAllow")),
+            Reach::No => ("monitor-x", t("desktop.voice.pttInFront")),
+        };
+        let mut note = div().flex().flex_col().items_start().gap(px(8.0)).child(
+            div()
+                .flex()
+                .gap(px(8.0))
+                .text_sm()
+                .text_color(p.muted_foreground)
+                .child(icon(glyph).size(px(16.0)).mt(px(2.0)))
+                .child(div().flex_1().min_w_0().child(line)),
+        );
+        if reach == Reach::NotAllowed {
+            note = note.child(
+                button("ptt-allow", t("desktop.voice.openPrivacy"), Some("settings"), Look::Outline, false, p)
+                    .rounded(radius_xl())
+                    .on_click(|_, _, _| Hotkeys::ask()),
+            );
+        }
+        let el = div().flex().flex_col().gap(px(12.0)).child(key).child(release).child(note);
+        motion::rise(el, "ptt-settings", Duration::ZERO, 6.0).into_any_element()
+    }
 }

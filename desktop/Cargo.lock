@@ -3195,6 +3195,7 @@ dependencies = [
  "prost-types",
  "protoc-bin-vendored",
  "pulseaudio",
+ "raw-window-handle",
  "ring",
  "rustls",
  "serde",
@@ -3219,6 +3220,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-capture",
  "windows-core 0.62.2",
+ "x11rb",
  "zed-scap",
  "zune-jpeg 0.5.15",
 ]
