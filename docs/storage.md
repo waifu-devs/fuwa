@@ -29,7 +29,7 @@ settings, and its backups stay a copy of the data folder.
 ## What Turso offers, and why fuwa ships its own log
 
 fuwa runs every file in Turso's concurrent-writer mode (MVCC). Checked against
-turso 0.7.2 (what fuwa uses) and 0.8.1 (the newest, out in late September 2026):
+turso 0.8.2 (what fuwa uses, the newest in early October 2026):
 
 | Turso feature | What it does | Fits fuwa? |
 | --- | --- | --- |
