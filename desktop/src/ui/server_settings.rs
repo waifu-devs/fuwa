@@ -971,9 +971,7 @@ impl Render for ServerSettingsView {
             .min_h(window.viewport_size().height)
             .occlude()
             .flex()
-            // The page's surface, out to the window's edge past the close button (the web's
-            // screen is `bg-background` and its page draws nothing over it).
-            .bg(p.chat_surface)
+            .bg(p.background)
             .text_color(p.foreground)
             // The web's body line height; Tailwind's text sizes set their own where pages use them.
             .line_height(gpui_kit::relative(1.5))
@@ -999,6 +997,9 @@ impl Render for ServerSettingsView {
                     .id("server-settings-body")
                     .flex_1()
                     .h(window.viewport_size().height)
+                    // The page's surface, out to the window's edge past the close button, over
+                    // the backdrop as the chat is (like the app's own settings).
+                    .bg(p.chat_surface)
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .child(content),
