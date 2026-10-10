@@ -1,4 +1,4 @@
-import { bucket, defineRailway, github, image, project, ref, service, volume } from "railway/iac";
+import { bucket, defineRailway, github, group, image, project, ref, service, volume } from "railway/iac";
 
 /**
  * fuwa.chat, the fuwa instance Waifu Devs hosts. It has a Railway project of its own,
@@ -14,6 +14,10 @@ import { bucket, defineRailway, github, image, project, ref, service, volume } f
  * secret the media parts hold: they never get the cluster key, so one that's broken
  * into can't reach the directory or the shards.
  * The DNS records for fuwa.chat live with its registrar.
+ *
+ * On the dashboard's canvas everything sits in a group per region (named as in HOME and
+ * REGIONS), and @fuwafuwa in "Agents". A group is only how the canvas draws them: renaming
+ * one or moving a service between groups changes nothing about how it runs.
  *
  * The CDN and edge rules aren't something Railway configuration can declare yet, so
  * .railway/edge.mjs sets them through Railway's API, from the same workflow: on the `fuwa`
@@ -186,6 +190,7 @@ export default defineRailway((ctx) => {
         }),
       ]
     : [];
+  const agents = fuwafuwa.length ? group("Agents", fuwafuwa) : [];
 
   if (!SPLIT) {
     const fuwa = service("fuwa", {
@@ -208,7 +213,7 @@ export default defineRailway((ctx) => {
       },
     });
 
-    return project("fuwa", { resources: [data, replica, fuwa, ...fuwafuwa] });
+    return project("fuwa", { resources: [group(HOME.name, [data, replica, fuwa]), agents] });
   }
 
   const { gateways, shards } = SPLIT;
@@ -379,10 +384,10 @@ export default defineRailway((ctx) => {
       });
       return [shardData, shard];
     });
-    return [regionReplica, regionMedia, ...regionShards.flat()];
+    return group(region.name, [regionReplica, regionMedia, ...regionShards.flat()]);
   });
 
   return project("fuwa", {
-    resources: [data, replica, directory, ...shardParts.flat(), gateway, ...media, ...regionParts, ...fuwafuwa],
+    resources: [group(HOME.name, [gateway, directory, data, replica, ...shardParts.flat(), ...media]), regionParts, agents],
   });
 });
