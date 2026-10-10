@@ -239,7 +239,7 @@ pub(crate) fn person_avatar(user: Option<&pb::User>, id: &str, size: f32, text: 
     } else {
         let again = fallback.clone();
         base.child(
-            gpui_kit::img(SharedString::from(url))
+            crate::ui::widgets::picture(url)
                 .size_full()
                 .rounded_full()
                 .object_fit(gpui_kit::ObjectFit::Cover)

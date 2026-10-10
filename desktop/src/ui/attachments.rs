@@ -180,7 +180,7 @@ pub(crate) fn attachments_view(
                     let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
                 })
                 .child(
-                    img(SharedString::from(file.url.clone()))
+                    crate::ui::widgets::picture(file.url.clone())
                         .size_full()
                         .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
                         .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
@@ -501,6 +501,7 @@ impl FuwaApp {
         card = match &s.preview {
             Some(path) => card.child(
                 img(path.clone())
+                    .id(SharedString::from(format!("staged-pic|{}", path.display())))
                     .absolute()
                     .top_0()
                     .left_0()
@@ -829,7 +830,7 @@ impl FuwaApp {
                     .gap(px(12.0))
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(motion::grow_in(
-                        img(SharedString::from(url.to_owned()))
+                        crate::ui::widgets::picture(url.to_owned())
                             .w(px(w))
                             .h(px(h))
                             .rounded(radius_xl())

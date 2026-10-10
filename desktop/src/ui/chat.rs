@@ -2699,7 +2699,7 @@ pub(crate) fn emoji_glyph(choice: &crate::ui::emoji::Choice, size: f32) -> AnyEl
         Some(url) => base
             .child({
                 use gpui_kit::StyledImage as _;
-                gpui_kit::img(SharedString::from(url.clone())).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
+                crate::ui::widgets::picture(url.clone()).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
             })
             .into_any_element(),
         None => base.in_color().text_size(px(size * 0.85)).child(choice.insert.clone()).into_any_element(),

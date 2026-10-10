@@ -760,7 +760,7 @@ impl SettingsView {
                         let pick = pick.clone();
                         this.patch_backdrop(target, cx, move |b| b.image = pick)
                     }))
-                    .child(img(SharedString::from(url.clone())).size_full().object_fit(ObjectFit::Cover))
+                    .child(crate::ui::widgets::picture(url.clone()).size_full().object_fit(ObjectFit::Cover))
                     .when(active && !moving, |el| el.child(check(p)))
                     .when(is_kept, |el| {
                         el.child(
@@ -1398,7 +1398,7 @@ impl SettingsView {
                 .when(active, |el| el.shadow(crate::ui::settings_controls::shadow_lg()))
                 .when_some(picture, |el, url| {
                     el.child(
-                        img(SharedString::from(url))
+                        crate::ui::widgets::picture(url)
                             .absolute()
                             .inset_0()
                             .size_full()

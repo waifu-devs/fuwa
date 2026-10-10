@@ -152,7 +152,13 @@ fn one_file(
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.6))
-            .child(img(picture.clone()).size_full().rounded(radius_xl()).object_fit(ObjectFit::Contain))
+            .child(
+                img(picture.clone())
+                    .id(SharedString::from(format!("sealed-img|{id}")))
+                    .size_full()
+                    .rounded(radius_xl())
+                    .object_fit(ObjectFit::Contain),
+            )
             .child(
                 div()
                     .id(SharedString::from(format!("sealed-save|{id}")))

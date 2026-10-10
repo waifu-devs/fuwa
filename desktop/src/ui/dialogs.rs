@@ -248,7 +248,7 @@ fn emoji_glyph(emoji: &str, look: &crate::ui::mentions::Look, tint: Hsla, fallba
     match own {
         Some(url) => {
             use gpui_kit::StyledImage as _;
-            gpui_kit::img(SharedString::from(url.clone()))
+            crate::ui::widgets::picture(url.clone())
                 .size(px(24.0))
                 .object_fit(gpui_kit::ObjectFit::Contain)
                 .into_any_element()
