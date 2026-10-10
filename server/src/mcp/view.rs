@@ -84,6 +84,7 @@ pub fn role(r: &pb::Role) -> Value {
         "position": r.position,
         "color": r.color.map(|c| format!("#{c:06x}")),
         "permissions": permissions,
+        "hoist": r.hoist,
         "mentionable": r.mentionable,
     }))
 }

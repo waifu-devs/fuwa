@@ -13,6 +13,7 @@
 //! it wraps, and this module never touches a database.
 
 mod catalog;
+mod manage;
 mod tools;
 mod view;
 

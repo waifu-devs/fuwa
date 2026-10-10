@@ -322,10 +322,16 @@
     router clients reach (`call!` over `Mcp::inner`: the gateway's when
     split), so routing, permission checks and limits are the call's own;
     it never touches a database. `view.rs` turns messages into compact
-    JSON, `catalog.rs` holds the resources and prompts. Before any tool on
+    JSON, `catalog.rs` holds the resources and prompts. `manage.rs` holds
+    the tools for running a server (settings, channels, roles, invites,
+    webhooks, AutoMod, the way in, shared channels, profile items): one
+    line each naming the call, whose request is read from the arguments as
+    proto3 JSON and whose input schema is built from the request's
+    descriptor and comments (prost-reflect), enums short like `view.rs`'s. Before any tool on
     a server it asks `AgentService.GetMcpAccess` (the server file's
     `mcp_access`) whether that server's managers let the agent in. A new
-    API call agents should have gets a tool here, wrapping that call.
+    API call agents should have gets a tool here, wrapping that call (a
+    line in `manage.rs` when its request can be the tool's arguments).
   - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside

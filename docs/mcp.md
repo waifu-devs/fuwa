@@ -93,12 +93,44 @@ can't do in the apps' API, it can't do here.
 | `list_roles`, `list_emojis`, `get_profile` | `RoleService.ListRoles`, `EmojiService.ListEmojis`, `AuthService.GetProfile` |
 | `time_out_member`, `kick_member`, `ban_member`, `unban_member` | `ServerService`'s moderation calls |
 | `add_member_role`, `remove_member_role` | `RoleService.AddMemberRole`, `RemoveMemberRole` |
-| `upload_picture` | `MediaService.CreateUpload` and the upload itself |
+| `upload_picture` | `MediaService.CreateUpload` and the upload itself (emoji, server icons and banners, webhook pictures, decorations) |
 | `create_emoji` | `EmojiService.CreateEmoji` |
 | `set_commands`, `list_commands` | `CommandService.SetCommands`, `ListCommands` ([docs/commands.md](commands.md)) |
 
-Tools say whether they only read, and which ones can't be undone (deleting,
-kicking, banning), so apps can ask before running them. A call the API
+#### Running a server
+
+These take the call's request as their arguments, in proto3 JSON with the
+field names of the `.proto` (`server_id`, `parent_id`), and answer with its
+response the same way. Their input schemas are built from the request's
+descriptor, with each field's comment from the `.proto`, so a tool takes
+exactly what its call takes. Enums are written as the other tools write
+them, short and lower case (`"type": "category"`, `"deny": ["view_channels"]`);
+the full names (`CHANNEL_TYPE_CATEGORY`) work too. A call that answers
+nothing comes back as `{"done": true}`.
+
+| Area | Tools | Wraps |
+| --- | --- | --- |
+| Server | `update_server`, `get_server_usage`, `update_member`, `list_bans`, `list_audit_log`, `get_mcp_access` | `ServerService.UpdateServer`, `GetServerUsage`, `UpdateMember`, `ListBans`, `ListAuditLog`; `AgentService.GetMcpAccess` |
+| Channels and categories | `get_channel`, `create_channel`, `update_channel`, `reorder_channels`, `set_channel_permissions`, `delete_channel` | `ChannelService` |
+| Roles | `create_role`, `update_role`, `reorder_roles`, `delete_role` | `RoleService` |
+| Invites | `list_invites`, `create_invite`, `delete_invite` | `InviteService` |
+| Emoji | `rename_emoji`, `delete_emoji` | `EmojiService.UpdateEmoji`, `DeleteEmoji` |
+| Webhooks | `list_webhooks`, `create_webhook`, `update_webhook`, `reset_webhook_token`, `delete_webhook` | `WebhookService` |
+| AutoMod | `list_automod_rules`, `save_automod_rule`, `test_automod_rule`, `delete_automod_rule` | `AutoModService` |
+| The way in | `get_join_form`, `set_join_form`, `list_applications`, `review_application`, `get_welcome_screen`, `set_welcome_screen`, `get_onboarding`, `set_onboarding` | `JoinService` |
+| Shared channels | `list_shared_channels`, `create_share_code`, `delete_share_code`, `preview_share`, `accept_share`, `review_share`, `update_shared_channel`, `block_from_shared_channel`, `disconnect_shared_channel` | `SharedChannelService` ([docs/shared-channels.md](shared-channels.md)) |
+| Profile items | `list_profile_items`, `create_profile_item`, `update_profile_item`, `delete_profile_item` | `ProfileItemService`'s server calls ([docs/profile-items.md](profile-items.md)) |
+
+They need the same permissions as in the apps (Manage Server, Manage
+Channels, Manage Roles and so on), and rank still decides what an agent can
+touch: only roles and people below its highest role, and only permissions
+it has itself. Some things stay with people: agents can't own servers, so
+they can't create, delete or hand over one, and only people choose which
+agents may use MCP in a server.
+
+Tools say whether they only read, and which ones can't be undone (every
+`delete_*`, `disconnect_shared_channel`, `reset_webhook_token`, kicking,
+banning), so apps can ask before running them. A call the API
 refuses comes back as a tool error with the API's reason ("not allowed:
 …"), so the model reads why. Polls and threads get their tools when they
 land.
