@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion, useAnimationControls } from "motion/react
 import { useState, type FormEvent } from "react";
 import type { Member } from "@/gen/fuwa/v1/types_pb";
 import { banMember, kickMember, setNickname, timeOutMember } from "@/fuwa/actions";
-import { useAccess, useAction, useRoles } from "@/fuwa/hooks";
+import { byId, useAccess, useAction, useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
@@ -264,7 +264,7 @@ function ActionIcon({ action, gavel }: { action: ModAction; gavel: ReturnType<ty
 export function useModeration(instanceKey: string, serverId: string, target: Member | undefined) {
   const access = useAccess(instanceKey, serverId);
   const roles = useRoles(instanceKey, serverId);
-  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
+  const ownerId = useFuwa((s) => byId(s.instances[instanceKey]?.servers, serverId)?.ownerId ?? "");
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   return moderationFor(access, ownerId, roles, meId, target);
 }

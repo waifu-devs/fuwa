@@ -41,7 +41,7 @@ impl crate::ui::app::FuwaApp {
         let needs = self.core.shared.read(|s| {
             s.order.iter().find_map(|key| {
                 s.instance(key).and_then(|i| {
-                    let name = if self.core.prefs().streamer_mode {
+                    let name = if self.core.prefs_now().streamer_mode {
                         "An instance you added".to_owned()
                     } else {
                         i.name().to_string()

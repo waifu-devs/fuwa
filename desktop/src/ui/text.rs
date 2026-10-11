@@ -102,6 +102,59 @@ fn time_of(at: &DateTime<Local>) -> String {
     if twelve_hours() { at.format("%-I:%M %p").to_string() } else { at.format("%H:%M").to_string() }
 }
 
+/// [`when`], remembered: every message row shows one, and they're drawn
+/// again and again. Forgotten when the day, the clock setting or the
+/// language changes (each changes what they say).
+pub fn when_kept(ms: i64) -> gpui_kit::SharedString {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    type Kept = (Option<(chrono::NaiveDate, u8, String)>, HashMap<i64, gpui_kit::SharedString>);
+    thread_local! {
+        static KEPT: RefCell<Kept> = RefCell::new((None, HashMap::new()));
+    }
+    let stamp =
+        (Local::now().date_naive(), CLOCK.load(std::sync::atomic::Ordering::Relaxed), crate::core::i18n::current().0);
+    KEPT.with_borrow_mut(|(at, kept)| {
+        if at.as_ref() != Some(&stamp) || kept.len() > 4096 {
+            *at = Some(stamp);
+            kept.clear();
+        }
+        kept.entry(ms).or_insert_with(|| when(ms).into()).clone()
+    })
+}
+
+/// Splits moments, oldest first, into local days (for the lines between
+/// days in a list): one in the same day as the last costs a comparison, not
+/// a look at the time zone.
+#[derive(Default)]
+pub struct Days {
+    /// The last moment's day, as [start, end) in unix milliseconds.
+    span: Option<(i64, i64)>,
+}
+
+impl Days {
+    /// Whether `ms` falls on another day than the moment before it (the first always does).
+    pub fn starts(&mut self, ms: i64) -> bool {
+        if self.span.is_some_and(|(start, end)| ms >= start && ms < end) {
+            return false;
+        }
+        self.span = day_span(ms);
+        true
+    }
+
+    /// The next moment starts a day again, whatever it is.
+    pub fn reset(&mut self) {
+        self.span = None;
+    }
+}
+
+fn day_span(ms: i64) -> Option<(i64, i64)> {
+    let date = Local.timestamp_millis_opt(ms).single()?.date_naive();
+    let start =
+        |d: chrono::NaiveDate| Some(Local.from_local_datetime(&d.and_hms_opt(0, 0, 0)?).earliest()?.timestamp_millis());
+    Some((start(date)?, start(date.succ_opt()?)?))
+}
+
 /// "Today at 3:04 PM", "Yesterday at 9:12 AM", or the day and time, as the web's `formatStamp`.
 pub fn when(ms: i64) -> String {
     let Some(at) = Local.timestamp_millis_opt(ms).single() else { return String::new() };

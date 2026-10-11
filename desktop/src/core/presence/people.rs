@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tonic::Code;
 
-use crate::core::Core;
 use crate::core::api::{Api, Problem};
 use crate::core::store::InstanceState;
+use crate::core::{Area, Core};
 use crate::pb;
 
 /// No input for this long and the app says you're away.
@@ -83,14 +83,20 @@ pub fn online(presence: &pb::Presence) -> bool {
 }
 
 /// Puts changes in: someone online is kept, someone going offline dropped.
-pub fn put(people: &mut HashMap<String, pb::Presence>, changes: Vec<pb::Presence>) {
+/// Whether anything changed (a presence said again as it was changes nothing).
+pub fn put(people: &mut HashMap<String, pb::Presence>, changes: Vec<pb::Presence>) -> bool {
+    let mut changed = false;
     for presence in changes {
         if online(&presence) {
-            people.insert(presence.user_id.clone(), presence);
+            if people.get(&presence.user_id) != Some(&presence) {
+                people.insert(presence.user_id.clone(), presence);
+                changed = true;
+            }
         } else {
-            people.remove(&presence.user_id);
+            changed |= people.remove(&presence.user_id).is_some();
         }
     }
+    changed
 }
 
 impl InstanceState {
@@ -108,7 +114,7 @@ pub(crate) async fn follow(core: Arc<Core>, key: String, api: Api) {
     loop {
         match watch_once(&core, &key, &api, &mut wait).await {
             Err(err) if err.code == Code::Unimplemented => {
-                core.shared.instance(&key, |i| i.people = None);
+                core.shared.instance_in(&key, &[Area::Presence(&key)], |i| i.people = None);
                 return;
             }
             Err(err) if err.signed_out() => return,
@@ -167,7 +173,7 @@ impl Feed {
         self.ready = true;
         // Everyone at once: whoever went offline while away is gone too.
         let list = std::mem::take(&mut self.gathered);
-        core.shared.instance(key, |i| {
+        core.shared.instance_in(key, &[Area::Presence(key)], |i| {
             let mut people = HashMap::new();
             put(&mut people, list);
             i.people = Some(people);
@@ -175,11 +181,19 @@ impl Feed {
         true
     }
 
-    /// Puts in the changes gathered since the last time.
+    /// Puts in the changes gathered since the last time. Only who's online
+    /// changes, and only when something did, so the window's other parts
+    /// (the messages, server settings) aren't built again for it.
     pub fn flush(&mut self, core: &Core, key: &str) {
         self.due = None;
         let changes = std::mem::take(&mut self.gathered);
-        core.shared.instance(key, |i| put(i.people.get_or_insert_with(HashMap::new), changes));
+        if changes.is_empty() {
+            return;
+        }
+        core.shared.instance_if(key, &[Area::Presence(key)], |i| {
+            let fresh = i.people.is_none();
+            put(i.people.get_or_insert_with(HashMap::new), changes) || fresh
+        });
     }
 }
 

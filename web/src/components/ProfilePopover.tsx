@@ -1,12 +1,13 @@
 import * as Popover from "@radix-ui/react-popover";
 import { useNavigate } from "@tanstack/react-router";
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, LockKeyholeIcon, MessageCircleIcon, type LucideIcon } from "lucide-react";
-import { AnimatePresence, m as motion } from "motion/react";
+import { AnimatePresence, m as motion, useIsPresent } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { loadProfile, run } from "@/fuwa/actions";
 import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
+import { byId } from "@/fuwa/hooks";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
@@ -54,6 +55,11 @@ function useProfileLoad(open: boolean, instanceKey: string, user: User | undefin
  * Opens someone's profile card from whatever you click on them: a name or
  * avatar in chat, a row in the member list. The card shows what's already
  * known at once and fills in the bio and banner as they load.
+ *
+ * One is mounted per author in chat and per member row, so while closed it
+ * holds only its open state and the trigger: everything the card reads from
+ * the store (the profile, what you may do to them, the clock) lives in
+ * `ProfileContent`, mounted only while the card is open or closing.
  */
 export function ProfilePopover({
   instanceKey,
@@ -69,15 +75,65 @@ export function ProfilePopover({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [moderating, setModerating] = useState<ModAction | null>(null);
+  // The dialog mounts the first time it's wanted and stays, so its closing animation plays.
+  const [moderated, setModerated] = useState(false);
+  if (!user) return <>{children}</>;
+  return (
+    <>
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>{children}</Popover.Trigger>
+      <AnimatePresence>
+        {open && (
+          <ProfileContent
+            key="card"
+            instanceKey={instanceKey}
+            user={user}
+            member={member}
+            side={side}
+            onClose={() => setOpen(false)}
+            onModerate={(action) => {
+              setOpen(false);
+              setModerated(true);
+              setModerating(action);
+            }}
+          />
+        )}
+      </AnimatePresence>
+    </Popover.Root>
+    {member && moderated && (
+      <ModerateDialog instanceKey={instanceKey} serverId={member.serverId} member={moderating ? member : null} action={moderating} onClose={() => setModerating(null)} />
+    )}
+    </>
+  );
+}
+
+/** The open card: mounted by `ProfilePopover` only while it's open (and while it animates away). */
+function ProfileContent({
+  instanceKey,
+  user,
+  member,
+  side,
+  onClose,
+  onModerate,
+}: {
+  instanceKey: string;
+  user: User;
+  member?: Member;
+  side: "right" | "left" | "top" | "bottom";
+  onClose: () => void;
+  onModerate: (action: ModAction) => void;
+}) {
+  // False once it's closing, so a load isn't started again on the way out.
+  const present = useIsPresent();
   // A phone has no room beside a name for the card, so it opens under it and slides to fit.
   const roomy = useMediaQuery("(min-width: 768px)");
-  const profile = useFuwa((s) => (user ? s.instances[instanceKey]?.profiles[user.id] : undefined));
-  const me = useFuwa((s) => s.instances[instanceKey]?.me?.id === user?.id);
-  const loading = useProfileLoad(open, instanceKey, user) && !profile;
+  const profile = useFuwa((s) => s.instances[instanceKey]?.profiles[user.id]);
+  const me = useFuwa((s) => s.instances[instanceKey]?.me?.id === user.id);
+  const loading = useProfileLoad(present, instanceKey, user) && !profile;
   const allowed = useModeration(instanceKey, member?.serverId ?? "", member);
   const canModerate = allowed.timeout || allowed.kick || allowed.ban;
-  const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
-  const [moderating, setModerating] = useState<ModAction | null>(null);
+  const owner = useFuwa((s) => !!member && byId(s.instances[instanceKey]?.servers, member.serverId)?.ownerId === user.id);
   const now = useNow();
   // Anyone signed in can write to someone else privately, where the instance and this browser can. Agents have no DMs.
   const canMessage = useFuwa((s) => {
@@ -86,64 +142,42 @@ export function ProfilePopover({
   });
   // Friends are people's, on instances that have them.
   const canFriend = useFuwa((s) => !me && !isAgent(user) && s.instances[instanceKey]?.friends.status === "ready");
-  if (!user) return <>{children}</>;
   return (
-    <>
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>{children}</Popover.Trigger>
-      <AnimatePresence>
-        {open && (
-          <Popover.Portal forceMount>
-            <Popover.Content forceMount side={roomy ? side : "bottom"} align="start" sideOffset={10} collisionPadding={12} className="scroll-thin z-50 max-h-(--radix-popover-content-available-height) overflow-y-auto outline-none">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.92, y: 6 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 4 }}
-                transition={{ type: "spring", stiffness: 520, damping: 32 }}
-                style={{ transformOrigin: "var(--radix-popover-content-transform-origin)" }}
-              >
-                <ProfileCard
-                  user={user}
-                  profile={profile}
-                  member={member}
-                  owner={owner}
-                  roles={member && <MemberRoles instanceKey={instanceKey} member={member} />}
-                  me={me}
-                  instanceKey={instanceKey}
-                  loading={loading}
-                  className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
-                />
-                {canMessage && <MessageButton instanceKey={instanceKey} user={user} onOpened={() => setOpen(false)} />}
-                {canFriend && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.065 }}
-                    className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
-                  >
-                    <FriendActions instanceKey={instanceKey} user={user} />
-                  </motion.div>
-                )}
-                {canModerate && (
-                  <ModActions
-                    allowed={allowed}
-                    timedOut={!!timedOutUntil(member, now)}
-                    onPick={(action) => {
-                      setOpen(false);
-                      setModerating(action);
-                    }}
-                  />
-                )}
-              </motion.div>
-            </Popover.Content>
-          </Popover.Portal>
-        )}
-      </AnimatePresence>
-    </Popover.Root>
-    {member && canModerate && (
-      <ModerateDialog instanceKey={instanceKey} serverId={member.serverId} member={moderating ? member : null} action={moderating} onClose={() => setModerating(null)} />
-    )}
-    </>
+    <Popover.Portal forceMount>
+      <Popover.Content forceMount side={roomy ? side : "bottom"} align="start" sideOffset={10} collisionPadding={12} className="scroll-thin z-50 max-h-(--radix-popover-content-available-height) overflow-y-auto outline-none">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92, y: 6 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 4 }}
+          transition={{ type: "spring", stiffness: 520, damping: 32 }}
+          style={{ transformOrigin: "var(--radix-popover-content-transform-origin)" }}
+        >
+          <ProfileCard
+            user={user}
+            profile={profile}
+            member={member}
+            owner={owner}
+            roles={member && <MemberRoles instanceKey={instanceKey} member={member} />}
+            me={me}
+            instanceKey={instanceKey}
+            loading={loading}
+            className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
+          />
+          {canMessage && <MessageButton instanceKey={instanceKey} user={user} onOpened={onClose} />}
+          {canFriend && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.065 }}
+              className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
+            >
+              <FriendActions instanceKey={instanceKey} user={user} />
+            </motion.div>
+          )}
+          {canModerate && <ModActions allowed={allowed} timedOut={!!timedOutUntil(member, now)} onPick={onModerate} />}
+        </motion.div>
+      </Popover.Content>
+    </Popover.Portal>
   );
 }
 

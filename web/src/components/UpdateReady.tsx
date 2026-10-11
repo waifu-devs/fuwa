@@ -1,13 +1,14 @@
 import { RefreshCwIcon, SparklesIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SPRING } from "@/lib/motion";
 import { updateLine } from "@/lib/compat";
 import { FRESH, entryOf, look, type Freshness } from "@/lib/fresh";
-import { useInstances } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { useI18n } from "@/i18n/react";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError, reportUsage } from "@/lib/reports";
+import { everyWhileVisible, onVisibility } from "@/lib/schedule";
 
 /** How often the page looks for a newer app. */
 const EVERY_MS = 5 * 60 * 1000;
@@ -68,10 +69,23 @@ export function UpdateReady() {
   // (lib/compat.ts); the rest keeps working.
   // Reload only helps when it's this page's own instance; another instance's
   // features need the app it serves, or a newer fuwa there.
-  const need =
-    useInstances()
-      .map((i) => ({ line: updateLine(i.node?.versions, i.node?.name || hostOf(i.url), t), own: sameOrigin(i.url) }))
-      .find((n) => n.line !== null) ?? null;
+  // Read as one string, worked out once per instance's details (`node`), so the pill doesn't redraw on every
+  // message the way following whole instances would.
+  const lines = useMemo(() => new WeakMap<object, string | null>(), [t]);
+  const needKey = useFuwa((s) => {
+    for (const k of s.order) {
+      const i = s.instances[k];
+      if (!i) continue;
+      let line = i.node ? lines.get(i.node) : undefined;
+      if (line === undefined) {
+        line = updateLine(i.node?.versions, i.node?.name || hostOf(i.url), t);
+        if (i.node) lines.set(i.node, line);
+      }
+      if (line !== null) return `${sameOrigin(i.url) ? "1" : "0"}${line}`;
+    }
+    return null;
+  });
+  const need = needKey === null ? null : { own: needKey[0] === "1", line: needKey.slice(1) };
   const needs = need?.line ?? null;
   const showing = behind && behind !== later ? "updated" : needs && needs !== later ? "needs" : null;
   const canReload = showing === "updated" || !!need?.own;
@@ -82,7 +96,11 @@ export function UpdateReady() {
     const ours = ownEntry();
     if (!ours) return;
     let stopped = false;
+    let lastCheck = 0;
     async function check() {
+      // Showing the page and the timer coming due at once ask only once.
+      if (Date.now() - lastCheck < 10_000) return;
+      lastCheck = Date.now();
       const found = await servedEntry();
       if (stopped) return;
       fresh.current = look(fresh.current, ours!, found);
@@ -90,14 +108,14 @@ export function UpdateReady() {
       // A build counts once it's been seen twice in a row, a later deploy too.
       setBehind((prev) => (!now.stale ? null : now.streak >= 2 ? now.seen : prev));
     }
-    const timer = setInterval(check, EVERY_MS);
-    const onVisible = () => document.visibilityState === "visible" && void check();
-    document.addEventListener("visibilitychange", onVisible);
+    // Only while the page is shown: a hidden tab has nobody to tell, and showing it again looks at once.
+    const stop = everyWhileVisible(EVERY_MS, () => void check(), { onVisible: false });
+    const offVisible = onVisibility((visible) => visible && void check());
     window.addEventListener("online", check);
     return () => {
       stopped = true;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
+      stop();
+      offVisible();
       window.removeEventListener("online", check);
     };
   }, []);

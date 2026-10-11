@@ -31,6 +31,7 @@ import { emptyFriends, type FriendsState } from "@/lib/friends";
 import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
 import { withoutReactions, withReactionUpdate } from "@/lib/reactions";
+import { findMessage, messageIndex, memberSortName, sortMembers as sortMemberList, withMember } from "./lists";
 
 /**
  * Everything the client shows, for every instance at once. It changes only
@@ -110,10 +111,18 @@ export type DmState = {
   deviceId: string;
   /** The latest first. */
   conversations: Conversation[];
-  /** What each conversation said, as this device opened it, oldest first. Only conversations someone opened. Reactions aren't lines: they're tallied in `reactions`. */
+  /**
+   * What each conversation said, as this device opened it, oldest first.
+   * Reactions aren't lines: they're tallied in `reactions`. A conversation
+   * opened lately has its latest lines here (more as you scroll back, see
+   * `more`); any other only its last message and what came after it, for the
+   * list's preview. The vault keeps the rest (e2ee/lines.ts).
+   */
   items: Record<string, Item[]>;
-  /** Each conversation's reactions, as this device tallied them, by the record of the message they're on. */
+  /** Each opened conversation's reactions, as this device tallied them, by the record of the message they're on. */
   reactions: Record<string, Record<number, DmReaction[]>>;
+  /** Opened conversations with older lines than `items` holds, kept in the vault (`loadOlderLines`). */
+  more: Record<string, boolean>;
   pending: Record<string, PendingMessage[]>;
   unread: Record<string, number>;
   /** Every device in each conversation's group. */
@@ -145,6 +154,7 @@ export const emptyDms = (): DmState => ({
   conversations: [],
   items: {},
   reactions: {},
+  more: {},
   pending: {},
   unread: {},
   members: {},
@@ -331,13 +341,14 @@ export function sortChannels(channels: Channel[]): Channel[] {
 }
 
 /** By name; lists that rank people group them by role on top of this. */
-export function sortMembers(members: Member[]): Member[] {
-  return [...members].sort((a, b) =>
-    (a.nickname || a.user?.displayName || a.user?.username || "").localeCompare(
-      b.nickname || b.user?.displayName || b.user?.username || "",
-    ),
-  );
-}
+export const sortMembers = sortMemberList;
+export { withMember };
+
+/** Where the message with `id` is in a list sorted by id, or -1. */
+const indexOfMessage = (items: readonly Message[], id: string) => {
+  const at = messageIndex(items, id);
+  return at < items.length && items[at]!.id === id ? at : -1;
+};
 
 /**
  * The people a message brings with it: in a shared channel, its author from
@@ -359,8 +370,8 @@ export const threadKey = (threadId: string) => `t:${threadId}`;
 
 /** Inserts or replaces a message, keeping the list sorted by id (which is by time). */
 export function upsertMessage(items: Message[], message: Message): Message[] {
-  const at = items.findIndex((m) => m.id >= message.id);
-  if (at === -1) return [...items, message];
+  const at = messageIndex(items, message.id);
+  if (at === items.length) return [...items, message];
   if (items[at]!.id === message.id) {
     // An edit doesn't always say how the thread under it stands; keep what we know.
     const next = !message.thread && items[at]!.thread ? { ...message, thread: items[at]!.thread } : message;
@@ -374,7 +385,7 @@ export function upsertMessage(items: Message[], message: Message): Message[] {
  * an edit's answer: they leave reactions out, so the ones already here stay.
  */
 export function upsertKeepingReactions(items: Message[], message: Message): Message[] {
-  const before = items.find((m) => m.id === message.id);
+  const before = findMessage(items, message.id);
   return upsertMessage(items, before?.reactions.length && !message.reactions.length ? { ...message, reactions: before.reactions } : message);
 }
 
@@ -386,7 +397,7 @@ export function withMessage(i: InstanceState, channelId: string, threadId: strin
   let messages = i.messages;
   for (const at of [channelId, threadId && threadKey(threadId)]) {
     const loaded = at ? messages[at] : undefined;
-    const n = loaded?.items.findIndex((m) => m.id === messageId) ?? -1;
+    const n = loaded ? indexOfMessage(loaded.items, messageId) : -1;
     if (!loaded || n === -1) continue;
     const before = loaded.items[n]!;
     const after = fn(before);
@@ -403,7 +414,7 @@ export function withThreadSummary(i: InstanceState, channelId: string, threadId:
   const summary = thread && (thread.replyCount > 0 || thread.locked) ? thread : undefined;
   let next = i;
   const loaded = i.messages[channelId];
-  const at = loaded?.items.findIndex((m) => m.id === threadId) ?? -1;
+  const at = loaded ? indexOfMessage(loaded.items, threadId) : -1;
   if (loaded && at !== -1) {
     const items = loaded.items.map((m, n) => (n === at ? { ...m, thread: summary } : m));
     next = { ...next, messages: { ...next.messages, [channelId]: { ...loaded, items } } };
@@ -429,7 +440,7 @@ function keepMyVote(before: Message, after: Message): Message {
  */
 export function withPoll(i: InstanceState, channelId: string, messageId: string, poll: Poll, mine?: number[]): InstanceState {
   const loaded = i.messages[channelId];
-  const at = loaded?.items.findIndex((m) => m.id === messageId) ?? -1;
+  const at = loaded ? indexOfMessage(loaded.items, messageId) : -1;
   if (!loaded || at === -1) return i;
   const message = loaded.items[at]!;
   const next = { ...poll, myAnswerIds: mine ?? message.poll?.myAnswerIds ?? [] };
@@ -441,8 +452,15 @@ export function withPoll(i: InstanceState, channelId: string, messageId: string,
 export function withUpdatedUser(i: InstanceState, user: User): InstanceState {
   let members = i.members;
   for (const [serverId, list] of Object.entries(i.members)) {
-    if (!list.some((m) => m.user?.id === user.id)) continue;
-    members = { ...members, [serverId]: list.map((m) => (m.user?.id === user.id ? { ...m, user } : m)) };
+    const at = list.findIndex((m) => m.user?.id === user.id);
+    if (at === -1) continue;
+    const before = list[at]!;
+    const after = { ...before, user };
+    // A new name may move them in the list.
+    members = {
+      ...members,
+      [serverId]: memberSortName(after) === memberSortName(before) ? list.map((m, n) => (n === at ? after : m)) : withMember(list, after),
+    };
   }
   const profile = i.profiles[user.id];
   return {
@@ -575,7 +593,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       if (message.threadId) {
         const key = threadKey(message.threadId);
         const replies = next.messages[key];
-        const seen = replies?.items.some((m) => m.id === message.id);
+        const seen = !!replies && !!findMessage(replies.items, message.id);
         if (replies) next = { ...next, messages: { ...next.messages, [key]: { ...replies, items: upsertKeepingReactions(replies.items, message) } } };
         if (
           p.case === "messageCreated" &&
@@ -595,7 +613,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
           messages: { ...next.messages, [message.channelId]: { ...loaded, items: upsertKeepingReactions(loaded.items, message) } },
         };
       }
-      const known = loaded?.items.some((m) => m.id === message.id);
+      const known = !!loaded && !!findMessage(loaded.items, message.id);
       if (
         p.case === "messageCreated" &&
         !known &&
@@ -645,7 +663,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       let messages = i.messages;
       for (const at of [channelId, threadId && threadKey(threadId)]) {
         const loaded = at ? messages[at] : undefined;
-        const found = loaded?.items.find((m) => m.id === messageId);
+        const found = loaded && findMessage(loaded.items, messageId);
         if (found) messages = { ...messages, [at!]: { ...loaded!, items: upsertMessage(loaded!.items, { ...found, pinnedAt }) } };
       }
       return messages === i.messages ? i : { ...i, messages };
@@ -677,7 +695,7 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       if (!member?.user) return i;
       const list = i.members[sid] ?? [];
       const isNew = !list.some((m) => m.user?.id === member.user!.id);
-      const members = sortMembers([...list.filter((m) => m.user?.id !== member.user!.id), member]);
+      const members = withMember(list, member);
       const profile = i.profiles[member.user.id];
       return {
         ...i,

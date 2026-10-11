@@ -491,8 +491,11 @@ impl SettingsView {
                 ));
             }
         } else if let Some(s) = &self.data.username {
-            let name =
-                if self.core.prefs().hides_personal() { "••••••".to_owned() } else { me.username.clone() };
+            let name = if self.core.prefs_now().hides_personal() {
+                "••••••".to_owned()
+            } else {
+                me.username.clone()
+            };
             fields = fields.child(
                 div()
                     .flex()

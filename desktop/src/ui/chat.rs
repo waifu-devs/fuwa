@@ -17,6 +17,7 @@ use gpui_kit::{
     WeakEntity, Window, div, px, rgb,
 };
 
+use crate::core::Watch;
 use crate::core::config::Density;
 use crate::core::i18n::{Arg, t};
 use crate::core::shared;
@@ -27,7 +28,7 @@ use crate::ui::context_menu::{self, MenuOf};
 use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, SCHEME, mention_links};
 use crate::ui::motion;
-use crate::ui::text::{TIGHT, clock, images_as_links, ms_of, tracked, when};
+use crate::ui::text::{TIGHT, clock, images_as_links, ms_of, tracked};
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
@@ -35,6 +36,7 @@ use crate::ui::widgets::{
 };
 
 /// Who wrote something in a conversation or a secure channel, as shown.
+#[derive(Clone)]
 pub(crate) struct Who {
     pub name: String,
     pub color: Option<Hsla>,
@@ -178,6 +180,8 @@ pub struct MsgUi {
     pub waving: std::collections::HashSet<String>,
     /// When older messages were last asked for, so a failing load isn't asked again every frame.
     pub older_at: Option<Instant>,
+    /// Waiting to let go of a long channel's older messages, once it has rested at its newest.
+    pub trim_waiting: bool,
     /// The row under the pointer, and the row whose tools' card is (it pokes out above its row).
     pub hovered: Option<String>,
     pub hovered_tools: Option<String>,
@@ -268,6 +272,10 @@ pub struct Msg {
     pub reactions: Option<Rc<crate::ui::reactions::ReactBits>>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
+    /// What it was built from, as far as can be told before building its
+    /// parts (the message itself and everything around it); 0 when that
+    /// isn't enough (a poll, a thread, an agent's buttons, which read more).
+    pub pre: u64,
 }
 
 impl Row {
@@ -324,16 +332,75 @@ impl Row {
     }
 }
 
+/// A list's rows as read under the store's lock: messages that must be
+/// built anew wait in `jobs` (their text worked out with Markdown, mentions
+/// and emoji), done by [`Draft::finish`] once the lock is let go, so the
+/// core's threads aren't kept waiting on the window.
+#[derive(Default)]
+pub(crate) struct Draft {
+    rows: Vec<Row>,
+    jobs: Vec<Job>,
+    kept: Built,
+    look: Option<Rc<Look>>,
+}
+
+struct Job {
+    /// Its place in `rows`, and in the kept messages (none while it's sending).
+    at: usize,
+    key: Option<String>,
+    msg: Msg,
+    /// Emoji it brought from other servers.
+    emojis: Vec<pb::Emoji>,
+}
+
+impl Draft {
+    /// The rows, with every new message's text worked out; `built` keeps them for next time.
+    pub(crate) fn finish(self, built: &mut Built) -> Vec<Row> {
+        let Draft { mut rows, jobs, kept, look } = self;
+        let look = look.unwrap_or_default();
+        *built = kept;
+        for Job { at, key, mut msg, emojis } in jobs {
+            msg.shown = mention_links(
+                &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&msg.content))),
+                &look.with(&emojis),
+            );
+            let msg = Rc::new(msg);
+            if let Some(key) = key {
+                built.insert(key, msg.clone());
+            }
+            rows[at] = Row::Msg(msg);
+        }
+        group(&mut rows);
+        keep_grouped(&rows, built);
+        rows
+    }
+}
+
+/// Keeps each message as grouping left it (with or without its header), so
+/// the next time it's reused as it is rather than copied to change its header again.
+pub(crate) fn keep_grouped(rows: &[Row], built: &mut Built) {
+    for row in rows {
+        if let Row::Msg(m) = row
+            && let Some(kept) = built.get_mut(&m.id)
+            && !Rc::ptr_eq(kept, m)
+        {
+            *kept = m.clone();
+        }
+    }
+}
+
 impl FuwaApp {
     /// What the open list shows, row by row. `built` keeps the messages
     /// from the last time, so a new message doesn't redo the whole channel.
     fn rows(&self, built: &mut Built) -> Vec<Row> {
         match self.target() {
             Some(Target::Channel { key, server, channel }) => {
-                let mut rows = self.core.shared.read(|s| match s.instance(&key) {
-                    Some(i) => self.server_rows(i, &key, &server, &channel, None, built),
-                    None => Vec::new(),
-                });
+                // Read under the store's lock; the messages' text is worked out after it's let go.
+                let draft = self
+                    .core
+                    .shared
+                    .read(|s| s.instance(&key).map(|i| self.server_rows(i, &key, &server, &channel, None, built)));
+                let mut rows = draft.map(|d| d.finish(built)).unwrap_or_default();
                 self.dress_voice(&mut rows);
                 rows
             }
@@ -363,12 +430,13 @@ impl FuwaApp {
         channel: &str,
         thread: Option<&str>,
         built: &mut Built,
-    ) -> Vec<Row> {
+    ) -> Draft {
         let (key, server, channel) = (key.to_owned(), server.to_owned(), channel.to_owned());
         let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
         let mut rows = Vec::new();
+        let mut jobs = Vec::new();
         let at = thread.map_or_else(|| channel.clone(), crate::core::threads::thread_key);
-        let Some(loaded) = i.messages.get(&at) else { return rows };
+        let Some(loaded) = i.messages.get(&at) else { return Draft::default() };
         let here = i.channel(&server, &channel);
         let name = here.map(|c| c.name.clone()).unwrap_or_default();
         // In a shared channel each side moderates its own people: a guest's moderators can't
@@ -376,8 +444,10 @@ impl FuwaApp {
         let shared = here.and_then(|c| c.shared.as_ref());
         let guest_side = shared.is_some_and(|s| !s.home);
         let keeps_out = shared.is_some_and(|s| s.home) && i.access(&server).has(pb::Permission::KickMembers);
-        let look = Look::of(i, &server);
+        let look = Look::shared(i, &key, &server, &self.core.shared);
         let mut kept = Built::default();
+        // Each message's bytes, for its signature before building (one buffer for them all).
+        let mut encoded = Vec::new();
         // Each author as shown (name, colour, badge, picture), looked up once.
         type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>, Option<SharedString>)>;
         let mut authors: HashMap<String, Author> = HashMap::new();
@@ -476,15 +546,14 @@ impl FuwaApp {
                 }),
             });
         }
-        let mut last_day: Option<i64> = None;
+        let mut days = crate::ui::text::Days::default();
         for m in parent.into_iter().chain(&loaded.items) {
             let is_parent = parent.is_some_and(|p| std::ptr::eq(p, m));
             // A divider for each day (not between a thread's message and its replies).
             let at = ms_of(m.created_at.as_ref());
-            if !is_parent && !last_day.is_some_and(|d| crate::ui::text::same_day(d, at)) {
+            if days.starts(at) && !is_parent {
                 rows.push(Row::Day { id: format!("day|{}", m.id), text: crate::ui::text::day(at) });
             }
-            last_day = Some(at);
             if m.kind == pb::MessageKind::MemberJoined as i32 {
                 let who = author(&m.author_id);
                 rows.push(Row::Join(Rc::new(JoinLine {
@@ -527,6 +596,41 @@ impl FuwaApp {
             let keep_out = keeps_out && from.is_some() && hook.is_none();
             let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
             let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
+            let pinned = m.pinned_at.is_some();
+            let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
+            // Everything a plain message's row is built from, hashed before building any of it:
+            // unchanged, the row from last time stands. Polls, threads and agents' buttons read
+            // more than the message (votes being cast, unread replies, presses) and are built.
+            let plain = m.poll.is_none() && m.thread.is_none() && m.interaction.is_none() && m.components.is_empty();
+            encoded.clear();
+            let pre = if plain && prost::Message::encode(m, &mut encoded).is_ok() {
+                let mut h = DefaultHasher::new();
+                encoded.hash(&mut h);
+                (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
+                user.as_ref().map(|u| (&u.avatar_url, &u.username, &u.id)).hash(&mut h);
+                decoration.hash(&mut h);
+                (look.digest, editing, manage, suppress, &me, &mine, &owner_id).hash(&mut h);
+                (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
+                (pinned, can_pin, can_react, reactions_here, can_vote, can_reply, can_start).hash(&mut h);
+                (thread.is_some(), is_parent).hash(&mut h);
+                h.finish() | 1
+            } else {
+                0
+            };
+            if pre != 0
+                && let Some((key, was)) = built.remove_entry(&m.id)
+            {
+                if was.pre == pre {
+                    kept.insert(key, was.clone());
+                    rows.push(Row::Msg(was));
+                    if is_parent {
+                        divider(&mut rows);
+                        days.reset();
+                    }
+                    continue;
+                }
+                built.insert(key, was);
+            }
             let mut card = m.poll.as_ref().map(|poll| {
                 crate::ui::polls::PollCard::of(
                     poll,
@@ -550,8 +654,6 @@ impl FuwaApp {
                 can_thread: m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
             };
             let agent = crate::ui::commands::AgentBits::of(i, &server, m, can_vote, &self.commands).map(Rc::new);
-            let pinned = m.pinned_at.is_some();
-            let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
             let reactions = (reactions_here && m.kind == pb::MessageKind::Unspecified as i32)
                 .then(|| Rc::new(crate::ui::reactions::ReactBits::server(m, can_react, manage && !guest_side)));
             let mut h = DefaultHasher::new();
@@ -587,69 +689,82 @@ impl FuwaApp {
                 card.from = old.shares();
             }
             let card = card.map(Rc::new);
-            let msg = match was {
-                Some(was) if was.sig == sig => was,
-                _ => Rc::new(Msg {
-                    id: m.id.clone(),
-                    user: user.clone(),
-                    name: author_name.clone(),
-                    color: *color,
-                    content: m.content.clone(),
-                    shown: mention_links(
-                        &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&m.content))),
-                        &look.with(&m.emojis),
-                    ),
-                    mentions_me: i.pings_me(&server, m, suppress),
-                    editing,
-                    can_delete,
-                    at: ms_of(m.created_at.as_ref()),
-                    edited: m.edited_at.is_some(),
-                    head: true,
-                    mine: m.author_id == me,
-                    pending: false,
-                    failed: None,
-                    nonce: 0,
-                    unreadable: false,
-                    badge: *badge,
-                    embeds: m.embeds.clone(),
-                    from: from.clone(),
-                    keep_out,
-                    keeping_out,
-                    poll: card.clone(),
-                    // A voice message sent here plays from its card, like one in a conversation.
-                    voice: crate::ui::voice_notes::channel_voice(&m.attachments).0,
-                    attachments: crate::ui::voice_notes::channel_voice(&m.attachments).1,
-                    gif: m.gif.clone(),
-                    thread: bits.clone(),
-                    agent: agent.clone(),
-                    pinned,
-                    can_pin,
-                    reactions: reactions.clone(),
-                    decoration: decoration.clone(),
-                    owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
-                    enc: None,
-                    sig,
-                }),
+            let fresh = match was {
+                Some(was) if was.sig == sig => {
+                    // Same row: only what it was told by in advance moved (a reaction on a poll).
+                    let was = if was.pre == pre {
+                        was
+                    } else {
+                        let mut again = (*was).clone();
+                        again.pre = pre;
+                        Rc::new(again)
+                    };
+                    kept.insert(key, was.clone());
+                    rows.push(Row::Msg(was));
+                    None
+                }
+                _ => Some((
+                    key,
+                    Msg {
+                        id: m.id.clone(),
+                        user: user.clone(),
+                        name: author_name.clone(),
+                        color: *color,
+                        content: m.content.clone(),
+                        // Worked out once the store's lock is let go (`Draft::finish`).
+                        shown: String::new(),
+                        mentions_me: i.pings_me(&server, m, suppress),
+                        editing,
+                        can_delete,
+                        at: ms_of(m.created_at.as_ref()),
+                        edited: m.edited_at.is_some(),
+                        head: true,
+                        mine: m.author_id == me,
+                        pending: false,
+                        failed: None,
+                        nonce: 0,
+                        unreadable: false,
+                        badge: *badge,
+                        embeds: m.embeds.clone(),
+                        from: from.clone(),
+                        keep_out,
+                        keeping_out,
+                        poll: card.clone(),
+                        // A voice message sent here plays from its card, like one in a conversation.
+                        voice: crate::ui::voice_notes::channel_voice(&m.attachments).0,
+                        attachments: crate::ui::voice_notes::channel_voice(&m.attachments).1,
+                        gif: m.gif.clone(),
+                        thread: bits.clone(),
+                        agent: agent.clone(),
+                        pinned,
+                        can_pin,
+                        reactions: reactions.clone(),
+                        decoration: decoration.clone(),
+                        owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
+                        enc: None,
+                        sig,
+                        pre,
+                    },
+                )),
             };
-            kept.insert(key, msg.clone());
-            rows.push(Row::Msg(msg));
+            if let Some((key, msg)) = fresh {
+                jobs.push(Job { at: rows.len(), key: Some(key), msg, emojis: m.emojis.clone() });
+                rows.push(Row::Older { loading: true });
+            }
             if is_parent {
                 divider(&mut rows);
                 // The replies' days start over below it, as the thread's own list does.
-                last_day = None;
+                days.reset();
             }
         }
         for p in i.pending.get(&at).into_iter().flatten() {
-            rows.push(Row::Msg(Rc::new(Msg {
+            let msg = Msg {
                 id: format!("p{}", p.nonce),
                 user: i.me.clone(),
                 name: i.display_name(Some(&server), &me),
                 color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                 content: p.content.clone(),
-                shown: mention_links(
-                    &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&p.content))),
-                    &look.with(&p.emojis),
-                ),
+                shown: String::new(),
                 mentions_me: false,
                 editing: false,
                 can_delete: false,
@@ -679,22 +794,58 @@ impl FuwaApp {
                 owner: me == owner_id,
                 enc: None,
                 sig: 0,
-            })));
+                pre: 0,
+            };
+            jobs.push(Job { at: rows.len(), key: None, msg, emojis: p.emojis.clone() });
+            rows.push(Row::Older { loading: true });
         }
-        *built = kept;
-        group(&mut rows);
-        rows
+        Draft { rows, jobs, kept, look: Some(look) }
+    }
+
+    /// Whether the open thread's part of the store moved since its rows were
+    /// built (or another thread opened since).
+    pub(crate) fn thread_stale(&self) -> bool {
+        let Some(open) = &self.threads.open else { return false };
+        match &self.threads.seen {
+            Some((id, seen)) if *id == open.id => self.core.shared.changed_since(
+                *seen,
+                &[Watch::Messages { instance: &open.key, channel: &open.channel }, Watch::Dms(&open.key)],
+            ),
+            _ => true,
+        }
+    }
+
+    /// Whether the message list's part of the store moved since its rows
+    /// were built, or it shows something else now. A server channel's rows
+    /// come from its messages and everything else in the store but other
+    /// channels' messages, presence and direct messages; a secure channel's
+    /// and a conversation's from the instance's direct messages too.
+    pub(crate) fn list_stale(&self) -> bool {
+        let target = self.target();
+        if target.as_ref().map(|t| t.id()) != self.list.target {
+            return true;
+        }
+        let watched = match &target {
+            None => return false,
+            Some(Target::Channel { key, channel, .. }) => vec![Watch::Messages { instance: key, channel }],
+            Some(Target::Secure { key, channel, .. }) => {
+                vec![Watch::Messages { instance: key, channel }, Watch::Dms(key)]
+            }
+            Some(Target::Dm { key, .. }) => vec![Watch::Dms(key)],
+        };
+        self.core.shared.changed_since(self.list.seen, &watched)
     }
 
     /// The open thread's rows, built again from the store.
     pub(crate) fn sync_thread(&mut self, cx: &mut Context<Self>) {
         let Some(open) = self.threads.open.clone() else { return };
+        self.threads.seen = Some((open.id.clone(), self.core.shared.version()));
         let mut built = std::mem::take(&mut self.threads.built);
-        let rows = self.core.shared.read(|s| {
+        let draft = self.core.shared.read(|s| {
             s.instance(&open.key)
                 .map(|i| self.server_rows(i, &open.key, &open.server, &open.channel, Some(&open.id), &mut built))
-                .unwrap_or_default()
         });
+        let rows = draft.map(|d| d.finish(&mut built)).unwrap_or_default();
         self.threads.built = built;
         self.threads.rows = Rc::new(rows);
         cx.notify();
@@ -703,6 +854,8 @@ impl FuwaApp {
     /// Keeps the message list in step: grows at the bottom (and lets new
     /// messages rise in), grows at the top for older ones, or starts over.
     pub(crate) fn sync_list(&mut self, cx: &mut Context<Self>) {
+        // Read before the rows are, so a change while they're built is seen next time.
+        self.list.seen = self.core.shared.version();
         let mut built = std::mem::take(&mut self.built);
         let rows = self.rows(&mut built);
         self.built = built;
@@ -726,7 +879,7 @@ impl FuwaApp {
                 s.reset(len, cx);
                 s.scroll_to_end(cx);
             });
-            self.fresh.clear();
+            Rc::make_mut(&mut self.fresh).clear();
         } else if list.digest != digest {
             if len > list.len && first == list.first {
                 let added = len - list.len;
@@ -735,13 +888,14 @@ impl FuwaApp {
                     if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Line(_) | Row::Join(_) | Row::AutoMod(_))
                         && !self.fresh.contains_key(&r.id())
                     {
-                        self.fresh.insert(r.id(), now);
+                        Rc::make_mut(&mut self.fresh).insert(r.id(), now);
                     }
                 }
                 // Only what's actually new rises in.
                 let old: std::collections::HashSet<&str> =
                     rows[..list.len.min(rows.len())].iter().map(Row::id_str).collect();
-                self.fresh.retain(|id, at| !old.contains(id.as_str()) || at.elapsed() < Duration::from_millis(900));
+                Rc::make_mut(&mut self.fresh)
+                    .retain(|id, at| !old.contains(id.as_str()) || at.elapsed() < Duration::from_millis(900));
                 let changed = changed_rows(&list.rows, &digests, 0);
                 // New messages that came in while you read further up.
                 if self.scroller.read(cx).is_scrolled_up() {
@@ -780,7 +934,9 @@ impl FuwaApp {
         self.list.first = first;
         self.list.digest = digest;
         self.list.rows = digests;
-        self.fresh.retain(|_, at| at.elapsed() < Duration::from_secs(2));
+        if self.fresh.values().any(|at| at.elapsed() >= Duration::from_secs(2)) {
+            Rc::make_mut(&mut self.fresh).retain(|_, at| at.elapsed() < Duration::from_secs(2));
+        }
         self.poll_tick(&rows, cx);
         self.rows = Rc::new(rows);
         self.time_tick(cx);
@@ -992,6 +1148,28 @@ impl FuwaApp {
             })
     }
 
+    /// After reading far up and coming back down, a channel lets go of its
+    /// older messages once it has stayed at its newest a few seconds
+    /// (`Core::trim_open`); scrolling up reads them again.
+    fn trim_when_resting(&mut self, rows: usize, cx: &mut Context<Self>) {
+        if self.msg_ui.trim_waiting || rows <= crate::core::store::KEPT_IN_SIGHT + 60 {
+            return;
+        }
+        let Some(Target::Channel { key, channel, .. }) = self.target() else { return };
+        self.msg_ui.trim_waiting = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.msg_ui.trim_waiting = false;
+                let same = matches!(this.target(), Some(Target::Channel { key: k, channel: c, .. }) if k == key && c == channel);
+                if same && !this.scroller.read(cx).is_scrolled_up() {
+                    this.core.trim_open(&key, &channel);
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(crate) fn message_list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let rows = self.rows.clone();
@@ -1003,6 +1181,7 @@ impl FuwaApp {
         let up = !loading && self.scroller.read(cx).is_scrolled_up();
         if !up {
             self.msg_ui.missed = 0;
+            self.trim_when_resting(rows.len(), cx);
         }
         // An encrypted list notes where its start and last row land, to sit at the bottom while short.
         let fits = matches!(rows.first(), Some(Row::DmStart(_)) | Some(Row::Start { icon: "shield-check", .. }));
@@ -1059,7 +1238,7 @@ impl FuwaApp {
     /// What every row of a list needs from the window; `thread` for the open thread's panel.
     pub(crate) fn row_ctx(&self, thread: Option<String>, cx: &mut Context<Self>) -> Rc<RowCtx> {
         Rc::new(RowCtx {
-            fresh: if thread.is_some() { HashMap::new() } else { self.fresh.clone() },
+            fresh: if thread.is_some() { Rc::default() } else { self.fresh.clone() },
             this: cx.entity().downgrade(),
             compact: self.prefs.density == Density::Compact,
             edit_box: self.edit_box.clone(),
@@ -1082,7 +1261,7 @@ impl FuwaApp {
             developer: self.prefs.developer_mode,
             waved: self.msg_ui.waved.clone(),
             waving: self.msg_ui.waving.clone(),
-            send_keys: match self.core.prefs().send_with {
+            send_keys: match self.core.prefs_now().send_with {
                 crate::core::config::SendWith::Enter => "Enter".to_owned(),
                 crate::core::config::SendWith::ModEnter => {
                     format!("{}+Enter", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" })
@@ -1372,7 +1551,7 @@ pub(crate) fn group(rows: &mut [Row]) {
 
 /// What every row of the open list needs from the window.
 pub(crate) struct RowCtx {
-    pub(crate) fresh: std::collections::HashMap<String, Instant>,
+    pub(crate) fresh: Rc<std::collections::HashMap<String, Instant>>,
     pub(crate) this: WeakEntity<FuwaApp>,
     pub(crate) compact: bool,
     pub(crate) edit_box: gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
@@ -1762,15 +1941,16 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     };
     // Encrypted messages say they're being encrypted while they go.
     let sending = if m.enc.is_some() { t("dms-calls.dm.pending.encrypting") } else { t("chat.pending.sending") };
-    let stamp: SharedString = if m.pending { sending.clone().into() } else { when(m.at).into() };
+    let stamp: SharedString = if m.pending { sending.clone().into() } else { crate::ui::text::when_kept(m.at) };
     // A time shows the whole date while the pointer rests on it (the web's `title`).
     let full_time = |id: &str, el: Div| -> AnyElement {
         if m.pending {
             return el.into_any_element();
         }
-        let full = crate::ui::text::full(m.at);
+        // Worked out only when the tooltip shows.
+        let at = m.at;
         el.id(SharedString::from(format!("{id}|{}", m.id)))
-            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(full.clone()).build(window, cx))
+            .tooltip(move |window, cx| crate::ui::overlay::Tip::new(crate::ui::text::full(at)).build(window, cx))
             .into_any_element()
     };
     let mut body = div().flex_1().min_w_0().flex().flex_col();

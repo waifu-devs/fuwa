@@ -50,6 +50,7 @@ import { outsideEmojis } from "@/lib/emoji-catalog";
 import { reportUsage } from "@/lib/reports";
 import type { Clip } from "@/voice/recorder";
 import { forgetAccount, forgetInstance } from "./accounts";
+import { evicted, KEEP_AT_BOTTOM, KEEP_PAGE, touched, trimmed } from "./lists";
 import { addAccount, dropAccount, engine, follow, keptAccounts, removeInstance } from "./sync";
 import {
   addServer,
@@ -57,7 +58,7 @@ import {
   notificationKey,
   removeServer,
   sortChannels,
-  sortMembers,
+  withMember,
   store,
   threadKey,
   updateInstance,
@@ -69,6 +70,7 @@ import {
   withPoll,
   withUpdatedUser,
   withUsers,
+  type FuwaState,
   type PendingMessage,
 } from "./store";
 
@@ -641,10 +643,9 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
 /** Puts a member's new state in the store, ahead of its event. */
 function storeMember(key: string, serverId: string, member: Member | undefined) {
   if (!member?.user) return;
-  const id = member.user.id;
   updateInstance(key, (i) => ({
     ...i,
-    members: { ...i.members, [serverId]: sortMembers([...(i.members[serverId] ?? []).filter((m) => m.user?.id !== id), member]) },
+    members: { ...i.members, [serverId]: withMember(i.members[serverId] ?? [], member) },
   }));
 }
 
@@ -1606,15 +1607,36 @@ export const followThread = (key: string, serverId: string, channelId: string, t
     });
   });
 
+/** Channels and threads opened lately, per instance, the latest first: what decides whose messages stay (lists.ts). */
+const opened = new Map<string, string[]>();
+
+/**
+ * Brings what's on screen to the front of the instance's recent places and
+ * lets go of messages in the ones left a while ago: those left lately keep
+ * their latest page, older ones drop theirs. Run on each focus change.
+ */
+function evictFor(s: FuwaState, key: string, channelId: string, threadId: string | null | undefined): FuwaState {
+  const inst = s.instances[key];
+  if (!inst) return s;
+  const places = [channelId, threadId ? threadKey(threadId) : null];
+  const recent = touched(opened.get(key) ?? [], places);
+  opened.set(key, recent.slice(0, 64));
+  const messages = evicted(inst.messages, recent, new Set(places.filter((x): x is string => !!x)));
+  return messages === inst.messages ? s : { ...s, instances: { ...s.instances, [key]: { ...inst, messages } } };
+}
+
 /** Marks a thread as open beside its channel and clears its unread count; null when it closes. */
 export function focusThread(key: string, threadId: string | null) {
   store.update((s) => {
     if (s.focus?.instance !== key || (s.focus.thread ?? null) === threadId) return s;
     const focus = { ...s.focus, thread: threadId ?? undefined };
     const inst = s.instances[key];
-    if (!inst || !threadId || !inst.threadUnread[threadId]) return { ...s, focus };
-    const { [threadId]: _, ...threadUnread } = inst.threadUnread;
-    return { ...s, focus, instances: { ...s.instances, [key]: { ...inst, threadUnread } } };
+    let next: FuwaState = { ...s, focus };
+    if (inst && threadId && inst.threadUnread[threadId]) {
+      const { [threadId]: _, ...threadUnread } = inst.threadUnread;
+      next = { ...next, instances: { ...next.instances, [key]: { ...inst, threadUnread } } };
+    }
+    return evictFor(next, key, focus.channel, threadId);
   });
 }
 
@@ -1622,13 +1644,30 @@ export function focusThread(key: string, threadId: string | null) {
 export function focusChannel(key: string | null, channelId: string | null) {
   store.update((s) => {
     const focus = key && channelId ? { instance: key, channel: channelId } : null;
-    let next = s.focus?.instance === focus?.instance && s.focus?.channel === focus?.channel ? s : { ...s, focus };
+    const moved = !(s.focus?.instance === focus?.instance && s.focus?.channel === focus?.channel);
+    let next = moved ? { ...s, focus } : s;
     const inst = key ? next.instances[key] : undefined;
     if (inst && channelId && inst.unread[channelId]) {
       const { [channelId]: _, ...unread } = inst.unread;
       next = { ...next, instances: { ...next.instances, [key!]: { ...inst, unread } } };
     }
-    return next;
+    return moved && key && channelId ? evictFor(next, key, channelId, null) : next;
+  });
+}
+
+/**
+ * Cuts the channel (or thread, by `threadKey`) on screen back to its latest
+ * messages once you're at its bottom again, after scrolling far up loaded
+ * many: what was cut loads again when you scroll up. Call it from the
+ * message list when it's scrolled to the bottom; it does nothing until the
+ * list holds a page more than `keep`, so calling it often is cheap.
+ */
+export function trimToLatest(key: string, at: string, keep = KEEP_AT_BOTTOM) {
+  updateInstance(key, (i) => {
+    const loaded = i.messages[at];
+    if (!loaded || loaded.items.length <= keep + KEEP_PAGE) return i;
+    const cut = trimmed(loaded, keep);
+    return cut === loaded ? i : { ...i, messages: { ...i.messages, [at]: cut } };
   });
 }
 

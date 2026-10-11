@@ -122,25 +122,32 @@ fn poll_extra(ends_at: Option<i64>, voters: i64, now: i64) -> String {
 
 /// The "live" dot: a soft ring breathes out of it, unless motion is turned down.
 fn live_dot(id: impl Into<SharedString>, window: &Window, cx: &gpui_kit::App) -> AnyElement {
-    let ring = div().absolute().inset_0().rounded_full().bg(rgb(ROSE));
-    let ring = if cx.reduce_motion() {
-        div().into_any_element()
-    } else {
-        let id: SharedString = id.into();
-        motion::ambient(ring, SharedString::from(format!("{id}|ring")), Duration::from_millis(1800), window, |el, t| {
+    let still = cx.reduce_motion();
+    let id: SharedString = id.into();
+    // Drawn over its part (`floats.rs`), so the ring doesn't build the sidebar again every frame.
+    crate::ui::floats::float(format!("{id}|ring"), 8.0, 8.0, Duration::from_millis(1800), window, cx, move |t| {
+        let ring = (!still && t > 0.0).then(|| {
             // easeOut on scale 1 → 2.6 and opacity .55 → 0.
             let e = 1.0 - (1.0 - t).powi(2);
             let grow = 4.0 * 1.6 * e;
-            el.left(px(-grow)).top(px(-grow)).right(px(-grow)).bottom(px(-grow)).opacity(0.55 * (1.0 - e))
-        })
-    };
-    div()
-        .relative()
-        .size(px(8.0))
-        .flex_none()
-        .child(ring)
-        .child(div().absolute().inset_0().rounded_full().bg(rgb(ROSE)))
-        .into_any_element()
+            div()
+                .absolute()
+                .rounded_full()
+                .bg(rgb(ROSE))
+                .left(px(-grow))
+                .top(px(-grow))
+                .right(px(-grow))
+                .bottom(px(-grow))
+                .opacity(0.55 * (1.0 - e))
+        });
+        div()
+            .relative()
+            .size(px(8.0))
+            .flex_none()
+            .children(ring)
+            .child(div().absolute().inset_0().rounded_full().bg(rgb(ROSE)))
+            .into_any_element()
+    })
 }
 
 impl FuwaApp {
@@ -159,7 +166,7 @@ impl FuwaApp {
         }
         let in_channel =
             self.core.call().filter(|c| c.instance == key && c.server_id == server_id).map(|c| c.channel_id);
-        let hidden = self.core.prefs().live_tiles_hidden;
+        let hidden = self.core.prefs_now().live_tiles_hidden.clone();
         let now = crate::core::dms::now_ms();
         self.core.shared.read(|s| {
             s.instance(key)

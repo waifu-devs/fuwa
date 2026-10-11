@@ -3,7 +3,8 @@ import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
-import { store, updateDms, updateInstance, type DmMember } from "@/fuwa/store";
+import { byId, memberById } from "@/fuwa/lists";
+import { store, updateDms, updateInstance, without, type DmMember, type FuwaState } from "@/fuwa/store";
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
 import { onDmPinEvent } from "@/fuwa/pins";
 import {
@@ -38,6 +39,7 @@ import { reportError } from "@/lib/reports";
 import { isOneEmoji, tallyDm } from "@/lib/reactions";
 import { BackupSync } from "./backup";
 import * as history from "./history";
+import * as win from "./lines";
 import * as threads from "./threads";
 import * as vault from "./vault";
 import { filesOf, toSealedFiles } from "./files";
@@ -270,7 +272,7 @@ export class DmEngine {
   /** Secure channels in servers, by channel id: followed once opened, or once a record arrives. */
   private secure = new Map<string, SecureChannel>();
   /** Servers whose secure channels wait to be brought in step with a permission change. */
-  private settling = new Map<string, ReturnType<typeof setTimeout>>();
+  private settling = new Map<string, ReturnType<typeof setTimeout> | null>();
   /** Catch-ups waiting their turn, so a burst of records reads each conversation once. */
   private queued = new Set<string>();
   private work: Promise<void> = Promise.resolve();
@@ -278,6 +280,20 @@ export class DmEngine {
   private delivered: Promise<void> = Promise.resolve();
   /** The account's message backup, as this device takes part in it. */
   readonly backup: BackupSync;
+  /** Conversations opened lately, the one on screen first: these keep a window of lines in the store (lines.ts). */
+  private recent: string[] = [];
+  /** Their windows, as last shown. */
+  private windows = new Map<string, win.Window>();
+  /** Lines written since a window was last shown, by conversation; "all" when it has to be read again. */
+  private changes = new Map<string, Map<number, vault.Item> | "all">();
+  /** Each conversation's refreshes and window changes, one after another. */
+  private chains = new Map<string, Promise<void>>();
+  /** A refresh waiting its turn, per conversation: more asks join it. */
+  private waiting = new Map<string, Promise<void>>();
+  /** Whether this device joined a secure channel after it started, once worked out. */
+  private late = new Map<string, boolean>();
+  private lastFocus: FuwaState["focus"] = null;
+  private readonly unwatch: () => void;
 
   private constructor(
     readonly key: string,
@@ -297,6 +313,7 @@ export class DmEngine {
       me.id,
       (fn) => exclusive(`${this.lock}:backup`, fn),
       async (ids) => {
+        for (const id of ids) this.changedAll(id);
         await Promise.all(ids.map((id) => this.refresh(id).catch(() => {})));
         for (const id of ids) this.tell(id);
       },
@@ -306,9 +323,15 @@ export class DmEngine {
       this.tabs.onmessage = (e: MessageEvent<{ vault: string; conversation?: string; list?: boolean }>) => {
         if (e.data?.vault !== this.vaultKey || this.stopped) return;
         if (e.data.list) void this.resync().catch(() => {});
-        else if (e.data.conversation) void this.refresh(e.data.conversation).catch(() => {});
+        else if (e.data.conversation) {
+          this.changedAll(e.data.conversation);
+          void this.refresh(e.data.conversation).catch(() => {});
+        }
       };
     }
+    // Which conversation is on screen decides which keep their lines in the store.
+    const unsubscribe = store.subscribe(() => this.onStore());
+    this.unwatch = () => void unsubscribe();
   }
 
   get deviceId() {
@@ -356,9 +379,10 @@ export class DmEngine {
   stop() {
     if (this.stopped) return;
     this.controller.abort();
+    this.unwatch();
     this.backup.stop();
     this.tabs?.close();
-    for (const timer of this.settling.values()) clearTimeout(timer);
+    for (const timer of this.settling.values()) if (timer) clearTimeout(timer);
     try {
       this.device.free();
     } catch {
@@ -725,6 +749,7 @@ export class DmEngine {
         }
       }
       await vault.write(this.vaultKey, { device: this.saved(), notes: [note], items: [...changed.values()], forgetSent });
+      this.changed(id, changed.values());
       this.tell(id);
       const lines = c.channel ? [...known.values()] : [];
       for (const i of changed.values()) {
@@ -1130,11 +1155,9 @@ export class DmEngine {
         this.device.joinFromWelcome(c.id, welcome.data, allowed);
         const seq = Number(welcome.sequence);
         const next = { ...note, cursor: seq };
-        await vault.write(this.vaultKey, {
-          device: this.saved(),
-          notes: [next],
-          items: [item(this.vaultKey, c.id, { seq, kind: "joined", senderId: this.me.id, deviceId: this.device.deviceId })],
-        });
+        const joined = item(this.vaultKey, c.id, { seq, kind: "joined", senderId: this.me.id, deviceId: this.device.deviceId });
+        await vault.write(this.vaultKey, { device: this.saved(), notes: [next], items: [joined] });
+        this.joinedAt(c.id, joined);
         return next;
       } catch (err) {
         // Used up or out of date: join by itself instead.
@@ -1158,12 +1181,9 @@ export class DmEngine {
         const record = await c.commit(commit, false);
         const seq = Number(record?.sequence ?? 0n);
         const next = { ...note, cursor: seq };
-        await vault.write(this.vaultKey, {
-          notes: [next],
-          items: [
-            item(this.vaultKey, c.id, { seq, at: record ? ms(record) : Date.now(), kind: "joined", senderId: this.me.id, deviceId: this.device.deviceId }),
-          ],
-        });
+        const joined = item(this.vaultKey, c.id, { seq, at: record ? ms(record) : Date.now(), kind: "joined", senderId: this.me.id, deviceId: this.device.deviceId });
+        await vault.write(this.vaultKey, { notes: [next], items: [joined] });
+        this.joinedAt(c.id, joined);
         return next;
       } catch (err) {
         this.device.forget(c.id);
@@ -1297,6 +1317,7 @@ export class DmEngine {
       load: () => vault.loadItems(this.vaultKey, id),
       write: async (items: vault.Item[]) => {
         await vault.write(this.vaultKey, { items });
+        this.changed(id, items);
         this.tell(id);
       },
     };
@@ -1352,74 +1373,230 @@ export class DmEngine {
     this.tabs?.postMessage({ vault: this.vaultKey, conversation });
   }
 
-  /** A conversation's lines to show, and its reactions tallied: reactions are lines of their own, never shown. */
-  private lineUp(all: vault.Item[]) {
-    return { items: all.filter((i) => i.kind !== "reaction"), reactions: tallyDm(all, this.me.id) };
+  /** Whether a conversation is the one on screen. */
+  private focused(id: string) {
+    const f = store.get().focus;
+    return f?.instance === this.key && f.channel === id;
   }
 
-  /** Puts what this browser knows about a conversation in the store. */
-  async refresh(id: string) {
-    if (this.secure.has(id)) return this.refreshChannel(id);
+  /** Whether a conversation keeps a window of lines in the store: on screen, or opened lately. */
+  private wanted(id: string) {
+    return this.recent.includes(id) || this.focused(id);
+  }
+
+  /** A conversation came on screen: it keeps its window, and the one opened longest ago lets go of its own. */
+  private onStore() {
+    const f = store.get().focus;
+    if (f === this.lastFocus || this.stopped) return;
+    this.lastFocus = f;
+    if (f?.instance !== this.key) return;
+    const id = f.channel;
+    if (!this.conversations.has(id) && !this.secure.has(id)) return;
+    // Not from inside the store's own update.
+    queueMicrotask(() => {
+      if (this.stopped || !this.focused(id)) return;
+      const shown = this.windows.has(id);
+      this.touch(id);
+      if (!shown) void this.refresh(id).catch(() => {});
+    });
+  }
+
+  private touch(id: string) {
+    if (this.recent[0] === id) return;
+    const { recent, dropped } = win.touchRecent(this.recent, id);
+    this.recent = recent;
+    for (const d of dropped) this.shrink(d);
+  }
+
+  /** A conversation left a while ago: back to its tail in the store, the rest only in the vault. */
+  private shrink(id: string) {
+    const w = this.windows.get(id);
+    this.windows.delete(id);
+    this.changes.delete(id);
+    if (!w) return;
+    const tail = win.tailOf(w.lines);
+    updateDms(this.key, (d) => ({ ...d, items: { ...d.items, [id]: tail }, reactions: without(d.reactions, id), more: without(d.more, id) }));
+  }
+
+  /** Lines just written: shown conversations put them in their windows at the next refresh, instead of reading everything again. */
+  private changed(id: string, items: Iterable<vault.Item>) {
+    if (!this.wanted(id)) return;
+    const had = this.changes.get(id);
+    if (had === "all") return;
+    const map = had ?? new Map<number, vault.Item>();
+    for (const i of items) map.set(i.seq, i);
+    this.changes.set(id, map);
+  }
+
+  /** Something else changed a conversation's lines (another tab, the backup): read it again. */
+  private changedAll(id: string) {
+    this.late.delete(id);
+    if (this.wanted(id)) this.changes.set(id, "all");
+  }
+
+  /** This device just joined a group: from a welcome or by itself. */
+  private joinedAt(id: string, joined: vault.Item) {
+    if (joined.seq > 1) this.late.set(id, true);
+    this.changed(id, [joined]);
+  }
+
+  /** Runs `fn` after whatever else is changing this conversation's window. */
+  private serial(id: string, fn: () => Promise<void>): Promise<void> {
+    const run = (this.chains.get(id) ?? Promise.resolve()).then(fn);
+    const tail = run.catch(() => {});
+    this.chains.set(id, tail);
+    void tail.then(() => {
+      if (this.chains.get(id) === tail) this.chains.delete(id);
+    });
+    return run;
+  }
+
+  /** Puts what this browser knows about a conversation (or secure channel) in the store. */
+  refresh(id: string): Promise<void> {
+    const waiting = this.waiting.get(id);
+    if (waiting) return waiting;
+    const run = this.serial(id, () => {
+      this.waiting.delete(id);
+      return this.show(id);
+    });
+    this.waiting.set(id, run);
+    return run;
+  }
+
+  /** A window as the vault has it: a secure channel's whole history (its threads need it), a direct message's latest lines. */
+  private async loadWindow(id: string, secure: boolean, from = 0): Promise<win.Window> {
+    if (secure) return win.windowOf(await vault.loadItems(this.vaultKey, id), 0);
+    if (from > 0) return win.windowOf(await vault.loadItemsFrom(this.vaultKey, id, from), from);
+    let n = 0;
+    const { items, complete } = await vault.loadItemsBack(this.vaultKey, id, 0, (t) => t.at(-1)!.kind !== "reaction" && ++n >= win.OPEN_LINES);
+    return win.windowOf(items, complete ? 0 : (items[0]?.seq ?? 0));
+  }
+
+  private async show(id: string) {
+    const secure = this.secure.has(id);
     const c = this.conversations.get(id);
-    if (!c || this.stopped) return;
-    const [all, note, members] = await Promise.all([
-      vault.loadItems(this.vaultKey, id),
+    if (this.stopped || (!secure && !c)) return;
+    if (this.focused(id)) this.touch(id);
+    const open = this.recent.includes(id);
+    const pending = this.changes.get(id);
+    this.changes.delete(id);
+    const had = this.windows.get(id);
+    const [note, members, window, tail] = await Promise.all([
       vault.loadNote(this.vaultKey, id),
       exclusive(this.lock, async () => {
         await this.fresh();
         return this.device.isMember(id) ? (this.device.members(id) as WasmMember[]) : [];
       }),
+      !open
+        ? undefined
+        : had && pending !== "all"
+          ? pending
+            ? win.mergeWindow(had, pending.values())
+            : had
+          : this.loadWindow(id, secure, had?.from),
+      // Not opened lately: only the last message on, for the list.
+      open
+        ? undefined
+        : vault.loadItemsBack(this.vaultKey, id, 0, (t) => vault.isMessage(t.at(-1)!) || t.length >= win.TAIL_SCAN).then((r) => win.tailOf(r.items)),
     ]);
+    if (this.stopped || (secure && !this.secure.has(id))) return;
+    // Left while this was read: only the tail stays.
+    const keep = window && this.recent.includes(id) ? window : undefined;
+    if (keep) this.windows.set(id, keep);
+    else this.windows.delete(id);
+    const items = keep ? keep.lines : (tail ?? (window ? win.tailOf(window.lines) : []));
+    const looking = this.focused(id) && document.visibilityState === "visible";
+    const unread = looking ? 0 : await this.unreadIn(id, secure, note.read, keep);
     if (this.stopped) return;
-    const { items, reactions } = this.lineUp(all);
-    const focused = store.get().focus;
-    const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
-    const unread = looking
-      ? 0
-      : items.filter((i) => vault.isMessage(i) && !i.deleted && i.senderId !== this.me.id && i.seq > note.read).length;
-    const safety = this.safetyNumber(c, members);
-    updateDms(this.key, (d) => ({
-      ...d,
-      items: { ...d.items, [id]: items },
-      reactions: { ...d.reactions, [id]: reactions },
-      unread: { ...d.unread, [id]: unread },
-      members: { ...d.members, [id]: members satisfies DmMember[] },
-      safety: { ...d.safety, [id]: safety },
-      verified: { ...d.verified, [id]: note.verified },
-    }));
+    const reactions = keep ? (keep === had ? store.get().instances[this.key]?.dms.reactions[id] : undefined) ?? tallyDm([...keep.lines, ...keep.reactions], this.me.id) : undefined;
+    const more = !!keep && keep.from > 0;
+    const safety = c ? this.safetyNumber(c, members) : "";
+    updateDms(this.key, (d) => {
+      const next = {
+        ...d,
+        items: d.items[id] === items || (!keep && win.sameLines(d.items[id], items)) ? d.items : { ...d.items, [id]: items },
+        reactions: reactions ? (d.reactions[id] === reactions ? d.reactions : { ...d.reactions, [id]: reactions }) : without(d.reactions, id),
+        more: more ? (d.more[id] ? d.more : { ...d.more, [id]: true }) : without(d.more, id),
+        members: { ...d.members, [id]: members satisfies DmMember[] },
+      };
+      if (secure) return { ...next, threadNotes: { ...d.threadNotes, [id]: { follows: note.follows ?? {}, read: note.threadRead ?? {} } } };
+      return {
+        ...next,
+        unread: d.unread[id] === unread ? d.unread : { ...d.unread, [id]: unread },
+        safety: d.safety[id] === safety ? d.safety : { ...d.safety, [id]: safety },
+        verified: d.verified[id] === note.verified ? d.verified : { ...d.verified, [id]: note.verified },
+      };
+    });
+    // A secure channel's unread count goes with the server's channels.
+    if (secure) updateInstance(this.key, (i) => (i.unread[id] === unread ? i : { ...i, unread: { ...i.unread, [id]: unread } }));
     if (looking && items.length && note.read < items.at(-1)!.seq) void this.markRead(id).catch(() => {});
   }
 
-  /** Puts what this browser knows about a secure channel in the store; its unread count goes with the server's channels. */
-  private async refreshChannel(id: string) {
-    const [all, note, members] = await Promise.all([
-      vault.loadItems(this.vaultKey, id),
-      vault.loadNote(this.vaultKey, id),
-      exclusive(this.lock, async () => {
-        await this.fresh();
-        return this.device.isMember(id) ? (this.device.members(id) as WasmMember[]) : [];
-      }),
-    ]);
-    if (this.stopped || !this.secure.has(id)) return;
-    const { items, reactions } = this.lineUp(all);
-    const focused = store.get().focus;
-    const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
-    // Replies kept to their threads count in their threads, not the channel.
-    const bySeq = new Map(items.map((i) => [i.seq, i]));
-    const inChannel = (i: vault.Item) => !threads.threadOf(i, bySeq) || !!i.inChannel;
-    const unread = looking
-      ? 0
-      : items.filter((i) => i.kind === "text" && !i.deleted && i.senderId !== this.me.id && i.seq > note.read && inChannel(i)).length;
-    const threadNote = { follows: note.follows ?? {}, read: note.threadRead ?? {} };
+  /**
+   * Messages from others after the last one you saw: in a secure channel,
+   * only those the channel shows (replies kept to their threads count there).
+   * Read from the window when it reaches back that far, else from the vault.
+   */
+  private async unreadIn(id: string, secure: boolean, read: number, window: win.Window | undefined): Promise<number> {
+    const lines =
+      window && win.coversUnread(window, read)
+        ? window.lines
+        : (await vault.loadItemsFrom(this.vaultKey, id, read + 1)).filter((i) => i.kind !== "reaction");
+    const fresh = lines.filter((i) => i.seq > read && !i.deleted && i.senderId !== this.me.id);
+    if (!secure) return fresh.filter(vault.isMessage).length;
+    const texts = fresh.filter((i) => i.kind === "text");
+    const bySeq = new Map(lines.map((i) => [i.seq, i]));
+    // The messages replies are under, from before what was read here.
+    const parents = [...new Set(texts.map((i) => i.thread ?? 0).filter((p) => p > 0 && !bySeq.has(p)))];
+    if (parents.length) {
+      for (const p of await vault.loadItemsAt(parents.map((seq) => [this.vaultKey, id, seq]))) if (p) bySeq.set(p.seq, p);
+    }
+    return texts.filter((i) => !threads.threadOf(i, bySeq) || !!i.inChannel).length;
+  }
+
+  /** Reaches an opened conversation's window further back, by one step. */
+  loadOlderLines(id: string): Promise<void> {
+    return this.serial(id, async () => {
+      const w = this.windows.get(id);
+      if (!w || w.from === 0) return;
+      let n = 0;
+      const { items, complete } = await vault.loadItemsBack(this.vaultKey, id, w.from, (t) => t.at(-1)!.kind !== "reaction" && ++n >= win.OPEN_LINES);
+      this.extend(id, w, items, complete);
+    });
+  }
+
+  /** Reaches an opened conversation's window back to `seq` (a pin, a reply's message), when it doesn't yet. */
+  loadLinesThrough(id: string, seq: number): Promise<void> {
+    return this.serial(id, async () => {
+      const w = this.windows.get(id);
+      if (!w || w.from === 0 || seq >= w.from) return;
+      const { items, complete } = await vault.loadItemsBack(this.vaultKey, id, w.from, (t) => t.at(-1)!.seq <= seq);
+      this.extend(id, w, items, complete);
+    });
+  }
+
+  private extend(id: string, w: win.Window, older: vault.Item[], complete: boolean) {
+    if (this.stopped || this.windows.get(id) !== w) return;
+    const next = win.extendWindow(w, older, complete ? 0 : (older[0]?.seq ?? w.from));
+    this.windows.set(id, next);
+    const reactions = tallyDm([...next.lines, ...next.reactions], this.me.id);
     updateDms(this.key, (d) => ({
       ...d,
-      items: { ...d.items, [id]: items },
+      items: { ...d.items, [id]: next.lines },
       reactions: { ...d.reactions, [id]: reactions },
-      members: { ...d.members, [id]: members satisfies DmMember[] },
-      threadNotes: { ...d.threadNotes, [id]: threadNote },
+      more: next.from > 0 ? { ...d.more, [id]: true } : without(d.more, id),
     }));
-    updateInstance(this.key, (i) => (i.unread[id] === unread ? i : { ...i, unread: { ...i.unread, [id]: unread } }));
-    if (looking && items.length && note.read < items.at(-1)!.seq) void this.markRead(id).catch(() => {});
+  }
+
+  /** Whether this device joined a secure channel after it started (so it holds less of its history). */
+  private async joinedLate(id: string): Promise<boolean> {
+    const known = this.late.get(id);
+    if (known !== undefined) return known;
+    const w = this.windows.get(id);
+    const lines = w && w.from === 0 ? w.lines : await vault.loadItems(this.vaultKey, id);
+    const late = lines.some((i) => i.kind === "joined" && i.senderId === this.me.id && i.seq > 1);
+    this.late.set(id, late);
+    return late;
   }
 
   // ───────────────────────── Secure channels ─────────────────────────
@@ -1470,31 +1647,35 @@ export class DmEngine {
     if (this.settling.has(serverId)) return;
     const ids = [...this.secure].filter(([, sc]) => sc.serverId === serverId).map(([id]) => id);
     if (!ids.length) return;
+    this.settling.set(serverId, null);
     // The device whose commit adds someone is the one that passes history on,
     // so devices that joined after the channel started (and hold less of it)
     // let the others go first.
-    const late = ids.some((id) => store.get().instances[this.key]?.dms.items[id]?.some((i) => i.kind === "joined" && i.senderId === this.me.id && i.seq > 1));
-    const timer = setTimeout(
-      () => {
-        this.settling.delete(serverId);
-        for (const id of ids) {
-          // Only people who may write commit for the group; the server refuses the others'.
-          if (!this.secure.has(id) || !this.canWrite(serverId, id)) continue;
-          void exclusive(this.lock, async () => {
-            await this.fresh();
-            await this.catchUp(id);
-            const c = this.room(id);
-            if (c && this.device.isMember(id)) await this.reconcile(c);
-          })
-            .catch((err: unknown) => {
-              if (!(err instanceof DmError)) reportError("e2ee.secure_settle", "secure_channel");
+    void Promise.all(ids.map((id) => this.joinedLate(id).catch(() => false))).then((lates) => {
+      if (this.stopped || this.settling.get(serverId) !== null) return;
+      const late = lates.some(Boolean);
+      const timer = setTimeout(
+        () => {
+          this.settling.delete(serverId);
+          for (const id of ids) {
+            // Only people who may write commit for the group; the server refuses the others'.
+            if (!this.secure.has(id) || !this.canWrite(serverId, id)) continue;
+            void exclusive(this.lock, async () => {
+              await this.fresh();
+              await this.catchUp(id);
+              const c = this.room(id);
+              if (c && this.device.isMember(id)) await this.reconcile(c);
             })
-            .finally(() => void this.refresh(id).catch(() => {}));
-        }
-      },
-      400 + Math.random() * ACCESS_SETTLE_MS + (late ? LATE_SETTLE_MS : 0),
-    );
-    this.settling.set(serverId, timer);
+              .catch((err: unknown) => {
+                if (!(err instanceof DmError)) reportError("e2ee.secure_settle", "secure_channel");
+              })
+              .finally(() => void this.refresh(id).catch(() => {}));
+          }
+        },
+        400 + Math.random() * ACCESS_SETTLE_MS + (late ? LATE_SETTLE_MS : 0),
+      );
+      this.settling.set(serverId, timer);
+    });
   }
 
   /**
@@ -1515,9 +1696,9 @@ export class DmEngine {
   /** Whether you may write in a server's channel, worked out as the server does, from what this app knows. */
   private canWrite(serverId: string, channelId: string): boolean {
     const i = store.get().instances[this.key];
-    const server = i?.servers.find((x) => x.id === serverId);
+    const server = byId(i?.servers, serverId);
     if (!i || !server) return false;
-    const member = i.members[serverId]?.find((m) => m.user?.id === this.me.id);
+    const member = memberById(i.members[serverId], this.me.id);
     const access = accessOf(
       serverId,
       server.ownerId,
@@ -1541,11 +1722,17 @@ export class DmEngine {
       await vault.forget(this.vaultKey, id);
       this.tell(id);
     });
-    updateDms(this.key, (d) => {
-      const { [id]: _, ...items } = d.items;
-      const { [id]: __, ...members } = d.members;
-      return { ...d, items, members };
-    });
+    this.windows.delete(id);
+    this.changes.delete(id);
+    this.late.delete(id);
+    this.recent = this.recent.filter((x) => x !== id);
+    updateDms(this.key, (d) => ({
+      ...d,
+      items: without(d.items, id),
+      reactions: without(d.reactions, id),
+      more: without(d.more, id),
+      members: without(d.members, id),
+    }));
   }
 
   /** Both people's safety number, from the devices in the group. Empty until both have one there. */

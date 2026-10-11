@@ -25,7 +25,7 @@ use tonic::Code;
 use crate::core::api::Api;
 use crate::core::config::Prefs;
 use crate::core::store::{self, ChannelMessages, InstanceState, Store};
-use crate::core::{Core, dms, notifications, threads};
+use crate::core::{Area, Core, Watch, dms, notifications, threads};
 use crate::pb;
 use crate::rpc;
 
@@ -225,11 +225,18 @@ pub fn merge_newest(entry: &mut ChannelMessages, page: Vec<pb::Message>, has_mor
 /// Moves what heads say on into the store, and queues reads for the
 /// channels that notify for every message.
 pub(super) fn take_heads(core: &Arc<Core>, key: &str, heads: &pb::ChannelHeads, notifier: &mut Notifier) {
-    let prefs = core.prefs();
-    let missed = core.shared.update(|s| {
+    let prefs = core.prefs_now();
+    // Heads move only their channels' newest message and unread count.
+    let areas: Vec<Area> = heads
+        .servers
+        .iter()
+        .flat_map(|server| &server.channels)
+        .map(|head| Area::Messages { instance: key, channel: &head.channel_id })
+        .collect();
+    let missed = core.shared.update_if(&areas, |s| {
         let focus = s.focus_channel(key).map(str::to_owned);
-        let Some(i) = s.instances.get_mut(key) else { return Vec::new() };
-        apply_heads(i, heads, focus.as_deref(), &prefs, dms::now_ms())
+        let Some(i) = s.instances.get_mut(key) else { return (Vec::new(), false) };
+        (apply_heads(i, heads, focus.as_deref(), &prefs, dms::now_ms()), true)
     });
     notifier.want(missed);
 }
@@ -313,7 +320,7 @@ async fn notify_missed(core: Arc<Core>, key: String, api: Api, server_id: String
         ..Default::default()
     };
     let Ok(res) = rpc!(api.messages(), list_messages(req)).await else { return done };
-    let prefs = core.prefs();
+    let prefs = core.prefs_now();
     let notices = core.shared.update(|s| {
         let shown = s.focus_channel(&key) == Some(channel_id.as_str());
         let Some(i) = s.instances.get_mut(&key) else { return Vec::new() };
@@ -421,6 +428,8 @@ pub(super) struct Focuser {
     in_effect: pb::Focus,
     /// The store changing: the focus is worked out again at `due`.
     pub changes: watch::Receiver<u64>,
+    /// The store's version when it was last looked at.
+    seen: u64,
     pub due: Option<tokio::time::Instant>,
     /// Hands focuses to the task that sends them, once the stream has an id.
     sender: Option<(watch::Sender<pb::Focus>, tokio::task::JoinHandle<()>)>,
@@ -430,7 +439,9 @@ impl Focuser {
     pub fn new(core: &Arc<Core>, key: &str, opened: pb::Focus) -> Self {
         let mut changes = core.changes();
         changes.mark_unchanged();
+        let seen = core.shared.version();
         Self {
+            seen,
             core: core.clone(),
             key: key.to_owned(),
             asked: opened.clone(),
@@ -468,9 +479,22 @@ impl Focuser {
         }
     }
 
-    /// The store changed: the focus is looked at again shortly.
+    /// The store changed: the focus is looked at again shortly, if what it's
+    /// made of may have moved (what's open and in sight, the open channel's
+    /// messages, conversations); presence, other channels and other
+    /// instances don't make one.
     pub fn changed(&mut self) {
-        self.due.get_or_insert_with(|| tokio::time::Instant::now() + SETTLE);
+        let now = self.core.shared.version();
+        let open = self.core.shared.read(|s| s.focus_channel(&self.key).map(str::to_owned));
+        let mut watched = vec![Watch::Dms(&self.key)];
+        if let Some(channel) = &open {
+            watched.push(Watch::Messages { instance: &self.key, channel });
+        }
+        let moved = self.core.shared.changed_since(self.seen, &watched);
+        self.seen = now;
+        if moved {
+            self.due.get_or_insert_with(|| tokio::time::Instant::now() + SETTLE);
+        }
     }
 
     /// Works the focus out again, and sends it if it's new.

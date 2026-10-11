@@ -867,7 +867,8 @@ impl FuwaApp {
         let place = Place { key: key.to_owned(), server: server.to_owned(), channel: channel.to_owned() };
         let poll = self.voters_poll(&place, message);
         let (Some(poll), Some(voters)) = (poll, self.polls.voters.as_ref()) else { return div().into_any_element() };
-        let look = self.core.shared.read(|s| s.instance(key).map(|i| Look::of(i, server)).unwrap_or_default());
+        let shared = &self.core.shared;
+        let look = shared.read(|s| s.instance(key).map(|i| Look::shared(i, key, server, shared)).unwrap_or_default());
         let current = voters.answer;
         // The active tab's pill glides between tabs (the web's `layoutId`), once
         // they've been measured; until then the active tab wears it itself.
@@ -1215,7 +1216,7 @@ impl FuwaApp {
         let Some(e) = self.polls.editor.as_ref() else { return div().into_any_element() };
         let (look, catalog, tone) = self.core.shared.read(|s| {
             let i = s.instance(&e.place.key);
-            let look = i.map(|i| Look::of(i, &e.place.server)).unwrap_or_default();
+            let look = i.map(|i| Look::shared(i, &e.place.key, &e.place.server, &self.core.shared)).unwrap_or_default();
             let catalog = i
                 .and_then(|i| Some(Catalog::own(i.server(&e.place.server)?, i.emojis.get(&e.place.server)?)))
                 .unwrap_or_default();

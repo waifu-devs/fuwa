@@ -756,7 +756,7 @@ impl InstanceSettingsView {
                 ("Assertion Consumer Service (HTTP-POST)".to_owned(), sp.saml_acs_url.clone()),
             ]
         };
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let mut list = div().mt(px(12.0)).flex().flex_col().gap(px(8.0));
         for (n, (label, value)) in rows.into_iter().enumerate() {
             let copied = self.sso.copied == Some(n);
@@ -905,7 +905,7 @@ impl InstanceSettingsView {
 
     /// Who the provider said signed in, after a test.
     fn identity(&self, identity: Option<&pb::SsoIdentity>, p: &Palette) -> AnyElement {
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let id = identity.cloned().unwrap_or_default();
         let rows = [
             (t("instancesettings.nav.name"), id.name.clone()),

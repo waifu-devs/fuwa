@@ -109,7 +109,7 @@ pub(crate) fn moderates<'a>(i: &'a InstanceState, server: &'a str, channel: &'a 
 
 /// A secure channel's lines, sorted into the channel and its threads.
 pub(crate) fn organized(i: &InstanceState, server: &str, channel: &str) -> Organized {
-    let items = i.dms.items.get(channel).map(Vec::as_slice).unwrap_or_default();
+    let items = i.dms.items.get(channel).map(|v| v.as_slice()).unwrap_or_default();
     st::organize(items, &moderates(i, server, channel))
 }
 
@@ -132,7 +132,7 @@ impl FuwaApp {
             color: i.name_color(server, id).map(|c| rgb(c).into()),
             user: i.users.get(id).cloned(),
         };
-        let items = i.dms.items.get(channel).map(Vec::as_slice).unwrap_or_default();
+        let items = i.dms.items.get(channel).map(|v| v.as_slice()).unwrap_or_default();
         let locked = crate::core::backup::state(key).status == crate::core::backup::Status::Locked;
         let earlier = earlier_from(items, locked);
         let name_of = |id: &str| i.display_name(Some(server), id);

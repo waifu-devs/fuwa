@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{Hash as _, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -273,6 +274,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         owner: false,
         enc: Some(Rc::new(enc)),
         sig: 0,
+        pre: 0,
     }
 }
 
@@ -317,7 +319,7 @@ pub(crate) fn encrypted_rows(
     let stored = i.dms.items.get(id);
     let items = match &lines {
         Some(l) => l.items,
-        None => stored.map(Vec::as_slice).unwrap_or_default(),
+        None => stored.map(|v| v.as_slice()).unwrap_or_default(),
     };
     let in_thread = lines.as_ref().is_some_and(|l| l.in_thread);
     let mut rows = vec![start];
@@ -326,13 +328,26 @@ pub(crate) fn encrypted_rows(
         let text = t(if moderate.is_some() { "chat.secure.joining" } else { "dms-calls.dm.view.joining" });
         rows.push(Row::Line(Rc::new(SysLine { id: "joining".into(), kind: LineKind::Joining, text, at: 0 })));
     }
-    let mut last_day: Option<i64> = None;
+    let mut days = crate::ui::text::Days::default();
     let mut day = |rows: &mut Vec<Row>, at: i64, id: String| {
-        if !last_day.is_some_and(|d| crate::ui::text::same_day(d, at)) {
+        if days.starts(at) {
             rows.push(Row::Day { id: format!("day|{id}"), text: crate::ui::text::day(at) });
         }
-        last_day = Some(at);
     };
+    // Each sender as shown, looked up once.
+    let people: RefCell<HashMap<String, Who>> = RefCell::default();
+    let who_of = |user: &str| -> Who {
+        if let Some(w) = people.borrow().get(user) {
+            return w.clone();
+        }
+        let w = who(user);
+        people.borrow_mut().insert(user.to_owned(), w.clone());
+        w
+    };
+    // The messages built last time for this list (`BUILT`), and those built now.
+    let place_key = lines.as_ref().map_or(id, |l| l.place.as_str()).to_owned();
+    let mut kept = BUILT.with_borrow_mut(|b| b.remove(&place_key)).unwrap_or_default();
+    let mut built = crate::ui::chat::Built::default();
     for item in items {
         // The first device to join a conversation doesn't need telling it joined.
         if item.kind == ItemKind::Joined && item.seq <= 1 {
@@ -353,31 +368,67 @@ pub(crate) fn encrypted_rows(
             })));
             continue;
         }
-        let enc = EncBits {
-            deleted: item.deleted,
-            shared: !item.shared_by.is_empty(),
-            question: question.to_owned(),
-            files: if item.deleted { Vec::new() } else { item.files.clone() },
-            sending: Vec::new(),
+        let author = who_of(&item.sender_id);
+        let key = item.seq.to_string();
+        let editing = editing == Some(key.as_str());
+        let can_delete = !item.deleted && (mine || moderate == Some(true));
+        let pinned = pins.filter(|_| !item.deleted).map(|pins| pins.iter().any(|p| p.sequence == item.seq));
+        let reactions = react.filter(|_| !item.deleted).map(|can_add| {
+            let name_of = |u: &str| who_of(u).name;
+            Rc::new(crate::ui::reactions::ReactBits::encrypted_item(i, id, item, can_add, &name_of))
+        });
+        // Everything the row is made from, so an unchanged line is reused rather than built again.
+        let sig = {
+            let mut h = std::hash::DefaultHasher::new();
+            item_digest(item, &mut h);
+            (&author.name, author.color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits))).hash(&mut h);
+            author.user.as_ref().map(prost::Message::encode_to_vec).hash(&mut h);
+            (mine, editing, can_delete, pinned, question).hash(&mut h);
+            if let Some(r) = &reactions {
+                r.digest(&mut h);
+            }
+            // Never 0, which means "not kept".
+            h.finish() | 1
         };
-        let mut m = plain_msg(item.seq.to_string(), who(&item.sender_id), item.content.clone(), item.at, mine, enc);
-        m.editing = editing == Some(m.id.as_str());
-        m.edited = item.edited_at > 0;
-        m.can_delete = !item.deleted && (mine || moderate == Some(true));
-        m.voice = item.voice.as_ref().map(|v| Rc::new(crate::ui::voice_notes::VoiceCard::of(v)));
-        if let Some(pins) = pins.filter(|_| !item.deleted) {
-            m.can_pin = true;
-            m.pinned = pins.iter().any(|p| p.sequence == item.seq);
-        }
-        if let Some(can_add) = react.filter(|_| !item.deleted) {
-            let name_of = |u: &str| who(u).name;
-            m.reactions =
-                Some(Rc::new(crate::ui::reactions::ReactBits::encrypted_item(i, id, item, can_add, &name_of)));
-        }
-        if let Some(l) = &lines {
-            (l.dress)(item, &mut m);
-        }
-        rows.push(Row::Msg(Rc::new(m)));
+        let m = match kept.remove(&key) {
+            Some(was) if was.sig == sig => was,
+            _ => {
+                let enc = EncBits {
+                    deleted: item.deleted,
+                    shared: !item.shared_by.is_empty(),
+                    question: question.to_owned(),
+                    files: if item.deleted { Vec::new() } else { item.files.clone() },
+                    sending: Vec::new(),
+                };
+                let mut m = plain_msg(key.clone(), author, item.content.clone(), item.at, mine, enc);
+                m.editing = editing;
+                m.edited = item.edited_at > 0;
+                m.can_delete = can_delete;
+                m.voice = item.voice.as_ref().map(|v| Rc::new(crate::ui::voice_notes::VoiceCard::of(v)));
+                if let Some(pinned) = pinned {
+                    m.can_pin = true;
+                    m.pinned = pinned;
+                }
+                m.reactions = reactions;
+                m.sig = sig;
+                Rc::new(m)
+            }
+        };
+        let m = match &lines {
+            // What a list adds isn't in the signature: the row is told apart by its content.
+            Some(l) => {
+                let mut dressed = (*m).clone();
+                (l.dress)(item, &mut dressed);
+                dressed.sig = 0;
+                built.insert(key, m);
+                Rc::new(dressed)
+            }
+            None => {
+                built.insert(key, m.clone());
+                m
+            }
+        };
+        rows.push(Row::Msg(m));
     }
     let shows = |p: &crate::core::dms::DmPending| lines.as_ref().is_none_or(|l| (l.pending)(p));
     for pending in i.dms.sending.get(id).into_iter().flatten().filter(|p| shows(p)) {
@@ -402,7 +453,34 @@ pub(crate) fn encrypted_rows(
     }
     // One person's messages close together share a header, as in a channel.
     crate::ui::chat::group(&mut rows);
+    if lines.is_none() {
+        crate::ui::chat::keep_grouped(&rows, &mut built);
+    }
+    drop(kept);
+    BUILT.with_borrow_mut(|b| {
+        // A few lists at a time: the open one, its thread, one left a moment ago.
+        if b.len() >= 4 {
+            b.clear();
+        }
+        b.insert(place_key, built);
+    });
     rows
+}
+
+thread_local! {
+    /// Each encrypted list's messages as last built, by sequence, so a new
+    /// line doesn't redo the conversation.
+    static BUILT: RefCell<HashMap<String, crate::ui::chat::Built>> = RefCell::new(HashMap::new());
+}
+
+/// What an encrypted line shows of itself.
+fn item_digest(item: &Item, h: &mut impl Hasher) {
+    (item.seq, item.at, &item.sender_id, &item.content, item.edited_at, item.deleted, &item.shared_by).hash(h);
+    for f in &item.files {
+        (&f.media_id, &f.name, &f.content_type, f.size, f.file_size, f.width, f.height).hash(h);
+    }
+    item.voice.as_ref().map(|v| (&v.media_id, v.duration_ms, &v.waveform)).hash(h);
+    (item.thread, item.reply_to).hash(h);
 }
 
 impl FuwaApp {
@@ -421,7 +499,7 @@ impl FuwaApp {
             let user = person(id);
             Who { name: user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into()), color: None, user }
         };
-        let items = i.dms.items.get(conversation).map(Vec::as_slice).unwrap_or_default();
+        let items = i.dms.items.get(conversation).map(|v| v.as_slice()).unwrap_or_default();
         let locked = crate::core::backup::state(&self.target().map(|t| t.key().to_owned()).unwrap_or_default()).status
             == crate::core::backup::Status::Locked;
         let earlier = earlier_from(items, locked);
@@ -1357,7 +1435,7 @@ impl FuwaApp {
     ) -> AnyElement {
         let s = seal(p);
         let label = |combo: &str| combo.replace("Mod", if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" });
-        let (send, line) = match self.core.prefs().send_with {
+        let (send, line) = match self.core.prefs_now().send_with {
             SendWith::Enter => (label("Enter"), label("Shift+Enter")),
             SendWith::ModEnter => (label("Mod+Enter"), label("Enter")),
         };
@@ -1679,7 +1757,7 @@ mod tests {
             }))
             .unwrap()
         };
-        i.dms.items.insert("c".into(), vec![item(1), item(2), item(3)]);
+        i.dms.items.insert("c".into(), std::sync::Arc::new(vec![item(1), item(2), item(3)]));
         let who = |_: &str| Who { name: "U".into(), color: None, user: None };
         let start = || Row::Older { loading: false };
         let marks = |pins: Option<&[pb::DmPin]>| {

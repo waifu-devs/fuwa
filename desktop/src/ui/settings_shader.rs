@@ -600,7 +600,7 @@ impl SettingsView {
     /// The shader of a backdrop being edited.
     fn backdrop_shader(&self, target: Target) -> Option<CustomShader> {
         match target {
-            Target::App => self.core.prefs().backdrop.shader,
+            Target::App => self.core.prefs_now().backdrop.shader.clone(),
             Target::Draft => {
                 self.themes.draft.as_ref().and_then(|(t, _)| t.backdrop.as_ref()).and_then(|b| b.shader.clone())
             }

@@ -84,14 +84,31 @@ fn refuse(uri: &http::Uri, trusted: &[String]) -> Option<&'static str> {
     None
 }
 
+type Pool = hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    Empty<Bytes>,
+>;
+
+/// One client for every picture, built (and the system's roots read) the
+/// first time one is fetched, so connections to an instance are kept and
+/// reused instead of opened (and TLS shaken hands) again per picture.
+fn pool() -> &'static Pool {
+    static POOL: std::sync::OnceLock<Pool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let roots = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
+            Ok(roots) => roots,
+            Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
+        };
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            .pool_timer(hyper_util::rt::TokioTimer::new())
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build(roots.https_or_http().enable_http1().build())
+    })
+}
+
 /// A GET, following a few redirects (each checked again), with the body read into memory.
 async fn fetch(mut uri: http::Uri, agent: http::HeaderValue, trusted: Trusted) -> anyhow::Result<Response<AsyncBody>> {
-    let roots = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
-        Ok(roots) => roots,
-        Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
-    };
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build::<_, Empty<Bytes>>(roots.https_or_http().enable_http1().build());
+    let client = pool();
     for _ in 0..=REDIRECTS {
         let trusted = trusted();
         if let Some(why) = refuse(&uri, &trusted) {

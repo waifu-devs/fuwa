@@ -139,10 +139,30 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
     return "effect" in current.source ? RESOLUTION[current.source.effect] : (custom?.scale ?? CUSTOM_SCALES[0]!);
   };
 
+  // Where the canvas sits, read when it's laid out anew (a ResizeObserver, and the window resizing) instead of
+  // every frame: reading layout each frame can force the page to lay out in the middle of a frame.
+  const box = { left: 0, top: 0, width: canvas.clientWidth, height: canvas.clientHeight };
+  const measure = () => {
+    const rect = canvas.getBoundingClientRect();
+    box.left = rect.left;
+    box.top = rect.top;
+    box.width = canvas.clientWidth;
+    box.height = canvas.clientHeight;
+  };
+  measure();
+  const resizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+  resizes?.observe(canvas);
+  window.addEventListener("resize", measure, { passive: true });
+  // A canvas inside something that scrolls (a preview in settings) moves without resizing: its place is read
+  // again on the next frame that needs it.
+  let moved = false;
+  const onScroll = () => void (moved = true);
+  window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+
   const size = () => {
     const scale = Math.min(window.devicePixelRatio || 1, 1.5) * resolution();
-    const width = Math.max(1, Math.round(canvas.clientWidth * scale));
-    const height = Math.max(1, Math.round(canvas.clientHeight * scale));
+    const width = Math.max(1, Math.round(box.width * scale));
+    const height = Math.max(1, Math.round(box.height * scale));
     if (target.size[0] !== width || target.size[1] !== height) target.resize([width, height]);
   };
 
@@ -157,9 +177,12 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
     }
     if (!custom?.fx || !custom.ready) return null;
     if (custom.pointer && pointer.seen) {
-      const rect = canvas.getBoundingClientRect();
-      const toX = (pointer.toX - rect.left) / Math.max(rect.width, 1);
-      const toY = (pointer.toY - rect.top) / Math.max(rect.height, 1);
+      if (moved) {
+        moved = false;
+        measure();
+      }
+      const toX = (pointer.toX - box.left) / Math.max(box.width, 1);
+      const toY = (pointer.toY - box.top) / Math.max(box.height, 1);
       const k = current.still ? 1 : 1 - Math.exp(-dt * 7);
       pointer.x += (toX - pointer.x) * k;
       pointer.y += (toY - pointer.y) * k;
@@ -340,6 +363,9 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
       stopErrors();
       stopLoop();
       window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      resizes?.disconnect();
       target.dispose();
     },
   };

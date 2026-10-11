@@ -1,7 +1,7 @@
 //! Keys the app hears while another program is in front, a game most of
 //! all: push to talk, the game overlay's key (`ui/game_overlay.rs`), muting
 //! and deafening. Nothing hooks the keyboard: a thread reads whether the
-//! keys being watched are down, about a hundred times a second
+//! keys being watched are down, forty times a second
 //! (`GetAsyncKeyState` on Windows, `CGEventSourceKeyState` on macOS,
 //! `QueryKeymap` on X11), so the game still gets every key, and no other key
 //! is read. It sleeps while nothing is watched. Wayland lets no program see
@@ -21,8 +21,11 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
 pub use os::x11;
 
-/// How often the keys are read while something is watched.
-const EVERY: Duration = Duration::from_millis(10);
+/// How often the keys are read while something is watched. 25 ms adds at
+/// most about one 20 ms voice frame to push to talk (12 ms on average),
+/// which nobody hears, and still catches the quickest tap (a key is down
+/// 50 ms or more); a quarter of the wakeups of reading every 10 ms.
+const EVERY: Duration = Duration::from_millis(25);
 
 /// Whether keys can be heard while another program is in front.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

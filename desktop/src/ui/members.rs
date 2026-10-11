@@ -16,9 +16,9 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 
-use crate::core::Core;
 use crate::core::i18n::t;
 use crate::core::store::user_name;
+use crate::core::{Core, Watch};
 use crate::pb;
 use crate::ui::motion;
 use crate::ui::text::{WIDE, tracked};
@@ -98,16 +98,28 @@ pub struct MembersView {
     list: gpui_kit::ListState,
     /// The people in the rows in sight, which a live connection's focus names (`core/live.rs`).
     pub in_view: Vec<String>,
+    /// Wakes the list when the soonest time-out ends; replaced on each refresh.
+    time_out_ends: Option<gpui_kit::Task<()>>,
+    /// The store's version when the rows were last read (`Shared::changed_since`).
+    seen: u64,
 }
 
 impl EventEmitter<MembersEvent> for MembersView {}
 
 impl MembersView {
     pub fn new(core: Arc<Core>, key: String, server: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Built again when its instance's people, presence or anything
+        // server-wide changed; messages and direct messages don't show here.
         let mut changes = core.changes();
         cx.spawn_in(window, async move |this, cx| {
             while changes.changed().await.is_ok() {
-                if this.update(cx, |this, cx| this.refresh(cx)).is_err() {
+                let going = this.update(cx, |this, cx| {
+                    let watched = [Watch::Presence(&this.key)];
+                    if this.core.shared.changed_since(this.seen, &watched) {
+                        this.refresh(cx);
+                    }
+                });
+                if going.is_err() {
                     break;
                 }
             }
@@ -135,6 +147,8 @@ impl MembersView {
             joined: None,
             list,
             in_view: Vec::new(),
+            time_out_ends: None,
+            seen: 0,
         };
         this.refresh(cx);
         this
@@ -142,6 +156,7 @@ impl MembersView {
 
     /// Reads the people again, and draws again only if something shown changed.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.seen = self.core.shared.version();
         let now = crate::core::dms::now_ms();
         let (rows, ends) = self.core.shared.read(|s| match s.instance(&self.key) {
             Some(i) => lines(i, &self.server, now),
@@ -160,15 +175,15 @@ impl MembersView {
             }
         }
         let digest = h.finish();
-        // A time-out ending is news too, though nothing else changes.
-        if let Some(ends) = ends {
+        // A time-out ending is news too, though nothing else changes. One
+        // timer at a time: the one set last time is dropped (and so stopped).
+        self.time_out_ends = ends.map(|ends| {
             let wait = Duration::from_millis((ends - now).max(0) as u64 + 50);
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(wait).await;
                 let _ = this.update(cx, |this, cx| this.refresh(cx));
             })
-            .detach();
-        }
+        });
         if digest != self.digest {
             self.digest = digest;
             // Only people who just joined slide in, not the first ones seen.

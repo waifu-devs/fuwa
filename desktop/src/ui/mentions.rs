@@ -78,6 +78,38 @@ impl Look {
         Self { people, roles, role_colors, me, my_roles, emojis, digest: h.finish() }
     }
 
+    /// The look of a server on instance `key`, made again only after a
+    /// change to more than messages, presence or direct messages (members,
+    /// roles and emoji are all of those): it copies every member's name, and
+    /// lists and messages ask for it often.
+    pub fn shared(i: &InstanceState, key: &str, server_id: &str, shared: &crate::core::Shared) -> std::rc::Rc<Self> {
+        thread_local! {
+            #[allow(clippy::type_complexity)]
+            static LOOKS: std::cell::RefCell<HashMap<(String, String), (u64, std::rc::Rc<Look>)>> =
+                std::cell::RefCell::new(HashMap::new());
+        }
+        let found = LOOKS.with_borrow(|looks| {
+            looks
+                .get(&(key.to_owned(), server_id.to_owned()))
+                .filter(|(seen, _)| !shared.changed_since(*seen, &[]))
+                .map(|(_, look)| look.clone())
+        });
+        if let Some(look) = found {
+            return look;
+        }
+        // Read before it's made, so a change meanwhile makes it again next time.
+        let version = shared.version();
+        let look = std::rc::Rc::new(Self::of(i, server_id));
+        LOOKS.with_borrow_mut(|looks| {
+            // A few servers' worth: the ones open now and lately.
+            if looks.len() >= 16 {
+                looks.clear();
+            }
+            looks.insert((key.to_owned(), server_id.to_owned()), (version, look.clone()));
+        });
+        look
+    }
+
     /// With the emoji a message brought along from other servers, for the
     /// ones not here already.
     pub fn with(&self, brought: &[pb::Emoji]) -> std::borrow::Cow<'_, Self> {

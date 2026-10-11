@@ -134,6 +134,25 @@ pub fn ambient<E: IntoElement + Styled + 'static>(
     }
 }
 
+/// An [`ambient`] loop so slow that a few frames a second look the same as
+/// every frame (a banner drifting a pixel a second): it asks for `fps`, not
+/// the screen's rate. Loops with the same period stay in step, so several on
+/// one page are drawn in the same frames.
+pub fn drift<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    period: Duration,
+    fps: f32,
+    window: &Window,
+    pose: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    if window.is_window_active() {
+        el.with_animation(id, Animation::new(period).repeat_synced().with_max_fps(fps), pose).into_any_element()
+    } else {
+        pose(el, 0.0).into_any_element()
+    }
+}
+
 /// A flourish that plays once when it first shows (a wiggle, a bob, dots
 /// drifting by) and then rests at `pose(1.0)`, so a page that holds still
 /// stops drawing. For ones that keep going while the window's in front, see

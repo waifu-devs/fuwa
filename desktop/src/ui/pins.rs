@@ -374,7 +374,7 @@ impl FuwaApp {
                 }
                 PinPlace::Dm { conversation } => {
                     let list = i.dms.pins.get(conversation);
-                    let items = i.dms.items.get(conversation).map(Vec::as_slice).unwrap_or_default();
+                    let items = i.dms.items.get(conversation).map(|v| v.as_slice()).unwrap_or_default();
                     let users = i.dms.conversations.iter().find(|c| &c.id == conversation).map(|c| c.users.as_slice());
                     let rows = list
                         .map(|l| {

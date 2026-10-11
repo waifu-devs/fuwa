@@ -119,7 +119,7 @@ impl SettingsView {
     fn load_endpoint(&mut self, key: &str, agent_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.agents.endpoint = EndpointForm { for_agent: Some(agent_id.to_owned()), ..Default::default() };
         // Streamer mode hides the address, as the web's private fields do.
-        let private = self.core.prefs().hides_personal();
+        let private = self.core.prefs_now().hides_personal();
         let url = cx.new(|cx| InputState::new(window, cx).placeholder("https://example.com/fuwa").masked(private));
         let (k, id) = (key.to_owned(), agent_id.to_owned());
         cx.subscribe(&url, move |this: &mut SettingsView, _, e: &InputEvent, cx| {
@@ -552,7 +552,7 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Secrets stay dotted out whenever streamer mode is on, with no way to show them.
-        let streaming = self.core.prefs().streamer_mode;
+        let streaming = self.core.prefs_now().streamer_mode;
         let form = &self.agents.endpoint;
         let visible = form.secret_shown && !streaming;
         let (copied, confirm, busy) = (form.copied, form.confirm_secret, form.busy);

@@ -121,11 +121,23 @@ impl GameOverlay {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Who's talking, who's in the call.
+        // Who's talking, who's in the call: what changes on the call's instance, or
+        // everywhere (the call itself, settings), not another instance's messages.
         let mut changes = core.changes();
+        let mut seen = core.shared.version();
         cx.spawn_in(window, async move |this, cx| {
             while changes.changed().await.is_ok() {
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let went = this.update(cx, |this, cx| {
+                    let now = this.core.shared.version();
+                    let instance = this.core.call().map(|c| c.instance);
+                    let watched: Vec<crate::core::Watch> =
+                        instance.as_deref().map(crate::core::Watch::Instance).into_iter().collect();
+                    if this.core.shared.changed_since(seen, &watched) {
+                        cx.notify();
+                    }
+                    seen = now;
+                });
+                if went.is_err() {
                     break;
                 }
             }
@@ -603,7 +615,7 @@ impl FuwaApp {
 
     fn on_hotkey(&mut self, press: Press, window: &mut Window, cx: &mut Context<Self>) {
         if press.action == "pushToTalk" {
-            if self.core.prefs().input_mode == InputMode::Ptt {
+            if self.core.prefs_now().input_mode == InputMode::Ptt {
                 self.core.set_pushing(press.down);
                 cx.notify();
             }
@@ -626,7 +638,7 @@ impl FuwaApp {
     /// The overlay's key: in use, or back out of the way. It opens the
     /// overlay if it wasn't showing.
     pub(crate) fn toggle_overlay(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if !offered() || !self.core.prefs().overlay {
+        if !offered() || !self.core.prefs_now().overlay {
             return;
         }
         let using = self.overlay.open.is_some() && self.overlay.using.get();
@@ -648,7 +660,7 @@ impl FuwaApp {
         target: &Clicked,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.core.prefs().overlay_notifications {
+        if !self.core.prefs_now().overlay_notifications {
             return false;
         }
         let Some((_, overlay)) = &self.overlay.open else { return false };
@@ -659,7 +671,8 @@ impl FuwaApp {
     /// Opens or closes the overlay as things stand, keeps the keys heard
     /// from a game in step, and looks for games while it waits for one.
     pub(crate) fn sync_overlay(&mut self, cx: &mut Context<Self>) {
-        let prefs = self.core.prefs();
+        // Runs on every change: the settings as they are, not a copy.
+        let prefs = self.core.prefs_now();
         let in_call = self.core.call().is_some();
         let on = prefs.overlay && offered();
 

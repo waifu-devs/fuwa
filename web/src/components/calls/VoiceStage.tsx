@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { hangUp, joinCall } from "@/calls/engine";
 import { useCalls, useInVoice } from "@/calls/state";
-import { useAccess, useInstance } from "@/fuwa/hooks";
+import { byId, memberById, useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CopyId } from "@/components/CopyId";
 import { SwapText } from "@/components/motion";
@@ -29,7 +29,6 @@ import { useVoiceIn } from "./VoiceUsers";
  * and pops out into a window of its own.
  */
 export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
-  const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const states = useVoiceIn(instanceKey, serverId, channel.id);
   const joined = useInVoice(instanceKey, channel.id);
@@ -38,8 +37,9 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
   const { t } = useI18n();
   const canConnect = hasIn(access, channel.id, Permission.CONNECT);
   const canSpeak = hasIn(access, channel.id, Permission.SPEAK);
-  const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
-  const me = inst?.me?.id;
+  // Only what it shows, so messages and member changes elsewhere don't redraw the stage.
+  const serverName = useFuwa((s) => byId(s.instances[instanceKey]?.servers, serverId)?.name);
+  const me = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   const myStream = useCalls((s) => s.selfStream);
   // Screens come through only while you're in the channel; yours from this browser.
   const sharing = joined ? states.filter((s) => (s.userId === me ? myStream : s.selfStream)) : [];
@@ -174,7 +174,7 @@ function gridFor(n: number) {
 
 function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey: string; serverId: string; channelId: string; state: VoiceState; index: number }) {
   const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
-  const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
+  const member = useFuwa((s) => memberById(s.instances[instanceKey]?.members[serverId], state.userId));
   const self = useFuwa((s) => s.instances[instanceKey]?.me?.id === state.userId);
   const joined = useInVoice(instanceKey, channelId);
   const mine = useCalls((s) => s.selfVideo);
@@ -217,12 +217,12 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
   const onServer = states.some((v) => v.serverRecord);
   const { t } = useI18n();
   const count = states.filter((v) => v.selfRecord || v.serverRecord).length;
-  const video = useFuwa((s) => !!s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.recordVideo) && onServer;
+  const video = useFuwa((s) => !!byId(s.instances[instanceKey]?.servers, serverId)?.recordVideo) && onServer;
   const names = useFuwa((s) =>
     states
       .filter((v) => v.selfRecord || v.serverRecord)
       .map((v) => {
-        const member = s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === v.userId);
+        const member = memberById(s.instances[instanceKey]?.members[serverId], v.userId);
         return member ? memberName(member) : displayName(s.instances[instanceKey]?.users[v.userId]);
       })
       .join(", "),
@@ -254,7 +254,7 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
 /** Someone's shared screen: shown whole, with whose it is and that it's live. */
 function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: string; serverId: string; state: VoiceState; self: boolean }) {
   const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
-  const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
+  const member = useFuwa((s) => memberById(s.instances[instanceKey]?.members[serverId], state.userId));
   const name = member ? memberName(member) : displayName(user);
   const { t } = useI18n();
   return (

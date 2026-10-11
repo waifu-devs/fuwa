@@ -84,7 +84,7 @@ impl SettingsView {
         let check = soft_button("updates-check", t("desktop.updates.checkNow"), p).when(!busy, |el| {
             el.on_click(move |_, _, _| {
                 let core = core.clone();
-                let install = core.prefs().auto_update;
+                let install = core.prefs_now().auto_update;
                 drop(Arc::clone(&core).spawn(async move { core.check_for_update(install).await }));
             })
         });

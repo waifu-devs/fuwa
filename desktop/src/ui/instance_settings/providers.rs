@@ -174,7 +174,7 @@ impl InstanceSettingsView {
             p,
             cx,
         ));
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         for (n, (id, name, console)) in SIGN_IN_PROVIDERS.into_iter().enumerate() {
             let setting = sign_in_setting(&draft, id);
             let was = sign_in_setting(&saved, id);

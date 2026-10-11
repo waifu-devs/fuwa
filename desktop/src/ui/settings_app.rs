@@ -736,7 +736,7 @@ impl SettingsView {
     /// What a stream would see: the address, your name and an instance's tooltip, live.
     fn stream_preview(&mut self, on: bool, p: &Palette) -> AnyElement {
         let me = self.account_me();
-        let hidden = on && self.core.prefs().streamer_hide_personal;
+        let hidden = on && self.core.prefs_now().streamer_hide_personal;
         let dot = |c: u32, a: f32| div().size(px(10.0)).rounded_full().bg(alpha(rgb(c), a));
         let mut card = div()
             .flex()

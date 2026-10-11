@@ -342,6 +342,55 @@ fn put(items: &mut Vec<pb::Message>, message: pb::Message, keep_reactions: bool)
     }
 }
 
+/// Messages kept of a channel (or thread) that isn't on screen: about its
+/// newest page, as the web keeps. Scrolling up there reads the rest again.
+pub const KEPT_OUT_OF_SIGHT: usize = 50;
+/// Messages kept of the channel on screen once it's scrolled back down to
+/// its newest ([`trim_messages`], which the window calls).
+pub const KEPT_IN_SIGHT: usize = 200;
+
+/// Lets go of a list's oldest messages, keeping the newest `keep`. It says
+/// there's more (`has_more`), so scrolling up reads them again page by page.
+/// A list still reading a page is left alone (the page would land beyond a
+/// gap). Whether any went.
+pub fn trim_messages(list: &mut ChannelMessages, keep: usize) -> bool {
+    if list.loading || list.items.len() <= keep {
+        return false;
+    }
+    let cut = list.items.len() - keep;
+    list.items.drain(..cut);
+    list.items.shrink_to(keep.max(list.items.len()) + keep / 4);
+    list.has_more = true;
+    true
+}
+
+/// Lets go of what's loaded for channels and threads that aren't on screen
+/// (`focus`), keeping each one's newest page so it opens at once, and of
+/// pin lists read for channels that aren't. Whether anything went.
+pub fn trim_out_of_sight(store: &mut Store) -> bool {
+    let focus = store.focus.clone();
+    let mut trimmed = false;
+    for (key, i) in &mut store.instances {
+        let here = focus.as_ref().filter(|f| f.instance == *key);
+        let shown = |at: &str| {
+            here.is_some_and(|f| f.channel == at || f.thread.as_deref().is_some_and(|t| threads::thread_key(t) == at))
+        };
+        for (at, list) in &mut i.messages {
+            if !shown(at) {
+                trimmed |= trim_messages(list, KEPT_OUT_OF_SIGHT);
+            }
+        }
+        // Opening the pins reads them again.
+        let before = i.pins.len();
+        i.pins.retain(|at, list| {
+            matches!(list.status, crate::core::pins::PinStatus::Loading)
+                || here.is_some_and(|f| at.split('|').next() == Some(f.channel.as_str()))
+        });
+        trimmed |= i.pins.len() != before;
+    }
+    trimmed
+}
+
 /// In a shared channel the authors needn't be members here: each message carries who wrote it.
 pub fn add_shared_authors(users: &mut HashMap<String, pb::User>, messages: &[pb::Message]) {
     for user in messages.iter().filter_map(|m| m.shared.as_ref()?.user.as_ref()) {
@@ -696,6 +745,38 @@ mod tests {
 
     fn message(id: &str, channel: &str, author: &str) -> pb::Message {
         pb::Message { id: id.into(), channel_id: channel.into(), author_id: author.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn out_of_sight_keeps_the_newest_page_and_can_read_the_rest_again() {
+        let mut store = Store::default();
+        let mut i = InstanceState::new("k", "https://k");
+        let page = |n: usize, channel: &str| ChannelMessages {
+            items: (0..n).map(|n| message(&format!("{n:04}"), channel, "a")).collect(),
+            has_more: false,
+            loading: false,
+        };
+        i.messages.insert("open".into(), page(300, "open"));
+        i.messages.insert("away".into(), page(300, "away"));
+        i.messages.insert("short".into(), page(10, "short"));
+        i.messages.insert("reading".into(), ChannelMessages { loading: true, ..page(300, "reading") });
+        store.instances.insert("k".into(), i);
+        store.focus = Some(Focus { instance: "k".into(), channel: "open".into(), thread: None });
+        assert!(trim_out_of_sight(&mut store));
+        let i = &store.instances["k"];
+        assert_eq!(i.messages["open"].items.len(), 300);
+        let away = &i.messages["away"];
+        assert_eq!(away.items.len(), KEPT_OUT_OF_SIGHT);
+        assert_eq!(away.items.first().map(|m| m.id.as_str()), Some("0250"));
+        assert!(away.has_more);
+        assert!(!i.messages["short"].has_more);
+        // A page on its way would land past a gap: that list waits.
+        assert_eq!(i.messages["reading"].items.len(), 300);
+        // The open one, scrolled back down.
+        let open = store.instances.get_mut("k").unwrap().messages.get_mut("open").unwrap();
+        assert!(trim_messages(open, KEPT_IN_SIGHT));
+        assert_eq!(open.items.len(), KEPT_IN_SIGHT);
+        assert!(!trim_messages(open, KEPT_IN_SIGHT));
     }
 
     #[test]

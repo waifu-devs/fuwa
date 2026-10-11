@@ -127,7 +127,7 @@ impl SettingsView {
                     Ok(Ok(imported)) => {
                         let theme = imported.theme;
                         let (id, name, theme_dark) = (theme.id.clone(), theme.name.clone(), theme.dark());
-                        let full = this.core.prefs().custom_themes.len() >= themes::MAX_CUSTOM_THEMES;
+                        let full = this.core.prefs_now().custom_themes.len() >= themes::MAX_CUSTOM_THEMES;
                         if full {
                             this.say(true, t("desktop.look.full"), cx);
                             return;
@@ -143,7 +143,7 @@ impl SettingsView {
                             }
                         });
                         let mut note = t_with("desktop.look.themeOn", &[("theme", Arg::Str(&name))]);
-                        if this.core.prefs().follow_system && theme_dark != dark {
+                        if this.core.prefs_now().follow_system && theme_dark != dark {
                             note = if theme_dark {
                                 t_with("desktop.look.nowDark", &[("theme", Arg::Str(&name))])
                             } else {

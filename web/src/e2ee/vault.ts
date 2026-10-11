@@ -211,6 +211,41 @@ export async function loadItems(vault: string, conversation: string): Promise<It
   return result(db.transaction("items").objectStore("items").getAll(inConversation(vault, conversation)) as IDBRequest<Item[]>);
 }
 
+/** A conversation's lines from `from` on (its record and later), oldest first. */
+export async function loadItemsFrom(vault: string, conversation: string, from: number): Promise<Item[]> {
+  const db = await open();
+  const range = IDBKeyRange.bound([vault, conversation, from], [vault, conversation, []]);
+  return result(db.transaction("items").objectStore("items").getAll(range) as IDBRequest<Item[]>);
+}
+
+/**
+ * A conversation's lines before `before` (all of them when it's 0), read
+ * from the newest back until `enough` says so, oldest first. `complete` when
+ * it got back to the first line.
+ */
+export async function loadItemsBack(
+  vault: string,
+  conversation: string,
+  before: number,
+  enough: (taken: Item[]) => boolean,
+): Promise<{ items: Item[]; complete: boolean }> {
+  const db = await open();
+  const upper = before > 0 ? [vault, conversation, before] : [vault, conversation, []];
+  const range = IDBKeyRange.bound([vault, conversation], upper, false, before > 0);
+  const request = db.transaction("items").objectStore("items").openCursor(range, "prev");
+  const taken: Item[] = [];
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return resolve({ items: taken.reverse(), complete: true });
+      taken.push(cursor.value as Item);
+      if (enough(taken)) return resolve({ items: taken.reverse(), complete: false });
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error ?? new Error(i18n().t("system.storage.readFailed")));
+  });
+}
+
 export async function loadSent(vault: string, hash: string): Promise<Uint8Array | undefined> {
   const db = await open();
   const sent = await result(db.transaction("sent").objectStore("sent").get([vault, hash]) as IDBRequest<Sent | undefined>);

@@ -64,18 +64,20 @@ export function AccountItems({ instanceKey, onAdd }: { instanceKey: string; onAd
 export function AddAccountDialog({ instanceKey, open, onOpenChange }: { instanceKey: string; open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const inst = useFuwa((s) => s.instances[instanceKey]);
-  if (!inst?.node) return null;
+  // Only the two things it needs, not the whole instance (which changes with every message).
+  const url = useFuwa((s) => s.instances[instanceKey]?.url);
+  const node = useFuwa((s) => s.instances[instanceKey]?.node);
+  if (!node || url === undefined) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader
           title={t("connect.accounts.addTitle")}
-          description={t("connect.accounts.addAbout", { instance: inst.node.name || instanceKey })}
+          description={t("connect.accounts.addAbout", { instance: node.name || instanceKey })}
         />
         <Account
-          url={inst.url}
-          node={inst.node}
+          url={url}
+          node={node}
           returnTo={`/${instanceKey}`}
           onDone={(key) => {
             onOpenChange(false);

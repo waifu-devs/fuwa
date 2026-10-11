@@ -673,14 +673,22 @@ impl FuwaApp {
                     .justify_center()
                     .bg(alpha(p.primary, 0.15))
                     .text_color(p.primary)
-                    .child(icon("upload").size(px(28.0)).with_animation(
-                        "drop-bob",
-                        Animation::new(Duration::from_millis(1200)).repeat(),
-                        |el, t| {
-                            let y = -6.0 * (t * std::f32::consts::PI).sin();
-                            el.transform(gpui_kit::Transformation::translate(gpui_kit::point(px(0.0), px(y))))
-                        },
-                    )),
+                    // It bobs only while something's dragged: the sheet is there, unseen, all the time.
+                    .child(if cx.has_active_drag() {
+                        icon("upload")
+                            .size(px(28.0))
+                            .with_animation(
+                                "drop-bob",
+                                Animation::new(Duration::from_millis(1200)).repeat(),
+                                |el, t| {
+                                    let y = -6.0 * (t * std::f32::consts::PI).sin();
+                                    el.transform(gpui_kit::Transformation::translate(gpui_kit::point(px(0.0), px(y))))
+                                },
+                            )
+                            .into_any_element()
+                    } else {
+                        icon("upload").size(px(28.0)).into_any_element()
+                    }),
             )
             .child(
                 div()

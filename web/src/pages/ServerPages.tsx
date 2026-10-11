@@ -5,8 +5,12 @@ import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { ChannelView } from "@/components/chat/ChannelView";
-import { SecureChannelView } from "@/components/chat/SecureChannelView";
-import { VoiceStage } from "@/components/calls/VoiceStage";
+import { lazyComponent } from "@/components/lazy";
+
+/** A voice channel's stage, from its own file (fetched once the app is idle). */
+const VoiceStage = lazyComponent(() => import("@/components/calls/VoiceStage").then((m) => m.VoiceStage), undefined, { idle: true });
+/** A secure channel, with the encrypted message list it shares with direct messages, from its own file too. */
+const SecureChannelView = lazyComponent(() => import("@/components/chat/SecureChannelView").then((m) => m.SecureChannelView), undefined, { idle: true });
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SsoGate, useSsoLocked } from "@/components/join/SsoGate";
 import { useLayout } from "@/components/Shell";

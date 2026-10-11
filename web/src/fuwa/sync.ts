@@ -1,10 +1,11 @@
-import { create } from "@bufbuild/protobuf";
+import { create, equals } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { WatchFriendsResponse } from "@/gen/fuwa/v1/friend_pb";
 import type { ChannelHeads, Focus, OpenResponse } from "@/gen/fuwa/v1/live_pb";
-import { ChannelType, EventSchema, type Event, type ProfileItem, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, EventSchema, NodeSchema, type Event, type ProfileItem, type User } from "@/gen/fuwa/v1/types_pb";
+import { afterWhileVisible } from "@/lib/schedule";
 import { dmEngine, startDms, stopDms } from "@/e2ee/engine";
 import { loadApplied } from "@/lib/applied";
 import { adoptInstanceKeys, forgetAccount } from "./accounts";
@@ -81,8 +82,15 @@ import {
  * presence, and says what's on screen so busy servers send the rest as heads.
  */
 
-/** How often the instance's public details (and its announcement) are read again. */
-const NODE_REFRESH = "60 seconds";
+/** How often the instance's public details (and its announcement) are read again, while the page is shown. */
+const NODE_REFRESH_MS = 60_000;
+
+/** Waits `ms`, and then until the page is shown, if it's hidden. */
+const sleepWhileHidden = (ms: number) =>
+  Effect.async<void>((resume) => {
+    const cancel = afterWhileVisible(ms, () => resume(Effect.void));
+    return Effect.sync(cancel);
+  });
 
 /** A timestamp as a key to compare, "" when unset. */
 const stampKey = (at: { seconds: bigint; nanos: number } | undefined) => (at ? `${at.seconds}.${at.nanos}` : "");
@@ -388,8 +396,15 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     patchInstance(key, { connection: servers.length ? "connecting" : "live" });
 
     // The instance's name, sign-up options and announcement change without an event.
+    // Read again every minute while the page is shown, and once it's shown again;
+    // the same answer leaves the store alone, so nothing that shows the node redraws.
     yield* call((signal) => api.node.getNode({}, { signal })).pipe(
-      Effect.tap(({ node }) => Effect.sync(() => node && patchInstance(key, { node }))),
+      Effect.tap(({ node }) =>
+        Effect.sync(() => {
+          const had = store.get().instances[key]?.node;
+          if (node && !(had && equals(NodeSchema, had, node))) patchInstance(key, { node });
+        }),
+      ),
       Effect.tap(({ node }) => {
         const at = stampKey(node?.profileItemsAt);
         if (!node || at === itemsAt) return Effect.void;
@@ -397,8 +412,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
         return listProfileItems(api).pipe(Effect.tap((list) => Effect.sync(() => list && patchInstance(key, { profileItems: list }))));
       }),
       Effect.ignore,
-      Effect.repeat(Schedule.spaced(NODE_REFRESH)),
-      Effect.delay(NODE_REFRESH),
+      (read) => Effect.forever(Effect.zipRight(sleepWhileHidden(NODE_REFRESH_MS), read)),
       Effect.forkScoped,
     );
 

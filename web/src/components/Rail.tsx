@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { CompassIcon, FolderMinusIcon, FolderPlusIcon, GlobeIcon, PlusIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { useRailInstances, type RailInstance } from "@/fuwa/hooks";
@@ -14,6 +14,7 @@ import { SPRING } from "@/lib/motion";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { useContextMenu } from "@/components/ContextMenu";
+import { useSeen } from "@/components/lazy";
 import { serverMenu } from "@/components/menus/server";
 import type { MenuIcon } from "@/lib/context-menu";
 import {
@@ -47,11 +48,16 @@ export function Rail() {
   const params = useParams({ strict: false }) as { instance?: string; server?: string };
   const [creating, setCreating] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const creatingSeen = useSeen(creating);
+  const connectingSeen = useSeen(connecting);
   const navigate = useNavigate();
   const signedIn = instances.filter((i) => i.me);
   // Instances below one whose servers were rearranged or a folder opened glide to their new place.
-  useFoldersVersion();
-  useFuwa((s) => s.order.map((k) => s.instances[k]?.rail?.length ?? -1).join());
+  const folders = useFoldersVersion();
+  const rails = useFuwa((s) => s.order.map((k) => s.instances[k]?.rail?.length ?? -1).join());
+  // What decides where things sit: entries measure themselves for a glide only when this changes, not on every
+  // redraw (moving between pages, a connection coming back).
+  const shape = `${folders}/${rails}/${instances.map((i) => `${i.key}:${i.servers.length}:${Object.keys(i.applied).length}`).join()}`;
 
   return (
     <nav
@@ -66,13 +72,13 @@ export function Rail() {
 
       <AnimatePresence initial={false} mode="popLayout">
         {instances.map((inst) => (
-          <Pop key={inst.key}>
+          <Pop key={inst.key} shape={shape}>
             <InstanceGroup inst={inst} params={params} />
           </Pop>
         ))}
       </AnimatePresence>
 
-      <motion.div layout="position" transition={SPRING} className="flex flex-col items-center gap-2">
+      <motion.div layout="position" layoutDependency={shape} transition={SPRING} className="flex flex-col items-center gap-2">
       <Divider />
       <DropdownMenu>
         <Tooltip>
@@ -108,8 +114,9 @@ export function Rail() {
       </DropdownMenu>
       </motion.div>
 
-      <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={params.instance} />
-      <AddInstanceDialog open={connecting} onOpenChange={setConnecting} />
+      {/* Mounted the first time they open (they read every instance), then kept for their closing animation. */}
+      {creatingSeen && <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={params.instance} />}
+      {connectingSeen && <AddInstanceDialog open={connecting} onOpenChange={setConnecting} />}
     </nav>
   );
 }
@@ -126,6 +133,7 @@ function Pop({
   still = false,
   delay = 0,
   glide = true,
+  shape,
 }: {
   children: ReactNode;
   className?: string;
@@ -135,11 +143,14 @@ function Pop({
   delay?: number;
   /** Moves to new places by itself; off where `useRailGlide` moves things. */
   glide?: boolean;
+  /** With `glide`: what decides where it sits, so it's measured only when that changes. */
+  shape?: string;
 }) {
   return (
     <motion.div
       ref={ref}
       layout={glide ? "position" : false}
+      layoutDependency={shape}
       initial={still ? false : { opacity: 0, scale: 0.3 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.3 }}
@@ -314,6 +325,10 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
     const after = layout[at + 1];
     arrange(moveRail(layout, { kind: "server", id, folder: "", before: after ? keyOf(after) : null }), "rail.arrange");
   };
+  // One stable handler for every server's folder item, so the memoized buttons don't redraw when the layout does.
+  const folderActions = useRef({ newFolder, leaveFolder });
+  folderActions.current = { newFolder, leaveFolder };
+  const onFolder = useCallback((id: string, inFolder: boolean) => (inFolder ? folderActions.current.leaveFolder(id) : folderActions.current.newFolder(id)), []);
 
   const server = (id: string, folder: string, n = 0) => {
     const s = byId.get(id);
@@ -328,18 +343,7 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
           data-rail-lifted={landingId() === id ? "" : undefined}
           className="w-full"
         >
-          <ServerButton
-            inst={inst}
-            server={s}
-            active={active === id}
-            folder={
-              inst.me
-                ? folder
-                  ? { label: t("workspace.rail.takeOut"), icon: FolderMinusIcon, onSelect: () => leaveFolder(id) }
-                  : { label: t("workspace.rail.newFolder"), icon: FolderPlusIcon, onSelect: () => newFolder(id) }
-                : undefined
-            }
-          />
+          <ServerButton instanceKey={inst.key} server={s} active={active === id} inFolder={inst.me ? !!folder : undefined} onFolder={onFolder} />
         </div>
       </Pop>
     );
@@ -433,10 +437,31 @@ function Folder({
 /** What a server's menu offers for your folders: put it in one, or take it out. */
 type FolderItem = { label: string; icon: MenuIcon; onSelect: () => void };
 
-function ServerButton({ inst, server, active, folder }: { inst: RailInstance; server: Server; active: boolean; folder?: FolderItem }) {
-  const unread = useUnread(inst.key, [server.id]);
+/** A server in the rail: memoized, so it redraws for its own unread count, not every change to the rail. */
+const ServerButton = memo(function ServerButton({
+  instanceKey,
+  server,
+  active,
+  inFolder,
+  onFolder,
+}: {
+  instanceKey: string;
+  server: Server;
+  active: boolean;
+  /** Whether it sits in a folder; undefined when you can't arrange (signed out). */
+  inFolder: boolean | undefined;
+  onFolder: (id: string, inFolder: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const unread = useUnread(instanceKey, [server.id]);
   const menu = useContextMenu("server", () => {
-    const sections = serverMenu({ instanceKey: inst.key, server });
+    const folder: FolderItem | undefined =
+      inFolder === undefined
+        ? undefined
+        : inFolder
+          ? { label: t("workspace.rail.takeOut"), icon: FolderMinusIcon, onSelect: () => onFolder(server.id, true) }
+          : { label: t("workspace.rail.newFolder"), icon: FolderPlusIcon, onSelect: () => onFolder(server.id, false) };
+    const sections = serverMenu({ instanceKey, server });
     if (!folder) return sections;
     // Your folders sit with the server's own settings, before its ID and Leave.
     const at = sections.findIndex((s) => s.id === "developer" || s.id === "danger");
@@ -444,7 +469,7 @@ function ServerButton({ inst, server, active, folder }: { inst: RailInstance; se
     return at === -1 ? [...sections, entry] : [...sections.slice(0, at), entry, ...sections.slice(at)];
   });
   return (
-    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }} menu={menu}>
+    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: instanceKey, server: server.id }} menu={menu}>
       <span className="relative">
         <ServerIcon server={server} active={active} />
         <AnimatePresence>
@@ -463,7 +488,7 @@ function ServerButton({ inst, server, active, folder }: { inst: RailInstance; se
       </span>
     </RailItem>
   );
-}
+});
 
 /** A rail entry with Discord's left pill: a dot when unread, taller on hover, full when open. */
 function RailItem({

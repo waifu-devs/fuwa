@@ -107,6 +107,16 @@ export const deleteDm = (key: string, id: string, seq: number) => ready(key).rem
 
 export const markDmRead = (key: string, id: string) => dmEngine(key)?.markRead(id).catch(() => {});
 
+/**
+ * An opened conversation's older lines, one step further back: call when the
+ * list is scrolled to its top while `dms.more[id]` says there are some. They
+ * come from this browser's vault, never the instance.
+ */
+export const loadOlderLines = (key: string, id: string) => dmEngine(key)?.loadOlderLines(id).catch(() => {});
+
+/** Brings an opened conversation's lines back to `seq` (jumping to a pin or a replied-to message). */
+export const loadLinesThrough = (key: string, id: string, seq: number) => dmEngine(key)?.loadLinesThrough(id, seq).catch(() => {});
+
 /** Marks the conversation's safety number as checked with the other person, or not ("" ). */
 export const verifyDm = (key: string, id: string, safety: string) => ready(key).verify(id, safety);
 

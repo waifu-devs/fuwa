@@ -734,7 +734,7 @@ impl FuwaApp {
                     .bg(alpha(p.background, 0.8))
                     .px(px(10.0))
                     .py(px(4.0))
-                    .child(live_badge(&state.user_id, window))
+                    .child(live_badge(&state.user_id, window, cx))
                     .child(
                         div()
                             .min_w_0()
@@ -817,7 +817,7 @@ impl FuwaApp {
                 .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(red())
-                .child(ping_dot("rec-pill-ping", 8.0, red(), alpha(red(), 0.6), window))
+                .child(ping_dot("rec-pill-ping", 8.0, red(), alpha(red(), 0.6), window, cx))
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
         };
         match (text, leaving) {

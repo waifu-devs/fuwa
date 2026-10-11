@@ -105,6 +105,8 @@ pub struct Threads {
     pub searching: Option<Task<()>>,
     /// Asks the server about something, so it isn't asked twice at once.
     pub busy: bool,
+    /// The thread the rows were last built for, and the store's version then.
+    pub seen: Option<(String, u64)>,
 }
 
 impl Threads {
@@ -139,6 +141,7 @@ impl Threads {
                 run: 0,
                 searching: None,
                 busy: false,
+                seen: None,
             },
             subs,
         )

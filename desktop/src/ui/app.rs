@@ -11,8 +11,8 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _,
-    Render, Styled as _, Subscription, Window, actions, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding,
+    ParentElement as _, Render, Styled as _, Subscription, Window, actions, div, px,
 };
 
 use crate::core::config::Prefs;
@@ -21,6 +21,7 @@ use crate::core::store::Focus;
 use crate::core::{Core, Notice};
 use crate::ui::connect::{ConnectEvent, ConnectView};
 use crate::ui::instance_settings::{InstanceSettingsEvent, InstanceSettingsView};
+use crate::ui::panel::Part;
 use crate::ui::server_settings::{ServerSettingsEvent, ServerSettingsView};
 use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::theme::{self, FONT};
@@ -246,6 +247,8 @@ pub struct ListSync {
     pub digest: u64,
     /// Each row's digest, so only the rows that changed are measured again.
     pub rows: Vec<u64>,
+    /// The store's version when the rows were last built (`Shared::changed_since`).
+    pub seen: u64,
 }
 
 pub struct FuwaApp {
@@ -263,7 +266,7 @@ pub struct FuwaApp {
     /// The open channel's messages as built, kept between changes.
     pub built: crate::ui::chat::Built,
     /// Messages that arrived while their list was open, and when: they rise in.
-    pub fresh: HashMap<String, Instant>,
+    pub fresh: std::rc::Rc<HashMap<String, Instant>>,
     pub requested: HashSet<String>,
     pub prepared: HashSet<String>,
     /// Starting a secure channel's encryption over, from its dialog.
@@ -282,6 +285,10 @@ pub struct FuwaApp {
     pub members_open: bool,
     /// The open server's member list, a view of its own.
     pub members_view: Option<Entity<crate::ui::members::MembersView>>,
+    /// The window's parts as views of their own (`panel.rs`), made with the first frame.
+    panels: Option<crate::ui::panel::Panels>,
+    /// What had focus when the window went to the background, to take it back on return.
+    unfocused: Option<gpui_kit::FocusHandle>,
     pub connect: Option<Entity<ConnectView>>,
     pub settings: Option<Entity<SettingsView>>,
     pub server_settings: Option<Entity<ServerSettingsView>>,
@@ -417,7 +424,7 @@ impl FuwaApp {
                 match event {
                     // Enter sends unless the Chat setting says Ctrl+Enter (taken in `intercept`).
                     InputEvent::PressEnter { shift: false, secondary: false }
-                        if this.core.prefs().send_with == crate::core::config::SendWith::Enter =>
+                        if this.core.prefs_now().send_with == crate::core::config::SendWith::Enter =>
                     {
                         this.send_now(window, cx)
                     }
@@ -463,7 +470,21 @@ impl FuwaApp {
                 cx.notify();
             }),
             // Ambient loops run only while the window is in front.
-            cx.observe_window_activation(window, |_, _, cx| cx.notify()),
+            cx.observe_window_activation(window, |this, window, cx| {
+                // A text field's caret blinks on in the background (every blink draws its
+                // part again), so it lets go of focus there and takes it back on return.
+                if window.is_window_active() {
+                    if let Some(handle) = this.unfocused.take()
+                        && window.focused(cx).is_none_or(|now| now == this.focus)
+                    {
+                        handle.focus(window, cx);
+                    }
+                } else if let Some(handle) = window.focused(cx).filter(|f| *f != this.focus) {
+                    this.unfocused = Some(handle);
+                    this.focus.focus(window, cx);
+                }
+                cx.notify()
+            }),
         ];
         // Keys the text fields would otherwise take: the @ list's arrows, Enter
         // and Escape, Up to edit your last message, Escape to stop editing.
@@ -493,14 +514,43 @@ impl FuwaApp {
         })
         .detach();
 
-        // while a call goes on or the camera is being checked.
-        // while a call goes on.
+        // The clock: "today" and "yesterday" move on at midnight, and times like
+        // "5 minutes ago" every minute. Nothing else redraws the list for them.
+        cx.spawn_in(window, async move |this, cx| {
+            let mut today = chrono::Local::now().date_naive();
+            loop {
+                let into = chrono::Local::now().timestamp_millis().rem_euclid(60_000) as u64;
+                cx.background_executor().timer(Duration::from_millis(60_000 - into + 50)).await;
+                let now = chrono::Local::now().date_naive();
+                let went = this.update(cx, |this, cx| {
+                    if now != today {
+                        // Every day divider and stamp, worked out again.
+                        this.sync_list(cx);
+                        this.sync_thread(cx);
+                        cx.notify();
+                    } else if let Some(panels) = &this.panels {
+                        panels.notify(Part::Main, cx);
+                    }
+                });
+                if went.is_err() {
+                    break;
+                }
+                today = now;
+            }
+        })
+        .detach();
+
+        // A camera's new picture, while a call goes on or the camera is being checked.
         let mut pictures = core.videos().changes();
         cx.spawn_in(window, async move |this, cx| {
             while pictures.changed().await.is_ok() {
                 let going = this.update(cx, |this, cx| {
-                    if this.core.call().is_some() || this.core.camera_testing().0 {
-                        cx.notify();
+                    // Cameras are drawn in the main column (and over the window, which is
+                    // drawn every frame): only that part is built again for a new picture.
+                    if (this.core.call().is_some() || this.core.camera_testing().0)
+                        && let Some(panels) = &this.panels
+                    {
+                        panels.notify(Part::Main, cx);
                     }
                 });
                 if going.is_err() {
@@ -573,7 +623,7 @@ impl FuwaApp {
             list: ListSync::default(),
             rows: std::rc::Rc::new(Vec::new()),
             built: Default::default(),
-            fresh: HashMap::new(),
+            fresh: Default::default(),
             requested: HashSet::new(),
             prepared: HashSet::new(),
             secure_reset: Default::default(),
@@ -585,6 +635,8 @@ impl FuwaApp {
             collapsed: Default::default(),
             members_open: true,
             members_view: None,
+            panels: None,
+            unfocused: None,
             connect: None,
             settings: None,
             server_settings: None,
@@ -703,8 +755,13 @@ impl FuwaApp {
             self.after_move(window, cx);
         }
         self.ensure_loaded(cx);
-        self.sync_list(cx);
-        self.sync_thread(cx);
+        // The message list and the thread are built again only when what they show moved.
+        if self.list_stale() {
+            self.sync_list(cx);
+        }
+        if self.thread_stale() {
+            self.sync_thread(cx);
+        }
         // Hanging up closes the popped-out cameras and lets go of every picture.
         // A moderator turning your camera off reaches you at once, not at the next keep.
         self.core.watch_video_moderation();
@@ -2012,7 +2069,9 @@ impl FuwaApp {
         let empty = self.core.shared.read(|s| s.order.is_empty());
         // Server settings cover the whole window with a solid page.
         crate::ui::effects::hold(self.server_settings.is_some() || self.instance_settings.is_some());
-        let behind = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
+        let panels = self.panels.get_or_insert_with(|| crate::ui::panel::Panels::new(&cx.entity(), cx));
+        let behind_on = theme::backdrop(cx).any();
+        let behind = behind_on.then(|| panels.element(Part::Backdrop));
 
         let base = div()
             .id("fuwa")
@@ -2042,84 +2101,125 @@ impl FuwaApp {
             .when_some(behind, |el, behind| el.child(behind));
 
         if empty && let Some(connect) = &self.connect {
+            // Only the welcome page: no part holds floats.
+            crate::ui::floats::begin_frame([]);
             return base.child(connect.clone()).into_any_element();
         }
-
-        // Under a full-window page the banner can't be seen, so it doesn't move there either.
-        let covered = self.server_settings.is_some() || self.instance_settings.is_some();
-        let announcement = if covered { None } else { self.render_announcement(window, cx) };
-        let update_note = if covered { None } else { self.render_update_note(window, cx) };
-        // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
-        let streamer = self.render_streamer_banner(window, cx);
-        let sign_in = if covered { None } else { self.render_sign_in_notice(window, cx) };
-        let (dialog_leaving, menu_leaving, context_leaving) = self.render_leaving(window, cx);
+        // Each part is a view of its own (`panel.rs`): the root itself draws next to nothing.
+        let panels = self.panels.as_ref().expect("made above");
+        crate::ui::floats::begin_frame(panels.cached_ids(behind_on));
+        crate::ui::images::Images::frame(&panels.images.clone(), crate::ui::floats::frame(), window, cx);
         base.child(
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .when_some(streamer, |el, banner| el.child(banner))
-                .when_some(announcement, |el, banner| el.child(banner))
-                .when_some(sign_in, |el, banner| el.child(banner))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .child(self.render_rail(window, cx))
-                        .child(self.render_sidebar(window, cx))
-                        .child(self.render_main(window, cx)),
-                ),
+            div().size_full().flex().flex_col().child(panels.element(Part::Top)).child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .child(panels.element(Part::Rail))
+                    .child(panels.element(Part::Sidebar))
+                    .child(panels.element(Part::Main)),
+            ),
         )
-        .when_some(self.render_call_pop_layer(cx), |el, layer| el.child(layer))
-        .when_some(update_note, |el, note| el.child(note))
-        // The connect view draws its own frame: the welcome page, or a dialog over a dimmed app.
-        .when_some(self.connect.clone(), |el, connect| el.child(connect))
-        .when_some(self.render_folder_dialog(window, cx), |el, dialog| el.child(dialog))
-        .when_some(
-            match self.menu.clone() {
-                Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
-                Some(Menu::Status { key }) => Some(self.status_menu(&key, window, cx)),
-                _ => None,
-            },
-            |el, menu| el.child(menu),
-        )
-        .when_some(menu_leaving, |el, menu| el.child(menu))
-        .when_some(self.settings.clone(), |el, settings| el.child(settings))
-        .when_some(self.server_settings.clone(), |el, settings| {
-            // Drawn again only when it changes, not on every frame of the window.
-            el.child(
-                gpui_kit::AnyView::from(settings)
-                    .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
-            )
-        })
-        .when_some(self.instance_settings.clone(), |el, settings| {
-            el.child(
-                gpui_kit::AnyView::from(settings)
-                    .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
-            )
-        })
-        .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
-        .when_some(dialog_leaving, |el, d| el.child(d))
-        .when_some(crate::ui::cropper::layer(&self.home.create.cropper), |el, c| el.child(c))
-        .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
-        .when_some(self.react_panel(window, cx), |el, panel| el.child(panel))
-        .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
-        .when_some(context_leaving, |el, menu| el.child(menu))
-        .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))
-        .when_some(self.render_switcher(window, cx), |el, switcher| el.child(switcher))
-        .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
-        .child(self.render_toasts(window, cx))
-        // After everything: which cameras this window showed, and how big.
-        .child(crate::ui::video::commit(self.core.clone()))
-        .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
-            // A new theme washes in: the old page color fades away over it.
-            el.child(div().absolute().inset_0().bg(color).with_animation(
-                gpui_kit::SharedString::from(format!("theme-fade|{at:?}")),
-                gpui_kit::Animation::new(THEME_FADE).with_easing(gpui_kit::ease_out_quint()),
-                |el, t| el.opacity(0.85 * (1.0 - t)),
-            ))
-        })
+        .child(panels.element(Part::Floats))
+        .child(panels.element(Part::Over))
         .into_any_element()
+    }
+
+    /// One part of the window (`panel.rs`), drawn inside its own view.
+    pub(crate) fn render_part(&mut self, part: Part, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        match part {
+            // A cached view is laid out as a root, so each fills the box the window gave it.
+            Part::Backdrop => {
+                let p = pal(cx);
+                let layers = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
+                div().size_full().relative().children(layers).into_any_element()
+            }
+            Part::Top => {
+                // Under a full-window page the banner can't be seen, so it doesn't move there either.
+                let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+                let announcement = if covered { None } else { self.render_announcement(window, cx) };
+                // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
+                let streamer = self.render_streamer_banner(window, cx);
+                let sign_in = if covered { None } else { self.render_sign_in_notice(window, cx) };
+                div()
+                    .flex()
+                    .flex_col()
+                    .when_some(streamer, |el, banner| el.child(banner))
+                    .when_some(announcement, |el, banner| el.child(banner))
+                    .when_some(sign_in, |el, banner| el.child(banner))
+                    .into_any_element()
+            }
+            Part::Rail => self.render_rail(window, cx).into_any_element(),
+            Part::Sidebar => self.render_sidebar(window, cx).into_any_element(),
+            Part::Main => div().size_full().flex().child(self.render_main(window, cx)).into_any_element(),
+            Part::Floats => {
+                // Under a full-window page they can't be seen, so they don't move there either.
+                let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+                if covered { div().into_any_element() } else { crate::ui::floats::layer(window, cx) }
+            }
+            Part::Over => self.render_over(window, cx),
+        }
+    }
+
+    /// Everything over the window, in the order it stacks.
+    fn render_over(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+        let update_note = if covered { None } else { self.render_update_note(window, cx) };
+        let (dialog_leaving, menu_leaving, context_leaving) = self.render_leaving(window, cx);
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .when_some(self.render_call_pop_layer(cx), |el, layer| el.child(layer))
+            .when_some(update_note, |el, note| el.child(note))
+            // The connect view draws its own frame: the welcome page, or a dialog over a dimmed app.
+            .when_some(self.connect.clone(), |el, connect| el.child(connect))
+            .when_some(self.render_folder_dialog(window, cx), |el, dialog| el.child(dialog))
+            .when_some(
+                match self.menu.clone() {
+                    Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
+                    Some(Menu::Status { key }) => Some(self.status_menu(&key, window, cx)),
+                    _ => None,
+                },
+                |el, menu| el.child(menu),
+            )
+            .when_some(menu_leaving, |el, menu| el.child(menu))
+            .when_some(self.settings.clone(), |el, settings| el.child(settings))
+            .when_some(self.server_settings.clone(), |el, settings| {
+                // Drawn again only when it changes, not on every frame of the window.
+                el.child(
+                    gpui_kit::AnyView::from(settings)
+                        .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+                )
+            })
+            .when_some(self.instance_settings.clone(), |el, settings| {
+                el.child(
+                    gpui_kit::AnyView::from(settings)
+                        .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+                )
+            })
+            .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+            .when_some(dialog_leaving, |el, d| el.child(d))
+            .when_some(crate::ui::cropper::layer(&self.home.create.cropper), |el, c| el.child(c))
+            .when_some(self.render_recordings(window, cx), |el, d| el.child(d))
+            .when_some(self.react_panel(window, cx), |el, panel| el.child(panel))
+            .when_some(self.render_context_menu(window, cx), |el, menu| el.child(menu))
+            .when_some(context_leaving, |el, menu| el.child(menu))
+            .when_some(self.render_sheet(window, cx), |el, sheet| el.child(sheet))
+            .when_some(self.render_switcher(window, cx), |el, switcher| el.child(switcher))
+            .when_some(self.render_incoming_calls(window, cx), |el, calls| el.child(calls))
+            .child(self.render_toasts(window, cx))
+            // After everything: which cameras this window showed, and how big.
+            .child(crate::ui::video::commit(self.core.clone()))
+            .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
+                // A new theme washes in: the old page color fades away over it.
+                el.child(div().absolute().inset_0().bg(color).with_animation(
+                    gpui_kit::SharedString::from(format!("theme-fade|{at:?}")),
+                    gpui_kit::Animation::new(THEME_FADE).with_easing(gpui_kit::ease_out_quint()),
+                    |el, t| el.opacity(0.85 * (1.0 - t)),
+                ))
+            })
+            .into_any_element()
     }
 }

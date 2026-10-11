@@ -941,7 +941,9 @@ impl FuwaApp {
             });
         }
         if !(panel.loading && !panel.more) && panel.error.is_none() {
-            let look = self.core.shared.read(|s| s.instance(&panel.key).map(|i| Look::of(i, &panel.server)));
+            let shared = &self.core.shared;
+            let look =
+                shared.read(|s| s.instance(&panel.key).map(|i| Look::shared(i, &panel.key, &panel.server, shared)));
             let look = look.unwrap_or_default();
             let mut last_channel = String::new();
             for (n, result) in panel.results.iter().enumerate() {
@@ -1199,10 +1201,39 @@ struct Look {
     users: std::collections::HashMap<String, pb::User>,
     channels: std::collections::HashMap<String, String>,
     /// How chat draws mentions, roles and emoji here.
-    mentions: crate::ui::mentions::Look,
+    mentions: std::rc::Rc<crate::ui::mentions::Look>,
 }
 
 impl Look {
+    /// A server's look, kept until something but messages, presence or
+    /// direct messages changes (it copies every user and member's name, and
+    /// the results panel asks every frame).
+    fn shared(
+        i: &crate::core::store::InstanceState,
+        key: &str,
+        server: &str,
+        shared: &crate::core::Shared,
+    ) -> std::rc::Rc<Self> {
+        type Kept = Option<(String, String, u64, std::rc::Rc<Look>)>;
+        thread_local! {
+            static KEPT: std::cell::RefCell<Kept> = const { std::cell::RefCell::new(None) };
+        }
+        let found = KEPT.with_borrow(|kept| {
+            kept.as_ref()
+                .filter(|(k, s, seen, _)| k == key && s == server && !shared.changed_since(*seen, &[]))
+                .map(|(.., look)| look.clone())
+        });
+        if let Some(look) = found {
+            return look;
+        }
+        let version = shared.version();
+        let mut look = Self::of(i, server);
+        look.mentions = crate::ui::mentions::Look::shared(i, key, server, shared);
+        let look = std::rc::Rc::new(look);
+        KEPT.set(Some((key.to_owned(), server.to_owned(), version, look.clone())));
+        look
+    }
+
     fn of(i: &crate::core::store::InstanceState, server: &str) -> Self {
         let mut look = Self { users: i.users.clone(), ..Default::default() };
         for m in i.members.get(server).into_iter().flatten() {
@@ -1214,7 +1245,6 @@ impl Look {
         for c in i.channels.get(server).into_iter().flatten() {
             look.channels.insert(c.id.clone(), c.name.clone());
         }
-        look.mentions = crate::ui::mentions::Look::of(i, server);
         look
     }
 }

@@ -254,6 +254,21 @@ struct ImgState {
     frame_index: usize,
     last_frame_time: Option<Instant>,
     started_loading: Option<(Instant, Task<()>)>,
+    /// fuwa: when the next frame of an animated image is due, and the timer
+    /// that draws the view again then (instead of an animation frame every
+    /// vsync, which rebuilds the whole view 60 times a second).
+    next_frame: Option<(Instant, Task<()>)>,
+}
+
+/// fuwa: how long a frame of an animated image shows. Like browsers, a
+/// delay of 10 ms or less means 100 ms.
+fn frame_delay(data: &RenderImage, frame_index: usize) -> Duration {
+    let delay = Duration::from(data.delay(frame_index));
+    if delay <= Duration::from_millis(10) {
+        Duration::from_millis(100)
+    } else {
+        delay
+    }
 }
 
 /// The image layout state between frames
@@ -292,6 +307,7 @@ impl Element for Img {
                     frame_index: 0,
                     last_frame_time: None,
                     started_loading: None,
+                    next_frame: None,
                 })
             });
 
@@ -324,7 +340,7 @@ impl Element for Img {
                                         if let Some(last_frame_time) = state.last_frame_time {
                                             let elapsed = current_time - last_frame_time;
                                             let frame_duration =
-                                                Duration::from(data.delay(state.frame_index));
+                                                frame_delay(&data, state.frame_index);
 
                                             if elapsed >= frame_duration {
                                                 state.frame_index =
@@ -383,8 +399,22 @@ impl Element for Img {
                                 && data.frame_count() > 1
                                 && window.is_window_active()
                                 && !cx.reduce_motion()
+                                && let Some(state) = &mut state
                             {
-                                window.request_animation_frame();
+                                // fuwa: drawn again when the next frame is due, not every vsync.
+                                let shown_at = state.last_frame_time.unwrap_or_else(Instant::now);
+                                let due = shown_at + frame_delay(&data, state.frame_index);
+                                let now = Instant::now();
+                                if state.next_frame.as_ref().is_none_or(|(at, _)| *at != due || *at <= now) {
+                                    let current_view = window.current_view();
+                                    // A moment past it, so it's never a hair early.
+                                    let wait = due.saturating_duration_since(now) + Duration::from_millis(1);
+                                    let task = window.spawn(cx, async move |cx| {
+                                        cx.background_executor().timer(wait).await;
+                                        cx.update(move |_, cx| cx.notify(current_view)).ok();
+                                    });
+                                    state.next_frame = Some((due, task));
+                                }
                             }
                         }
                         Some(_err) => {

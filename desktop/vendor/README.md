@@ -94,6 +94,18 @@ was a debug assertion before.
 popped-out call can hide the pointer with its controls, as the web's
 `cursor-none` does.
 
+**Cheaper redraws.** An animated image (a GIF, a moving emoji) is drawn
+again when its next frame is due, by a timer that notifies its view, instead
+of asking for an animation frame every vsync, which built its whole view 60
+times a second; a delay of 10ms or less means 100ms, as in browsers. An
+`image_cache` element keeps its cache on hand while its children prepaint
+too, since lists and cached views lay their children out then (before, their
+pictures fell through to the global asset cache, kept forever).
+`Window::element_opacity` is public (for the paint phase), so a decoration
+drawn somewhere else can take the opacity around its placeholder, and
+`RenderImage::into_frames` hands back the frames' buffers so a camera's
+pictures can be reused rather than allocated anew.
+
 ## Checking the renderers
 
 Only Linux can be built and run here. The wgpu renderer has headless tests

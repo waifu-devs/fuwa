@@ -178,7 +178,7 @@ impl ServerSettingsView {
     // ───────────────────────── Invites ─────────────────────────
 
     pub(super) fn invites_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let streamer = self.core.prefs().streamer_mode;
+        let streamer = self.core.prefs_now().streamer_mode;
         let base = self
             .core
             .shared
@@ -641,11 +641,20 @@ impl ServerSettingsView {
         let filters = div().flex().flex_wrap().items_center().gap(px(8.0)).child(search).child(role_menu).child(shows);
 
         let count = t_with("serversettings.shared.members", &[("count", Arg::Num(shown.len() as i64))]);
-        let mut list = div().flex().flex_col().gap(px(6.0));
         let n_shown = shown.len();
-        for (n, s) in shown.into_iter().enumerate() {
-            list = list.child(self.member_row(s, n, &roles, &mine, now, p, window, cx));
-        }
+        // Only the rows near what's in sight are built (`windowed.rs`): a big server has thousands.
+        let keys: Vec<SharedString> = shown
+            .iter()
+            .map(|s| SharedString::from(s.member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default()))
+            .collect();
+        let plan = crate::ui::windowed::plan(format!("members|{}", self.server), &self.scroll, &keys, 6.0, 64.0);
+        let mut shown: Vec<Option<Shown>> = shown.into_iter().map(Some).collect();
+        let rows: Vec<AnyElement> = plan
+            .rows()
+            .into_iter()
+            .filter_map(|n| shown[n].take().map(|s| self.member_row(s, n, &roles, &mine, now, p, window, cx)))
+            .collect();
+        let list = plan.finish(rows, window);
         div()
             .flex()
             .flex_col()
@@ -694,8 +703,8 @@ impl ServerSettingsView {
         let joined =
             if day == t("common.time.today") || day == t("common.time.yesterday") { day.to_lowercase() } else { day };
         let until = timed_out_until(&s.member, now);
-        let developer = self.core.prefs().developer_mode;
-        let role_colors = self.core.prefs().role_colors;
+        let developer = self.core.prefs_now().developer_mode;
+        let role_colors = self.core.prefs_now().role_colors;
         let colored = s.color.is_some() && role_colors == crate::core::config::RoleColors::Names;
         let name_color: Hsla = match s.color {
             Some(c) if colored => gpui_kit::rgb(c).into(),

@@ -13,9 +13,7 @@ import { Shell } from "@/components/Shell";
 import { rememberedPath } from "@/lib/last-path";
 import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { instanceKey } from "@/fuwa/saved";
-import { DmView } from "@/components/dm/DmView";
 import { InstanceHome } from "@/pages/InstanceHome";
-import { FriendsPage } from "@/pages/FriendsPage";
 import { InvitePage } from "@/pages/InvitePage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
 import { SsoDone } from "@/pages/SsoDone";
@@ -23,13 +21,16 @@ import { ProviderDone } from "@/pages/ProviderDone";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 import { lazyComponent } from "@/components/lazy";
+import { SettingsScreens } from "@/components/settings/screens";
 import { useUi } from "@/lib/ui";
 import { reportThrown, setRouteSource } from "@/lib/reports";
 
 const LegalPage = lazyComponent(() => import("@/pages/Legal").then((m) => m.Legal));
-const SettingsScreens = lazyComponent(() => import("@/components/settings/UserSettings").then((m) => m.UserSettings));
+// Pages reached from the sidebar come from their own files, fetched once the app is idle so opening one is still instant.
+const DmView = lazyComponent(() => import("@/components/dm/DmView").then((m) => m.DmView), undefined, { idle: true });
+const FriendsPage = lazyComponent(() => import("@/pages/FriendsPage").then((m) => m.FriendsPage), undefined, { idle: true });
 
-/** Settings load from their own file the first time they open (or once the app is idle). */
+/** Settings load from their own file the first time they open (or as a settings button is about to be pressed). */
 function UserSettings() {
   const open = useUi((u) => u.settings !== null);
   const [opened, setOpened] = useState(open);

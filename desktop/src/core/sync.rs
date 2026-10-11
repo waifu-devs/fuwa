@@ -25,7 +25,7 @@ use crate::core::notifications;
 use crate::core::reports;
 use crate::core::store::{self, Connection, InstanceState, Outcome};
 use crate::core::threads;
-use crate::core::{Core, Notice};
+use crate::core::{Area, Core, Notice};
 use crate::pb;
 use crate::rpc;
 
@@ -654,11 +654,11 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             list.push(event.clone());
         }
     }
-    let prefs = core.prefs();
-    let (outcome, name, notice) = core.shared.update(|store| {
+    let prefs = core.prefs_now();
+    let (outcome, name, notice) = core.shared.update_if(&[event_area(key, &event)], |store| {
         let focus = store.focus_channel(key).map(str::to_owned);
         let focus_thread = store.focus_thread(key).map(str::to_owned);
-        let Some(i) = store.instances.get_mut(key) else { return (Outcome::Nothing, None, None) };
+        let Some(i) = store.instances.get_mut(key) else { return ((Outcome::Nothing, None, None), false) };
         let name = i.server(&sid).map(|s| s.name.clone());
         let outcome = store::apply_event(i, &event, focus.as_deref(), focus_thread.as_deref());
         let notice = match (&outcome, &event.payload) {
@@ -677,7 +677,7 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             }
             _ => None,
         };
-        (outcome, name, notice)
+        ((outcome, name, notice), true)
     });
     if let Some(notice) = notice {
         core.shared.notice(notice);
@@ -712,6 +712,26 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
         }
         core.follow(key, &sid, false);
     }
+}
+
+/// What applying an event touches (`Area`): one channel's messages for what
+/// happens to messages there, everything for the rest. A message from a
+/// shared channel may bring its author's look, which shows everywhere.
+pub(super) fn event_area<'a>(key: &'a str, event: &'a pb::Event) -> Area<'a> {
+    use pb::event::Payload;
+    let channel = match &event.payload {
+        Some(
+            Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
+            | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }),
+        ) if m.shared.is_none() => m.channel_id.as_str(),
+        Some(Payload::MessageDeleted(p)) => p.channel_id.as_str(),
+        Some(Payload::ReactionUpdated(p)) => p.channel_id.as_str(),
+        Some(Payload::ReactionsCleared(p)) => p.channel_id.as_str(),
+        Some(Payload::ThreadUpdated(p)) => p.channel_id.as_str(),
+        Some(Payload::PollUpdated(p)) => p.channel_id.as_str(),
+        _ => return Area::All,
+    };
+    if channel.is_empty() { Area::All } else { Area::Messages { instance: key, channel } }
 }
 
 /// What a new message from someone else in a channel that isn't on screen

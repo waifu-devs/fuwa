@@ -17,7 +17,7 @@ import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { providerName, sendGif, useGifSettings } from "@/fuwa/gifs";
-import { lazyComponent } from "@/components/lazy";
+import { intent, lazyComponent } from "@/components/lazy";
 import { SPRING } from "@/lib/motion";
 import { useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
@@ -50,7 +50,7 @@ export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: s
     <>
       <motion.button
         ref={refs.setReference}
-        {...getReferenceProps()}
+        {...getReferenceProps(intent(Picker))}
         type="button"
         aria-label={t("chattools.gifs.button")}
         whileHover={{ scale: 1.1, rotate: 6 }}

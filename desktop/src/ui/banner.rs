@@ -113,14 +113,27 @@ pub fn server_banner(
             let moving = if still {
                 shown.into_any_element()
             } else {
-                motion::ambient(div().absolute().inset_0(), id, Duration::from_secs(52), window, move |el, t| {
-                    // There and back again over one period.
-                    let t = 0.5 - 0.5 * (t * std::f32::consts::TAU).cos();
-                    let (l, tp, sw, sh) = place(t);
-                    el.child(
-                        crate::ui::widgets::picture(url.clone()).absolute().left(px(l)).top(px(tp)).w(px(sw)).h(px(sh)),
-                    )
-                })
+                // Under a pixel a second: ten frames a second look the same as sixty.
+                motion::drift(
+                    div().absolute().inset_0(),
+                    id,
+                    Duration::from_secs(52),
+                    DRIFT_FPS,
+                    window,
+                    move |el, t| {
+                        // There and back again over one period.
+                        let t = 0.5 - 0.5 * (t * std::f32::consts::TAU).cos();
+                        let (l, tp, sw, sh) = place(t);
+                        el.child(
+                            crate::ui::widgets::picture(url.clone())
+                                .absolute()
+                                .left(px(l))
+                                .top(px(tp))
+                                .w(px(sw))
+                                .h(px(sh)),
+                        )
+                    },
+                )
             };
             el.child(motion::fade_in(div().absolute().inset_0().child(moving), "banner-in", Duration::from_millis(600)))
         }
@@ -143,6 +156,9 @@ pub fn server_banner(
 }
 
 /// A server without a banner: its accent and hue, two soft lights drifting
+/// How often a banner's slow drift is drawn: its picture and lights move a pixel or two a second.
+const DRIFT_FPS: f32 = 10.0;
+
 /// over them and a faint dot grid (the web's `Gradient` in `join/Banner.tsx`).
 fn gradient(server: &pb::Server, w: f32, h: f32, still: bool, window: &Window) -> AnyElement {
     let a = accent(server);
@@ -187,10 +203,11 @@ fn gradient(server: &pb::Server, w: f32, h: f32, still: bool, window: &Window) -
     let lit = if still {
         lights(div().absolute().inset_0(), 0.0)
     } else {
-        div().absolute().inset_0().child(motion::ambient(
+        div().absolute().inset_0().child(motion::drift(
             div().absolute().inset_0(),
             SharedString::from(format!("banner-glow-{}", server.id)),
             Duration::from_secs(36),
+            DRIFT_FPS,
             window,
             move |el, t| lights(el, 0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
         ))

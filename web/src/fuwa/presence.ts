@@ -179,6 +179,7 @@ function watchInput() {
       idle = false;
       for (const fn of idleListeners) fn();
     }
+    armIdle();
   };
   for (const name of ["pointerdown", "keydown", "wheel", "touchstart", "focus"] as const) {
     window.addEventListener(name, seen, { passive: true, capture: true });
@@ -196,13 +197,28 @@ function watchInput() {
     },
     { passive: true },
   );
-  setInterval(() => {
-    if (!idle && Date.now() - lastInput > IDLE_AFTER) {
+  // Going idle: one timer for when the last input will be IDLE_AFTER old, looked at
+  // again when it fires (input since moves it on), instead of a check every 30 seconds.
+  // It keeps running while the page is hidden: that's when people are away.
+  const check = () => {
+    const left = lastInput + IDLE_AFTER - Date.now();
+    if (left > 0) return void setTimeout(check, left + 1000);
+    if (!idle) {
       idle = true;
       for (const fn of idleListeners) fn();
     }
-  }, 30_000);
+    // Idle until input comes; `seen` starts the timer again.
+    armed = false;
+  };
+  armIdle = () => {
+    if (armed) return;
+    armed = true;
+    setTimeout(check, Math.max(0, lastInput + IDLE_AFTER - Date.now()) + 1000);
+  };
+  armIdle();
 }
+let armed = false;
+let armIdle = () => {};
 
 // ─────────────── Following an instance ───────────────
 

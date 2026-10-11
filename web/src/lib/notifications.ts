@@ -1,6 +1,8 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer, useSyncExternalStore } from "react";
+import { clockNow, subscribeClock } from "@/lib/schedule";
 import { NotificationLevel, type Message, type NotificationSettings, type User } from "@/gen/fuwa/v1/types_pb";
+import { byId, memberById } from "@/fuwa/lists";
 import { notificationKey, useFuwa, type InstanceState } from "@/fuwa/store";
 import { i18n, type I18n, type Key } from "@/i18n/i18n";
 import { formatTime, mentions } from "@/lib/format";
@@ -25,6 +27,12 @@ export function isMuted(n: NotificationSettings | undefined, now = Date.now()) {
   return !n.mutedUntil || timestampDate(n.mutedUntil).getTime() > now;
 }
 
+/** When settings stop muting by themselves: their mute's end, or Infinity (not muted, or until turned back on). */
+export function muteEnds(n: NotificationSettings | undefined): number {
+  if (!n?.muted || !n.mutedUntil) return Infinity;
+  return timestampDate(n.mutedUntil).getTime();
+}
+
 export function effectiveNotifications(inst: InstanceState, serverId: string, channelId: string, now = Date.now()): Effective {
   const server = inst.notifications[notificationKey(serverId)];
   const channel = inst.notifications[notificationKey(serverId, channelId)];
@@ -32,7 +40,7 @@ export function effectiveNotifications(inst: InstanceState, serverId: string, ch
     level:
       channel?.level ||
       server?.level ||
-      inst.servers.find((s) => s.id === serverId)?.defaultNotifications ||
+      byId(inst.servers, serverId)?.defaultNotifications ||
       NotificationLevel.UNSPECIFIED,
     muted: isMuted(server, now) || isMuted(channel, now),
     suppressEveryone: !!server?.suppressEveryone,
@@ -61,7 +69,7 @@ export function pingsMe(
   suppressEveryone: boolean,
 ) {
   const me = inst.me;
-  const mine = me ? inst.members[serverId]?.find((m) => m.user?.id === me.id)?.roleIds : undefined;
+  const mine = me ? memberById(inst.members[serverId], me.id)?.roleIds : undefined;
   return pingsUser(me ?? undefined, mine ?? [], message, suppressEveryone);
 }
 
@@ -80,14 +88,14 @@ export function pingsUser(
   return message.mentionRoleIds.some((id) => mine.has(id));
 }
 
-/** A clock that ticks every `ms`, so timed mutes run out on screen. */
+/**
+ * A clock that ticks every `ms`, so timed mutes run out on screen. Every
+ * caller asking for the same period shares one timer (lib/schedule.ts),
+ * which stops when nobody uses it and pauses while the page is hidden.
+ */
 export function useNow(ms = 30_000) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(id);
-  }, [ms]);
-  return now;
+  const subscribe = useCallback((fn: () => void) => subscribeClock(ms, fn), [ms]);
+  return useSyncExternalStore(subscribe, () => clockNow(ms));
 }
 
 /** Your settings for a server, or one of its channels (none: all defaults). */
@@ -95,12 +103,25 @@ export function useNotificationSettings(key: string, serverId: string, channelId
   return useFuwa((s) => s.instances[key]?.notifications[notificationKey(serverId, channelId)]);
 }
 
-/** Whether a channel is muted, by itself or through its server. */
+/**
+ * Whether a channel is muted, by itself or through its server. Redraws only
+ * when that changes: when settings change, or when a timed mute runs out (a
+ * timer for that moment, not a clock ticking under every row).
+ */
 export function useMuted(key: string, serverId: string, channelId = ""): boolean {
-  const now = useNow();
   const server = useNotificationSettings(key, serverId);
   const channel = useNotificationSettings(key, serverId, channelId);
-  return isMuted(server, now) || isMuted(channel, now);
+  const [, expired] = useReducer((n: number) => n + 1, 0);
+  const now = Date.now();
+  const muted = isMuted(server, now) || isMuted(channel, now);
+  // The next moment the answer can change by itself: the soonest end of a mute still on.
+  const ends = Math.min(isMuted(server, now) ? muteEnds(server) : Infinity, isMuted(channel, now) ? muteEnds(channel) : Infinity);
+  useEffect(() => {
+    if (ends === Infinity) return;
+    const id = setTimeout(expired, Math.min(Math.max(0, ends - Date.now()) + 50, 2 ** 31 - 1));
+    return () => clearTimeout(id);
+  }, [ends]);
+  return muted;
 }
 
 /** The levels, named in the app's language (common.notify.*): `label` for menus, `short` for chips. */
