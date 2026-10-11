@@ -652,7 +652,7 @@
     a full-screen page like server settings covers them),
     `settings_shader.rs` the custom shader editor under Background (the
     web's `ShaderEditor.tsx`, over `core/effects`: `custom.rs` the prelude,
-    checks and starters word for word the web's, `status.rs` what happened
+    checks, starters and AI prompt word for word the web's, `status.rs` what happened
     to each shader, kept across restarts in `Prefs::shaders_trying`; `wgsl.rs` colors its code by the
     web's rules), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
@@ -840,7 +840,8 @@
     `lib/effects/gpu.ts`, which is loaded only when an effect is on (it's
     kept out of the vendor chunk in `vite.config.ts`); CSS stands in without
     WebGPU. Custom shaders (people's own WGSL `fn shade`) are in
-    `lib/effects/custom.ts` (the prelude, the text checks, the starters);
+    `lib/effects/custom.ts` (the prelude, the text checks, the starters,
+    the prompt the editor copies for an AI chat);
     `gpu.ts` compiles and times them before they draw, `lib/effects/status.ts`
     remembers which ran, were too slow or stopped the GPU, and anything but
     running shows the shader's fallback. Their editor is

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fill, flatten, type Namespace, template } from "../../i18n/core.ts";
 import type { I18n } from "../../i18n/i18n.ts";
-import { sanitizeShader, shaderProblem, STARTERS, stripComments } from "./custom.ts";
+import { aiPrompt, sanitizeShader, shaderProblem, STARTERS, stripComments } from "./custom.ts";
 
 /** English as the page has it (i18n/i18n.ts needs Vite, so this reads the catalog itself). */
 const english = flatten({ system: JSON.parse(readFileSync(new URL("../../../../locales/en/system.json", import.meta.url), "utf8")) as Namespace });
@@ -15,6 +15,14 @@ const SHADE = "fn shade(uv: vec2f) -> vec4f { return vec4f(0.0); }";
 
 test("the starters pass the checks", () => {
   for (const starter of STARTERS) assert.equal(shaderProblem(t, starter.shader.code), null, starter.id);
+});
+
+test("the AI prompt carries the prelude and an example, and ends where the person writes", () => {
+  const prompt = aiPrompt();
+  assert.ok(prompt.includes("var<uniform> fuwa: Fuwa;") && prompt.includes("fn fbm(p: vec2f) -> f32"));
+  assert.ok(prompt.includes(STARTERS[3]!.shader.code));
+  assert.ok(!prompt.includes("{prelude}") && !prompt.includes("{example}"));
+  assert.ok(prompt.endsWith("What I want:\n"));
 });
 
 test("a block comment opened inside a line comment doesn't hide the code after it", () => {

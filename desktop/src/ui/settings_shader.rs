@@ -13,11 +13,13 @@ use gpui_kit::base::input::{Diagnostic as Mark, DiagnosticSeverity, Position};
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState, TabSize};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, AppContext as _, ClipboardItem, Context, Entity, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use crate::core::effects::custom::{CustomShader, FALLBACKS, MAX_SHADER_BYTES, SHADER_NAME_MAX, STARTERS, shader_id};
+use crate::core::effects::custom::{
+    CustomShader, FALLBACKS, MAX_SHADER_BYTES, SHADER_NAME_MAX, STARTERS, ai_prompt, shader_id,
+};
 use crate::core::effects::gpu::{self, Diagnostic, Gpu};
 use crate::core::effects::status::{self, ShaderStatus};
 use crate::core::i18n::{Arg, t, t_with};
@@ -62,6 +64,9 @@ pub(crate) struct ShaderForm {
     /// Counts edits, so only the latest one's check counts.
     edits: u64,
     reference: bool,
+    /// The AI prompt was just copied: counts copies, so only the latest one's timer clears it.
+    copied: Option<u64>,
+    copies: u64,
     /// The code's colors, kept in step with the theme.
     colors: Rc<Cell<wgsl::Colors>>,
 }
@@ -212,6 +217,8 @@ impl SettingsView {
                 checked: (shader.code.clone(), Vec::new()),
                 edits: 0,
                 reference: form.reference,
+                copied: form.copied,
+                copies: form.copies,
                 colors: form.colors.clone(),
             };
             return;
@@ -462,21 +469,30 @@ impl SettingsView {
             .text_xs()
             .child(
                 div()
-                    .id("shader-reference")
                     .flex()
+                    .flex_wrap()
                     .items_center()
-                    .gap(px(4.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.primary)
-                    .cursor_pointer()
-                    .hover(|s| s.underline())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.themes.shader.reference = !this.themes.shader.reference;
-                        cx.notify();
-                    }))
-                    .child(icon("book-open").size(px(14.0)))
-                    .child(t("appsettings.shader.reference"))
-                    .child(icon(if reference { "chevron-up" } else { "chevron-down" }).size(px(14.0))),
+                    .gap_x(px(16.0))
+                    .gap_y(px(4.0))
+                    .child(
+                        div()
+                            .id("shader-reference")
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(p.primary)
+                            .cursor_pointer()
+                            .hover(|s| s.underline())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.themes.shader.reference = !this.themes.shader.reference;
+                                cx.notify();
+                            }))
+                            .child(icon("book-open").size(px(14.0)))
+                            .child(t("appsettings.shader.reference"))
+                            .child(icon(if reference { "chevron-up" } else { "chevron-down" }).size(px(14.0))),
+                    )
+                    .child(self.ask_ai(p, cx)),
             )
             .child(
                 div()
@@ -598,6 +614,51 @@ impl SettingsView {
     }
 
     /// The shader of a backdrop being edited.
+    /// Copies the prompt that has an AI chat write a shader; the person describes theirs after it.
+    fn ask_ai(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let copied = self.themes.shader.copied.is_some();
+        div()
+            .id("shader-ask-ai")
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(if copied { p.success } else { p.primary })
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .active(|s| s.scale(0.94))
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("appsettings.shader.askAiHint")).build(window, cx))
+            .on_click(cx.listener(|this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(ai_prompt()));
+                let form = &mut this.themes.shader;
+                form.copies += 1;
+                let copy = form.copies;
+                form.copied = Some(copy);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(2400)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.themes.shader.copied == Some(copy) {
+                            this.themes.shader.copied = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+                cx.notify();
+            }))
+            .child(motion::rise(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(icon(if copied { "check" } else { "wand-sparkles" }).size(px(14.0)))
+                    .child(if copied { t("appsettings.shader.askAiCopied") } else { t("appsettings.shader.askAi") }),
+                SharedString::from(format!("shader-ask-ai-{copied}")),
+                Duration::ZERO,
+                12.0,
+            ))
+    }
+
     fn backdrop_shader(&self, target: Target) -> Option<CustomShader> {
         match target {
             Target::App => self.core.prefs_now().backdrop.shader.clone(),

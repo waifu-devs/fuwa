@@ -1,12 +1,14 @@
-import { AlertTriangleIcon, BookOpenIcon, ChevronDownIcon, CpuIcon, Loader2Icon, RotateCcwIcon, SparklesIcon, TurtleIcon, ZapOffIcon } from "lucide-react";
+import { AlertTriangleIcon, BookOpenIcon, CheckIcon, ChevronDownIcon, CpuIcon, Loader2Icon, RotateCcwIcon, SparklesIcon, TurtleIcon, WandSparklesIcon, ZapOffIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { SPRING } from "@/lib/motion";
+import { SwapText } from "@/components/motion";
 import { type I18n, type Key, T, useI18n } from "@/i18n/react";
 import { EFFECT_INFO } from "@/lib/backdrop";
-import { FALLBACKS, MAX_SHADER_BYTES, SHADER_NAME_MAX, shaderId, shaderProblem, STARTERS, type CustomShader } from "@/lib/effects/custom";
+import { aiPrompt, FALLBACKS, MAX_SHADER_BYTES, SHADER_NAME_MAX, shaderId, shaderProblem, STARTERS, type CustomShader } from "@/lib/effects/custom";
 import type { Diagnostic } from "@/lib/effects/gpu";
 import { retryShader, useShaderStatus, type ShaderStatus } from "@/lib/effects/status";
+import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 /** Whether this browser can draw effects on the GPU. */
@@ -138,13 +140,16 @@ export function ShaderEditor({ value, onChange }: { value: CustomShader; onChang
       </AnimatePresence>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-        <button type="button" onClick={() => setReference((r) => !r)} className="flex items-center gap-1 font-bold text-primary hover:underline">
-          <BookOpenIcon className="size-3.5" />
-          {t("appsettings.shader.reference")}
-          <motion.span animate={{ rotate: reference ? 180 : 0 }} transition={SPRING}>
-            <ChevronDownIcon className="size-3.5" />
-          </motion.span>
-        </button>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <button type="button" onClick={() => setReference((r) => !r)} className="flex items-center gap-1 font-bold text-primary hover:underline">
+            <BookOpenIcon className="size-3.5" />
+            {t("appsettings.shader.reference")}
+            <motion.span animate={{ rotate: reference ? 180 : 0 }} transition={SPRING}>
+              <ChevronDownIcon className="size-3.5" />
+            </motion.span>
+          </button>
+          <AskAi />
+        </div>
         <span className={cn("tabular-nums text-muted-foreground", size > MAX_SHADER_BYTES && "font-bold text-destructive")}>
           {t("appsettings.shader.size", { size: number(size / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 }), max: MAX_SHADER_BYTES / 1024 })}
         </span>
@@ -173,6 +178,46 @@ export function ShaderEditor({ value, onChange }: { value: CustomShader; onChang
         </div>
       </div>
     </motion.div>
+  );
+}
+
+/** Copies the prompt that has an AI chat write a shader; the person describes theirs after it. */
+function AskAi() {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = () => {
+    void navigator.clipboard?.writeText(aiPrompt()).then(
+      () => {
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 2400);
+      },
+      () => toast(t("appsettings.shader.askAiFailed")),
+    );
+  };
+  return (
+    <motion.button
+      type="button"
+      onClick={copy}
+      title={t("appsettings.shader.askAiHint")}
+      whileTap={{ scale: 0.94 }}
+      className={cn("flex items-center gap-1 font-bold hover:underline", copied ? "text-emerald-500" : "text-primary")}
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={copied ? "copied" : "copy"}
+          initial={{ opacity: 0, scale: 0.6, rotate: -30 }}
+          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+          exit={{ opacity: 0, scale: 0.6 }}
+          transition={SPRING}
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <WandSparklesIcon className="size-3.5" />}
+        </motion.span>
+      </AnimatePresence>
+      <SwapText>{copied ? t("appsettings.shader.askAiCopied") : t("appsettings.shader.askAi")}</SwapText>
+    </motion.button>
   );
 }
 
