@@ -354,6 +354,59 @@ pub fn default_shader() -> CustomShader {
     STARTERS[0].shader()
 }
 
+// ───────────────────────── Asking an AI ─────────────────────────
+
+/// What someone pastes into an AI chat to have it write a shader: the
+/// inputs, the rules, the budget and an example, ending where they describe
+/// what they want. The web's `AI_PROMPT`, word for word.
+const AI_PROMPT: &str = r#"You're writing a custom background effect for fuwa, a chat app: a fragment shader in WGSL (the WebGPU Shading Language), drawn behind the app's interface, so people read text over it all day. Keep it easy on the eyes.
+
+Write one function:
+
+  fn shade(uv: vec2f) -> vec4f
+
+fuwa calls it for every pixel. It returns a color (rgb, 0 to 1) and how much that color covers what's behind it (alpha, 0 to 1, straight, not premultiplied). fuwa puts the code between its own prelude and entry point, which multiply the alpha by the strength the person chose and premultiply it.
+
+The prelude, already defined before the code (never declare any of it again):
+
+{prelude}
+What the inputs are:
+- uv: this pixel, 0 to 1 across and down; (0, 0) is the top left. It isn't corrected for the aspect ratio: multiply it by vec2f(fuwa.res.x / fuwa.res.y, 1.0) for round shapes.
+- fuwa.time: seconds (f32), scaled by the person's speed setting. It stands still for people who ask for reduced motion, so the effect must look good frozen too.
+- fuwa.res: the size drawn, in pixels.
+- fuwa.pointer: the mouse pointer in uv's units, eased; it starts at (0.5, 0.5) and is outside 0..1 when the pointer is off the window.
+- fuwa.primary, fuwa.accent, fuwa.background, fuwa.foreground: the theme's colors (rgba, alpha 1): its primary, the primary turned 48 degrees in hue, its background and its text. Use these instead of fixed colors, so the effect fits any theme, light or dark.
+- fuwa.intensity: the strength, 0 to 1, which fuwa already applies.
+- hash21(p): a random number from 0 to 1 for a point. noise(p): smooth value noise, 0 to 1. fbm(p): four octaves of it, 0 to 1.
+
+Rules fuwa checks; a shader that breaks one never runs:
+- No @ anywhere outside comments: no attributes, bindings, entry points or uniforms of its own. There are no textures, buffers or samplers, only the inputs above.
+- No enable, requires or diagnostic directives.
+- No links (anything like scheme://), not even in comments.
+- At most 16 KB of code.
+- It defines fn shade(uv: vec2f) -> vec4f. Helper functions and constants of its own are fine, as long as their names don't clash with the prelude's (Fuwa, fuwa, hash21, noise, fbm) or fs_main.
+
+It has to be light. fuwa times it on the person's GPU, which may be a laptop's: when a frame takes over 20 ms it runs the shader at a lower resolution, and when that's still too slow it shows a built-in effect instead. It draws at most 30 frames a second. Keep loops short with fixed bounds (a dozen steps, not hundreds), and no raymarching or deeply nested fbm.
+
+WGSL is strict:
+- No implicit conversions: write 1.0, not 1, where a float is meant, and f32(i) to use a loop counter as a float.
+- let is constant and var is mutable. There's no ?: operator: use select(ifFalse, ifTrue, condition).
+- The vector types are vec2f, vec3f and vec4f. Built-ins include mix, smoothstep, step, clamp, fract, floor, length, distance, dot, normalize, sin, cos, atan2, exp, pow and abs.
+- No recursion.
+
+An example, fuwa's own Clouds starter:
+
+{example}
+Answer with the whole shader in one wgsl code block: the shade function and any helpers it needs, nothing from the prelude, starting with a short comment that says what it draws. After the block, say in a sentence or two which numbers to change to tune it. If I come back with an error from fuwa's editor, fix it and answer with the whole shader again.
+
+What I want:
+"#;
+
+/// The prompt to copy for an AI chat, which the person finishes by describing their shader.
+pub fn ai_prompt() -> String {
+    AI_PROMPT.replace("{prelude}", INPUTS).replace("{example}", STARTERS[3].code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +430,14 @@ mod tests {
                 custom.contains(&format!("id: \"{}\",\n    name: \"{}\",\n    hint: \"{}\"", s.id, s.name, s.hint))
             );
         }
+    }
+
+    #[test]
+    fn the_ai_prompt_is_the_webs_word_for_word() {
+        assert!(web("custom.ts").contains(&format!("const AI_PROMPT = `{AI_PROMPT}`;")));
+        let prompt = ai_prompt();
+        assert!(prompt.contains(INPUTS) && prompt.contains(STARTERS[3].code));
+        assert!(prompt.ends_with("What I want:\n"));
     }
 
     #[test]

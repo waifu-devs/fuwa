@@ -147,6 +147,12 @@ read:
 The uniform is `struct Fuwa { primary, accent, background, foreground: vec4f, res, pointer: vec2f, time, intensity: f32 }`
 at group 0, binding 0. Apps must give exactly these inputs, so a shader draws the same everywhere.
 
+The editor's "Copy a prompt for an AI" copies `aiPrompt()` (`custom.ts`; the
+desktop's `ai_prompt`, word for word): these inputs, the prelude, the rules
+below, the time budget and the Clouds starter, for an AI chat to write a
+shader from. It ends with "What I want:", where the person describes theirs
+before sending it.
+
 What keeps a shader to these inputs, in every app:
 
 - **Checked as text first** (`shaderProblem`): no link (`scheme://`)
