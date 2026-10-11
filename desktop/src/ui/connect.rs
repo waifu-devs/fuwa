@@ -732,7 +732,7 @@ impl ConnectView {
     /// The instance's name and address over the sign-in, with the way back.
     fn header(&self, cx: &mut Context<Self>, p: &Palette) -> Div {
         let node = self.node.clone().unwrap_or_default();
-        let streamer = self.core.prefs().streamer_mode;
+        let streamer = self.core.prefs_now().streamer_mode;
         let address = if streamer { "address hidden".to_owned() } else { instance_key(&self.url) };
         let commit: String = node.build.as_ref().map(|b| b.commit.chars().take(7).collect()).unwrap_or_default();
         let build = if commit.is_empty() {
@@ -773,7 +773,7 @@ impl ConnectView {
 
     /// The web's `ContinueAs`: the other accounts kept here.
     fn continue_as(&self, kept: &[SavedAccount], cx: &mut Context<Self>, p: &Palette) -> Div {
-        let streamer = self.core.prefs().streamer_mode;
+        let streamer = self.core.prefs_now().streamer_mode;
         let mut list = div().flex().flex_col().gap(px(8.0));
         for (n, a) in kept.iter().enumerate() {
             let user = crate::core::accounts::user_of(a);
@@ -1131,7 +1131,7 @@ impl ConnectView {
     ) -> AnyElement {
         let empty = self.new_username.read(cx).value().trim().is_empty();
         let on = self.use_profile;
-        let streamer = self.core.prefs().streamer_mode;
+        let streamer = self.core.prefs_now().streamer_mode;
         let what = if account.display_name.is_empty() {
             t("connect.providerDone.pictureOnly")
         } else if streamer {

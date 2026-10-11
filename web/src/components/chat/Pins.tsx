@@ -13,13 +13,14 @@ import {
 } from "@floating-ui/react";
 import { CornerDownRightIcon, LockKeyholeIcon, PinIcon, PinOffIcon, RotateCwIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DmPin } from "@/gen/fuwa/v1/dm_pb";
 import type { Message, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
 import type { FuwaError } from "@/fuwa/errors";
 import { loadChannelPins, loadDmPins, pinDm, pinMessage, useChannelPins, useDmPins } from "@/fuwa/pins";
 import { useFuwa } from "@/fuwa/store";
+import { loadLinesThrough } from "@/fuwa/dms";
 import { MessageBody } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
@@ -383,7 +384,23 @@ function DmPinsList({
   const { t } = useI18n();
   const pins = useDmPins(instanceKey, conversationId);
   const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[conversationId] ?? NO_ITEMS);
+  // A conversation opens with only its latest lines: pins older than those are loaded from this device's
+  // vault so they can show (and be jumped to).
+  const more = useFuwa((s) => !!s.instances[instanceKey]?.dms.more[conversationId]);
   const list = pins?.pins ?? NO_PINS;
+  const firstSeq = items[0]?.seq;
+  const oldestMissing = useMemo(() => {
+    if (!more || firstSeq === undefined) return null;
+    let oldest: number | null = null;
+    for (const pin of list) {
+      const seq = Number(pin.sequence);
+      if (seq < firstSeq && (oldest === null || seq < oldest)) oldest = seq;
+    }
+    return oldest;
+  }, [list, more, firstSeq]);
+  useEffect(() => {
+    if (oldestMissing !== null) void loadLinesThrough(instanceKey, conversationId, oldestMissing);
+  }, [instanceKey, conversationId, oldestMissing]);
   if (!pins || (pins.status === "loading" && list.length === 0)) return <Loading />;
   if (pins.status === "failed" && list.length === 0) return <Failed onRetry={() => void loadDmPins(instanceKey, conversationId)} />;
   if (list.length === 0) return <Empty hint={t("chattools.pins.emptyDm")} />;

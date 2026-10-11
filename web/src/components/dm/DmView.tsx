@@ -35,6 +35,8 @@ import {
   dismissPending,
   dmProblem,
   editDm,
+  loadLinesThrough,
+  loadOlderLines,
   markDmRead,
   prepareConversation,
   retryPending,
@@ -456,11 +458,29 @@ export function EncryptedMessages({
 
   // A pin opened from the header: draw the rows down to it, then bring it into view and let it glow.
   const jump = useDmJump(id);
+  // Older lines than the conversation opened with stay in this device's vault until asked for.
+  const more = useFuwa((s) => !!s.instances[instanceKey]?.dms.more[id]);
+  const firstSeq = list[0]?.seq;
+  const loadingThrough = useRef<number | null>(null);
   useEffect(() => {
     if (!jump) return;
-    doneDmJump(jump);
     const index = rows.findIndex((r) => r.key === `s${jump.seq}`);
-    if (index === -1) return;
+    if (index === -1) {
+      // Older than what's loaded: load down to it first; this runs again once its rows are in.
+      if (more && firstSeq !== undefined && jump.seq < firstSeq && loadingThrough.current !== jump.seq) {
+        loadingThrough.current = jump.seq;
+        atBottom.current = false;
+        void Promise.resolve(loadLinesThrough(instanceKey, id, jump.seq)).finally(() => {
+          // Still not there (deleted, or gone from the vault): drop the jump.
+          if (!rowsRef.current.some((r) => r.key === `s${jump.seq}`)) doneDmJump(jump);
+        });
+        return;
+      }
+      doneDmJump(jump);
+      return;
+    }
+    doneDmJump(jump);
+    loadingThrough.current = null;
     if (index < skipped) setHidden(Math.max(0, index - 10));
     atBottom.current = false;
     const light = (tries: number) =>
@@ -473,28 +493,43 @@ export function EncryptedMessages({
         el.classList.add("jumped");
       });
     light(5);
-  }, [jump, rows, skipped]);
+  }, [jump, rows, skipped, more, firstSeq, instanceKey, id]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const count = useRef(0);
   const shownBefore = useRef(skipped);
+  const firstBefore = useRef(firstSeq);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const revealed = skipped < shownBefore.current;
+    // Older lines loaded from the vault above what was there.
+    const prepended = firstBefore.current !== undefined && firstSeq !== undefined && firstSeq < firstBefore.current;
     if (atBottom.current) el.scrollTop = el.scrollHeight;
-    // Rows revealed above: keep what you were reading where it was.
-    else if (revealed) el.scrollTop = el.scrollHeight - fromBottom.current;
+    // Rows revealed or loaded above: keep what you were reading where it was.
+    else if (revealed || prepended) el.scrollTop = el.scrollHeight - fromBottom.current;
     else if (rows.length > count.current) setMissed((n) => n + rows.length - count.current);
     count.current = rows.length;
     shownBefore.current = skipped;
-  }, [rows, skipped]);
+    firstBefore.current = firstSeq;
+  }, [rows, skipped, firstSeq]);
+  const loadingOlder = useRef(false);
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
     fromBottom.current = el.scrollHeight - el.scrollTop;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     if (atBottom.current) setMissed(0);
-    if (el.scrollTop < 300 && skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
-  }, [skipped]);
+    if (el.scrollTop < 300) {
+      if (skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
+      // Every row drawn and the top in sight: older lines come from the vault, one page at a time
+      // (the engine queues asks, so a burst of scroll events mustn't become a burst of pages).
+      else if (more && !loadingOlder.current) {
+        loadingOlder.current = true;
+        void Promise.resolve(loadOlderLines(instanceKey, id)).finally(() => (loadingOlder.current = false));
+      }
+    }
+  }, [skipped, more, instanceKey, id]);
 
   return (
     <div className="relative min-h-0 flex-1">

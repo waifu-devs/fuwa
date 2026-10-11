@@ -3,7 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Member, Role } from "@/gen/fuwa/v1/types_pb";
 import type { Activity } from "@/gen/fuwa/v1/presence_pb";
-import { useRoles } from "@/fuwa/hooks";
+import { byId, useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { RoleName } from "@/components/RoleName";
@@ -18,9 +18,10 @@ import { AppBadge } from "@/components/AppBadge";
 import { ActivityLine, PresenceDot } from "@/components/Presence";
 import { useOnline, usePresence } from "@/fuwa/presence";
 import { useMemberMenu } from "@/components/menus/member";
-import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
+import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil, toDate } from "@/lib/format";
 import { type Key, T, useI18n } from "@/i18n/react";
-import { useNow } from "@/lib/notifications";
+import { useNowAtExpiry } from "@/components/use-expiry";
+import { linesIn } from "@/components/virtual-range";
 import { colorOf, hoistedRole } from "@/lib/permissions";
 
 const EMPTY: Member[] = [];
@@ -49,10 +50,19 @@ const SECTION_GAP = 16;
  * transform that eases when the place changes.
  */
 export function MemberList({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const now = useNow(60_000);
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
+  // No ticking clock: the list moves on when a time-out or a custom status runs out.
+  const ends = useMemo(() => {
+    const out: number[] = [];
+    for (const m of members) {
+      if (m.timedOutUntil) out.push(toDate(m.timedOutUntil).getTime());
+      if (m.user?.statusExpiresAt) out.push(toDate(m.user.statusExpiresAt).getTime());
+    }
+    return out;
+  }, [members]);
+  const now = useNowAtExpiry(ends);
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
-  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId);
+  const ownerId = useFuwa((s) => byId(s.instances[instanceKey]?.servers, serverId)?.ownerId);
   const roles = useRoles(instanceKey, serverId);
   // Who's online changes at most a few times a second, as one new Set.
   const online = useOnline(instanceKey);
@@ -86,19 +96,25 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
     if (h > 0) setHeights((cur) => (cur[kind] === h ? cur : { ...cur, [kind]: h }));
   }, []);
 
-  const { items, total } = useMemo(() => {
+  const { items, tops, sizes, total } = useMemo(() => {
     const out: Item[] = [];
+    const tops: number[] = [];
+    const sizes: number[] = [];
     let top = 0;
     sections.forEach((section, n) => {
       if (n > 0) top += SECTION_GAP;
       out.push({ kind: "heading", key: `heading-${section.id}`, top, section });
+      tops.push(top);
+      sizes.push(heights.heading);
       top += heights.heading + 4;
       for (const m of section.members) {
         out.push({ kind: "member", key: `member-${m.user?.id}`, top, member: m });
+        tops.push(top);
+        sizes.push(heights.member);
         top += heights.member;
       }
     });
-    return { items: out, total: top };
+    return { items: out, tops, sizes, total: top };
   }, [sections, heights]);
 
   // The part of the list in view.
@@ -113,13 +129,22 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // At most once a frame, however fast the scroll events come.
+  const frame = useRef(0);
   const onScroll = useCallback(() => {
-    const el = scroller.current;
-    if (el) setView({ top: el.scrollTop, height: el.clientHeight });
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      const el = scroller.current;
+      if (el) setView((v) => (v.top === el.scrollTop && v.height === el.clientHeight ? v : { top: el.scrollTop, height: el.clientHeight }));
+    });
   }, []);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
   const from = view.top - OVERSCAN * heights.member;
   const to = view.top + view.height + OVERSCAN * heights.member;
-  const shown = items.filter((item) => item.top + heights.member >= from && item.top <= to);
+  // The lines are in order from the top, so the ones in view are found by binary search.
+  const [start, end] = linesIn(tops, sizes, from, to);
+  const shown = items.slice(start, end);
 
   // Only people who just joined slide in; lines scrolled into view just appear.
   const known = useRef<Set<string> | null>(null);
@@ -156,7 +181,8 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                     roles={roles}
                     owner={item.member.user?.id === ownerId}
                     me={item.member.user?.id === meId}
-                    now={now}
+                    timedOut={timedOutUntil(item.member, now)?.getTime() ?? 0}
+                    status={shownStatus(item.member.user, now)}
                     enter={joined.fresh.has(item.member.user?.id ?? "")}
                   />
                 )}
@@ -188,7 +214,8 @@ const MemberRow = memo(function MemberRow({
   roles,
   owner,
   me,
-  now,
+  timedOut,
+  status,
   enter,
 }: {
   instanceKey: string;
@@ -196,7 +223,9 @@ const MemberRow = memo(function MemberRow({
   roles: Role[];
   owner: boolean;
   me: boolean;
-  now: number;
+  /** When their time-out ends (0: not timed out), and the custom status still shown: what the clock decides, worked out by the list. */
+  timedOut: number;
+  status: string;
   enter: boolean;
 }) {
   // Only this row redraws when this person's presence changes.
@@ -230,9 +259,9 @@ const MemberRow = memo(function MemberRow({
               <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
               {owner && <CrownIcon aria-label={t("chat.author.owner")} className="size-3 shrink-0 text-amber-400" />}
               {isAgent(m.user) && <AppBadge agent />}
-              <TimedOutMark member={m} now={now} />
+              <TimedOutMark until={timedOut} />
             </span>
-            <MemberSubtitle member={m} me={me} now={now} activity={presence?.activities[0]} />
+            <MemberSubtitle member={m} me={me} status={status} activity={presence?.activities[0]} />
           </span>
         </button>
       </ProfilePopover>
@@ -247,9 +276,9 @@ const MemberRow = memo(function MemberRow({
 });
 
 /** An hourglass by the names of members who are timed out. */
-function TimedOutMark({ member, now }: { member: Member; now: number }) {
+function TimedOutMark({ until: ends }: { until: number }) {
   const { t } = useI18n();
-  const until = timedOutUntil(member, now);
+  const until = ends ? new Date(ends) : null;
   return (
     <AnimatePresence>
       {until && (
@@ -269,8 +298,7 @@ function TimedOutMark({ member, now }: { member: Member; now: number }) {
 }
 
 /** Under a member's name: what they're doing, else their custom status, else their username. */
-function MemberSubtitle({ member, me, now, activity }: { member: Member; me: boolean; now: number; activity?: Activity }) {
-  const status = shownStatus(member.user, now);
+function MemberSubtitle({ member, me, status, activity }: { member: Member; me: boolean; status: string; activity?: Activity }) {
   return (
     <span className="relative block h-4 overflow-hidden text-xs text-muted-foreground">
       <AnimatePresence mode="popLayout" initial={false}>

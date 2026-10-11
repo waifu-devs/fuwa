@@ -57,6 +57,8 @@ struct Slot {
     picture: Option<Picture>,
     /// Counts the pictures put here.
     seq: u64,
+    /// A buffer the window is done with (`give_back`), for the next picture.
+    spare: Option<Vec<u8>>,
 }
 
 /// The latest picture of every feed, and what the windows want of them.
@@ -98,6 +100,9 @@ impl Videos {
             let slot = slots.entry(feed.to_owned()).or_default();
             if let Some(old) = slot.picture.replace(std::mem::take(picture)) {
                 *picture = old;
+            } else if let Some(spare) = slot.spare.take() {
+                // The window gave the last one back: the next picture is written into it.
+                picture.bgra = spare;
             }
             slot.seq += 1;
         }
@@ -107,6 +112,14 @@ impl Videos {
     /// The feed's newest picture, if one came since the last time it was taken.
     pub fn take(&self, feed: &str) -> Option<Picture> {
         self.slots.lock().get_mut(feed).and_then(|s| s.picture.take())
+    }
+
+    /// The window is done with a picture's buffer: the feed's next picture
+    /// is written into it rather than into new memory.
+    pub fn give_back(&self, feed: &str, buffer: Vec<u8>) {
+        if let Some(slot) = self.slots.lock().get_mut(feed) {
+            slot.spare = Some(buffer);
+        }
     }
 
     /// How many pictures a feed has had: 0 while none came.
@@ -242,9 +255,15 @@ mod tests {
         let mut next = Picture { width: 2, height: 1, bgra: vec![2; 8] };
         videos.publish("a", &mut next);
         assert_eq!(next.bgra, vec![1; 8], "the one not taken comes back to be written over");
-        assert_eq!(videos.take("a").unwrap().bgra, vec![2; 8]);
+        let taken = videos.take("a").unwrap();
+        assert_eq!(taken.bgra, vec![2; 8]);
         assert!(videos.take("a").is_none());
         assert_eq!(videos.seq("a"), 2);
+        // Once the window has drawn it, its buffer comes back for the next picture.
+        videos.give_back("a", taken.bgra);
+        let mut third = Picture::default();
+        videos.publish("a", &mut third);
+        assert_eq!(third.bgra, vec![2; 8], "the buffer given back is written into next");
 
         videos.want(1, HashMap::from([("a".into(), 300)]));
         videos.want(2, HashMap::from([("a".into(), 700)]));

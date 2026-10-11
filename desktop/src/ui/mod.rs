@@ -29,10 +29,12 @@ mod effects;
 mod embeds;
 mod emoji;
 mod emoji_picker;
+mod floats;
 mod friends;
 mod game_overlay;
 mod gifs;
 mod http;
+mod images;
 mod instance_home;
 mod instance_settings;
 mod join;
@@ -47,6 +49,7 @@ mod motion;
 mod notify;
 mod onboarding;
 pub(crate) mod overlay;
+mod panel;
 pub mod perf;
 mod pins;
 mod png;
@@ -101,6 +104,7 @@ mod voice_notes;
 mod voice_stage;
 mod wgsl;
 mod widgets;
+mod windowed;
 
 use std::fs::File;
 

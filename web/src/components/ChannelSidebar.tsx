@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, UserPlusIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel, type Server } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
@@ -10,7 +10,7 @@ import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { useServerSettingsTabs } from "@/components/dialogs/serverSettingsTabs";
-import { lazyComponent } from "@/components/lazy";
+import { intent, lazyComponent } from "@/components/lazy";
 import { RulesDialog } from "@/components/join/Rules";
 import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
@@ -134,7 +134,10 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
   }, [reviews, instanceKey, serverId]);
 
-  const edit = (id: string, focus?: "permissions") => setSettings({ tab: "channels", target: focus ? `${id}:${focus}` : id });
+  // Stable, so the memoized rows below don't redraw when the sidebar does.
+  const edit = useCallback((id: string, focus?: "permissions") => setSettings({ tab: "channels", target: focus ? `${id}:${focus}` : id }), []);
+  const onCollapse = useCallback((id: string, closed: boolean) => setCollapsed((c) => ({ ...c, [id]: closed })), []);
+  const onCreateIn = useCallback((parentId: string) => setCreating({ parentId }), []);
 
   if (!known) return null;
   return (
@@ -184,10 +187,10 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               access={access}
               activeId={params.channel}
               collapsed={collapsed}
-              onCollapse={(id, closed) => setCollapsed((c) => ({ ...c, [id]: closed }))}
+              onCollapse={onCollapse}
               onSettings={setSettings}
               onInvite={setInviting}
-              onCreate={(parentId) => setCreating({ parentId })}
+              onCreate={onCreateIn}
               onMenuEdit={edit}
             />
           </motion.ul>
@@ -332,6 +335,7 @@ function ServerMenuTrigger({ instanceKey, server, nodeName }: { instanceKey: str
     <DropdownMenuTrigger asChild>
       <button
         type="button"
+        {...intent(ServerSettingsDialog)}
         className="group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition hover:bg-muted/60 data-[state=open]:bg-muted/60"
       >
         <span className="min-w-0 flex-1">
@@ -537,6 +541,11 @@ function ChannelGroups({
   onCreate: (parentId: string) => void;
   onMenuEdit: ChannelMenuActions["edit"];
 }) {
+  // What's shown where: rows are measured for their glide only when this changes (a channel added, moved or folded away),
+  // not on every redraw (an unread count, a mute running out).
+  const shape = groups
+    .map((g) => `${g.category?.id ?? ""}${collapsed[g.category?.id ?? ""] ? "-" : `:${g.channels.map((c) => c.id).join(",")}`}`)
+    .join("|");
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       {groups.flatMap((group) => {
@@ -552,17 +561,12 @@ function ChannelGroups({
                 instanceKey={instanceKey}
                 channel={c}
                 active={activeId === c.id}
+                shape={shape}
                 canConnect={hasIn(access, c.id, Permission.CONNECT)}
-                onEdit={
-                  hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
-                    ? () => onSettings({ tab: "channels", target: c.id })
-                    : undefined
-                }
-                onInvite={
-                  c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE)
-                    ? () => onInvite(c.id)
-                    : undefined
-                }
+                canEdit={hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)}
+                canInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE)}
+                onSettings={onSettings}
+                onInvite={onInvite}
                 onMenuEdit={onMenuEdit}
               />
             ));
@@ -573,8 +577,9 @@ function ChannelGroups({
             category={group.category}
             closed={closed}
             count={group.channels.length}
-            onToggle={() => onCollapse(id, !closed)}
-            onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => onCreate(id) : undefined}
+            shape={shape}
+            onCollapse={onCollapse}
+            onCreate={hasIn(access, id, Permission.MANAGE_CHANNELS) ? onCreate : undefined}
             instanceKey={instanceKey}
             onMenuEdit={onMenuEdit}
           />,
@@ -586,13 +591,14 @@ function ChannelGroups({
 }
 
 /** A category's header: folds its channels away, and (with Manage Channels) adds one or drags the whole category. */
-function CategoryRow({
+const CategoryRow = memo(function CategoryRow({
   instanceKey,
   category,
   closed,
   count,
-  onToggle,
-  onAdd,
+  shape,
+  onCollapse,
+  onCreate,
   onMenuEdit,
   ref,
 }: {
@@ -600,13 +606,18 @@ function CategoryRow({
   category: Channel;
   closed: boolean;
   count: number;
-  onToggle: () => void;
-  onAdd?: () => void;
+  /** The sidebar's arrangement: the row is measured for its glide when this changes. */
+  shape: string;
+  onCollapse: (id: string, closed: boolean) => void;
+  /** With Manage Channels there: makes a channel in it. */
+  onCreate?: (parentId: string) => void;
   /** Opens its settings from its right-click menu. */
   onMenuEdit: ChannelMenuActions["edit"];
   ref?: Ref<HTMLLIElement>;
 }) {
   const { t } = useI18n();
+  const onToggle = () => onCollapse(category.id, !closed);
+  const onAdd = onCreate && (() => onCreate(category.id));
   const menu = useContextMenu("category", () =>
     categoryMenu(
       { instanceKey, serverId: category.serverId, category },
@@ -620,6 +631,7 @@ function CategoryRow({
       data-id={category.id}
       data-collapsed={closed || undefined}
       layout="position"
+      layoutDependency={shape}
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
@@ -662,17 +674,21 @@ function CategoryRow({
       )}
     </motion.li>
   );
-}
+});
 
-function ChannelRow({
+/** A channel's row: memoized, so it redraws for its own unread count or mute, not the sidebar's every change. */
+const ChannelRow = memo(function ChannelRow({
   instanceKey,
   channel,
   active,
   index,
   parent,
+  shape,
   ref,
-  onEdit,
-  onInvite,
+  canEdit,
+  canInvite,
+  onSettings,
+  onInvite: inviteTo,
   onMenuEdit,
   canConnect,
 }: {
@@ -684,14 +700,20 @@ function ChannelRow({
   index: number;
   /** The category it shows under, or "" for none. */
   parent: string;
+  /** The sidebar's arrangement: the row is measured for its glide when this changes. */
+  shape: string;
   ref?: Ref<HTMLLIElement>;
-  /** With Manage Channels or Manage Roles there: opens the channel's settings. */
-  onEdit?: () => void;
+  /** With Manage Channels or Manage Roles there: the settings shortcut opens the channel's settings. */
+  canEdit: boolean;
   /** With Create Invite there: invites people straight into it. */
-  onInvite?: () => void;
+  canInvite: boolean;
+  onSettings: (settings: { tab: string; target?: string }) => void;
+  onInvite: (channelId: string) => void;
   /** Opens its settings (or its permissions) from its right-click menu. */
   onMenuEdit: ChannelMenuActions["edit"];
 }) {
+  const onEdit = canEdit ? () => onSettings({ tab: "channels", target: channel.id }) : undefined;
+  const onInvite = canInvite ? () => inviteTo(channel.id) : undefined;
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
   const { compact, setNavOpen } = useLayout();
@@ -707,6 +729,7 @@ function ChannelRow({
       data-id={channel.id}
       data-parent={parent}
       layout="position"
+      layoutDependency={shape}
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.025 } }}
       exit={{ opacity: 0, x: -10, transition: { duration: 0.15 } }}
@@ -751,7 +774,7 @@ function ChannelRow({
       {voice && <VoiceUsers instanceKey={instanceKey} serverId={channel.serverId} channelId={channel.id} />}
     </motion.li>
   );
-}
+});
 
 /** A channel's icon, with a padlock on private ones. */
 function ChannelGlyph({ icon: Icon, locked, active }: { icon: typeof HashIcon; locked: boolean; active: boolean }) {

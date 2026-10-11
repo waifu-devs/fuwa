@@ -283,7 +283,7 @@ impl SettingsView {
         // How agents connect.
         let how = self.agents.how_to;
         let url = self.core.shared.read(|s| s.instance(&key).map(|i| i.url.clone())).unwrap_or_default();
-        let host = if self.core.prefs().hides_personal() {
+        let host = if self.core.prefs_now().hides_personal() {
             "••••••".to_owned()
         } else {
             url.trim_start_matches("https://").trim_start_matches("http://").to_owned()
@@ -500,7 +500,7 @@ impl SettingsView {
                                             this.agents.making = false;
                                             this.agents.open = Some(id.clone());
                                             this.agents.fresh = Some((id, token));
-                                            this.agents.token_shown = !this.core.prefs().hides_personal();
+                                            this.agents.token_shown = !this.core.prefs_now().hides_personal();
                                         }
                                         Err(e) => {
                                             this.toast("circle-alert", e.message, cx);
@@ -975,7 +975,7 @@ impl SettingsView {
                                         match result {
                                             Ok(token) => {
                                                 this.agents.fresh = Some((id, token));
-                                                this.agents.token_shown = !this.core.prefs().hides_personal();
+                                                this.agents.token_shown = !this.core.prefs_now().hides_personal();
                                             }
                                             Err(e) => this.toast("circle-alert", e.message, cx),
                                         }

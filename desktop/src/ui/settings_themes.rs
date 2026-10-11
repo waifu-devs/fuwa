@@ -268,7 +268,7 @@ pub(crate) fn theme_preview(
 impl SettingsView {
     fn backdrop_of(&self, target: Target) -> Backdrop {
         match target {
-            Target::App => self.core.prefs().backdrop,
+            Target::App => self.core.prefs_now().backdrop.clone(),
             Target::Draft => self.themes.draft.as_ref().and_then(|(t, _)| t.backdrop.clone()).unwrap_or_default(),
         }
     }
@@ -1065,7 +1065,7 @@ impl SettingsView {
         }
         theme.updated_at = crate::core::dms::now_ms();
         let (id, name) = (theme.id.clone(), theme.name.clone());
-        let in_use = self.core.prefs().theme == id;
+        let in_use = self.core.prefs_now().theme == id;
         self.set(cx, |pr| {
             match pr.custom_themes.iter_mut().find(|t| t.id == theme.id) {
                 Some(slot) => *slot = theme,

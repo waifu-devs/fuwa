@@ -104,6 +104,12 @@ impl RenderImage {
     pub fn frame_count(&self) -> usize {
         self.data.len()
     }
+
+    /// Takes the image apart into its frames, so their buffers can be used again
+    /// (a video's next picture written into the last one's memory).
+    pub fn into_frames(self) -> SmallVec<[Frame; 1]> {
+        self.data
+    }
 }
 
 impl fmt::Debug for RenderImage {

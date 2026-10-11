@@ -62,6 +62,8 @@ pub struct Home {
     pub create: crate::ui::join::CreateForm,
     /// Asks how your applications went every half a minute.
     _watch: Task<()>,
+    /// The page's scrolling, so only the cards in sight are built (`windowed.rs`).
+    scroll: gpui_kit::ScrollHandle,
 }
 
 /// Browse on one instance.
@@ -114,6 +116,7 @@ impl Home {
                 browse: HashMap::new(),
                 joining: HashSet::new(),
                 joined: HashSet::new(),
+                scroll: gpui_kit::ScrollHandle::new(),
                 errors: HashMap::new(),
                 withdrawing: HashSet::new(),
                 sso_waiting: None,
@@ -427,6 +430,7 @@ impl FuwaApp {
             .id("instance-page")
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.home.scroll)
             .child(div().w_full().flex().justify_center().pt(px(24.0)).pb(px(64.0)).child(body))
             .into_any_element()
     }
@@ -461,7 +465,7 @@ impl FuwaApp {
             .line_height(px(20.0))
             .font_weight(FontWeight::BOLD)
             .text_color(muted)
-            .child(conn_dot(connection, p, window))
+            .child(conn_dot(connection, p, window, cx))
             .child(format!("{label} ·"))
             .child(if streamer { "•••••".to_owned() } else { key.replace('~', "/") })
             .child("·")
@@ -722,10 +726,17 @@ impl FuwaApp {
             page = page.child(self.featured_section(key, &featured, width, cols, p, window, cx));
         }
         let card_w = (width - 16.0 * f32::from(cols - 1)) / f32::from(cols);
-        let mut rows = div().flex().flex_col().gap(px(16.0));
-        for (r, chunk) in shown.chunks(usize::from(cols)).enumerate() {
+        // Only the rows of cards near what's in sight are built: a big instance has hundreds.
+        let chunks: Vec<_> = shown.chunks(usize::from(cols)).collect();
+        let keys: Vec<SharedString> = chunks
+            .iter()
+            .map(|c| format!("{cols}|{}", c.first().map(|s| s.id.as_str()).unwrap_or_default()).into())
+            .collect();
+        let plan = crate::ui::windowed::plan(format!("browse|{key}"), &self.home.scroll, &keys, 16.0, 220.0);
+        let mut rows = Vec::new();
+        for r in plan.rows() {
             let mut row = div().flex().gap(px(16.0));
-            for (c, s) in chunk.iter().enumerate() {
+            for (c, s) in chunks[r].iter().enumerate() {
                 let n = r * usize::from(cols) + c;
                 let card = self.server_card(key, s, card_w, p, window, cx);
                 row = row.child(motion::rise(
@@ -735,9 +746,9 @@ impl FuwaApp {
                     20.0,
                 ));
             }
-            rows = rows.child(row);
+            rows.push(row.into_any_element());
         }
-        page.child(rows).into_any_element()
+        page.child(plan.finish(rows, window)).into_any_element()
     }
 
     /// The servers the instance's admins feature, over the rest: two to a
@@ -1400,24 +1411,27 @@ pub(crate) fn connection_label(c: Connection) -> String {
 }
 
 /// The web's `.conn-dot` (0.55rem), pinging while live and breathing while it connects.
-fn conn_dot(c: Connection, p: &Palette, window: &Window) -> AnyElement {
+fn conn_dot(c: Connection, p: &Palette, window: &Window, cx: &App) -> AnyElement {
     let dot = crate::ui::widgets::conn_dot(c, p).size(px(8.8)).border_0();
     match c {
         Connection::Live => {
             let ring: Hsla = gpui_kit::rgb(0x3ecf8e).into();
-            let ping = motion::ambient(
-                div().absolute().rounded_full().bg(ring),
-                "home-conn-ping",
-                Duration::from_millis(2400),
-                window,
-                |el, t| {
-                    let k = (t / 0.75).min(1.0);
-                    let grow = 1.0 + k;
-                    let s = 8.8 * grow;
-                    el.size(px(s)).left(px((8.8 - s) / 2.0)).top(px((8.8 - s) / 2.0)).opacity(1.0 - k)
-                },
-            );
-            div().relative().size(px(8.8)).flex_none().child(ping).child(dot.absolute()).into_any_element()
+            let p = *p;
+            // Drawn over the page (`floats.rs`), so the ping doesn't build the page again every frame.
+            crate::ui::floats::float("home-conn-ping", 8.8, 8.8, Duration::from_millis(2400), window, cx, move |t| {
+                let k = (t / 0.75).min(1.0);
+                let s = 8.8 * (1.0 + k);
+                let ping = div()
+                    .absolute()
+                    .rounded_full()
+                    .bg(ring)
+                    .size(px(s))
+                    .left(px((8.8 - s) / 2.0))
+                    .top(px((8.8 - s) / 2.0))
+                    .opacity(1.0 - k);
+                let dot = crate::ui::widgets::conn_dot(Connection::Live, &p).size(px(8.8)).border_0();
+                div().relative().size(px(8.8)).flex_none().child(ping).child(dot.absolute()).into_any_element()
+            })
         }
         Connection::Connecting | Connection::Reconnecting => motion::ambient(
             div().flex_none().child(dot),

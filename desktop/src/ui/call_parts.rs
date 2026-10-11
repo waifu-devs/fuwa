@@ -59,23 +59,21 @@ pub(crate) fn ping_dot(
     color: impl Into<gpui_kit::Hsla>,
     wave: gpui_kit::Hsla,
     window: &Window,
+    cx: &gpui_kit::App,
 ) -> Div {
-    let ping = motion::ambient(
-        div().absolute().inset_0().rounded_full().bg(wave),
-        ElementId::Name(id.into()),
-        Duration::from_secs(1),
-        window,
-        |el, t| {
-            let k = ping_at(t);
-            el.scale(1.0 + k).opacity(1.0 - k)
-        },
-    );
-    div()
-        .relative()
-        .size(px(size))
-        .flex_none()
-        .child(ping)
-        .child(div().absolute().inset_0().rounded_full().bg(color.into()))
+    let color: gpui_kit::Hsla = color.into();
+    // Drawn over the window rather than in its part (`floats.rs`), so a call's ping
+    // doesn't build the sidebar or the call's page again every frame.
+    let dot = crate::ui::floats::float(id.into(), size, size, Duration::from_secs(1), window, cx, move |t| {
+        let k = ping_at(t);
+        div()
+            .relative()
+            .size(px(size))
+            .child(div().absolute().inset_0().rounded_full().bg(wave).scale(1.0 + k).opacity(1.0 - k))
+            .child(div().absolute().inset_0().rounded_full().bg(color))
+            .into_any_element()
+    });
+    div().relative().size(px(size)).flex_none().child(dot)
 }
 
 /// How far a ping has gone `t` into its loop: out over the first three
@@ -1331,7 +1329,7 @@ impl FuwaApp {
                 )
                 // The web's `RecordingDot`, pinging while it records.
                 .when(on, |el| {
-                    el.child(ping_dot(format!("{id}|dot"), 8.0, red(), alpha(red(), 0.6), window).mt(px(6.0)))
+                    el.child(ping_dot(format!("{id}|dot"), 8.0, red(), alpha(red(), 0.6), window, cx).mt(px(6.0)))
                 })
                 .on_hover(cx.listener(move |this, over: &bool, _, cx| {
                     if *over {

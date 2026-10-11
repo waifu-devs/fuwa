@@ -17,6 +17,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px, radians,
 };
 
+use crate::core::Watch;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
@@ -162,6 +163,10 @@ pub struct EmojiPicker {
     pub recent: Vec<String>,
     /// The layout and what it was made from.
     pub layout: Option<(u64, Rc<PickLayout>)>,
+    /// When the layout was last checked (the store's version), for what (the
+    /// place, the query and the tone): until the instance changes, it stands
+    /// without making the catalog again.
+    pub checked: Option<(u64, String)>,
 }
 
 impl Default for EmojiPicker {
@@ -173,6 +178,7 @@ impl Default for EmojiPicker {
             scroll: gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(200.0)),
             recent: Vec::new(),
             layout: None,
+            checked: None,
         }
     }
 }
@@ -228,7 +234,7 @@ impl FuwaApp {
         self.reacting = None;
         self.emoji_open = true;
         self.picker = None;
-        self.emoji = EmojiPicker { recent: self.core.prefs().recent_emoji, ..Default::default() };
+        self.emoji = EmojiPicker { recent: self.core.prefs_now().recent_emoji.clone(), ..Default::default() };
         self.emoji_born = Some(std::time::Instant::now());
         self.emoji_query.update(cx, |state, cx| {
             state.set_value("", window, cx);
@@ -268,6 +274,21 @@ impl FuwaApp {
     /// The grid for what's typed, kept until the query, the emoji or the tone change.
     fn emoji_layout(&mut self, query: &str, tone: u8) -> Rc<PickLayout> {
         use std::hash::{Hash as _, Hasher as _};
+        // Nothing the catalog is made from changed: the layout stands.
+        let version = self.core.shared.version();
+        let place = format!(
+            "{:?}|{:?}|{}|{query}|{tone}",
+            self.target().map(|t| t.id()),
+            self.reacting.as_ref().map(|r| &r.msg),
+            self.reacting.as_ref().is_some_and(|r| r.standard_only)
+        );
+        if let (Some((seen, was)), Some((_, layout))) = (&self.emoji.checked, &self.emoji.layout)
+            && *was == place
+            && self.target().is_some_and(|t| !self.core.shared.changed_since(*seen, &[Watch::Instance(t.key())]))
+        {
+            return layout.clone();
+        }
+        self.emoji.checked = Some((version, place));
         let catalog = self.emoji_catalog();
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (query, tone).hash(&mut h);
@@ -439,7 +460,7 @@ impl FuwaApp {
             return None;
         }
         let query = self.emoji_query.read(cx).value().to_string();
-        let tone = self.core.prefs().skin_tone;
+        let tone = self.core.prefs_now().skin_tone;
         let layout = self.emoji_layout(&query, tone);
         if layout.searching && self.emoji.active.is_none() && !layout.flat.is_empty() {
             self.emoji.active = Some(0);

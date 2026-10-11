@@ -12,6 +12,8 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -242,7 +244,9 @@ pub struct Vault {
     dir: PathBuf,
     key: [u8; 32],
     head: Head,
-    items: HashMap<String, Vec<Item>>,
+    /// The conversations read from disk so far, shared with the store (which
+    /// shows the open one from the same copy), and when each was last used.
+    items: HashMap<String, (Arc<Vec<Item>>, Instant)>,
 }
 
 /// What an encrypted vault file starts with, then a 24-byte nonce, then the sealed JSON.
@@ -322,13 +326,30 @@ impl Vault {
         self.head.sent.get(hash).and_then(|p| B64.decode(p).ok())
     }
 
-    /// A conversation's items, oldest first.
-    pub fn items(&mut self, conversation: &str) -> std::io::Result<&mut Vec<Item>> {
+    /// A conversation's items, oldest first, read from disk the first time.
+    pub fn items(&mut self, conversation: &str) -> std::io::Result<&Arc<Vec<Item>>> {
+        let now = Instant::now();
         if !self.items.contains_key(conversation) {
             let list: Vec<Item> = read_sealed(&self.key, &self.items_path(conversation))?.unwrap_or_default();
-            self.items.insert(conversation.to_owned(), list);
+            self.items.insert(conversation.to_owned(), (Arc::new(list), now));
         }
-        Ok(self.items.get_mut(conversation).expect("just loaded"))
+        let (list, used) = self.items.get_mut(conversation).expect("just loaded");
+        *used = now;
+        Ok(list)
+    }
+
+    /// A conversation's items to change (copied first if the store still
+    /// shows the copy it had).
+    fn items_mut(&mut self, conversation: &str) -> std::io::Result<&mut Vec<Item>> {
+        self.items(conversation)?;
+        Ok(Arc::make_mut(&mut self.items.get_mut(conversation).expect("just loaded").0))
+    }
+
+    /// Lets go of what's been read of conversations unused for `idle` and
+    /// not `kept` (they're read from disk again when needed).
+    pub fn release(&mut self, idle: Duration, kept: impl Fn(&str) -> bool) {
+        let now = Instant::now();
+        self.items.retain(|c, (_, used)| kept(c) || now.duration_since(*used) < idle);
     }
 
     /// Forgets everything kept for one conversation or channel: its note and what it said.
@@ -374,7 +395,7 @@ impl Vault {
             if backing_up && !self.head.unbacked.iter().any(|(c, s)| *c == conversation && *s == item.seq) {
                 self.head.unbacked.push((conversation.clone(), item.seq));
             }
-            let list = self.items(&conversation)?;
+            let list = self.items_mut(&conversation)?;
             match list.binary_search_by_key(&item.seq, |i| i.seq) {
                 Ok(at) => list[at] = item,
                 Err(at) => list.insert(at, item),
@@ -386,7 +407,7 @@ impl Vault {
         std::fs::create_dir_all(&self.dir)?;
         restrict(&self.dir, true)?;
         for conversation in conversations {
-            self.write_sealed(&self.items_path(&conversation), &self.items[&conversation])?;
+            self.write_sealed(&self.items_path(&conversation), &*self.items[&conversation].0)?;
         }
         self.write_sealed(&self.dir.join("vault.json"), &self.head)
     }
@@ -450,7 +471,7 @@ impl Vault {
         for (conversation, item) in items {
             let note = self.head.notes.entry(conversation.clone()).or_default();
             note.read = note.read.max(item.seq);
-            let list = self.items(&conversation)?;
+            let list = self.items_mut(&conversation)?;
             match list.binary_search_by_key(&item.seq, |i| i.seq) {
                 Ok(at) => list[at] = item,
                 Err(at) => list.insert(at, item),
@@ -462,7 +483,7 @@ impl Vault {
         std::fs::create_dir_all(&self.dir)?;
         restrict(&self.dir, true)?;
         for conversation in conversations {
-            self.write_sealed(&self.items_path(&conversation), &self.items[&conversation])?;
+            self.write_sealed(&self.items_path(&conversation), &*self.items[&conversation].0)?;
         }
         self.save_head()
     }

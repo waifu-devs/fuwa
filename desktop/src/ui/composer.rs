@@ -209,7 +209,7 @@ impl FuwaApp {
 
     /// Tells the box whether Enter sends or adds a line, as the Chat setting says.
     pub(crate) fn follow_send_with(&mut self, cx: &mut Context<Self>) {
-        let enter = self.core.prefs().send_with == crate::core::config::SendWith::Enter;
+        let enter = self.core.prefs_now().send_with == crate::core::config::SendWith::Enter;
         if self.composing.enter_sends != Some(enter) {
             self.composing.enter_sends = Some(enter);
             self.composer.update(cx, |state, cx| state.set_submit_on_enter(enter, cx));
@@ -388,7 +388,7 @@ impl FuwaApp {
             );
             return crate::ui::text::hint_line(&template, &[("keys", "Enter"), ("esc", "Esc")], p).into_any_element();
         }
-        let (send, line) = match self.core.prefs().send_with {
+        let (send, line) = match self.core.prefs_now().send_with {
             crate::core::config::SendWith::Enter => (label("Enter"), label("Shift+Enter")),
             crate::core::config::SendWith::ModEnter => (label("Mod+Enter"), label("Enter")),
         };

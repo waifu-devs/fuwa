@@ -354,7 +354,7 @@ impl FuwaApp {
     }
 
     fn start_playing(&mut self, media_id: String, sound: Arc<Vec<f32>>, from_ms: u64, cx: &mut Context<Self>) {
-        let rate = self.core.prefs().voice_rate;
+        let rate = self.core.prefs_now().voice_rate;
         self.voice.playing = Some(Playing { media_id, player: Player::play(sound, from_ms, rate) });
         crate::core::reports::used("dm.voice.play");
         self.voice_tick(cx);
@@ -363,7 +363,7 @@ impl FuwaApp {
 
     /// Steps voice messages to the next speed (1×, 1.5×, 2×), kept for next time.
     pub(crate) fn next_voice_rate(&mut self, cx: &mut Context<Self>) {
-        let rate = next_rate(self.core.prefs().voice_rate);
+        let rate = next_rate(self.core.prefs_now().voice_rate);
         self.core.set_prefs(|prefs| prefs.voice_rate = rate);
         if let Some(playing) = &self.voice.playing {
             playing.player.set_rate(rate);
@@ -427,7 +427,7 @@ impl FuwaApp {
 
     /// Gives the conversation's voice messages how they're playing.
     pub(crate) fn dress_voice(&self, rows: &mut [Row]) {
-        let rate = self.core.prefs().voice_rate;
+        let rate = self.core.prefs_now().voice_rate;
         for row in rows {
             let Row::Msg(m) = row else { continue };
             let Some(card) = &m.voice else { continue };

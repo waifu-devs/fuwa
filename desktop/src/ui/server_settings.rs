@@ -501,11 +501,22 @@ impl ServerSettingsView {
         let member_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("serversettings.members.search")));
         let query = cx.new(|cx| InputState::new(window, cx).placeholder(t("settings.screen.search")));
         let (pages, page_subscriptions) = pages::Pages::new(window, cx);
-        // The page reads the instance as it draws, so it draws again when that changes.
+        // The page reads the instance as it draws, so it draws again when that
+        // changes; not for messages, presence or direct messages, which no page shows.
         let mut changes = core.changes();
+        let watching = core.clone();
         cx.spawn_in(window, async move |this, cx| {
+            let mut seen = watching.shared.version();
             while changes.changed().await.is_ok() {
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let now = watching.shared.version();
+                let changed = watching.shared.changed_since(seen, &[]);
+                seen = now;
+                let going = this.update(cx, |_, cx| {
+                    if changed {
+                        cx.notify();
+                    }
+                });
+                if going.is_err() {
                     break;
                 }
             }

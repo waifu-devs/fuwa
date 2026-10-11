@@ -548,7 +548,7 @@ impl FuwaApp {
                     .bg(alpha(p.background, 0.8))
                     .px(px(8.0))
                     .py(px(2.0))
-                    .child(live_badge(&user.id, window))
+                    .child(live_badge(&user.id, window, cx))
                     .child(
                         div()
                             .min_w_0()

@@ -1148,7 +1148,7 @@ impl ServerSettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let left = ms(code.expires_at.as_ref()) - now;
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let deleting = self.shared.busy.contains(&code.code);
         let copied =
             self.copied.as_ref().is_some_and(|(c, at)| *c == code.code && at.elapsed() < Duration::from_millis(1400));
@@ -1520,7 +1520,7 @@ impl ServerSettingsView {
 
     /// A code just made, to copy.
     fn fresh_code(&self, code: &pb::ShareCode, now: i64, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let copied =
             self.copied.as_ref().is_some_and(|(c, at)| *c == code.code && at.elapsed() < Duration::from_millis(1400));
         let value = code.code.clone();

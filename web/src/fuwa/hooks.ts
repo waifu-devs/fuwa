@@ -6,6 +6,7 @@ import { accessOf, NO_ACCESS, type Access } from "@/lib/permissions";
 import { run } from "./actions";
 import type { FuwaError } from "./errors";
 import { i18n } from "@/i18n/i18n";
+import { byId, memberById } from "./lists";
 import { store, useFuwa, type InstanceState } from "./store";
 
 /**
@@ -96,13 +97,19 @@ export const useRoles = (key: string, serverId: string): Role[] =>
 export const useMyMember = (key: string, serverId: string): Member | undefined =>
   useFuwa((s) => {
     const i = s.instances[key];
-    return i?.members[serverId]?.find((m) => m.user?.id === i.me?.id);
+    return memberById(i?.members[serverId], i?.me?.id);
   });
+
+/** Someone's membership in a server, looked up by id without scanning the list on every change. */
+export const useMember = (key: string, serverId: string, userId: string | undefined): Member | undefined =>
+  useFuwa((s) => memberById(s.instances[key]?.members[serverId], userId));
+
+export { byId, memberById };
 
 /** What you can do in a server, worked out as the server does. */
 export function useAccess(key: string, serverId: string): Access {
-  const ownerId = useFuwa((s) => s.instances[key]?.servers.find((x) => x.id === serverId)?.ownerId);
-  const hasRules = useFuwa((s) => !!s.instances[key]?.servers.find((x) => x.id === serverId)?.hasRules);
+  const ownerId = useFuwa((s) => byId(s.instances[key]?.servers, serverId)?.ownerId);
+  const hasRules = useFuwa((s) => !!byId(s.instances[key]?.servers, serverId)?.hasRules);
   const meId = useFuwa((s) => s.instances[key]?.me?.id);
   const member = useMyMember(key, serverId);
   const roles = useRoles(key, serverId);
@@ -129,10 +136,10 @@ export function useAccess(key: string, serverId: string): Access {
 /** What you can do in a server right now, worked out as `useAccess` does, for code that runs outside rendering (a right-click menu). */
 export function accessNow(key: string, serverId: string): Access {
   const i = store.get().instances[key];
-  const server = i?.servers.find((x) => x.id === serverId);
+  const server = byId(i?.servers, serverId);
   const meId = i?.me?.id;
   if (!i || !server?.ownerId || !meId) return NO_ACCESS;
-  const member = i.members[serverId]?.find((m) => m.user?.id === meId);
+  const member = memberById(i.members[serverId], meId);
   return accessOf(
     serverId,
     server.ownerId,

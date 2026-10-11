@@ -112,6 +112,8 @@ const BLURRED_SIDE: f32 = 480.0;
 /// The picture blurred by `blur` points. It's made smaller, blurred off the
 /// main thread and kept; until it's ready (or while a resize makes it
 /// again) the last one made for this picture shows, and nothing sharp does.
+/// Once it's been made smaller, the full-size picture is let go: blurring it
+/// again (a resize) starts from the smaller copy.
 fn blurred(
     url: SharedString,
     fit: Fit,
@@ -121,17 +123,35 @@ fn blurred(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<AnyElement> {
+    /// The picture made smaller (BGRA, `dw` by `dh`), and its own size.
+    #[derive(Clone)]
+    struct Small {
+        url: SharedString,
+        iw: f32,
+        ih: f32,
+        dw: usize,
+        dh: usize,
+        bytes: Arc<Vec<u8>>,
+    }
     struct Made {
         key: String,
         working: Option<String>,
-        image: Option<(SharedString, Arc<Image>, f32, f32)>,
+        image: Option<(SharedString, Arc<RenderImage>, f32, f32)>,
+        small: Option<Small>,
     }
-    static MADE: Mutex<Made> = Mutex::new(Made { key: String::new(), working: None, image: None });
+    static MADE: Mutex<Made> = Mutex::new(Made { key: String::new(), working: None, image: None, small: None });
 
     let resource = Resource::Uri(url.clone().into());
-    let Some(Ok(source)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else { return None };
-    let s = source.size(0);
-    let (iw, ih) = (i32::from(s.width).max(1) as f32, i32::from(s.height).max(1) as f32);
+    let small = MADE.lock().small.clone().filter(|s| s.url == url);
+    // The full-size picture, only until it's been made smaller.
+    let (source, iw, ih) = match &small {
+        Some(s) => (None, s.iw, s.ih),
+        None => {
+            let Some(Ok(source)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else { return None };
+            let s = source.size(0);
+            (Some(source), i32::from(s.width).max(1) as f32, i32::from(s.height).max(1) as f32)
+        }
+    };
     let shrink = (iw.max(ih) / BLURRED_SIDE).max(1.0);
     let (dw, dh) = ((iw / shrink).round().max(1.0) as usize, (ih / shrink).round().max(1.0) as usize);
     let scale = window.scale_factor();
@@ -150,27 +170,56 @@ fn blurred(
         made.working = Some(key.clone());
         let view = window.current_view();
         let wrap = fit == Fit::Tile;
-        let work = cx.background_executor().spawn(async move { blur_picture(&source, dw, dh, radius, wrap) });
-        let (url, key) = (url.clone(), key.clone());
-        cx.spawn(async move |cx| {
-            let png = work.await;
-            let mut made = MADE.lock();
-            if made.working.as_deref() == Some(key.as_str()) {
-                made.working = None;
-                if let Some(png) = png {
-                    made.key = key;
-                    let (tw, th) = (iw / scale, ih / scale);
-                    made.image = Some((url, Arc::new(Image::from_bytes(ImageFormat::Png, png)), tw, th));
-                }
+        let work = cx.background_executor().spawn({
+            let url = url.clone();
+            async move {
+                let small = match (small, source) {
+                    (Some(small), _) => small,
+                    (None, Some(source)) => {
+                        let bytes = Arc::new(shrink_picture(&source, dw, dh)?);
+                        Small { url, iw, ih, dw, dh, bytes }
+                    }
+                    (None, None) => return None,
+                };
+                let picture = blur_picture(&small.bytes, small.dw, small.dh, radius, wrap)?;
+                Some((small, picture))
             }
-            drop(made);
-            cx.update(|cx| cx.notify(view));
-        })
-        .detach();
+        });
+        let (url, key) = (url.clone(), key.clone());
+        window
+            .spawn(cx, async move |cx| {
+                let done = work.await;
+                let mut made = MADE.lock();
+                let (mut let_go, mut replaced) = (false, None);
+                if made.working.as_deref() == Some(key.as_str()) {
+                    made.working = None;
+                    if let Some((small, picture)) = done {
+                        made.key = key;
+                        let (tw, th) = (iw / scale, ih / scale);
+                        replaced = made.image.replace((url, picture, tw, th)).map(|(_, old, ..)| old);
+                        let_go = made.small.as_ref().is_none_or(|s| s.url != small.url);
+                        made.small = Some(small);
+                    }
+                }
+                drop(made);
+                let _ = cx.update(|window, cx| {
+                    if let_go {
+                        cx.remove_asset::<ImgResourceLoader>(&resource);
+                    }
+                    if let Some(old) = replaced {
+                        // The last blur, out of the window's textures; everything is drawn
+                        // again so nothing kept still shows it.
+                        cx.drop_image(old, Some(window));
+                        window.refresh();
+                    }
+                    cx.notify(view)
+                });
+            })
+            .detach();
     }
     let (_, image, tw, th) = made.image.as_ref().filter(|(u, ..)| *u == url)?;
     if fit == Fit::Tile {
-        return Some(tiled(Tile::Image(image.clone()), *tw, *th, w, h).into_any_element());
+        return Some(tiled(Tile::Render(image.clone()), *tw, *th, w, h).into_any_element());
     }
     Some(
         img(image.clone())
@@ -182,18 +231,15 @@ fn blurred(
     )
 }
 
-/// A loaded picture (BGRA) made `dw` by `dh` and blurred by three box blurs
-/// of `radius`, as a PNG. `wrap` blurs across the edges, so a repeated
-/// picture stays seamless.
-fn blur_picture(source: &RenderImage, dw: usize, dh: usize, radius: usize, wrap: bool) -> Option<Vec<u8>> {
+/// A loaded picture (BGRA) made `dw` by `dh`, each pixel the average of the ones it covers.
+fn shrink_picture(source: &RenderImage, dw: usize, dh: usize) -> Option<Vec<u8>> {
     let s = source.size(0);
     let (sw, sh) = (usize::try_from(i32::from(s.width)).ok()?, usize::try_from(i32::from(s.height)).ok()?);
     let bytes = source.as_bytes(0)?;
     if sw == 0 || sh == 0 || bytes.len() < sw * sh * 4 {
         return None;
     }
-    // Smaller first: each pixel the average of the ones it covers.
-    let mut px = vec![0f32; dw * dh * 4];
+    let mut out = vec![0u8; dw * dh * 4];
     for y in 0..dh {
         let (y0, y1) = (y * sh / dh, ((y + 1) * sh / dh).max(y * sh / dh + 1).min(sh));
         for x in 0..dw {
@@ -210,21 +256,27 @@ fn blur_picture(source: &RenderImage, dw: usize, dh: usize, radius: usize, wrap:
             let n = ((y1 - y0) * (x1 - x0)) as f32;
             let at = (y * dw + x) * 4;
             for c in 0..4 {
-                px[at + c] = sum[c] / n;
+                out[at + c] = (sum[c] / n).round().clamp(0.0, 255.0) as u8;
             }
         }
     }
+    Some(out)
+}
+
+/// A small picture (BGRA, `dw` by `dh`) blurred by three box blurs of
+/// `radius`, ready to draw. `wrap` blurs across the edges, so a repeated
+/// picture stays seamless.
+fn blur_picture(small: &[u8], dw: usize, dh: usize, radius: usize, wrap: bool) -> Option<Arc<RenderImage>> {
+    let mut px: Vec<f32> = small.iter().map(|v| f32::from(*v)).collect();
     let mut line = Vec::new();
     for _ in 0..3 {
         box_blur(&mut px, dw, dh, 1, dw, radius, wrap, &mut line);
         box_blur(&mut px, dh, dw, dw, 1, radius, wrap, &mut line);
     }
-    let mut rgba = Vec::with_capacity(dw * dh * 4);
-    for p in px.chunks(4) {
-        // BGRA back to RGBA.
-        rgba.extend_from_slice(&[p[2], p[1], p[0], p[3]].map(|v| v.round().clamp(0.0, 255.0) as u8));
-    }
-    Some(crate::ui::png::png(dw as u32, dh as u32, &rgba, false))
+    // Still BGRA, as the window draws pictures.
+    let bgra: Vec<u8> = px.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect();
+    let buffer = image::RgbaImage::from_raw(dw as u32, dh as u32, bgra)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])))
 }
 
 /// One box blur pass along lines of `len` pixels `step` apart, `lines` of
@@ -275,6 +327,7 @@ fn box_blur(
 enum Tile {
     Uri(SharedString),
     Image(Arc<Image>),
+    Render(Arc<RenderImage>),
 }
 
 /// A picture repeated over `w` by `h`, scaled up when it's tiny so it stays a few hundred tiles.
@@ -288,6 +341,7 @@ fn tiled(tile: Tile, tw: f32, th: f32, w: f32, h: f32) -> gpui_kit::Div {
         let el = match &tile {
             Tile::Uri(u) => crate::ui::widgets::picture(u.clone()),
             Tile::Image(i) => img(i.clone()).id("texture-tile"),
+            Tile::Render(i) => img(i.clone()).id("texture-tile"),
         };
         grid = grid.child(el.flex_none().w(px(tw)).h(px(th)).object_fit(ObjectFit::Fill));
     }

@@ -110,7 +110,7 @@ impl FuwaApp {
             return true;
         }
         // With the Chat setting on Ctrl+Enter, that sends and Enter adds a line.
-        let with = self.core.prefs().send_with;
+        let with = self.core.prefs_now().send_with;
         if with == crate::core::config::SendWith::ModEnter && crate::ui::composer::sends_message(key, with) {
             self.send_now(window, cx);
             return true;
@@ -147,7 +147,7 @@ impl FuwaApp {
             self.picker = None;
             return;
         }
-        let tone = self.core.prefs().skin_tone;
+        let tone = self.core.prefs_now().skin_tone;
         let options = self.core.shared.read(|s| match &target {
             Target::Channel { key, server, channel } => s
                 .instance(key)

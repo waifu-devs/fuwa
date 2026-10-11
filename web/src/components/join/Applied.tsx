@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { ApplicationStatus } from "@/gen/fuwa/v1/types_pb";
 import { checkApplied, dismissApplied, run, withdrawApplication } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useInstances } from "@/fuwa/hooks";
-import type { InstanceState } from "@/fuwa/store";
+import { useFuwa, type InstanceState } from "@/fuwa/store";
 import { ServerIcon } from "@/components/Icons";
 import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
@@ -15,6 +14,7 @@ import { i18n } from "@/i18n/i18n";
 import { useI18n } from "@/i18n/react";
 import type { Applied } from "@/lib/applied";
 import { ago } from "@/lib/format";
+import { everyWhileVisible } from "@/lib/schedule";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +27,15 @@ const EVERY = 30_000;
  * Nothing runs while you aren't waiting on any.
  */
 export function AppliedWatcher() {
-  const instances = useInstances();
-  const waiting = instances
-    .filter((i) => i.me && i.connection === "live" && Object.values(i.applied).some((a) => a.status === ApplicationStatus.PENDING))
-    .map((i) => i.key)
-    .join(" ");
+  // One string, so the watcher redraws only when which instances it asks changes, not on every event.
+  const waiting = useFuwa((s) =>
+    s.order
+      .filter((k) => {
+        const i = s.instances[k];
+        return !!i?.me && i.connection === "live" && Object.values(i.applied).some((a) => a.status === ApplicationStatus.PENDING);
+      })
+      .join(" "),
+  );
   useEffect(() => {
     if (!waiting) return;
     const keys = waiting.split(" ");
@@ -49,14 +53,8 @@ export function AppliedWatcher() {
           },
         );
     };
-    check();
-    const id = setInterval(check, EVERY);
-    const onShow = () => document.visibilityState === "visible" && check();
-    document.addEventListener("visibilitychange", onShow);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onShow);
-    };
+    // Only while the page is shown; coming back to the tab after a round was due asks at once.
+    return everyWhileVisible(EVERY, check, { immediate: true });
   }, [waiting]);
   return null;
 }

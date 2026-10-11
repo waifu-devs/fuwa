@@ -15,7 +15,7 @@ import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { DmList } from "@/components/dm/DmList";
 import { HostedBadge } from "@/components/HostedBadge";
-import { lazyComponent } from "@/components/lazy";
+import { intent, lazyComponent } from "@/components/lazy";
 import { useI18n } from "@/i18n/react";
 
 const InstanceSettingsDialog = lazyComponent(
@@ -61,6 +61,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
           <button
             type="button"
             onClick={() => setSettings(true)}
+            {...intent(InstanceSettingsDialog)}
             title={t("workspace.instanceSidebar.settings")}
             className="group grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
           >

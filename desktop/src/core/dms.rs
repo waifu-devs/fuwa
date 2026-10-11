@@ -31,12 +31,12 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tonic::Code;
 
-use crate::core::Shared;
 use crate::core::api::{Api, Problem};
 use crate::core::calls;
 use crate::core::history::{self, Candidate, LogKind, Logged};
 use crate::core::secure_threads;
 use crate::core::vault::{Change, DeviceRef, Item, ItemKind, Note, Signed, Vault, VoiceFile, sha256_hex};
+use crate::core::{Area, Shared};
 use crate::pb;
 use crate::rpc;
 
@@ -93,8 +93,15 @@ pub struct DmState {
     pub device_id: String,
     /// The latest first.
     pub conversations: Vec<pb::Conversation>,
-    /// What each conversation said, as this device opened it, oldest first.
-    pub items: HashMap<String, Vec<Item>>,
+    /// What each conversation said, as this device opened it, oldest first:
+    /// all of it for the conversations opened lately and secure channels (the
+    /// vault's own copy, shared), only the end from its last message on for
+    /// the others ([`preview_tail`]), which is what the list shows of them.
+    pub items: HashMap<String, Arc<Vec<Item>>>,
+    /// Conversations opened lately, the latest first: the one on screen and
+    /// up to [`KEEP_OPEN`] before it keep all their lines in the store (the
+    /// web's `touchRecent`), so going back to one is instant.
+    pub opened: Vec<String>,
     pub unread: HashMap<String, u32>,
     /// Every device in each conversation's group.
     pub members: HashMap<String, Vec<DmMember>>,
@@ -119,6 +126,34 @@ pub struct DmState {
     /// Per secure channel: the threads you follow or stopped following, and
     /// what you've seen in each (`secure_threads.rs`).
     pub thread_notes: HashMap<String, Note>,
+}
+
+/// How many conversations keep all their lines after they're left (the one
+/// on screen not counted), as the web's `KEEP_OPEN`.
+pub const KEEP_OPEN: usize = 3;
+
+/// `id` came on screen: it goes to the front of the conversations opened
+/// lately. Gives those that fell off the end.
+pub fn touch_opened(opened: &mut Vec<String>, id: &str) -> Vec<String> {
+    opened.retain(|o| o != id);
+    opened.insert(0, id.to_owned());
+    opened.split_off(opened.len().min(KEEP_OPEN + 1))
+}
+
+/// How long a conversation's lines stay in memory once it's not on screen
+/// and nothing has used them.
+const FORGET_READ: Duration = Duration::from_secs(10 * 60);
+
+/// What's kept in the store of a conversation that isn't on screen: its
+/// lines from the last message on (what its line in the list shows), or
+/// nothing when it has no messages. Opening it puts it all in again
+/// (`DmEngine::refresh`).
+pub fn preview_tail(items: &Arc<Vec<Item>>) -> Arc<Vec<Item>> {
+    match items.iter().rposition(|i| i.kind == ItemKind::Text) {
+        Some(0) => items.clone(),
+        Some(at) => Arc::new(items[at..].to_vec()),
+        None => Arc::default(),
+    }
 }
 
 /// A message being encrypted and sent, or one that couldn't be (the web's `PendingMessage`).
@@ -556,8 +591,9 @@ impl DmEngine {
         self.stop.is_cancelled()
     }
 
+    /// Changes only the direct messages' state (`Area::Dms`).
     fn update(&self, f: impl FnOnce(&mut DmState)) {
-        self.shared.instance(&self.key, |i| f(&mut i.dms));
+        self.shared.instance_in(&self.key, &[Area::Dms(&self.key)], |i| f(&mut i.dms));
     }
 
     /// Follows the account's conversations until stopped, reconnecting with backoff.
@@ -1016,7 +1052,7 @@ impl DmEngine {
             let mut lines = Vec::new();
             if channel {
                 // A thread goes with its message: replies under a deleted one are dropped here (and only here).
-                lines = inner.vault.items(id)?.clone();
+                lines = inner.vault.items(id)?.to_vec();
                 for (c, i) in &change.items {
                     if c == id {
                         match lines.iter_mut().find(|l| l.seq == i.seq) {
@@ -1791,7 +1827,7 @@ impl DmEngine {
         let secure = self.secure.lock().contains_key(id);
         {
             let mut inner = self.inner.lock().await;
-            let mut all = inner.vault.items(id).map(|i| i.clone()).unwrap_or_default();
+            let mut all = inner.vault.items(id).map(|i| i.to_vec()).unwrap_or_default();
             if let Some(before) = all.iter_mut().find(|i| i.seq == seq)
                 && !before.deleted
             {
@@ -1885,7 +1921,8 @@ impl DmEngine {
         // Held until the store has what was read, so a refresh that read
         // earlier can't put its older copy over a newer one.
         let mut inner = self.inner.lock().await;
-        let items = inner.vault.items(id).map(|i| i.clone()).unwrap_or_default();
+        // Shared with the vault, not copied.
+        let items: Arc<Vec<Item>> = inner.vault.items(id).map(Arc::clone).unwrap_or_default();
         let note = inner.vault.note(id);
         let members = if inner.device.is_member(id) { inner.device.members(id).unwrap_or_default() } else { vec![] };
         // Let go of meanwhile.
@@ -1913,8 +1950,15 @@ impl DmEngine {
             })
             .collect();
         let last = items.last().map(|i| i.seq).unwrap_or(0);
+        // Conversations read a while ago and not on screen leave memory (the
+        // vault reads them again when they're needed).
+        let opened = self.shared.read(|s| s.instance(&self.key).map(|i| i.dms.opened.clone()).unwrap_or_default());
+        inner.vault.release(FORGET_READ, |c| c == id || opened.iter().any(|o| o == c));
         if let Some(c) = conversation {
             let safety = self.safety_number(&c, &members);
+            // Only those opened lately are kept whole; the list shows the others' last line.
+            let whole = looking || opened.iter().any(|o| o == id);
+            let items = if whole { items } else { preview_tail(&items) };
             self.update(|d| {
                 d.items.insert(id.to_owned(), items);
                 d.unread.insert(id.to_owned(), unread);
@@ -1928,7 +1972,7 @@ impl DmEngine {
             });
         } else {
             // A secure channel's unread count goes with the server's channels.
-            self.shared.instance(&self.key, |i| {
+            self.shared.instance_in(&self.key, &[Area::Dms(&self.key)], |i| {
                 i.dms.items.insert(id.to_owned(), items);
                 i.dms.members.insert(id.to_owned(), shown);
                 i.dms.thread_notes.insert(id.to_owned(), note.clone());
@@ -2236,5 +2280,31 @@ mod pending_tests {
         let list = &dms.sending["c"];
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].failed.as_deref(), Some("nope"));
+    }
+
+    #[test]
+    fn conversations_left_keep_only_their_last_message() {
+        let all = Arc::new(vec![
+            Item::new(1, ItemKind::Text, 0, "u", "d"),
+            Item::new(2, ItemKind::Text, 0, "u", "d"),
+            Item::new(3, ItemKind::Devices, 0, "u", "d"),
+        ]);
+        let tail = preview_tail(&all);
+        assert_eq!(tail.iter().map(|i| i.seq).collect::<Vec<_>>(), vec![2, 3]);
+        // A tail again is itself, not a copy.
+        assert!(Arc::ptr_eq(&preview_tail(&tail), &tail));
+        assert!(preview_tail(&Arc::new(vec![Item::new(1, ItemKind::Joined, 0, "u", "d")])).is_empty());
+    }
+
+    #[test]
+    fn the_last_few_opened_stay_whole() {
+        let mut opened = Vec::new();
+        for id in ["a", "b", "c", "d"] {
+            assert!(touch_opened(&mut opened, id).is_empty());
+        }
+        assert_eq!(touch_opened(&mut opened, "b"), Vec::<String>::new());
+        assert_eq!(opened, ["b", "d", "c", "a"]);
+        assert_eq!(touch_opened(&mut opened, "e"), vec!["a".to_owned()]);
+        assert_eq!(opened, ["e", "b", "d", "c"]);
     }
 }

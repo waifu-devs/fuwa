@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useMemo, type Ref } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import { isMessage, lineText, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
@@ -10,6 +10,7 @@ import { useLayout } from "@/components/Shell";
 import { Count } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
 import { useContextMenu } from "@/components/ContextMenu";
+import { useVirtualList } from "@/components/virtual";
 import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";
 import { blockedIds } from "@/lib/friends";
@@ -32,6 +33,20 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
   const { t } = useI18n();
+  // Conversations pile up over time, so only the ones in view are drawn, each at its place; a conversation
+  // that moves to the top glides there (`.member-line`).
+  const keys = useMemo(() => conversations.map((c) => c.id), [conversations]);
+  const { listRef, measure, total, lines } = useVirtualList(keys, { estimate: 44 });
+  // Only conversations that just started slide in; rows scrolled into view just appear.
+  const known = useRef<Set<string> | null>(null);
+  const present = useMemo(() => {
+    const ids = new Set(keys);
+    const fresh = known.current ? new Set(keys.filter((id) => !known.current!.has(id))) : new Set<string>();
+    return { ids, fresh };
+  }, [keys]);
+  useEffect(() => {
+    known.current = present.ids;
+  }, [present]);
   if (status === "off") return null;
   return (
     <section aria-label={t("dms-calls.dm.list.label")} className="mt-4">
@@ -80,10 +95,16 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
             </p>
           </motion.div>
         )}
-        {conversations.map((c, n) => (
-          <DmLink key={c.id} instanceKey={instanceKey} conversation={c} index={n} />
-        ))}
       </AnimatePresence>
+      <div ref={listRef as React.RefObject<HTMLDivElement | null>} className="relative" style={{ height: total }}>
+        <AnimatePresence initial={false} custom={present.ids} presenceAffectsLayout={false}>
+          {lines.map((line) => (
+            <div key={line.key} ref={measure} data-vkey={line.key} className="member-line absolute inset-x-0 top-0" style={{ transform: `translateY(${line.top}px)` }}>
+              <DmLink instanceKey={instanceKey} conversation={conversations[line.index]!} enter={present.fresh.has(line.key)} />
+            </div>
+          ))}
+        </AnimatePresence>
+      </div>
     </section>
   );
 }
@@ -101,17 +122,8 @@ function preview(t: I18n["t"], items: Item[] | undefined, meId: string | undefin
   return "";
 }
 
-function DmLink({
-  instanceKey,
-  conversation,
-  index,
-  ref,
-}: {
-  instanceKey: string;
-  conversation: Conversation;
-  index: number;
-  ref?: Ref<HTMLDivElement>;
-}) {
+/** One conversation: memoized, so it redraws for its own messages, unread count or call, not the list's every change. */
+const DmLink = memo(function DmLink({ instanceKey, conversation, enter }: { instanceKey: string; conversation: Conversation; enter: boolean }) {
   const { compact, setNavOpen } = useLayout();
   const { t } = useI18n();
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
@@ -123,11 +135,14 @@ function DmLink({
   const menu = useContextMenu("dm", () => dmMenu({ instanceKey, conversation, other }));
   return (
     <motion.div
-      ref={ref}
-      layout="position"
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.03 } }}
-      exit={{ opacity: 0, x: -10, transition: { duration: 0.15 } }}
+      initial={enter ? { opacity: 0, x: -10 } : false}
+      animate={{ opacity: 1, x: 0 }}
+      exit="exit"
+      variants={{
+        // A conversation that went away slides out; one that only scrolled out of view goes at once.
+        exit: (present: Set<string>) =>
+          present.has(conversation.id) ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, x: -10, transition: { duration: 0.15 } },
+      }}
       transition={SPRING}
     >
       <Link
@@ -191,4 +206,4 @@ function DmLink({
       </Link>
     </motion.div>
   );
-}
+});

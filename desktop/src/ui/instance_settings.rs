@@ -422,7 +422,7 @@ impl InstanceSettingsView {
             })
         };
         // Streamer mode keeps addresses and account ids off the screen, as on the web.
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let fields = Fields {
             slot,
             key: input(&p.api_key, &t("instancesettings.moderation.paste"), true, window, cx),
@@ -469,7 +469,7 @@ impl InstanceSettingsView {
 
     /// The boxes for settings typed as text, each writing to the draft as it changes.
     fn make_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         for (path, placeholder, get, set) in TEXTS {
             let masked = path == "turn_secret" || (hide && path == "public_url");
             let state = cx.new(|cx| {

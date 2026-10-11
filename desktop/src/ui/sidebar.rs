@@ -2,6 +2,7 @@
 //! instance's servers, with who you are at the bottom. The highlight under
 //! the open row glides from one row to the next.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -74,7 +75,16 @@ impl FuwaApp {
                     .border_color(p.border)
                     .child(header),
             )
-            .child(div().id("sidebar-scroll").flex_1().overflow_y_scroll().px(px(8.0)).pb(px(12.0)).child(body))
+            .child(
+                div()
+                    .id("sidebar-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .track_scroll(&sidebar_scroll())
+                    .px(px(8.0))
+                    .pb(px(12.0))
+                    .child(body),
+            )
             .when_some(call_bar, |el, bar| el.child(bar))
             .child(self.me_panel(window, cx))
     }
@@ -97,10 +107,18 @@ impl FuwaApp {
                 }
                 _ => Default::default(),
             };
+            // Only this server's channels' counts, not the whole instance's.
+            let unread: HashMap<String, u32> = match (i, &channels) {
+                (Some(i), Some(list)) => list
+                    .iter()
+                    .filter_map(|c| i.unread.get(&c.id).filter(|n| **n > 0).map(|n| (c.id.clone(), *n)))
+                    .collect(),
+                _ => HashMap::new(),
+            };
             (
                 i.and_then(|i| i.server(server_id).cloned()),
                 channels,
-                i.map(|i| i.unread.clone()).unwrap_or_default(),
+                unread,
                 muted,
                 i.map(|i| i.access(server_id)).unwrap_or_default(),
                 i.is_some_and(|i| crate::core::notifications::is_muted(i.notification_settings(server_id, ""), now)),
@@ -618,27 +636,44 @@ impl FuwaApp {
                     view.update(cx, |view, cx| view.show(crate::ui::server_settings::Page::Applications, cx));
                 }
             }))
-            .child(
-                div()
-                    .relative()
-                    .size(px(28.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(crate::ui::theme::radius_lg())
-                    .bg(p.primary)
-                    .text_color(p.primary_foreground)
-                    // A ring that keeps swelling out of the tile and fading (1.6s).
-                    .child(motion::ambient(
-                        div().absolute().inset_0().rounded(crate::ui::theme::radius_lg()).bg(p.primary),
-                        "applications-ping",
-                        Duration::from_millis(1600),
-                        window,
-                        |el, t| el.opacity(0.6 * (1.0 - t)).scale(1.0 + 0.6 * t),
-                    ))
-                    .child(icon("clipboard-list").size(px(16.0))),
-            )
+            // A ring that keeps swelling out of the tile and fading (1.6s), drawn over the
+            // sidebar (`floats.rs`) so it doesn't build the sidebar again every frame.
+            .child({
+                let (fill, ink) = (p.primary, p.primary_foreground);
+                crate::ui::floats::float(
+                    "applications-ping",
+                    28.0,
+                    28.0,
+                    Duration::from_millis(1600),
+                    window,
+                    cx,
+                    move |t| {
+                        div()
+                            .relative()
+                            .size(px(28.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(crate::ui::theme::radius_lg())
+                            .bg(fill)
+                            .text_color(ink)
+                            .when(t > 0.0, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .rounded(crate::ui::theme::radius_lg())
+                                        .bg(fill)
+                                        .opacity(0.6 * (1.0 - t))
+                                        .scale(1.0 + 0.6 * t),
+                                )
+                            })
+                            .child(icon("clipboard-list").size(px(16.0)))
+                            .into_any_element()
+                    },
+                )
+            })
             .child(
                 div()
                     .flex_1()
@@ -997,12 +1032,17 @@ impl FuwaApp {
         }
 
         let mut list = div().relative().pt(px(8.0));
-        let mut highlight = None;
-        for (n, row) in rows.iter().enumerate() {
+        let highlight = rows
+            .iter()
+            .position(|row| open.as_ref().is_some_and(|(k, id)| *k == row.key && *id == row.id))
+            .map(|n| 8.0 + n as f32 * 48.0);
+        // Only the conversations near what's in sight are built (`windowed.rs`).
+        let keys: Vec<SharedString> = rows.iter().map(|r| format!("{}|{}", r.key, r.id).into()).collect();
+        let plan = crate::ui::windowed::plan("sidebar-dms", &sidebar_scroll(), &keys, 0.0, 48.0);
+        let mut built = Vec::new();
+        for n in plan.rows() {
+            let row = &rows[n];
             let active = open.as_ref().is_some_and(|(k, id)| *k == row.key && *id == row.id);
-            if active {
-                highlight = Some(8.0 + n as f32 * 48.0);
-            }
             let name = row.other.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| "Someone".into());
             let hover = alpha(p.primary, 0.08);
             let nav = Nav::Home { dm: Some((row.key.clone(), row.id.clone())) };
@@ -1013,63 +1053,67 @@ impl FuwaApp {
                 window,
                 cx,
             );
-            list = list.child(motion::rise(
-                div()
-                    .id(SharedString::from(format!("dm|{}|{}", row.key, row.id)))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        self.right_click(MenuOf::Dm { key: row.key.clone(), conversation: row.id.clone() }, cx),
-                    )
-                    .when(
-                        self.context.as_ref().is_some_and(|m| m.of.lit() == format!("dm|{}|{}", row.key, row.id)),
-                        |el| el.bg(hover),
-                    )
-                    .h(px(46.0))
-                    .mb(px(2.0))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(corner(12.0))
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
-                    .child(avatar(row.other.as_ref(), 32.0, &p))
-                    .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .when(active || row.unread > 0, |el| el.font_weight(FontWeight::BOLD))
-                                    .child(name),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(p.muted_foreground)
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(if streamer { "Encrypted".to_owned() } else { row.instance.clone() }),
-                            ),
-                    )
-                    .when_some(unread, |el, (unread, left)| {
-                        let id = format!("dm-n|{}|{}", row.key, row.id);
-                        el.child(
-                            div()
-                                .when(left < 1.0, |el| el.scale(left))
-                                .child(badge(id, unread, p.sidebar, &p, window, cx)),
+            built.push(
+                motion::rise(
+                    div()
+                        .id(SharedString::from(format!("dm|{}|{}", row.key, row.id)))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            self.right_click(MenuOf::Dm { key: row.key.clone(), conversation: row.id.clone() }, cx),
                         )
-                    }),
-                SharedString::from(format!("dm-in|{}|{}", row.key, row.id)),
-                Duration::from_millis(24 * n as u64),
-                6.0,
-            ));
+                        .when(
+                            self.context.as_ref().is_some_and(|m| m.of.lit() == format!("dm|{}|{}", row.key, row.id)),
+                            |el| el.bg(hover),
+                        )
+                        .h(px(46.0))
+                        .mb(px(2.0))
+                        .px(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .rounded(corner(12.0))
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                        .child(avatar(row.other.as_ref(), 32.0, &p))
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .when(active || row.unread > 0, |el| el.font_weight(FontWeight::BOLD))
+                                        .child(name),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(p.muted_foreground)
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .child(if streamer { "Encrypted".to_owned() } else { row.instance.clone() }),
+                                ),
+                        )
+                        .when_some(unread, |el, (unread, left)| {
+                            let id = format!("dm-n|{}|{}", row.key, row.id);
+                            el.child(
+                                div()
+                                    .when(left < 1.0, |el| el.scale(left))
+                                    .child(badge(id, unread, p.sidebar, &p, window, cx)),
+                            )
+                        }),
+                    SharedString::from(format!("dm-in|{}|{}", row.key, row.id)),
+                    Duration::from_millis(24 * n.min(20) as u64),
+                    6.0,
+                )
+                .into_any_element(),
+            );
         }
+        list = list.child(plan.finish(built, window));
         if let Some(target) = highlight {
             let at = motion::follow("hl|dms", target, window, cx);
             list = div()
@@ -1143,7 +1187,7 @@ impl FuwaApp {
                         .map(|c| Dm {
                             id: c.id.clone(),
                             other: c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned()),
-                            line: preview(i.dms.items.get(&c.id).map(Vec::as_slice), &me),
+                            line: preview(i.dms.items.get(&c.id).map(|v| v.as_slice()), &me),
                             unread: i.dms.unread.get(&c.id).copied().unwrap_or(0),
                             calling: i.dms.calls.get(&c.id).is_some_and(|call| !call.participants.is_empty()),
                         })
@@ -2109,4 +2153,12 @@ fn preview(items: Option<&[crate::core::vault::Item]>, me: &str) -> String {
         };
     }
     String::new()
+}
+
+/// The sidebar's scrolling, so only the conversations in sight are built.
+fn sidebar_scroll() -> gpui_kit::ScrollHandle {
+    thread_local! {
+        static SCROLL: gpui_kit::ScrollHandle = gpui_kit::ScrollHandle::new();
+    }
+    SCROLL.with(Clone::clone)
 }

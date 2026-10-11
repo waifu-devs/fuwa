@@ -239,10 +239,13 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
   width: 40%;
   background: linear-gradient(100deg, transparent, color-mix(in srgb, white 60%, transparent), transparent);
   transform: translateX(-120%) skewX(-14deg);
-  animation: glint 6s ease-in-out 1.4s infinite;
+  /* A few glints after it appears, then it rests (an endless one keeps the compositor busy); hovering glints again. */
+  animation: glint 6s ease-in-out 1.4s 3;
   pointer-events: none;
 }
+.hosted-chip:hover::after { animation: glint-once 0.9s ease-in-out; }
 @keyframes glint { 0% { transform: translateX(-120%) skewX(-14deg); } 22%, 100% { transform: translateX(320%) skewX(-14deg); } }
+@keyframes glint-once { 0% { transform: translateX(-120%) skewX(-14deg); } 100% { transform: translateX(320%) skewX(-14deg); } }
 @media (prefers-reduced-motion: reduce) { .hosted-chip::after { display: none; } }
 /* The same glint on anything: give a span inside it this class (encrypted-message buttons and pills). */
 .shine { overflow: hidden; }
@@ -253,8 +256,10 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
   width: 40%;
   background: linear-gradient(100deg, transparent, color-mix(in srgb, white 45%, transparent), transparent);
   transform: translateX(-120%) skewX(-14deg);
-  animation: glint 7s ease-in-out 1.2s infinite;
+  animation: glint 7s ease-in-out 1.2s 3;
 }
+/* Its button (or whatever holds it) glints again under the pointer. */
+:hover > .shine::after { animation: glint-once 0.9s ease-in-out; }
 @media (prefers-reduced-motion: reduce) { .shine::after { display: none; } }
 .tilt { transform-style: preserve-3d; will-change: transform; position: relative; }
 .tilt::after {
@@ -681,7 +686,8 @@ mark.search-hit { background: color-mix(in srgb, var(--primary) 26%, transparent
   .conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 9999px; display: inline-block; position: relative; }
 }
 .conn-dot[data-state="live"] { background: #3ecf8e; }
-.conn-dot[data-state="live"]::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #3ecf8e; animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite; }
+/* A few pings when it comes live (the pseudo-element is new then), then a steady dot: one per instance in the rail. */
+.conn-dot[data-state="live"]::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #3ecf8e; animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) 3; }
 .conn-dot[data-state="connecting"],
 .conn-dot[data-state="reconnecting"] { background: #f5a524; animation: breathe 1.2s ease-in-out infinite; }
 .conn-dot[data-state="offline"] { background: var(--destructive); }
@@ -857,14 +863,24 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 @keyframes siren { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
 
 /* Calls (components/calls). Someone talking: a green ring that breathes with them. */
+/* The ring's own glow stays put; the breath is a second, wider glow on a pseudo-element fading in and out,
+   so only opacity animates (on the compositor) instead of a box-shadow blur repainted every frame. */
 .speaking-ring {
   border-style: solid;
   border-color: #3ba55d;
   box-shadow: 0 0 0 0 rgb(59 165 93 / 0.5), 0 0 14px rgb(59 165 93 / 0.45);
-  animation: speaking 1.1s ease-in-out infinite;
   pointer-events: none;
 }
-@keyframes speaking { 50% { box-shadow: 0 0 0 4px rgb(59 165 93 / 0.18), 0 0 22px rgb(59 165 93 / 0.55); } }
+.speaking-ring::after {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--ring, 3px));
+  border-radius: inherit;
+  box-shadow: 0 0 0 4px rgb(59 165 93 / 0.18), 0 0 22px rgb(59 165 93 / 0.4);
+  opacity: 0;
+  animation: speaking 1.1s ease-in-out infinite;
+}
+@keyframes speaking { 50% { opacity: 1; } }
 
 /* A call ringing: the phone shakes, then rests, like a real one. */
 @keyframes ringing { 0%, 50%, 100% { transform: rotate(0); } 5%, 15%, 25%, 35% { transform: rotate(-16deg); } 10%, 20%, 30%, 40% { transform: rotate(16deg); } }
@@ -1138,3 +1154,6 @@ button:active > .rail-folder { scale: 0.92; }
 }
 @keyframes jumped { 0%, 35% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .jumped::after { animation-duration: 0.01s; animation-delay: 1.2s; } }
+
+/* Lists that draw only the lines in view (components/virtual.ts): a line whose height was just measured jumps into place rather than gliding. */
+[data-settling] .member-line { transition: none; }

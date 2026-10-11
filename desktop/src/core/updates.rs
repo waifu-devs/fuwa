@@ -171,8 +171,16 @@ pub fn status() -> Status {
 }
 
 fn set(core: &Core, status: Status) {
-    *STATUS.lock() = status;
-    core.shared.update(|_| {});
+    // Only the window shows it, and only when it moved (progress comes often).
+    let changed = {
+        let mut now = STATUS.lock();
+        let changed = *now != status;
+        *now = status;
+        changed
+    };
+    if changed {
+        core.shared.poke(&[crate::core::Area::Window]);
+    }
 }
 
 /// What an instance says about the latest release (see `server/src/releases.rs`).
@@ -636,7 +644,7 @@ impl Core {
             tokio::time::sleep(FIRST_CHECK).await;
             loop {
                 let Some(core) = weak.upgrade() else { return };
-                let install = core.prefs().auto_update;
+                let install = core.prefs_now().auto_update;
                 core.check_for_update(install).await;
                 drop(core);
                 tokio::time::sleep(CHECK_EVERY).await;

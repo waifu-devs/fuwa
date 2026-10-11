@@ -659,7 +659,7 @@ impl SettingsView {
             )
             .into_any_element();
         rows.push(("about-me", t("settings.nav.aboutMe"), Some(bio_hint), self.bio_field(&d, ready, p, window, cx)));
-        let username = if self.core.prefs().hides_personal() {
+        let username = if self.core.prefs_now().hides_personal() {
             "@••••••".to_owned()
         } else {
             format!("@{}", me.username)
@@ -751,7 +751,7 @@ impl SettingsView {
         let banner =
             banner_of(&me.id, if is_link(&d.banner) { d.banner.trim().to_owned() } else { String::new() }, d.accent, p)
                 .h(px(112.0));
-        let hidden = self.core.prefs().hides_personal();
+        let hidden = self.core.prefs_now().hides_personal();
         let effect =
             effect.map(|spec| self.effect_layer("preview-card", &spec, &me.id, d.accent, (288.0, 420.0), true, cx));
         let card = div()

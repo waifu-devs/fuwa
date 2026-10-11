@@ -247,11 +247,12 @@ pub fn system_dark(appearance: WindowAppearance) -> bool {
 }
 
 /// The backdrop on screen, kept as a global for the window to draw.
-pub struct CurrentBackdrop(pub Backdrop);
+pub struct CurrentBackdrop(pub std::sync::Arc<Backdrop>);
 
 impl gpui_kit::Global for CurrentBackdrop {}
 
-pub fn backdrop(cx: &App) -> Backdrop {
+/// Shared rather than copied: a custom shader's code comes along with it.
+pub fn backdrop(cx: &App) -> std::sync::Arc<Backdrop> {
     cx.try_global::<CurrentBackdrop>().map(|c| c.0.clone()).unwrap_or_default()
 }
 
@@ -267,7 +268,7 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     ROLE_BESIDE.store(prefs.role_colors == crate::core::config::RoleColors::Beside, Ordering::Relaxed);
     CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
     crate::ui::text::set_clock(prefs.clock);
-    cx.set_global(CurrentBackdrop(backdrop));
+    cx.set_global(CurrentBackdrop(std::sync::Arc::new(backdrop)));
     cx.set_global(Current(p));
     KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
     KitTheme::update(cx, |t| {

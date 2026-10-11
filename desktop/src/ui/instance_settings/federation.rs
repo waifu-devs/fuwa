@@ -294,7 +294,7 @@ impl InstanceSettingsView {
         };
         let defaults = config.defaults.clone().unwrap_or_default();
         let saved_on = self.saved().is_some_and(|s| s.federation);
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let blue = sky();
 
         // `mb-4 flex items-start gap-3 rounded-2xl border border-sky-500/30 bg-sky-500/5 p-3 text-sm`.

@@ -379,8 +379,8 @@ impl InstanceSettingsView {
         }
         let now = now_ms();
         let me = self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())));
-        let streamer = self.core.prefs().streamer_mode;
-        let developer = self.core.prefs().developer_mode;
+        let streamer = self.core.prefs_now().streamer_mode;
+        let developer = self.core.prefs_now().developer_mode;
         let a = &self.accounts;
         // A filter's name, with how many accounts it has once that's known.
         let option = |bare: &str, counted: &str, n: Option<i64>| match n {
@@ -796,7 +796,7 @@ impl InstanceSettingsView {
         let a = self.accounts.list.as_ref()?.iter().find(|x| id_of(x) == id)?.clone();
         let me = self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())))
             == Some(id.clone());
-        let developer = self.core.prefs().developer_mode;
+        let developer = self.core.prefs_now().developer_mode;
         let name = name_of(&a);
         let agent = is_agent(a.user.as_ref());
         let item = |key: &'static str,
@@ -1224,7 +1224,7 @@ impl InstanceSettingsView {
 
     /// The password, typed out letter by letter, behind a veil in streamer mode.
     fn new_password(&self, password: &str, p: &Palette, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let hidden = self.core.prefs().streamer_mode && !self.accounts.revealed;
+        let hidden = self.core.prefs_now().streamer_mode && !self.accounts.revealed;
         let copied = self.accounts.copied.is_some_and(|at| at.elapsed() < Duration::from_millis(1600));
         let mut letters =
             div().flex().justify_center().font_family("monospace").text_lg().font_weight(FontWeight::BOLD);

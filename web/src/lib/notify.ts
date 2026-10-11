@@ -1,10 +1,10 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { LeaveReason, MessageKind, type Event, type User } from "@/gen/fuwa/v1/types_pb";
-import { store, type InstanceState } from "@/fuwa/store";
+import { LeaveReason, MessageKind, type Event, type NotificationSettings, type User } from "@/gen/fuwa/v1/types_pb";
+import { notificationKey, store, type InstanceState } from "@/fuwa/store";
 import { doNotDisturb } from "@/fuwa/presence";
 import { i18n } from "@/i18n/i18n";
 import { displayName, memberName } from "@/lib/format";
-import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
+import { effectiveNotifications, isMuted, muteEnds, pingsMe, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { requestThread } from "@/lib/threads";
 import { play } from "@/lib/sounds";
@@ -262,21 +262,80 @@ export function setTitle(title: string) {
   document.title = (badge ? `(${badge > 99 ? "99+" : badge}) ` : "") + baseTitle;
 }
 
-function unreadTotal(): number {
-  if (!getPrefs().unreadBadge) return 0;
-  let total = 0;
-  const now = Date.now();
-  for (const inst of Object.values(store.get().instances)) {
-    for (const [serverId, channels] of Object.entries(inst.channels)) {
-      for (const channel of channels) {
-        const n = inst.unread[channel.id];
-        if (n && !effectiveNotifications(inst, serverId, channel.id, now).muted) total += n;
-      }
-    }
-    for (const n of Object.values(inst.dms.unread)) total += n;
-    for (const n of Object.values(inst.threadUnread)) total += n;
+/** One instance's part of the badge, kept until something it was counted from changes or a mute runs out. */
+type Tally = {
+  unread: InstanceState["unread"];
+  channels: InstanceState["channels"];
+  notifications: InstanceState["notifications"];
+  dmUnread: InstanceState["dms"]["unread"];
+  threadUnread: InstanceState["threadUnread"];
+  total: number;
+  /** When a timed mute that mattered here runs out (Infinity: none). */
+  until: number;
+};
+const tallies = new Map<string, Tally>();
+
+function tally(inst: InstanceState, now: number): Tally {
+  const had = tallies.get(inst.key);
+  if (
+    had &&
+    had.unread === inst.unread &&
+    had.channels === inst.channels &&
+    had.notifications === inst.notifications &&
+    had.dmUnread === inst.dms.unread &&
+    had.threadUnread === inst.threadUnread &&
+    now < had.until
+  ) {
+    return had;
   }
-  return total;
+  let total = 0;
+  let until = Infinity;
+  const muted = (n: NotificationSettings | undefined) => {
+    if (!isMuted(n, now)) return false;
+    until = Math.min(until, muteEnds(n));
+    return true;
+  };
+  for (const [serverId, channels] of Object.entries(inst.channels)) {
+    const server = inst.notifications[notificationKey(serverId)];
+    let serverOff: boolean | undefined;
+    for (const channel of channels) {
+      const n = inst.unread[channel.id];
+      if (!n) continue;
+      serverOff ??= muted(server);
+      // Both are looked at, so `until` knows when either runs out.
+      const channelOff = muted(inst.notifications[notificationKey(serverId, channel.id)]);
+      if (!serverOff && !channelOff) total += n;
+    }
+  }
+  for (const n of Object.values(inst.dms.unread)) total += n;
+  for (const n of Object.values(inst.threadUnread)) total += n;
+  const next: Tally = {
+    unread: inst.unread,
+    channels: inst.channels,
+    notifications: inst.notifications,
+    dmUnread: inst.dms.unread,
+    threadUnread: inst.threadUnread,
+    total,
+    until,
+  };
+  tallies.set(inst.key, next);
+  return next;
+}
+
+/** The unread count for the badge, and when it may change by itself (a timed mute running out). */
+function unreadTotal(): { total: number; until: number } {
+  if (!getPrefs().unreadBadge) return { total: 0, until: Infinity };
+  const now = Date.now();
+  const instances = store.get().instances;
+  let total = 0;
+  let until = Infinity;
+  for (const inst of Object.values(instances)) {
+    const t = tally(inst, now);
+    total += t.total;
+    until = Math.min(until, t.until);
+  }
+  for (const key of tallies.keys()) if (!instances[key]) tallies.delete(key);
+  return { total, until };
 }
 
 let icon: HTMLImageElement | null = null;
@@ -318,8 +377,17 @@ function drawIcon(count: number) {
 
 /** Keeps the tab's title and icon showing the unread count. */
 export function watchUnread() {
+  let wake: ReturnType<typeof setTimeout> | null = null;
+  let wakeAt = Infinity;
   const update = () => {
-    const next = unreadTotal();
+    const { total: next, until } = unreadTotal();
+    // Timed mutes run out on their own: look again then.
+    if (until !== wakeAt) {
+      if (wake) clearTimeout(wake);
+      wake = null;
+      wakeAt = until;
+      if (until !== Infinity) wake = setTimeout(update, Math.min(Math.max(0, until - Date.now()) + 50, 2 ** 31 - 1));
+    }
     if (next === badge) return;
     badge = next;
     setTitle(baseTitle);
@@ -327,7 +395,5 @@ export function watchUnread() {
   };
   store.subscribe(update);
   subscribePrefs(update);
-  // Timed mutes run out on their own.
-  setInterval(update, 30_000);
   update();
 }

@@ -136,9 +136,14 @@ impl Element for ImageCacheElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        for child in &mut self.children {
-            child.prepaint(window, cx);
-        }
+        // fuwa: lists and cached views lay their children out while they
+        // prepaint, so the cache stays on hand for them too.
+        let image_cache = self.image_cache_provider.provide(window, cx);
+        window.with_image_cache(Some(image_cache), |window| {
+            for child in &mut self.children {
+                child.prepaint(window, cx);
+            }
+        })
     }
 
     fn paint(

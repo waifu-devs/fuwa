@@ -49,6 +49,11 @@ const BUDGET_MS: f32 = 20.0;
 const STUCK: Duration = Duration::from_millis(2500);
 /// A layer the window hasn't asked for in this long is let go.
 const FORGET: Duration = Duration::from_secs(3);
+/// With no layer at all for this long, the thread ends and lets go of the
+/// device (its memory on the GPU, its driver threads). Long enough that
+/// glancing at a full-screen page (which hides the effects) doesn't start a
+/// device again on the way back.
+const LET_GO: Duration = Duration::from_secs(30);
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// What a layer draws: a built-in effect, or the WGSL of a custom shader.
@@ -257,6 +262,8 @@ fn run() {
         return;
     };
     JOBS.lock().gpu = Gpu::Ready;
+    // Since when nothing has been shown, while nothing is.
+    let mut unused: Option<Instant> = None;
     loop {
         let (checks, work, forget) = {
             let mut jobs = JOBS.lock();
@@ -267,9 +274,28 @@ fn run() {
                 let now = Instant::now();
                 jobs.layers.retain(|_, l| now - l.asked < FORGET);
                 if !jobs.checks.is_empty() || jobs.layers.values().any(|l| l.dirty) || !jobs.forget.is_empty() {
+                    unused = None;
                     break;
                 }
-                WAKE.wait_for(&mut jobs, Duration::from_secs(1));
+                // Effects off (or covered) for a while: the thread ends and the
+                // device goes with it; the next layer asked for starts both again.
+                let wait = match jobs.layers.values().map(|l| l.asked + FORGET).min() {
+                    Some(gone) => {
+                        unused = None;
+                        gone.saturating_duration_since(now) + Duration::from_millis(10)
+                    }
+                    None => {
+                        let since = *unused.get_or_insert(now);
+                        if now - since >= LET_GO {
+                            jobs.gpu = Gpu::Unknown;
+                            drop(jobs);
+                            tracing::debug!("no effects shown for a while; letting the GPU go");
+                            return;
+                        }
+                        LET_GO - (now - since)
+                    }
+                };
+                WAKE.wait_for(&mut jobs, wait);
             }
             let work: Vec<(u64, Source, (u32, u32), Inputs)> = jobs
                 .layers

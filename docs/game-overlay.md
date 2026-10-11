@@ -42,7 +42,7 @@ draw over other programs or hear keys meant for them.
   keeps nothing.
 - `desktop/src/core/hotkeys.rs` hears keys while another program is in
   front: push to talk, the overlay's key, and mute and deafen during a call.
-  It hooks nothing. A thread reads whether the watched keys are down, 100
+  It hooks nothing. A thread reads whether the watched keys are down, 40
   times a second, while something is watched (`GetAsyncKeyState`,
   `CGEventSourceKeyState`, X11's `QueryKeymap`), so the game still gets
   every key and no other key is read. With a fuwa window in front, the

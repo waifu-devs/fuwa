@@ -381,6 +381,12 @@ fn two_people_talk_in_a_server_and_in_private() {
         let (core, key, bob_id) = (alice.clone(), key.clone(), bob_id.clone());
         wait(&alice, async move { core.open_conversation(&key, &bob_id).await }).unwrap()
     };
+    // Each opens it once and goes back: conversations opened lately keep all
+    // their lines in the store, the others only their last message.
+    for core in [&alice, &bob] {
+        core.set_focus(Some(Focus { instance: key.clone(), channel: conversation.clone(), thread: None }));
+        core.set_focus(Some(Focus { instance: key.clone(), channel: general.clone(), thread: None }));
+    }
     {
         let (core, key, id) = (alice.clone(), key.clone(), conversation.clone());
         let content = Content::Text { text: "a secret 🍵".into(), reply_to: 0 };
@@ -758,6 +764,11 @@ fn two_people_talk_in_a_server_and_in_private() {
     // A restarted app picks up where it was: same session, same device, same history.
     drop(alice);
     let alice = Core::start(Paths::under(home_a.path())).unwrap();
+    // Until it's opened, only its last message is in memory.
+    until(&alice, "the conversation's last message", |s| {
+        s.instance(&key).unwrap().dms.items.get(&conversation).is_some_and(|items| items.len() == 1)
+    });
+    alice.set_focus(Some(Focus { instance: key.clone(), channel: conversation.clone(), thread: None }));
     said(&alice, "got it");
 
     instance.app.shutdown.cancel();

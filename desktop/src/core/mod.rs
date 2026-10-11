@@ -5,6 +5,9 @@
 //! The core runs on its own Tokio runtime, since the gRPC clients need one
 //! and GPUI has its own executor. It changes the store under a lock and bumps
 //! a version the window watches, so the window redraws after every change.
+//! Each change also says what it touched ([`Area`]), so the parts of the
+//! window that rebuild something big (the message list, the member list)
+//! can tell whether their part moved ([`Shared::changed_since`]).
 
 pub mod account;
 pub mod account_settings;
@@ -79,7 +82,7 @@ use tokio::sync::{mpsc, watch};
 use crate::core::api::{Api, Problem, instance_key, normalize_url};
 use crate::core::config::{Paths, Prefs, SavedInstance};
 use crate::core::dms::{Content, DmEngine, DmError, DmStatus};
-use crate::core::store::{ChannelMessages, Focus, InstanceState, PendingMessage, Store, upsert_message};
+use crate::core::store::{Focus, InstanceState, PendingMessage, Store, upsert_message};
 use crate::pb;
 use crate::rpc;
 
@@ -106,14 +109,115 @@ pub enum Notice {
     Friend { instance: String, title: String },
 }
 
+/// What one change to the store touched. Anything not named here is
+/// [`Area::All`], which every reader counts as theirs: a part narrower than
+/// that is only ever claimed by a change that touches nothing else, so a
+/// reader that skips work for it can't miss a change it shows. When in
+/// doubt, a change is `All`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Area<'a> {
+    /// Anything at all.
+    All,
+    /// One channel's loaded messages on an instance, and what hangs off them
+    /// only: the threads under them (their replies and parents), their
+    /// reactions and polls, the channel's unread count and newest message.
+    /// Not users, members, pins or anything another channel shows.
+    Messages { instance: &'a str, channel: &'a str },
+    /// Who's online on an instance (`InstanceState::people`), nothing else.
+    Presence(&'a str),
+    /// An instance's direct messages and secure channels' decrypted lines
+    /// (`InstanceState::dms`, and secure channels' unread counts).
+    Dms(&'a str),
+    /// Nothing in the store: something the window shows from elsewhere
+    /// changed (a game asking, a shader's status, an update's progress).
+    /// Only whole-window redraws follow it.
+    Window,
+}
+
+/// What a reader shows, to ask [`Shared::changed_since`] about. A change to
+/// [`Area::All`] counts for every one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watch<'a> {
+    /// One channel's messages (and threads under it).
+    Messages { instance: &'a str, channel: &'a str },
+    /// Who's online on an instance.
+    Presence(&'a str),
+    /// An instance's direct messages and secure channels.
+    Dms(&'a str),
+    /// Any change to one instance, whatever part (but not [`Area::Window`]).
+    Instance(&'a str),
+}
+
+/// When each part of the store last changed, as the version it changed at.
+/// The version is the window's ([`Core::changes`]), bumped once per change.
+#[derive(Debug, Default)]
+pub struct Changes {
+    /// The last change to everything ([`Area::All`]).
+    all: u64,
+    /// Per instance, its last change of any kind but `All`.
+    instances: HashMap<String, u64>,
+    messages: HashMap<String, HashMap<String, u64>>,
+    presence: HashMap<String, u64>,
+    dms: HashMap<String, u64>,
+}
+
+impl Changes {
+    fn mark(&mut self, area: Area<'_>, version: u64) {
+        let on = |map: &mut HashMap<String, u64>, key: &str| match map.get_mut(key) {
+            Some(at) => *at = version,
+            None => {
+                map.insert(key.to_owned(), version);
+            }
+        };
+        match area {
+            Area::All => self.all = version,
+            Area::Window => {}
+            Area::Messages { instance, channel } => {
+                on(&mut self.instances, instance);
+                match self.messages.get_mut(instance) {
+                    Some(channels) => on(channels, channel),
+                    None => {
+                        self.messages.insert(instance.to_owned(), HashMap::from([(channel.to_owned(), version)]));
+                    }
+                }
+            }
+            Area::Presence(instance) => {
+                on(&mut self.instances, instance);
+                on(&mut self.presence, instance);
+            }
+            Area::Dms(instance) => {
+                on(&mut self.instances, instance);
+                on(&mut self.dms, instance);
+            }
+        }
+    }
+
+    /// Whether anything `watched` shows changed after version `since`.
+    pub fn since(&self, since: u64, watched: &[Watch<'_>]) -> bool {
+        let after = |at: Option<&u64>| at.is_some_and(|at| *at > since);
+        self.all > since
+            || watched.iter().any(|w| match *w {
+                Watch::Messages { instance, channel } => {
+                    after(self.messages.get(instance).and_then(|channels| channels.get(channel)))
+                }
+                Watch::Presence(instance) => after(self.presence.get(instance)),
+                Watch::Dms(instance) => after(self.dms.get(instance)),
+                Watch::Instance(instance) => after(self.instances.get(instance)),
+            })
+    }
+}
+
 /// The store, and telling the window it changed.
 #[derive(Clone)]
 pub struct Shared {
     store: Arc<Mutex<Store>>,
     version: Arc<watch::Sender<u64>>,
+    /// What each change touched, by the version it bumped to.
+    changes: Arc<Mutex<Changes>>,
     notices: mpsc::UnboundedSender<Notice>,
-    /// The app's settings, here so the encryption engine can tell whether a message should notify.
-    prefs: Arc<Mutex<Prefs>>,
+    /// The app's settings, here so the encryption engine can tell whether a
+    /// message should notify. Shared, so reading them doesn't copy them.
+    prefs: Arc<Mutex<Arc<Prefs>>>,
 }
 
 impl Shared {
@@ -122,16 +226,96 @@ impl Shared {
         f(&self.store.lock())
     }
 
-    /// Changes the store and tells the window.
+    /// Changes the store and tells the window. Counts as a change to
+    /// everything ([`Area::All`]); [`Shared::update_in`] names a narrower part.
     pub fn update<R>(&self, f: impl FnOnce(&mut Store) -> R) -> R {
+        self.update_in(&[Area::All], f)
+    }
+
+    /// Changes the store, touching only `areas`, and tells the window. With
+    /// no areas the store is changed but nobody is told (for a change that
+    /// turned out to change nothing; see [`Shared::update_if`]).
+    pub fn update_in<R>(&self, areas: &[Area<'_>], f: impl FnOnce(&mut Store) -> R) -> R {
         let out = f(&mut self.store.lock());
-        self.version.send_modify(|v| *v = v.wrapping_add(1));
+        self.bump(areas);
         out
     }
 
-    /// Changes one instance; nothing if it was removed meanwhile.
+    /// Changes the store and tells the window only if `f` says it changed
+    /// something (the bool it gives back).
+    pub fn update_if<R>(&self, areas: &[Area<'_>], f: impl FnOnce(&mut Store) -> (R, bool)) -> R {
+        let (out, changed) = f(&mut self.store.lock());
+        if changed {
+            self.bump(areas);
+        }
+        out
+    }
+
+    /// Tells the window something it shows changed outside the store (or
+    /// that `areas` should be looked at again) without changing anything.
+    pub fn poke(&self, areas: &[Area<'_>]) {
+        self.bump(areas);
+    }
+
+    fn bump(&self, areas: &[Area<'_>]) {
+        if areas.is_empty() {
+            return;
+        }
+        // Marked before the version is seen, so a reader woken by it finds the marks.
+        self.version.send_modify(|v| {
+            *v = v.wrapping_add(1);
+            let mut changes = self.changes.lock();
+            for area in areas {
+                changes.mark(*area, *v);
+            }
+        });
+    }
+
+    /// The version the store is at now: the last change's.
+    pub fn version(&self) -> u64 {
+        *self.version.borrow()
+    }
+
+    /// Whether anything `watched` shows (or everything) changed after
+    /// version `since`. A reader keeps the [`Shared::version`] it last
+    /// looked at, read before it looks, and skips its work when this is false:
+    ///
+    /// ```ignore
+    /// let now = core.shared.version();
+    /// if core.shared.changed_since(self.seen, &[Watch::Presence(&key)]) {
+    ///     self.rebuild();
+    /// }
+    /// self.seen = now;
+    /// ```
+    pub fn changed_since(&self, since: u64, watched: &[Watch<'_>]) -> bool {
+        self.changes.lock().since(since, watched)
+    }
+
+    /// Changes one instance; nothing if it was removed meanwhile (and then
+    /// nobody is told).
     pub fn instance<R>(&self, key: &str, f: impl FnOnce(&mut InstanceState) -> R) -> Option<R> {
-        self.update(|s| s.instances.get_mut(key).map(f))
+        self.instance_in(key, &[Area::All], f)
+    }
+
+    /// Changes one instance, touching only `areas`; nothing if it was removed meanwhile.
+    pub fn instance_in<R>(&self, key: &str, areas: &[Area<'_>], f: impl FnOnce(&mut InstanceState) -> R) -> Option<R> {
+        self.update_if(areas, |s| match s.instances.get_mut(key) {
+            Some(i) => (Some(f(i)), true),
+            None => (None, false),
+        })
+    }
+
+    /// Changes one instance, telling the window only if `f` says it changed something.
+    pub fn instance_if(&self, key: &str, areas: &[Area<'_>], f: impl FnOnce(&mut InstanceState) -> bool) -> bool {
+        self.update_if(areas, |s| {
+            let changed = s.instances.get_mut(key).is_some_and(f);
+            (changed, changed)
+        })
+    }
+
+    /// The app's settings as they are now, shared rather than copied.
+    pub fn prefs(&self) -> Arc<Prefs> {
+        self.prefs.lock().clone()
     }
 
     pub fn is_focused(&self, key: &str, channel: &str) -> bool {
@@ -168,7 +352,7 @@ impl Shared {
         if self.is_focused(key, channel_id) || dms::now_ms() - item.at > 30_000 {
             return;
         }
-        let prefs = self.prefs.lock().clone();
+        let prefs = self.prefs();
         let notice = self.read(|s| {
             let i = s.instance(key)?;
             if i.me.as_ref().is_some_and(|m| m.id == item.sender_id) {
@@ -267,8 +451,9 @@ impl Core {
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
+            changes: Arc::new(Mutex::new(Changes::default())),
             notices: notices_tx,
-            prefs: Arc::new(Mutex::new(prefs.clone())),
+            prefs: Arc::new(Mutex::new(Arc::new(prefs.clone()))),
         };
         // Only you can open the app's folders.
         vault::private_dir(&paths.config)?;
@@ -279,7 +464,7 @@ impl Core {
         // A game asking to be allowed shows in the window.
         let games = presence::Games::new(prefs.game_answers.clone(), {
             let shared = shared.clone();
-            move || shared.update(|_| {})
+            move || shared.poke(&[Area::Window])
         });
         let game_activity = prefs.game_activity;
         // Custom shaders being tried are kept in the settings, so one that stops the app is remembered.
@@ -290,7 +475,7 @@ impl Core {
                 move |list| {
                     let saved = {
                         let mut prefs = prefs.lock();
-                        prefs.shaders_trying = list;
+                        Arc::make_mut(&mut prefs).shaders_trying = list;
                         prefs.clone()
                     };
                     config::store_prefs(&paths, &saved);
@@ -298,7 +483,7 @@ impl Core {
             },
             {
                 let shared = shared.clone();
-                move || shared.update(|_| {})
+                move || shared.poke(&[Area::Window])
             },
         );
         let core = Arc::new(Self {
@@ -374,15 +559,22 @@ impl Core {
 
     // ───────────────────────── Settings ─────────────────────────
 
+    /// A copy of the app's settings, to change or keep.
     pub fn prefs(&self) -> Prefs {
-        self.shared.prefs.lock().clone()
+        (*self.shared.prefs()).clone()
+    }
+
+    /// The app's settings as they are now, without copying them: for reading
+    /// them often (each event, each change the window sees).
+    pub fn prefs_now(&self) -> Arc<Prefs> {
+        self.shared.prefs()
     }
 
     pub fn set_prefs(&self, f: impl FnOnce(&mut Prefs)) {
         let (prefs, language_changed) = {
             let mut prefs = self.shared.prefs.lock();
             let language = prefs.language.clone();
-            f(&mut prefs);
+            f(Arc::make_mut(&mut prefs));
             (prefs.clone(), prefs.language != language)
         };
         if language_changed {
@@ -727,6 +919,21 @@ impl Core {
     pub fn set_focus(self: &Arc<Self>, focus: Option<Focus>) {
         let dm = self.shared.update(|s| {
             s.focus = focus.clone();
+            // What's out of sight now keeps only its newest page, and
+            // conversations only what their line in the list shows.
+            store::trim_out_of_sight(s);
+            // A conversation (perhaps one just started, not listed yet): not a server's channel.
+            if let Some(f) = &focus
+                && let Some(i) = s.instances.get_mut(&f.instance)
+                && !i.channels.values().any(|list| list.iter().any(|c| c.id == f.channel))
+            {
+                let dms = &mut i.dms;
+                for gone in dms::touch_opened(&mut dms.opened, &f.channel) {
+                    if let Some(items) = dms.items.get_mut(&gone) {
+                        *items = dms::preview_tail(items);
+                    }
+                }
+            }
             let f = focus.as_ref()?;
             let i = s.instances.get_mut(&f.instance)?;
             i.unread.remove(&f.channel);
@@ -738,7 +945,11 @@ impl Core {
         if let Some((key, id)) = dm
             && let Some(engine) = self.dm_engine(&key)
         {
-            self.runtime.spawn(async move { engine.mark_read(&id).await });
+            // All of it is read in again (only the end was kept while it wasn't open).
+            self.runtime.spawn(async move {
+                engine.mark_read(&id).await;
+                engine.refresh(&id).await;
+            });
         }
     }
 
@@ -820,6 +1031,21 @@ impl Core {
         cleared
     }
 
+    /// Lets go of the open channel's (or thread's, by `threads::thread_key`)
+    /// older messages, keeping the newest [`store::KEPT_IN_SIGHT`], for when
+    /// it's scrolled back down to its newest after reading far up. Scrolling
+    /// up again reads them again. Whether any went (and the list changed).
+    pub fn trim_open(&self, key: &str, at: &str) -> bool {
+        self.shared.update_if(&[Area::Messages { instance: key, channel: at }], |s| {
+            let trimmed = s
+                .instances
+                .get_mut(key)
+                .and_then(|i| i.messages.get_mut(at))
+                .is_some_and(|list| store::trim_messages(list, store::KEPT_IN_SIGHT));
+            (trimmed, trimmed)
+        })
+    }
+
     /// Loads the latest messages of a channel the first time it's opened, or older ones.
     pub async fn load_messages(
         &self,
@@ -842,13 +1068,18 @@ impl Core {
     ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
         let at = if thread_id.is_empty() { channel_id.to_owned() } else { threads::thread_key(thread_id) };
-        let current = self.shared.read(|s| s.instance(key).and_then(|i| i.messages.get(&at).cloned()));
-        if current.as_ref().is_some_and(|c| c.loading || !older)
-            || (older && !current.as_ref().is_some_and(|c| c.has_more))
+        // Where the list stands (loading, more to read, its oldest), not a copy of it.
+        let current = self.shared.read(|s| {
+            s.instance(key)
+                .and_then(|i| i.messages.get(&at))
+                .map(|c| (c.loading, c.has_more, c.items.first().map(|m| m.id.clone())))
+        });
+        if current.as_ref().is_some_and(|(loading, _, _)| *loading || !older)
+            || (older && !current.as_ref().is_some_and(|(_, has_more, _)| *has_more))
         {
             return Ok(());
         }
-        let before_id = if older { current.as_ref().and_then(|c| c.items.first()).map(|m| m.id.clone()) } else { None };
+        let before_id = if older { current.as_ref().and_then(|(_, _, first)| first.clone()) } else { None };
         self.shared.instance(key, |i| i.messages.entry(at.clone()).or_default().loading = true);
         let res = rpc!(
             api.messages(),
@@ -864,11 +1095,15 @@ impl Core {
         .await;
         self.shared.instance(key, |i| match res {
             Ok(res) => threads::put_page(i, &at, res, current.is_none(), older),
+            // As it was, with whatever came live meanwhile: a list that wasn't
+            // there and still has nothing goes again, so opening it tries again.
             Err(_) => {
-                match &current {
-                    Some(c) => i.messages.insert(at.clone(), ChannelMessages { loading: false, ..c.clone() }),
-                    None => i.messages.remove(&at),
-                };
+                if let Some(list) = i.messages.get_mut(&at) {
+                    list.loading = false;
+                    if current.is_none() && list.items.is_empty() {
+                        i.messages.remove(&at);
+                    }
+                }
             }
         });
         Ok(())
@@ -1252,5 +1487,32 @@ pub enum SignIn {
 impl DmStatus {
     pub fn is_ready(self) -> bool {
         self == DmStatus::Ready
+    }
+}
+
+#[cfg(test)]
+mod change_tests {
+    use super::*;
+
+    #[test]
+    fn readers_skip_only_changes_they_dont_show() {
+        let mut changes = Changes::default();
+        let messages = Watch::Messages { instance: "k", channel: "c" };
+        changes.mark(Area::Presence("k"), 1);
+        changes.mark(Area::Messages { instance: "k", channel: "other" }, 2);
+        changes.mark(Area::Messages { instance: "j", channel: "c" }, 3);
+        changes.mark(Area::Window, 4);
+        assert!(!changes.since(0, &[messages]));
+        assert!(changes.since(0, &[Watch::Presence("k")]));
+        assert!(!changes.since(1, &[Watch::Presence("k")]));
+        assert!(changes.since(1, &[Watch::Instance("k")]));
+        assert!(!changes.since(2, &[Watch::Instance("k"), Watch::Dms("k")]));
+        changes.mark(Area::Messages { instance: "k", channel: "c" }, 5);
+        assert!(changes.since(4, &[messages]));
+        assert!(!changes.since(5, &[messages]));
+        // A change to everything is everyone's.
+        changes.mark(Area::All, 6);
+        assert!(changes.since(5, &[]));
+        assert!(changes.since(5, &[Watch::Presence("k")]));
     }
 }

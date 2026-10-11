@@ -7,7 +7,8 @@ import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { applyVolumes, toggleDeafen, toggleMute } from "@/calls/engine";
 import { useCalls } from "@/calls/state";
 import { toFuwaError } from "@/fuwa/errors";
-import { useAccess, useInstance } from "@/fuwa/hooks";
+import { byId, useAccess, useMember, useRoles } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { engine } from "@/fuwa/sync";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/lib/motion";
@@ -41,7 +42,7 @@ export function VoiceAvatar({ user, speaking, className, ring = 3 }: { user: Use
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ type: "spring", stiffness: 700, damping: 26 }}
             className="speaking-ring absolute rounded-full"
-            style={{ inset: -ring, borderWidth: ring }}
+            style={{ inset: -ring, borderWidth: ring, "--ring": `${ring}px` } as React.CSSProperties}
           />
         )}
       </AnimatePresence>
@@ -187,10 +188,52 @@ export function ParticipantMenu({
   children: ReactNode;
 }) {
   const userId = user?.id ?? "";
+  // One of these wraps every person in every call and voice channel shown, so while closed it reads only
+  // whether it's you; the volume and moderation live in `ParticipantCard`, mounted while it's open.
+  const self = useFuwa((s) => s.instances[instanceKey]?.me?.id === userId);
+  const [open, setOpen] = useState(false);
+
+  if (self) return <>{children}</>;
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>{children}</Popover.Trigger>
+      <AnimatePresence>
+        {open && (
+          <ParticipantCard
+            key="card"
+            instanceKey={instanceKey}
+            serverId={serverId}
+            channelId={channelId}
+            user={user}
+            state={state}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+    </Popover.Root>
+  );
+}
+
+/** The open `ParticipantMenu`: mounted only while it's open (and while it animates away). */
+function ParticipantCard({
+  instanceKey,
+  serverId,
+  channelId,
+  user,
+  state,
+  onClose,
+}: {
+  instanceKey: string;
+  serverId?: string;
+  channelId?: string;
+  user: User | undefined;
+  state?: VoiceState;
+  onClose: () => void;
+}) {
+  const userId = user?.id ?? "";
   const key = `${instanceKey}/${userId}`;
   const volume = usePrefs((p) => p.userVolumes[key] ?? 100);
-  const { self, member, canMute, canMove } = useModeration(instanceKey, serverId, channelId, userId);
-  const [open, setOpen] = useState(false);
+  const { member, canMute, canMove } = useModeration(instanceKey, serverId, channelId, userId);
   const narrow = useMediaQuery("(max-width: 640px)");
 
   const setVolume = (v: number) => {
@@ -204,52 +247,43 @@ export function ParticipantMenu({
   const moderate = async (change: Moderation) => {
     try {
       await engine(instanceKey).api.calls.moderateVoice({ serverId: serverId!, userId, ...change });
-      if (change.disconnect) setOpen(false);
+      if (change.disconnect) onClose();
     } catch (err) {
       toast(toFuwaError(err).message);
     }
   };
 
-  if (self) return <>{children}</>;
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>{children}</Popover.Trigger>
-      <AnimatePresence>
-        {open && (
-          <Popover.Portal forceMount>
-            <Popover.Content asChild side={narrow ? "bottom" : "right"} align={narrow ? "center" : "start"} sideOffset={8} collisionPadding={12} forceMount>
-              <motion.div
-                initial={{ opacity: 0, scale: 0.92, x: -6 }}
-                animate={{ opacity: 1, scale: 1, x: 0 }}
-                exit={{ opacity: 0, scale: 0.95, x: -4 }}
-                transition={SPRING}
-                className="z-50 w-64 origin-[var(--radix-popover-content-transform-origin)] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl"
-              >
-                <div className="mb-3 flex items-center gap-2">
-                  <UserAvatar user={user} className="size-8" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-bold">{member ? memberName(member) : displayName(user)}</span>
-                </div>
-                <VolumeRow volume={volume} onChange={setVolume} />
-                {(canMute || canMove) && state && <ModActions state={state} canMute={canMute} canMove={canMove} onModerate={moderate} />}
-              </motion.div>
-            </Popover.Content>
-          </Popover.Portal>
-        )}
-      </AnimatePresence>
-    </Popover.Root>
+    <Popover.Portal forceMount>
+      <Popover.Content asChild side={narrow ? "bottom" : "right"} align={narrow ? "center" : "start"} sideOffset={8} collisionPadding={12} forceMount>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92, x: -6 }}
+          animate={{ opacity: 1, scale: 1, x: 0 }}
+          exit={{ opacity: 0, scale: 0.95, x: -4 }}
+          transition={SPRING}
+          className="z-50 w-64 origin-[var(--radix-popover-content-transform-origin)] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl"
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <UserAvatar user={user} className="size-8" />
+            <span className="min-w-0 flex-1 truncate text-sm font-bold">{member ? memberName(member) : displayName(user)}</span>
+          </div>
+          <VolumeRow volume={volume} onChange={setVolume} />
+          {(canMute || canMove) && state && <ModActions state={state} canMute={canMute} canMove={canMove} onModerate={moderate} />}
+        </motion.div>
+      </Popover.Content>
+    </Popover.Portal>
   );
 }
 
 /** Who someone is to you in a voice channel, and whether you may mute or disconnect them there. */
 function useModeration(instanceKey: string, serverId: string | undefined, channelId: string | undefined, userId: string) {
-  const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId ?? "");
-  const server = inst?.servers.find((s) => s.id === serverId);
-  const member = serverId ? inst?.members[serverId]?.find((m) => m.user?.id === userId) : undefined;
-  const ranked = server ? outranks(access, standing(server.ownerId, inst?.roles[serverId!] ?? [], member)) : false;
+  const ownerId = useFuwa((s) => (serverId ? byId(s.instances[instanceKey]?.servers, serverId)?.ownerId : undefined));
+  const member = useMember(instanceKey, serverId ?? "", serverId ? userId : undefined);
+  const roles = useRoles(instanceKey, serverId ?? "");
+  const ranked = ownerId !== undefined ? outranks(access, standing(ownerId, roles, member)) : false;
   const may = (permission: Permission) => !!channelId && ranked && hasIn(access, channelId, permission);
   return {
-    self: userId === inst?.me?.id,
     member,
     canMute: may(Permission.MUTE_MEMBERS),
     canMove: may(Permission.MOVE_MEMBERS),

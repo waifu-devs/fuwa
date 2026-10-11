@@ -44,7 +44,7 @@ impl InstanceSettingsView {
         };
         let defaults = config.defaults.clone().unwrap_or_default();
         let startup = config.startup.clone().unwrap_or_default();
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let addresses = startup.media_addresses.join(", ");
         let port = startup.media_port.to_string();
         let media = match (startup.media_port, startup.media_addresses.is_empty()) {

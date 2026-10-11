@@ -562,7 +562,7 @@ impl SettingsView {
             }
             1 => {
                 let secret = self.security.secret.clone().unwrap_or_default();
-                let streaming = self.core.prefs().streamer_mode;
+                let streaming = self.core.prefs_now().streamer_mode;
                 let veiled = streaming && !self.security.revealed;
                 let qr = div()
                     .relative()
@@ -890,7 +890,7 @@ impl SettingsView {
 
     /// Backup codes in a grid, to copy or save as a file.
     fn backup_codes(&self, codes: &[String], place: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let streaming = self.core.prefs().streamer_mode;
+        let streaming = self.core.prefs_now().streamer_mode;
         let mut grid = div().flex().flex_wrap().gap(px(8.0)).when(streaming, |el| el.opacity(0.15));
         for (n, code) in codes.iter().enumerate() {
             grid = grid.child(motion::rise(
@@ -1015,7 +1015,7 @@ impl SettingsView {
             };
         };
         let working = listed.methods.iter().filter(|m| m.works).count();
-        let hidden = self.core.prefs().hides_personal();
+        let hidden = self.core.prefs_now().hides_personal();
         let mut list = div().flex().flex_col().gap(px(8.0));
         for (n, m) in listed.methods.iter().enumerate() {
             let only = m.works && working == 1;

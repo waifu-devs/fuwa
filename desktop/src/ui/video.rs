@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, App, Div, FontWeight, Global, Hsla, InteractiveElement as _, IntoElement,
-    ObjectFit, ParentElement as _, Pixels, RenderImage, SharedString, Stateful, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Window, div, px,
+    Animation, AnimationExt as _, AnyElement, App, Div, EntityId, FontWeight, Global, Hsla, InteractiveElement as _,
+    IntoElement, ObjectFit, ParentElement as _, Pixels, RenderImage, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, px,
 };
 
 use crate::core::Core;
@@ -37,8 +37,18 @@ struct Shown {
 #[derive(Default)]
 pub(crate) struct VideoCache {
     shown: HashMap<String, Shown>,
-    /// How tall each window draws each feed this frame, in device pixels.
-    drawing: HashMap<u64, HashMap<String, u32>>,
+    /// How tall each window draws each feed, in device pixels.
+    drawing: HashMap<u64, Drawing>,
+}
+
+/// What one window draws, by the view each tile is in. A cached view that
+/// wasn't drawn again this frame (`panel.rs`) still shows its tiles as they
+/// were, so what it measured last time stands.
+#[derive(Default)]
+struct Drawing {
+    /// Counts this window's frames, at its `commit`.
+    frame: u64,
+    by_view: HashMap<EntityId, (u64, HashMap<String, u32>)>,
 }
 
 impl Global for VideoCache {}
@@ -59,9 +69,19 @@ pub(crate) fn picture(core: &Core, feed: &str, window: &mut Window, cx: &mut App
         s.image.clone()
     });
     if let Some(old) = old {
-        cx.drop_image(old.image, Some(window));
+        cx.drop_image(old.image.clone(), Some(window));
+        give_back(core, feed, old.image);
     }
     current
+}
+
+/// Hands a picture's memory back to its feed, once nothing else holds it,
+/// so the next picture is decoded into it instead of into new memory.
+fn give_back(core: &Core, feed: &str, image: Arc<RenderImage>) {
+    let Ok(image) = Arc::try_unwrap(image) else { return };
+    if let Some(frame) = image.into_frames().into_iter().next() {
+        core.videos().give_back(feed, frame.into_buffer().into_raw());
+    }
 }
 
 /// Notes that this window draws `feed` `height` device pixels tall, if any
@@ -75,9 +95,15 @@ fn measure(feed: String) -> impl IntoElement {
             if height == 0 {
                 return;
             }
-            let id = window.window_handle().window_id().as_u64();
-            let cache = cx.default_global::<VideoCache>();
-            let at = cache.drawing.entry(id).or_default().entry(feed.clone()).or_default();
+            let (id, view) = (window.window_handle().window_id().as_u64(), window.current_view());
+            let drawing = cx.default_global::<VideoCache>().drawing.entry(id).or_default();
+            let frame = drawing.frame;
+            let (at, sizes) = drawing.by_view.entry(view).or_default();
+            if *at != frame {
+                *at = frame;
+                sizes.clear();
+            }
+            let at = sizes.entry(feed.clone()).or_default();
             *at = (*at).max(height);
         },
         |_, _, _, _| {},
@@ -95,7 +121,25 @@ pub(crate) fn commit(core: Arc<Core>) -> impl IntoElement {
         move |_, window, cx| {
             let id = window.window_handle().window_id().as_u64();
             let cache = cx.default_global::<VideoCache>();
-            let drawn = cache.drawing.remove(&id).unwrap_or_default();
+            let drawing = cache.drawing.entry(id).or_default();
+            let frame = drawing.frame;
+            // Measured this frame, or in a part kept as it was drawn.
+            drawing.by_view.retain(|view, (at, _)| *at == frame || crate::ui::floats::kept(*view));
+            drawing.frame += 1;
+            let mut drawn: HashMap<String, u32> = HashMap::new();
+            for (_, sizes) in drawing.by_view.values() {
+                for (feed, height) in sizes {
+                    let at = drawn.entry(feed.clone()).or_default();
+                    *at = (*at).max(*height);
+                }
+            }
+            // A kept part still shows its pictures: they stay in the atlases.
+            let now = Instant::now();
+            for feed in drawn.keys() {
+                if let Some(shown) = cache.shown.get_mut(feed) {
+                    shown.used = now;
+                }
+            }
             let stale: Vec<String> =
                 cache.shown.iter().filter(|(_, s)| s.used.elapsed() > UNUSED).map(|(f, _)| f.clone()).collect();
             let gone: Vec<Arc<RenderImage>> =
@@ -157,7 +201,7 @@ pub(crate) fn feed_view(
 }
 
 /// The little "LIVE" mark on a shared screen (`who` shares it), its dot pinging.
-pub(crate) fn live_badge(who: &str, window: &Window) -> Div {
+pub(crate) fn live_badge(who: &str, window: &Window, cx: &gpui_kit::App) -> Div {
     div()
         .flex_none()
         .flex()
@@ -170,7 +214,14 @@ pub(crate) fn live_badge(who: &str, window: &Window) -> Div {
         .line_height(px(14.0))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(gpui_kit::white())
-        .child(ping_dot(format!("live-ping|{who}"), 6.0, gpui_kit::white(), gpui_kit::hsla(0.0, 0.0, 1.0, 0.7), window))
+        .child(ping_dot(
+            format!("live-ping|{who}"),
+            6.0,
+            gpui_kit::white(),
+            gpui_kit::hsla(0.0, 0.0, 1.0, 0.7),
+            window,
+            cx,
+        ))
         .child(t("dms-calls.calls.video.live"))
 }
 

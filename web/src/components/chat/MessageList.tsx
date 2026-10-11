@@ -47,7 +47,7 @@ import {
   type SharedServer,
   type User,
 } from "@/gen/fuwa/v1/types_pb";
-import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
+import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage, trimToLatest } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
@@ -119,6 +119,8 @@ export type MessageListHandle = {
 const FIRST_ROWS = 80;
 /** How many more rows each scroll to the top reveals before asking the server for older messages. */
 const MORE_ROWS = 80;
+/** How long the list rests at its bottom before the messages loaded far above are let go of (`trimToLatest`). */
+const SETTLE_MS = 1500;
 /** How many pages back opening a search result goes looking for its message. */
 const JUMP_PAGES = 100;
 
@@ -396,7 +398,9 @@ function useListScroll({
 }) {
   const [hidden, setHidden] = useState<number | null>(null);
   const ready = !!state && !state.loading;
-  const skipped = hidden ?? (ready ? Math.max(0, rows.length - FIRST_ROWS) : 0);
+  // Never more than all but the last FIRST_ROWS: after the store lets go of older messages (`trimToLatest`)
+  // there are fewer rows above than were hidden.
+  const skipped = Math.min(hidden ?? (ready ? Math.max(0, rows.length - FIRST_ROWS) : 0), Math.max(0, rows.length - FIRST_ROWS));
   if (hidden === null && ready) setHidden(skipped);
   const shown = skipped ? rows.slice(skipped) : rows;
   // Ids already on screen when the list opened, so only new arrivals animate in.
@@ -420,6 +424,18 @@ function useListScroll({
   const firstKey = useRef<string | undefined>(undefined);
   const lastShown = useRef(0);
 
+  // Resting at the bottom (after scrolling far up, or while messages keep coming), the store keeps only the
+  // latest messages; scrolling up loads the rest again. Waits for the list to settle there first.
+  const at = threadId ? threadKey(threadId) : channel.id;
+  const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const settle = useCallback(() => {
+    clearTimeout(settling.current);
+    settling.current = setTimeout(() => {
+      if (atBottom.current) trimToLatest(instanceKey, at);
+    }, SETTLE_MS);
+  }, [instanceKey, at]);
+  useEffect(() => () => clearTimeout(settling.current), [settle]);
+
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -428,6 +444,7 @@ function useListScroll({
     const prepended = firstKey.current !== undefined && top !== firstKey.current && shown.length > lastShown.current;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
+      if (items.length > lastCount.current) settle();
     } else if (prepended) {
       el.scrollTop = el.scrollHeight - fromBottom.current;
     } else if (items.length > lastCount.current) {
@@ -449,11 +466,12 @@ function useListScroll({
     if (bottom) setMissed(0);
     // Back at the bottom after reading far up: let go of the rows far above, so new messages stay cheap.
     if (bottom && rowCount.current - skipped > FIRST_ROWS + MORE_ROWS) setHidden(rowCount.current - FIRST_ROWS);
+    if (bottom) settle();
     if (el.scrollTop < 300) {
       if (skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
       else if (state?.hasMore && !state.loading) run(loadMessages(instanceKey, serverId, channel.id, true, threadId)).catch(() => {});
     }
-  }, [instanceKey, serverId, channel.id, threadId, state?.hasMore, state?.loading, skipped]);
+  }, [instanceKey, serverId, channel.id, threadId, state?.hasMore, state?.loading, skipped, settle]);
 
   const jump = () => {
     const el = scroller.current;

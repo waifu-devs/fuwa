@@ -105,7 +105,7 @@ impl FuwaApp {
             )
             .when(live, |el| {
                 // The red dot pops in, pinging while the server records.
-                let dot = ping_dot("rec-button-ping", 8.0, red(), alpha(red(), 0.6), window)
+                let dot = ping_dot("rec-button-ping", 8.0, red(), alpha(red(), 0.6), window, cx)
                     .child(div().absolute().inset_0().rounded_full().border_2().border_color(background));
                 el.child(div().absolute().top(px(6.0)).right(px(6.0)).child(motion::pop(
                     dot,

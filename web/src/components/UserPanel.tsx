@@ -26,6 +26,8 @@ import { useNow } from "@/lib/notifications";
 import { openSettings, toast } from "@/lib/ui";
 import type { I18n } from "@/i18n/i18n";
 import { useI18n } from "@/i18n/react";
+import { intent, useSeen } from "@/components/lazy";
+import { SettingsScreens } from "@/components/settings/screens";
 
 const CHOICES = [
   { status: PresenceStatus.ONLINE, dot: "online", hint: "" },
@@ -88,6 +90,8 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const settings = usePresenceSettings(instanceKey);
   const now = useNow(60_000);
   const [adding, setAdding] = useState(false);
+  // Mounted the first time it opens, then kept for its closing animation.
+  const addingSeen = useSeen(adding);
   if (!me) return null;
   const status = shownStatus(me, now);
   const picked = settings?.status ?? PresenceStatus.ONLINE;
@@ -150,11 +154,12 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
           <AccountItems instanceKey={instanceKey} onAdd={() => setAdding(true)} />
         </DropdownMenuContent>
       </DropdownMenu>
-      <AddAccountDialog instanceKey={instanceKey} open={adding} onOpenChange={setAdding} />
+      {addingSeen && <AddAccountDialog instanceKey={instanceKey} open={adding} onOpenChange={setAdding} />}
       <MuteButtons />
       <button
         type="button"
         onClick={() => openSettings()}
+        {...intent(SettingsScreens)}
         aria-label={t("workspace.userPanel.settings")}
         className="group grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
       >

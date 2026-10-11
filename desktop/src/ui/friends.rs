@@ -46,6 +46,8 @@ pub struct Friends {
     clear_add: bool,
     /// A friend's "more" menu, open under its button.
     pub more: Option<(String, gpui_kit::Point<gpui_kit::Pixels>)>,
+    /// The list's scrolling, so only the lines in sight are built (`windowed.rs`).
+    scroll: gpui_kit::ScrollHandle,
 }
 
 /// Something done about someone.
@@ -90,6 +92,7 @@ impl Friends {
                 relation: None,
                 clear_add: false,
                 more: None,
+                scroll: gpui_kit::ScrollHandle::new(),
             },
             subs,
         )
@@ -430,7 +433,14 @@ impl FuwaApp {
         );
 
         let tab_id = tab_key(self.friends.tab);
-        let mut body = div().id("friends-list").flex_1().min_h_0().overflow_y_scroll().px(px(24.0)).pb(px(24.0));
+        let mut body = div()
+            .id("friends-list")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.friends.scroll)
+            .px(px(24.0))
+            .pb(px(24.0));
         if status != FriendsStatus::Ready && list.is_empty() {
             body = body.child(loading(&p));
         } else if shown.is_empty() {
@@ -480,16 +490,37 @@ impl FuwaApp {
             });
             body = body.child(empty(glyph, &t(title), &t(text), action, &p, window));
         } else {
-            let mut gone = leaving.iter().peekable();
+            // Each line, and those on their way out where they were; only the ones in sight are built.
+            enum Line {
+                Here(usize),
+                Gone(usize),
+            }
+            let id = |f: &pb::Friend| f.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+            let mut lines: Vec<(Line, SharedString)> = Vec::new();
+            let mut gone = leaving.iter().enumerate().peekable();
             for (n, f) in shown.iter().enumerate() {
-                while let Some((_, f, k)) = gone.next_if(|(at, ..)| *at <= n) {
-                    body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
+                while let Some((g, (_, f, _))) = gone.next_if(|(_, (at, ..))| *at <= n) {
+                    lines.push((Line::Gone(g), format!("gone|{}", id(f)).into()));
                 }
-                body = body.child(self.friend_line(key, f, n, dms, &p, window, cx));
+                lines.push((Line::Here(n), id(f).into()));
             }
-            for (_, f, k) in gone {
-                body = body.child(self.friend_leaving(key, f, dms, *k, &p, window, cx));
+            for (g, (_, f, _)) in gone {
+                lines.push((Line::Gone(g), format!("gone|{}", id(f)).into()));
             }
+            let keys: Vec<SharedString> = lines.iter().map(|(_, k)| k.clone()).collect();
+            let plan =
+                crate::ui::windowed::plan(format!("friends|{key}|{tab_id}"), &self.friends.scroll, &keys, 0.0, 64.0);
+            let mut rows = Vec::new();
+            for n in plan.rows() {
+                rows.push(match lines[n].0 {
+                    Line::Here(at) => self.friend_line(key, shown[at], at, dms, &p, window, cx),
+                    Line::Gone(g) => {
+                        let (_, f, k) = &leaving[g];
+                        self.friend_leaving(key, f, dms, *k, &p, window, cx)
+                    }
+                });
+            }
+            body = body.child(plan.finish(rows, window));
         }
         // A new tab slides in from the side.
         page = page.child(motion::slide_in(

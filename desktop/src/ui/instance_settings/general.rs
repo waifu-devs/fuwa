@@ -24,7 +24,7 @@ impl InstanceSettingsView {
         };
         let defaults = config.defaults.clone().unwrap_or_default();
         let startup = config.startup.clone().unwrap_or_default();
-        let hide = self.core.prefs().streamer_mode;
+        let hide = self.core.prefs_now().streamer_mode;
         let mut page = div().flex().flex_col();
         let node = self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.node.clone()));
         if let Some(card) = super::release::newer_release(node.as_ref(), p) {
