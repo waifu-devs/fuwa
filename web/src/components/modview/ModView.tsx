@@ -148,6 +148,7 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
           section={section}
           onSectionChange={setSection}
           openToSection
+          searchable={false}
         >
           {tab ? (
             <Queue
