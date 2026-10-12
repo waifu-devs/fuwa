@@ -1,5 +1,5 @@
 //! The tools for running a server: its settings, channels, roles, invites,
-//! emoji, webhooks, AutoMod, the way in, shared channels and profile items.
+//! emoji, webhooks, AutoMod, the way in, shared channels, profile items and Mod View.
 //! Each wraps one gRPC call whose arguments are the request itself, read
 //! from proto3 JSON (field names as in the .proto), and answers with the
 //! response the same way. The input schema is built from the request's
@@ -270,6 +270,39 @@ tools! {
         "Delete a profile item",
         "Deletes one of the server's profile effects or decorations and takes it off everyone wearing it. \
          Needs Manage Server.";
+
+    // Mod View (docs/mod-view.md).
+    "report_message" => moderation_service_client::ModerationServiceClient.report_message(ReportMessageRequest), Writes,
+        "Report a message",
+        "Reports a message to the server's moderators, with a reason and an optional note. Reporting it again \
+         changes the reason and note.";
+    "report_member" => moderation_service_client::ModerationServiceClient.report_member(ReportMemberRequest), Writes,
+        "Report a member",
+        "Reports someone who is or was in the server to its moderators, with a reason and an optional note.";
+    "list_mod_cases" => moderation_service_client::ModerationServiceClient.list_mod_cases(ListModCasesRequest), Reads,
+        "List Mod View cases",
+        "Messages AutoMod caught and messages or members people reported, newest first, filtered by status, \
+         kind or who they're about. Needs Use Mod View.";
+    "get_mod_case" => moderation_service_client::ModerationServiceClient.get_mod_case(GetModCaseRequest), Reads,
+        "Get a Mod View case",
+        "One case with every report in it (who reported and why) and the message as it is now. Needs Use Mod View.";
+    "update_mod_case" => moderation_service_client::ModerationServiceClient.update_mod_case(UpdateModCaseRequest), Writes,
+        "Close or reopen a case",
+        "Marks a case resolved or dismissed, with an optional reason, or opens it again. Doesn't act on anyone. \
+         Needs Use Mod View.";
+    "get_member_overview" => moderation_service_client::ModerationServiceClient.get_member_overview(GetMemberOverviewRequest), Reads,
+        "Look into a member",
+        "Someone's membership, ban, cases, what moderators did to them and the notes about them. Needs Use Mod \
+         View.";
+    "list_member_messages" => moderation_service_client::ModerationServiceClient.list_member_messages(ListMemberMessagesRequest), Reads,
+        "A member's messages",
+        "What someone wrote, newest first, in the channels this agent can see. Needs Use Mod View.";
+    "add_mod_note" => moderation_service_client::ModerationServiceClient.add_mod_note(AddModNoteRequest), Writes,
+        "Write a moderator note",
+        "Adds a note about someone that only members with Use Mod View see.";
+    "delete_mod_note" => moderation_service_client::ModerationServiceClient.delete_mod_note(DeleteModNoteRequest), Destroys,
+        "Delete a moderator note",
+        "Deletes one of this agent's notes, or anyone's with Manage Server. Needs Use Mod View.";
 }
 
 /// Whether there's a tool by that name here.

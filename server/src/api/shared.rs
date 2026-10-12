@@ -1322,7 +1322,9 @@ async fn review_guest(
         timed_out_until: Some(timestamp(253_402_300_799_000)),
         ..Default::default()
     };
-    let verdict = automod::review(conn, server_id, &member, access, channel, text, asked, events).await?;
+    let verdict =
+        automod::review(conn, server_id, &member, access, channel, text, asked, automod::Sent::default(), events)
+            .await?;
     let times_out = store::load_automod(conn).await?.iter().any(|rule| {
         rule.enabled
             && !rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
@@ -1471,7 +1473,10 @@ async fn review_here(
     let blocked = sdb
         .write(&author_id, async |conn, events| {
             let channel = load_channel(conn, &sdb.id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
-            Ok(automod::review(conn, &sdb.id, member, access, &channel, text, asked.as_ref(), events).await?.blocked)
+            let sent = automod::Sent::default();
+            Ok(automod::review(conn, &sdb.id, member, access, &channel, text, asked.as_ref(), sent, events)
+                .await?
+                .blocked)
         })
         .await?;
     match blocked {

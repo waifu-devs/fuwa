@@ -60,6 +60,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0036_reactions.sql"),
     include_str!("../migrations/server/0037_agent_deliveries.sql"),
     include_str!("../migrations/server/0038_usernames.sql"),
+    include_str!("../migrations/server/0039_mod_view.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -149,6 +150,9 @@ fn may_change_rules(payload: &Payload) -> bool {
             | Payload::VoiceStateRemoved(_)
             | Payload::LiveTileUpdated(_)
             | Payload::LiveTileEnded(_)
+            | Payload::ModCaseUpdated(_)
+            | Payload::ModNoteAdded(_)
+            | Payload::ModNoteDeleted(_)
     )
 }
 

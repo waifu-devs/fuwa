@@ -362,6 +362,11 @@ enum AuditAction {
   AUDIT_ACTION_PROFILE_ITEM_DELETE = 59;
   // A moderator took reactions off a message. The target is its author.
   AUDIT_ACTION_REACTIONS_CLEAR = 60;
+  // Mod View: a moderator closed a case or opened it again (the change is
+  // its status), or wrote or deleted a note. The target is who it's about.
+  AUDIT_ACTION_MOD_CASE_UPDATE = 61;
+  AUDIT_ACTION_MOD_NOTE_ADD = 62;
+  AUDIT_ACTION_MOD_NOTE_DELETE = 63;
 }
 
 // One thing someone did with a moderator's or manager's permission.

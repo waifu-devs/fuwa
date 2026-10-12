@@ -1047,6 +1047,7 @@ impl Api {
                         return Err(Error::NotFound("message being replied to"));
                     }
                 }
+                let id = new_id();
                 let verdict = automod::review(
                     conn,
                     &sdb.id,
@@ -1055,6 +1056,7 @@ impl Api {
                     &channel,
                     automod::Text { all: &reviewed, content: &req.content },
                     asked.as_ref(),
+                    automod::Sent { id: &id, thread_id: &req.thread_id, edit: false },
                     events,
                 )
                 .await?;
@@ -1081,7 +1083,7 @@ impl Api {
                     ));
                 }
                 let message = pb::Message {
-                    id: new_id(),
+                    id,
                     server_id: sdb.id.clone(),
                     channel_id: channel.id.clone(),
                     author_id: account.id.clone(),
@@ -1341,6 +1343,7 @@ impl MessageService for Api {
                                 &channel,
                                 automod::Text { all: &reviewed, content: &req.content },
                                 asked.as_ref(),
+                                automod::Sent { id: &message.id, thread_id: &message.thread_id, edit: true },
                                 events,
                             )
                             .await?;

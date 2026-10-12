@@ -476,6 +476,7 @@ impl App {
             .add_service(crate::pb::command_service_server::CommandServiceServer::new(api.clone()))
             .add_service(crate::pb::live_tile_service_server::LiveTileServiceServer::new(api.clone()))
             .add_service(crate::pb::profile_item_service_server::ProfileItemServiceServer::new(api.clone()))
+            .add_service(crate::pb::moderation_service_server::ModerationServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
