@@ -40,6 +40,7 @@ use gpui_kit::{Div, Stateful};
 mod agents;
 mod applications;
 mod audit;
+pub(crate) use audit::kind as audit_kind;
 mod automod;
 mod channels;
 mod emoji;
@@ -1314,6 +1315,7 @@ fn field_label(field: &str) -> String {
         "record_video" => t("serversettings.audit.field.recordVideo"),
         "camera_max_height" => t("serversettings.audit.field.cameraMaxHeight"),
         "camera_max_fps" => t("serversettings.audit.field.cameraMaxFps"),
+        "status" => t("desktop.modView.audit.field.status"),
         other => other.to_owned(),
     }
 }
@@ -1326,6 +1328,12 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     match field {
         "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" => yes_no(raw),
+        "status" if entry.action == A::ModCaseUpdate as i32 => {
+            match raw.parse::<i32>().ok().and_then(|s| pb::ModCaseStatus::try_from(s).ok()) {
+                Some(status) => t(crate::core::mod_view::status_key(status)),
+                None => raw.to_owned(),
+            }
+        }
         "record_video" => {
             if raw == "true" {
                 t("serversettings.audit.value.soundVideo")
@@ -1609,6 +1617,22 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.liveTileEnd",
             &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target)), ("channel", Arg::Str(&place))],
         ),
+        A::ModCaseUpdate => {
+            let status = change("status").and_then(|c| c.after.parse::<i32>().ok());
+            let key = match status.and_then(|s| pb::ModCaseStatus::try_from(s).ok()) {
+                Some(pb::ModCaseStatus::Resolved) => "desktop.modView.audit.s.resolved",
+                Some(pb::ModCaseStatus::Dismissed) => "desktop.modView.audit.s.dismissed",
+                Some(pb::ModCaseStatus::Open) => "desktop.modView.audit.s.reopened",
+                _ => "desktop.modView.audit.s.caseUpdated",
+            };
+            t_with(key, &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
+        A::ModNoteAdd => {
+            t_with("desktop.modView.audit.s.noteAdd", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
+        A::ModNoteDelete => {
+            t_with("desktop.modView.audit.s.noteDelete", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
         A::InviteCreate if !entry.channel_name.is_empty() => t_with(
             "serversettings.audit.s.inviteCreateIn",
             &[("actor", Arg::Str(&actor)), ("channel", Arg::Str(&place))],

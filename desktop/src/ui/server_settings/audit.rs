@@ -10,7 +10,7 @@ use crate::ui::settings_controls::{Look, button};
 use crate::ui::theme::{radius_2xl, radius_xl};
 
 /// An entry's look: its icon, its tint (background, text), and its name in the "What" menu.
-pub(super) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'static str) {
+pub(crate) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'static str) {
     let tw = |c: u32| -> (Hsla, Hsla) {
         let fg: Hsla = gpui_kit::rgb(c).into();
         (fg.opacity(0.15), fg)
@@ -82,12 +82,21 @@ pub(super) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'stati
         A::MessagePin => ("pin", sky, "messagePin"),
         A::MessageUnpin => ("pin-off", muted, "messageUnpin"),
         A::LiveTileEnd => ("radio-tower", lime, "liveTileEnd"),
+        A::ModCaseUpdate => ("shield-check", violet, "modCaseUpdate"),
+        A::ModNoteAdd => ("notebook-pen", sky, "modNoteAdd"),
+        A::ModNoteDelete => ("notebook", red, "modNoteDelete"),
     };
     (glyph, bg, fg, key)
 }
 
-fn kind_label(action: A, p: &Palette) -> String {
-    t(&format!("serversettings.audit.kind.{}", kind(action, p).3))
+pub(crate) fn kind_label(action: A, p: &Palette) -> String {
+    match action {
+        // Mod View's, named with the rest of its words.
+        A::ModCaseUpdate | A::ModNoteAdd | A::ModNoteDelete => {
+            t(&format!("desktop.modView.audit.kind.{}", kind(action, p).3))
+        }
+        _ => t(&format!("serversettings.audit.kind.{}", kind(action, p).3)),
+    }
 }
 
 impl ServerSettingsView {
@@ -513,8 +522,8 @@ mod tests {
     fn every_action_has_a_label() {
         let p = Palette::of(&crate::core::themes::builtins()[1]);
         for action in (0..100).filter_map(|n| A::try_from(n).ok()) {
-            let key = format!("serversettings.audit.kind.{}", kind(action, &p).3);
-            assert_ne!(t(&key), key, "{action:?}");
+            let label = kind_label(action, &p);
+            assert!(!label.contains(".kind."), "{action:?}: {label}");
         }
     }
 }

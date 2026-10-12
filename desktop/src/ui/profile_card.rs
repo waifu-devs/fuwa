@@ -226,6 +226,9 @@ struct Facts {
     moderation: Vec<P>,
     /// The decoration around their avatar here, its picture's link (docs/profile-items.md).
     decoration: Option<String>,
+    /// You may report them in this server, and open their page in Mod View (docs/mod-view.md).
+    report: bool,
+    mod_view: bool,
 }
 
 impl FuwaApp {
@@ -267,6 +270,8 @@ impl FuwaApp {
                     assignable: Vec::new(),
                     moderation: Vec::new(),
                     decoration: None,
+                    report: false,
+                    mod_view: false,
                 };
             };
             let member = server.and_then(|sid| {
@@ -299,6 +304,8 @@ impl FuwaApp {
             };
             let decoration = i.decoration_url(server, member.as_ref(), user.as_ref()).map(str::to_owned);
             Facts {
+                report: server.is_some_and(|sid| crate::core::mod_view::can_report_member(i, sid, user_id)),
+                mod_view: server.is_some_and(|sid| i.can_mod_view(sid)),
                 decoration,
                 can_message: !me && !agent && matches!(i.dms.status, DmStatus::Ready | DmStatus::Starting),
                 can_friend: !me && !agent && i.friends.status == crate::core::friends::FriendsStatus::Ready,
@@ -470,6 +477,70 @@ impl FuwaApp {
                 );
             }
             column = column.child(motion::rise(row, "profile-mod-in", Duration::from_millis(80), 6.0));
+        }
+        // Mod View: their page for moderators, and reporting them for everyone else here.
+        if let (Some(sid), true) = (server, f.mod_view || f.report) {
+            let mut row = under_box(&p).flex().gap(px(6.0));
+            let small = |id: &'static str, glyph: &'static str, label: String, tint: Hsla, soft: Hsla| {
+                let group = SharedString::from(id);
+                div()
+                    .id(group.clone())
+                    .group(group.clone())
+                    .flex_1()
+                    .h(px(28.0))
+                    .px(px(8.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(6.0))
+                    .rounded(radius_xl())
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(soft).text_color(tint))
+                    .active(|s| s.scale(0.95))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}-icon")))
+                            .group_hover(group, |s| s.rotate(gpui_kit::radians(-0.21)).scale(1.1))
+                            .child(icon(glyph).size(px(14.0))),
+                    )
+                    .child(label)
+            };
+            if f.mod_view {
+                let (k, s, uid) = (key.to_owned(), sid.to_owned(), user_id.to_owned());
+                row = row.child(
+                    small(
+                        "profile-mod-view",
+                        "user-round-search",
+                        t("desktop.modView.menu.openMember"),
+                        p.primary.into(),
+                        alpha(p.primary, 0.1),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.dialog = None;
+                        this.open_mod_view(&k, &s, Some(uid.clone()), window, cx)
+                    })),
+                );
+            }
+            if f.report {
+                let (k, s, uid) = (key.to_owned(), sid.to_owned(), user_id.to_owned());
+                row = row.child(
+                    small(
+                        "profile-report",
+                        "flag",
+                        t("desktop.modView.menu.report"),
+                        p.destructive.into(),
+                        alpha(p.destructive, 0.1),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let of = crate::ui::report::ReportOf::Member { user_id: uid.clone() };
+                        this.open_report(&k, &s, of, window, cx)
+                    })),
+                );
+            }
+            column = column.child(motion::rise(row, "profile-report-in", Duration::from_millis(95), 6.0));
         }
 
         // Beside what opened it: on its side when there's room, else the other; the window's edges hold it in.

@@ -67,6 +67,7 @@ export function SettingsScreen({
   section,
   onSectionChange,
   openToSection = false,
+  searchable = true,
   children,
   footer,
 }: {
@@ -79,6 +80,8 @@ export function SettingsScreen({
   onSectionChange: (id: string) => void;
   /** On phones, open straight to `section` instead of the menu. */
   openToSection?: boolean;
+  /** The search box over the menu; off for screens whose sections aren't settings. */
+  searchable?: boolean;
   children: ReactNode;
   /** Shown under every section, such as a save bar for edits across sections. */
   footer?: ReactNode;
@@ -194,6 +197,7 @@ export function SettingsScreen({
                       wide={wide}
                       query={query}
                       onQuery={setQuery}
+                      searchable={searchable}
                     />
                   )}
                   {showSection && current && (
@@ -297,6 +301,7 @@ function Menu({
   wide,
   query,
   onQuery,
+  searchable,
 }: {
   title: string;
   subtitle?: string;
@@ -307,6 +312,7 @@ function Menu({
   wide: boolean;
   query: string;
   onQuery: (query: string) => void;
+  searchable: boolean;
 }) {
   const { t } = useI18n();
   const highlight = useId();
@@ -335,14 +341,16 @@ function Menu({
             {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         )}
-        <SearchBox
-          query={query}
-          onQuery={onQuery}
-          onPick={() => {
-            const first = results?.[0];
-            if (first) onChoose(first.section.id, first.settings[0]?.id);
-          }}
-        />
+        {searchable && (
+          <SearchBox
+            query={query}
+            onQuery={onQuery}
+            onPick={() => {
+              const first = results?.[0];
+              if (first) onChoose(first.section.id, first.settings[0]?.id);
+            }}
+          />
+        )}
         {results ? (
           <Results results={results} query={query} onChoose={onChoose} wide={wide} />
         ) : (

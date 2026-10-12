@@ -49,6 +49,7 @@ export const KNOWN: P[] = [
   P.CREATE_THREADS,
   P.CREATE_POLLS,
   P.ADD_REACTIONS,
+  P.MODERATE,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -166,6 +167,7 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     channel: "serversettings.permission.moveMembersChannel",
   },
   [P.MANAGE_WEBHOOKS]: { label: "serversettings.permission.manageWebhooks", about: "serversettings.permission.manageWebhooksAbout" },
+  [P.MODERATE]: { label: "serversettings.permission.moderate", about: "serversettings.permission.moderateAbout" },
 };
 
 /** A known permission's catalog keys (every permission the settings pages list is one). */
@@ -184,7 +186,7 @@ export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
   },
   {
     title: "serversettings.permission.group.membership",
-    permissions: [P.CREATE_INVITE, P.CHANGE_NICKNAME, P.MANAGE_NICKNAMES, P.KICK_MEMBERS, P.BAN_MEMBERS, P.TIME_OUT_MEMBERS],
+    permissions: [P.CREATE_INVITE, P.CHANGE_NICKNAME, P.MANAGE_NICKNAMES, P.KICK_MEMBERS, P.BAN_MEMBERS, P.TIME_OUT_MEMBERS, P.MODERATE],
   },
   {
     title: "serversettings.permission.group.textChannels",

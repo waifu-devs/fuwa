@@ -204,6 +204,39 @@ impl FuwaApp {
                         .danger(),
                     );
                 }
+                // Reporting someone else's message to the server's moderators (docs/mod-view.md).
+                if let Some(Target::Channel { key, server, channel }) = self.target()
+                    && !m.editing
+                    && !m.keeping_out
+                    && m.badge.is_none()
+                {
+                    let found = self.core.shared.read(|s| {
+                        let i = s.instance(&key)?;
+                        let at = thread.as_deref().map_or(channel.clone(), crate::core::threads::thread_key);
+                        let pb_msg = [at.as_str(), channel.as_str()]
+                            .iter()
+                            .filter_map(|c| i.messages.get(*c))
+                            .find_map(|l| l.items.iter().find(|x| x.id == m.id))?
+                            .clone();
+                        crate::core::mod_view::can_report_message(i, &server, &channel, &pb_msg).then_some(pb_msg)
+                    });
+                    if let Some(found) = found {
+                        let of = crate::ui::report::ReportOf::Message {
+                            channel: channel.clone(),
+                            message: found.id.clone(),
+                            author: found.author_id.clone(),
+                            excerpt: crate::ui::report::excerpt(&found.content),
+                        };
+                        manage.push(
+                            Item::act(
+                                t("desktop.modView.menu.reportMessage"),
+                                "flag",
+                                run(move |this, window, cx| this.open_report(&key, &server, of.clone(), window, cx)),
+                            )
+                            .danger(),
+                        );
+                    }
+                }
                 // Private messages are numbered in their conversation: they have no ID to copy.
                 let in_server = matches!(self.target(), Some(Target::Channel { .. }));
                 let developer = if in_server { copy_id(&m.id, "message") } else { Vec::new() };
@@ -290,6 +323,9 @@ impl FuwaApp {
             timed_out: bool,
             /// Where you stand with them, when this instance has friends.
             friend: Option<i32>,
+            /// You may report them here, and look them up in Mod View.
+            report: bool,
+            mod_view: bool,
         }
         let facts = self.core.shared.read(|s| {
             let i = s.instance(key)?;
@@ -324,6 +360,8 @@ impl FuwaApp {
                 .as_ref()
                 .is_some_and(|m| crate::core::moderation::timed_out_until(m, crate::core::dms::now_ms()).is_some());
             Some(Facts {
+                report: server.is_some_and(|sv| crate::core::mod_view::can_report_member(i, sv, user_id)),
+                mod_view: server.is_some_and(|sv| i.can_mod_view(sv)),
                 me,
                 agent: crate::ui::widgets::is_agent(user.as_ref()),
                 dms: matches!(i.dms.status, crate::core::dms::DmStatus::Ready | crate::core::dms::DmStatus::Starting),
@@ -485,6 +523,33 @@ impl FuwaApp {
                     }),
                 );
                 moderate.push(if ending { item } else { item.danger() });
+            }
+        }
+        if let Some(sv) = server {
+            if f.mod_view {
+                let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
+                moderate.insert(
+                    0,
+                    Item::act(
+                        t("desktop.modView.menu.openMember"),
+                        "user-round-search",
+                        run(move |this, window, cx| this.open_mod_view(&k, &s, Some(uid.clone()), window, cx)),
+                    ),
+                );
+            }
+            if f.report {
+                let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
+                moderate.push(
+                    Item::act(
+                        t("desktop.modView.menu.report"),
+                        "flag",
+                        run(move |this, window, cx| {
+                            let of = crate::ui::report::ReportOf::Member { user_id: uid.clone() };
+                            this.open_report(&k, &s, of, window, cx)
+                        }),
+                    )
+                    .danger(),
+                );
             }
         }
         let mut friend = Vec::new();
@@ -762,6 +827,7 @@ impl FuwaApp {
                 run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
             ));
         }
+        manage.extend(self.mod_view_item(key, server));
         // Your nickname and card in this server, on the Server profiles page.
         let s = server.to_owned();
         manage.push(Item::act(
@@ -821,6 +887,7 @@ impl FuwaApp {
                 run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
             ));
         }
+        manage.extend(self.mod_view_item(key, server));
         if access.has(P::ManageChannels) {
             let (k, s) = (key.to_owned(), server.to_owned());
             manage.push(Item::act(
@@ -890,6 +957,23 @@ impl FuwaApp {
             );
         }
         Built::of(vec![manage, about, developer, danger])
+    }
+
+    /// "Mod View", with how many cases are open, for people with Use Mod View.
+    fn mod_view_item(&self, key: &str, server: &str) -> Option<Item> {
+        let open = self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            i.can_mod_view(server).then(|| i.open_cases(server).unwrap_or(0))
+        })?;
+        let (k, s) = (key.to_owned(), server.to_owned());
+        Some(
+            Item::act(
+                t("desktop.modView.title"),
+                "shield-check",
+                run(move |this, window, cx| this.open_mod_view(&k, &s, None, window, cx)),
+            )
+            .hint(if open > 0 { open.to_string() } else { String::new() }),
+        )
     }
 
     fn invite_item(&self, key: &str, server: &str, channel: &str) -> Item {

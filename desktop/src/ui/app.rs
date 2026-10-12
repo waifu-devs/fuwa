@@ -197,6 +197,12 @@ pub enum Dialog {
     },
     /// Starting a screen share in the call you're in (`ui/screen_share.rs`).
     ShareScreen,
+    /// Reporting a message or a person to the server's moderators (`ui/report.rs`).
+    Report {
+        key: String,
+        server: String,
+        of: crate::ui::report::ReportOf,
+    },
 }
 
 /// A small menu hanging under a bell, or over your name.
@@ -325,6 +331,10 @@ pub struct FuwaApp {
     pub friends: crate::ui::friends::Friends,
     /// Profile cards and the moderation dialog.
     pub people: crate::ui::profile_card::People,
+    /// The report dialog's reason and note (`ui/report.rs`).
+    pub report: crate::ui::report::Reporting,
+    /// A server's Mod View, over everything but dialogs (`ui/mod_view.rs`).
+    pub mod_view: Option<Entity<crate::ui::mod_view::ModViewView>>,
     /// The instance page: Browse, invites, applying and making servers (`ui::instance_home`, `ui::join`).
     pub home: crate::ui::instance_home::Home,
     pub onboarding: crate::ui::onboarding::Onboarding,
@@ -416,6 +426,7 @@ impl FuwaApp {
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
         let people = crate::ui::profile_card::People::new(window, cx);
+        let report = crate::ui::report::Reporting::new(window, cx);
         let (home, home_subs) = crate::ui::instance_home::Home::new(window, cx);
         let (gifs, gif_subs) = crate::ui::gifs::Gifs::new(window, cx);
         let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
@@ -661,6 +672,8 @@ impl FuwaApp {
             threads,
             friends,
             people,
+            report,
+            mod_view: None,
             home,
             onboarding,
             time_picker: None,
@@ -1512,6 +1525,69 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// A server's Mod View (`ui/mod_view.rs`), on its queue or on someone's page.
+    pub fn open_mod_view(
+        &mut self,
+        key: &str,
+        server: &str,
+        member: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::ui::mod_view::{ModViewEvent, ModViewView};
+        self.menu = None;
+        self.dialog = None;
+        let same = self.mod_view.as_ref().is_some_and(|v| {
+            let v = v.read(cx);
+            v.key == key && v.server == server
+        });
+        if !same {
+            let core = self.core.clone();
+            let view = cx.new(|cx| ModViewView::new(core, key.to_owned(), server.to_owned(), window, cx));
+            self._subscriptions.push(cx.subscribe_in(
+                &view,
+                window,
+                |this: &mut Self, view, event: &ModViewEvent, window, cx| {
+                    match event {
+                        ModViewEvent::Close => this.mod_view = None,
+                        ModViewEvent::Toast { icon, title } => {
+                            this.toast(icon, title.clone(), String::new(), None, None, cx)
+                        }
+                        ModViewEvent::Moderate { user_id, action } => {
+                            let (key, server) = {
+                                let v = view.read(cx);
+                                (v.key.clone(), v.server.clone())
+                            };
+                            let dialog = Dialog::Moderate { key, server, user_id: user_id.clone(), action: *action };
+                            this.open_dialog(dialog, window, cx);
+                        }
+                        ModViewEvent::Jump(message) => {
+                            let (key, server) = {
+                                let v = view.read(cx);
+                                (v.key.clone(), v.server.clone())
+                            };
+                            this.mod_view = None;
+                            // A reply only in its thread is found there.
+                            if !message.thread_id.is_empty() && !message.also_in_channel {
+                                this.open_channel(&key, &server, &message.channel_id, window, cx);
+                                this.open_thread(message.thread_id.clone(), window, cx);
+                            } else {
+                                this.jump_to_message(&key, &server, (**message).clone(), window, cx);
+                            }
+                        }
+                    }
+                    cx.notify();
+                },
+            ));
+            self.mod_view = Some(view);
+        }
+        if let (Some(view), Some(user)) = (self.mod_view.clone(), member) {
+            view.update(cx, |v, cx| v.open_member(user, window, cx));
+        }
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
     pub fn open_dialog(&mut self, dialog: Dialog, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = match &dialog {
             Dialog::CreateServer { .. } => "My cozy server",
@@ -1671,6 +1747,11 @@ impl FuwaApp {
             Dialog::CreateServer { .. } => self.create_server_now(window, cx),
             Dialog::Apply { .. } | Dialog::Application { .. } => {}
             Dialog::ShareScreen => self.start_share(cx),
+            Dialog::Report { .. } if self.report.sent.is_some() => {
+                self.dialog = None;
+                self.close_dialog(cx);
+            }
+            Dialog::Report { .. } => self.send_report(cx),
             Dialog::JoinInvite { key } => {
                 self.dialog_busy = true;
                 cx.notify();
@@ -1976,6 +2057,8 @@ impl FuwaApp {
             self.rail.editing = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
+        } else if let Some(view) = self.mod_view.clone() {
+            view.update(cx, |v, cx| v.escape(cx));
         } else if let Some(view) = self.server_settings.clone() {
             view.update(cx, |v, cx| v.escape(window, cx));
         } else if let Some(view) = self.instance_settings.clone() {
@@ -2056,6 +2139,7 @@ impl FuwaApp {
             self.connect.is_some(),
             self.settings.is_some(),
             self.server_settings.is_some(),
+            self.mod_view.is_some(),
             self.instance_settings.is_some(),
             self.switcher.is_some(),
         ]
@@ -2068,7 +2152,9 @@ impl FuwaApp {
         self.covers = covers;
         let empty = self.core.shared.read(|s| s.order.is_empty());
         // Server settings cover the whole window with a solid page.
-        crate::ui::effects::hold(self.server_settings.is_some() || self.instance_settings.is_some());
+        crate::ui::effects::hold(
+            self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some(),
+        );
         let panels = self.panels.get_or_insert_with(|| crate::ui::panel::Panels::new(&cx.entity(), cx));
         let behind_on = theme::backdrop(cx).any();
         let behind = behind_on.then(|| panels.element(Part::Backdrop));
@@ -2136,7 +2222,8 @@ impl FuwaApp {
             }
             Part::Top => {
                 // Under a full-window page the banner can't be seen, so it doesn't move there either.
-                let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+                let covered =
+                    self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
                 let announcement = if covered { None } else { self.render_announcement(window, cx) };
                 // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
                 let streamer = self.render_streamer_banner(window, cx);
@@ -2154,7 +2241,8 @@ impl FuwaApp {
             Part::Main => div().size_full().flex().child(self.render_main(window, cx)).into_any_element(),
             Part::Floats => {
                 // Under a full-window page they can't be seen, so they don't move there either.
-                let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+                let covered =
+                    self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
                 if covered { div().into_any_element() } else { crate::ui::floats::layer(window, cx) }
             }
             Part::Over => self.render_over(window, cx),
@@ -2163,7 +2251,7 @@ impl FuwaApp {
 
     /// Everything over the window, in the order it stacks.
     fn render_over(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+        let covered = self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
         let update_note = if covered { None } else { self.render_update_note(window, cx) };
         let (dialog_leaving, menu_leaving, context_leaving) = self.render_leaving(window, cx);
         div()
@@ -2196,6 +2284,13 @@ impl FuwaApp {
             .when_some(self.instance_settings.clone(), |el, settings| {
                 el.child(
                     gpui_kit::AnyView::from(settings)
+                        .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+                )
+            })
+            .when_some(self.mod_view.clone(), |el, view| {
+                // Like server settings: drawn again only when it changes.
+                el.child(
+                    gpui_kit::AnyView::from(view)
                         .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
                 )
             })

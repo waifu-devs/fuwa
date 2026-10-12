@@ -120,6 +120,7 @@ nothing comes back as `{"done": true}`.
 | The way in | `get_join_form`, `set_join_form`, `list_applications`, `review_application`, `get_welcome_screen`, `set_welcome_screen`, `get_onboarding`, `set_onboarding` | `JoinService` |
 | Shared channels | `list_shared_channels`, `create_share_code`, `delete_share_code`, `preview_share`, `accept_share`, `review_share`, `update_shared_channel`, `block_from_shared_channel`, `disconnect_shared_channel` | `SharedChannelService` ([docs/shared-channels.md](shared-channels.md)) |
 | Profile items | `list_profile_items`, `create_profile_item`, `update_profile_item`, `delete_profile_item` | `ProfileItemService`'s server calls ([docs/profile-items.md](profile-items.md)) |
+| Mod View | `report_message`, `report_member`, `list_mod_cases`, `get_mod_case`, `update_mod_case`, `get_member_overview`, `list_member_messages`, `add_mod_note`, `delete_mod_note` | `ModerationService` ([docs/mod-view.md](mod-view.md)) |
 
 They need the same permissions as in the apps (Manage Server, Manage
 Channels, Manage Roles and so on), and rank still decides what an agent can

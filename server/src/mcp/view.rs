@@ -405,6 +405,16 @@ pub fn event(e: &pb::Event) -> Value {
         Some(Payload::InteractionCreated(p)) => {
             ("interaction_created", json!({ "interaction": p.interaction.as_ref().map(interaction) }))
         }
+        // Only agents with Use Mod View get these; get_mod_case has the rest.
+        Some(Payload::ModCaseUpdated(p)) => (
+            "mod_case_updated",
+            json!({
+                "case_id": p.mod_case.as_ref().map(|c| c.id.as_str()),
+                "subject_id": p.mod_case.as_ref().map(|c| c.subject_id.as_str()),
+                "status": p.mod_case.as_ref().map(|c| name(c.status().as_str_name(), "MOD_CASE_STATUS_")),
+            }),
+        ),
+        Some(Payload::ModNoteAdded(_)) | Some(Payload::ModNoteDeleted(_)) => ("mod_note", json!({})),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

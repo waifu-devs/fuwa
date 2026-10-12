@@ -19,6 +19,7 @@ import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
 import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
+import { ModerationService } from "@/gen/fuwa/v1/moderation_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { PresenceService } from "@/gen/fuwa/v1/presence_pb";
 import { ProfileItemService } from "@/gen/fuwa/v1/profile_item_pb";
@@ -61,6 +62,7 @@ export type Api = {
   search: Client<typeof SearchService>;
   liveTiles: Client<typeof LiveTileService>;
   profileItems: Client<typeof ProfileItemService>;
+  moderation: Client<typeof ModerationService>;
 };
 
 /**
@@ -105,5 +107,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     search: createClient(SearchService, transport),
     liveTiles: createClient(LiveTileService, transport),
     profileItems: createClient(ProfileItemService, transport),
+    moderation: createClient(ModerationService, transport),
   };
 }

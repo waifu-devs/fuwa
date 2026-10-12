@@ -1,0 +1,181 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/server.proto";
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Mod View (docs/mod-view.md): what a server's moderators keep an eye on.
+// Members report messages and members; AutoMod opens a case for every
+// message it catches; members with MODERATE work through the cases, look
+// at a member's messages and history, and write notes about them.
+//
+// A moderator sees only what's in channels they can see: a case about a
+// message elsewhere doesn't exist for them, and a member's messages are
+// listed from their channels alone. Secure channels, direct messages and
+// channels shared from another server have no cases: the server can't read
+// the first two, and the third's messages are kept by its home server.
+service ModerationService {
+  // Reports a message to the server's moderators. Any member who can see it
+  // may, except its author; reporting it again changes the reason and note.
+  rpc ReportMessage(ReportMessageRequest) returns (ReportMessageResponse);
+  // Reports a member (or someone who was one) to the server's moderators.
+  rpc ReportMember(ReportMemberRequest) returns (ReportMemberResponse);
+
+  // MODERATE from here on.
+
+  // Cases, newest first.
+  rpc ListModCases(ListModCasesRequest) returns (ListModCasesResponse);
+  // One case and every report in it.
+  rpc GetModCase(GetModCaseRequest) returns (GetModCaseResponse);
+  // Closes a case (RESOLVED or DISMISSED) or opens it again (OPEN).
+  rpc UpdateModCase(UpdateModCaseRequest) returns (UpdateModCaseResponse);
+  // Everything about one person in the server, for a moderator: their
+  // membership, a ban, how many cases they've had, what moderators did to
+  // them and the notes about them. Works for people who left or were banned.
+  rpc GetMemberOverview(GetMemberOverviewRequest) returns (GetMemberOverviewResponse);
+  // What one person wrote, newest first, in the channels the caller can see.
+  rpc ListMemberMessages(ListMemberMessagesRequest) returns (ListMemberMessagesResponse);
+  rpc AddModNote(AddModNoteRequest) returns (AddModNoteResponse);
+  // Deletes a note: one's own, or anyone's with MANAGE_SERVER.
+  rpc DeleteModNote(DeleteModNoteRequest) returns (DeleteModNoteResponse);
+}
+
+message ReportMessageRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string message_id = 3;
+  ModReportReason reason = 4;
+  // Up to 500 characters.
+  string note = 5;
+}
+
+message ReportMessageResponse {}
+
+message ReportMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+  ModReportReason reason = 3;
+  // Up to 500 characters.
+  string note = 4;
+}
+
+message ReportMemberResponse {}
+
+message ListModCasesRequest {
+  string server_id = 1;
+  // Only cases in this state; every state when unset.
+  ModCaseStatus status = 2;
+  // Only cases about this person.
+  string subject_id = 3;
+  // Only cases of this kind.
+  ModCaseKind kind = 4;
+  // Cases older than this one, for the next page.
+  string before_id = 5;
+  // At most 100; 50 when unset.
+  int32 limit = 6;
+}
+
+message ListModCasesResponse {
+  repeated ModCase cases = 1;
+  // The people the cases are about and who closed them.
+  repeated User users = 2;
+  bool has_more = 3;
+  // How many cases are open, in the channels the caller can see.
+  int32 open_count = 4;
+}
+
+message GetModCaseRequest {
+  string server_id = 1;
+  string case_id = 2;
+}
+
+message GetModCaseResponse {
+  ModCase mod_case = 1;
+  // Oldest first.
+  repeated ModReport reports = 2;
+  // The message as it is now, when it's still there.
+  Message message = 3;
+  repeated User users = 4;
+}
+
+message UpdateModCaseRequest {
+  string server_id = 1;
+  string case_id = 2;
+  ModCaseStatus status = 3;
+  // Why, up to 500 characters; kept with the case and in the audit log.
+  string resolution = 4;
+}
+
+message UpdateModCaseResponse {
+  ModCase mod_case = 1;
+}
+
+message GetMemberOverviewRequest {
+  string server_id = 1;
+  string user_id = 2;
+}
+
+message GetMemberOverviewResponse {
+  User user = 1;
+  // Unset when they aren't a member now.
+  Member member = 2;
+  // When their account was made.
+  google.protobuf.Timestamp account_created_at = 3;
+  // Set while they're banned.
+  ModOverviewBan ban = 4;
+  // Cases about them, in channels the caller can see.
+  int32 open_cases = 5;
+  int32 total_cases = 6;
+  // What moderators (and AutoMod) did to them, newest first, up to 50.
+  repeated AuditEntry history = 7;
+  // Newest first.
+  repeated ModNote notes = 8;
+  // Messages they have in the channels the caller can see.
+  int64 message_count = 9;
+  // Everyone named above: moderators who acted, note authors.
+  repeated User users = 10;
+}
+
+message ModOverviewBan {
+  string reason = 1;
+  string banned_by_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message ListMemberMessagesRequest {
+  string server_id = 1;
+  string user_id = 2;
+  // Messages older than this one, for the next page.
+  string before_id = 3;
+  // At most 100; 50 when unset.
+  int32 limit = 4;
+  // Only in this channel.
+  string channel_id = 5;
+}
+
+message ListMemberMessagesResponse {
+  // Newest first.
+  repeated Message messages = 1;
+  bool has_more = 2;
+  repeated User authors = 3;
+}
+
+message AddModNoteRequest {
+  string server_id = 1;
+  string user_id = 2;
+  // 1 to 1000 characters.
+  string content = 3;
+}
+
+message AddModNoteResponse {
+  ModNote note = 1;
+}
+
+message DeleteModNoteRequest {
+  string server_id = 1;
+  string note_id = 2;
+}
+
+message DeleteModNoteResponse {}

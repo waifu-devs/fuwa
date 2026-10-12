@@ -14,6 +14,8 @@ import {
   FailedPreconditionError,
   LiveTileKind,
   MessageIntent,
+  ModCaseStatus,
+  ModReportReason,
   LiveTileSource,
   MediaPurpose,
   FuwaError,
@@ -197,6 +199,23 @@ test("an agent reacts to messages and hears others react", async () => {
   assert.equal(off.count, 1);
   assert.equal(off.me, false);
   await assert.rejects(agent.react(message!, "not an emoji"), (e: FuwaError) => e.code === Code.InvalidArgument);
+  await agent.stop();
+});
+
+test("an agent reports a message to the server's moderators", async () => {
+  const agent = newAgent();
+  await agent.start();
+  const { message } = await say("buy cheap followers here");
+  await agent.report(message!, ModReportReason.SPAM, "looks like spam");
+  const { cases } = await person.moderation.listModCases({ serverId, status: ModCaseStatus.OPEN });
+  const found = cases.find((c) => c.messageId === message!.id);
+  assert.equal(found?.reportCount, 1);
+  assert.deepEqual(found?.reasons, [ModReportReason.SPAM]);
+  const { reports } = await person.moderation.getModCase({ serverId, caseId: found!.id });
+  assert.deepEqual(
+    reports.map((r) => [r.reporterId, r.note]),
+    [[agent.me.id, "looks like spam"]],
+  );
   await agent.stop();
 });
 

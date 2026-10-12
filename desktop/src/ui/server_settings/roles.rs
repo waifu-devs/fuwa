@@ -55,6 +55,7 @@ pub(super) fn permission_name(p: P) -> String {
         P::Record => t("serversettings.permission.record"),
         P::MuteMembers => t("serversettings.permission.muteMembers"),
         P::MoveMembers => t("serversettings.permission.moveMembers"),
+        P::Moderate => t("desktop.modView.permission"),
     }
 }
 
@@ -90,6 +91,7 @@ pub(super) fn permission_about(p: P) -> String {
         P::Record => t("serversettings.permission.recordAbout"),
         P::MuteMembers => t("serversettings.permission.muteMembersAbout"),
         P::MoveMembers => t("serversettings.permission.moveMembersAbout"),
+        P::Moderate => t("desktop.modView.permissionAbout"),
     }
 }
 

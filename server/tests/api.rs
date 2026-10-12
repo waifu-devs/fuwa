@@ -83,6 +83,7 @@ struct Clients {
     shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
     live_tiles: pb::live_tile_service_client::LiveTileServiceClient<Channel>,
     profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
+    moderation: pb::moderation_service_client::ModerationServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -106,7 +107,8 @@ async fn clients(instance: &Instance) -> Clients {
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
         shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
         live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel.clone()),
-        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel),
+        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel.clone()),
+        moderation: pb::moderation_service_client::ModerationServiceClient::new(channel),
     }
 }
 
@@ -11769,5 +11771,294 @@ async fn live_presence_in_large_servers_follows_focus() {
     presence.update_presence(idle(&cy)).await.unwrap();
     presence.update_presence(idle(&ann)).await.unwrap();
     assert_eq!(next_seen(&mut stream).await, ann_user.id);
+    instance.stop().await;
+}
+
+async fn report_message(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    message_id: &str,
+    reason: pb::ModReportReason,
+    note: &str,
+) -> Result<(), tonic::Status> {
+    c.moderation
+        .report_message(authed(
+            token,
+            pb::ReportMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                message_id: message_id.into(),
+                reason: reason as i32,
+                note: note.into(),
+            },
+        ))
+        .await
+        .map(|_| ())
+}
+
+async fn mod_cases(
+    c: &mut Clients,
+    token: &str,
+    request: pb::ListModCasesRequest,
+) -> Result<pb::ListModCasesResponse, tonic::Status> {
+    c.moderation.list_mod_cases(authed(token, request)).await.map(|r| r.into_inner())
+}
+
+/// The Mod View events in a server's log, as one member is shown them.
+async fn mod_events(c: &mut Clients, token: &str, server_id: &str) -> Vec<Payload> {
+    let request = pb::ListEventsRequest { server_id: server_id.into(), after_sequence: 0, limit: 500 };
+    c.events
+        .list_events(authed(token, request))
+        .await
+        .unwrap()
+        .into_inner()
+        .events
+        .into_iter()
+        .filter_map(|e| e.payload)
+        .filter(|p| matches!(p, Payload::ModCaseUpdated(_) | Payload::ModNoteAdded(_) | Payload::ModNoteDeleted(_)))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mod_view_cases_reports_and_people() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    let sid = create_server(&mut c, &juan, "Moderated", true).await.id;
+    for token in [&mika, &rin, &kai] {
+        join(&mut c, token, &sid).await;
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap()
+        .id;
+    // Mika moderates, but can't see #staff-only.
+    let mods = create_role(&mut c, &juan, &sid, "Mods", &[pb::Permission::Moderate]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    let hidden = new_channel(&mut c, &juan, &sid, "staff-only", pb::ChannelType::Text).await.id;
+    let deny = overwrite(&mods.id, pb::OverwriteTarget::Role, &[], &[pb::Permission::ViewChannels]);
+    set_permissions(&mut c, &juan, &sid, &hidden, vec![deny]).await.unwrap();
+    save_rule(
+        &mut c,
+        &juan,
+        &sid,
+        pb::AutoModRule {
+            name: "No spoilers".into(),
+            enabled: true,
+            trigger: pb::AutoModTrigger::Keywords as i32,
+            keywords: vec!["spoiler".into()],
+            actions: vec![act(pb::AutoModActionKind::Block)],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Only moderators get in.
+    let everything = pb::ListModCasesRequest { server_id: sid.clone(), ..Default::default() };
+    let denied = mod_cases(&mut c, &kai, everything.clone()).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+
+    // AutoMod opens a case for the message it kept out, with what it said.
+    send(&mut c, &rin, &sid, &general, "huge spoiler ahead").await.unwrap_err();
+    let cases = mod_cases(&mut c, &mika, everything.clone()).await.unwrap();
+    assert_eq!(cases.cases.len(), 1);
+    let caught = &cases.cases[0];
+    assert_eq!(caught.kind(), pb::ModCaseKind::AutoMod);
+    assert_eq!((caught.subject_id.as_str(), caught.message_id.as_str()), (rin_user.id.as_str(), ""));
+    assert_eq!(caught.content, "huge spoiler ahead");
+    assert_eq!(caught.auto_mod.as_ref().unwrap().rule_name, "No spoilers");
+    assert!(cases.users.iter().any(|u| u.id == rin_user.id));
+
+    // Reports of one message join one case; reporting again changes the reason.
+    let rude = send(&mut c, &rin, &sid, &general, "you're all terrible").await.unwrap();
+    let own = report_message(&mut c, &rin, &sid, &general, &rude.id, pb::ModReportReason::Spam, "").await;
+    assert_eq!(own.unwrap_err().code(), Code::InvalidArgument);
+    let no_reason = report_message(&mut c, &kai, &sid, &general, &rude.id, pb::ModReportReason::Unspecified, "").await;
+    assert_eq!(no_reason.unwrap_err().code(), Code::InvalidArgument);
+    report_message(&mut c, &kai, &sid, &general, &rude.id, pb::ModReportReason::Spam, "again").await.unwrap();
+    report_message(&mut c, &kai, &sid, &general, &rude.id, pb::ModReportReason::Harassment, "mean").await.unwrap();
+    report_message(&mut c, &juan, &sid, &general, &rude.id, pb::ModReportReason::Rules, "").await.unwrap();
+    // One in a channel Mika can't see stays out of Mika's view.
+    let whisper = send(&mut c, &rin, &sid, &hidden, "between us").await.unwrap();
+    report_message(&mut c, &kai, &sid, &hidden, &whisper.id, pb::ModReportReason::Other, "").await.unwrap();
+    // And people can be reported themselves.
+    c.moderation
+        .report_member(authed(
+            &kai,
+            pb::ReportMemberRequest {
+                server_id: sid.clone(),
+                user_id: rin_user.id.clone(),
+                reason: pb::ModReportReason::Scam as i32,
+                note: "asked for my password".into(),
+            },
+        ))
+        .await
+        .unwrap();
+
+    let open = pb::ListModCasesRequest { status: pb::ModCaseStatus::Open as i32, ..everything.clone() };
+    let seen = mod_cases(&mut c, &mika, open.clone()).await.unwrap();
+    assert_eq!(seen.open_count, 3);
+    assert_eq!(seen.cases.len(), 3, "{:?}", seen.cases);
+    assert!(seen.cases.iter().all(|case| case.channel_id != hidden));
+    let reported = seen.cases.iter().find(|case| case.message_id == rude.id).unwrap().clone();
+    assert_eq!(reported.kind(), pb::ModCaseKind::MessageReport);
+    assert_eq!(reported.report_count, 2);
+    assert_eq!(reported.reasons, vec![pb::ModReportReason::Harassment as i32, pb::ModReportReason::Rules as i32],);
+    assert_eq!(mod_cases(&mut c, &juan, open.clone()).await.unwrap().open_count, 4);
+    let whispered = mod_cases(&mut c, &juan, open.clone()).await.unwrap().cases;
+    let whispered = whispered.iter().find(|case| case.channel_id == hidden).unwrap();
+    let get = |token: &str, case_id: &str| {
+        let mut moderation = c.moderation.clone();
+        let request = authed(token, pb::GetModCaseRequest { server_id: sid.clone(), case_id: case_id.into() });
+        async move { moderation.get_mod_case(request).await.map(|r| r.into_inner()) }
+    };
+    assert_eq!(get(&mika, &whispered.id).await.unwrap_err().code(), Code::NotFound);
+
+    // A case shows who reported and why, and the message as it is now.
+    let full = get(&mika, &reported.id).await.unwrap();
+    let reporters: Vec<(&str, i32, &str)> =
+        full.reports.iter().map(|r| (r.reporter_id.as_str(), r.reason, r.note.as_str())).collect();
+    assert_eq!(reporters.len(), 2);
+    assert!(reporters.contains(&(kai_user.id.as_str(), pb::ModReportReason::Harassment as i32, "mean")));
+    assert_eq!(full.message.unwrap().content, "you're all terrible");
+
+    // Closing a case is audited; the next report opens another.
+    let closed = c
+        .moderation
+        .update_mod_case(authed(
+            &mika,
+            pb::UpdateModCaseRequest {
+                server_id: sid.clone(),
+                case_id: reported.id.clone(),
+                status: pb::ModCaseStatus::Resolved as i32,
+                resolution: "warned them".into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .mod_case
+        .unwrap();
+    assert_eq!(closed.status(), pb::ModCaseStatus::Resolved);
+    assert_eq!((closed.closed_by_id.as_str(), closed.resolution.as_str()), (mika_user.id.as_str(), "warned them"));
+    let entries = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest {
+            server_id: sid.clone(),
+            action: pb::AuditAction::ModCaseUpdate as i32,
+            ..Default::default()
+        },
+    )
+    .await
+    .entries;
+    assert_eq!(entries.len(), 1);
+    assert_eq!((entries[0].target_id.as_str(), entries[0].reason.as_str()), (rin_user.id.as_str(), "warned them"));
+    report_message(&mut c, &kai, &sid, &general, &rude.id, pb::ModReportReason::Spam, "").await.unwrap();
+    let again = mod_cases(&mut c, &mika, open.clone()).await.unwrap();
+    let reopened = again.cases.iter().find(|case| case.message_id == rude.id).unwrap();
+    assert_ne!(reopened.id, reported.id);
+    assert_eq!(reopened.report_count, 1);
+
+    // A person's page: their cases and messages only where Mika can see.
+    c.servers
+        .time_out_member(authed(
+            &juan,
+            pb::TimeOutMemberRequest {
+                server_id: sid.clone(),
+                user_id: rin_user.id.clone(),
+                seconds: 60,
+                reason: "cool off".into(),
+            },
+        ))
+        .await
+        .unwrap();
+    c.moderation
+        .add_mod_note(authed(
+            &mika,
+            pb::AddModNoteRequest { server_id: sid.clone(), user_id: rin_user.id.clone(), content: "  watch  ".into() },
+        ))
+        .await
+        .unwrap();
+    let not_a_mod = c
+        .moderation
+        .add_mod_note(authed(
+            &kai,
+            pb::AddModNoteRequest { server_id: sid.clone(), user_id: rin_user.id.clone(), content: "hi".into() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(not_a_mod.code(), Code::PermissionDenied);
+    let overview = c
+        .moderation
+        .get_member_overview(authed(
+            &mika,
+            pb::GetMemberOverviewRequest { server_id: sid.clone(), user_id: rin_user.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(overview.member.unwrap().timed_out_until.is_some());
+    assert!(overview.account_created_at.is_some() && overview.ban.is_none());
+    assert_eq!((overview.open_cases, overview.total_cases), (3, 4));
+    assert_eq!(overview.message_count, 1);
+    let actions: Vec<pb::AuditAction> = overview.history.iter().map(|e| e.action()).collect();
+    assert_eq!(actions, vec![pb::AuditAction::MemberTimeOut, pb::AuditAction::ModCaseUpdate]);
+    assert_eq!(overview.history[0].reason, "cool off");
+    assert_eq!(overview.notes.len(), 1);
+    assert_eq!(overview.notes[0].content, "watch");
+    let note_id = overview.notes[0].id.clone();
+    let written = c
+        .moderation
+        .list_member_messages(authed(
+            &mika,
+            pb::ListMemberMessagesRequest {
+                server_id: sid.clone(),
+                user_id: rin_user.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(written.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec![rude.id.as_str()]);
+    assert!(!written.has_more);
+
+    // Only moderators hear about cases and notes, and Mika nothing from #staff-only.
+    assert!(mod_events(&mut c, &kai, &sid).await.is_empty());
+    let heard = mod_events(&mut c, &mika, &sid).await;
+    assert!(heard.iter().any(|p| matches!(p, Payload::ModNoteAdded(_))));
+    assert!(heard.iter().all(|p| match p {
+        Payload::ModCaseUpdated(u) => u.mod_case.as_ref().unwrap().channel_id != hidden,
+        _ => true,
+    }));
+    assert!(mod_events(&mut c, &juan, &sid).await.iter().any(|p| match p {
+        Payload::ModCaseUpdated(u) => u.mod_case.as_ref().unwrap().channel_id == hidden,
+        _ => false,
+    }));
+
+    // Notes go by their author, or by someone who manages the server.
+    let delete = |token: &str| {
+        let mut moderation = c.moderation.clone();
+        let request = authed(token, pb::DeleteModNoteRequest { server_id: sid.clone(), note_id: note_id.clone() });
+        async move { moderation.delete_mod_note(request).await }
+    };
+    assert_eq!(delete(&kai).await.unwrap_err().code(), Code::PermissionDenied);
+    delete(&juan).await.unwrap();
+    assert_eq!(delete(&mika).await.unwrap_err().code(), Code::NotFound);
     instance.stop().await;
 }

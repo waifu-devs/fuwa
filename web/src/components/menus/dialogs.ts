@@ -1,4 +1,5 @@
 import type { Member, Server } from "@/gen/fuwa/v1/types_pb";
+import type { ReportTarget } from "@/components/modview/ReportDialog";
 import type { ModAction } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 
@@ -17,7 +18,8 @@ type MenuDialog =
   | { kind: "moderate"; instanceKey: string; serverId: string; member: Member; action: ModAction }
   | { kind: "confirm"; confirm: Confirm }
   | { kind: "invite"; instanceKey: string; serverId: string; channelId: string }
-  | { kind: "server-settings"; instanceKey: string; server: Server; tab: string; target?: string };
+  | { kind: "server-settings"; instanceKey: string; server: Server; tab: string; target?: string }
+  | { kind: "report"; target: ReportTarget };
 
 /** The dialog open now, and the last of each kind, kept while it closes. */
 type State = { open: MenuDialog | null; last: Partial<Record<MenuDialog["kind"], MenuDialog>> };

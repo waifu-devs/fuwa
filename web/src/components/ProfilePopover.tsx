@@ -11,6 +11,7 @@ import { byId } from "@/fuwa/hooks";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
+import { ProfileReport } from "@/components/modview/ProfileReport";
 import { FriendActions } from "@/components/friends/FriendActions";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -175,6 +176,7 @@ function ProfileContent({
             </motion.div>
           )}
           {canModerate && <ModActions allowed={allowed} timedOut={!!timedOutUntil(member, now)} onPick={onModerate} />}
+          {member && <ProfileReport instanceKey={instanceKey} user={user} member={member} me={me} onClose={onClose} />}
         </motion.div>
       </Popover.Content>
     </Popover.Portal>

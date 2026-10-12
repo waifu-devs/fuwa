@@ -113,7 +113,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.SearchService"
         | "fuwa.v1.CommandService"
         | "fuwa.v1.LiveTileService"
-        | "fuwa.v1.ProfileItemService" => Target::Shard,
+        | "fuwa.v1.ProfileItemService"
+        | "fuwa.v1.ModerationService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

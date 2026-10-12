@@ -349,6 +349,18 @@
     message through that rule and is counted in the anonymous report by
     kind and provider id. The web pages are `settings/instance/Moderation.tsx`
     and the Smart filter in `settings/server/AutoMod.tsx`.
+  - `api/moderation.rs`: Mod View (`ModerationService`, docs/mod-view.md),
+    under the Use Mod View permission (`MODERATE`). Cases in the server
+    file's `mod_cases`: AutoMod opens one per rule that catches a message
+    (`automod::act`, told the message's id through `automod::Sent`), and
+    members' reports (`mod_reports`, one row per reporter) join the open case
+    for the same message or member (`open_key`). A case keeps what the
+    message said. `mod_notes` are moderators' notes. A moderator sees only
+    cases, messages and history from channels they can see, and only they
+    get `ModCaseUpdated` and the note events (`moderation::event_shown`);
+    reporters are never shown to the person reported. Deleting an account
+    calls `forget_person`. Not in secure channels, DMs or channels shared
+    from another server.
   - `search.rs` and `api/search.rs`: searching a server's messages
     (`SearchService`). Turso's own full-text search needs a new dependency
     and doesn't run in MVCC, so the index is plain tables in the server's file

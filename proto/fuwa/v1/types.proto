@@ -452,6 +452,14 @@ enum Permission {
   // React to messages with emoji (MessageService.React). Taking your own
   // reaction off needs nothing.
   PERMISSION_ADD_REACTIONS = 28;
+
+  // Server-wide only.
+
+  // Mod View (ModerationService): the cases AutoMod and members' reports
+  // open, members' messages in the channels they can see, their history
+  // with the server's moderators, and the moderators' notes about them.
+  // Acting on someone still takes its own permission (KICK_MEMBERS...).
+  PERMISSION_MODERATE = 29;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -1393,6 +1401,11 @@ message Event {
     ProfileItemsUpdated profile_items_updated = 34;
     ReactionUpdated reaction_updated = 35;
     ReactionsCleared reactions_cleared = 36;
+    // Mod View: only members with MODERATE get these, and a case about a
+    // message only if they can see its channel.
+    ModCaseUpdated mod_case_updated = 37;
+    ModNoteAdded mod_note_added = 38;
+    ModNoteDeleted mod_note_deleted = 39;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1694,4 +1707,107 @@ message SignInMethod {
   google.protobuf.Timestamp linked_at = 4;
   // Whether it signs in right now: false while the instance has it off.
   bool works = 5;
+}
+
+// ============================================================================
+// Mod View
+// ============================================================================
+
+// Something for a server's moderators to look at (ModerationService): a
+// message AutoMod caught, or a message or member someone reported. Reports
+// of the same message, or the same member, fold into one open case.
+message ModCase {
+  string id = 1;
+  string server_id = 2;
+  ModCaseKind kind = 3;
+  ModCaseStatus status = 4;
+  // Who it's about: the message's author, or the member reported.
+  string subject_id = 5;
+  // Where the message was; empty for a member report.
+  string channel_id = 6;
+  // The message, while it's there to jump to: empty for a member report, or
+  // when AutoMod kept it from being sent. It may have been deleted since.
+  string message_id = 7;
+  // The thread it's a reply in, if it is one.
+  string thread_id = 8;
+  // What the message said when it was caught or first reported, kept for
+  // the moderators even if it's edited or deleted.
+  string content = 9;
+  // AUTO_MOD: the rule and what it did.
+  AutoModAlert auto_mod = 10;
+  // Reports: how many people reported it, and the reasons they gave.
+  int32 report_count = 11;
+  repeated ModReportReason reasons = 12;
+  google.protobuf.Timestamp created_at = 13;
+  // The last report, or the last change to its status.
+  google.protobuf.Timestamp updated_at = 14;
+  // Who closed it and when, and what they wrote; unset while it's open.
+  string closed_by_id = 15;
+  google.protobuf.Timestamp closed_at = 16;
+  string resolution = 17;
+}
+
+enum ModCaseKind {
+  MOD_CASE_KIND_UNSPECIFIED = 0;
+  MOD_CASE_KIND_AUTO_MOD = 1;
+  MOD_CASE_KIND_MESSAGE_REPORT = 2;
+  MOD_CASE_KIND_MEMBER_REPORT = 3;
+}
+
+enum ModCaseStatus {
+  MOD_CASE_STATUS_UNSPECIFIED = 0;
+  MOD_CASE_STATUS_OPEN = 1;
+  // A moderator dealt with it.
+  MOD_CASE_STATUS_RESOLVED = 2;
+  // A moderator found nothing to do.
+  MOD_CASE_STATUS_DISMISSED = 3;
+}
+
+enum ModReportReason {
+  MOD_REPORT_REASON_UNSPECIFIED = 0;
+  MOD_REPORT_REASON_SPAM = 1;
+  MOD_REPORT_REASON_HARASSMENT = 2;
+  MOD_REPORT_REASON_HATE = 3;
+  MOD_REPORT_REASON_SEXUAL = 4;
+  MOD_REPORT_REASON_VIOLENCE = 5;
+  MOD_REPORT_REASON_SELF_HARM = 6;
+  MOD_REPORT_REASON_SCAM = 7;
+  // Breaks the server's rules some other way.
+  MOD_REPORT_REASON_RULES = 8;
+  MOD_REPORT_REASON_OTHER = 9;
+}
+
+// One person's report in a case. Only moderators see who reported; the
+// person reported is never told.
+message ModReport {
+  string reporter_id = 1;
+  ModReportReason reason = 2;
+  // What they added, up to 500 characters.
+  string note = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// A moderator's note about a member, seen only by members with MODERATE.
+message ModNote {
+  string id = 1;
+  // Who it's about.
+  string subject_id = 2;
+  string author_id = 3;
+  // Up to 1000 characters of plain text.
+  string content = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// A case was opened, reported again, or closed or opened again.
+message ModCaseUpdated {
+  ModCase mod_case = 1;
+}
+
+message ModNoteAdded {
+  ModNote note = 1;
+}
+
+message ModNoteDeleted {
+  string subject_id = 1;
+  string note_id = 2;
 }

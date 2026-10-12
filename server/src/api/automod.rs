@@ -628,6 +628,17 @@ fn count(rules: &[pb::AutoModRule], trigger: Trigger, except: &str) -> usize {
     rules.iter().filter(|r| r.trigger == trigger as i32 && r.id != except).count()
 }
 
+/// The message AutoMod is looking at, for the case it opens when a rule
+/// catches it: the id a new message will have (or an edited one has), and
+/// its thread. Empty where there's none to point at.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct Sent<'a> {
+    pub id: &'a str,
+    pub thread_id: &'a str,
+    /// It's there already: a block keeps the edit out, not the message.
+    pub edit: bool,
+}
+
 /// What AutoMod did about a message.
 #[derive(Debug, Default)]
 pub(super) struct Verdict {
@@ -648,6 +659,7 @@ pub(super) async fn review(
     channel: &pb::Channel,
     text: automod::Text<'_>,
     asked: Option<&Asked>,
+    sent: Sent<'_>,
     events: &mut Vec<Payload>,
 ) -> Result<Verdict> {
     let content = text.all;
@@ -674,7 +686,7 @@ pub(super) async fn review(
             caught.push((rule, hit));
         }
     }
-    let blocked = act(conn, server_id, member, channel, content, asked, &caught, events).await?;
+    let blocked = act(conn, server_id, member, channel, content, asked, sent, &caught, events).await?;
     Ok(Verdict { blocked })
 }
 
@@ -712,8 +724,8 @@ pub(super) async fn tile_blocked(
 }
 
 /// Does what the rules that `caught` a message say: works out what its
-/// author is told when one blocks it (returned), times them out and posts
-/// the alerts.
+/// author is told when one blocks it (returned), times them out, posts the
+/// alerts and opens a case in Mod View for each rule.
 #[allow(clippy::too_many_arguments)]
 async fn act(
     conn: &turso::Connection,
@@ -722,6 +734,7 @@ async fn act(
     channel: &pb::Channel,
     content: &str,
     asked: Option<&Asked>,
+    sent: Sent<'_>,
     caught: &[(pb::AutoModRule, automod::Hit)],
     events: &mut Vec<Payload>,
 ) -> Result<Option<String>> {
@@ -756,7 +769,31 @@ async fn act(
             store::audit(conn, &author_id, entry).await?;
         }
     }
+    // The message is there to jump to unless the block kept a new one out.
+    let message_id = if blocked.is_some() && !sent.edit { "" } else { sent.id };
     for (rule, hit) in caught {
+        let found = pb::AutoModAlert {
+            rule_id: rule.id.clone(),
+            rule_name: rule.name.clone(),
+            trigger: rule.trigger,
+            channel_id: channel.id.clone(),
+            content: content.to_string(),
+            matched: hit.matched.clone(),
+            blocked: blocked.is_some(),
+            timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
+            provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.clone()).unwrap_or_default(),
+            capped_per_day: 0,
+        };
+        super::moderation::auto_mod_case(
+            conn,
+            server_id,
+            &author_id,
+            message_id,
+            sent.thread_id,
+            found.clone(),
+            events,
+        )
+        .await?;
         let Some(alert) = action(rule, Kind::Alert) else { continue };
         let Some(alert_channel) = load_channel(conn, server_id, &alert.channel_id).await? else { continue };
         let message = pb::Message {
@@ -766,18 +803,7 @@ async fn act(
             author_id: author_id.clone(),
             created_at: Some(timestamp(now)),
             kind: pb::MessageKind::AutoModAlert as i32,
-            auto_mod: Some(pb::AutoModAlert {
-                rule_id: rule.id.clone(),
-                rule_name: rule.name.clone(),
-                trigger: rule.trigger,
-                channel_id: channel.id.clone(),
-                content: content.to_string(),
-                matched: hit.matched.clone(),
-                blocked: blocked.is_some(),
-                timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
-                provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.clone()).unwrap_or_default(),
-                capped_per_day: 0,
-            }),
+            auto_mod: Some(found),
             ..Default::default()
         };
         super::messages::insert_system(conn, &message).await?;
@@ -812,7 +838,8 @@ async fn review_sent(
         return Ok(vec![]);
     };
     let caught = [(effective(&rule, Some(level)), hit)];
-    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_none() {
+    let sent = Sent { id: &message.id, thread_id: &message.thread_id, edit: true };
+    if act(conn, server_id, member, &channel, content, Some(asked), sent, &caught, events).await?.is_none() {
         return Ok(vec![]);
     }
     let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();

@@ -131,6 +131,7 @@ impl FuwaApp {
             || self.dialog.is_some()
             || self.connect.is_some()
             || self.server_settings.is_some()
+            || self.mod_view.is_some()
             || self.instance_settings.is_some()
             || self.settings.is_some()
             || self.switcher.is_some()

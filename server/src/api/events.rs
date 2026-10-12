@@ -93,6 +93,9 @@ fn shown_to(account_id: &str, access: &Access, payload: &Payload) -> bool {
     match payload {
         Payload::ApplicationUpdated(_) => access.has(pb::Permission::KickMembers),
         Payload::InteractionCreated(p) => p.interaction.as_ref().is_some_and(|i| i.agent_id == account_id),
+        Payload::ModCaseUpdated(_) | Payload::ModNoteAdded(_) | Payload::ModNoteDeleted(_) => {
+            super::moderation::event_shown(access, payload)
+        }
         payload => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
     }
 }
