@@ -196,6 +196,15 @@ agent.on("reactionUpdated", (payload) => {
   `reactionUpdated` and `reactionsCleared` events say what changes (`me` is
   never set in events: compare `userId`).
 
+### Reports and Mod View
+
+`agent.report(message, ModReportReason.SPAM, "note")` reports a message to
+its server's moderators, as members do from the apps
+([docs/mod-view.md](mod-view.md)). An agent given Use Mod View can work
+through the cases with `agent.api.moderation` (`listModCases`,
+`getModCase`, `updateModCase`, `getMemberOverview`...), and gets
+`modCaseUpdated` events; the MCP server has the same calls as tools.
+
 ### Typed events
 
 Every event kind has a handler named after its payload, with that payload's

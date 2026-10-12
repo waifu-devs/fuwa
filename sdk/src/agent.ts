@@ -4,7 +4,7 @@ import { EventFollower, type EventKind, type EventPayload } from "./events.js";
 import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
-import type { LiveTile, LiveTileContentSchema } from "./gen/fuwa/v1/types_pb.js";
+import type { LiveTile, LiveTileContentSchema, ModReportReason } from "./gen/fuwa/v1/types_pb.js";
 import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
   AccountKind,
@@ -421,6 +421,21 @@ export class Agent {
     });
     if (!reaction) throw toFuwaError(new Error("the instance didn't return the reaction"));
     return reaction;
+  }
+
+  /**
+   * Reports a message to its server's moderators (Mod View), with a reason
+   * and an optional note of up to 500 characters. Reporting it again
+   * changes the reason and note. Moderators see that the agent reported it.
+   */
+  async report(message: Message, reason: ModReportReason, note = ""): Promise<void> {
+    await this.api.moderation.reportMessage({
+      serverId: message.serverId,
+      channelId: message.channelId,
+      messageId: message.id,
+      reason,
+      note,
+    });
   }
 
   /** Who reacted to a message with an emoji, the earliest first (up to 100). */
