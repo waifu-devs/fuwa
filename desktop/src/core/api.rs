@@ -214,6 +214,7 @@ clients! {
     live_tiles => "LiveTileService" pb::live_tile_service_client::LiveTileServiceClient<Transport>,
     profile_items => "ProfileItemService" pb::profile_item_service_client::ProfileItemServiceClient<Transport>,
     live => "LiveService" pb::live_service_client::LiveServiceClient<Transport>,
+    moderation => "ModerationService" pb::moderation_service_client::ModerationServiceClient<Transport>,
 }
 
 impl Api {

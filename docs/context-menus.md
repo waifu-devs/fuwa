@@ -132,3 +132,11 @@ Timestamp added. Shift+F10 and the Menu key open the menu of what the pointer
 is over, or of the open channel or conversation. A message's `react` row has
 no "See who reacted" (hovering a reaction says who), and the keyboard skips its
 emoji buttons: "Add reaction" is the way in from the keys.
+
+Mod View (on instances with `mod-view`) adds, on the desktop: "Report
+message" in a message's `manage` (others' plain messages in the server's own
+text and announcement channels: not direct messages, secure channels or a
+channel shared from another server); "Open in Mod View" first in someone's
+`moderate` (Use Mod View) and "Report" at its end (anyone else in the
+server); and "Mod View" in a server's `manage` and the server header's menu
+(Use Mod View), with the open cases as its hint.

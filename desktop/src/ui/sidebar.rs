@@ -135,6 +135,12 @@ impl FuwaApp {
         // a chevron, and the server's menu under it.
         let node_name = self.core.shared.read(|s| s.instance(key).map(|i| i.name()).unwrap_or_default());
         let members = server.member_count;
+        // Moderators see how many cases wait in Mod View, counted once the server shows.
+        self.core.want_open_cases(key, server_id);
+        let open_cases = self.core.shared.read(|s| {
+            s.instance(key).filter(|i| i.can_mod_view(server_id)).and_then(|i| i.open_cases(server_id)).unwrap_or(0)
+        });
+        let cases_badge = self.mod_view_badge(key, server_id, open_cases, &p, window, cx);
         let of = MenuOf::ServerHeader { key: key.to_owned(), server: server.id.clone() };
         let menu_open = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
         let turn = motion::follow(
@@ -213,6 +219,7 @@ impl FuwaApp {
                                 ))),
                         ),
                 )
+                .when_some(cases_badge, |el, badge| el.child(badge))
                 .child(
                     gpui_kit::svg()
                         .path("icons/chevron-down.svg")
@@ -556,6 +563,51 @@ impl FuwaApp {
         let tiles = self.live_tiles_strip(key, server_id, window, cx);
         let body = div().when_some(notice, |el, n| el.child(n)).when_some(tiles, |el, t| el.child(t)).child(list);
         (header, body.into_any_element())
+    }
+
+    /// Open cases in Mod View, beside the server's name: a shield with the count
+    /// popping in and rolling, that opens Mod View. It shrinks away once none are left.
+    fn mod_view_badge(
+        &mut self,
+        key: &str,
+        server_id: &str,
+        open: i32,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let of = format!("{key}/{server_id}");
+        let (count, left) = going(&format!("mod-view-badge|{of}"), (open > 0).then_some(open), window, cx)?;
+        let (k, sid) = (key.to_owned(), server_id.to_owned());
+        let hover = alpha(p.destructive, 0.2);
+        let pill = div()
+            .id("mod-view-badge")
+            .flex_none()
+            .h(px(22.0))
+            .px(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .rounded_full()
+            .bg(alpha(p.destructive, 0.12))
+            .text_color(p.destructive)
+            .text_size(px(11.0))
+            .font_weight(FontWeight::EXTRA_BOLD)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .active(|s| s.scale(0.92))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.open_mod_view(&k, &sid, None, window, cx);
+            }))
+            .child(icon("shield-alert").size(px(12.0)))
+            .child(motion::count(format!("mod-view-n|{of}"), count.max(0) as u64, Some(99), 11.0, window, cx));
+        Some(
+            div()
+                .when(left < 1.0, |el| el.opacity(left).scale(left))
+                .child(crate::ui::widgets::popped(pill, SharedString::from(format!("mod-view-pop|{of}")), 0.0, -20.0))
+                .into_any_element(),
+        )
     }
 
     /// People waiting to be let in, for whoever can let them in (the web's

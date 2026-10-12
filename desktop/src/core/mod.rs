@@ -39,6 +39,7 @@ pub mod keybinds;
 pub mod linked;
 mod live;
 pub mod live_tiles;
+pub mod mod_view;
 pub mod moderation;
 pub mod notifications;
 pub mod onboarding;

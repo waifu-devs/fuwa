@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 28] = [
+pub const KNOWN: [P; 29] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -42,6 +42,7 @@ pub const KNOWN: [P; 28] = [
     P::CreateThreads,
     P::CreatePolls,
     P::AddReactions,
+    P::Moderate,
 ];
 
 pub const ALL: Bits = {
@@ -93,7 +94,15 @@ pub const GROUPS: [(&str, &[P]); 5] = [
     ),
     (
         "Membership",
-        &[P::CreateInvite, P::ChangeNickname, P::ManageNicknames, P::KickMembers, P::BanMembers, P::TimeOutMembers],
+        &[
+            P::CreateInvite,
+            P::ChangeNickname,
+            P::ManageNicknames,
+            P::KickMembers,
+            P::BanMembers,
+            P::TimeOutMembers,
+            P::Moderate,
+        ],
     ),
     (
         "Text channels",
@@ -169,6 +178,10 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         ),
         P::MuteMembers => ("Mute members", "Mute or deafen people ranked below them in voice channels, for everyone."),
         P::MoveMembers => ("Move members", "Disconnect people ranked below them from voice channels."),
+        P::Moderate => (
+            "Use Mod View",
+            "See reports and what AutoMod caught, look into a member's messages and history, and keep notes about them. Acting on someone still takes its own permission.",
+        ),
     }
 }
 

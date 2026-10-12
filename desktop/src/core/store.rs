@@ -128,6 +128,8 @@ pub struct InstanceState {
     /// server, by channel id, once asked (None while asking): what reactions
     /// there can use (`reactions::Core::want_home_emojis`).
     pub home_emojis: HashMap<String, Option<Vec<pb::Emoji>>>,
+    /// Per server you moderate: its open cases, the cases seen and the notes of open pages (`mod_view.rs`).
+    pub mod_view: HashMap<String, crate::core::mod_view::ModView>,
 }
 
 impl InstanceState {
@@ -171,6 +173,7 @@ impl InstanceState {
             profile_items: Vec::new(),
             server_items: HashMap::new(),
             home_emojis: HashMap::new(),
+            mod_view: HashMap::new(),
         }
     }
 
@@ -438,6 +441,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.emojis.remove(server_id);
     i.server_items.remove(server_id);
     i.shared.remove(server_id);
+    i.mod_view.remove(server_id);
     i.synced.remove(server_id);
     i.followed.remove(server_id);
     threads::forget_threads_in(i, &channels.iter().map(String::as_str).collect());
@@ -612,6 +616,17 @@ pub fn apply_event(
         Payload::MessagePinned(p) => crate::core::pins::mark(i, p),
         Payload::ReactionUpdated(p) => crate::core::reactions::updated(i, p),
         Payload::ReactionsCleared(p) => crate::core::reactions::cleared(i, p),
+        Payload::ModCaseUpdated(pb::ModCaseUpdated { mod_case: Some(case) }) => {
+            crate::core::mod_view::case_updated(i.mod_view.entry(sid.to_owned()).or_default(), case)
+        }
+        Payload::ModNoteAdded(pb::ModNoteAdded { note: Some(note) }) => {
+            crate::core::mod_view::note_added(i.mod_view.entry(sid.to_owned()).or_default(), note)
+        }
+        Payload::ModNoteDeleted(p) => crate::core::mod_view::note_deleted(
+            i.mod_view.entry(sid.to_owned()).or_default(),
+            &p.subject_id,
+            &p.note_id,
+        ),
         Payload::ThreadUpdated(p) => threads::with_thread_summary(i, &p.channel_id, &p.thread_id, p.thread.as_ref()),
         Payload::UserUpdated(pb::UserUpdated { user: Some(user) }) => update_user(i, user),
         Payload::MemberJoined(pb::MemberJoined { member: Some(member) })

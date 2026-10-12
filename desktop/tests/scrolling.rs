@@ -32,6 +32,9 @@ const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("instance_settings.rs", 2),
     ("join.rs", 2),
     ("keys.rs", 2),
+    // The case beside the queue, and a person's side: full-screen columns over nothing that scrolls.
+    ("mod_view.rs", 1),
+    ("mod_view/member.rs", 1),
     ("onboarding.rs", 1),
     ("overlay.rs", 1),
     ("pins.rs", 1),
