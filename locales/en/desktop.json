@@ -349,5 +349,15 @@
   "overlay.usingNoKey": "Give “Use the game overlay” a shortcut to click in the overlay.",
   "overlay.exclusive": "Games in exclusive full screen draw over every window, the overlay too. Play in borderless or windowed to see it.",
   "overlay.wayland": "The game overlay needs X11: Wayland doesn't let one app draw over another or hear keys meant for it.",
-  "overlay.allowKeys": "macOS needs to let fuwa use Input Monitoring before the overlay's key works while a game is in front."
+  "overlay.allowKeys": "macOS needs to let fuwa use Input Monitoring before the overlay's key works while a game is in front.",
+  "menu.settings": "Settings…",
+  "menu.services": "Services",
+  "menu.hide": "Hide fuwa",
+  "menu.hideOthers": "Hide Others",
+  "menu.showAll": "Show All",
+  "menu.quit": "Quit fuwa",
+  "menu.window": "Window",
+  "menu.minimize": "Minimize",
+  "menu.fullScreen": "Enter Full Screen",
+  "menu.close": "Close Window"
 }

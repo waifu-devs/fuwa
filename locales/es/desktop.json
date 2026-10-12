@@ -82,5 +82,15 @@
   "overlay.usingNoKey": "Dale un atajo a “Use the game overlay” para hacer clic en la superposición.",
   "overlay.exclusive": "Los juegos en pantalla completa exclusiva se dibujan encima de todas las ventanas, también de la superposición. Juega en ventana o sin bordes para verla.",
   "overlay.wayland": "La superposición de juego necesita X11: Wayland no deja que una app dibuje sobre otra ni oiga sus teclas.",
-  "overlay.allowKeys": "macOS tiene que dejar a fuwa usar Monitorización de entrada para que la tecla de la superposición funcione con un juego delante."
+  "overlay.allowKeys": "macOS tiene que dejar a fuwa usar Monitorización de entrada para que la tecla de la superposición funcione con un juego delante.",
+  "menu.settings": "Ajustes…",
+  "menu.services": "Servicios",
+  "menu.hide": "Ocultar fuwa",
+  "menu.hideOthers": "Ocultar otros",
+  "menu.showAll": "Mostrar todo",
+  "menu.quit": "Salir de fuwa",
+  "menu.window": "Ventana",
+  "menu.minimize": "Minimizar",
+  "menu.fullScreen": "Pantalla completa",
+  "menu.close": "Cerrar ventana"
 }

@@ -93,6 +93,7 @@ mod settings_updates;
 mod settings_voice;
 mod shared_marks;
 mod sidebar;
+mod system;
 pub mod text;
 pub mod theme;
 pub(crate) mod threads;
@@ -180,6 +181,7 @@ pub fn run() -> anyhow::Result<()> {
                 None
             }
         };
+        system::init(main, cx);
         // Closing the main window quits, popped-out cameras or not.
         cx.on_window_closed(move |cx, closed| {
             if cx.windows().is_empty() || Some(closed) == main {

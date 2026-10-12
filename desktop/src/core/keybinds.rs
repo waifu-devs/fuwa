@@ -157,7 +157,7 @@ pub fn problem_with(
     except: Except,
 ) -> Option<String> {
     let c = normalize(combo);
-    if let Some((_, what)) = FIXED.iter().find(|(k, _)| normalize(k) == c) {
+    if let Some((_, what)) = FIXED.iter().chain(SYSTEM).find(|(k, _)| normalize(k) == c) {
         return Some(format!("{} is kept for “{what}”.", label(&c)));
     }
     for action in &ACTIONS {
@@ -182,6 +182,21 @@ pub fn problem_with(
 
 /// Keys the desktop app keeps for itself, so they can't be given to an action.
 pub const FIXED: [(&str, &str); 2] = [("Mod+Shift+N", "Add an instance"), ("Escape", "Close what's open")];
+
+/// The system's own shortcuts (`ui/system.rs`), which every app answers to.
+#[cfg(target_os = "macos")]
+pub const SYSTEM: &[(&str, &str)] = &[
+    ("Mod+Q", "Quit fuwa"),
+    ("Mod+W", "Close the window"),
+    ("Mod+M", "Minimize"),
+    ("Mod+Ctrl+F", "Full screen"),
+    ("Mod+H", "Hide fuwa"),
+    ("Mod+Alt+H", "Hide others"),
+];
+#[cfg(target_os = "linux")]
+pub const SYSTEM: &[(&str, &str)] = &[("Mod+Q", "Quit fuwa"), ("Alt+F4", "Close the window")];
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub const SYSTEM: &[(&str, &str)] = &[("Alt+F4", "Close the window")];
 
 /// Keys that only work inside the message box, listed on the sheet but not changeable.
 pub const COMPOSER_KEYS: [(&str, &str); 4] = [
@@ -351,6 +366,9 @@ mod tests {
         );
         assert!(problem_with("F1", &keybinds, &custom, Except::default()).unwrap().contains("Show keyboard shortcuts"));
         assert!(problem_with("Mod+K", &keybinds, &custom, Except::default()).is_none());
+        for (combo, _) in SYSTEM {
+            assert!(problem_with(combo, &keybinds, &custom, Except::default()).is_some());
+        }
     }
 
     #[test]
