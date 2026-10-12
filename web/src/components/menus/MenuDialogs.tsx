@@ -4,16 +4,26 @@ import { useState, useSyncExternalStore } from "react";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { lazyComponent } from "@/components/lazy";
 import { ModerateDialog } from "@/components/ModerateDialog";
+import "@/components/modview/menus";
+import { ReportDialog } from "@/components/modview/ReportDialog";
 import { closeMenuDialog as close, subscribeMenuDialogs as subscribe, menuDialogs, type Confirm } from "@/components/menus/dialogs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { useModView } from "@/fuwa/moderation";
 import { useI18n } from "@/i18n/react";
 
 /*
  * Dialogs a right-click menu opens from places that don't have them already:
  * the server rail has no invite or settings dialog of its own, and a member
  * row has no moderation dialog. They're the same dialogs the buttons open.
+ * Reporting and Mod View (docs/mod-view.md) open from here too, wherever
+ * they're asked for.
  */
+
+const ModView = lazyComponent(
+  () => import("@/components/modview/ModView").then((m) => m.ModViewHost),
+  (p) => p.open,
+);
 
 const ServerSettingsDialog = lazyComponent(
   () => import("@/components/dialogs/ServerSettingsDialog").then((m) => m.ServerSettingsDialog),
@@ -26,8 +36,11 @@ export function MenuDialogs() {
   const invite = last.invite?.kind === "invite" ? last.invite : null;
   const settings = last["server-settings"]?.kind === "server-settings" ? last["server-settings"] : null;
   const confirm = last.confirm?.kind === "confirm" ? last.confirm.confirm : null;
+  const modView = useModView();
   return (
     <>
+      <ReportDialog target={open?.kind === "report" ? open.target : null} onClose={close} />
+      <ModView open={modView.open} />
       {moderate && (
         <ModerateDialog
           instanceKey={moderate.instanceKey}

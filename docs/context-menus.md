@@ -48,7 +48,7 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 | primary | Reply in thread / Open thread (where the message's own button shows) · Edit message (yours) · Copy text |
 | manage | Pin message / Unpin message (Manage Messages) · Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) · Remove all reactions (Manage Messages, when it has reactions; asks first; not on a guest's side of a shared channel, where only the home clears them) |
 | developer | Copy message ID |
-| danger | Delete message (yours, or with Manage Messages): asks in the message's toolbar |
+| danger | Report message (someone else's ordinary message, where the instance has Mod View; not in secure channels or channels shared from another server; opens the report dialog) · Delete message (yours, or with Manage Messages): asks in the message's toolbar |
 
 A message in a direct message or secure channel (`dm_message`): target | the
 same react section, standard emoji only, and See who reacted from this
@@ -68,8 +68,9 @@ text · Dismiss (failed).
 | primary | Profile · Message (encrypted DM; not yourself or agents) · Mention (puts `@name` in the message box) |
 | social | (friends, once they exist) |
 | manage | Edit server profile (yourself) · Change nickname · Roles ▸ (checkboxes for the roles below yours, with Manage Roles; stays open while you pick) |
-| moderate | Time out / End time out · Kick · Ban: each opens the same dialog as the profile card, asking for a reason |
+| moderate | Open in Mod View (Use Mod View: their page) · Time out / End time out · Kick · Ban: each opens the same dialog as the profile card, asking for a reason |
 | developer | Copy user ID |
+| danger | Report (someone else, in a server, where the instance has Mod View; opens the report dialog) |
 
 ### A channel (`channel`)
 
@@ -92,7 +93,7 @@ Permissions | Copy category ID | Delete category (asks first; its channels stay)
 | --- | --- |
 | primary | Mark as read · Invite people |
 | notifications | Mute server ▸ / Unmute server · Notification settings |
-| manage | Server settings · Edit server profile |
+| manage | Mod View (Use Mod View; the number of open cases beside it) · Server settings · Edit server profile |
 | folder | Put in a new folder, or Take out of folder (your own rail folders) |
 | developer | Copy server ID |
 | danger | Leave server (not the owner; asks first) |
@@ -112,9 +113,10 @@ phone's own menu.
 Features add their items without touching the menus: `extendMenu(kind, {
 section, at, build })` from `web/src/lib/context-menu.ts`, with the sections
 named above. A section a menu doesn't have yet is added before `danger`.
-Planned: Reply at the start of `primary`, Mark unread in `primary`, Report in
-`danger`, Add friend in `social`, attachments and polls in the composer's
-`insert`.
+Mod View's items (docs/mod-view.md) come in this way, from
+`web/src/components/modview/menus.ts`. Planned: Reply at the start of
+`primary`, Mark unread in `primary`, Add friend in `social`, attachments and
+polls in the composer's `insert`.
 
 ## Desktop
 

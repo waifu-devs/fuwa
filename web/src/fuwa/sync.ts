@@ -13,6 +13,7 @@ import { closeNotifications, onLiveEvent, onRemoved } from "@/lib/notify";
 import { effectiveNotifications } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
+import { forgetModeration, onModEvent } from "./moderation";
 import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
@@ -152,6 +153,7 @@ export function onLeaveAccount(fn: (key: string) => void) {
 function leave(key: string) {
   closeNotifications(key);
   forgetPins(key);
+  forgetModeration(key);
   clearToasts();
   for (const fn of leaving) fn(key);
 }
@@ -433,6 +435,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
           });
           closeNotifications(key);
           forgetPins(key);
+          forgetModeration(key);
           if (userId) void forgetAccount(key, userId);
           patchInstance(key, { connection: "signed-out", problem: i18n().t("workspace.session.ended") });
         } else {
@@ -725,6 +728,7 @@ const followEvents = (
           onLiveEvent(key, event);
           dmEngine(key)?.onServerEvent(event);
           onPinEvent(key, event);
+          onModEvent(key, event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));

@@ -48,11 +48,14 @@ import {
   RadioTowerIcon,
   SparkleIcon,
   SparklesIcon,
+  InboxIcon,
+  StickyNoteIcon,
+  NotebookPenIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuditAction, type AuditChange, type AuditEntry } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, ModCaseStatus, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";
 import { listAuditLog, run, type AuditFilter } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
@@ -131,6 +134,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.PROFILE_ITEM_UPDATE]: { label: "serversettings.audit.kind.profileItemUpdate", icon: SparkleIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.PROFILE_ITEM_DELETE]: { label: "serversettings.audit.kind.profileItemDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.REACTIONS_CLEAR]: { label: "serversettings.audit.kind.reactionsClear", icon: SmileIcon, tint: "bg-orange-500/15 text-orange-500" },
+  [AuditAction.MOD_CASE_UPDATE]: { label: "serversettings.audit.kind.modCaseUpdate", icon: InboxIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.MOD_NOTE_ADD]: { label: "serversettings.audit.kind.modNoteAdd", icon: NotebookPenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.MOD_NOTE_DELETE]: { label: "serversettings.audit.kind.modNoteDelete", icon: StickyNoteIcon, tint: "bg-destructive/15 text-destructive" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -178,6 +184,7 @@ const FIELD: Record<string, Key> = {
   server: "serversettings.invites.server",
   actions: "serversettings.audit.field.actions",
   effect: "serversettings.audit.field.effect",
+  status: "serversettings.audit.field.status",
 };
 
 /** A changed field's name in the app's language. */
@@ -284,7 +291,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
         <ol className="relative flex flex-col gap-1.5">
           <AnimatePresence initial={false}>
             {entries.map((entry, n) => (
-              <Entry
+              <AuditLogEntry
                 key={entry.id}
                 entry={entry}
                 index={n}
@@ -333,7 +340,7 @@ function Filter({ label, value, children }: { label: string; value: string; chil
   );
 }
 
-function Entry({
+export function AuditLogEntry({
   entry,
   index,
   users,
@@ -466,9 +473,18 @@ function value(lang: Lang, field: string, raw: string, users: Record<string, Use
   if (field === "thread_archive_hours") return raw === "0" ? t("serversettings.shared.never") : formatDuration(lang, Number(raw) * 3600);
   if (field === "camera_max_height") return raw === "0" ? t("serversettings.camera.none") : t("appsettings.voice.heightValue", { height: Number(raw) });
   if (field === "camera_max_fps") return raw === "0" ? t("serversettings.camera.none") : t("appsettings.voice.fpsValue", { fps: Number(raw) });
+  if (field === "status") return caseStatusWord(t, Number(raw));
   if (field === "record_video") return raw === "true" ? t("serversettings.audit.value.soundVideo") : t("serversettings.audit.value.soundOnly");
   return raw || t("serversettings.audit.value.nothing");
 }
+
+/** A Mod View case's state in words. */
+const caseStatusWord = (t: Lang["t"], status: number) =>
+  status === ModCaseStatus.RESOLVED
+    ? t("chattools.modview.status.resolved")
+    : status === ModCaseStatus.DISMISSED
+      ? t("chattools.modview.status.dismissed")
+      : t("chattools.modview.status.open");
 
 /** What an entry says happened: a sentence per kind of change, with the people, roles and channels in bold. */
 function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
@@ -684,6 +700,20 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
     }
     case AuditAction.PROFILE_ITEM_DELETE:
       return say("serversettings.audit.s.profileItemDelete", { name: <b>{change("name")?.before}</b> });
+    case AuditAction.MOD_CASE_UPDATE: {
+      const status = Number(change("status")?.after ?? 0);
+      const key: Key =
+        status === ModCaseStatus.RESOLVED
+          ? "serversettings.audit.s.modCaseResolve"
+          : status === ModCaseStatus.DISMISSED
+            ? "serversettings.audit.s.modCaseDismiss"
+            : "serversettings.audit.s.modCaseReopen";
+      return say(key, { target });
+    }
+    case AuditAction.MOD_NOTE_ADD:
+      return say("serversettings.audit.s.modNoteAdd", { target });
+    case AuditAction.MOD_NOTE_DELETE:
+      return say("serversettings.audit.s.modNoteDelete", { target });
     default:
       return say("serversettings.audit.s.unknown");
   }

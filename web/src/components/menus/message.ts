@@ -107,8 +107,9 @@ export type MessageMenuActions = {
 
 /**
  * A message's menu. Sections, in order: target (selection, link, picture),
- * react, primary, manage, developer, danger. Replies and reports join
- * through `extendMenu("message", …)` once they exist.
+ * react, primary, manage, developer, danger. Reports join through
+ * `extendMenu("message", …)` (components/modview/menus.ts), and replies
+ * will too.
  */
 export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, actions: MessageMenuActions): MenuSection[] {
   const { t } = i18n();

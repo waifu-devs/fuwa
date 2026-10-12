@@ -3,6 +3,8 @@ import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, 
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel, type Server } from "@/gen/fuwa/v1/types_pb";
+import { ModViewItem, useModViewHere } from "@/components/modview/ModViewItem";
+import { useOpenCases } from "@/fuwa/moderation";
 import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction } from "@/fuwa/hooks";
@@ -130,6 +132,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const ssoLocked = useSsoLocked(instanceKey, serverId);
   const { compact, setNavOpen } = useLayout();
   const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[serverId]?.length ?? 0);
+  // Open Mod View cases, read now so the menu's badge is ready when it opens.
+  const moderates = useModViewHere(instanceKey, serverId);
+  useOpenCases(instanceKey, serverId, moderates);
   useEffect(() => {
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
   }, [reviews, instanceKey, serverId]);
@@ -154,6 +159,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         waiting={waiting}
         usage={usage}
         canCreate={canCreate}
+        moderates={moderates}
         manage={has(access, Permission.MANAGE_SERVER)}
         onInvite={setInviting}
         onSettings={setSettings}
@@ -244,6 +250,7 @@ function ServerMenu({
   waiting,
   usage,
   canCreate,
+  moderates,
   manage,
   onInvite,
   onSettings,
@@ -263,6 +270,8 @@ function ServerMenu({
   waiting: number;
   usage: boolean;
   canCreate: boolean;
+  /** Use Mod View: the queue opens from here. */
+  moderates: boolean;
   /** Manage Server: they choose which live tiles everyone here sees. */
   manage: boolean;
   onInvite: (channelId: string) => void;
@@ -290,7 +299,8 @@ function ServerMenu({
           onSettings={onSettings}
           onCreate={onCreate}
         />
-        {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
+        <ModViewItem instanceKey={instanceKey} server={server} />
+        {(settingsTabs.length > 0 || canCreate || moderates) && <DropdownMenuSeparator />}
         {server?.hasRules && (
           <DropdownMenuItem onSelect={onRules}>
             <ScrollTextIcon /> {t("workspace.sidebar.rules")}
