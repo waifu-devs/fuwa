@@ -1,7 +1,10 @@
 import { BotIcon, MessageSquareWarningIcon, UserRoundXIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { createContext, useContext } from "react";
-import type { Server, User } from "@/gen/fuwa/v1/types_pb";
+import type { Emoji, Server, User } from "@/gen/fuwa/v1/types_pb";
+import { Mention, MessageEmojis } from "@/components/chat/mentions";
+import { remarkMentions } from "@/components/chat/remark-mentions";
+import { Markdown, type MarkdownExtension } from "@/components/Markdown";
 import { Private } from "@/components/Private";
 import { useI18n } from "@/i18n/react";
 import { AUTO_MOD, DISMISSED, MEMBER_REPORT, reasonLabel, RESOLVED, statusLabel } from "@/lib/mod-view";
@@ -119,5 +122,23 @@ export function Shimmer({ rows = 4, className }: { rows?: number; className?: st
         <div key={n} className={cn("shimmer h-16 rounded-2xl", className)} />
       ))}
     </div>
+  );
+}
+
+/** Messages' text as chat draws it: mentions as chips, server emoji as their pictures. */
+const MESSAGE_TEXT: MarkdownExtension = { remarkPlugins: [remarkMentions], components: { "fuwa-mention": Mention } };
+
+/**
+ * A message's text in Mod View, drawn like a chat row with the server's look
+ * (provided once by the screen); `emojis` are those from other servers the
+ * message brought along.
+ */
+export function MessageText({ content, emojis, className }: { content: string; emojis?: Emoji[]; className?: string }) {
+  return (
+    <MessageEmojis value={emojis}>
+      <Markdown className={cn("chat", className)} extension={MESSAGE_TEXT}>
+        {content}
+      </Markdown>
+    </MessageEmojis>
   );
 }

@@ -23,7 +23,6 @@ import { addNote, closeModView, deleteNote, listCases, memberMessages, memberOve
 import { requestJump } from "@/fuwa/search";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Markdown } from "@/components/Markdown";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { goTo } from "@/components/menus/common";
@@ -31,7 +30,7 @@ import { Count } from "@/components/motion";
 import { AuditLogEntry } from "@/components/settings/server/AuditLog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Empty, Handle, Heading, kindLook, ReasonChips, StatusPill, useScope } from "@/components/modview/shared";
+import { Empty, Handle, Heading, kindLook, MessageText, ReasonChips, StatusPill, useScope } from "@/components/modview/shared";
 import { useI18n } from "@/i18n/react";
 import { ago, displayName, formatStamp, memberName, timedOutUntil, toDate } from "@/lib/format";
 import { daysSince, kindLabel, NOTE_MAX, snippet, withNote } from "@/lib/mod-view";
@@ -562,7 +561,7 @@ function Messages({ userId, count }: { userId: string; count: number }) {
                     <CornerDownRightIcon className="size-3.5" /> {t("chattools.modview.jump")}
                   </button>
                 </p>
-                {m.content ? <Markdown className="text-sm break-words">{m.content}</Markdown> : <p className="text-sm text-muted-foreground italic">{t("chattools.modview.noText")}</p>}
+                {m.content ? <MessageText content={m.content} emojis={m.emojis} className="text-sm break-words" /> : <p className="text-sm text-muted-foreground italic">{t("chattools.modview.noText")}</p>}
               </motion.li>
             );
           })}

@@ -1,9 +1,10 @@
 import { ArrowLeftIcon, CircleCheckIcon, CircleSlashIcon, FilterXIcon, InboxIcon, LayersIcon, LoaderCircleIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react";
 import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import type { ModCase, Server, User } from "@/gen/fuwa/v1/types_pb";
+import type { Emoji, Member, ModCase, Server, User } from "@/gen/fuwa/v1/types_pb";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
-import { useAccess } from "@/fuwa/hooks";
+import { useAccess, useRoles } from "@/fuwa/hooks";
+import { ServerLookProvider, type ServerLook } from "@/components/chat/mentions";
 import { closeModView, listCases, useModView, useOpenCases, watchMod, type ModViewPlace } from "@/fuwa/moderation";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
@@ -32,6 +33,9 @@ import { cn } from "@/lib/utils";
  * permissions as everywhere else.
  */
 
+const NO_MEMBERS: Member[] = [];
+const NO_EMOJI: Emoji[] = [];
+
 const TAB_ICONS = { open: InboxIcon, resolved: CircleCheckIcon, dismissed: CircleSlashIcon, all: LayersIcon } as const;
 const TAB_LABELS = {
   open: "chattools.modview.tab.open",
@@ -52,6 +56,10 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
   const access = useAccess(instanceKey, given.id);
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === given.id)) ?? given;
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id ?? "");
+  const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
+  const members = useFuwa((s) => s.instances[instanceKey]?.members[given.id] ?? NO_MEMBERS);
+  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[given.id] ?? NO_EMOJI);
+  const roles = useRoles(instanceKey, given.id);
   const known = useFuwa((s) => s.instances[instanceKey]?.users);
   const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "mod-view"));
   const allowed = here && has(access, Permission.MODERATE);
@@ -112,6 +120,12 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
     [instanceKey, server, meId, user, learn],
   );
 
+  // Messages' mentions and emoji, drawn as chat draws them.
+  const look = useMemo<ServerLook>(() => {
+    const myRoles = members.find((m) => m.user?.id === me?.id)?.roleIds ?? [];
+    return { instanceKey, ownerId: server.ownerId, roles, members, emojis, me: me ? { id: me.id, username: me.username, roleIds: myRoles } : undefined };
+  }, [instanceKey, server.ownerId, roles, members, emojis, me]);
+
   const personName = person ? displayName(user(person)) : "";
   const groups: SettingsGroup[] = [
     {
@@ -124,29 +138,31 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
 
   return (
     <ModViewContext.Provider value={scope}>
-      <SettingsScreen
-        open={open && allowed}
-        onOpenChange={(o) => !o && closeModView()}
-        title={t("chattools.modview.title")}
-        subtitle={server.name}
-        groups={groups}
-        section={section}
-        onSectionChange={setSection}
-        openToSection
-      >
-        {tab ? (
-          <Queue
-            key={`${tab}|${subject}`}
-            tab={tab}
-            subjectId={subject}
-            onClearSubject={() => setSubject("")}
-            selected={selected}
-            onSelect={setSelected}
-          />
-        ) : person ? (
-          <MemberPage key={person} userId={person} />
-        ) : null}
-      </SettingsScreen>
+      <ServerLookProvider value={look}>
+        <SettingsScreen
+          open={open && allowed}
+          onOpenChange={(o) => !o && closeModView()}
+          title={t("chattools.modview.title")}
+          subtitle={server.name}
+          groups={groups}
+          section={section}
+          onSectionChange={setSection}
+          openToSection
+        >
+          {tab ? (
+            <Queue
+              key={`${tab}|${subject}`}
+              tab={tab}
+              subjectId={subject}
+              onClearSubject={() => setSubject("")}
+              selected={selected}
+              onSelect={setSelected}
+            />
+          ) : person ? (
+            <MemberPage key={person} userId={person} />
+          ) : null}
+        </SettingsScreen>
+      </ServerLookProvider>
     </ModViewContext.Provider>
   );
 }

@@ -22,13 +22,12 @@ import { closeModView, getCase, updateCase, watchMod } from "@/fuwa/moderation";
 import { requestJump } from "@/fuwa/search";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Markdown } from "@/components/Markdown";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { goTo } from "@/components/menus/common";
 import { Count } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Handle, Heading, kindLook, ReasonChips, StatusPill, useScope } from "@/components/modview/shared";
+import { Handle, Heading, kindLook, MessageText, ReasonChips, StatusPill, useScope } from "@/components/modview/shared";
 import { useI18n } from "@/i18n/react";
 import { ago, displayName, formatDuration, formatStamp, timedOutUntil, toDate } from "@/lib/format";
 import { AUTO_MOD, kindLabel, MEMBER_REPORT, OPEN, reasonLabel, RESOLUTION_MAX } from "@/lib/mod-view";
@@ -166,14 +165,14 @@ function WhatItSaid({ data }: { data: GetModCaseResponse }) {
         {channel ? t("chattools.modview.saidIn", { channel: channel.name }) : t("chattools.modview.said")}
       </Heading>
       <blockquote className="rounded-2xl border-l-4 border-destructive/50 bg-muted/40 px-3 py-2 text-sm break-words">
-        {mc.content ? <Markdown>{mc.content}</Markdown> : <span className="text-muted-foreground italic">{t("chattools.modview.noText")}</span>}
+        {mc.content ? <MessageText content={mc.content} emojis={live?.emojis} /> : <span className="text-muted-foreground italic">{t("chattools.modview.noText")}</span>}
       </blockquote>
       <AnimatePresence mode="popLayout" initial={false}>
         {edited && (
           <motion.div key="now" {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-1">
             <p className="text-xs font-bold text-muted-foreground">{t("chattools.modview.editedSince")}</p>
             <blockquote className="rounded-2xl border-l-4 border-border bg-muted/30 px-3 py-2 text-sm break-words">
-              {live.content ? <Markdown>{live.content}</Markdown> : <span className="text-muted-foreground italic">{t("chattools.modview.noText")}</span>}
+              {live.content ? <MessageText content={live.content} emojis={live.emojis} /> : <span className="text-muted-foreground italic">{t("chattools.modview.noText")}</span>}
             </blockquote>
           </motion.div>
         )}
