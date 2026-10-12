@@ -64,6 +64,7 @@ const POWERS = [
   Permission.MUTE_MEMBERS,
   Permission.MOVE_MEMBERS,
   Permission.RECORD,
+  Permission.MODERATE,
 ].reduce((bits, p) => bits | bit(p), 0);
 
 /** Whether anyone may get the role by picking it. */
