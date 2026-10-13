@@ -570,12 +570,17 @@ impl FuwaApp {
             }
         })
         .detach();
-        // A popped-out camera's window closed: it shows nothing any more.
+        // A popped-out camera's window closed: it shows nothing any more. Later, not
+        // now: windows are closed from inside this view's own updates (the overlay,
+        // hanging up), and updating it again there panics.
         let weak = cx.entity().downgrade();
         subscriptions.push(cx.on_window_closed(move |cx, id| {
-            let _ = weak.update(cx, |this, cx| {
-                this.calls.popouts.retain(|_, h| h.window_id() != id);
-                crate::ui::video::forget_window(&this.core, id.as_u64(), cx);
+            let weak = weak.clone();
+            cx.defer(move |cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.calls.popouts.retain(|_, h| h.window_id() != id);
+                    crate::ui::video::forget_window(&this.core, id.as_u64(), cx);
+                });
             });
         }));
 

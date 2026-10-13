@@ -153,7 +153,10 @@ impl GameOverlay {
         })
         .detach();
         using.set(false);
-        Self { core, app, using, through: None, notes: Vec::new(), next_note: 1, focus: cx.focus_handle() }
+        // Clicks go through from the start, not from its first frame: until then the
+        // whole screen would take them (macOS counts even its clear pixels as there).
+        let through = click_through::set(window, true).then_some(true);
+        Self { core, app, using, through, notes: Vec::new(), next_note: 1, focus: cx.focus_handle() }
     }
 
     /// Puts the overlay in use (taking clicks and keys) or back out of the way.
@@ -751,11 +754,22 @@ impl FuwaApp {
         };
         let (core, using) = (self.core.clone(), self.overlay.using.clone());
         let app = cx.entity().downgrade();
-        match gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| GameOverlay::new(core, app, using, window, cx))
-        }) {
-            Ok(opened) => self.overlay.open = Some(opened),
-            Err(err) => tracing::warn!("couldn't open the game overlay: {err}"),
+        // `gpui_kit::open_window`, but with the root's theme background taken away:
+        // the window is see-through, only the cards draw.
+        let mut overlay = None;
+        let opened = cx.open_window(options, |window, cx| {
+            let view = cx.new(|cx| GameOverlay::new(core, app, using, window, cx));
+            overlay = Some(view.clone());
+            cx.new(|cx| {
+                let mut root = gpui_kit::base::Root::new(view, window, cx);
+                root.style().background = Some(gpui_kit::transparent_black().into());
+                root
+            })
+        });
+        match (opened, overlay) {
+            (Ok(handle), Some(overlay)) => self.overlay.open = Some((handle.into(), overlay)),
+            (Err(err), _) => tracing::warn!("couldn't open the game overlay: {err}"),
+            (Ok(_), None) => {}
         }
     }
 }
