@@ -363,6 +363,18 @@ pub fn is_effect_id(id: &str) -> bool {
 }
 
 impl Motion {
+    pub fn name(self) -> &'static str {
+        match self {
+            Motion::Fall => "fall",
+            Motion::Rise => "rise",
+            Motion::Twinkle => "twinkle",
+            Motion::Drift => "drift",
+            Motion::Burst => "burst",
+            Motion::Shoot => "shoot",
+            Motion::Pop => "pop",
+        }
+    }
+
     fn by_name(name: &str) -> Option<Motion> {
         Some(match name {
             "fall" => Motion::Fall,
@@ -378,6 +390,19 @@ impl Motion {
 }
 
 impl Region {
+    pub fn name(self) -> &'static str {
+        match self {
+            Region::Top => "top",
+            Region::Bottom => "bottom",
+            Region::Edges => "edges",
+            Region::Corners => "corners",
+            Region::Anywhere => "anywhere",
+            Region::TopLeft => "top-left",
+            Region::TopRight => "top-right",
+            Region::Center => "center",
+        }
+    }
+
     fn by_name(name: &str) -> Option<Region> {
         Some(match name {
             "top" => Region::Top,
@@ -394,6 +419,19 @@ impl Region {
 }
 
 impl Paint {
+    /// As a spec writes it: a token, or `#rrggbb`.
+    pub fn name(self) -> String {
+        match self {
+            Paint::Primary => "primary".into(),
+            Paint::Ring => "ring".into(),
+            Paint::Accent => "accent".into(),
+            Paint::Foreground => "foreground".into(),
+            Paint::Card => "card".into(),
+            Paint::Profile => "profile".into(),
+            Paint::Hex(rgb) => format!("#{rgb:06x}"),
+        }
+    }
+
     fn by_name(name: &str) -> Option<Paint> {
         Some(match name {
             "primary" => Paint::Primary,

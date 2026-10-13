@@ -268,6 +268,7 @@
   "server.shared.notYet": "Not yet",
   "profileItems.chooseEffect": "Choose an effect file",
   "profileItems.effectTooBig": "That file is too big to be an effect.",
+  "profileItems.cantSaveTemplate": "Couldn't save the template.",
   "video.cameraBlocked": "Your system isn't letting fuwa use the camera. Allow it in System Settings, under Privacy & Security, then Camera.",
   "video.screenBlocked": "Your system isn't letting fuwa record the screen. Allow it in System Settings, under Privacy & Security, then Screen & System Audio Recording.",
   "video.nothingToShare": "There's nothing to share here. On Linux, sharing a screen needs an X11 session for now.",

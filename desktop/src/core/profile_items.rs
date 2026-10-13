@@ -122,6 +122,140 @@ pub fn name_from_file(file: &str) -> String {
     name.chars().take(40).collect::<String>().trim().to_owned()
 }
 
+// ───────────────────────── Helping people make them ─────────────────────────
+
+/// The docs that explain each kind: the effect format, and what a decoration should look like.
+pub const EFFECT_DOCS: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-effects.md#the-format";
+pub const DECORATION_DOCS: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-items.md#decorations";
+
+/// What someone pastes into an AI chat to have it write a profile effect,
+/// ending where they describe what they want. The web's `EFFECT_PROMPT`, word
+/// for word.
+pub const EFFECT_PROMPT: &str = r##"You're writing a profile effect for fuwa, a chat app: an animated layer of small particles that plays over someone's profile card (304 by 420 pixels) when it opens. People still need to read the name, status and bio under it, so particles start at the card's edges and corners and cross it quickly.
+
+An effect is a JSON spec, data rather than code. It plays a short intro (under three seconds) when the card opens, then settles into a sparse idle loop for as long as the card stays open.
+
+{
+  "layers": [ ... 1 to 6 layers ... ]
+}
+
+Each layer is one kind of particle. Its fields:
+- shape: one of petal, star, sparkle, heart, snowflake, bubble, dot, confetti, streak.
+- motion: fall or rise (across the card, swaying), twinkle (a glint in place, then a rest), drift (wanders and glows), burst (flies out and falls away), shoot (a streak, then a rest), pop (swells and pops).
+- phase: intro plays once when the card opens; idle loops after it. Have at least one of each.
+- count: 1 to 24 particles, for the 304 by 420 card. At most 60 play at once across all layers, so keep idle layers sparse (5 to 12).
+- from: where they start: top, bottom, edges, corners, anywhere, top-left, top-right, center.
+- size: [min, max] in pixels, 2 to 96. Most particles look right between 10 and 32.
+- duration: [min, max] for one pass, 300 to 20000 ms. Intro layers 900 to 2500; idle layers 2000 to 12000.
+- delay: [min, max] in ms, 0 to 3000: when each intro particle starts after the card opens. Leave it out for idle layers.
+- colors: 1 to 8 of #rrggbb or the theme's tokens primary, ring, accent, foreground, card, or profile (the card's own color). Mixing a token in makes the effect fit every theme.
+- spin: degrees turned over a pass, -1440 to 1440 (optional).
+- sway: 0 to 400 pixels: sideways sway for fall and rise (10 to 30), wander radius for drift, flight distance for burst (200 to 300) (optional).
+- flip: true to tumble in 3D, like paper (optional).
+- glow: true for a soft glow in the particle's color (optional).
+- opacity: peak opacity, 0.05 to 1 (optional, 1 when left out).
+
+fuwa refuses a spec with a shape, motion, place or color not on these lists, a number out of its range, or more than 16 KB, and drops fields it doesn't know. The effect gets its id, name and description from the item it's added as, so leave those out.
+
+An example, fuwa's own Sakura (a gust of petals from the top left, then a gentle fall):
+
+{
+  "layers": [
+    { "shape": "petal", "motion": "burst", "phase": "intro", "count": 18, "from": "top-left", "size": [18, 28], "duration": [1500, 2300], "delay": [0, 260], "colors": ["#ffb7c5", "#ff8fab", "#ffc8d6", "primary"], "spin": 540, "sway": 280, "flip": true, "opacity": 0.95 },
+    { "shape": "petal", "motion": "fall", "phase": "idle", "count": 9, "from": "top", "size": [15, 24], "duration": [6500, 9500], "colors": ["#ffb7c5", "#ff8fab", "#ffc8d6", "primary"], "spin": 320, "sway": 22, "flip": true, "opacity": 0.9 }
+  ]
+}
+
+Answer with the whole spec in one json code block, then say in a sentence or two which numbers to change to tune it. If I come back with an error from fuwa, fix it and answer with the whole spec again.
+
+What I want:
+"##;
+
+/// What someone pastes into an AI that makes pictures to have it draw an
+/// avatar decoration. The web's `DECORATION_PROMPT`, word for word.
+pub const DECORATION_PROMPT: &str = r##"Draw an avatar decoration for fuwa, a chat app: a frame that's drawn over someone's round profile picture, like a wreath or a crown around it.
+
+- A square PNG, 600 by 600 pixels, with a truly transparent background (real alpha, not a checkerboard pattern painted in, and no background color).
+- The profile picture is a circle 500 pixels across in the middle, 50 pixels in from each edge. Keep that circle see-through so the face shows: put the art around its rim and in the corners, overlapping the circle's edge only a little.
+- Don't draw a face, a person or a profile picture inside it: only the frame.
+- It's shown as small as 40 pixels across next to messages, so use bold shapes and clear outlines, and no text or fine detail.
+
+What I want:
+"##;
+
+/// The template's size and the avatar's circle in it: the avatar is 1/1.2 of the picture.
+pub const TEMPLATE_SIZE: u32 = 600;
+pub const TEMPLATE_AVATAR: u32 = 500;
+
+/// A built-in effect as a spec to start from: only its layers (the item gets
+/// its own id, name and line), laid out like the web's `starterText`, with
+/// each list of numbers or colors on one line.
+pub fn starter_text(id: &str) -> Option<String> {
+    let spec = fx::spec(id)?;
+    let num = |n: f32| format!("{n}");
+    let pair = |(a, b): (f32, f32)| format!("[{}, {}]", num(a), num(b));
+    let layers: Vec<String> = spec
+        .layers
+        .iter()
+        .map(|l| {
+            let colors: Vec<String> = l.colors.iter().map(|c| format!("\"{}\"", c.name())).collect();
+            let mut fields = vec![
+                format!("\"shape\": \"{}\"", l.shape.name()),
+                format!("\"motion\": \"{}\"", l.motion.name()),
+                format!("\"phase\": \"{}\"", if l.intro { "intro" } else { "idle" }),
+                format!("\"count\": {}", l.count),
+                format!("\"from\": \"{}\"", l.from.name()),
+                format!("\"size\": {}", pair(l.size)),
+                format!("\"duration\": {}", pair(l.duration)),
+            ];
+            if l.intro {
+                fields.push(format!("\"delay\": {}", pair(l.delay)));
+            }
+            fields.push(format!("\"colors\": [{}]", colors.join(", ")));
+            if l.spin != 0.0 {
+                fields.push(format!("\"spin\": {}", num(l.spin)));
+            }
+            if l.sway != 0.0 {
+                fields.push(format!("\"sway\": {}", num(l.sway)));
+            }
+            if l.flip {
+                fields.push("\"flip\": true".into());
+            }
+            if l.glow {
+                fields.push("\"glow\": true".into());
+            }
+            if l.opacity != 1.0 {
+                fields.push(format!("\"opacity\": {}", num(l.opacity)));
+            }
+            format!("    {{\n      {}\n    }}", fields.join(",\n      "))
+        })
+        .collect();
+    Some(format!("{{\n  \"layers\": [\n{}\n  ]\n}}", layers.join(",\n")))
+}
+
+/// A picture to draw a decoration on, as RGBA pixels `TEMPLATE_SIZE` square:
+/// see-through, with the avatar's circle shaded grey and dashed round its rim.
+pub fn template_pixels() -> Vec<u8> {
+    let size = TEMPLATE_SIZE as usize;
+    let (mid, r) = (TEMPLATE_SIZE as f32 / 2.0, TEMPLATE_AVATAR as f32 / 2.0);
+    let mut px = vec![0u8; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let (dx, dy) = (x as f32 + 0.5 - mid, y as f32 + 0.5 - mid);
+            let d = (dx * dx + dy * dy).sqrt();
+            let fill = 0.35 * (r - d + 0.5).clamp(0.0, 1.0);
+            // A 3 pixel line, 12 on and 8 off along the rim.
+            let along = (dy.atan2(dx) + std::f32::consts::PI) * r;
+            let dashed = along % 20.0 < 12.0;
+            let line = if dashed { 0.9 * (2.0 - (d - r).abs()).clamp(0.0, 1.0) } else { 0.0 };
+            let a = line + fill * (1.0 - line);
+            let i = (y * size + x) * 4;
+            px[i..i + 4].copy_from_slice(&[128, 128, 128, (a * 255.0).round() as u8]);
+        }
+    }
+    px
+}
+
 impl InstanceState {
     /// Whether the instance lets profile effects play.
     pub fn effects_on(&self) -> bool {
@@ -395,6 +529,51 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn web(file: &str) -> String {
+        let path = format!("{}/../web/src/lib/{file}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(path).expect("the web app's profile items")
+    }
+
+    #[test]
+    fn the_prompts_are_the_webs_word_for_word() {
+        let web = web("profile-items.ts");
+        assert!(web.contains(&format!("export const EFFECT_PROMPT = `{EFFECT_PROMPT}`;")));
+        assert!(web.contains(&format!("export const DECORATION_PROMPT = `{DECORATION_PROMPT}`;")));
+        assert!(web.contains(&format!("export const EFFECT_DOCS = \"{EFFECT_DOCS}\";")));
+        assert!(web.contains(&format!("export const DECORATION_DOCS = \"{DECORATION_DOCS}\";")));
+        assert!(web.contains(&format!("export const TEMPLATE_SIZE = {TEMPLATE_SIZE};")));
+        assert!(web.contains(&format!("export const TEMPLATE_AVATAR = {TEMPLATE_AVATAR};")));
+    }
+
+    #[test]
+    fn every_starter_is_its_built_ins_layers() {
+        for id in fx::IDS {
+            let text = starter_text(id).unwrap();
+            let spec = check_effect_text(&text).unwrap();
+            assert_eq!(spec.layers, fx::spec(id).unwrap().layers, "{id}");
+            assert!(text.contains("\"size\": ["), "{text}");
+        }
+        assert!(starter_text("nope").is_none());
+        // Laid out as the web's `specText` lays out the same spec.
+        let sakura = starter_text("sakura").unwrap();
+        assert!(sakura.starts_with("{\n  \"layers\": [\n    {\n      \"shape\": \"petal\",\n"), "{sakura}");
+        assert!(
+            sakura.contains("\"colors\": [\"#ffb7c5\", \"#ff8fab\", \"#ffc8d6\", \"primary\"],\n      \"spin\": 540"),
+            "{sakura}"
+        );
+        assert!(sakura.contains("\"opacity\": 0.95\n    },"), "{sakura}");
+    }
+
+    #[test]
+    fn the_template_marks_the_avatar_and_leaves_the_rest_clear() {
+        let px = template_pixels();
+        let at = |x: usize, y: usize| px[(y * TEMPLATE_SIZE as usize + x) * 4 + 3];
+        assert_eq!(px.len(), (TEMPLATE_SIZE * TEMPLATE_SIZE * 4) as usize);
+        assert_eq!(at(300, 300), 89);
+        assert_eq!(at(10, 10), 0);
+        assert_eq!(at(599, 300), 0);
+    }
 
     fn decoration(id: &str, server: &str) -> pb::ProfileItem {
         pb::ProfileItem {

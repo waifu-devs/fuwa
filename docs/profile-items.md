@@ -53,7 +53,17 @@ viewer's switches (Settings > Accessibility > Profile effects), reduced
 motion and the slow-device fallback all apply.
 
 Admins and managers add an effect by uploading a `.json` file or pasting the
-spec. A theme-style editor can come later.
+spec. To get one started, the page offers:
+
+- **Start from a built-in**: any of the built-in effects' layers, to change.
+- **Copy a prompt for an AI**: the format, its limits and an example, ending
+  where the person describes the effect they want, for any AI chat. What it
+  answers is pasted back and checked like any spec. The web's
+  `EFFECT_PROMPT` (`lib/profile-items.ts`) and the desktop's are the same
+  words.
+- **Read the guide**: this format, in docs/profile-effects.md.
+
+A theme-style editor can come later.
 
 ## Decorations
 
@@ -63,6 +73,21 @@ instance (no `server_id`, by an instance admin) or for a server (with its
 square and see-through in the middle; apps draw it centred over the avatar
 at 1.2 times its size, never catching clicks. A GIF moves (`animated`); with
 reduced motion it's held still on its first frame.
+
+### Making one
+
+Make it 600 × 600 pixels: the avatar is the circle 500 pixels across in the
+middle (50 in from each edge). Keep that circle see-through so the face
+shows, and put the art around its rim and in the corners, overlapping the
+circle's edge only a little. The background must be really transparent (PNG,
+GIF or WebP with alpha). It's shown as small as about 40 pixels across, next
+to messages, so bold shapes and clear outlines read best; skip text and fine
+detail.
+
+Beside "Add a decoration" the apps offer a **template** (that 600 × 600
+picture with the avatar's circle shaded; draw around it and hide the circle
+before saving) and a **prompt to copy** for an AI that makes pictures, saying
+all of the above, which ends where the person describes their decoration.
 
 A decoration's picture can't be replaced: add another and delete the old
 one. Deleting it deletes the picture.
