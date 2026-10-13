@@ -30,6 +30,8 @@ pub(super) struct Economy {
     name: Entity<InputState>,
     description: Entity<InputState>,
     emoji_query: Entity<InputState>,
+    /// The game rule's games, one per line or separated by commas.
+    games: Entity<TextareaState>,
     /// The icon's picker is open.
     icon_open: bool,
     /// The editor's number boxes, by what they hold ("amount-1", "price"...).
@@ -69,8 +71,16 @@ impl Economy {
         let description =
             cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.economy.currency.descriptionPlaceholder")));
         let emoji_query = cx.new(|cx| InputState::new(window, cx).placeholder(t("desktop.economy.currency.findEmoji")));
+        let games = cx.new(|cx| {
+            TextareaState::new(window, cx).auto_grow(2, 6).placeholder(t("desktop.economy.currency.gamesPlaceholder"))
+        });
         let mut subscriptions = vec![
             cx.subscribe(&name, typed),
+            cx.subscribe(&games, |this: &mut ServerSettingsView, _, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    this.economy_typed(cx);
+                }
+            }),
             cx.subscribe(&description, typed),
             cx.subscribe(&emoji_query, |_: &mut ServerSettingsView, _, _: &InputEvent, cx| cx.notify()),
         ];
@@ -85,6 +95,7 @@ impl Economy {
             name,
             description,
             emoji_query,
+            games,
             icon_open: false,
             numbers,
             saving: false,
@@ -115,6 +126,7 @@ impl ServerSettingsView {
             .chain([
                 ("name".to_owned(), self.economy.name.read(cx).value().to_string()),
                 ("description".to_owned(), self.economy.description.read(cx).value().to_string()),
+                ("games".to_owned(), self.economy.games.read(cx).value().to_string()),
             ])
             .collect();
         let get = |k: &str| read.get(k).map(String::as_str).unwrap_or_default();
@@ -133,6 +145,9 @@ impl ServerSettingsView {
                     if r.action == Action::Daily {
                         r.streak_bonus = typed_number(get("bonus"));
                         r.streak_max_days = typed_number(get("days")).clamp(-1, i64::from(i32::MAX)) as i32;
+                    }
+                    if r.action == Action::GameMinute {
+                        r.games = eco::parse_games(get("games"));
                     }
                 }
             }
@@ -154,6 +169,7 @@ impl ServerSettingsView {
     /// Fills the editor's boxes from what's opened in it.
     fn fill_economy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut values: Vec<(String, String)> = Vec::new();
+        let mut games = String::new();
         let (name, description) = match &self.economy.editor {
             Some(Editor::Currency { draft, .. }) => {
                 for r in &draft.rules {
@@ -169,6 +185,9 @@ impl ServerSettingsView {
                     if r.action == Action::Daily {
                         values.push(("bonus".into(), r.streak_bonus.to_string()));
                         values.push(("days".into(), r.streak_max_days.to_string()));
+                    }
+                    if r.action == Action::GameMinute {
+                        games = eco::games_text(&r.games);
                     }
                 }
                 (draft.name.clone(), draft.description.clone())
@@ -189,6 +208,7 @@ impl ServerSettingsView {
         self.economy.name.update(cx, |s, cx| s.set_value(name, window, cx));
         self.economy.description.update(cx, |s, cx| s.set_value(description, window, cx));
         self.economy.emoji_query.update(cx, |s, cx| s.set_value("", window, cx));
+        self.economy.games.update(cx, |s, cx| s.set_value(games, window, cx));
     }
 
     fn edit_currency(&mut self, currency: Option<pb::Currency>, window: &mut Window, cx: &mut Context<Self>) {
@@ -532,7 +552,11 @@ impl ServerSettingsView {
                     .text_size(px(11.0))
                     .text_color(p.muted_foreground)
                     .child(icon(eco::action_glyph(a)).size(px(12.0)))
-                    .child(format!("{} +{}", t(eco::action_key(a)), amount_text(r.amount))),
+                    .child(if a == Action::GameMinute {
+                        format!("{} +{} · {}", t(eco::action_key(a)), amount_text(r.amount), eco::games_short(&r.games))
+                    } else {
+                        format!("{} +{}", t(eco::action_key(a)), amount_text(r.amount))
+                    }),
             );
         }
         if c.transferable {
@@ -759,8 +783,14 @@ impl ServerSettingsView {
             Some(&t("desktop.economy.currency.earningHint")),
             p,
         ));
+        let games_offered =
+            self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| eco::offered(Action::GameMinute, i)));
         for r in &draft.rules {
             let a = r.action;
+            // An instance without the game rule never sees it offered (one already set still shows).
+            if a == Action::GameMinute && !games_offered && !r.enabled {
+                continue;
+            }
             let n = a as i32;
             let mut row = div()
                 .flex()
@@ -853,6 +883,37 @@ impl ServerSettingsView {
                             t("desktop.economy.currency.streakDays"),
                             self.economy_number("days", 70.0, Some(t("desktop.economy.currency.days")), p, window, cx),
                         ));
+                }
+                if a == Action::GameMinute {
+                    let games = self.economy.games.clone();
+                    numbers = numbers.child(
+                        div().w_full().child(rule_field(
+                            t("desktop.economy.currency.games"),
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(crate::ui::instance_home::focus_ring(
+                                    div()
+                                        .w_full()
+                                        .min_h(px(62.0))
+                                        .px(px(2.0))
+                                        .rounded(radius_xl())
+                                        .border_1()
+                                        .border_color(p.border)
+                                        .text_sm()
+                                        .child(Textarea::new(&games).appearance(false)),
+                                    focused(&games, window, cx),
+                                    p,
+                                ))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(p.muted_foreground)
+                                        .child(t("desktop.economy.currency.gamesHint")),
+                                ),
+                        )),
+                    );
                 }
                 row = row.child(motion::rise(
                     numbers,

@@ -1876,6 +1876,11 @@ enum CurrencyAction {
   CURRENCY_ACTION_REACTION_RECEIVED = 5;
   // Each minute in a voice channel with someone else there, not deafened.
   CURRENCY_ACTION_VOICE_MINUTE = 6;
+  // Each minute playing a game (an activity of kind PLAYING) the rule
+  // names, or any game when it names none, while the member shares what
+  // they're doing in the server (docs/presence.md). Apps say what's being
+  // played, so a daily cap is worth setting.
+  CURRENCY_ACTION_GAME_MINUTE = 7;
 }
 
 // How much one action earns.
@@ -1892,6 +1897,10 @@ message EarnRule {
   int64 streak_bonus = 5;
   // ...up to this many days (0 for no streak bonus).
   int32 streak_max_days = 6;
+  // GAME_MINUTE: the games that pay, by name as activities give it
+  // ("Celeste"), matched ignoring case. Empty for any game. At most 50, each
+  // 1 to 128 characters.
+  repeated string games = 7;
 }
 
 enum ShopListingKind {

@@ -12208,6 +12208,9 @@ async fn economy_currencies_earning_shop_and_grants() {
     let nothing = vec![earn(pb::CurrencyAction::Message, 0)];
     let refused = c.economy.create_currency(authed(&juan, coin(nothing))).await;
     assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let long_game = vec![pb::EarnRule { games: vec!["x".repeat(129)], ..earn(pb::CurrencyAction::GameMinute, 1) }];
+    let refused = c.economy.create_currency(authed(&juan, coin(long_game))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
     let rules = vec![
         pb::EarnRule { cooldown_seconds: 3600, ..earn(pb::CurrencyAction::Message, 5) },
         pb::EarnRule {
@@ -12216,15 +12219,29 @@ async fn economy_currencies_earning_shop_and_grants() {
             cooldown_seconds: 9,
             ..earn(pb::CurrencyAction::Daily, 10)
         },
-        earn(pb::CurrencyAction::Join, 50),
+        pb::EarnRule { games: vec!["Celeste".into()], ..earn(pb::CurrencyAction::Join, 50) },
         pb::EarnRule { daily_cap: 2, ..earn(pb::CurrencyAction::ReactionReceived, 1) },
+        pb::EarnRule {
+            games: vec![" Celeste ".into(), "celeste".into(), "Tetris".into()],
+            daily_cap: 60,
+            cooldown_seconds: 30,
+            ..earn(pb::CurrencyAction::GameMinute, 2)
+        },
     ];
     let currency = c.economy.create_currency(authed(&juan, coin(rules))).await.unwrap().into_inner().currency.unwrap();
     assert_eq!(currency.name, "Coins");
-    assert_eq!(currency.earn.len(), 4);
+    assert_eq!(currency.earn.len(), 5);
     // Fields that mean nothing for an action are dropped.
     let daily = currency.earn.iter().find(|r| r.action == pb::CurrencyAction::Daily as i32).unwrap();
     assert_eq!((daily.cooldown_seconds, daily.streak_bonus), (0, 2));
+    let joining = currency.earn.iter().find(|r| r.action == pb::CurrencyAction::Join as i32).unwrap();
+    assert!(joining.games.is_empty());
+    // A game rule's games are trimmed and named once.
+    let game = currency.earn.iter().find(|r| r.action == pb::CurrencyAction::GameMinute as i32).unwrap();
+    assert_eq!(
+        (game.games.clone(), game.daily_cap, game.cooldown_seconds),
+        (vec!["Celeste".into(), "Tetris".into()], 60, 0)
+    );
     let listed = c
         .economy
         .list_currencies(authed(&rin, pb::ListCurrenciesRequest { server_id: sid.clone() }))

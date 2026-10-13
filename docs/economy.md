@@ -47,6 +47,7 @@ Each currency has at most one `EarnRule` per action, with an amount, and:
 | `MESSAGE` | Sending a message in the server's own text, announcement or thread channels (not secure ones, not shared from another server, not webhooks). | `cooldown_seconds` between two earnings, so spam doesn't pay. |
 | `REACTION_RECEIVED` | Someone else reacts to your message. | `cooldown_seconds`, like messages. Taking a reaction off doesn't take it back. |
 | `VOICE_MINUTE` | Each minute in one of the server's voice channels with at least one other person, while you're not deafened. | |
+| `GAME_MINUTE` | Each minute playing one of the games the rule names (by name, ignoring case), or any game when it names none, while the person shares what they're doing in this server (docs/presence.md: "Show what I'm doing" on, the server not hidden, not invisible). | `games`: up to 50 names. |
 | `DAILY` | Pressing Claim (`ClaimDaily`), once per UTC day. | `streak_bonus` more for each day in a row after the first, up to `streak_max_days`. Missing a day starts the streak again. |
 | `JOIN` | Joining the server. | Once per person ever: leaving and joining again doesn't pay again. |
 | `ONBOARDING` | Finishing the server's onboarding. | Once per person ever. |
@@ -57,7 +58,13 @@ day. Agents never earn by actions (they're given or sent currency).
 Earning happens inside the write that did the thing (the message, the
 reaction, the join), so a message that AutoMod blocks earns nothing. Voice
 is in memory, so the shard holding a server credits the people in its
-voice channels once a minute in one write (`economy::spawn_voice_earnings`).
+voice channels once a minute in one write (`economy::spawn_minute_earnings`).
+Games are credited by the same tick: presence lives where accounts are, so
+the shard asks the directory (`Playing`) who's playing in its servers, and
+hears only of people whose activity shows there. The game's name is never
+written down: the ledger says only that it was earned by playing. Apps say
+what's being played (the desktop app sees it, programs send it), so anyone
+could claim to play; a `daily_cap` keeps a game rule from being farmed.
 The state that throttles earning (when someone last earned by a rule, and
 how much today) is the server file's `currency_earnings`.
 
