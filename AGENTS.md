@@ -361,6 +361,29 @@
     reporters are never shown to the person reported. Deleting an account
     calls `forget_person`. Not in secure channels, DMs or channels shared
     from another server.
+  - `api/economy.rs`: a server's economy (`EconomyService`,
+    docs/economy.md). Currencies in the server file's `currencies` (name,
+    an emoji or server emoji for an icon, earn rules as one protobuf blob,
+    `transferable`), balances in `currency_balances` (never below zero, kept
+    after someone leaves) with every change in `currency_ledger`, and the
+    shop in `shop_listings` (a role, a profile item, or anything by name;
+    `profile_item_owners` for items bought, which only their buyers may wear
+    while listed: `economy::may_wear` in `UpdateMember`). Earning
+    (`economy::earn`) runs inside the write that did it: a message, a
+    reaction to someone else's message, a join (`post_join`), finishing
+    onboarding; `spawn_voice_earnings` credits voice once a minute, and
+    `currency_earnings` holds the cooldowns, daily caps and once-only
+    rewards. Agents never earn by actions. Manage Economy (`MANAGE_ECONOMY`)
+    runs it and reads everyone's ledger and the finance page
+    (`GetEconomyOverview`); Grant Currency (`GRANT_CURRENCY`) gives and
+    takes, audited (`CURRENCY_GRANT`), to a member or a role (`write_alone`,
+    one `WalletsChanged`). A shop role, like an onboarding one, carries
+    nothing in `join::POWERS`. `BalanceUpdated` goes only to its owner and
+    `PurchaseMade` to the buyer and managers (`economy::event_shown`).
+    Deleting a role or profile item takes its listings (`economy::unlist`);
+    deleting an account, its money (`forget_economy`). Web:
+    `fuwa/economy.ts`, `lib/economy.ts`, `components/economy/` and
+    `settings/server/Economy.tsx` and `Finances.tsx`.
   - `search.rs` and `api/search.rs`: searching a server's messages
     (`SearchService`). Turso's own full-text search needs a new dependency
     and doesn't run in MVCC, so the index is plain tables in the server's file

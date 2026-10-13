@@ -477,6 +477,7 @@ impl App {
             .add_service(crate::pb::live_tile_service_server::LiveTileServiceServer::new(api.clone()))
             .add_service(crate::pb::profile_item_service_server::ProfileItemServiceServer::new(api.clone()))
             .add_service(crate::pb::moderation_service_server::ModerationServiceServer::new(api.clone()))
+            .add_service(crate::pb::economy_service_server::EconomyServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -742,6 +743,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         spawn_sso_rechecks(app.clone());
         spawn_poll_closings(app.clone());
         crate::api::spawn_search_indexer(app.clone());
+        crate::api::spawn_voice_earnings(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());

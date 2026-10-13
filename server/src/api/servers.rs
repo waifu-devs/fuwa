@@ -631,6 +631,12 @@ impl ServerService for Api {
                         {
                             return Err(Error::NotFound("decoration"));
                         }
+                        // Items the shop sells only for those who bought them.
+                        for (id, worn) in [(&effect, &target.effect), (&decoration, &target.decoration_id)] {
+                            if let Some(id) = id.as_deref().filter(|v| !v.is_empty() && v != worn) {
+                                super::economy::may_wear(conn, id, &target_id).await?;
+                            }
+                        }
                         conn.execute(
                             "UPDATE members SET nickname = coalesce(?2, nickname),
                                profile_effect = coalesce(?3, profile_effect),

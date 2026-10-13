@@ -1,5 +1,6 @@
 //! The tools for running a server: its settings, channels, roles, invites,
-//! emoji, webhooks, AutoMod, the way in, shared channels, profile items and Mod View.
+//! emoji, webhooks, AutoMod, the way in, shared channels, profile items, Mod
+//! View and the economy.
 //! Each wraps one gRPC call whose arguments are the request itself, read
 //! from proto3 JSON (field names as in the .proto), and answers with the
 //! response the same way. The input schema is built from the request's
@@ -307,6 +308,61 @@ tools! {
     "delete_mod_note" => moderation_service_client::ModerationServiceClient.delete_mod_note(DeleteModNoteRequest), Destroys,
         "Delete a moderator note",
         "Deletes one of this agent's notes, or anyone's with Manage Server. Needs Use Mod View.";
+
+    // The economy (docs/economy.md).
+    "list_currencies" => economy_service_client::EconomyServiceClient.list_currencies(ListCurrenciesRequest), Reads,
+        "List the server's currencies",
+        "The server's currencies in order, with their icons and how members earn them.";
+    "list_shop" => economy_service_client::EconomyServiceClient.list_shop(ListShopRequest), Reads,
+        "List the shop",
+        "Everything the server's shop lists, in order: roles, profile items and custom things, with prices, \
+         stock and how many were bought. Members can buy only the available ones.";
+    "get_wallet" => economy_service_client::EconomyServiceClient.get_wallet(GetWalletRequest), Reads,
+        "Get a wallet",
+        "Balances in every currency and the profile items bought: this agent's, or a member's with Manage \
+         Economy or Grant Currency.";
+    "list_ledger" => economy_service_client::EconomyServiceClient.list_ledger(ListLedgerRequest), Reads,
+        "List balance changes",
+        "Every change to balances, newest first: this agent's, a member's, or everyone's (user_id \"*\") with \
+         Manage Economy. Filter by currency and kind; page with before_id.";
+    "transfer_currency" => economy_service_client::EconomyServiceClient.transfer(TransferRequest), Writes,
+        "Send currency to a member",
+        "Sends some of this agent's own balance of a currency members may send to each other, with a note.";
+    "buy_listing" => economy_service_client::EconomyServiceClient.buy(BuyRequest), Writes,
+        "Buy from the shop",
+        "Buys an available listing with this agent's own balance.";
+    "grant_currency" => economy_service_client::EconomyServiceClient.grant(GrantRequest), Writes,
+        "Give or take currency",
+        "Gives an amount of a currency to a member, or to everyone with a role (the server's id for \
+         @everyone); an amount below zero takes it away, never below zero. The reason goes to them and the \
+         audit log. Needs Grant Currency.";
+    "get_economy_overview" => economy_service_client::EconomyServiceClient.get_economy_overview(GetEconomyOverviewRequest), Reads,
+        "The server's finances",
+        "One currency over the last days: what's held and by how many, earned (by action), granted, taken, \
+         spent and sent, the top holders, spenders and earners, the listings bought most and each day's \
+         totals. Needs Manage Economy.";
+    "create_currency" => economy_service_client::EconomyServiceClient.create_currency(CreateCurrencyRequest), Writes,
+        "Create a currency",
+        "Adds a currency with its name, icon (an emoji, or one of the server's emoji by id), description, \
+         whether members may send it, and its earn rules (set replace_earn). Needs Manage Economy.";
+    "update_currency" => economy_service_client::EconomyServiceClient.update_currency(UpdateCurrencyRequest), Writes,
+        "Change a currency",
+        "Changes what's set in the change; earn rules are replaced only with replace_earn. Needs Manage Economy.";
+    "delete_currency" => economy_service_client::EconomyServiceClient.delete_currency(DeleteCurrencyRequest), Destroys,
+        "Delete a currency",
+        "Deletes a currency with every balance, ledger entry and listing in it. Needs Manage Economy.";
+    "create_shop_listing" => economy_service_client::EconomyServiceClient.create_shop_listing(CreateShopListingRequest), Writes,
+        "List something in the shop",
+        "Sells a role (one that moderates or manages nothing, below this agent's own; also needs Manage Roles), \
+         one of the server's profile items, or anything else by name, for a price in one currency. Needs \
+         Manage Economy.";
+    "update_shop_listing" => economy_service_client::EconomyServiceClient.update_shop_listing(UpdateShopListingRequest), Writes,
+        "Change a listing",
+        "Changes a listing's name, description, price, stock, position or whether it's available. Needs \
+         Manage Economy.";
+    "delete_shop_listing" => economy_service_client::EconomyServiceClient.delete_shop_listing(DeleteShopListingRequest), Destroys,
+        "Take a listing down",
+        "Deletes a listing; what was bought stays with its buyers. Needs Manage Economy.";
 }
 
 /// Whether there's a tool by that name here.

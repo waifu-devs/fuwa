@@ -5,7 +5,7 @@ use tonic::{Request, Response, Status};
 
 use super::messages::post_join;
 use super::servers::{at_the_door, let_in, use_invite};
-use super::{Api, Seat, respond, text};
+use super::{Api, Seat, economy, respond, text};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, Permission, join_service_server::JoinService};
@@ -33,12 +33,14 @@ const MAX_OPTION_ROLES: usize = 5;
 const MAX_OPTION_CHANNELS: usize = 5;
 const MAX_HELLO: usize = 200;
 
-/// What a role handed out by onboarding may never carry: anyone could pick
-/// it, so nothing that moderates or manages the server.
-const POWERS: Bits = permissions::ADMIN | bit(Permission::Administrator) | bit(Permission::ManageRoles);
+/// What a role handed out by onboarding (or sold in the shop) may never
+/// carry: anyone could pick it, so nothing that moderates or manages the
+/// server.
+const POWERS: Bits =
+    permissions::ADMIN | bit(Permission::Administrator) | bit(Permission::ManageRoles) | bit(Permission::GrantCurrency);
 
-/// Whether anyone may get the role by picking it in onboarding.
-fn harmless(role: &pb::Role) -> bool {
+/// Whether anyone may get the role by picking it in onboarding, or buying it.
+pub(super) fn harmless(role: &pb::Role) -> bool {
     permissions::from_list(&role.permissions).is_ok_and(|bits| bits & POWERS == 0)
 }
 
@@ -412,6 +414,8 @@ impl JoinService for Api {
                                 .await?;
                         }
                         conn.execute("UPDATE members SET onboarded_at = ?2 WHERE user_id = ?1", (account.id.as_str(), now_ms()))
+                            .await?;
+                        economy::earn(conn, &sdb.id, &account.id, pb::CurrencyAction::Onboarding, now_ms(), events)
                             .await?;
                         let member =
                             store::member(conn, &sdb.id, &account.id).await?.ok_or(Error::NotFound("membership"))?;
