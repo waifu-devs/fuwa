@@ -541,8 +541,16 @@ impl ShopView {
                 .earn
                 .iter()
                 .filter_map(|r| Action::try_from(r.action).ok().map(|a| (a, r)))
-                .map(|(a, r)| {
+                .enumerate()
+                .map(|(n, (a, r))| {
+                    let tip = eco::earn_line(r);
+                    let text = if a == Action::GameMinute {
+                        format!("+{} · {}", amount_text(r.amount), eco::games_short(&r.games))
+                    } else {
+                        format!("+{}", amount_text(r.amount))
+                    };
                     div()
+                        .id(SharedString::from(format!("shop-earn-{}-{n}", c.id)))
                         .flex()
                         .items_center()
                         .gap(px(4.0))
@@ -553,7 +561,8 @@ impl ShopView {
                         .text_size(px(11.0))
                         .text_color(p.muted_foreground)
                         .child(icon(eco::action_glyph(a)).size(px(12.0)))
-                        .child(format!("+{}", amount_text(r.amount)))
+                        .child(text)
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
                         .into_any_element()
                 })
                 .collect();

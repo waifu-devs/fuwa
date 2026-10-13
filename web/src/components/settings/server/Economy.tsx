@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Permission, type Currency, type ProfileItem, type Role, type ShopListing } from "@/gen/fuwa/v1/types_pb";
 import { createCurrency, createListing, deleteCurrency, deleteListing, economyMessage, updateCurrency, updateListing, useEconomy } from "@/fuwa/economy";
 import { useAccess, useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { Amount, CurrencyIcon, ListingVisual, listingName } from "@/components/economy/shared";
 import { confirmFirst } from "@/components/menus/dialogs";
@@ -37,6 +38,7 @@ import {
   type RuleForm,
   type RuleProblem,
 } from "@/lib/economy";
+import { instanceHas } from "@/lib/compat";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { above, cssColor, harmless, has, sortRoles } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
@@ -355,7 +357,7 @@ function CurrencyCard({
         </div>
       </div>
       <Toggle checked={draft.transferable} onChange={(transferable) => set({ transferable })} label={t("serversettings.economy.transferable")} hint={t("serversettings.economy.transferableHint")} />
-      <EarnRules draft={draft.rules} problem={problem && problem !== "name" ? problem : null} onChange={(rules) => set({ rules })} />
+      <EarnRules instanceKey={instanceKey} draft={draft.rules} problem={problem && problem !== "name" ? problem : null} onChange={(rules) => set({ rules })} />
       {currency && (
         <div className="flex justify-end">
           <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={remove}>
@@ -379,14 +381,27 @@ function CurrencyCard({
 }
 
 /** One row per action a currency can reward: on or off, and its numbers. */
-function EarnRules({ draft, problem, onChange }: { draft: Record<number, RuleForm>; problem: RuleProblem | null; onChange: (rules: Record<number, RuleForm>) => void }) {
+function EarnRules({
+  instanceKey,
+  draft,
+  problem,
+  onChange,
+}: {
+  instanceKey: string;
+  draft: Record<number, RuleForm>;
+  problem: RuleProblem | null;
+  onChange: (rules: Record<number, RuleForm>) => void;
+}) {
   const { t } = useI18n();
+  const versions = useFuwa((s) => s.instances[instanceKey]?.node?.versions);
+  // Actions the instance doesn't know yet stay out, unless a rule already has one.
+  const actions = ACTIONS.filter((a) => !a.feature || instanceHas(versions, a.feature) || draft[a.action]?.on);
   const set = (action: number, patch: Partial<RuleForm>) => onChange({ ...draft, [action]: { ...draft[action]!, ...patch } });
   return (
     <div className="flex flex-col gap-2">
       <p className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.economy.earning")}</p>
       <ul className="flex flex-col gap-1.5">
-        {ACTIONS.map((meta) => {
+        {actions.map((meta) => {
           const rule = draft[meta.action]!;
           const wrong = (field: keyof Omit<RuleForm, "on">) => problem?.action === meta.action && problem.field === field;
           return (
@@ -416,6 +431,19 @@ function EarnRules({ draft, problem, onChange }: { draft: Record<number, RuleFor
                     <Field label={t("serversettings.economy.rule.dailyCap")} wrong={wrong("dailyCap")}>
                       <Input inputMode="numeric" value={rule.dailyCap} placeholder={t("serversettings.economy.rule.noCap")} onChange={(e) => set(meta.action, { dailyCap: e.target.value })} className="h-9 rounded-lg tabular-nums" />
                     </Field>
+                    {meta.games && (
+                      <div className="col-span-full">
+                        <Field label={t("serversettings.economy.rule.games")} hint={t("serversettings.economy.rule.gamesHint")} wrong={wrong("games")}>
+                          <Textarea
+                            value={rule.games}
+                            rows={3}
+                            placeholder={t("serversettings.economy.rule.gamesAny")}
+                            onChange={(e) => set(meta.action, { games: e.target.value })}
+                            className="min-h-0 resize-y rounded-lg"
+                          />
+                        </Field>
+                      </div>
+                    )}
                     {meta.streak && (
                       <>
                         <Field label={t("serversettings.economy.rule.streakBonus")} wrong={wrong("streakBonus")}>

@@ -64,6 +64,9 @@ service DirectoryService {
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
   rpc FindAgent(FindAgentRequest) returns (FindAgentResponse);
+  // Who's playing games in the asking shard's servers, where they share
+  // what they're doing, for paying GAME_MINUTE earn rules.
+  rpc Playing(PlayingRequest) returns (PlayingResponse);
   // Agents' endpoints, for the shard delivering their events: those that
   // are on, with their secrets and the agents' accounts.
   rpc AgentEndpoints(AgentEndpointsRequest) returns (AgentEndpointsResponse);
@@ -611,6 +614,22 @@ message CheckEmojisResponse {
   // The ones that passed, as they're stored: id, server_id, name, the
   // picture's link at this instance's public address, and animated.
   repeated fuwa.v1.Emoji emojis = 1;
+}
+
+message PlayingRequest {
+  string shard_id = 1;
+}
+
+message PlayingResponse {
+  repeated Player players = 1;
+}
+
+// Someone playing, in one server where it shows.
+message Player {
+  string server_id = 1;
+  string user_id = 2;
+  // The games' names.
+  repeated string games = 3;
 }
 
 message FindAgentResponse {

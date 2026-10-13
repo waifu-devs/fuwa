@@ -15,6 +15,11 @@ import {
   EMPTY,
   forSale,
   formRules,
+  GAME_MINUTE,
+  GAME_NAME_MAX,
+  GAMES_MAX,
+  parseGames,
+  sameRules,
   ledgerLine,
   LEDGER_EARN,
   LEDGER_GRANT,
@@ -57,7 +62,7 @@ const cur = (id: string, position = 0, extra: Partial<Currency> = {}): Currency 
 const bal = (currencyId: string, amount: number, extra: Partial<Balance> = {}): Balance => ({ currencyId, userId: "me", amount: BigInt(amount), earned: 0n, spent: 0n, dailyStreak: 0, ...extra }) as Balance;
 const lst = (id: string, extra: Partial<ShopListing> = {}): ShopListing =>
   ({ id, currencyId: "C", kind: LISTING_CUSTOM, targetId: "", name: id, description: "", price: 10n, sold: 0n, position: 0, available: true, ...extra }) as ShopListing;
-const rule = (extra: Partial<EarnRule> = {}): EarnRule => ({ action: DAILY, amount: 50n, cooldownSeconds: 0, dailyCap: 0n, streakBonus: 10n, streakMaxDays: 3, ...extra }) as EarnRule;
+const rule = (extra: Partial<EarnRule> = {}): EarnRule => ({ action: DAILY, amount: 50n, cooldownSeconds: 0, dailyCap: 0n, streakBonus: 10n, streakMaxDays: 3, games: [], ...extra }) as EarnRule;
 const ev = (payload: EconomyPayload) => payload;
 
 test("every action and ledger kind has words in both languages", () => {
@@ -131,13 +136,30 @@ test("earn rules: form and back, with every problem found", () => {
   assert.equal(back.rules.length, 2);
   assert.deepEqual(
     back.rules.find((r) => r.action === MESSAGE),
-    { action: MESSAGE, amount: 2n, cooldownSeconds: 60, dailyCap: 0n, streakBonus: 0n, streakMaxDays: 0 },
+    { action: MESSAGE, amount: 2n, cooldownSeconds: 60, dailyCap: 0n, streakBonus: 0n, streakMaxDays: 0, games: [] },
   );
   assert.deepEqual(formRules({ ...form, [MESSAGE]: { ...form[MESSAGE]!, amount: "0" } }), { problem: { action: MESSAGE, field: "amount" } });
   assert.deepEqual(formRules({ ...form, [MESSAGE]: { ...form[MESSAGE]!, cooldown: "999999" } }), { problem: { action: MESSAGE, field: "cooldown" } });
   // Fields an action doesn't have are ignored.
-  const join = { ...form, 3: { on: true, amount: "5", cooldown: "x", dailyCap: "", streakBonus: "y", streakMaxDays: "" } };
-  assert.ok("rules" in formRules(join));
+  const join = { ...form, 3: { on: true, amount: "5", cooldown: "x", dailyCap: "", streakBonus: "y", streakMaxDays: "", games: "Celeste" } };
+  const joined = formRules(join);
+  assert.ok("rules" in joined && joined.rules.find((r) => r.action === 3)!.games.length === 0);
+});
+
+test("a game rule's games: one per line, each once, within the server's limits", () => {
+  assert.deepEqual(parseGames(" Celeste \n\nhollow knight\nCELESTE\nWarhammer 40,000"), ["Celeste", "hollow knight", "Warhammer 40,000"]);
+  assert.deepEqual(parseGames(""), []);
+  assert.equal(parseGames("x".repeat(GAME_NAME_MAX + 1)), null);
+  assert.equal(parseGames(Array.from({ length: GAMES_MAX + 1 }, (_, i) => `Game ${i}`).join("\n")), null);
+  const form = rulesForm([{ action: GAME_MINUTE, amount: 2n, cooldownSeconds: 0, dailyCap: 60n, streakBonus: 0n, streakMaxDays: 0, games: ["Celeste", "Tetris"] }]);
+  assert.equal(form[GAME_MINUTE]!.games, "Celeste\nTetris");
+  const back = formRules(form);
+  assert.ok("rules" in back);
+  assert.deepEqual(back.rules[0]!.games, ["Celeste", "Tetris"]);
+  assert.ok(sameRules(back.rules, [{ action: GAME_MINUTE, amount: 2n, cooldownSeconds: 0, dailyCap: 60n, streakBonus: 0n, streakMaxDays: 0, games: ["Celeste", "Tetris"] }]));
+  assert.ok(!sameRules(back.rules, [{ action: GAME_MINUTE, amount: 2n, cooldownSeconds: 0, dailyCap: 60n, streakBonus: 0n, streakMaxDays: 0, games: ["Celeste"] }]));
+  const tooMany = { ...form, [GAME_MINUTE]: { ...form[GAME_MINUTE]!, games: "y".repeat(200) } };
+  assert.deepEqual(formRules(tooMany), { problem: { action: GAME_MINUTE, field: "games" } });
 });
 
 test("a currency's change says only what changed, and counts it", () => {

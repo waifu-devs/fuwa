@@ -770,6 +770,19 @@ impl DirectoryService for Internal {
         }))
     }
 
+    async fn playing(&self, request: Request<cpb::PlayingRequest>) -> Result<Response<cpb::PlayingResponse>, Status> {
+        let shard = request.into_inner().shard_id;
+        let index = &self.app.index;
+        let players = self
+            .app
+            .presence
+            .playing(index, |server_id| index.placement(server_id).as_deref() == Some(shard.as_str()))
+            .into_iter()
+            .map(|(server_id, user_id, games)| cpb::Player { server_id, user_id, games })
+            .collect();
+        Ok(Response::new(cpb::PlayingResponse { players }))
+    }
+
     async fn agent_endpoints(
         &self,
         request: Request<cpb::AgentEndpointsRequest>,

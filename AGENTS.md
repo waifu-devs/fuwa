@@ -371,7 +371,9 @@
     while listed: `economy::may_wear` in `UpdateMember`). Earning
     (`economy::earn`) runs inside the write that did it: a message, a
     reaction to someone else's message, a join (`post_join`), finishing
-    onboarding; `spawn_voice_earnings` credits voice once a minute, and
+    onboarding; `spawn_minute_earnings` credits voice once a minute, and
+    games being played where people share them (`App::playing`, the
+    cluster call `Playing`, from `Presence::playing`), and
     `currency_earnings` holds the cooldowns, daily caps and once-only
     rewards. Agents never earn by actions. Manage Economy (`MANAGE_ECONOMY`)
     runs it and reads everyone's ledger and the finance page

@@ -370,6 +370,19 @@ impl App {
         }
     }
 
+    /// Who's playing games in this part's servers, where it shows:
+    /// `(server id, account id, the games)`.
+    pub async fn playing(&self) -> Result<Vec<(String, String, Vec<String>)>> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::PlayingRequest { shard_id: link.id.clone() };
+                let found = link.ask(request, |mut d, r| async move { d.playing(r).await }).await?;
+                Ok(found.players.into_iter().map(|p| (p.server_id, p.user_id, p.games)).collect())
+            }
+            _ => Ok(self.presence.playing(&self.index, |_| true)),
+        }
+    }
+
     /// The endpoints of these agents that are on, for delivering their
     /// events (`api/endpoints.rs`).
     pub async fn agent_endpoints(&self, agent_ids: &[String]) -> Result<Vec<cpb::DeliveryEndpoint>> {
