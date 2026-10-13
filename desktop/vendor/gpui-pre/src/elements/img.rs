@@ -255,10 +255,17 @@ struct ImgState {
     last_frame_time: Option<Instant>,
     started_loading: Option<(Instant, Task<()>)>,
     /// fuwa: when the next frame of an animated image is due, and the timer
-    /// that draws the view again then (instead of an animation frame every
-    /// vsync, which rebuilds the whole view 60 times a second).
+    /// that wakes the view a little before then (instead of an animation
+    /// frame every vsync for the whole of a long frame, which rebuilds the
+    /// whole view 60 times a second).
     next_frame: Option<(Instant, Task<()>)>,
 }
+
+/// fuwa: how long before a frame is due an animated image stops waiting on a
+/// timer and asks for animation frames, so the new frame shows on the first
+/// vsync past it rather than a timer's tick (15.6 ms apart on Windows) and a
+/// vsync later. A bit over one 60 Hz refresh plus a coarse timer's lateness.
+const FRAME_LEAD: Duration = Duration::from_millis(25);
 
 /// fuwa: how long a frame of an animated image shows. Like browsers, a
 /// delay of 10 ms or less means 100 ms.
@@ -401,14 +408,20 @@ impl Element for Img {
                                 && !cx.reduce_motion()
                                 && let Some(state) = &mut state
                             {
-                                // fuwa: drawn again when the next frame is due, not every vsync.
+                                // fuwa: a timer until the next frame is nearly due, then
+                                // every vsync until it shows, so frames change on the
+                                // display's refresh (as in browsers) without redrawing
+                                // the view 60 times a second through a long frame.
                                 let shown_at = state.last_frame_time.unwrap_or_else(Instant::now);
                                 let due = shown_at + frame_delay(&data, state.frame_index);
                                 let now = Instant::now();
-                                if state.next_frame.as_ref().is_none_or(|(at, _)| *at != due || *at <= now) {
+                                if due.saturating_duration_since(now) <= FRAME_LEAD {
+                                    state.next_frame = None;
+                                    window.request_animation_frame();
+                                } else if state.next_frame.as_ref().is_none_or(|(at, _)| *at != due)
+                                {
                                     let current_view = window.current_view();
-                                    // A moment past it, so it's never a hair early.
-                                    let wait = due.saturating_duration_since(now) + Duration::from_millis(1);
+                                    let wait = due.saturating_duration_since(now) - FRAME_LEAD;
                                     let task = window.spawn(cx, async move |cx| {
                                         cx.background_executor().timer(wait).await;
                                         cx.update(move |_, cx| cx.notify(current_view)).ok();

@@ -94,10 +94,13 @@ was a debug assertion before.
 popped-out call can hide the pointer with its controls, as the web's
 `cursor-none` does.
 
-**Cheaper redraws.** An animated image (a GIF, a moving emoji) is drawn
-again when its next frame is due, by a timer that notifies its view, instead
-of asking for an animation frame every vsync, which built its whole view 60
-times a second; a delay of 10ms or less means 100ms, as in browsers. An
+**Cheaper redraws.** An animated image (a GIF, a moving emoji) waits on a
+timer that notifies its view until its next frame is nearly due (25ms), and
+only then asks for an animation frame every vsync until the frame changes,
+instead of asking every vsync all the time, which built its whole view 60
+times a second. Frames still change on the display's refresh, as in browsers,
+not a coarse timer's tick and a vsync later. A delay of 10ms or less means
+100ms, as in browsers. An
 `image_cache` element keeps its cache on hand while its children prepaint
 too, since lists and cached views lay their children out then (before, their
 pictures fell through to the global asset cache, kept forever).
