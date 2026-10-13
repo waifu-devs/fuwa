@@ -2,8 +2,7 @@ import { ChevronDownIcon, CoinsIcon, EyeOffIcon, InfinityIcon, PlusIcon, ShieldI
 import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Permission, type Currency, type ProfileItem, type Role, type ShopListing } from "@/gen/fuwa/v1/types_pb";
-import { createCurrency, createListing, deleteCurrency, deleteListing, updateCurrency, updateListing, useEconomy } from "@/fuwa/economy";
-import type { FuwaError } from "@/fuwa/errors";
+import { createCurrency, createListing, deleteCurrency, deleteListing, economyMessage, updateCurrency, updateListing, useEconomy } from "@/fuwa/economy";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { Amount, CurrencyIcon, ListingVisual, listingName } from "@/components/economy/shared";
@@ -291,7 +290,7 @@ function CurrencyCard({
         if (made) onCreated?.(made);
       }
     } catch (err) {
-      setError((err as FuwaError).message);
+      setError(economyMessage(err));
     } finally {
       setSaving(false);
     }
@@ -511,7 +510,7 @@ function ListingCard({
         if (made) onCreated?.(made);
       }
     } catch (err) {
-      setError((err as FuwaError).message);
+      setError(economyMessage(err));
     } finally {
       setSaving(false);
     }

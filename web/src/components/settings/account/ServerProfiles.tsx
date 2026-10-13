@@ -1,9 +1,11 @@
+import { Effect } from "effect";
 import { ServerIcon as ServerGlyph } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { updateServerProfile, type ServerProfilePatch } from "@/fuwa/actions";
-import { openShop, useEconomy } from "@/fuwa/economy";
+import { economyMessage, openShop, useEconomy } from "@/fuwa/economy";
+import { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Amount } from "@/components/economy/shared";
 import { lockedItems } from "@/lib/economy";
@@ -26,6 +28,10 @@ import { useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const NICKNAME_MAX = 32;
+
+/** Saves a server profile, saying "buy it first" in the app's words when an item is sold in the shop. */
+const saveServerProfile = (...args: Parameters<typeof updateServerProfile>) =>
+  updateServerProfile(...args).pipe(Effect.mapError((err) => new FuwaError({ code: err.code, message: economyMessage(err) })));
 
 /**
  * The server being edited. A server picked here counts until another is
@@ -58,7 +64,7 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === me?.id));
   const profile = useFuwa((s) => (me ? s.instances[instanceKey]?.profiles[me.id] : undefined));
   const [edits, setEdits] = useState<Edits>({});
-  const save = useAction(updateServerProfile);
+  const save = useAction(saveServerProfile);
   // Server profiles keep an effect and a decoration only on instances with profile items.
   const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
   const effectsOn = useEffectsOn(instanceKey) && itemsHere;

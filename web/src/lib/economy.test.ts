@@ -9,6 +9,7 @@ import {
   chartColumns,
   currencyChange,
   currencyDraft,
+  economyProblem,
   DAILY,
   dailyOf,
   EMPTY,
@@ -280,4 +281,34 @@ test("the chart's scale and bars", () => {
   assert.equal(share(5, 0), 0);
   assert.equal(share(5, 10), 0.5);
   assert.equal(share(15, 10), 1);
+});
+
+test("the server's refusals are worded by the app, and unknown ones aren't", () => {
+  const pre = (message: string) => economyProblem({ code: 9, message });
+  assert.deepEqual(pre("you don't have enough Coins"), { key: "chattools.economy.notEnough", values: { currency: "Coins" } });
+  assert.equal(pre("the price changed: have another look before buying")?.key, "chattools.economy.problem.priceChanged");
+  assert.equal(pre("it's sold out")?.key, "chattools.economy.problem.soldOut");
+  assert.equal(pre("you've claimed today's reward already; come back tomorrow")?.key, "chattools.economy.problem.claimed");
+  assert.deepEqual(pre("Gems can't be sent between members"), { key: "chattools.economy.problem.notTransferable", values: { currency: "Gems" } });
+  assert.deepEqual(pre("Gems has no daily reward"), { key: "chattools.economy.problem.noDaily", values: { currency: "Gems" } });
+  assert.equal(pre("you can't hold any more")?.key, "chattools.economy.problem.full");
+  assert.equal(pre("this item is sold in the server's shop: buy it first")?.key, "chattools.economy.problem.buyFirst");
+  assert.equal(pre("a role in the shop can't carry permissions that moderate or manage the server")?.key, "chattools.economy.problem.powerfulRole");
+  assert.equal(economyProblem({ code: 6, message: "you have this role already" })?.key, "chattools.economy.problem.haveRole");
+  assert.equal(economyProblem({ code: 6, message: "you have this item already" })?.key, "chattools.economy.problem.haveItem");
+  assert.equal(pre("something new"), null);
+  assert.equal(economyProblem({ code: 3, message: "you don't have enough Coins" }), null);
+  const all = [
+    "you don't have enough X",
+    "the price changed",
+    "it's sold out",
+    "claimed today's reward already",
+    "X can't be sent between members",
+    "X has no daily reward",
+    "can't hold any more",
+    "sold in the server's shop",
+    "can't carry permissions",
+  ].map((m) => pre(m)!);
+  all.push(economyProblem({ code: 6, message: "role" })!, economyProblem({ code: 6, message: "item" })!);
+  for (const worded of all) assert.ok(known(worded.key), worded.key);
 });

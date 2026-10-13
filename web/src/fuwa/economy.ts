@@ -1,9 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { EconomyOverview, ListLedgerResponse } from "@/gen/fuwa/v1/economy_pb";
 import type { Balance, Currency, Event, LedgerKind, ShopListing, ShopListingKind } from "@/gen/fuwa/v1/types_pb";
+import { i18n } from "@/i18n/i18n";
 import { instanceHas } from "@/lib/compat";
 import {
   applyEconomy,
+  economyProblem,
   ECONOMY_EVENTS,
   EMPTY,
   LEDGER_PAGE,
@@ -95,7 +97,7 @@ async function readWallet(instanceKey: string, serverId: string) {
 }
 
 const shopLoading = new Set<string>();
-/** Reads the shop (everything, for managers; what's for sale, for members). */
+/** Reads the shop: every listing, for sale or not (the shop shows what is, profile pickers lock every item a listing sells). */
 export function loadShop(instanceKey: string, serverId: string): Promise<void> {
   const key = keyOf(instanceKey, serverId);
   if (shopLoading.has(key)) return Promise.resolve();
@@ -153,6 +155,13 @@ export function anyCurrency(currencyId: string): Currency | undefined {
 /** A currency by id, from what's known. */
 export const currencyOf = (instanceKey: string, serverId: string, currencyId: string): Currency | undefined =>
   economyNow(instanceKey, serverId).currencies?.find((c) => c.id === currencyId);
+
+/** What went wrong with an economy call, in the app's words where the server's refusal is one it knows. */
+export function economyMessage(cause: unknown): string {
+  const err = toFuwaError(cause);
+  const worded = economyProblem(err);
+  return worded ? i18n().t(worded.key, worded.values) : err.message;
+}
 
 // ── Members' calls ───────────────────────────────────────────────────────
 

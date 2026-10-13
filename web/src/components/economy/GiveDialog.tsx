@@ -2,8 +2,7 @@ import { HandCoinsIcon, LoaderCircleIcon, MinusIcon, PlusIcon } from "lucide-rea
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type { User } from "@/gen/fuwa/v1/types_pb";
-import { grant, useEconomy, walletOf } from "@/fuwa/economy";
-import type { FuwaError } from "@/fuwa/errors";
+import { economyMessage, grant, useEconomy, walletOf } from "@/fuwa/economy";
 import { useInstance } from "@/fuwa/hooks";
 import { Amount } from "@/components/economy/shared";
 import { UserAvatar } from "@/components/Icons";
@@ -89,7 +88,7 @@ function Body({ target, onDone }: { target: GiveTarget; onDone: () => void }) {
       );
       onDone();
     } catch (err) {
-      setError((err as FuwaError).message);
+      setError(economyMessage(err));
     } finally {
       setBusy(false);
     }

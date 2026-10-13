@@ -590,3 +590,37 @@ export function chartColumns(days: readonly { earned: bigint | number; granted: 
 
 /** A share of a total, 0 to 1, for bars in ranked lists. */
 export const share = (part: number, total: number) => (total > 0 ? Math.min(1, Math.max(0, part / total)) : 0);
+
+/* ---- The server's refusals, in the app's words ---- */
+
+/** gRPC's codes for what the economy refuses (Connect's `Code`, kept here so this file stays pure). */
+const ALREADY_EXISTS = 6;
+const FAILED_PRECONDITION = 9;
+
+/** A refusal worded by the app: a key and what fills it. */
+export type Worded = { key: Key; values?: Record<string, string> };
+
+/**
+ * What the server's economy refusals mean, worded by the app instead of the
+ * server's English. Matched by code and then by the message the server
+ * writes; anything else (or a refusal worded differently by another
+ * version) is null, and the server's own message is shown.
+ */
+export function economyProblem(err: { code: number; message: string }): Worded | null {
+  const message = err.message.trim();
+  if (err.code === ALREADY_EXISTS) {
+    return { key: /\brole\b/.test(message) ? "chattools.economy.problem.haveRole" : "chattools.economy.problem.haveItem" };
+  }
+  if (err.code !== FAILED_PRECONDITION) return null;
+  let found: RegExpMatchArray | null;
+  if ((found = message.match(/^you don't have enough (.+?)\.?$/))) return { key: "chattools.economy.notEnough", values: { currency: found[1]! } };
+  if (/^the price changed/.test(message)) return { key: "chattools.economy.problem.priceChanged" };
+  if (/^it's sold out/.test(message)) return { key: "chattools.economy.problem.soldOut" };
+  if (/claimed today's reward already/.test(message)) return { key: "chattools.economy.problem.claimed" };
+  if ((found = message.match(/^(.+) can't be sent between members/))) return { key: "chattools.economy.problem.notTransferable", values: { currency: found[1]! } };
+  if ((found = message.match(/^(.+) has no daily reward/))) return { key: "chattools.economy.problem.noDaily", values: { currency: found[1]! } };
+  if (/can't hold any more/.test(message)) return { key: "chattools.economy.problem.full" };
+  if (/sold in the server's shop/.test(message)) return { key: "chattools.economy.problem.buyFirst" };
+  if (/can't carry permissions/.test(message)) return { key: "chattools.economy.problem.powerfulRole" };
+  return null;
+}

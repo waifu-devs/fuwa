@@ -495,5 +495,15 @@
     "one": "Quitaste {amount} {currency} a {count} persona",
     "other": "Quitaste {amount} {currency} en total a {count} personas"
   },
-  "economy.youHave": "Tienes {amount}"
+  "economy.youHave": "Tienes {amount}",
+  "economy.problem.haveRole": "Ya tienes este rol.",
+  "economy.problem.haveItem": "Ya tienes este artículo.",
+  "economy.problem.priceChanged": "El precio acaba de cambiar. Vuelve a mirarlo antes de comprar.",
+  "economy.problem.soldOut": "Se acaba de agotar.",
+  "economy.problem.claimed": "Ya reclamaste la recompensa de hoy. ¡Vuelve mañana!",
+  "economy.problem.notTransferable": "{currency} no se puede enviar entre miembros.",
+  "economy.problem.noDaily": "{currency} no tiene recompensa diaria.",
+  "economy.problem.full": "No puedes tener más.",
+  "economy.problem.buyFirst": "Este artículo se vende en la tienda del servidor. Cómpralo primero para llevarlo.",
+  "economy.problem.powerfulRole": "Un rol de la tienda no puede tener permisos para moderar o administrar el servidor."
 }

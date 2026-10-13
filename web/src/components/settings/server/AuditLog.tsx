@@ -59,7 +59,7 @@ import {
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuditAction, type AuditChange, type AuditEntry } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, ModCaseStatus, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, ModCaseStatus, NotificationLevel, type Channel, type Permission, type ProfileItem, type Role, type User } from "@/gen/fuwa/v1/types_pb";
 import { listAuditLog, run, type AuditFilter } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
@@ -199,17 +199,14 @@ const FIELD: Record<string, Key> = {
   effect: "serversettings.audit.field.effect",
   status: "serversettings.audit.field.status",
   currency: "serversettings.audit.field.currency",
-  currency_id: "serversettings.audit.field.currency",
   amount: "serversettings.audit.field.amount",
-  icon_emoji: "serversettings.audit.field.icon",
-  icon_emoji_id: "serversettings.audit.field.icon",
+  icon: "serversettings.audit.field.icon",
   transferable: "serversettings.audit.field.transferable",
   earn: "serversettings.audit.field.earn",
   price: "serversettings.audit.field.price",
   stock: "serversettings.audit.field.stock",
   available: "serversettings.audit.field.available",
-  kind: "serversettings.audit.field.listingKind",
-  target_id: "serversettings.audit.field.listingTarget",
+  target: "serversettings.audit.field.listingTarget",
 };
 
 /** A changed field's name in the app's language. */
@@ -243,6 +240,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
   const inst = useInstance(instanceKey);
   const channels = inst?.channels[serverId];
   const roles = useRoles(instanceKey, serverId);
+  const items = inst?.serverProfileItems[serverId];
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [users, setUsers] = useState<Record<string, User>>({});
   const [more, setMore] = useState(false);
@@ -328,6 +326,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
                 users={users}
                 channels={channels ?? []}
                 roles={roles}
+                items={items}
                 open={open === entry.id}
                 onToggle={() => setOpen(open === entry.id ? null : entry.id)}
               />
@@ -376,6 +375,7 @@ export function AuditLogEntry({
   users,
   channels,
   roles,
+  items,
   open,
   onToggle,
 }: {
@@ -384,6 +384,8 @@ export function AuditLogEntry({
   users: Record<string, User>;
   channels: Channel[];
   roles: Role[];
+  /** The server's profile items, to name what a shop listing sells. */
+  items?: readonly ProfileItem[];
   open: boolean;
   onToggle: () => void;
 }) {
@@ -393,6 +395,7 @@ export function AuditLogEntry({
   const at = toDate(entry.createdAt);
   const details = entry.changes.filter((c) => c.field !== "deleted_messages");
   const expandable = details.length > 0 || !!entry.reason;
+  const nameOf: Named = (id) => roles.find((r) => r.id === id)?.name ?? items?.find((i) => i.id === id)?.name;
   return (
     <motion.li
       layout="position"
@@ -407,7 +410,7 @@ export function AuditLogEntry({
           <UserAvatar user={actor} className="absolute -right-1.5 -bottom-1.5 size-5 ring-2 ring-background" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm break-words">{sentence(lang, entry, users, channels, roles)}</span>
+          <span className="block text-sm break-words">{sentence(lang, entry, users, channels, roles, nameOf)}</span>
           <span className="block text-xs text-muted-foreground" title={formatStamp(at)}>
             {formatStamp(at)}
           </span>
@@ -436,15 +439,15 @@ export function AuditLogEntry({
                 >
                   <span className="text-muted-foreground">{fieldName(lang.t, change.field)}:</span>
                   {ONE_SIDE[entry.action] ? (
-                    <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
+                    <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry, nameOf)}</span>
                   ) : (
                     <>
                       <span className="rounded-md bg-destructive/10 px-1.5 text-destructive line-through decoration-destructive/50">
-                        {value(lang, change.field, change.before, users, channels, entry)}
+                        {value(lang, change.field, change.before, users, channels, entry, nameOf)}
                       </span>
                       <ArrowRightIcon className="size-3.5 text-muted-foreground" />
                       <span className="rounded-md bg-emerald-500/10 px-1.5 text-emerald-600 dark:text-emerald-400">
-                        {value(lang, change.field, change.after, users, channels, entry)}
+                        {value(lang, change.field, change.after, users, channels, entry, nameOf)}
                       </span>
                     </>
                   )}
@@ -458,14 +461,20 @@ export function AuditLogEntry({
   );
 }
 
+/** A role's or profile item's name by its id, while the server still has it. */
+type Named = (id: string) => string | undefined;
+
 /** A value from the log, in words. */
-function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
+function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry, nameOf: Named): string {
   const { t } = lang;
   const yesNo = () => (raw === "true" ? t("serversettings.audit.value.yes") : t("serversettings.audit.value.no"));
   const none = t("serversettings.audit.value.none");
   if (field === "discoverable" || field === "enabled" || field === "transferable" || field === "available") return yesNo();
-  if (field === "currency" || field === "currency_id") return anyCurrency(raw)?.name ?? raw;
+  // Grants and listings keep the currency by its name, as it was then.
+  if (field === "currency") return raw || none;
   if (field === "amount" || field === "price") return raw ? i18n().number(Number(raw)) : none;
+  if (field === "earn") return raw ? t("serversettings.audit.value.changed") : none;
+  if (field === "target") return raw ? (nameOf(raw) ?? (entry.roleName || t("serversettings.audit.value.gone"))) : none;
   if (field === "stock") return raw ? i18n().number(Number(raw)) : t("settings.controls.noLimit");
   if (field === "role") return Object.hasOwn(OLD_RANK, raw) ? t(OLD_RANK[raw]!) : raw ? entry.roleName : none;
   if (field === "hoist" || field === "mentionable") return yesNo();
@@ -520,7 +529,7 @@ const caseStatusWord = (t: Lang["t"], status: number) =>
       : t("chattools.modview.status.open");
 
 /** What an entry says happened: a sentence per kind of change, with the people, roles and channels in bold. */
-function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
+function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[], nameOf: Named): ReactNode {
   const actor = <b>{displayName(users[entry.actorId])}</b>;
   const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
   // Roles go by their name now, like channels, and the one they had once they're gone.
@@ -757,21 +766,29 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
     case AuditAction.CURRENCY_DELETE:
       return say("serversettings.audit.s.currencyDelete", { name: <b>{change("name")?.before || lang.t("serversettings.audit.aCurrency")}</b> });
     case AuditAction.SHOP_LISTING_CREATE:
-      return say("serversettings.audit.s.listingCreate", { name: <b>{change("name")?.after || lang.t("serversettings.audit.aListing")}</b> });
     case AuditAction.SHOP_LISTING_UPDATE:
-      return say("serversettings.audit.s.listingUpdate", { name: <b>{change("name")?.after || lang.t("serversettings.audit.aListing")}</b> });
-    case AuditAction.SHOP_LISTING_DELETE:
-      return say("serversettings.audit.s.listingDelete", { name: <b>{change("name")?.before || lang.t("serversettings.audit.aListing")}</b> });
+    case AuditAction.SHOP_LISTING_DELETE: {
+      // A listing without a name of its own goes by what it sells.
+      const side = entry.action === AuditAction.SHOP_LISTING_DELETE ? "before" : "after";
+      const sells = change("target")?.[side];
+      const name = change("name")?.[side] || (sells && nameOf(sells)) || lang.t("serversettings.audit.aListing");
+      const key =
+        entry.action === AuditAction.SHOP_LISTING_CREATE
+          ? "serversettings.audit.s.listingCreate"
+          : entry.action === AuditAction.SHOP_LISTING_UPDATE
+            ? "serversettings.audit.s.listingUpdate"
+            : "serversettings.audit.s.listingDelete";
+      return say(key, { name: <b>{name}</b> });
+    }
     case AuditAction.CURRENCY_GRANT: {
+      // The amount is signed (a take is negative) and the currency kept by name.
       const raw = Number(change("amount")?.after ?? 0);
-      const id = change("currency")?.after ?? change("currency_id")?.after ?? "";
-      const currency = anyCurrency(id);
       const amount = (
         <b>
-          {i18n().number(Math.abs(raw))} {currency ? currency.name : id}
+          {i18n().number(Math.abs(raw))} {change("currency")?.after || lang.t("serversettings.audit.aCurrency")}
         </b>
       );
-      // A role's grant is kept under the role's name, since a member's id isn't one.
+      // A grant to a role keeps the role's name; one to a member doesn't.
       const toRole = !!entry.roleName || roles.some((r) => r.id === entry.targetId);
       if (toRole) return say(raw < 0 ? "serversettings.audit.s.currencyTakeRole" : "serversettings.audit.s.currencyGiveRole", { amount, role });
       return say(raw < 0 ? "serversettings.audit.s.currencyTake" : "serversettings.audit.s.currencyGive", { amount, target });

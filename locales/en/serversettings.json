@@ -1087,7 +1087,6 @@
   "audit.field.available": "For sale",
   "audit.field.currency": "Currency",
   "audit.field.earn": "Earning",
-  "audit.field.listingKind": "Kind",
   "audit.field.listingTarget": "Sells",
   "audit.field.price": "Price",
   "audit.field.stock": "Stock",
@@ -1221,5 +1220,7 @@
   "finances.nothingYet": "Nothing yet",
   "finances.ledger": "Every change",
   "finances.kind": "Kind",
-  "finances.allKinds": "Everything"
+  "finances.allKinds": "Everything",
+  "audit.value.changed": "Changed",
+  "audit.value.gone": "Something since deleted"
 }

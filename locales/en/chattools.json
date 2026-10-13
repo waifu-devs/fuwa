@@ -495,5 +495,15 @@
     "one": "Took {amount} {currency} from {count} person",
     "other": "Took {amount} {currency} in all from {count} people"
   },
-  "economy.youHave": "You have {amount}"
+  "economy.youHave": "You have {amount}",
+  "economy.problem.haveRole": "You have this role already.",
+  "economy.problem.haveItem": "You have this item already.",
+  "economy.problem.priceChanged": "The price just changed. Have another look before buying.",
+  "economy.problem.soldOut": "It just sold out.",
+  "economy.problem.claimed": "You've claimed today's reward already. Come back tomorrow!",
+  "economy.problem.notTransferable": "{currency} can't be sent between members.",
+  "economy.problem.noDaily": "{currency} has no daily reward.",
+  "economy.problem.full": "You can't hold any more.",
+  "economy.problem.buyFirst": "This item is sold in the server's shop. Buy it first to wear it.",
+  "economy.problem.powerfulRole": "A role in the shop can't carry permissions that moderate or manage the server."
 }

@@ -163,16 +163,20 @@ export function LedgerList({
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The people the pages name, as the instance sent them with each page. */
+  const [people, setPeople] = useState<Record<string, User>>({});
   const kindsKey = kinds.join(",");
 
   useEffect(() => {
     let live = true;
     setEntries(null);
     setError(null);
+    setPeople({});
     listLedger(instanceKey, serverId, { currencyId, userId, kinds: kindsKey ? kindsKey.split(",").map(Number) : [] }).then(
       (res) => {
         if (!live) return;
         setEntries(res.entries);
+        setPeople(byId({}, res.users));
         setMore(res.hasMore);
       },
       (err: FuwaError) => live && setError(err.message),
@@ -189,6 +193,7 @@ export function LedgerList({
     try {
       const res = await listLedger(instanceKey, serverId, { currencyId, userId, kinds: kindsKey ? kindsKey.split(",").map(Number) : [], beforeId: last.id });
       setEntries((list) => withPage(list ?? [], res.entries));
+      setPeople((known) => byId(known, res.users));
       setMore(res.hasMore);
     } catch (err) {
       setError((err as FuwaError).message);
@@ -237,6 +242,7 @@ export function LedgerList({
                 currencies={currencies}
                 listings={listings}
                 items={items}
+                people={people}
                 whose={userId === "*"}
               />
             ))}
@@ -253,6 +259,14 @@ export function LedgerList({
   );
 }
 
+/** `known` with `users` added by id. */
+function byId(known: Record<string, User>, users: readonly User[]): Record<string, User> {
+  if (!users.length) return known;
+  const next = { ...known };
+  for (const user of users) next[user.id] = user;
+  return next;
+}
+
 /** One change to a balance: what happened, how much, and what was left. */
 function LedgerRow({
   instanceKey,
@@ -262,6 +276,7 @@ function LedgerRow({
   currencies,
   listings,
   items,
+  people,
   whose,
 }: {
   instanceKey: string;
@@ -271,12 +286,15 @@ function LedgerRow({
   currencies: readonly Currency[];
   listings: readonly ShopListing[] | null;
   items: readonly ProfileItem[] | undefined;
+  people: Record<string, User>;
   whose: boolean;
 }) {
   const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const roles = useMemo(() => inst?.roles[serverId] ?? [], [inst?.roles, serverId]);
-  const person = (id: string) => inst?.users[id] ?? inst?.members[serverId]?.find((m) => m.user?.id === id)?.user;
+  // The ledger names people the app may not know (gone, or not loaded yet):
+  // the page's own users first, then what the app has.
+  const person = (id: string) => people[id] ?? inst?.users[id] ?? inst?.members[serverId]?.find((m) => m.user?.id === id)?.user;
   const currency = currencies.find((c) => c.id === entry.currencyId);
   const amount = num(entry.amount);
   const listing = listings?.find((l) => l.id === entry.listingId);

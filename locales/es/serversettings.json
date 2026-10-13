@@ -1087,7 +1087,6 @@
   "audit.field.available": "A la venta",
   "audit.field.currency": "Moneda",
   "audit.field.earn": "Cómo se gana",
-  "audit.field.listingKind": "Tipo",
   "audit.field.listingTarget": "Vende",
   "audit.field.price": "Precio",
   "audit.field.stock": "Existencias",
@@ -1221,5 +1220,7 @@
   "finances.nothingYet": "Nada todavía",
   "finances.ledger": "Cada cambio",
   "finances.kind": "Tipo",
-  "finances.allKinds": "Todo"
+  "finances.allKinds": "Todo",
+  "audit.value.changed": "Cambiado",
+  "audit.value.gone": "Algo ya eliminado"
 }

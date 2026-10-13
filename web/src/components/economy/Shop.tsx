@@ -2,8 +2,7 @@ import { CheckIcon, FlameIcon, GiftIcon, HistoryIcon, LoaderCircleIcon, SearchIc
 import { AnimatePresence, m as motion } from "motion/react";
 import { useId, useMemo, useState, type FormEvent } from "react";
 import type { Balance, Currency, Member, ProfileItem, Role, ShopListing, User } from "@/gen/fuwa/v1/types_pb";
-import { buy, claimDaily, closeShop, transfer, useEconomy, useShopView, type ShopTab } from "@/fuwa/economy";
-import type { FuwaError } from "@/fuwa/errors";
+import { buy, claimDaily, closeShop, economyMessage, transfer, useEconomy, useShopView, type ShopTab } from "@/fuwa/economy";
 import { useAccess, useInstance, useMyMember } from "@/fuwa/hooks";
 import { Amount, CurrencyIcon, LedgerList, ListingVisual, listingName } from "@/components/economy/shared";
 import { UserAvatar } from "@/components/Icons";
@@ -132,7 +131,7 @@ function BalanceCard({ instanceKey, serverId, currency, balance, index }: { inst
       const res = await claimDaily(instanceKey, serverId, currency.id);
       setWon({ amount: num(res.entry?.amount), n: Date.now() });
     } catch (err) {
-      toast((err as FuwaError).message);
+      toast(economyMessage(err));
     } finally {
       setBusy(false);
     }
@@ -303,7 +302,7 @@ function ListingCard({
       setTimeout(() => setBought(false), 1800);
       toast(t("chattools.economy.bought", { name }));
     } catch (err) {
-      setError((err as FuwaError).message);
+      setError(economyMessage(err));
     } finally {
       setBusy(false);
     }
@@ -406,7 +405,7 @@ function SendForm({ instanceKey, serverId, currencies, balanceOf }: { instanceKe
       setAmount("");
       setNote("");
     } catch (err) {
-      setError((err as FuwaError).message);
+      setError(economyMessage(err));
     } finally {
       setBusy(false);
     }
