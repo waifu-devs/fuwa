@@ -141,3 +141,9 @@ channel shared from another server); "Open in Mod View" first in someone's
 `moderate` (Use Mod View) and "Report" at its end (anyone else in the
 server); and "Mod View" in a server's `manage` and the server header's menu
 (Use Mod View), with the open cases as its hint.
+
+The economy (on instances with `economy`, docs/economy.md) adds, on the
+desktop: "Give currency" in someone's `moderate`, after Ban and before
+Report (Grant Currency, in a server with currencies), which opens the same
+dialog as the profile card's: give or take, the currency, the amount and a
+reason for the audit log.

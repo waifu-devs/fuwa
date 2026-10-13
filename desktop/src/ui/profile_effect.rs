@@ -280,6 +280,7 @@ impl SettingsView {
         accent: i32,
         offered: &[(String, fx::Spec)],
         none_label: Option<String>,
+        locked: &std::collections::HashMap<String, String>,
         ready: bool,
         width: f32,
         p: &Palette,
@@ -354,6 +355,12 @@ impl SettingsView {
                     card =
                         card.child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
+                // Sold in the server's shop and not bought: a padlock and its price, and no picking.
+                let lock = locked.get(&id).filter(|_| !active);
+                if let Some(price) = lock {
+                    card = card.child(crate::ui::decoration_picker::lock_badge(price, radius_xl(), p));
+                }
+                let open = lock.is_none();
                 let (pick_id, hover_on) = (id.clone(), hover_key.clone());
                 let fg = p.foreground;
                 // Its shadow deepens while pointed at.
@@ -373,9 +380,10 @@ impl SettingsView {
                         .rounded(radius_2xl())
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .hover(|s| s.translate_y(px(-3.0)))
-                        .active(|s| s.scale(0.95))
+                        .when(open, |el| {
+                            el.cursor_pointer().hover(|s| s.translate_y(px(-3.0))).active(|s| s.scale(0.95))
+                        })
+                        .when(!open, |el| el.cursor_not_allowed())
                         .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                             if *on {
                                 this.state.effect_hover = Some(hover_on.clone());
@@ -384,7 +392,11 @@ impl SettingsView {
                             }
                             cx.notify();
                         }))
-                        .on_click(cx.listener(move |this, _, _, cx| pick(this, pick_id.clone(), cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if open {
+                                pick(this, pick_id.clone(), cx)
+                            }
+                        }))
                         .child(card)
                         .child(
                             // As on the web, a long name runs past its tile rather than being cut.

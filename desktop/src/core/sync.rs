@@ -688,6 +688,12 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     {
         engine.on_server_event(&sid, payload);
     }
+    // Everyone's balances moved (a grant to a role), or you bought something: your wallet is read again.
+    let bought = matches!(&event.payload, Some(Payload::PurchaseMade(pb::PurchaseMade { entry: Some(e), .. }))
+        if core.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref()).is_some_and(|me| me.id == e.user_id)));
+    if bought || matches!(event.payload, Some(Payload::WalletsChanged(_))) {
+        crate::core::economy::spawn_wallet(core, key, &sid);
+    }
     // A pin changed: the lists it shows in are read again where they're open.
     if let Some(Payload::MessagePinned(p)) = &event.payload {
         core.reload_pins(key, &sid, &p.channel_id, &p.thread_id);
@@ -837,6 +843,8 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
                     store::apply_event(i, event, focus.as_deref(), focus_thread.as_deref());
                 }
             });
+            // The economy isn't in the log either (docs/economy.md): read with the rest.
+            core.load_economy(&key, &server_id).await;
         }
         Err(_) => {
             // Left or deleted while loading: stop following it.
@@ -857,6 +865,8 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
 /// sequence), so any that came while the stream was away are lost: after a
 /// gap, read them again.
 async fn relist_voice(core: Arc<Core>, key: String, api: Api, server_id: String) {
+    // Balances and the shop may have moved too.
+    core.load_economy(&key, &server_id).await;
     // So are apps' live tiles.
     let tiles = core.list_live_tiles(&key, &server_id).await;
     core.shared.instance(&key, |i| {

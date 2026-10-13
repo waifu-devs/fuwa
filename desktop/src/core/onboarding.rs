@@ -31,7 +31,7 @@ pub const RULES: i32 = pb::OnboardingStepKind::Rules as i32;
 pub const SAY_HELLO: i32 = pb::OnboardingStepKind::Hello as i32;
 
 /// Permissions that make a role too strong for onboarding to hand out, as the web app counts them.
-pub const NOT_HARMLESS: [P; 17] = [
+pub const NOT_HARMLESS: [P; 19] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -49,6 +49,8 @@ pub const NOT_HARMLESS: [P; 17] = [
     P::MoveMembers,
     P::Record,
     P::Moderate,
+    P::ManageEconomy,
+    P::GrantCurrency,
 ];
 
 /// Whether onboarding may hand out a role with these permissions.
@@ -350,5 +352,7 @@ mod tests {
         assert!(saved.set_by.is_empty());
         assert!(harmless(&[P::SendMessages as i32]));
         assert!(!harmless(&[P::KickMembers as i32]));
+        assert!(!harmless(&[P::ManageEconomy as i32]));
+        assert!(!harmless(&[P::SendMessages as i32, P::GrantCurrency as i32]));
     }
 }

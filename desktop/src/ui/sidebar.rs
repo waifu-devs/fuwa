@@ -54,6 +54,8 @@ impl FuwaApp {
             Nav::Instance { key } => self.instance_sidebar(&key, window, cx),
         };
         let call_bar = self.call_bar(window, cx);
+        // Your balances in a server with currencies, over your name (docs/economy.md).
+        let wallet = self.sidebar_wallet(window, cx);
         div()
             .w(px(SIDEBAR))
             .h_full()
@@ -85,6 +87,7 @@ impl FuwaApp {
                     .pb(px(12.0))
                     .child(body),
             )
+            .when_some(wallet, |el, wallet| el.child(wallet))
             .when_some(call_bar, |el, bar| el.child(bar))
             .child(self.me_panel(window, cx))
     }

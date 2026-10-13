@@ -203,6 +203,12 @@ pub enum Dialog {
         server: String,
         of: crate::ui::report::ReportOf,
     },
+    /// Giving a member or a role some of a server's currency, or taking it (`ui/economy.rs`).
+    GiveCurrency {
+        key: String,
+        server: String,
+        to: crate::core::economy::GrantTo,
+    },
 }
 
 /// A small menu hanging under a bell, or over your name.
@@ -333,6 +339,10 @@ pub struct FuwaApp {
     pub people: crate::ui::profile_card::People,
     /// The report dialog's reason and note (`ui/report.rs`).
     pub report: crate::ui::report::Reporting,
+    /// Give currency's currency, amount and reason (`ui/economy.rs`).
+    pub giving: crate::ui::economy::Giving,
+    /// A server's shop, over everything but dialogs (`ui/shop.rs`).
+    pub shop: Option<Entity<crate::ui::shop::ShopView>>,
     /// A server's Mod View, over everything but dialogs (`ui/mod_view.rs`).
     pub mod_view: Option<Entity<crate::ui::mod_view::ModViewView>>,
     /// The instance page: Browse, invites, applying and making servers (`ui::instance_home`, `ui::join`).
@@ -427,6 +437,7 @@ impl FuwaApp {
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
         let people = crate::ui::profile_card::People::new(window, cx);
         let report = crate::ui::report::Reporting::new(window, cx);
+        let (giving, giving_subs) = crate::ui::economy::Giving::new(window, cx);
         let (home, home_subs) = crate::ui::instance_home::Home::new(window, cx);
         let (gifs, gif_subs) = crate::ui::gifs::Gifs::new(window, cx);
         let (onboarding, onboarding_subs) = crate::ui::onboarding::Onboarding::new(window, cx);
@@ -505,6 +516,7 @@ impl FuwaApp {
         subscriptions.extend(home_subs);
         subscriptions.extend(gif_subs);
         subscriptions.extend(onboarding_subs);
+        subscriptions.extend(giving_subs);
         subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 if this.intercept(&event.keystroke, window, cx) {
@@ -673,6 +685,8 @@ impl FuwaApp {
             friends,
             people,
             report,
+            giving,
+            shop: None,
             mod_view: None,
             home,
             onboarding,
@@ -1499,6 +1513,13 @@ impl FuwaApp {
                         let dialog = Dialog::Moderate { key, server, user_id: user_id.clone(), action: *action };
                         this.open_dialog(dialog, window, cx);
                     }
+                    ServerSettingsEvent::Give { to } => {
+                        let (key, server) = {
+                            let v = view.read(cx);
+                            (v.key.clone(), v.server.clone())
+                        };
+                        this.open_give(&key, &server, to.clone(), window, cx);
+                    }
                     ServerSettingsEvent::Invite { .. } => {
                         let server = view.read(cx).server.clone();
                         this.open_dialog(Dialog::Invite { link: None, server }, window, cx);
@@ -1584,6 +1605,25 @@ impl FuwaApp {
         if let (Some(view), Some(user)) = (self.mod_view.clone(), member) {
             view.update(cx, |v, cx| v.open_member(user, window, cx));
         }
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// A server's shop (`ui/shop.rs`): your balances, what's for sale, your history and sending.
+    pub fn open_shop(&mut self, key: &str, server: &str, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::ui::shop::{ShopEvent, ShopView};
+        self.menu = None;
+        self.dialog = None;
+        let core = self.core.clone();
+        let view = cx.new(|cx| ShopView::new(core, key.to_owned(), server.to_owned(), window, cx));
+        self._subscriptions.push(cx.subscribe_in(&view, window, |this: &mut Self, _, event: &ShopEvent, _, cx| {
+            match event {
+                ShopEvent::Close => this.shop = None,
+                ShopEvent::Toast { icon, title } => this.toast(icon, title.clone(), String::new(), None, None, cx),
+            }
+            cx.notify();
+        }));
+        self.shop = Some(view);
         self.focus.focus(window, cx);
         cx.notify();
     }
@@ -1752,6 +1792,7 @@ impl FuwaApp {
                 self.close_dialog(cx);
             }
             Dialog::Report { .. } => self.send_report(cx),
+            Dialog::GiveCurrency { .. } => self.send_give(cx),
             Dialog::JoinInvite { key } => {
                 self.dialog_busy = true;
                 cx.notify();
@@ -2057,6 +2098,8 @@ impl FuwaApp {
             self.rail.editing = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
+        } else if let Some(view) = self.shop.clone() {
+            view.update(cx, |v, cx| v.escape(cx));
         } else if let Some(view) = self.mod_view.clone() {
             view.update(cx, |v, cx| v.escape(cx));
         } else if let Some(view) = self.server_settings.clone() {
@@ -2140,6 +2183,7 @@ impl FuwaApp {
             self.settings.is_some(),
             self.server_settings.is_some(),
             self.mod_view.is_some(),
+            self.shop.is_some(),
             self.instance_settings.is_some(),
             self.switcher.is_some(),
         ]
@@ -2153,7 +2197,10 @@ impl FuwaApp {
         let empty = self.core.shared.read(|s| s.order.is_empty());
         // Server settings cover the whole window with a solid page.
         crate::ui::effects::hold(
-            self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some(),
+            self.server_settings.is_some()
+                || self.instance_settings.is_some()
+                || self.mod_view.is_some()
+                || self.shop.is_some(),
         );
         let panels = self.panels.get_or_insert_with(|| crate::ui::panel::Panels::new(&cx.entity(), cx));
         let behind_on = theme::backdrop(cx).any();
@@ -2222,8 +2269,10 @@ impl FuwaApp {
             }
             Part::Top => {
                 // Under a full-window page the banner can't be seen, so it doesn't move there either.
-                let covered =
-                    self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
+                let covered = self.server_settings.is_some()
+                    || self.instance_settings.is_some()
+                    || self.mod_view.is_some()
+                    || self.shop.is_some();
                 let announcement = if covered { None } else { self.render_announcement(window, cx) };
                 // Streamer mode's bar is over everything; the sign-in notice under the announcement (banners.rs).
                 let streamer = self.render_streamer_banner(window, cx);
@@ -2241,8 +2290,10 @@ impl FuwaApp {
             Part::Main => div().size_full().flex().child(self.render_main(window, cx)).into_any_element(),
             Part::Floats => {
                 // Under a full-window page they can't be seen, so they don't move there either.
-                let covered =
-                    self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
+                let covered = self.server_settings.is_some()
+                    || self.instance_settings.is_some()
+                    || self.mod_view.is_some()
+                    || self.shop.is_some();
                 if covered { div().into_any_element() } else { crate::ui::floats::layer(window, cx) }
             }
             Part::Over => self.render_over(window, cx),
@@ -2251,7 +2302,10 @@ impl FuwaApp {
 
     /// Everything over the window, in the order it stacks.
     fn render_over(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let covered = self.server_settings.is_some() || self.instance_settings.is_some() || self.mod_view.is_some();
+        let covered = self.server_settings.is_some()
+            || self.instance_settings.is_some()
+            || self.mod_view.is_some()
+            || self.shop.is_some();
         let update_note = if covered { None } else { self.render_update_note(window, cx) };
         let (dialog_leaving, menu_leaving, context_leaving) = self.render_leaving(window, cx);
         div()
@@ -2289,6 +2343,12 @@ impl FuwaApp {
             })
             .when_some(self.mod_view.clone(), |el, view| {
                 // Like server settings: drawn again only when it changes.
+                el.child(
+                    gpui_kit::AnyView::from(view)
+                        .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+                )
+            })
+            .when_some(self.shop.clone(), |el, view| {
                 el.child(
                     gpui_kit::AnyView::from(view)
                         .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),

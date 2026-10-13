@@ -130,6 +130,8 @@ pub struct InstanceState {
     pub home_emojis: HashMap<String, Option<Vec<pb::Emoji>>>,
     /// Per server you moderate: its open cases, the cases seen and the notes of open pages (`mod_view.rs`).
     pub mod_view: HashMap<String, crate::core::mod_view::ModView>,
+    /// Per server: its currencies, shop and your wallet there (`economy.rs`).
+    pub economy: HashMap<String, crate::core::economy::Economy>,
 }
 
 impl InstanceState {
@@ -174,6 +176,7 @@ impl InstanceState {
             server_items: HashMap::new(),
             home_emojis: HashMap::new(),
             mod_view: HashMap::new(),
+            economy: HashMap::new(),
         }
     }
 
@@ -442,6 +445,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.server_items.remove(server_id);
     i.shared.remove(server_id);
     i.mod_view.remove(server_id);
+    i.economy.remove(server_id);
     i.synced.remove(server_id);
     i.followed.remove(server_id);
     threads::forget_threads_in(i, &channels.iter().map(String::as_str).collect());
@@ -627,6 +631,23 @@ pub fn apply_event(
             &p.subject_id,
             &p.note_id,
         ),
+        Payload::CurrenciesUpdated(p) => {
+            crate::core::economy::currencies_updated(i.economy.entry(sid.to_owned()).or_default(), &p.currencies)
+        }
+        Payload::ShopUpdated(p) => {
+            crate::core::economy::shop_updated(i.economy.entry(sid.to_owned()).or_default(), &p.listings)
+        }
+        Payload::ShopListingUpdated(pb::ShopListingUpdated { listing: Some(listing) }) => {
+            crate::core::economy::listing_updated(i.economy.entry(sid.to_owned()).or_default(), listing)
+        }
+        Payload::BalanceUpdated(pb::BalanceUpdated { balance: Some(balance), .. }) => {
+            let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+            crate::core::economy::balance_updated(i.economy.entry(sid.to_owned()).or_default(), balance, &me)
+        }
+        Payload::PurchaseMade(pb::PurchaseMade { listing: Some(listing), .. }) => {
+            // Its listing as it is after the sale; the wallet is read again (`sync.rs`).
+            crate::core::economy::listing_updated(i.economy.entry(sid.to_owned()).or_default(), listing)
+        }
         Payload::ThreadUpdated(p) => threads::with_thread_summary(i, &p.channel_id, &p.thread_id, p.thread.as_ref()),
         Payload::UserUpdated(pb::UserUpdated { user: Some(user) }) => update_user(i, user),
         Payload::MemberJoined(pb::MemberJoined { member: Some(member) })

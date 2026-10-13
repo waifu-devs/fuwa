@@ -229,6 +229,8 @@ struct Facts {
     /// You may report them in this server, and open their page in Mod View (docs/mod-view.md).
     report: bool,
     mod_view: bool,
+    /// You may give them currency here, or take it (docs/economy.md).
+    give: bool,
 }
 
 impl FuwaApp {
@@ -272,6 +274,7 @@ impl FuwaApp {
                     decoration: None,
                     report: false,
                     mod_view: false,
+                    give: false,
                 };
             };
             let member = server.and_then(|sid| {
@@ -306,6 +309,7 @@ impl FuwaApp {
             Facts {
                 report: server.is_some_and(|sid| crate::core::mod_view::can_report_member(i, sid, user_id)),
                 mod_view: server.is_some_and(|sid| i.can_mod_view(sid)),
+                give: server.is_some_and(|sid| member.is_some() && i.can_grant_currency(sid)),
                 decoration,
                 can_message: !me && !agent && matches!(i.dms.status, DmStatus::Ready | DmStatus::Starting),
                 can_friend: !me && !agent && i.friends.status == crate::core::friends::FriendsStatus::Ready,
@@ -479,7 +483,7 @@ impl FuwaApp {
             column = column.child(motion::rise(row, "profile-mod-in", Duration::from_millis(80), 6.0));
         }
         // Mod View: their page for moderators, and reporting them for everyone else here.
-        if let (Some(sid), true) = (server, f.mod_view || f.report) {
+        if let (Some(sid), true) = (server, f.mod_view || f.report || f.give) {
             let mut row = under_box(&p).flex().gap(px(6.0));
             let small = |id: &'static str, glyph: &'static str, label: String, tint: Hsla, soft: Hsla| {
                 let group = SharedString::from(id);
@@ -522,6 +526,17 @@ impl FuwaApp {
                         this.dialog = None;
                         this.open_mod_view(&k, &s, Some(uid.clone()), window, cx)
                     })),
+                );
+            }
+            if f.give {
+                let (k, s, uid) = (key.to_owned(), sid.to_owned(), user_id.to_owned());
+                let gold = crate::ui::economy::gold(&p);
+                row = row.child(
+                    small("profile-give", "hand-coins", t("desktop.economy.give.menu"), gold, gold.opacity(0.1))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let to = crate::core::economy::GrantTo::Member(uid.clone());
+                            this.open_give(&k, &s, to, window, cx)
+                        })),
                 );
             }
             if f.report {
