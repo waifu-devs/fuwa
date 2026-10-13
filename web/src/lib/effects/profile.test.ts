@@ -23,7 +23,7 @@ test("plans animate only transform and opacity, within the particle budget", () 
     const particles = planEffect(effect, card);
     assert.ok(particles.length > 0 && particles.length <= MAX_PARTICLES, `${effect.id}: ${particles.length}`);
     for (const p of particles) {
-      assert.ok(SHAPE_PATHS[p.shape]);
+      assert.ok(p.shape && SHAPE_PATHS[p.shape]);
       assert.ok(p.keyframes.length >= 2);
       assert.equal(p.keyframes[0]!.offset, 0);
       assert.equal(p.keyframes.at(-1)!.offset, 1);

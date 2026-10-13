@@ -123,6 +123,8 @@ pub struct Palette {
     pub background: Rgba,
     pub foreground: Rgba,
     pub card: Rgba,
+    /// Text on a card (profile effects' shaders read it).
+    pub card_foreground: Rgba,
     pub primary: Rgba,
     pub primary_foreground: Rgba,
     pub secondary: Rgba,
@@ -156,6 +158,7 @@ impl Palette {
             background: rgba(background),
             foreground: rgba(t.get("foreground")),
             card: rgba(t.get("card")),
+            card_foreground: rgba(t.get("card-foreground")),
             primary: rgba(primary),
             primary_foreground: rgba(t.get("primary-foreground")),
             secondary: rgba(t.get("secondary")),

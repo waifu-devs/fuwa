@@ -320,6 +320,7 @@ impl App {
         };
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
+            PictureOwner::Instance => row.purpose == pb::MediaPurpose::Decoration && row.server_id.is_none(),
             PictureOwner::Server(server_id) => {
                 matches!(
                     row.purpose,

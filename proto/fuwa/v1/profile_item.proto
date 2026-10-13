@@ -39,7 +39,8 @@ service ProfileItemService {
   rpc DeleteServerProfileItem(DeleteServerProfileItemRequest) returns (DeleteServerProfileItemResponse);
 }
 
-// What a new item is. Exactly one of effect and picture_url, for its kind.
+// What a new item is: an effect's spec (and any pictures it draws), or a
+// decoration's picture_url.
 message NewProfileItem {
   ProfileItemKind kind = 1;
   // 1 to 40 characters.
@@ -51,6 +52,15 @@ message NewProfileItem {
   string effect = 4;
   // A decoration's picture: the `media.url` of an upload of yours.
   string picture_url = 5;
+  // An effect's own pictures, which its layers draw by their place here
+  // ("image": 0 for the first): up to 8 `media.url`s of uploads of yours
+  // (MEDIA_PURPOSE_DECORATION, for the server when it's a server's).
+  repeated string picture_urls = 6;
+}
+
+// An effect's pictures, all of them in order.
+message ProfileItemPictureUrls {
+  repeated string urls = 1;
 }
 
 // What changes; unset fields stay. A decoration's picture can't change:
@@ -60,6 +70,9 @@ message ProfileItemChange {
   optional string description = 2;
   // Effects only.
   optional string effect = 3;
+  // Effects only: their pictures, as NewProfileItem.picture_urls. Ones
+  // left out are deleted; the spec is checked again against the new list.
+  ProfileItemPictureUrls pictures = 4;
 }
 
 message ListInstanceProfileItemsRequest {}

@@ -4,7 +4,9 @@ Beyond the effects every app ships with (docs/profile-effects.md), an
 instance and each of its servers can offer their own **profile items**:
 
 - **Effects**: animated layers over the profile card, as specs in the
-  format of docs/profile-effects.md (data, never code or pictures).
+  format of docs/profile-effects.md: particles of built-in shapes or of
+  the effect's own pictures, and a shader (WGSL) drawn under them, alone or
+  together.
 - **Decorations**: a picture around someone's avatar, drawn wherever the
   avatar is: messages, the member list, profile cards.
 
@@ -45,7 +47,8 @@ lists like the avatar does. It never goes to other instances.
 
 An item's `effect` is the spec as JSON, checked by the instance before it's
 stored (`profile_items::check_effect`): every field in the format's lists and
-ranges, at most 16 KB, anything else refused rather than clamped. It's
+ranges, a shader held to the custom shaders' rules, at most 40 KB, anything
+else refused rather than clamped. It's
 written back with only the format's fields, under the item's id in lowercase
 and its name and description. Apps still put every spec that didn't ship
 with them through `sanitizeEffect`, and play it like a built-in one, so the
@@ -53,11 +56,26 @@ viewer's switches (Settings > Accessibility > Profile effects), reduced
 motion and the slow-device fallback all apply.
 
 Admins and managers add an effect by uploading a `.json` file or pasting the
-spec. To get one started, the page offers:
+spec. Beside it they add the effect's pictures and write its shader:
+
+- **Pictures**: up to 8, each numbered by its place, which is what a layer's
+  `"image"` names. They're uploads like a decoration's
+  (`MEDIA_PURPOSE_DECORATION`, a server's counted in its attachments, one
+  file each), sent as `NewProfileItem.picture_urls` and kept in
+  `ProfileItem.pictures`. `ProfileItemChange.pictures` replaces the whole
+  list: new uploads are checked, pictures left out are deleted, and the
+  spec is checked again against the new list.
+- **Shader**: WGSL, edited on its own (the editor puts it in the spec's
+  `shader.code`, and takes it out of a pasted spec), with the backdrop's
+  shader starters to begin from and what happened when this device last
+  ran it.
+
+To get one started, the page offers:
 
 - **Start from a built-in**: any of the built-in effects' layers, to change.
 - **Copy a prompt for an AI**: the format, its limits and an example, ending
-  where the person describes the effect they want, for any AI chat. What it
+  where the person describes the effect they want, for any AI chat. It
+  covers pictures and shaders too. What it
   answers is pasted back and checked like any spec. The web's
   `EFFECT_PROMPT` (`lib/profile-items.ts`) and the desktop's are the same
   words.
@@ -90,7 +108,7 @@ before saving) and a **prompt to copy** for an AI that makes pictures, saying
 all of the above, which ends where the person describes their decoration.
 
 A decoration's picture can't be replaced: add another and delete the old
-one. Deleting it deletes the picture.
+one. Deleting it deletes the picture, as deleting an effect deletes its.
 
 ## The instance's switches
 

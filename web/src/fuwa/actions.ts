@@ -1767,12 +1767,13 @@ export const loadInstanceProfileItems = (key: string) =>
     return items;
   });
 
-export type NewItem = { kind: ProfileItemKind; name: string; description: string; effect?: string; pictureUrl?: string };
+/** `pictureUrls`: an effect's own pictures, which its image layers name by place. */
+export type NewItem = { kind: ProfileItemKind; name: string; description: string; effect?: string; pictureUrl?: string; pictureUrls?: string[] };
 
 /** Adds a profile item: the instance's (no `serverId`, admins) or a server's (Manage Server). */
 export const createProfileItem = (key: string, serverId: string, item: NewItem) =>
   Effect.gen(function* () {
-    const fresh = { kind: item.kind, name: item.name, description: item.description, effect: item.effect ?? "", pictureUrl: item.pictureUrl ?? "" };
+    const fresh = { kind: item.kind, name: item.name, description: item.description, effect: item.effect ?? "", pictureUrl: item.pictureUrl ?? "", pictureUrls: item.pictureUrls ?? [] };
     const res = yield* call((signal): Promise<{ item?: ProfileItem }> =>
       serverId
         ? api(key).profileItems.createServerProfileItem({ serverId, item: fresh }, { signal })
@@ -1782,11 +1783,13 @@ export const createProfileItem = (key: string, serverId: string, item: NewItem) 
     return res.item!;
   });
 
-export type ItemChange = { name?: string; description?: string; effect?: string };
+/** `pictures`: an effect's pictures, all of them in order (ones left out are deleted). */
+export type ItemChange = { name?: string; description?: string; effect?: string; pictures?: string[] };
 
-/** Renames an item, changes its line, or replaces an effect's spec. */
-export const updateProfileItem = (key: string, serverId: string, itemId: string, change: ItemChange) =>
+/** Renames an item, changes its line, or replaces an effect's spec and pictures. */
+export const updateProfileItem = (key: string, serverId: string, itemId: string, { pictures, ...rest }: ItemChange) =>
   Effect.gen(function* () {
+    const change = { ...rest, ...(pictures ? { pictures: { urls: pictures } } : {}) };
     const res = yield* call((signal): Promise<{ item?: ProfileItem }> =>
       serverId
         ? api(key).profileItems.updateServerProfileItem({ serverId, itemId, change }, { signal })

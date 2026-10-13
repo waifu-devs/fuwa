@@ -286,7 +286,11 @@
     and `profile_decoration`, set through `UpdateMember`). Effects are specs
     checked by `check_effect`; decorations are uploads
     (`MEDIA_PURPOSE_DECORATION`). Profiles and members name items by id and
-    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`);
+    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`).
+    An effect may carry its own pictures (`ProfileItem.pictures`, uploads
+    like a decoration's, named by layers' `image`) and a shader (WGSL in
+    the custom backdrop shaders' format, checked by `shader_problem` and
+    drawn by apps under the particles: web `components/EffectShader.tsx`);
     deleting an item takes it off its wearers in the same write. Web:
     `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
     `components/settings/ProfileItems.tsx` (both settings dialogs) and

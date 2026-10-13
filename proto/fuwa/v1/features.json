@@ -33,6 +33,7 @@
     { "id": "mod-view", "date": "2026-10-12", "title": "Mod View and reports" },
     { "id": "mod-view-find", "date": "2026-10-13", "title": "Finding people in Mod View" },
     { "id": "economy", "date": "2026-10-13", "title": "Server currencies and the shop" },
-    { "id": "economy-games", "date": "2026-10-13", "title": "Earning currency by playing games" }
+    { "id": "economy-games", "date": "2026-10-13", "title": "Earning currency by playing games" },
+    { "id": "profile-effect-media", "date": "2026-10-13", "title": "Pictures and shaders in profile effects" }
   ]
 }

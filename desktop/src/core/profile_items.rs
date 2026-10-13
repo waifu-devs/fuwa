@@ -9,7 +9,7 @@ use tonic::Code;
 
 use crate::core::Core;
 use crate::core::api::Problem;
-use crate::core::profile_effects::{self as fx, Spec};
+use crate::core::profile_effects::{self as fx, Picture, Spec};
 use crate::core::store::{self, InstanceState};
 use crate::pb;
 use crate::rpc;
@@ -30,8 +30,36 @@ pub enum Scope {
 pub enum NewItem {
     /// A picture from this computer, uploaded first.
     Decoration { content_type: String, bytes: Vec<u8> },
-    /// An effect's spec, as JSON, sent as is: the instance checks it.
-    Effect { spec: String },
+    /// An effect's spec, as JSON, sent as is: the instance checks it. With
+    /// its pictures' links, in order, uploaded already (`send_pictures`).
+    Effect { spec: String, pictures: Vec<String> },
+}
+
+/// One of an effect's pictures while it's edited: on the instance already,
+/// or a file on this computer to upload.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DraftPicture {
+    Uploaded { url: String, animated: bool },
+    File(std::path::PathBuf),
+}
+
+impl DraftPicture {
+    /// As the preview plays it: a file shows from this computer.
+    pub fn picture(&self) -> Picture {
+        match self {
+            DraftPicture::Uploaded { url, animated } => Picture { url: url.clone(), animated: *animated, local: false },
+            DraftPicture::File(path) => {
+                let name = path.to_string_lossy().into_owned();
+                let animated = name.to_ascii_lowercase().ends_with(".gif");
+                Picture { url: name, animated, local: true }
+            }
+        }
+    }
+}
+
+/// An item's pictures as specs take them.
+pub fn item_pictures(item: &pb::ProfileItem) -> Vec<Picture> {
+    item.pictures.iter().map(|p| Picture { url: p.url.clone(), animated: p.animated, local: false }).collect()
 }
 
 /// An effect item's spec, ready to play: parsed and checked like any spec
@@ -41,11 +69,17 @@ pub fn item_effect(item: &pb::ProfileItem) -> Option<Spec> {
     if item.kind != pb::ProfileItemKind::Effect as i32 || item.effect.is_empty() {
         return None;
     }
-    parse_effect(&item.effect, Some(&item.id.to_lowercase()), Some((&item.name, &item.description)))
+    parse_effect(
+        &item.effect,
+        Some(&item.id.to_lowercase()),
+        Some((&item.name, &item.description)),
+        &item_pictures(item),
+    )
 }
 
-/// A spec from JSON text; `id` and `text` replace its own when given.
-pub fn parse_effect(json: &str, id: Option<&str>, text: Option<(&str, &str)>) -> Option<Spec> {
+/// A spec from JSON text, with the pictures its image layers draw; `id` and
+/// `text` replace its own when given.
+pub fn parse_effect(json: &str, id: Option<&str>, text: Option<(&str, &str)>, pictures: &[Picture]) -> Option<Spec> {
     let mut raw: serde_json::Value = serde_json::from_str(json).ok()?;
     let named = raw.as_object_mut()?;
     if let Some(id) = id {
@@ -55,7 +89,7 @@ pub fn parse_effect(json: &str, id: Option<&str>, text: Option<(&str, &str)>) ->
         named.insert("name".into(), name.into());
         named.insert("description".into(), description.into());
     }
-    fx::sanitize(&raw)
+    fx::sanitize(&raw, pictures)
 }
 
 /// Why an effect someone pasted or picked can't be added.
@@ -77,15 +111,68 @@ impl EffectProblem {
 }
 
 /// Checks an effect someone is about to add (the instance checks again):
-/// the spec under a stand-in id for the preview, or what's wrong.
-pub fn check_effect_text(text: &str) -> Result<Spec, EffectProblem> {
+/// the spec under a stand-in id for the preview, or what's wrong. `pictures`
+/// are the ones it will have (files on this computer until they're uploaded).
+pub fn check_effect_text(text: &str, pictures: &[Picture]) -> Result<Spec, EffectProblem> {
     if text.trim().is_empty() {
         return Err(EffectProblem::Empty);
     }
     if serde_json::from_str::<serde_json::Value>(text).is_err() {
         return Err(EffectProblem::Json);
     }
-    parse_effect(text, Some("preview"), Some(("preview", ""))).ok_or(EffectProblem::Spec)
+    parse_effect(text, Some("preview"), Some(("preview", "")), pictures).ok_or(EffectProblem::Spec)
+}
+
+/// A spec's text split for editing: the JSON without its shader's code, and
+/// the code on its own, so the WGSL is edited as WGSL rather than inside a
+/// JSON string. Text that isn't JSON (or has no shader) comes back as it is.
+/// The web's `splitShader`.
+pub fn split_shader(text: &str) -> (String, String) {
+    let Ok(serde_json::Value::Object(mut spec)) = serde_json::from_str::<serde_json::Value>(text) else {
+        return (text.to_owned(), String::new());
+    };
+    let Some(serde_json::Value::Object(shader)) = spec.get_mut("shader") else {
+        return (text.to_owned(), String::new());
+    };
+    let Some(serde_json::Value::String(code)) = shader.remove("code") else {
+        return (text.to_owned(), String::new());
+    };
+    if shader.is_empty() {
+        spec.remove("shader");
+    }
+    let json = serde_json::to_string_pretty(&spec).unwrap_or_else(|_| text.to_owned());
+    (json, code)
+}
+
+/// The spec's text again from its two parts: the shader's code put back in
+/// (its other settings, if any, kept), or the shader left out when there's
+/// no code. JSON that doesn't parse comes back as it is, for the checks to
+/// say so. A shader alone needs no JSON at all. The web's `joinShader`.
+pub fn join_shader(json: &str, wgsl: &str) -> String {
+    use serde_json::{Value, json};
+    let code = wgsl.trim_end();
+    if json.trim().is_empty() {
+        return if code.trim().is_empty() {
+            String::new()
+        } else {
+            json!({ "layers": [], "shader": { "code": code } }).to_string()
+        };
+    }
+    let Ok(Value::Object(mut spec)) = serde_json::from_str::<Value>(json) else { return json.to_owned() };
+    if code.trim().is_empty() {
+        spec.remove("shader");
+    } else {
+        let mut settings = match spec.remove("shader") {
+            Some(Value::Object(settings)) => settings,
+            _ => serde_json::Map::new(),
+        };
+        settings.insert("code".into(), code.into());
+        spec.insert("shader".into(), Value::Object(settings));
+    }
+    if !spec.get("layers").is_some_and(Value::is_array) {
+        spec.insert("layers".into(), Value::Array(Vec::new()));
+    }
+    Value::Object(spec).to_string()
 }
 
 /// An item by id, of a kind, whatever the id's case (an effect's spec keeps it in lowercase).
@@ -155,7 +242,12 @@ Each layer is one kind of particle. Its fields:
 - glow: true for a soft glow in the particle's color (optional).
 - opacity: peak opacity, 0.05 to 1 (optional, 1 when left out).
 
-fuwa refuses a spec with a shape, motion, place or color not on these lists, a number out of its range, or more than 16 KB, and drops fields it doesn't know. The effect gets its id, name and description from the item it's added as, so leave those out.
+Two more things an effect can have, if what I want calls for them:
+
+- Pictures: an effect can carry up to 8 pictures of its own, uploaded with it in an order. A layer with "image": 0 draws the first picture instead of a shape ("image": 1 the second, and so on). It leaves out shape, and may leave out colors: a picture keeps its own, and its glow is then the theme's primary. Only use pictures I say I have, and tell me which picture goes in which place.
+- A shader: "shader": { "code": "...", "intensity": 0.6, "speed": 1 } draws a WGSL shader across the whole card, under the particles. The code defines fn shade(uv: vec2f) -> vec4f, called for each pixel with uv from 0,0 at the top left to 1,1 at the bottom right, and returns a color and how much it covers the card (straight alpha, 0 to 1). Keep alpha low in the middle (0.15 or less) so the text stays readable. It can read the uniform fuwa: fuwa.primary (the theme's color), fuwa.accent (the card's own color), fuwa.background (the card), fuwa.foreground (its text), all vec4f; fuwa.res (its size in pixels) and fuwa.pointer (0 to 1), both vec2f; fuwa.time (seconds) and fuwa.intensity, both f32; and the helpers hash21(p: vec2f) -> f32, noise(p: vec2f) -> f32 and fbm(p: vec2f) -> f32. It can't declare anything with an attribute (no @group, @binding or entry points), turn on extensions or contain links, and it's at most 16 KB. intensity (0.05 to 1) scales how much it covers, speed (0 to 4) how fast its time runs. A shader alone, with "layers": [], is an effect too. In the JSON the code is one string, so write its line breaks as \n.
+
+fuwa refuses a spec with a shape, motion, place or color not on these lists, a number out of its range, a shader that breaks those rules, or more than 40 KB, and drops fields it doesn't know. The effect gets its id, name and description from the item it's added as, so leave those out.
 
 An example, fuwa's own Sakura (a gust of petals from the top left, then a gentle fall):
 
@@ -200,7 +292,7 @@ pub fn starter_text(id: &str) -> Option<String> {
         .map(|l| {
             let colors: Vec<String> = l.colors.iter().map(|c| format!("\"{}\"", c.name())).collect();
             let mut fields = vec![
-                format!("\"shape\": \"{}\"", l.shape.name()),
+                format!("\"shape\": \"{}\"", l.shape.map_or("", fx::Shape::name)),
                 format!("\"motion\": \"{}\"", l.motion.name()),
                 format!("\"phase\": \"{}\"", if l.intro { "intro" } else { "idle" }),
                 format!("\"count\": {}", l.count),
@@ -407,9 +499,10 @@ impl Core {
                 item.picture_url =
                     self.upload_picture_for(key, server_id, pb::MediaPurpose::Decoration, &content_type, bytes).await?;
             }
-            NewItem::Effect { spec } => {
+            NewItem::Effect { spec, pictures } => {
                 item.kind = pb::ProfileItemKind::Effect as i32;
                 item.effect = spec;
+                item.picture_urls = pictures;
             }
         }
         let api = self.api(key).ok_or_else(missing)?;
@@ -428,7 +521,37 @@ impl Core {
         Ok(made)
     }
 
-    /// Renames an item, or changes its description.
+    /// Uploads an effect's new pictures (for the server, or the instance), in
+    /// order, and hands back every picture's link (the web's `sendPictures`).
+    pub async fn send_pictures(
+        self: &Arc<Self>,
+        key: &str,
+        scope: &Scope,
+        pictures: Vec<DraftPicture>,
+    ) -> Result<Vec<String>, Problem> {
+        let server_id = match scope {
+            Scope::Instance => "",
+            Scope::Server(id) => id.as_str(),
+        };
+        let mut urls = Vec::with_capacity(pictures.len());
+        for picture in pictures {
+            match picture {
+                DraftPicture::Uploaded { url, .. } => urls.push(url),
+                DraftPicture::File(path) => {
+                    let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let content_type = crate::core::account::picture_type(&file).unwrap_or("image/png");
+                    let bytes = crate::core::account::read_picture(&path).await?;
+                    urls.push(
+                        self.upload_picture_for(key, server_id, pb::MediaPurpose::Decoration, content_type, bytes)
+                            .await?,
+                    );
+                }
+            }
+        }
+        Ok(urls)
+    }
+
+    /// Renames an item, changes its description, or replaces an effect's spec and pictures.
     pub async fn change_profile_item(
         &self,
         key: &str,
@@ -538,7 +661,9 @@ mod tests {
     #[test]
     fn the_prompts_are_the_webs_word_for_word() {
         let web = web("profile-items.ts");
-        assert!(web.contains(&format!("export const EFFECT_PROMPT = `{EFFECT_PROMPT}`;")));
+        // As the template literal reads at run time: `\\n` in its source is `\n` in the text.
+        let read = web.replace("\\\\", "\\");
+        assert!(read.contains(&format!("export const EFFECT_PROMPT = `{EFFECT_PROMPT}`;")));
         assert!(web.contains(&format!("export const DECORATION_PROMPT = `{DECORATION_PROMPT}`;")));
         assert!(web.contains(&format!("export const EFFECT_DOCS = \"{EFFECT_DOCS}\";")));
         assert!(web.contains(&format!("export const DECORATION_DOCS = \"{DECORATION_DOCS}\";")));
@@ -550,7 +675,7 @@ mod tests {
     fn every_starter_is_its_built_ins_layers() {
         for id in fx::IDS {
             let text = starter_text(id).unwrap();
-            let spec = check_effect_text(&text).unwrap();
+            let spec = check_effect_text(&text, &[]).unwrap();
             assert_eq!(spec.layers, fx::spec(id).unwrap().layers, "{id}");
             assert!(text.contains("\"size\": ["), "{text}");
         }
@@ -563,6 +688,47 @@ mod tests {
             "{sakura}"
         );
         assert!(sakura.contains("\"opacity\": 0.95\n    },"), "{sakura}");
+    }
+
+    #[test]
+    fn the_shader_is_edited_apart_from_the_json() {
+        let text =
+            r#"{"layers":[],"shader":{"code":"fn shade(uv: vec2f) -> vec4f {\n  return vec4f(0.0);\n}","speed":2}}"#;
+        let (json, wgsl) = split_shader(text);
+        assert_eq!(wgsl, "fn shade(uv: vec2f) -> vec4f {\n  return vec4f(0.0);\n}");
+        assert!(!json.contains("code") && json.contains("\"speed\": 2"), "{json}");
+        let joined: serde_json::Value = serde_json::from_str(&join_shader(&json, &format!("{wgsl}\n\n"))).unwrap();
+        assert_eq!(joined, serde_json::from_str::<serde_json::Value>(text).unwrap());
+        // No code: no shader; no JSON: a shader alone.
+        let bare = join_shader(r#"{"layers":[],"shader":{"speed":2}}"#, " ");
+        assert_eq!(bare, r#"{"layers":[]}"#);
+        assert_eq!(join_shader("", "x"), r#"{"layers":[],"shader":{"code":"x"}}"#);
+        assert_eq!(join_shader("", "  "), "");
+        assert_eq!(join_shader("{", "x"), "{");
+        assert_eq!(split_shader("{"), ("{".to_owned(), String::new()));
+        assert_eq!(split_shader(r#"{"layers":[]}"#).1, "");
+        // Without settings beside the code, the shader goes from the JSON altogether.
+        assert!(!split_shader(r#"{"layers":[],"shader":{"code":"x"}}"#).0.contains("shader"));
+    }
+
+    #[test]
+    fn an_items_pictures_reach_its_spec() {
+        let spec = r#"{"layers":[{"image":0,"motion":"pop","phase":"intro","count":3,"from":"edges","size":[4,8],"duration":[400,900]}]}"#;
+        let mut item = pb::ProfileItem {
+            id: "01PIC".into(),
+            kind: pb::ProfileItemKind::Effect as i32,
+            name: "Pics".into(),
+            effect: spec.into(),
+            ..Default::default()
+        };
+        assert!(item_effect(&item).is_none());
+        item.pictures = vec![pb::ProfileItemPicture { url: "https://k/media/p".into(), animated: true, size: 10 }];
+        let found = item_effect(&item).unwrap();
+        assert_eq!(found.pictures, vec![Picture { url: "https://k/media/p".into(), animated: true, local: false }]);
+        assert_eq!(check_effect_text(spec, &[]).unwrap_err(), EffectProblem::Spec);
+        let file = DraftPicture::File("/tmp/a.GIF".into()).picture();
+        assert!(file.local && file.animated);
+        assert!(check_effect_text(spec, &[file]).is_ok());
     }
 
     #[test]
@@ -601,10 +767,10 @@ mod tests {
         assert_eq!(resolve_effect("sakura", &items).unwrap().id, "sakura");
         assert!(resolve_effect("gone", &items).is_none());
         assert_eq!(offered_effects(&items).len(), 1);
-        assert_eq!(check_effect_text(" ").unwrap_err(), EffectProblem::Empty);
-        assert_eq!(check_effect_text("{").unwrap_err(), EffectProblem::Json);
-        assert_eq!(check_effect_text("{}").unwrap_err(), EffectProblem::Spec);
-        assert!(check_effect_text(spec).is_ok());
+        assert_eq!(check_effect_text(" ", &[]).unwrap_err(), EffectProblem::Empty);
+        assert_eq!(check_effect_text("{", &[]).unwrap_err(), EffectProblem::Json);
+        assert_eq!(check_effect_text("{}", &[]).unwrap_err(), EffectProblem::Spec);
+        assert!(check_effect_text(spec, &[]).is_ok());
         assert_eq!(name_from_file("Cherry_Blossom.json"), "Cherry Blossom");
         assert_eq!(name_from_file("ring-gold.png"), "ring gold");
     }

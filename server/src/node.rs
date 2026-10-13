@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0024_profile_items.sql"),
     include_str!("../migrations/node/0025_featured_servers.sql"),
     include_str!("../migrations/node/0026_agent_endpoints.sql"),
+    include_str!("../migrations/node/0027_profile_item_pictures.sql"),
 ];
 
 /// Notes that the instance's profile items changed now (`Node.profile_items_at`).
