@@ -429,7 +429,7 @@ impl SettingsView {
                     .min_w(px(224.0))
                     .h(px(36.0))
                     .text_xs()
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .when(error.is_some(), |el| el.border_color(alpha(p.destructive, 0.6))),
             )
             .child(save)
@@ -575,13 +575,17 @@ impl SettingsView {
             .p(px(4.0))
             .pl(px(12.0))
             .child(
-                div().flex_1().min_w_0().text_xs().font_family("monospace").when(!visible, |el| el.truncate()).child(
-                    motion::fade_in(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_xs()
+                    .font_family(crate::ui::theme::mono())
+                    .when(!visible, |el| el.truncate())
+                    .child(motion::fade_in(
                         div().child(shown),
                         SharedString::from(format!("endpoint-secret-{agent_id}-{visible}-{}", value.len())),
                         Duration::from_millis(180),
-                    ),
-                ),
+                    )),
             )
             .when(held, |row| {
                 row.child(

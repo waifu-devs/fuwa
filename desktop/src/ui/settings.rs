@@ -119,6 +119,8 @@ fn app_sections() -> Vec<Section> {
             ("message-display", t("appsettings.appearance.display"), "cozy compact"),
             ("chat-font-size", t("settings.nav.chatTextSize"), "font scaling"),
             ("zoom", t("appsettings.appearance.zoom"), "scale size"),
+            ("font", t("appsettings.appearance.font"), "typeface family file installed system"),
+            ("code-font", t("appsettings.appearance.codeFont"), "monospace fixed width typeface family"),
         ]),
         Section::new(
             Page::Themes,

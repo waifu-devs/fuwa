@@ -416,7 +416,7 @@ impl InstanceSettingsView {
                 .into_any_element(),
             Some(state) => {
                 focus_ring(area_box(Textarea::new(state).appearance(false), None, p), has_focus(state, window, cx), p)
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .text_xs()
                     .into_any_element()
             }
@@ -526,7 +526,8 @@ impl InstanceSettingsView {
                 .into_any_element()
         };
         // `grid grid-cols-8 gap-x-3 gap-y-1 font-mono text-xs tracking-wider`.
-        let mut groups = div().flex().flex_wrap().gap_x(px(12.0)).gap_y(px(4.0)).font_family("monospace").text_xs();
+        let mut groups =
+            div().flex().flex_wrap().gap_x(px(12.0)).gap_y(px(4.0)).font_family(crate::ui::theme::mono()).text_xs();
         for (n, group) in info.fingerprint.split(' ').enumerate() {
             groups = groups.child(motion::rise(
                 div().child(tracked(group.to_owned(), WIDER)),
@@ -633,7 +634,7 @@ impl InstanceSettingsView {
                                 p,
                             )
                             .h(px(36.0))
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .text_xs(),
                         ),
                     )
@@ -804,7 +805,7 @@ impl InstanceSettingsView {
                             )
                             .child(
                                 div()
-                                    .font_family("monospace")
+                                    .font_family(crate::ui::theme::mono())
                                     .text_size(px(11.0))
                                     .text_color(p.muted_foreground)
                                     .text_ellipsis()

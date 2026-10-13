@@ -452,11 +452,12 @@ impl FuwaApp {
         let streamer = self.prefs.streamer_mode;
         let shown: AnyElement = match &link {
             Some(link) => motion::rise(
-                div().truncate().font_family("monospace").text_sm().line_height(px(20.0)).child(if streamer {
-                    "•".repeat(link.chars().count().min(40))
-                } else {
-                    link.clone()
-                }),
+                div()
+                    .truncate()
+                    .font_family(crate::ui::theme::mono())
+                    .text_sm()
+                    .line_height(px(20.0))
+                    .child(if streamer { "•".repeat(link.chars().count().min(40)) } else { link.clone() }),
                 SharedString::from(format!("invite-link-{}", state.invite.as_ref().map_or("", |i| i.code.as_str()))),
                 Duration::ZERO,
                 12.0,

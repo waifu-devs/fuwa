@@ -695,7 +695,7 @@ impl InstanceSettingsView {
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .text_xs()
                                 .child(shown.to_owned()),
                         )
@@ -1093,7 +1093,7 @@ pub(super) fn cap_row(
 
 /// How wide a line of the app's font is drawn, for highlights that glide between words.
 pub(super) fn text_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
-    let mut font = gpui_kit::font(crate::ui::theme::FONT);
+    let mut font = gpui_kit::font(crate::ui::theme::font());
     font.weight = weight;
     let run = gpui_kit::TextRun {
         len: text.len(),

@@ -457,7 +457,7 @@ impl gpui_kit::Render for ReactorsTip {
             _ => t("chattools.reactions.loading"),
         };
         let tip = div()
-            .font_family(crate::ui::theme::FONT)
+            .font_family(crate::ui::theme::font())
             .bg(self.bg)
             .text_color(self.fg)
             .rounded(crate::ui::theme::radius_md())

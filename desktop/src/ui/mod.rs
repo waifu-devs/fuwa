@@ -78,6 +78,7 @@ mod settings_app;
 mod settings_backup;
 mod settings_controls;
 mod settings_data;
+mod settings_fonts;
 mod settings_friends;
 mod settings_keys;
 mod settings_language;

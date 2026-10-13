@@ -152,7 +152,7 @@ impl Render for PopOut {
             .overflow_hidden()
             .bg(gpui_kit::black())
             .text_color(gpui_kit::white())
-            .font_family(crate::ui::theme::FONT)
+            .font_family(crate::ui::theme::font())
             .on_mouse_move(cx.listener(|this, _, _, cx| {
                 let was = this.moved.elapsed() < AWAKE;
                 this.moved = Instant::now();

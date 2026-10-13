@@ -543,7 +543,7 @@ impl InstanceSettingsView {
                             has_focus(&s.metadata, window, cx),
                             p,
                         )
-                        .font_family("monospace")
+                        .font_family(crate::ui::theme::mono())
                         .text_xs(),
                     )
                     .child(
@@ -676,7 +676,7 @@ impl InstanceSettingsView {
                         has_focus(&s.certificates, window, cx),
                         p,
                     )
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .text_xs(),
                     "certs",
                     s.filled,
@@ -787,7 +787,7 @@ impl InstanceSettingsView {
                                 .flex_1()
                                 .min_w_0()
                                 .text_xs()
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .text_ellipsis()
                                 .whitespace_nowrap()
                                 .child(shown),

@@ -331,7 +331,7 @@ impl SettingsView {
                                     .bg(p.muted)
                                     .p(px(12.0))
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(crate::ui::theme::mono())
                                     .text_color(p.foreground)
                                     .child(format!(
                                         "grpcurl -H 'authorization: Bearer <token>' \\\n  -d '{{\"server_id\": \"…\", \"channel_id\": \"…\", \"content\": \"Hello! 🤖\"}}' \\\n  {host}:443 fuwa.v1.MessageService/SendMessage"
@@ -444,7 +444,7 @@ impl SettingsView {
                                     p,
                                 )
                                 .h(px(40.0))
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .when(!username.is_empty() && !valid_username(&username), |el| {
                                     el.border_color(alpha(p.destructive, 0.6))
                                 }),
@@ -1115,7 +1115,7 @@ impl SettingsView {
                                 .flex_1()
                                 .min_w_0()
                                 .text_xs()
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .when(!shown, |el| el.truncate())
                                 .child(if shown { token.to_owned() } else { "•".repeat(32) }),
                         )

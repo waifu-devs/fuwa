@@ -318,7 +318,7 @@ impl InstanceSettingsView {
                                 has_focus(state, window, cx),
                                 p,
                             )
-                            .font_family("monospace"),
+                            .font_family(crate::ui::theme::mono()),
                             id_missing,
                         ),
                         p,
@@ -333,7 +333,7 @@ impl InstanceSettingsView {
                                 has_focus(state, window, cx),
                                 p,
                             )
-                            .font_family("monospace"),
+                            .font_family(crate::ui::theme::mono()),
                             secret_missing,
                         ),
                         p,

@@ -638,7 +638,7 @@ struct TipView {
 impl gpui_kit::Render for TipView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let tip = div()
-            .font_family(crate::ui::theme::FONT)
+            .font_family(crate::ui::theme::font())
             .bg(self.bg)
             .text_color(self.fg)
             .rounded(crate::ui::theme::radius_md())

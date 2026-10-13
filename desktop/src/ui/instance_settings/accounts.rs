@@ -1227,7 +1227,7 @@ impl InstanceSettingsView {
         let hidden = self.core.prefs_now().streamer_mode && !self.accounts.revealed;
         let copied = self.accounts.copied.is_some_and(|at| at.elapsed() < Duration::from_millis(1600));
         let mut letters =
-            div().flex().justify_center().font_family("monospace").text_lg().font_weight(FontWeight::BOLD);
+            div().flex().justify_center().font_family(crate::ui::theme::mono()).text_lg().font_weight(FontWeight::BOLD);
         for (n, ch) in password.chars().enumerate() {
             letters = letters.child(motion::rise(
                 div().when(ch == '-', |el| el.text_color(p.muted_foreground)).child(tracked(ch.to_string(), WIDER)),
@@ -1248,7 +1248,7 @@ impl InstanceSettingsView {
                 div()
                     .flex()
                     .justify_center()
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .text_lg()
                     .font_weight(FontWeight::BOLD)
                     .text_color(alpha(p.muted_foreground, 0.4))

@@ -303,7 +303,13 @@ fn instance_line(instance: &str, fingerprint: &str, note: &str, p: &Palette) -> 
                         ))
                         .child(div().text_color(p.muted_foreground).child(note.to_owned())),
                 )
-                .child(div().font_family("monospace").text_xs().line_height(px(16.0)).child(fingerprint.to_owned())),
+                .child(
+                    div()
+                        .font_family(crate::ui::theme::mono())
+                        .text_xs()
+                        .line_height(px(16.0))
+                        .child(fingerprint.to_owned()),
+                ),
         )
 }
 
@@ -698,7 +704,7 @@ impl ServerSettingsView {
                             .relative()
                             .flex_1()
                             .min_w_0()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .child(
                                 super::pages::boxed(
                                     Input::new(&self.shared.code).appearance(false),
@@ -1188,7 +1194,7 @@ impl ServerSettingsView {
                     )
                     .child(
                         div()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .text_xs()
                             .line_height(px(16.0))
                             .text_color(p.muted_foreground)
@@ -1551,7 +1557,7 @@ impl ServerSettingsView {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .text_sm()
                                 .line_height(px(20.0))
                                 .font_weight(FontWeight::BOLD)

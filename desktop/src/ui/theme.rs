@@ -7,14 +7,18 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use gpui_kit::component::{Theme as KitTheme, ThemeMode};
-use gpui_kit::{App, Hsla, Pixels, Rgba, WindowAppearance, px, rgb};
+use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, WindowAppearance, px, rgb};
 
-use crate::core::config::{MotionChoice, Prefs};
+use crate::core::config::{FontPick, MotionChoice, Prefs};
 use crate::core::themes::{self, Backdrop, Theme};
 
 /// The bundled font, with Japanese: what the site and the web app use.
 /// M PLUS Rounded 1c, as its files name their family.
 pub const FONT: &str = "Rounded Mplus 1c";
+/// The fixed-width font unless another is picked: the system's.
+pub const MONO: &str = "monospace";
+/// GPUI's name for the system's interface font.
+const SYSTEM_FONT: &str = ".SystemUIFont";
 
 pub fn load_fonts(cx: &mut App) {
     let fonts: Vec<Cow<'static, [u8]>> = vec![
@@ -26,6 +30,90 @@ pub fn load_fonts(cx: &mut App) {
         tracing::warn!("couldn't load the bundled font: {err}");
     }
 }
+
+/// The fonts on screen (`Prefs::font`, `Prefs::code_font`), set by `apply`,
+/// and whether the one picked couldn't be found (so the default shows).
+struct Fonts {
+    ui: SharedString,
+    mono: SharedString,
+    ui_missing: bool,
+    mono_missing: bool,
+}
+
+static FONTS: parking_lot::RwLock<Fonts> = parking_lot::const_rwlock(Fonts {
+    ui: SharedString::new_static(FONT),
+    mono: SharedString::new_static(MONO),
+    ui_missing: false,
+    mono_missing: false,
+});
+
+/// The font the app is written in: the bundled one unless another is picked.
+pub fn font() -> SharedString {
+    FONTS.read().ui.clone()
+}
+
+/// The font for code and other fixed-width text.
+pub fn mono() -> SharedString {
+    FONTS.read().mono.clone()
+}
+
+/// Whether the font picked (or the code font, with `code`) isn't on this
+/// computer, so the default shows instead.
+pub fn font_missing(code: bool) -> bool {
+    let f = FONTS.read();
+    if code { f.mono_missing } else { f.ui_missing }
+}
+
+/// Font files of yours (`core::fonts`) already given to the text system, by file name.
+static LOADED: parking_lot::Mutex<Vec<String>> = parking_lot::Mutex::new(Vec::new());
+
+/// The families the text system knows, sorted, until a font is added.
+static NAMES: parking_lot::Mutex<Option<std::sync::Arc<Vec<String>>>> = parking_lot::Mutex::new(None);
+
+/// Every font family on this computer, and the app's own and yours, sorted.
+pub fn font_names(cx: &App) -> std::sync::Arc<Vec<String>> {
+    let mut names = NAMES.lock();
+    names.get_or_insert_with(|| std::sync::Arc::new(cx.text_system().all_font_names())).clone()
+}
+
+/// Gives a font file of yours to the text system, once: whether it's there.
+fn load_font_file(file: &str, cx: &App) -> bool {
+    if !crate::core::fonts::valid_file_name(file) {
+        return false;
+    }
+    let mut loaded = LOADED.lock();
+    if loaded.iter().any(|f| f == file) {
+        return true;
+    }
+    let Ok(bytes) = std::fs::read(crate::core::fonts::dir().join(file)) else { return false };
+    if let Err(err) = cx.text_system().add_fonts(vec![Cow::Owned(bytes)]) {
+        tracing::warn!("couldn't load a font file: {err}");
+        return false;
+    }
+    loaded.push(file.to_owned());
+    *NAMES.lock() = None;
+    true
+}
+
+/// The family a pick draws with, and whether it fell back to the default
+/// because the font picked isn't here.
+fn resolve(pick: &FontPick, code: bool, cx: &App) -> (SharedString, bool) {
+    let default = SharedString::new_static(if code { MONO } else { FONT });
+    let known = |family: &str| font_names(cx).iter().any(|n| n == family);
+    match pick {
+        FontPick::Default => (default, false),
+        FontPick::System if code => (default, false),
+        FontPick::System => (SharedString::new_static(SYSTEM_FONT), false),
+        FontPick::Installed { family } if known(family) => (family.clone().into(), false),
+        FontPick::File { file, family, .. } if load_font_file(file, cx) && known(family) => {
+            (family.clone().into(), false)
+        }
+        FontPick::Installed { .. } | FontPick::File { .. } => (default, true),
+    }
+}
+
+/// GPUI Kit's own fixed-width font, put back when the code font is the default again.
+static KIT_MONO: std::sync::OnceLock<SharedString> = std::sync::OnceLock::new();
 
 /// The colors views draw with: a theme's tokens and the app's surfaces made
 /// from them (`docs/themes.md`).
@@ -268,11 +356,17 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     ROLE_BESIDE.store(prefs.role_colors == crate::core::config::RoleColors::Beside, Ordering::Relaxed);
     CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
     crate::ui::text::set_clock(prefs.clock);
+    let (ui, ui_missing) = resolve(&prefs.font, false, cx);
+    let (mono, mono_missing) = resolve(&prefs.code_font, true, cx);
+    let mono_default = prefs.code_font == FontPick::Default || mono_missing;
+    *FONTS.write() = Fonts { ui: ui.clone(), mono: mono.clone(), ui_missing, mono_missing };
     cx.set_global(CurrentBackdrop(std::sync::Arc::new(backdrop)));
     cx.set_global(Current(p));
     KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
     KitTheme::update(cx, |t| {
-        t.font_family = FONT.into();
+        t.font_family = ui;
+        let kit_mono = KIT_MONO.get_or_init(|| t.mono_font_family.clone()).clone();
+        t.mono_font_family = if mono_default { kit_mono } else { mono };
         t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.5));
         t.radius = corner(10.0);
         t.radius_lg = corner(16.0);

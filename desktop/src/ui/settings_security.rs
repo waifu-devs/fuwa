@@ -648,7 +648,7 @@ impl SettingsView {
                                                         .py(px(8.0))
                                                         .text_sm()
                                                         .font_weight(FontWeight::BOLD)
-                                                        .font_family("monospace")
+                                                        .font_family(crate::ui::theme::mono())
                                                         .when(streaming, |el| el.opacity(0.15))
                                                         .child(groups.join(" ")),
                                                 )
@@ -904,7 +904,7 @@ impl SettingsView {
                     .justify_center()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .child(tracked(code.clone(), WIDER)),
                 SharedString::from(format!("code-{n}-{code}")),
                 Duration::from_millis(50 + 35 * n as u64),

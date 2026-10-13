@@ -1544,7 +1544,7 @@ impl SettingsView {
                         )
                         .when_some(this.themes.hex.get(token).cloned(), |el, s| {
                             el.child(
-                                div().h(px(18.0)).text_xs().font_family("monospace").child(
+                                div().h(px(18.0)).text_xs().font_family(crate::ui::theme::mono()).child(
                                     gpui_kit::component::Sizable::xsmall(Input::new(&s).appearance(false))
                                         .px(px(0.0))
                                         .py(px(0.0))

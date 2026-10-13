@@ -1159,7 +1159,7 @@ impl ServerSettingsView {
                             .rounded(px(6.0))
                             .bg(alpha(p.destructive, 0.1))
                             .text_color(p.destructive)
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .text_xs()
                             .line_height(px(16.0))
                             .child(m.clone()),

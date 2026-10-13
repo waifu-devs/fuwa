@@ -368,7 +368,7 @@ impl ServerSettingsView {
                     .child(
                         div()
                             .truncate()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .text_xs()
                             .line_height(px(16.0))
                             .text_color(p.muted_foreground)

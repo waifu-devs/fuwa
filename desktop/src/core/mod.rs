@@ -24,6 +24,7 @@ pub mod config;
 pub mod dms;
 pub mod effects;
 pub mod emoji;
+pub mod fonts;
 pub mod foreground;
 pub mod friends;
 pub mod gifs;
@@ -444,6 +445,12 @@ impl Core {
         i18n::set_language(prefs.language.as_deref());
         sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         sounds::set_picks(&paths.sounds(), &prefs.sound_picks);
+        fonts::set_dir(&paths.fonts());
+        {
+            let (dir, prefs) = (paths.fonts(), prefs.clone());
+            let _ =
+                std::thread::Builder::new().name("fuwa-fonts-sweep".into()).spawn(move || fonts::sweep(&dir, &prefs));
+        }
         {
             let (dir, picks) = (paths.sounds(), prefs.sound_picks.clone());
             let _ =

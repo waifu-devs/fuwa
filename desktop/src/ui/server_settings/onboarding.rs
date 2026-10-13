@@ -847,7 +847,12 @@ impl ServerSettingsView {
                     .border_color(p.border)
                     .when(color >= 0, |el| el.bg(gpui_kit::rgb(color as u32 & 0xff_ffff))),
             )
-            .child(div().w(px(80.0)).font_family("monospace").child(Input::new(&self.onboard.hex).appearance(false)));
+            .child(
+                div()
+                    .w(px(80.0))
+                    .font_family(crate::ui::theme::mono())
+                    .child(Input::new(&self.onboard.hex).appearance(false)),
+            );
         let accent_part = div()
             .flex()
             .flex_col()

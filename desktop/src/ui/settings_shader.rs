@@ -421,7 +421,7 @@ impl SettingsView {
             .border_1()
             .border_color(if lines.is_empty() { p.border.into() } else { alpha(p.destructive, 0.5) })
             .bg(alpha(p.background, 0.8))
-            .font_family("monospace")
+            .font_family(crate::ui::theme::mono())
             .text_size(px(12.5))
             .child(Editor::new(&code).appearance(false).h(px(352.0)));
 
@@ -518,7 +518,7 @@ impl SettingsView {
                             div()
                                 .w(px(176.0))
                                 .flex_none()
-                                .font_family("monospace")
+                                .font_family(crate::ui::theme::mono())
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(p.primary)
                                 .child(input),

@@ -513,7 +513,7 @@ impl ServerSettingsView {
                                     .border_1()
                                     .border_color(p.border)
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(crate::ui::theme::mono())
                                     .child(Textarea::new(&certs).appearance(false)),
                                 focused(&certs, window, cx),
                                 p,
@@ -798,7 +798,7 @@ impl ServerSettingsView {
                             .border_1()
                             .border_color(p.border)
                             .text_xs()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .child(Textarea::new(&xml).appearance(false)),
                         focused(&xml, window, cx),
                         p,
@@ -997,7 +997,15 @@ impl ServerSettingsView {
                             .py(px(4.0))
                             .pr(px(4.0))
                             .pl(px(12.0))
-                            .child(div().flex_1().min_w_0().truncate().text_xs().font_family("monospace").child(value))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .font_family(crate::ui::theme::mono())
+                                    .child(value),
+                            )
                             .child(
                                 div()
                                     .id(SharedString::from(format!("sso-copy-{n}")))

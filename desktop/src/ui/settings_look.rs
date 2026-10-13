@@ -1,6 +1,6 @@
 //! The Appearance page, as the web's `settings/app/Appearance.tsx`: the
 //! theme cards (light and dark picks that follow the system), density,
-//! message display, text size and zoom beside a live chat preview; and
+//! message display, text size, zoom and fonts (`settings_fonts`) beside a live chat preview; and
 //! theme files in and out, for the Themes page (`docs/themes.md`).
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -27,11 +27,13 @@ pub struct Look {
     busy: bool,
     /// The last thing worth saying (an error when the flag is set).
     note: Option<(bool, String)>,
+    /// The Font and Code font settings (`settings_fonts`).
+    pub(crate) fonts: [crate::ui::settings_fonts::FontForm; 2],
 }
 
 impl Look {
     pub fn new() -> Self {
-        Self { busy: false, note: None }
+        Self { busy: false, note: None, fonts: Default::default() }
     }
 }
 
@@ -345,6 +347,8 @@ impl SettingsView {
                 pr.text_scale = f32::from(pr.zoom) / 100.0;
             },
         );
+        let font_pick = self.font_setting(false, prefs, p, form_w, window, cx);
+        let code_font = self.font_setting(true, prefs, p, form_w, window, cx);
         let d = Prefs::default();
         let theme_changed = prefs.theme != d.theme
             || prefs.follow_system != d.follow_system
@@ -383,6 +387,20 @@ impl SettingsView {
                         pr.text_scale = 1.0;
                     }),
                     zoom,
+                ),
+                (
+                    "font",
+                    t("appsettings.appearance.font"),
+                    Some(t("appsettings.appearance.fontHint")),
+                    pref!(prefs, font),
+                    font_pick,
+                ),
+                (
+                    "code-font",
+                    t("appsettings.appearance.codeFont"),
+                    Some(t("appsettings.appearance.codeFontHint")),
+                    pref!(prefs, code_font),
+                    code_font,
                 ),
             ],
             p,
