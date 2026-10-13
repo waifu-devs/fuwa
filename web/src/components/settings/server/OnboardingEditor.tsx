@@ -20,7 +20,6 @@ import {
   OnboardingOptionSchema,
   OnboardingStepKind,
   OnboardingStepSchema,
-  Permission,
   type Channel,
   type Emoji,
   type OnboardingOption,
@@ -38,37 +37,13 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { type I18n, type Key, useI18n } from "@/i18n/react";
-import { above, bit, cssColor, fromList } from "@/lib/permissions";
+import { above, cssColor, harmless } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 /** As on the server. */
 const MAX_STEPS = 6;
 const MAX_OPTIONS = 12;
 const MAX_PICKS = 5;
-
-/** What a role handed out by onboarding may never carry, as the server checks it. */
-const POWERS = [
-  Permission.ADMINISTRATOR,
-  Permission.MANAGE_SERVER,
-  Permission.MANAGE_ROLES,
-  Permission.MANAGE_CHANNELS,
-  Permission.MANAGE_EMOJI,
-  Permission.MANAGE_WEBHOOKS,
-  Permission.MANAGE_MESSAGES,
-  Permission.MENTION_EVERYONE,
-  Permission.VIEW_AUDIT_LOG,
-  Permission.KICK_MEMBERS,
-  Permission.BAN_MEMBERS,
-  Permission.TIME_OUT_MEMBERS,
-  Permission.MANAGE_NICKNAMES,
-  Permission.MUTE_MEMBERS,
-  Permission.MOVE_MEMBERS,
-  Permission.RECORD,
-  Permission.MODERATE,
-].reduce((bits, p) => bits | bit(p), 0);
-
-/** Whether anyone may get the role by picking it. */
-const harmless = (role: Role) => (fromList(role.permissions) & POWERS) === 0;
 
 /** Each kind of step: its name and what it does (catalog keys), and its icon. */
 const KINDS: Record<Exclude<OnboardingStepKind, OnboardingStepKind.UNSPECIFIED>, { label: Key; hint: Key; icon: LucideIcon }> = {

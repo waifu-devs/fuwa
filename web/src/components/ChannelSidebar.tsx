@@ -21,6 +21,7 @@ import { Count, SwapText } from "@/components/motion";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
+import { WalletChip } from "@/components/economy/WalletChip";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { SharedBadge } from "@/components/chat/Shared";
 import { VoiceUsers } from "@/components/calls/VoiceUsers";
@@ -203,6 +204,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           )}
         </LiveTilesGroup>
       </div>
+      <WalletChip instanceKey={instanceKey} serverId={serverId} />
       <CallPanel />
       <UserPanel instanceKey={instanceKey} />
 

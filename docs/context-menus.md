@@ -68,7 +68,7 @@ text · Dismiss (failed).
 | primary | Profile · Message (encrypted DM; not yourself or agents) · Mention (puts `@name` in the message box) |
 | social | (friends, once they exist) |
 | manage | Edit server profile (yourself) · Change nickname · Roles ▸ (checkboxes for the roles below yours, with Manage Roles; stays open while you pick) |
-| moderate | Open in Mod View (Use Mod View: their page) · Time out / End time out · Kick · Ban: each opens the same dialog as the profile card, asking for a reason |
+| moderate | Open in Mod View (Use Mod View: their page) · Time out / End time out · Kick · Ban: each opens the same dialog as the profile card, asking for a reason · Give currency (Grant Currency, in a server with currencies, where the instance has the economy; opens the same dialog as the profile card's button: give or take, an amount, a reason) |
 | developer | Copy user ID |
 | danger | Report (someone else, in a server, where the instance has Mod View; opens the report dialog) |
 
@@ -91,7 +91,7 @@ Permissions | Copy category ID | Delete category (asks first; its channels stay)
 
 | Section | Items |
 | --- | --- |
-| primary | Mark as read · Invite people |
+| primary | Mark as read · Invite people · Shop (servers with currencies, where the instance has the economy; opens the shop) |
 | notifications | Mute server ▸ / Unmute server · Notification settings |
 | manage | Mod View (Use Mod View; the number of open cases beside it) · Server settings · Edit server profile |
 | folder | Put in a new folder, or Take out of folder (your own rail folders) |
@@ -114,7 +114,8 @@ Features add their items without touching the menus: `extendMenu(kind, {
 section, at, build })` from `web/src/lib/context-menu.ts`, with the sections
 named above. A section a menu doesn't have yet is added before `danger`.
 Mod View's items (docs/mod-view.md) come in this way, from
-`web/src/components/modview/menus.ts`. Planned: Reply at the start of
+`web/src/components/modview/menus.ts`, and the economy's (docs/economy.md)
+from `web/src/components/economy/menus.ts`. Planned: Reply at the start of
 `primary`, Mark unread in `primary`, Add friend in `social`, attachments and
 polls in the composer's `insert`.
 

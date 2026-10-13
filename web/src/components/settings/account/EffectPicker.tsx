@@ -1,4 +1,5 @@
 import { BanIcon } from "lucide-react";
+import { LockBadge } from "@/components/settings/account/DecorationPicker";
 import { m as motion } from "motion/react";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { hue } from "@/components/icons-utils";
@@ -28,7 +29,9 @@ export type OfferedEffect = { id: string; spec: ProfileEffectSpec };
  * Picks a profile effect: None (or `noneLabel`, like "Use my profile's"),
  * then a tile for each effect fuwa ships with and each one `offered` by the
  * instance or the server. Tiles sit still until you point at one, focus it
- * or pick it, so a grid of them never plays nine effects at once.
+ * or pick it, so a grid of them never plays nine effects at once. Offered
+ * effects for sale in the server's shop that you haven't bought (`locks`)
+ * show a padlock and their price, and open the shop instead.
  */
 export function EffectPicker({
   value,
@@ -39,6 +42,8 @@ export function EffectPicker({
   noneLabel,
   pickedId = "effect-picked",
   disabled,
+  locks,
+  onLocked,
 }: {
   value: string;
   onChange: (effect: string) => void;
@@ -51,6 +56,8 @@ export function EffectPicker({
   /** The ring's layout id, apart for each picker on screen. */
   pickedId?: string;
   disabled?: boolean;
+  locks?: ReadonlyMap<string, ReactNode>;
+  onLocked?: (itemId: string) => void;
 }) {
   const { t } = useI18n();
   const color = accent < 0 ? `hsl(${hueOf(userId)} 85% 72%)` : colorCss(accent);
@@ -75,11 +82,28 @@ export function EffectPicker({
           {(lively) => <ProfileEffect effect={effect.id} seed={userId} color={color} play={lively} measure={false} replayOnHover={false} />}
         </Tile>
       ))}
-      {offered.map(({ id, spec }) => (
-        <Tile key={id} label={spec.name} title={spec.description || undefined} active={value === id} onClick={() => onChange(id)} userId={userId} accent={accent} pickedId={pickedId}>
-          {(lively) => <ProfileEffect effect={spec} seed={userId} color={color} play={lively} measure={false} replayOnHover={false} />}
-        </Tile>
-      ))}
+      {offered.map(({ id, spec }) => {
+        const lock = value !== id ? locks?.get(id) : undefined;
+        return (
+          <Tile
+            key={id}
+            label={spec.name}
+            title={lock ? t("accountsettings.serverProfiles.forSale", { name: spec.name }) : spec.description || undefined}
+            active={value === id}
+            onClick={() => (lock ? onLocked?.(id) : onChange(id))}
+            userId={userId}
+            accent={accent}
+            pickedId={pickedId}
+          >
+            {(lively) => (
+              <>
+                <ProfileEffect effect={spec} seed={userId} color={color} play={lively} measure={false} replayOnHover={false} />
+                {lock && <LockBadge>{lock}</LockBadge>}
+              </>
+            )}
+          </Tile>
+        );
+      })}
     </div>
   );
 }
