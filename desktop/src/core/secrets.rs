@@ -5,10 +5,16 @@
 //! a Secret Service, or `FUWA_DESKTOP_KEYCHAIN=off`), they fall back to one
 //! file only you can read, and the app says so in the log.
 //!
+//! macOS asks for the login password for each keychain entry an app reads or
+//! writes until it's always allowed, and again for every new build (the app
+//! is signed ad hoc), so there all of them live in one entry, read once at
+//! startup and written only when something changes. Entries from before that
+//! are moved into it the first time they're asked for.
+//!
 //! Entries are named after the app's data folder, so two copies with their
 //! own `FUWA_DESKTOP_HOME` keep apart.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
@@ -17,13 +23,36 @@ use crate::core::vault::{sha256_hex, write_json};
 
 const SERVICE: &str = "fuwa";
 
+/// The one entry holding every secret, on macOS.
+const BUNDLE: &str = "secrets";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Store {
+    /// The private file.
+    File,
+    /// One keychain entry per secret (Windows and Linux, which don't ask per
+    /// entry; Credential Manager also caps an entry's size).
+    Entries,
+    /// One keychain entry holding them all (macOS).
+    Bundle,
+}
+
 pub struct Secrets {
     /// Prefix for this data folder's entries.
     scope: String,
-    keychain: bool,
-    /// The fallback file, and what's in it.
+    store: Store,
+    /// The fallback file.
     file: PathBuf,
-    fallback: Mutex<BTreeMap<String, String>>,
+    known: Mutex<Known>,
+}
+
+#[derive(Default)]
+struct Known {
+    /// Every secret for the file and the bundle; those read or written so far
+    /// for separate entries.
+    values: BTreeMap<String, String>,
+    /// Names whose own keychain entry has been looked for already.
+    looked: BTreeSet<String>,
 }
 
 /// Runs a keychain call on a thread of its own: some backends drive their
@@ -32,29 +61,67 @@ fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|s| s.spawn(f).join().expect("keychain call panicked"))
 }
 
+fn read_entry(entry: String) -> keyring::Result<String> {
+    off_runtime(move || keyring::Entry::new(SERVICE, &entry).and_then(|e| e.get_password()))
+}
+
+fn write_entry(entry: String, value: String) {
+    off_runtime(move || {
+        if let Err(err) = keyring::Entry::new(SERVICE, &entry).and_then(|e| e.set_password(&value)) {
+            tracing::warn!("couldn't keep a secret in the keychain: {err}");
+        }
+    });
+}
+
+fn delete_entry(entry: String) {
+    off_runtime(move || match keyring::Entry::new(SERVICE, &entry).and_then(|e| e.delete_credential()) {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(err) => tracing::warn!("couldn't remove a secret from the keychain: {err}"),
+    });
+}
+
 impl Secrets {
     pub fn open(config: &Path) -> Self {
         let scope = sha256_hex(config.to_string_lossy().as_bytes())[..12].to_owned();
         let file = config.join("secrets.json");
         let wanted = std::env::var("FUWA_DESKTOP_KEYCHAIN").map(|v| v != "off").unwrap_or(true);
-        let keychain = wanted && {
-            let probe = format!("{scope}:probe");
-            off_runtime(move || match keyring::Entry::new(SERVICE, &probe).and_then(|e| e.get_password()) {
-                Ok(_) | Err(keyring::Error::NoEntry) => true,
+        let mut known = Known::default();
+        let store = if !wanted {
+            Store::File
+        } else if cfg!(target_os = "macos") {
+            match read_entry(format!("{scope}:{BUNDLE}")) {
+                Ok(json) => {
+                    known.values = serde_json::from_str(&json).unwrap_or_else(|err| {
+                        tracing::warn!("the keychain's secrets didn't read ({err}); starting over");
+                        BTreeMap::new()
+                    });
+                    Store::Bundle
+                }
+                Err(keyring::Error::NoEntry) => Store::Bundle,
                 Err(err) => {
                     tracing::warn!("no system keychain ({err}); keeping secrets in a private file instead");
-                    false
+                    Store::File
                 }
-            })
+            }
+        } else {
+            match read_entry(format!("{scope}:probe")) {
+                Ok(_) | Err(keyring::Error::NoEntry) => Store::Entries,
+                Err(err) => {
+                    tracing::warn!("no system keychain ({err}); keeping secrets in a private file instead");
+                    Store::File
+                }
+            }
         };
-        let fallback =
-            std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
-        Self { scope, keychain, file, fallback: Mutex::new(fallback) }
+        if store == Store::File {
+            known.values =
+                std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        }
+        Self { scope, store, file, known: Mutex::new(known) }
     }
 
     /// Whether secrets are in the system keychain (rather than the private file).
     pub fn in_keychain(&self) -> bool {
-        self.keychain
+        self.store != Store::File
     }
 
     fn entry(&self, name: &str) -> String {
@@ -62,53 +129,72 @@ impl Secrets {
     }
 
     pub fn get(&self, name: &str) -> Option<String> {
-        if !self.keychain {
-            return self.fallback.lock().get(name).cloned();
+        let mut known = self.known.lock();
+        if let Some(value) = known.values.get(name) {
+            return Some(value.clone());
         }
-        let entry = self.entry(name);
-        off_runtime(move || match keyring::Entry::new(SERVICE, &entry).and_then(|e| e.get_password()) {
-            Ok(value) => Some(value),
-            Err(keyring::Error::NoEntry) => None,
+        // The file holds everything; so does the bundle, but for entries from before it.
+        if self.store == Store::File || !known.looked.insert(name.to_owned()) {
+            return None;
+        }
+        let value = match read_entry(self.entry(name)) {
+            Ok(value) => value,
+            Err(keyring::Error::NoEntry) => return None,
             Err(err) => {
                 tracing::warn!("couldn't read a secret from the keychain: {err}");
-                None
+                return None;
             }
-        })
+        };
+        known.values.insert(name.to_owned(), value.clone());
+        if self.store == Store::Bundle {
+            self.save(&known);
+            delete_entry(self.entry(name));
+        }
+        Some(value)
     }
 
     pub fn set(&self, name: &str, value: &str) {
-        if !self.keychain {
-            let mut map = self.fallback.lock();
-            map.insert(name.to_owned(), value.to_owned());
-            self.save(&map);
+        let mut known = self.known.lock();
+        let looked = !known.looked.insert(name.to_owned());
+        if known.values.get(name).map(String::as_str) == Some(value) {
             return;
         }
-        let (entry, value) = (self.entry(name), value.to_owned());
-        off_runtime(move || {
-            if let Err(err) = keyring::Entry::new(SERVICE, &entry).and_then(|e| e.set_password(&value)) {
-                tracing::warn!("couldn't keep a secret in the keychain: {err}");
-            }
-        });
+        known.values.insert(name.to_owned(), value.to_owned());
+        match self.store {
+            Store::Entries => write_entry(self.entry(name), value.to_owned()),
+            Store::File | Store::Bundle => self.save(&known),
+        }
+        if self.store == Store::Bundle && !looked {
+            delete_entry(self.entry(name));
+        }
     }
 
     pub fn delete(&self, name: &str) {
-        if !self.keychain {
-            let mut map = self.fallback.lock();
-            if map.remove(name).is_some() {
-                self.save(&map);
-            }
-            return;
+        let mut known = self.known.lock();
+        let looked = !known.looked.insert(name.to_owned());
+        let had = known.values.remove(name).is_some();
+        match self.store {
+            Store::File | Store::Bundle if had => self.save(&known),
+            Store::Entries if had || !looked => delete_entry(self.entry(name)),
+            _ => {}
         }
-        let entry = self.entry(name);
-        off_runtime(move || match keyring::Entry::new(SERVICE, &entry).and_then(|e| e.delete_credential()) {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => tracing::warn!("couldn't remove a secret from the keychain: {err}"),
-        });
+        if self.store == Store::Bundle && !looked {
+            delete_entry(self.entry(name));
+        }
     }
 
-    fn save(&self, map: &BTreeMap<String, String>) {
-        if let Err(err) = write_json(&self.file, map) {
-            tracing::warn!("couldn't save secrets: {err}");
+    fn save(&self, known: &Known) {
+        match self.store {
+            Store::File => {
+                if let Err(err) = write_json(&self.file, &known.values) {
+                    tracing::warn!("couldn't save secrets: {err}");
+                }
+            }
+            Store::Bundle => match serde_json::to_string(&known.values) {
+                Ok(json) => write_entry(self.entry(BUNDLE), json),
+                Err(err) => tracing::warn!("couldn't save secrets: {err}"),
+            },
+            Store::Entries => {}
         }
     }
 
