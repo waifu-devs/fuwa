@@ -367,6 +367,18 @@ enum AuditAction {
   AUDIT_ACTION_MOD_CASE_UPDATE = 61;
   AUDIT_ACTION_MOD_NOTE_ADD = 62;
   AUDIT_ACTION_MOD_NOTE_DELETE = 63;
+  // The economy (docs/economy.md). Currencies and shop listings: the
+  // target is the currency or listing.
+  AUDIT_ACTION_CURRENCY_CREATE = 64;
+  AUDIT_ACTION_CURRENCY_UPDATE = 65;
+  AUDIT_ACTION_CURRENCY_DELETE = 66;
+  AUDIT_ACTION_SHOP_LISTING_CREATE = 67;
+  AUDIT_ACTION_SHOP_LISTING_UPDATE = 68;
+  AUDIT_ACTION_SHOP_LISTING_DELETE = 69;
+  // Currency given or taken: the target is the member, or the role (its
+  // name in role_name); the changes are the currency and the amount, and
+  // the reason is the grant's.
+  AUDIT_ACTION_CURRENCY_GRANT = 70;
 }
 
 // One thing someone did with a moderator's or manager's permission.
