@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type {
+  FindPeopleResponse,
   GetMemberOverviewResponse,
   GetModCaseResponse,
   ListMemberMessagesResponse,
@@ -78,6 +79,9 @@ export const memberOverview = (instanceKey: string, serverId: string, userId: st
 
 export const memberMessages = (instanceKey: string, serverId: string, userId: string, beforeId = ""): Promise<ListMemberMessagesResponse> =>
   call(() => api(instanceKey).listMemberMessages({ serverId, userId, beforeId, limit: PAGE, channelId: "" }));
+
+export const findPeople = (instanceKey: string, serverId: string, query: string, signal?: AbortSignal): Promise<FindPeopleResponse> =>
+  call(() => api(instanceKey).findPeople({ serverId, query, limit: 20 }, { signal }));
 
 export async function addNote(instanceKey: string, serverId: string, userId: string, content: string): Promise<ModNote | undefined> {
   reportUsage("mod.note_add");

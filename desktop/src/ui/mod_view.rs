@@ -29,6 +29,7 @@ use crate::ui::text::{TIGHT, WIDE, ms_of, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
 use crate::ui::widgets::{app_badge, avatar, error_line, icon, is_agent, pal};
 
+mod find;
 mod member;
 
 /// How tall a case is in the queue, its gap included.
@@ -54,6 +55,7 @@ pub enum ModViewEvent {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Queue,
+    Find,
     Member,
 }
 
@@ -81,6 +83,9 @@ pub struct ModViewView {
     acting: Option<Status>,
     member: Option<member::MemberPage>,
     note: Entity<TextareaState>,
+    /// Finding someone: what's typed and what came back.
+    finder: Entity<InputState>,
+    found: find::Found,
     error: Option<String>,
     closing: Option<Instant>,
     _subscriptions: Vec<Subscription>,
@@ -115,12 +120,19 @@ impl ModViewView {
             }
         })
         .detach();
-        let subscriptions =
-            vec![cx.subscribe(&note, |_: &mut Self, _, e: &gpui_kit::component::input::InputEvent, cx| {
+        let finder = cx.new(|cx| InputState::new(window, cx).placeholder(t("chattools.modview.findPlaceholder")));
+        let subscriptions = vec![
+            cx.subscribe(&note, |_: &mut Self, _, e: &gpui_kit::component::input::InputEvent, cx| {
                 if let gpui_kit::component::input::InputEvent::Change = e {
                     cx.notify()
                 }
-            })];
+            }),
+            cx.subscribe(&finder, |this: &mut Self, _, e: &gpui_kit::component::input::InputEvent, cx| {
+                if let gpui_kit::component::input::InputEvent::Change = e {
+                    this.find_typed(cx)
+                }
+            }),
+        ];
         let mut this = Self {
             core,
             key,
@@ -140,6 +152,8 @@ impl ModViewView {
             acting: None,
             member: None,
             note,
+            finder,
+            found: find::Found::default(),
             error: None,
             closing: None,
             _subscriptions: subscriptions,
@@ -287,9 +301,9 @@ impl ModViewView {
         cx.notify();
     }
 
-    /// Escape: closes a person's page first, then Mod View.
+    /// Escape: closes a person's page (or finding someone) first, then Mod View.
     pub fn escape(&mut self, cx: &mut Context<Self>) {
-        if self.screen == Screen::Member {
+        if self.screen != Screen::Queue {
             self.screen = Screen::Queue;
             cx.notify();
             return;
@@ -323,6 +337,7 @@ impl ModViewView {
             Facts {
                 name: i.server(&self.server).map(|s| s.name.clone()),
                 allowed: i.can_mod_view(&self.server),
+                find: i.can_find_people(&self.server),
                 manage: access.has(P::ManageServer),
                 open: i.open_cases(&self.server),
                 me: i.me.as_ref().map(|u| u.id.clone()).unwrap_or_default(),
@@ -364,6 +379,7 @@ impl ModViewView {
 struct Facts {
     name: Option<String>,
     allowed: bool,
+    find: bool,
     manage: bool,
     open: Option<i32>,
     me: String,
@@ -1152,7 +1168,12 @@ impl Render for ModViewView {
         };
         let on_queue = self.screen == Screen::Queue;
         let mut rows = div().relative().flex().flex_col().gap(px(2.0));
-        let hl = motion::follow("mv-nav-hl", if on_queue { 0.0 } else { 34.0 }, window, cx);
+        let place = match self.screen {
+            Screen::Queue => 0.0,
+            Screen::Find => 1.0,
+            Screen::Member => 1.0 + f32::from(u8::from(facts.find)),
+        };
+        let hl = motion::follow("mv-nav-hl", place * 34.0, window, cx);
         rows = rows.child(
             div().absolute().left_0().right_0().top(px(hl)).h(px(32.0)).rounded(radius_lg()).bg(alpha(p.primary, 0.15)),
         );
@@ -1169,15 +1190,29 @@ impl Render for ModViewView {
                 cx.notify();
             })),
         );
+        if facts.find {
+            rows = rows.child(
+                nav_row(
+                    "mv-nav-find",
+                    icon("user-round-search").size(px(16.0)).into_any_element(),
+                    t("chattools.modview.find"),
+                    self.screen == Screen::Find,
+                    None,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.open_find(window, cx))),
+            );
+        }
         if let Some(page) = &self.member {
             let user = self.user_of(&page.user_id);
             let name = self.name_of(&page.user_id);
+            let on = self.screen == Screen::Member;
             rows = rows.child(motion::slide_in(
-                nav_row("mv-nav-member", avatar(user.as_ref(), 18.0, &p).into_any_element(), name, !on_queue, None)
-                    .on_click(cx.listener(|this, _, _, cx| {
+                nav_row("mv-nav-member", avatar(user.as_ref(), 18.0, &p).into_any_element(), name, on, None).on_click(
+                    cx.listener(|this, _, _, cx| {
                         this.screen = Screen::Member;
                         cx.notify();
-                    })),
+                    }),
+                ),
                 SharedString::from(format!("mv-nav-member-{}", page.user_id)),
                 -10.0,
             ));
@@ -1210,6 +1245,7 @@ impl Render for ModViewView {
 
         let (title, about) = match self.screen {
             Screen::Queue => (t("desktop.modView.nav.cases"), t("desktop.modView.queue.about2")),
+            Screen::Find => (t("chattools.modview.find"), t("chattools.modview.findHint")),
             Screen::Member => (t("desktop.modView.member.title"), t("desktop.modView.member.about")),
         };
         let body: AnyElement = match self.screen {
@@ -1235,6 +1271,7 @@ impl Render for ModViewView {
                     )
                     .into_any_element()
             }
+            Screen::Find => self.find_page(&p, window, cx),
             Screen::Member => self.member_page(&facts, &p, window, cx),
         };
         let content = div()

@@ -69,6 +69,17 @@ them, and a report would have to carry the plaintext out of the encryption.
 Messages in a channel shared from another server are kept by that server, so
 they can't be reported from here yet.
 
+## Finding someone
+
+`FindPeople` looks people up by part of their name, username or nickname
+(ignoring case, a leading @ dropped) or by their whole id. It searches
+everyone the server keeps a profile of, not only today's members: people who
+left, were banned, applied, or wrote in a channel it shares. That's what the
+member list can't reach, and often who a moderator is after. Members come
+first, after an exact username or id; each result says whether they're still
+a member and whether they're banned. It needs Use Mod View, and searches are
+never logged or kept.
+
 ## Notes
 
 Moderators can write plain-text notes about a person, up to 1,000 characters
@@ -97,6 +108,7 @@ who have the permission:
 
 - a queue of cases (open first) with each case's message, reports and
   actions;
-- a person's page, reached from a case, a profile card or the member list;
+- a person's page, reached from a case, a profile card, the member list or
+  "Find someone" (where the instance has `mod-view-find`);
 - "Report message" in a message's menu and "Report" on profile cards, for
   everyone.
