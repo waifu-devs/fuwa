@@ -250,6 +250,11 @@ impl InstanceState {
         self.has("mod-view") && self.access(server_id).has(P::Moderate)
     }
 
+    /// Whether Mod View can find people here, those who left or were banned too.
+    pub fn can_find_people(&self, server_id: &str) -> bool {
+        self.can_mod_view(server_id) && self.has("mod-view-find")
+    }
+
     /// How many cases are open in a server's Mod View, once counted (0 without it).
     pub fn open_cases(&self, server_id: &str) -> Option<i32> {
         if !self.can_mod_view(server_id) {
@@ -453,6 +458,23 @@ impl Core {
             mv.notes.insert(user_id.to_owned(), res.notes.clone());
         });
         Ok(res)
+    }
+
+    /// People who are or were in a server whose name, username or nickname
+    /// holds `query`, or whose id it is, members first; who they are is kept.
+    pub async fn find_people(&self, key: &str, server_id: &str, query: &str) -> Result<Vec<pb::ModPerson>, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.moderation(),
+            find_people(pb::FindPeopleRequest { server_id: server_id.into(), query: query.into(), limit: 20 })
+        )
+        .await?;
+        self.shared.instance(key, |i| {
+            for u in res.people.iter().filter_map(|p| p.user.as_ref()) {
+                i.users.insert(u.id.clone(), u.clone());
+            }
+        });
+        Ok(res.people)
     }
 
     /// What someone wrote, newest first, in the channels you can see.

@@ -297,6 +297,10 @@ tools! {
     "list_member_messages" => moderation_service_client::ModerationServiceClient.list_member_messages(ListMemberMessagesRequest), Reads,
         "A member's messages",
         "What someone wrote, newest first, in the channels this agent can see. Needs Use Mod View.";
+    "find_people" => moderation_service_client::ModerationServiceClient.find_people(FindPeopleRequest), Reads,
+        "Find someone to look into",
+        "People who are or were in the server (members first, then who left, was banned or applied) by part of \
+         their name, username or nickname, or their id. Needs Use Mod View.";
     "add_mod_note" => moderation_service_client::ModerationServiceClient.add_mod_note(AddModNoteRequest), Writes,
         "Write a moderator note",
         "Adds a note about someone that only members with Use Mod View see.";

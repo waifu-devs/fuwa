@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, CircleCheckIcon, CircleSlashIcon, FilterXIcon, InboxIcon, LayersIcon, LoaderCircleIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, CircleCheckIcon, CircleSlashIcon, FilterXIcon, InboxIcon, LayersIcon, LoaderCircleIcon, ShieldCheckIcon, UserRoundIcon, UserRoundSearchIcon } from "lucide-react";
 import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { Emoji, Member, ModCase, Server, User } from "@/gen/fuwa/v1/types_pb";
@@ -12,6 +12,7 @@ import { Count } from "@/components/motion";
 import { SettingsScreen, type SettingsGroup } from "@/components/settings/SettingsScreen";
 import { Button } from "@/components/ui/button";
 import { CaseDetail } from "@/components/modview/CaseDetail";
+import { FindPeople } from "@/components/modview/FindPeople";
 import { MemberPage } from "@/components/modview/MemberPage";
 import { Empty, kindLook, ModViewContext, ReasonChips, Shimmer, StatusPill, useScope, type ModViewScope } from "@/components/modview/shared";
 import { useI18n } from "@/i18n/react";
@@ -62,6 +63,7 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
   const roles = useRoles(instanceKey, given.id);
   const known = useFuwa((s) => s.instances[instanceKey]?.users);
   const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "mod-view"));
+  const findable = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "mod-view-find"));
   const allowed = here && has(access, Permission.MODERATE);
   const openCount = useOpenCases(instanceKey, server.id, allowed && open);
 
@@ -132,7 +134,17 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
       label: t("chattools.modview.queue"),
       sections: TABS.map((tab) => ({ id: tab, label: t(TAB_LABELS[tab]), icon: TAB_ICONS[tab], badge: tab === "open" ? openCount : undefined })),
     },
-    ...(person ? [{ label: t("chattools.modview.people"), sections: [{ id: "person", label: personName, icon: UserRoundIcon }] }] : []),
+    ...(findable || person
+      ? [
+          {
+            label: t("chattools.modview.people"),
+            sections: [
+              ...(findable ? [{ id: "find", label: t("chattools.modview.find"), icon: UserRoundSearchIcon }] : []),
+              ...(person ? [{ id: "person", label: personName, icon: UserRoundIcon }] : []),
+            ],
+          },
+        ]
+      : []),
   ];
   const tab = isTab(section) ? section : null;
 
@@ -159,6 +171,8 @@ function ModView({ open, instanceKey, server: given, place, n }: { open: boolean
               selected={selected}
               onSelect={setSelected}
             />
+          ) : section === "find" ? (
+            <FindPeople />
           ) : person ? (
             <MemberPage key={person} userId={person} />
           ) : null}

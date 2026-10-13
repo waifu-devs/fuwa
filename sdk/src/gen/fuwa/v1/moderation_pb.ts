@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/moderation.proto.
  */
 export const file_fuwa_v1_moderation: GenFile = /*@__PURE__*/
-  fileDesc("ChhmdXdhL3YxL21vZGVyYXRpb24ucHJvdG8SB2Z1d2EudjEiiQEKFFJlcG9ydE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSKAoGcmVhc29uGAQgASgOMhguZnV3YS52MS5Nb2RSZXBvcnRSZWFzb24SDAoEbm90ZRgFIAEoCSIXChVSZXBvcnRNZXNzYWdlUmVzcG9uc2UicQoTUmVwb3J0TWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIoCgZyZWFzb24YAyABKA4yGC5mdXdhLnYxLk1vZFJlcG9ydFJlYXNvbhIMCgRub3RlGAQgASgJIhYKFFJlcG9ydE1lbWJlclJlc3BvbnNlIqoBChNMaXN0TW9kQ2FzZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRImCgZzdGF0dXMYAiABKA4yFi5mdXdhLnYxLk1vZENhc2VTdGF0dXMSEgoKc3ViamVjdF9pZBgDIAEoCRIiCgRraW5kGAQgASgOMhQuZnV3YS52MS5Nb2RDYXNlS2luZBIRCgliZWZvcmVfaWQYBSABKAkSDQoFbGltaXQYBiABKAUiewoUTGlzdE1vZENhc2VzUmVzcG9uc2USHwoFY2FzZXMYASADKAsyEC5mdXdhLnYxLk1vZENhc2USHAoFdXNlcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgSEgoKb3Blbl9jb3VudBgEIAEoBSI3ChFHZXRNb2RDYXNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHY2FzZV9pZBgCIAEoCSKeAQoSR2V0TW9kQ2FzZVJlc3BvbnNlEiIKCG1vZF9jYXNlGAEgASgLMhAuZnV3YS52MS5Nb2RDYXNlEiMKB3JlcG9ydHMYAiADKAsyEi5mdXdhLnYxLk1vZFJlcG9ydBIhCgdtZXNzYWdlGAMgASgLMhAuZnV3YS52MS5NZXNzYWdlEhwKBXVzZXJzGAQgAygLMg0uZnV3YS52MS5Vc2VyInYKFFVwZGF0ZU1vZENhc2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdjYXNlX2lkGAIgASgJEiYKBnN0YXR1cxgDIAEoDjIWLmZ1d2EudjEuTW9kQ2FzZVN0YXR1cxISCgpyZXNvbHV0aW9uGAQgASgJIjsKFVVwZGF0ZU1vZENhc2VSZXNwb25zZRIiCghtb2RfY2FzZRgBIAEoCzIQLmZ1d2EudjEuTW9kQ2FzZSI+ChhHZXRNZW1iZXJPdmVydmlld1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAki3AIKGUdldE1lbWJlck92ZXJ2aWV3UmVzcG9uc2USGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlchI2ChJhY2NvdW50X2NyZWF0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiQKA2JhbhgEIAEoCzIXLmZ1d2EudjEuTW9kT3ZlcnZpZXdCYW4SEgoKb3Blbl9jYXNlcxgFIAEoBRITCgt0b3RhbF9jYXNlcxgGIAEoBRIkCgdoaXN0b3J5GAcgAygLMhMuZnV3YS52MS5BdWRpdEVudHJ5Eh8KBW5vdGVzGAggAygLMhAuZnV3YS52MS5Nb2ROb3RlEhUKDW1lc3NhZ2VfY291bnQYCSABKAMSHAoFdXNlcnMYCiADKAsyDS5mdXdhLnYxLlVzZXIiZgoOTW9kT3ZlcnZpZXdCYW4SDgoGcmVhc29uGAEgASgJEhQKDGJhbm5lZF9ieV9pZBgCIAEoCRIuCgpjcmVhdGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ1ChlMaXN0TWVtYmVyTWVzc2FnZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhEKCWJlZm9yZV9pZBgDIAEoCRINCgVsaW1pdBgEIAEoBRISCgpjaGFubmVsX2lkGAUgASgJInIKGkxpc3RNZW1iZXJNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEhAKCGhhc19tb3JlGAIgASgIEh4KB2F1dGhvcnMYAyADKAsyDS5mdXdhLnYxLlVzZXIiSAoRQWRkTW9kTm90ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCSI0ChJBZGRNb2ROb3RlUmVzcG9uc2USHgoEbm90ZRgBIAEoCzIQLmZ1d2EudjEuTW9kTm90ZSI6ChREZWxldGVNb2ROb3RlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHbm90ZV9pZBgCIAEoCSIXChVEZWxldGVNb2ROb3RlUmVzcG9uc2Uy5gUKEU1vZGVyYXRpb25TZXJ2aWNlEk4KDVJlcG9ydE1lc3NhZ2USHS5mdXdhLnYxLlJlcG9ydE1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5SZXBvcnRNZXNzYWdlUmVzcG9uc2USSwoMUmVwb3J0TWVtYmVyEhwuZnV3YS52MS5SZXBvcnRNZW1iZXJSZXF1ZXN0Gh0uZnV3YS52MS5SZXBvcnRNZW1iZXJSZXNwb25zZRJLCgxMaXN0TW9kQ2FzZXMSHC5mdXdhLnYxLkxpc3RNb2RDYXNlc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RNb2RDYXNlc1Jlc3BvbnNlEkUKCkdldE1vZENhc2USGi5mdXdhLnYxLkdldE1vZENhc2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNb2RDYXNlUmVzcG9uc2USTgoNVXBkYXRlTW9kQ2FzZRIdLmZ1d2EudjEuVXBkYXRlTW9kQ2FzZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZU1vZENhc2VSZXNwb25zZRJaChFHZXRNZW1iZXJPdmVydmlldxIhLmZ1d2EudjEuR2V0TWVtYmVyT3ZlcnZpZXdSZXF1ZXN0GiIuZnV3YS52MS5HZXRNZW1iZXJPdmVydmlld1Jlc3BvbnNlEl0KEkxpc3RNZW1iZXJNZXNzYWdlcxIiLmZ1d2EudjEuTGlzdE1lbWJlck1lc3NhZ2VzUmVxdWVzdBojLmZ1d2EudjEuTGlzdE1lbWJlck1lc3NhZ2VzUmVzcG9uc2USRQoKQWRkTW9kTm90ZRIaLmZ1d2EudjEuQWRkTW9kTm90ZVJlcXVlc3QaGy5mdXdhLnYxLkFkZE1vZE5vdGVSZXNwb25zZRJOCg1EZWxldGVNb2ROb3RlEh0uZnV3YS52MS5EZWxldGVNb2ROb3RlUmVxdWVzdBoeLmZ1d2EudjEuRGVsZXRlTW9kTm90ZVJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_server, file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChhmdXdhL3YxL21vZGVyYXRpb24ucHJvdG8SB2Z1d2EudjEiiQEKFFJlcG9ydE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSKAoGcmVhc29uGAQgASgOMhguZnV3YS52MS5Nb2RSZXBvcnRSZWFzb24SDAoEbm90ZRgFIAEoCSIXChVSZXBvcnRNZXNzYWdlUmVzcG9uc2UicQoTUmVwb3J0TWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIoCgZyZWFzb24YAyABKA4yGC5mdXdhLnYxLk1vZFJlcG9ydFJlYXNvbhIMCgRub3RlGAQgASgJIhYKFFJlcG9ydE1lbWJlclJlc3BvbnNlIqoBChNMaXN0TW9kQ2FzZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRImCgZzdGF0dXMYAiABKA4yFi5mdXdhLnYxLk1vZENhc2VTdGF0dXMSEgoKc3ViamVjdF9pZBgDIAEoCRIiCgRraW5kGAQgASgOMhQuZnV3YS52MS5Nb2RDYXNlS2luZBIRCgliZWZvcmVfaWQYBSABKAkSDQoFbGltaXQYBiABKAUiewoUTGlzdE1vZENhc2VzUmVzcG9uc2USHwoFY2FzZXMYASADKAsyEC5mdXdhLnYxLk1vZENhc2USHAoFdXNlcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgSEgoKb3Blbl9jb3VudBgEIAEoBSI3ChFHZXRNb2RDYXNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHY2FzZV9pZBgCIAEoCSKeAQoSR2V0TW9kQ2FzZVJlc3BvbnNlEiIKCG1vZF9jYXNlGAEgASgLMhAuZnV3YS52MS5Nb2RDYXNlEiMKB3JlcG9ydHMYAiADKAsyEi5mdXdhLnYxLk1vZFJlcG9ydBIhCgdtZXNzYWdlGAMgASgLMhAuZnV3YS52MS5NZXNzYWdlEhwKBXVzZXJzGAQgAygLMg0uZnV3YS52MS5Vc2VyInYKFFVwZGF0ZU1vZENhc2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdjYXNlX2lkGAIgASgJEiYKBnN0YXR1cxgDIAEoDjIWLmZ1d2EudjEuTW9kQ2FzZVN0YXR1cxISCgpyZXNvbHV0aW9uGAQgASgJIjsKFVVwZGF0ZU1vZENhc2VSZXNwb25zZRIiCghtb2RfY2FzZRgBIAEoCzIQLmZ1d2EudjEuTW9kQ2FzZSI+ChhHZXRNZW1iZXJPdmVydmlld1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAki3AIKGUdldE1lbWJlck92ZXJ2aWV3UmVzcG9uc2USGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlchI2ChJhY2NvdW50X2NyZWF0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiQKA2JhbhgEIAEoCzIXLmZ1d2EudjEuTW9kT3ZlcnZpZXdCYW4SEgoKb3Blbl9jYXNlcxgFIAEoBRITCgt0b3RhbF9jYXNlcxgGIAEoBRIkCgdoaXN0b3J5GAcgAygLMhMuZnV3YS52MS5BdWRpdEVudHJ5Eh8KBW5vdGVzGAggAygLMhAuZnV3YS52MS5Nb2ROb3RlEhUKDW1lc3NhZ2VfY291bnQYCSABKAMSHAoFdXNlcnMYCiADKAsyDS5mdXdhLnYxLlVzZXIiZgoOTW9kT3ZlcnZpZXdCYW4SDgoGcmVhc29uGAEgASgJEhQKDGJhbm5lZF9ieV9pZBgCIAEoCRIuCgpjcmVhdGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ1ChlMaXN0TWVtYmVyTWVzc2FnZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhEKCWJlZm9yZV9pZBgDIAEoCRINCgVsaW1pdBgEIAEoBRISCgpjaGFubmVsX2lkGAUgASgJInIKGkxpc3RNZW1iZXJNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEhAKCGhhc19tb3JlGAIgASgIEh4KB2F1dGhvcnMYAyADKAsyDS5mdXdhLnYxLlVzZXIiRAoRRmluZFBlb3BsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBXF1ZXJ5GAIgASgJEg0KBWxpbWl0GAMgASgFIjgKEkZpbmRQZW9wbGVSZXNwb25zZRIiCgZwZW9wbGUYASADKAsyEi5mdXdhLnYxLk1vZFBlcnNvbiJaCglNb2RQZXJzb24SGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchIOCgZtZW1iZXIYAiABKAgSEAoIbmlja25hbWUYAyABKAkSDgoGYmFubmVkGAQgASgIIkgKEUFkZE1vZE5vdGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkiNAoSQWRkTW9kTm90ZVJlc3BvbnNlEh4KBG5vdGUYASABKAsyEC5mdXdhLnYxLk1vZE5vdGUiOgoURGVsZXRlTW9kTm90ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB25vdGVfaWQYAiABKAkiFwoVRGVsZXRlTW9kTm90ZVJlc3BvbnNlMq0GChFNb2RlcmF0aW9uU2VydmljZRJOCg1SZXBvcnRNZXNzYWdlEh0uZnV3YS52MS5SZXBvcnRNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuUmVwb3J0TWVzc2FnZVJlc3BvbnNlEksKDFJlcG9ydE1lbWJlchIcLmZ1d2EudjEuUmVwb3J0TWVtYmVyUmVxdWVzdBodLmZ1d2EudjEuUmVwb3J0TWVtYmVyUmVzcG9uc2USSwoMTGlzdE1vZENhc2VzEhwuZnV3YS52MS5MaXN0TW9kQ2FzZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TW9kQ2FzZXNSZXNwb25zZRJFCgpHZXRNb2RDYXNlEhouZnV3YS52MS5HZXRNb2RDYXNlUmVxdWVzdBobLmZ1d2EudjEuR2V0TW9kQ2FzZVJlc3BvbnNlEk4KDVVwZGF0ZU1vZENhc2USHS5mdXdhLnYxLlVwZGF0ZU1vZENhc2VSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVNb2RDYXNlUmVzcG9uc2USWgoRR2V0TWVtYmVyT3ZlcnZpZXcSIS5mdXdhLnYxLkdldE1lbWJlck92ZXJ2aWV3UmVxdWVzdBoiLmZ1d2EudjEuR2V0TWVtYmVyT3ZlcnZpZXdSZXNwb25zZRJdChJMaXN0TWVtYmVyTWVzc2FnZXMSIi5mdXdhLnYxLkxpc3RNZW1iZXJNZXNzYWdlc1JlcXVlc3QaIy5mdXdhLnYxLkxpc3RNZW1iZXJNZXNzYWdlc1Jlc3BvbnNlEkUKCkZpbmRQZW9wbGUSGi5mdXdhLnYxLkZpbmRQZW9wbGVSZXF1ZXN0GhsuZnV3YS52MS5GaW5kUGVvcGxlUmVzcG9uc2USRQoKQWRkTW9kTm90ZRIaLmZ1d2EudjEuQWRkTW9kTm90ZVJlcXVlc3QaGy5mdXdhLnYxLkFkZE1vZE5vdGVSZXNwb25zZRJOCg1EZWxldGVNb2ROb3RlEh0uZnV3YS52MS5EZWxldGVNb2ROb3RlUmVxdWVzdBoeLmZ1d2EudjEuRGVsZXRlTW9kTm90ZVJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_server, file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.ReportMessageRequest
@@ -514,6 +514,94 @@ export const ListMemberMessagesResponseSchema: GenMessage<ListMemberMessagesResp
   messageDesc(file_fuwa_v1_moderation, 14);
 
 /**
+ * @generated from message fuwa.v1.FindPeopleRequest
+ */
+export type FindPeopleRequest = Message<"fuwa.v1.FindPeopleRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * 1 to 100 characters, a leading @ ignored. Matches part of a name,
+   * username or nickname, ignoring case, or a whole id.
+   *
+   * @generated from field: string query = 2;
+   */
+  query: string;
+
+  /**
+   * At most 50; 20 when unset.
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message fuwa.v1.FindPeopleRequest.
+ * Use `create(FindPeopleRequestSchema)` to create a new message.
+ */
+export const FindPeopleRequestSchema: GenMessage<FindPeopleRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_moderation, 15);
+
+/**
+ * @generated from message fuwa.v1.FindPeopleResponse
+ */
+export type FindPeopleResponse = Message<"fuwa.v1.FindPeopleResponse"> & {
+  /**
+   * Closest first: a username or id that is the query, then members, then
+   * names starting with it.
+   *
+   * @generated from field: repeated fuwa.v1.ModPerson people = 1;
+   */
+  people: ModPerson[];
+};
+
+/**
+ * Describes the message fuwa.v1.FindPeopleResponse.
+ * Use `create(FindPeopleResponseSchema)` to create a new message.
+ */
+export const FindPeopleResponseSchema: GenMessage<FindPeopleResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_moderation, 16);
+
+/**
+ * @generated from message fuwa.v1.ModPerson
+ */
+export type ModPerson = Message<"fuwa.v1.ModPerson"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * Whether they're a member now.
+   *
+   * @generated from field: bool member = 2;
+   */
+  member: boolean;
+
+  /**
+   * Their nickname here, when they're a member.
+   *
+   * @generated from field: string nickname = 3;
+   */
+  nickname: string;
+
+  /**
+   * @generated from field: bool banned = 4;
+   */
+  banned: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ModPerson.
+ * Use `create(ModPersonSchema)` to create a new message.
+ */
+export const ModPersonSchema: GenMessage<ModPerson> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_moderation, 17);
+
+/**
  * @generated from message fuwa.v1.AddModNoteRequest
  */
 export type AddModNoteRequest = Message<"fuwa.v1.AddModNoteRequest"> & {
@@ -540,7 +628,7 @@ export type AddModNoteRequest = Message<"fuwa.v1.AddModNoteRequest"> & {
  * Use `create(AddModNoteRequestSchema)` to create a new message.
  */
 export const AddModNoteRequestSchema: GenMessage<AddModNoteRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_moderation, 15);
+  messageDesc(file_fuwa_v1_moderation, 18);
 
 /**
  * @generated from message fuwa.v1.AddModNoteResponse
@@ -557,7 +645,7 @@ export type AddModNoteResponse = Message<"fuwa.v1.AddModNoteResponse"> & {
  * Use `create(AddModNoteResponseSchema)` to create a new message.
  */
 export const AddModNoteResponseSchema: GenMessage<AddModNoteResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_moderation, 16);
+  messageDesc(file_fuwa_v1_moderation, 19);
 
 /**
  * @generated from message fuwa.v1.DeleteModNoteRequest
@@ -579,7 +667,7 @@ export type DeleteModNoteRequest = Message<"fuwa.v1.DeleteModNoteRequest"> & {
  * Use `create(DeleteModNoteRequestSchema)` to create a new message.
  */
 export const DeleteModNoteRequestSchema: GenMessage<DeleteModNoteRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_moderation, 17);
+  messageDesc(file_fuwa_v1_moderation, 20);
 
 /**
  * @generated from message fuwa.v1.DeleteModNoteResponse
@@ -592,7 +680,7 @@ export type DeleteModNoteResponse = Message<"fuwa.v1.DeleteModNoteResponse"> & {
  * Use `create(DeleteModNoteResponseSchema)` to create a new message.
  */
 export const DeleteModNoteResponseSchema: GenMessage<DeleteModNoteResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_moderation, 18);
+  messageDesc(file_fuwa_v1_moderation, 21);
 
 /**
  * Mod View (docs/mod-view.md): what a server's moderators keep an eye on.
@@ -681,6 +769,18 @@ export const ModerationService: GenService<{
     methodKind: "unary";
     input: typeof ListMemberMessagesRequestSchema;
     output: typeof ListMemberMessagesResponseSchema;
+  },
+  /**
+   * Finds people who are or were in the server (left, banned, applied, or
+   * wrote in a channel it shares) by name, username, nickname or id, to look
+   * into them: members first.
+   *
+   * @generated from rpc fuwa.v1.ModerationService.FindPeople
+   */
+  findPeople: {
+    methodKind: "unary";
+    input: typeof FindPeopleRequestSchema;
+    output: typeof FindPeopleResponseSchema;
   },
   /**
    * @generated from rpc fuwa.v1.ModerationService.AddModNote

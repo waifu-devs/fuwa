@@ -18,7 +18,7 @@ use crate::pb::{
     self, ModCaseKind as Kind, ModCaseStatus as CaseStatus, Permission, moderation_service_server::ModerationService,
 };
 use crate::permissions::Access;
-use crate::servers::{self as store, Audit, Payload, load_channel, load_channels};
+use crate::servers::{self as store, Audit, Payload, USER_COLUMNS, load_channel, load_channels};
 
 /// A report's note, and a moderator's reason for closing a case.
 const MAX_REASON: usize = 500;
@@ -28,6 +28,8 @@ const HISTORY: i64 = 50;
 const NOTES: i64 = 100;
 /// Rows read at a time while filling a page with what the caller can see.
 const BATCH: i64 = 200;
+/// How long a search for someone may be.
+const MAX_QUERY: usize = 100;
 
 /// What a person's history in Mod View shows: what moderators, and AutoMod,
 /// did to them.
@@ -408,6 +410,38 @@ async fn page_messages(
     }
 }
 
+/// People the server knows (members, and anyone it kept a profile of: who
+/// left, was banned, applied or wrote in a channel it shares) whose name,
+/// username or nickname holds `query`, or whose id it is: an exact username
+/// or id first, then members, then names that start with it. `query` is
+/// lowercase; folding is SQLite's `lower`, ASCII only.
+async fn find_people(conn: &turso::Connection, query: &str, id: &str, limit: i64) -> Result<Vec<pb::ModPerson>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {USER_COLUMNS}, members.user_id IS NOT NULL, COALESCE(members.nickname, ''), bans.user_id IS NOT NULL
+             FROM users LEFT JOIN members ON members.user_id = users.id LEFT JOIN bans ON bans.user_id = users.id
+             WHERE users.id = ?2 OR instr(lower(users.username), ?1) > 0 OR instr(lower(users.display_name), ?1) > 0
+               OR instr(lower(COALESCE(members.nickname, '')), ?1) > 0
+             ORDER BY users.id = ?2 OR lower(users.username) = ?1 DESC, members.user_id IS NULL,
+               instr(lower(users.username), ?1) = 1 OR instr(lower(users.display_name), ?1) = 1
+                 OR instr(lower(COALESCE(members.nickname, '')), ?1) = 1 DESC,
+               lower(users.display_name), users.id
+             LIMIT ?3"
+        ),
+        (query, id, limit),
+        |r| {
+            Ok(pb::ModPerson {
+                user: Some(store::user_row(r)?),
+                member: r.get::<i64>(8)? != 0,
+                nickname: r.get(9)?,
+                banned: r.get::<i64>(10)? != 0,
+            })
+        },
+    )
+    .await
+}
+
 fn limit_of(asked: i32) -> usize {
     if asked <= 0 { 50 } else { asked.min(100) as usize }
 }
@@ -770,6 +804,25 @@ impl ModerationService for Api {
                 threads::attach(&conn, &mut messages).await?;
                 let authors = users(&conn, &[req.user_id.as_str()]).await?;
                 Ok(pb::ListMemberMessagesResponse { messages, has_more, authors })
+            }
+            .await,
+        )
+    }
+
+    async fn find_people(
+        &self,
+        request: Request<pb::FindPeopleRequest>,
+    ) -> Result<Response<pb::FindPeopleResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let Seat { sdb, .. } = self.with(&account, &req.server_id, Permission::Moderate).await?;
+                let query = text("a search", req.query.trim().trim_start_matches('@'), 1, MAX_QUERY)?;
+                let limit = if req.limit <= 0 { 20 } else { req.limit.min(50) };
+                let conn = sdb.read()?;
+                let people = find_people(&conn, &query.to_lowercase(), &query, limit.into()).await?;
+                Ok(pb::FindPeopleResponse { people })
             }
             .await,
         )

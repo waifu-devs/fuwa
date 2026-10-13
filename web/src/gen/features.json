@@ -30,6 +30,7 @@
     { "id": "featured-servers", "date": "2026-10-09", "title": "Servers featured in Browse" },
     { "id": "agent-endpoints", "date": "2026-10-09", "title": "Agents that get their events over HTTP" },
     { "id": "live-connection", "date": "2026-10-09", "title": "One live connection per app" },
-    { "id": "mod-view", "date": "2026-10-12", "title": "Mod View and reports" }
+    { "id": "mod-view", "date": "2026-10-12", "title": "Mod View and reports" },
+    { "id": "mod-view-find", "date": "2026-10-13", "title": "Finding people in Mod View" }
   ]
 }

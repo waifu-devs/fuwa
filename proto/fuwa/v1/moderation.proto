@@ -37,6 +37,10 @@ service ModerationService {
   rpc GetMemberOverview(GetMemberOverviewRequest) returns (GetMemberOverviewResponse);
   // What one person wrote, newest first, in the channels the caller can see.
   rpc ListMemberMessages(ListMemberMessagesRequest) returns (ListMemberMessagesResponse);
+  // Finds people who are or were in the server (left, banned, applied, or
+  // wrote in a channel it shares) by name, username, nickname or id, to look
+  // into them: members first.
+  rpc FindPeople(FindPeopleRequest) returns (FindPeopleResponse);
   rpc AddModNote(AddModNoteRequest) returns (AddModNoteResponse);
   // Deletes a note: one's own, or anyone's with MANAGE_SERVER.
   rpc DeleteModNote(DeleteModNoteRequest) returns (DeleteModNoteResponse);
@@ -160,6 +164,30 @@ message ListMemberMessagesResponse {
   repeated Message messages = 1;
   bool has_more = 2;
   repeated User authors = 3;
+}
+
+message FindPeopleRequest {
+  string server_id = 1;
+  // 1 to 100 characters, a leading @ ignored. Matches part of a name,
+  // username or nickname, ignoring case, or a whole id.
+  string query = 2;
+  // At most 50; 20 when unset.
+  int32 limit = 3;
+}
+
+message FindPeopleResponse {
+  // Closest first: a username or id that is the query, then members, then
+  // names starting with it.
+  repeated ModPerson people = 1;
+}
+
+message ModPerson {
+  User user = 1;
+  // Whether they're a member now.
+  bool member = 2;
+  // Their nickname here, when they're a member.
+  string nickname = 3;
+  bool banned = 4;
 }
 
 message AddModNoteRequest {

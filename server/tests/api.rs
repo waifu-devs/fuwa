@@ -12060,5 +12060,35 @@ async fn mod_view_cases_reports_and_people() {
     assert_eq!(delete(&kai).await.unwrap_err().code(), Code::PermissionDenied);
     delete(&juan).await.unwrap();
     assert_eq!(delete(&mika).await.unwrap_err().code(), Code::NotFound);
+
+    // Finding someone: by part of a name, a username with its @, or an id,
+    // members first, and people who are gone too.
+    let find = |token: &str, query: &str| {
+        let mut moderation = c.moderation.clone();
+        let request = authed(token, pb::FindPeopleRequest { server_id: sid.clone(), query: query.into(), limit: 0 });
+        async move { moderation.find_people(request).await.map(|r| r.into_inner().people) }
+    };
+    assert_eq!(find(&kai, "rin").await.unwrap_err().code(), Code::PermissionDenied);
+    assert_eq!(find(&mika, " @ ").await.unwrap_err().code(), Code::InvalidArgument);
+    let names =
+        |people: &[pb::ModPerson]| people.iter().map(|p| p.user.as_ref().unwrap().username.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&find(&mika, "RI").await.unwrap()), vec!["rin"]);
+    let by_id = find(&mika, &kai_user.id).await.unwrap();
+    assert_eq!(names(&by_id), vec!["kai"]);
+    assert!(by_id[0].member && !by_id[0].banned);
+    c.servers
+        .ban_member(authed(
+            &juan,
+            pb::BanMemberRequest { server_id: sid.clone(), user_id: kai_user.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let gone = find(&mika, "@Kai").await.unwrap();
+    assert_eq!(names(&gone), vec!["kai"]);
+    assert!(!gone[0].member && gone[0].banned);
+    // Everyone has an "i" in their name here: members come before Kai.
+    let everyone = names(&find(&mika, "i").await.unwrap());
+    assert_eq!(everyone.last().map(String::as_str), Some("kai"));
+    assert!(everyone.contains(&"mika".to_string()) && everyone.contains(&"rin".to_string()));
     instance.stop().await;
 }
