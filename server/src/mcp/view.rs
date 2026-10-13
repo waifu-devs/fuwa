@@ -415,6 +415,41 @@ pub fn event(e: &pb::Event) -> Value {
             }),
         ),
         Some(Payload::ModNoteAdded(_)) | Some(Payload::ModNoteDeleted(_)) => ("mod_note", json!({})),
+        // The economy: list_currencies, list_shop and get_wallet have the rest.
+        Some(Payload::CurrenciesUpdated(_)) => ("currencies_updated", json!({})),
+        Some(Payload::ShopUpdated(_)) => ("shop_updated", json!({})),
+        Some(Payload::ShopListingUpdated(p)) => (
+            "shop_listing_updated",
+            json!({
+                "listing_id": p.listing.as_ref().map(|l| l.id.as_str()),
+                "sold": p.listing.as_ref().map(|l| l.sold),
+                "stock": p.listing.as_ref().and_then(|l| l.stock),
+            }),
+        ),
+        // Only the agent whose balance it is gets this (events.rs).
+        Some(Payload::BalanceUpdated(p)) => (
+            "balance_updated",
+            json!({
+                "currency_id": p.balance.as_ref().map(|b| b.currency_id.as_str()),
+                "amount": p.balance.as_ref().map(|b| b.amount),
+                "change": p.entry.as_ref().map(|e| e.amount),
+                "from_id": p.entry.as_ref().map(|e| if e.actor_id.is_empty() { e.counterpart_id.as_str() } else { e.actor_id.as_str() }),
+                "note": p.entry.as_ref().map(|e| e.note.as_str()),
+            }),
+        ),
+        Some(Payload::WalletsChanged(p)) => ("wallets_changed", json!({ "currency_id": p.currency_id })),
+        // The buyer, and agents with Manage Economy, which may hand out what
+        // a custom listing promises.
+        Some(Payload::PurchaseMade(p)) => (
+            "purchase_made",
+            json!({
+                "buyer_id": p.entry.as_ref().map(|e| e.user_id.as_str()),
+                "listing_id": p.listing.as_ref().map(|l| l.id.as_str()),
+                "listing_name": p.listing.as_ref().map(|l| l.name.as_str()),
+                "price": p.entry.as_ref().map(|e| -e.amount),
+                "currency_id": p.entry.as_ref().map(|e| e.currency_id.as_str()),
+            }),
+        ),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

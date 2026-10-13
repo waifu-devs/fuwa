@@ -24,6 +24,8 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   emoji: (a) => has(a, Permission.MANAGE_EMOJI),
   "profile-items": (a) => has(a, Permission.MANAGE_SERVER),
+  economy: (a) => has(a, Permission.MANAGE_ECONOMY),
+  finances: (a) => has(a, Permission.MANAGE_ECONOMY),
   integrations: (a) => has(a, Permission.MANAGE_WEBHOOKS) || has(a, Permission.MANAGE_SERVER),
   shared: (a) => has(a, Permission.MANAGE_SERVER),
   recordings: (a) => has(a, Permission.MANAGE_SERVER),
@@ -47,7 +49,15 @@ export function useServerSettingsTabs(instanceKey: string, serverId: string): st
   const admin = useFuwa((s) => !!s.instances[instanceKey]?.admin);
   // Profile items only on instances that have them.
   const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
-  return useMemo(() => settingsTabsFor(access, admin).filter((id) => itemsHere || id !== "profile-items"), [access, admin, itemsHere]);
+  // The economy (docs/economy.md) too.
+  const economyHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "economy"));
+  return useMemo(
+    () =>
+      settingsTabsFor(access, admin).filter(
+        (id) => (itemsHere || id !== "profile-items") && (economyHere || (id !== "economy" && id !== "finances")),
+      ),
+    [access, admin, itemsHere, economyHere],
+  );
 }
 
 /** The same, from access already worked out (for a right-click menu). */

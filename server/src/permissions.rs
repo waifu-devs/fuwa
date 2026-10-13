@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 29] = [
+const KNOWN: [P; 31] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -51,6 +51,8 @@ const KNOWN: [P; 29] = [
     P::CreatePolls,
     P::AddReactions,
     P::Moderate,
+    P::ManageEconomy,
+    P::GrantCurrency,
 ];
 
 /// Every permission there is.
@@ -114,7 +116,8 @@ pub const ADMIN: Bits = bit(P::ManageServer)
     | bit(P::MuteMembers)
     | bit(P::MoveMembers)
     | bit(P::Record)
-    | bit(P::Moderate);
+    | bit(P::Moderate)
+    | bit(P::ManageEconomy);
 
 /// What a member who hasn't agreed to the server's rules yet can't do: talk
 /// (in text or voice), bring people in, or rename themselves.
@@ -177,6 +180,8 @@ pub fn label(p: P) -> &'static str {
         P::ManageWebhooks => "Manage webhooks",
         P::CreateThreads => "Start threads",
         P::Moderate => "Use Mod View",
+        P::ManageEconomy => "Manage economy",
+        P::GrantCurrency => "Grant currency",
     }
 }
 

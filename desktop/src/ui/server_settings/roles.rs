@@ -56,6 +56,8 @@ pub(super) fn permission_name(p: P) -> String {
         P::MuteMembers => t("serversettings.permission.muteMembers"),
         P::MoveMembers => t("serversettings.permission.moveMembers"),
         P::Moderate => t("desktop.modView.permission"),
+        P::ManageEconomy => t("desktop.economy.permission.manage"),
+        P::GrantCurrency => t("desktop.economy.permission.grant"),
     }
 }
 
@@ -92,6 +94,8 @@ pub(super) fn permission_about(p: P) -> String {
         P::MuteMembers => t("serversettings.permission.muteMembersAbout"),
         P::MoveMembers => t("serversettings.permission.moveMembersAbout"),
         P::Moderate => t("desktop.modView.permissionAbout"),
+        P::ManageEconomy => t("desktop.economy.permission.manageAbout"),
+        P::GrantCurrency => t("desktop.economy.permission.grantAbout"),
     }
 }
 

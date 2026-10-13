@@ -22,6 +22,7 @@ pub mod commands;
 pub mod compat;
 pub mod config;
 pub mod dms;
+pub mod economy;
 pub mod effects;
 pub mod emoji;
 pub mod fonts;

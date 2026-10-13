@@ -4,11 +4,14 @@ import { useState, useSyncExternalStore } from "react";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { lazyComponent } from "@/components/lazy";
 import { ModerateDialog } from "@/components/ModerateDialog";
+import "@/components/economy/menus";
+import { GiveDialog } from "@/components/economy/GiveDialog";
 import "@/components/modview/menus";
 import { ReportDialog } from "@/components/modview/ReportDialog";
 import { closeMenuDialog as close, subscribeMenuDialogs as subscribe, menuDialogs, type Confirm } from "@/components/menus/dialogs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { useShopView } from "@/fuwa/economy";
 import { useModView } from "@/fuwa/moderation";
 import { useI18n } from "@/i18n/react";
 
@@ -17,11 +20,17 @@ import { useI18n } from "@/i18n/react";
  * the server rail has no invite or settings dialog of its own, and a member
  * row has no moderation dialog. They're the same dialogs the buttons open.
  * Reporting and Mod View (docs/mod-view.md) open from here too, wherever
- * they're asked for.
+ * they're asked for, and so do the shop and giving currency
+ * (docs/economy.md).
  */
 
 const ModView = lazyComponent(
   () => import("@/components/modview/ModView").then((m) => m.ModViewHost),
+  (p) => p.open,
+);
+
+const Shop = lazyComponent(
+  () => import("@/components/economy/Shop").then((m) => m.ShopHost),
   (p) => p.open,
 );
 
@@ -37,10 +46,13 @@ export function MenuDialogs() {
   const settings = last["server-settings"]?.kind === "server-settings" ? last["server-settings"] : null;
   const confirm = last.confirm?.kind === "confirm" ? last.confirm.confirm : null;
   const modView = useModView();
+  const shop = useShopView();
   return (
     <>
       <ReportDialog target={open?.kind === "report" ? open.target : null} onClose={close} />
       <ModView open={modView.open} />
+      <Shop open={shop.open} />
+      <GiveDialog target={open?.kind === "give" ? open.target : null} onClose={close} />
       {moderate && (
         <ModerateDialog
           instanceKey={moderate.instanceKey}

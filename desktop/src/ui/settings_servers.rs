@@ -144,14 +144,16 @@ impl SettingsView {
         let saved_effect = member.as_ref().map(|m| m.effect.clone()).unwrap_or_default();
         let saved_decoration = member.as_ref().map(|m| m.decoration_id.clone()).unwrap_or_default();
         // Server profiles keep an effect and a decoration only on instances with profile items.
-        let (effects_on, decorations_on, items) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(&key) else { return (false, false, Vec::new()) };
+        let (effects_on, decorations_on, items, locked) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&key) else { return (false, false, Vec::new(), Default::default()) };
+            // Items the server's shop sells that you haven't bought (docs/economy.md).
+            let locked = i.economy(&server_id).map(crate::ui::economy::lock_labels).unwrap_or_default();
             let here = crate::core::compat::instance_has(
                 i.node.as_ref().and_then(|n| n.versions.as_ref()),
                 "profile-items",
                 &crate::core::compat::FEATURES,
             );
-            (i.effects_on() && here, i.decorations_on() && here, i.server_list(&server_id).to_vec())
+            (i.effects_on() && here, i.decorations_on() && here, i.server_list(&server_id).to_vec(), locked)
         });
         let accent = self.saved_draft().accent;
         let state = match &self.servers.nickname {
@@ -268,6 +270,7 @@ impl SettingsView {
                 accent,
                 &offered,
                 Some(t("accountsettings.serverProfiles.useMine")),
+                &locked,
                 true,
                 form_w,
                 p,
@@ -293,6 +296,7 @@ impl SettingsView {
                 &me,
                 &decorations,
                 Some(t("accountsettings.serverProfiles.useMine")),
+                &locked,
                 true,
                 form_w,
                 p,

@@ -326,6 +326,8 @@ impl FuwaApp {
             /// You may report them here, and look them up in Mod View.
             report: bool,
             mod_view: bool,
+            /// You may give them currency here.
+            give: bool,
         }
         let facts = self.core.shared.read(|s| {
             let i = s.instance(key)?;
@@ -362,6 +364,7 @@ impl FuwaApp {
             Some(Facts {
                 report: server.is_some_and(|sv| crate::core::mod_view::can_report_member(i, sv, user_id)),
                 mod_view: server.is_some_and(|sv| i.can_mod_view(sv)),
+                give: server.is_some_and(|sv| member.is_some() && i.can_grant_currency(sv)),
                 me,
                 agent: crate::ui::widgets::is_agent(user.as_ref()),
                 dms: matches!(i.dms.status, crate::core::dms::DmStatus::Ready | crate::core::dms::DmStatus::Starting),
@@ -536,6 +539,17 @@ impl FuwaApp {
                         run(move |this, window, cx| this.open_mod_view(&k, &s, Some(uid.clone()), window, cx)),
                     ),
                 );
+            }
+            if f.give {
+                let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());
+                moderate.push(Item::act(
+                    t("desktop.economy.give.menu"),
+                    "hand-coins",
+                    run(move |this, window, cx| {
+                        let to = crate::core::economy::GrantTo::Member(uid.clone());
+                        this.open_give(&k, &s, to, window, cx)
+                    }),
+                ));
             }
             if f.report {
                 let (k, s, uid) = (key.to_owned(), sv.to_owned(), user_id.to_owned());

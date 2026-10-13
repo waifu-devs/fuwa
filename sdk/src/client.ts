@@ -25,6 +25,7 @@ import { PresenceService } from "./gen/fuwa/v1/presence_pb.js";
 import { RoleService } from "./gen/fuwa/v1/role_pb.js";
 import { SearchService } from "./gen/fuwa/v1/search_pb.js";
 import { ModerationService } from "./gen/fuwa/v1/moderation_pb.js";
+import { EconomyService } from "./gen/fuwa/v1/economy_pb.js";
 import { SecureChannelService } from "./gen/fuwa/v1/secure_pb.js";
 import { ServerService } from "./gen/fuwa/v1/server_pb.js";
 import { SsoService } from "./gen/fuwa/v1/sso_pb.js";
@@ -105,6 +106,8 @@ export interface Fuwa {
   search: Client<typeof SearchService>;
   /** Mod View: reporting messages and members, and the cases moderators work through (docs/mod-view.md). */
   moderation: Client<typeof ModerationService>;
+  /** A server's currencies, shop, wallets and grants (docs/economy.md). */
+  economy: Client<typeof EconomyService>;
   /** What the instance says it runs: its version and build, from NodeService.GetNode. */
   serverVersion(): Promise<ServerVersion>;
   /** The fetch the client uses, for uploads. */
@@ -229,6 +232,7 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     live: client(LiveService),
     search: client(SearchService),
     moderation: client(ModerationService),
+    economy: client(EconomyService),
     async serverVersion() {
       const { node: n } = await node.getNode({});
       if (!n) throw toFuwaError(new Error("the instance didn't describe itself"), "fuwa.v1.NodeService/GetNode");

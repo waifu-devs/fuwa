@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use super::messages::load_message;
-use super::{Api, Seat, shared, users};
+use super::{Api, Seat, economy, shared, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::now_ms;
@@ -556,7 +556,16 @@ impl Api {
                     .await?
                     .filter(|m| m.channel_id == channel.id)
                     .ok_or(Error::NotFound("message"))?;
-                apply(conn, &message, &req.emoji, &req.emoji_id, &account.id, req.reacted, cap, events).await
+                let before = events.len();
+                let reaction =
+                    apply(conn, &message, &req.emoji, &req.emoji_id, &account.id, req.reacted, cap, events).await?;
+                // A new reaction to someone else's message pays its author.
+                if req.reacted && events.len() > before && message.author_id != account.id && message.webhook.is_none()
+                {
+                    let action = pb::CurrencyAction::ReactionReceived;
+                    economy::earn(conn, &sdb.id, &message.author_id, action, now_ms(), events).await?;
+                }
+                Ok(reaction)
             })
             .await?;
         Ok(pb::ReactResponse { reaction: Some(reaction) })

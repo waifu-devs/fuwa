@@ -43,7 +43,9 @@ mod audit;
 pub(crate) use audit::kind as audit_kind;
 mod automod;
 mod channels;
+mod economy;
 mod emoji;
+mod finances;
 mod frame;
 mod joinform;
 mod menu;
@@ -117,6 +119,10 @@ pub enum ServerSettingsEvent {
     },
     /// Open the app's own settings at Agents (where people make theirs).
     OpenAgents,
+    /// Open Give currency over the settings (docs/economy.md).
+    Give {
+        to: crate::core::economy::GrantTo,
+    },
     /// Say something for a moment, over the settings.
     Toast {
         icon: &'static str,
@@ -136,6 +142,8 @@ pub(crate) enum Page {
     Channels,
     Emoji,
     ProfileItems,
+    Economy,
+    Finances,
     Integrations,
     Shared,
     Recordings,
@@ -151,7 +159,7 @@ pub(crate) enum Page {
 }
 
 /// Every page, in the web's menu order (`serverSettingsTabs.ts`).
-const ALL: [Page; 22] = [
+const ALL: [Page; 24] = [
     Page::Overview,
     Page::Access,
     Page::Sso,
@@ -162,6 +170,8 @@ const ALL: [Page; 22] = [
     Page::Channels,
     Page::Emoji,
     Page::ProfileItems,
+    Page::Economy,
+    Page::Finances,
     Page::Integrations,
     Page::Shared,
     Page::Recordings,
@@ -195,6 +205,7 @@ impl Page {
             }
             Page::Emoji => access.has(P::ManageEmoji),
             Page::ProfileItems => manage,
+            Page::Economy | Page::Finances => access.has(P::ManageEconomy),
             Page::Integrations => access.has(P::ManageWebhooks) || manage,
             Page::Usage => admin || manage,
             Page::Limits => admin,
@@ -209,7 +220,11 @@ impl Page {
     }
 
     fn label(self) -> String {
-        t(&format!("serversettings.nav.{}", self.key()))
+        match self {
+            // The economy's, named with the rest of its words.
+            Page::Economy | Page::Finances => t(&format!("desktop.economy.nav.{}", self.key())),
+            _ => t(&format!("serversettings.nav.{}", self.key())),
+        }
     }
 
     fn glyph(self) -> &'static str {
@@ -224,6 +239,8 @@ impl Page {
             Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
             Page::ProfileItems => "sparkles",
+            Page::Economy => "coins",
+            Page::Finances => "landmark",
             Page::Integrations => "webhook",
             Page::Shared => "link-2",
             Page::Recordings => "video",
@@ -243,6 +260,7 @@ impl Page {
     fn about(self) -> String {
         match self {
             Page::Ownership | Page::Danger => String::new(),
+            Page::Economy | Page::Finances => t(&format!("desktop.economy.nav.{}About", self.key())),
             _ => t(&format!("serversettings.nav.{}About", self.key())),
         }
     }
@@ -260,6 +278,8 @@ impl Page {
             Page::Channels => "channels",
             Page::Emoji => "emoji",
             Page::ProfileItems => "profileItems",
+            Page::Economy => "economy",
+            Page::Finances => "finances",
             Page::Integrations => "integrations",
             Page::Shared => "shared",
             Page::Recordings => "recordings",
@@ -304,6 +324,10 @@ impl Page {
             Page::Channels => "reorder drag category topic slowmode slow mode private permissions overwrites",
             Page::Emoji => "emoji emote custom sticker upload",
             Page::ProfileItems => "profile items effects decorations avatar frame sparkle wear",
+            Page::Economy => {
+                "economy currency currencies coins points gems earn daily reward streak shop store sell buy price"
+            }
+            Page::Finances => "finances economy money balances ledger history holders spent earned granted chart",
             Page::Integrations => {
                 "webhook webhooks integration apps bot bots agent agents ci github feed rss alerts post api discord"
             }
@@ -462,6 +486,8 @@ pub struct ServerSettingsView {
     onboard: onboarding::Onboard,
     shared: shared::Shared,
     recordings: recordings::Recordings,
+    economy: economy::Economy,
+    finances: finances::Finances,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
     /// The menu's search.
@@ -532,6 +558,7 @@ impl ServerSettingsView {
         let (onboard, onboard_subscriptions) = onboarding::Onboard::new(window, cx);
         let (channels, channel_subscriptions) = channels::Channels::new(window, cx);
         let (shared, shared_subscriptions) = shared::Shared::new(window, cx);
+        let (economy, economy_subscriptions) = economy::Economy::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
@@ -564,6 +591,7 @@ impl ServerSettingsView {
         subscriptions.extend(onboard_subscriptions);
         subscriptions.extend(channel_subscriptions);
         subscriptions.extend(shared_subscriptions);
+        subscriptions.extend(economy_subscriptions);
         Self {
             profile_items: None,
             cropper: None,
@@ -596,6 +624,8 @@ impl ServerSettingsView {
             channels,
             shared,
             recordings: Default::default(),
+            economy,
+            finances: Default::default(),
             bar: None,
             query,
             focused_once: false,
@@ -748,6 +778,10 @@ impl Render for ServerSettingsView {
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
             allowed.retain(|pg| *pg != Page::ProfileItems);
         }
+        // Nor an economy before that.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("economy"))) {
+            allowed.retain(|pg| !matches!(pg, Page::Economy | Page::Finances));
+        }
         // Instances from before video in recordings and camera ceilings have nothing to choose.
         if !self
             .core
@@ -839,6 +873,8 @@ impl Render for ServerSettingsView {
                 }
                 both.into_any_element()
             }
+            Page::Economy => self.economy_page(&p, window, cx),
+            Page::Finances => self.finances_page(&p, window, cx),
             Page::Shared => self.shared_page(&p, window, cx),
             Page::Recordings => self.recordings_page(&server, &p, window, cx),
             Page::Usage => self.usage_page(&p, window, cx),
@@ -1316,6 +1352,14 @@ fn field_label(field: &str) -> String {
         "camera_max_height" => t("serversettings.audit.field.cameraMaxHeight"),
         "camera_max_fps" => t("serversettings.audit.field.cameraMaxFps"),
         "status" => t("desktop.modView.audit.field.status"),
+        "amount" => t("desktop.economy.audit.field.amount"),
+        "currency" => t("desktop.economy.audit.field.currency"),
+        "price" => t("desktop.economy.audit.field.price"),
+        "stock" => t("desktop.economy.audit.field.stock"),
+        "available" => t("desktop.economy.audit.field.available"),
+        "transferable" => t("desktop.economy.audit.field.transferable"),
+        "earn" => t("desktop.economy.audit.field.earn"),
+        "icon" => t("desktop.economy.audit.field.icon"),
         other => other.to_owned(),
     }
 }
@@ -1327,7 +1371,13 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
     };
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     match field {
-        "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" => yes_no(raw),
+        "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" | "available"
+        | "transferable" => yes_no(raw),
+        "stock" if raw.is_empty() => t("settings.controls.noLimit"),
+        "amount" | "price" | "stock" => {
+            raw.parse::<i64>().map(crate::core::economy::amount_text).unwrap_or_else(|_| raw.to_owned())
+        }
+        "earn" if raw == "changed" => t("desktop.economy.audit.value.changed"),
         "status" if entry.action == A::ModCaseUpdate as i32 => {
             match raw.parse::<i32>().ok().and_then(|s| pb::ModCaseStatus::try_from(s).ok()) {
                 Some(status) => t(crate::core::mod_view::status_key(status)),
@@ -1632,6 +1682,54 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         }
         A::ModNoteDelete => {
             t_with("desktop.modView.audit.s.noteDelete", &[("actor", Arg::Str(&actor)), ("target", Arg::Str(&target))])
+        }
+        A::CurrencyCreate | A::CurrencyUpdate | A::CurrencyDelete => {
+            let name = match entry.action() {
+                A::CurrencyDelete => change("name").map(|_| before.clone()),
+                _ => change("name").map(|_| after.clone()),
+            }
+            .unwrap_or_else(|| format!("**{}**", t("desktop.economy.audit.aCurrency")));
+            let key = match entry.action() {
+                A::CurrencyCreate => "desktop.economy.audit.s.currencyCreate",
+                A::CurrencyUpdate => "desktop.economy.audit.s.currencyUpdate",
+                _ => "desktop.economy.audit.s.currencyDelete",
+            };
+            t_with(key, &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))])
+        }
+        A::ShopListingCreate | A::ShopListingUpdate | A::ShopListingDelete => {
+            let name = match entry.action() {
+                A::ShopListingDelete => change("name").map(|_| before.clone()),
+                _ => change("name").map(|_| after.clone()),
+            }
+            .unwrap_or_else(|| format!("**{}**", t("desktop.economy.audit.aListing")));
+            let key = match entry.action() {
+                A::ShopListingCreate => "desktop.economy.audit.s.listingCreate",
+                A::ShopListingUpdate => "desktop.economy.audit.s.listingUpdate",
+                _ => "desktop.economy.audit.s.listingDelete",
+            };
+            t_with(key, &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))])
+        }
+        A::CurrencyGrant => {
+            let amount = change("amount").and_then(|c| c.after.parse::<i64>().ok()).unwrap_or(0);
+            let currency = change("currency")
+                .map(|c| format!("**{}**", plain(&c.after)))
+                .unwrap_or_else(|| format!("**{}**", t("desktop.economy.audit.aCurrency")));
+            let count = format!("**{}**", crate::core::economy::amount_text(amount.abs()));
+            let (key, who) = match (entry.role_name.is_empty(), amount < 0) {
+                (true, false) => ("desktop.economy.audit.s.grantMember", &target),
+                (true, true) => ("desktop.economy.audit.s.takeMember", &target),
+                (false, false) => ("desktop.economy.audit.s.grantRole", &role),
+                (false, true) => ("desktop.economy.audit.s.takeRole", &role),
+            };
+            t_with(
+                key,
+                &[
+                    ("actor", Arg::Str(&actor)),
+                    ("amount", Arg::Str(&count)),
+                    ("currency", Arg::Str(&currency)),
+                    ("target", Arg::Str(who)),
+                ],
+            )
         }
         A::InviteCreate if !entry.channel_name.is_empty() => t_with(
             "serversettings.audit.s.inviteCreateIn",

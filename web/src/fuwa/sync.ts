@@ -13,6 +13,7 @@ import { closeNotifications, onLiveEvent, onRemoved } from "@/lib/notify";
 import { effectiveNotifications } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
+import { forgetEconomy, forgetEconomyServer, loadEconomy, onEconomyEvent } from "./economy";
 import { forgetModeration, onModEvent } from "./moderation";
 import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { fromItems } from "@/lib/rail";
@@ -154,6 +155,7 @@ function leave(key: string) {
   closeNotifications(key);
   forgetPins(key);
   forgetModeration(key);
+  forgetEconomy(key);
   clearToasts();
   for (const fn of leaving) fn(key);
 }
@@ -436,6 +438,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
           closeNotifications(key);
           forgetPins(key);
           forgetModeration(key);
+          forgetEconomy(key);
           if (userId) void forgetAccount(key, userId);
           patchInstance(key, { connection: "signed-out", problem: i18n().t("workspace.session.ended") });
         } else {
@@ -553,6 +556,8 @@ const followEvents = (
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
         held.delete(serverId);
+        // The server's currencies and your wallet (docs/economy.md), on instances that have them.
+        if (instanceHas(store.get().instances[key]?.node?.versions, "economy")) void loadEconomy(key, serverId);
         // Secure channels this device is in may have had news while it was away.
         const secure = channels.channels.filter((c) => c.type === ChannelType.SECURE).map((c) => c.id);
         if (secure.length) void dmEngine(key)?.followServer(serverId, secure).catch(() => {});
@@ -729,6 +734,7 @@ const followEvents = (
           dmEngine(key)?.onServerEvent(event);
           onPinEvent(key, event);
           onModEvent(key, event);
+          onEconomyEvent(key, event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));
@@ -740,6 +746,7 @@ const followEvents = (
         if (gone) {
           cursors.delete(sid);
           held.delete(sid);
+          forgetEconomyServer(key, sid);
           yield* unfollow(key, sid);
         }
       });

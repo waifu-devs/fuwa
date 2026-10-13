@@ -10,6 +10,8 @@ import {
   ChevronDownIcon,
   ClipboardListIcon,
   ClipboardPenIcon,
+  CoinsIcon,
+  LineChartIcon,
   CompassIcon,
   CrownIcon,
   DoorOpenIcon,
@@ -51,6 +53,8 @@ import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
 import { ProfileItems } from "@/components/settings/ProfileItems";
+import { Economy } from "@/components/settings/server/Economy";
+import { Finances } from "@/components/settings/server/Finances";
 import { Webhooks } from "@/components/settings/server/Webhooks";
 import { SharedChannels } from "@/components/settings/server/SharedChannels";
 import { SharedGlyph } from "@/components/chat/Shared";
@@ -268,6 +272,24 @@ function useSettingsGroups(instanceKey: string, server: Server, can: (id: string
       keywords: "profile effect effects decoration decorations avatar frame card sparkles",
     },
     {
+      id: "economy",
+      label: t("serversettings.nav.economy"),
+      icon: CoinsIcon,
+      description: t("serversettings.nav.economyAbout"),
+      keywords: "economy currency currencies coins points gems money earn daily reward streak shop store buy sell listing price stock",
+      settings: [
+        { id: "currencies", label: t("serversettings.economy.currencies"), keywords: "coins earn rules daily transfer send" },
+        { id: "shop", label: t("serversettings.economy.shop"), keywords: "listing role item price stock" },
+      ],
+    },
+    {
+      id: "finances",
+      label: t("serversettings.nav.finances"),
+      icon: LineChartIcon,
+      description: t("serversettings.nav.financesAbout"),
+      keywords: "economy finances ledger balances circulating holders spent earned grant give take chart",
+    },
+    {
       id: "integrations",
       label: t("serversettings.nav.integrations"),
       icon: WebhookIcon,
@@ -359,6 +381,8 @@ const PAGES: Record<string, (p: PageProps) => ReactNode> = {
   welcome: (p) => <WelcomeAndOnboarding instanceKey={p.instanceKey} server={p.server} />,
   emoji: (p) => <Emoji instanceKey={p.instanceKey} serverId={p.server.id} />,
   "profile-items": (p) => <ProfileItems instanceKey={p.instanceKey} serverId={p.server.id} />,
+  economy: (p) => <Economy instanceKey={p.instanceKey} serverId={p.server.id} />,
+  finances: (p) => <Finances instanceKey={p.instanceKey} serverId={p.server.id} />,
   integrations: (p) => (
     <div className="flex flex-col gap-8">
       {has(p.access, Permission.MANAGE_SERVER) && <ServerAgents instanceKey={p.instanceKey} serverId={p.server.id} />}

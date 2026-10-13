@@ -1,9 +1,14 @@
+import { Effect } from "effect";
 import { ServerIcon as ServerGlyph } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { updateServerProfile, type ServerProfilePatch } from "@/fuwa/actions";
+import { economyMessage, openShop, useEconomy } from "@/fuwa/economy";
+import { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
+import { Amount } from "@/components/economy/shared";
+import { lockedItems } from "@/lib/economy";
 import { useFuwa } from "@/fuwa/store";
 import { ServerIcon } from "@/components/Icons";
 import { SwapText } from "@/components/motion";
@@ -23,6 +28,10 @@ import { useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const NICKNAME_MAX = 32;
+
+/** Saves a server profile, saying "buy it first" in the app's words when an item is sold in the shop. */
+const saveServerProfile = (...args: Parameters<typeof updateServerProfile>) =>
+  updateServerProfile(...args).pipe(Effect.mapError((err) => new FuwaError({ code: err.code, message: economyMessage(err) })));
 
 /**
  * The server being edited. A server picked here counts until another is
@@ -55,13 +64,25 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === me?.id));
   const profile = useFuwa((s) => (me ? s.instances[instanceKey]?.profiles[me.id] : undefined));
   const [edits, setEdits] = useState<Edits>({});
-  const save = useAction(updateServerProfile);
+  const save = useAction(saveServerProfile);
   // Server profiles keep an effect and a decoration only on instances with profile items.
   const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
   const effectsOn = useEffectsOn(instanceKey) && itemsHere;
   const decorationsOn = useDecorationsOn(instanceKey) && itemsHere;
   const items = useFuwa((s) => s.instances[instanceKey]?.serverProfileItems[serverId]);
   const offered = useOfferedEffects(items);
+  // Items for sale in the server's shop (docs/economy.md) wait behind a padlock until bought.
+  const economy = useEconomy(instanceKey, serverId, itemsHere);
+  const locks = useMemo(() => {
+    const map = new Map<string, ReactNode>();
+    if (!economy.shop || !economy.wallet) return map;
+    for (const [id, sale] of lockedItems(economy.shop, economy.wallet.ownedItemIds)) {
+      const currency = sale && economy.currencies?.find((c) => c.id === sale.currencyId);
+      map.set(id, sale ? <Amount instanceKey={instanceKey} currency={currency ?? undefined} value={sale.price} iconClassName="size-3" /> : t("accountsettings.serverProfiles.notForSale"));
+    }
+    return map;
+  }, [economy.shop, economy.wallet, economy.currencies, instanceKey, t]);
+  const toShop = () => openShop(instanceKey, serverId);
 
   if (!me) return null;
   if (!servers.length) return <NoServers />;
@@ -160,6 +181,8 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
                 offered={offered}
                 noneLabel={t("accountsettings.serverProfiles.useMine")}
                 pickedId="server-effect-picked"
+                locks={locks}
+                onLocked={toShop}
                 onChange={(next) => set({ effect: next })}
               />
             </Row>
@@ -178,6 +201,8 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
                     items={decorations}
                     noneLabel={t("accountsettings.serverProfiles.useMine")}
                     pickedId="server-decoration-picked"
+                    locks={locks}
+                    onLocked={toShop}
                     onChange={(next) => set({ decoration: next })}
                   />
                 </Row>

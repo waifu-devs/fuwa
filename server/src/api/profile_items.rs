@@ -244,6 +244,8 @@ impl ProfileItemService for Api {
                         let entry =
                             Audit::new(pb::AuditAction::ProfileItemDelete, &item.id).change("name", &item.name, "");
                         store::audit(conn, &account.id, entry).await?;
+                        super::economy::unlist(conn, &sdb.id, pb::ShopListingKind::ProfileItem, &item.id, events)
+                            .await?;
                         changed(conn, &sdb.id, events).await?;
                         Ok(item)
                     })

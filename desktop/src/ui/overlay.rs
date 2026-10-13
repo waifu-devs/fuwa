@@ -268,6 +268,9 @@ impl FuwaApp {
         if let Dialog::Report { key, server, of } = &dialog {
             return Some(self.render_report(key, server, of, window, cx));
         }
+        if let Dialog::GiveCurrency { key, server, to } = &dialog {
+            return Some(self.render_give(key, server, to, window, cx));
+        }
         if let Dialog::Welcome { key, server } = &dialog {
             return Some(self.render_welcome_web(key, server, window, cx));
         }
@@ -351,7 +354,8 @@ impl FuwaApp {
             | Dialog::PollVoters { .. }
             | Dialog::Picture { .. }
             | Dialog::ShareScreen
-            | Dialog::Report { .. } => unreachable!("drawn on its own"),
+            | Dialog::Report { .. }
+            | Dialog::GiveCurrency { .. } => unreachable!("drawn on its own"),
         };
         let danger = matches!(
             dialog,
@@ -429,6 +433,7 @@ impl FuwaApp {
             Dialog::Application { .. } => "application",
             Dialog::ShareScreen => "share",
             Dialog::Report { .. } => "report",
+            Dialog::GiveCurrency { .. } => "give",
         };
         Some(dialog_layer(tag, panel, &p, cx.listener(|this, _, _, cx| this.close_dialog(cx)), cx))
     }

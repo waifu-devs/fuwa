@@ -51,14 +51,19 @@ import {
   InboxIcon,
   StickyNoteIcon,
   NotebookPenIcon,
+  CoinsIcon,
+  StoreIcon,
+  HandCoinsIcon,
+  PackageXIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuditAction, type AuditChange, type AuditEntry } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, ModCaseStatus, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, ModCaseStatus, NotificationLevel, type Channel, type Permission, type ProfileItem, type Role, type User } from "@/gen/fuwa/v1/types_pb";
 import { listAuditLog, run, type AuditFilter } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance, useRoles } from "@/fuwa/hooks";
+import { anyCurrency } from "@/fuwa/economy";
 import { UserAvatar } from "@/components/Icons";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
@@ -70,6 +75,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { displayName, formatDuration, formatStamp, type Lang, toDate } from "@/lib/format";
+import { i18n } from "@/i18n/i18n";
 import { type Key, T, useI18n } from "@/i18n/react";
 import { cssColor, permissionLabel } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -137,6 +143,13 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.MOD_CASE_UPDATE]: { label: "serversettings.audit.kind.modCaseUpdate", icon: InboxIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.MOD_NOTE_ADD]: { label: "serversettings.audit.kind.modNoteAdd", icon: NotebookPenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.MOD_NOTE_DELETE]: { label: "serversettings.audit.kind.modNoteDelete", icon: StickyNoteIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.CURRENCY_CREATE]: { label: "serversettings.audit.kind.currencyCreate", icon: CoinsIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.CURRENCY_UPDATE]: { label: "serversettings.audit.kind.currencyUpdate", icon: CoinsIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.CURRENCY_DELETE]: { label: "serversettings.audit.kind.currencyDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SHOP_LISTING_CREATE]: { label: "serversettings.audit.kind.listingCreate", icon: StoreIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SHOP_LISTING_UPDATE]: { label: "serversettings.audit.kind.listingUpdate", icon: StoreIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SHOP_LISTING_DELETE]: { label: "serversettings.audit.kind.listingDelete", icon: PackageXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.CURRENCY_GRANT]: { label: "serversettings.audit.kind.currencyGrant", icon: HandCoinsIcon, tint: "bg-amber-500/15 text-amber-500" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -185,6 +198,15 @@ const FIELD: Record<string, Key> = {
   actions: "serversettings.audit.field.actions",
   effect: "serversettings.audit.field.effect",
   status: "serversettings.audit.field.status",
+  currency: "serversettings.audit.field.currency",
+  amount: "serversettings.audit.field.amount",
+  icon: "serversettings.audit.field.icon",
+  transferable: "serversettings.audit.field.transferable",
+  earn: "serversettings.audit.field.earn",
+  price: "serversettings.audit.field.price",
+  stock: "serversettings.audit.field.stock",
+  available: "serversettings.audit.field.available",
+  target: "serversettings.audit.field.listingTarget",
 };
 
 /** A changed field's name in the app's language. */
@@ -202,6 +224,11 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.WEBHOOK_DELETE]: "before",
   [AuditAction.PROFILE_ITEM_CREATE]: "after",
   [AuditAction.PROFILE_ITEM_DELETE]: "before",
+  [AuditAction.CURRENCY_CREATE]: "after",
+  [AuditAction.CURRENCY_DELETE]: "before",
+  [AuditAction.SHOP_LISTING_CREATE]: "after",
+  [AuditAction.SHOP_LISTING_DELETE]: "before",
+  [AuditAction.CURRENCY_GRANT]: "after",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -213,6 +240,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
   const inst = useInstance(instanceKey);
   const channels = inst?.channels[serverId];
   const roles = useRoles(instanceKey, serverId);
+  const items = inst?.serverProfileItems[serverId];
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [users, setUsers] = useState<Record<string, User>>({});
   const [more, setMore] = useState(false);
@@ -298,6 +326,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
                 users={users}
                 channels={channels ?? []}
                 roles={roles}
+                items={items}
                 open={open === entry.id}
                 onToggle={() => setOpen(open === entry.id ? null : entry.id)}
               />
@@ -346,6 +375,7 @@ export function AuditLogEntry({
   users,
   channels,
   roles,
+  items,
   open,
   onToggle,
 }: {
@@ -354,6 +384,8 @@ export function AuditLogEntry({
   users: Record<string, User>;
   channels: Channel[];
   roles: Role[];
+  /** The server's profile items, to name what a shop listing sells. */
+  items?: readonly ProfileItem[];
   open: boolean;
   onToggle: () => void;
 }) {
@@ -363,6 +395,7 @@ export function AuditLogEntry({
   const at = toDate(entry.createdAt);
   const details = entry.changes.filter((c) => c.field !== "deleted_messages");
   const expandable = details.length > 0 || !!entry.reason;
+  const nameOf: Named = (id) => roles.find((r) => r.id === id)?.name ?? items?.find((i) => i.id === id)?.name;
   return (
     <motion.li
       layout="position"
@@ -377,7 +410,7 @@ export function AuditLogEntry({
           <UserAvatar user={actor} className="absolute -right-1.5 -bottom-1.5 size-5 ring-2 ring-background" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm break-words">{sentence(lang, entry, users, channels, roles)}</span>
+          <span className="block text-sm break-words">{sentence(lang, entry, users, channels, roles, nameOf)}</span>
           <span className="block text-xs text-muted-foreground" title={formatStamp(at)}>
             {formatStamp(at)}
           </span>
@@ -406,15 +439,15 @@ export function AuditLogEntry({
                 >
                   <span className="text-muted-foreground">{fieldName(lang.t, change.field)}:</span>
                   {ONE_SIDE[entry.action] ? (
-                    <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
+                    <span className="rounded-md bg-muted px-1.5">{value(lang, change.field, change[ONE_SIDE[entry.action]!], users, channels, entry, nameOf)}</span>
                   ) : (
                     <>
                       <span className="rounded-md bg-destructive/10 px-1.5 text-destructive line-through decoration-destructive/50">
-                        {value(lang, change.field, change.before, users, channels, entry)}
+                        {value(lang, change.field, change.before, users, channels, entry, nameOf)}
                       </span>
                       <ArrowRightIcon className="size-3.5 text-muted-foreground" />
                       <span className="rounded-md bg-emerald-500/10 px-1.5 text-emerald-600 dark:text-emerald-400">
-                        {value(lang, change.field, change.after, users, channels, entry)}
+                        {value(lang, change.field, change.after, users, channels, entry, nameOf)}
                       </span>
                     </>
                   )}
@@ -428,12 +461,21 @@ export function AuditLogEntry({
   );
 }
 
+/** A role's or profile item's name by its id, while the server still has it. */
+type Named = (id: string) => string | undefined;
+
 /** A value from the log, in words. */
-function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
+function value(lang: Lang, field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry, nameOf: Named): string {
   const { t } = lang;
   const yesNo = () => (raw === "true" ? t("serversettings.audit.value.yes") : t("serversettings.audit.value.no"));
   const none = t("serversettings.audit.value.none");
-  if (field === "discoverable" || field === "enabled") return yesNo();
+  if (field === "discoverable" || field === "enabled" || field === "transferable" || field === "available") return yesNo();
+  // Grants and listings keep the currency by its name, as it was then.
+  if (field === "currency") return raw || none;
+  if (field === "amount" || field === "price") return raw ? i18n().number(Number(raw)) : none;
+  if (field === "earn") return raw ? t("serversettings.audit.value.changed") : none;
+  if (field === "target") return raw ? (nameOf(raw) ?? (entry.roleName || t("serversettings.audit.value.gone"))) : none;
+  if (field === "stock") return raw ? i18n().number(Number(raw)) : t("settings.controls.noLimit");
   if (field === "role") return Object.hasOwn(OLD_RANK, raw) ? t(OLD_RANK[raw]!) : raw ? entry.roleName : none;
   if (field === "hoist" || field === "mentionable") return yesNo();
   if (field === "color") return raw || none;
@@ -487,7 +529,7 @@ const caseStatusWord = (t: Lang["t"], status: number) =>
       : t("chattools.modview.status.open");
 
 /** What an entry says happened: a sentence per kind of change, with the people, roles and channels in bold. */
-function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
+function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[], nameOf: Named): ReactNode {
   const actor = <b>{displayName(users[entry.actorId])}</b>;
   const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
   // Roles go by their name now, like channels, and the one they had once they're gone.
@@ -714,6 +756,43 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       return say("serversettings.audit.s.modNoteAdd", { target });
     case AuditAction.MOD_NOTE_DELETE:
       return say("serversettings.audit.s.modNoteDelete", { target });
+    case AuditAction.CURRENCY_CREATE:
+      return say("serversettings.audit.s.currencyCreate", { name: <b>{change("name")?.after || anyCurrency(entry.targetId)?.name}</b> });
+    case AuditAction.CURRENCY_UPDATE: {
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1) return say("serversettings.audit.s.renamed", { before: <b>{renamed.before}</b>, after: <b>{renamed.after}</b> });
+      return say("serversettings.audit.s.currencyUpdate", { name: <b>{renamed?.after || anyCurrency(entry.targetId)?.name || lang.t("serversettings.audit.aCurrency")}</b> });
+    }
+    case AuditAction.CURRENCY_DELETE:
+      return say("serversettings.audit.s.currencyDelete", { name: <b>{change("name")?.before || lang.t("serversettings.audit.aCurrency")}</b> });
+    case AuditAction.SHOP_LISTING_CREATE:
+    case AuditAction.SHOP_LISTING_UPDATE:
+    case AuditAction.SHOP_LISTING_DELETE: {
+      // A listing without a name of its own goes by what it sells.
+      const side = entry.action === AuditAction.SHOP_LISTING_DELETE ? "before" : "after";
+      const sells = change("target")?.[side];
+      const name = change("name")?.[side] || (sells && nameOf(sells)) || lang.t("serversettings.audit.aListing");
+      const key =
+        entry.action === AuditAction.SHOP_LISTING_CREATE
+          ? "serversettings.audit.s.listingCreate"
+          : entry.action === AuditAction.SHOP_LISTING_UPDATE
+            ? "serversettings.audit.s.listingUpdate"
+            : "serversettings.audit.s.listingDelete";
+      return say(key, { name: <b>{name}</b> });
+    }
+    case AuditAction.CURRENCY_GRANT: {
+      // The amount is signed (a take is negative) and the currency kept by name.
+      const raw = Number(change("amount")?.after ?? 0);
+      const amount = (
+        <b>
+          {i18n().number(Math.abs(raw))} {change("currency")?.after || lang.t("serversettings.audit.aCurrency")}
+        </b>
+      );
+      // A grant to a role keeps the role's name; one to a member doesn't.
+      const toRole = !!entry.roleName || roles.some((r) => r.id === entry.targetId);
+      if (toRole) return say(raw < 0 ? "serversettings.audit.s.currencyTakeRole" : "serversettings.audit.s.currencyGiveRole", { amount, role });
+      return say(raw < 0 ? "serversettings.audit.s.currencyTake" : "serversettings.audit.s.currencyGive", { amount, target });
+    }
     default:
       return say("serversettings.audit.s.unknown");
   }

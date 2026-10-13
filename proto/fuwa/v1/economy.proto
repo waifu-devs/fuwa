@@ -1,0 +1,325 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// A server's economy (docs/economy.md): its own currencies, which members
+// earn by what they do (EarnRule), send to each other where a currency
+// allows it, and spend in the server's shop on roles, profile items and
+// anything else the server names. Members with GRANT_CURRENCY give and take
+// it, audited; members with MANAGE_ECONOMY run it all and see the finance
+// page. Agents do the same through the same permissions.
+//
+// Amounts are whole numbers. Balances never go below zero. Every change to
+// one is an entry in the server's ledger, and its owner gets BalanceUpdated.
+// Balances are private: a member sees only their own, people with
+// MANAGE_ECONOMY or GRANT_CURRENCY anyone's.
+service EconomyService {
+  // Any member.
+
+  // The server's currencies, in order.
+  rpc ListCurrencies(ListCurrenciesRequest) returns (ListCurrenciesResponse);
+  // The shop, in order: every listing, as ShopUpdated has them. Apps show
+  // members the available ones; the rest still keep their profile items
+  // for those who bought them.
+  rpc ListShop(ListShopRequest) returns (ListShopResponse);
+  // Your balances and the profile items you bought; someone else's with
+  // MANAGE_ECONOMY or GRANT_CURRENCY.
+  rpc GetWallet(GetWalletRequest) returns (GetWalletResponse);
+  // Changes to your balances, newest first; anyone's, or everyone's, with
+  // MANAGE_ECONOMY.
+  rpc ListLedger(ListLedgerRequest) returns (ListLedgerResponse);
+  // Takes the day's DAILY reward: once per UTC day, more for each day in a
+  // row when the rule has a streak bonus.
+  rpc ClaimDaily(ClaimDailyRequest) returns (ClaimDailyResponse);
+  // Sends some of a transferable currency to another member.
+  rpc Transfer(TransferRequest) returns (TransferResponse);
+  // Buys an available listing: a role or profile item once, a custom
+  // listing as often as there's stock.
+  rpc Buy(BuyRequest) returns (BuyResponse);
+
+  // MANAGE_ECONOMY.
+
+  rpc CreateCurrency(CreateCurrencyRequest) returns (CreateCurrencyResponse);
+  rpc UpdateCurrency(UpdateCurrencyRequest) returns (UpdateCurrencyResponse);
+  // Deletes it with every balance, ledger entry and listing in it.
+  rpc DeleteCurrency(DeleteCurrencyRequest) returns (DeleteCurrencyResponse);
+  // A ROLE listing also takes MANAGE_ROLES and a rank above the role.
+  rpc CreateShopListing(CreateShopListingRequest) returns (CreateShopListingResponse);
+  rpc UpdateShopListing(UpdateShopListingRequest) returns (UpdateShopListingResponse);
+  // Roles and items already bought stay with their buyers.
+  rpc DeleteShopListing(DeleteShopListingRequest) returns (DeleteShopListingResponse);
+  // The finance page: one currency's state, and what happened over the last
+  // days.
+  rpc GetEconomyOverview(GetEconomyOverviewRequest) returns (GetEconomyOverviewResponse);
+
+  // GRANT_CURRENCY.
+
+  // Gives an amount to a member, or to everyone with a role (the server's
+  // id for @everyone), or takes it away with an amount below zero (never
+  // below a zero balance). Audited, with the reason.
+  rpc Grant(GrantRequest) returns (GrantResponse);
+}
+
+message ListCurrenciesRequest {
+  string server_id = 1;
+}
+
+message ListCurrenciesResponse {
+  repeated Currency currencies = 1;
+}
+
+message ListShopRequest {
+  string server_id = 1;
+}
+
+message ListShopResponse {
+  repeated ShopListing listings = 1;
+}
+
+message GetWalletRequest {
+  string server_id = 1;
+  // Empty for yours.
+  string user_id = 2;
+}
+
+message GetWalletResponse {
+  // One per currency the server has, at zero when they have none.
+  repeated Balance balances = 1;
+  // The server's profile items they bought.
+  repeated string owned_item_ids = 2;
+}
+
+message ListLedgerRequest {
+  string server_id = 1;
+  // Empty for every currency.
+  string currency_id = 2;
+  // Empty for yours; "*" for everyone's (MANAGE_ECONOMY).
+  string user_id = 3;
+  // Only these kinds; empty for all.
+  repeated LedgerKind kinds = 4;
+  // Entries older than this one, for the next page.
+  string before_id = 5;
+  // 1 to 100; 50 when unset.
+  int32 limit = 6;
+}
+
+message ListLedgerResponse {
+  repeated LedgerEntry entries = 1;
+  bool has_more = 2;
+  // Everyone the entries name (whose they are, who granted, the other side
+  // of a transfer), as the server last saw them, including people who left.
+  repeated User users = 3;
+}
+
+message ClaimDailyRequest {
+  string server_id = 1;
+  string currency_id = 2;
+}
+
+message ClaimDailyResponse {
+  LedgerEntry entry = 1;
+  Balance balance = 2;
+}
+
+message TransferRequest {
+  string server_id = 1;
+  string currency_id = 2;
+  // A member, not you.
+  string user_id = 3;
+  // At least 1, and no more than you have.
+  int64 amount = 4;
+  // Up to 200 characters, shown to both.
+  string note = 5;
+}
+
+message TransferResponse {
+  // Your side.
+  LedgerEntry entry = 1;
+  Balance balance = 2;
+}
+
+message BuyRequest {
+  string server_id = 1;
+  string listing_id = 2;
+  // The price the app showed: refused if it changed since.
+  int64 expected_price = 3;
+}
+
+message BuyResponse {
+  LedgerEntry entry = 1;
+  Balance balance = 2;
+  ShopListing listing = 3;
+}
+
+// A new currency, or what changes in one. In an update, unset fields stay;
+// `earn` replaces every rule when `replace_earn` is set.
+message CurrencyChange {
+  optional string name = 1;
+  optional string icon_emoji = 2;
+  optional string icon_emoji_id = 3;
+  optional string description = 4;
+  optional bool transferable = 5;
+  optional int32 position = 6;
+  bool replace_earn = 7;
+  repeated EarnRule earn = 8;
+}
+
+message CreateCurrencyRequest {
+  string server_id = 1;
+  CurrencyChange currency = 2;
+}
+
+message CreateCurrencyResponse {
+  Currency currency = 1;
+}
+
+message UpdateCurrencyRequest {
+  string server_id = 1;
+  string currency_id = 2;
+  CurrencyChange change = 3;
+}
+
+message UpdateCurrencyResponse {
+  Currency currency = 1;
+}
+
+message DeleteCurrencyRequest {
+  string server_id = 1;
+  string currency_id = 2;
+}
+
+message DeleteCurrencyResponse {}
+
+message NewShopListing {
+  string currency_id = 1;
+  ShopListingKind kind = 2;
+  string target_id = 3;
+  string name = 4;
+  string description = 5;
+  int64 price = 6;
+  optional int64 stock = 7;
+  int32 position = 8;
+  bool available = 9;
+}
+
+// What changes; unset fields stay. The currency, kind and target can't
+// change: add another listing instead.
+message ShopListingChange {
+  optional string name = 1;
+  optional string description = 2;
+  optional int64 price = 3;
+  // Set `unlimited` to take the limit away.
+  optional int64 stock = 4;
+  bool unlimited = 5;
+  optional int32 position = 6;
+  optional bool available = 7;
+}
+
+message CreateShopListingRequest {
+  string server_id = 1;
+  NewShopListing listing = 2;
+}
+
+message CreateShopListingResponse {
+  ShopListing listing = 1;
+}
+
+message UpdateShopListingRequest {
+  string server_id = 1;
+  string listing_id = 2;
+  ShopListingChange change = 3;
+}
+
+message UpdateShopListingResponse {
+  ShopListing listing = 1;
+}
+
+message DeleteShopListingRequest {
+  string server_id = 1;
+  string listing_id = 2;
+}
+
+message DeleteShopListingResponse {}
+
+message GetEconomyOverviewRequest {
+  string server_id = 1;
+  string currency_id = 2;
+  // How far back the totals and days go: 1 to 365; 30 when unset.
+  int32 days = 3;
+}
+
+message GetEconomyOverviewResponse {
+  EconomyOverview overview = 1;
+}
+
+// One currency's finances.
+message EconomyOverview {
+  string currency_id = 1;
+  // Now: held by everyone, and by how many people.
+  int64 circulating = 2;
+  int32 holders = 3;
+  // Over the period asked for.
+  int64 earned = 4;
+  int64 granted = 5;
+  int64 taken = 6;
+  int64 spent = 7;
+  int64 transferred = 8;
+  int64 purchases = 9;
+  // Earned per action, most first.
+  repeated ActionTotal earned_by_action = 10;
+  // Up to 10 each, members only: who holds the most now, and who spent and
+  // earned the most over the period.
+  repeated PersonTotal top_holders = 11;
+  repeated PersonTotal top_spenders = 12;
+  repeated PersonTotal top_earners = 13;
+  // Listings bought the most over the period, up to 10.
+  repeated ListingTotal top_listings = 14;
+  // Every day of the period, oldest first, by UTC day.
+  repeated DayTotal days = 15;
+}
+
+message ActionTotal {
+  CurrencyAction action = 1;
+  int64 amount = 2;
+}
+
+message PersonTotal {
+  string user_id = 1;
+  int64 amount = 2;
+}
+
+message ListingTotal {
+  string listing_id = 1;
+  int64 count = 2;
+  int64 amount = 3;
+}
+
+message DayTotal {
+  // The day's start (UTC midnight).
+  google.protobuf.Timestamp day = 1;
+  int64 earned = 2;
+  int64 granted = 3;
+  int64 spent = 4;
+}
+
+message GrantRequest {
+  string server_id = 1;
+  string currency_id = 2;
+  // One of these.
+  string user_id = 3;
+  string role_id = 4;
+  // Each person's share: above zero to give, below to take.
+  int64 amount = 5;
+  // Why, up to 200 characters: shown to them and in the audit log.
+  string reason = 6;
+}
+
+message GrantResponse {
+  // How many people it reached, and what moved in all (taking stops at
+  // zero).
+  int32 people = 1;
+  int64 total = 2;
+}

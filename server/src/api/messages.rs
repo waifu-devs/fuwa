@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, commands, polls, reactions, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, commands, economy, polls, reactions, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -744,7 +744,7 @@ pub(super) async fn insert_system(conn: &turso::Connection, message: &pb::Messag
 }
 
 /// Posts "someone joined" in the server's system channel, if it has one,
-/// inside the write that adds them.
+/// and pays the server's welcome reward, inside the write that adds them.
 pub(super) async fn post_join(
     conn: &turso::Connection,
     server: &pb::Server,
@@ -752,6 +752,7 @@ pub(super) async fn post_join(
     now: i64,
     events: &mut Vec<Payload>,
 ) -> Result<()> {
+    economy::earn(conn, &server.id, user_id, pb::CurrencyAction::Join, now, events).await?;
     if server.system_channel_id.is_empty() {
         return Ok(());
     }
@@ -1130,6 +1131,7 @@ impl Api {
                     }
                     threads::refresh(conn, &channel.id, &parent.id, events).await?;
                 }
+                economy::earn(conn, &sdb.id, &account.id, pb::CurrencyAction::Message, now, events).await?;
                 Ok(Ok(message))
             })
             .await?

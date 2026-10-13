@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 29] = [
+pub const KNOWN: [P; 31] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -43,6 +43,8 @@ pub const KNOWN: [P; 29] = [
     P::CreatePolls,
     P::AddReactions,
     P::Moderate,
+    P::ManageEconomy,
+    P::GrantCurrency,
 ];
 
 pub const ALL: Bits = {
@@ -90,6 +92,8 @@ pub const GROUPS: [(&str, &[P]); 5] = [
             P::ManageWebhooks,
             P::ManageServer,
             P::ViewAuditLog,
+            P::ManageEconomy,
+            P::GrantCurrency,
         ],
     ),
     (
@@ -181,6 +185,14 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         P::Moderate => (
             "Use Mod View",
             "See reports and what AutoMod caught, look into a member's messages and history, and keep notes about them. Acting on someone still takes its own permission.",
+        ),
+        P::ManageEconomy => (
+            "Manage economy",
+            "Make and change the server's currencies and how members earn them, run the shop, and see the finances with everyone's balances and history.",
+        ),
+        P::GrantCurrency => (
+            "Grant currency",
+            "Give currency to a member or a role, or take it away. Every grant goes in the audit log.",
         ),
     }
 }

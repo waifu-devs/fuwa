@@ -460,6 +460,17 @@ enum Permission {
   // with the server's moderators, and the moderators' notes about them.
   // Acting on someone still takes its own permission (KICK_MEMBERS...).
   PERMISSION_MODERATE = 29;
+
+  // Server-wide only.
+
+  // The server's economy (EconomyService, docs/economy.md): its currencies,
+  // how members earn them, its shop, and the finance page with every
+  // member's balance and history. Listing a role in the shop also takes
+  // MANAGE_ROLES and a rank above the role.
+  PERMISSION_MANAGE_ECONOMY = 30;
+  // Give currency to a member or a role, or take it away, with a reason
+  // that goes in the audit log. Also reads anyone's wallet.
+  PERMISSION_GRANT_CURRENCY = 31;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -1415,6 +1426,21 @@ message Event {
     // After a reconnect, apps list them again (LiveTileService.ListLiveTiles).
     LiveTileUpdated live_tile_updated = 42;
     LiveTileEnded live_tile_ended = 43;
+    // The economy (docs/economy.md). The server's currencies or shop
+    // changed: all of them, as they are now.
+    CurrenciesUpdated currencies_updated = 44;
+    ShopUpdated shop_updated = 45;
+    // One listing changed: bought (`sold` and `stock` moved).
+    ShopListingUpdated shop_listing_updated = 46;
+    // Only the person whose balance it is gets these.
+    BalanceUpdated balance_updated = 47;
+    // Everyone's balances may have changed at once (a grant to a role):
+    // apps holding a wallet read it again (EconomyService.GetWallet).
+    WalletsChanged wallets_changed = 48;
+    // Someone bought something. Only the buyer and members with
+    // MANAGE_ECONOMY get it, so agents can hand out what a custom listing
+    // promises.
+    PurchaseMade purchase_made = 49;
   }
 }
 
@@ -1810,4 +1836,174 @@ message ModNoteAdded {
 message ModNoteDeleted {
   string subject_id = 1;
   string note_id = 2;
+}
+
+// A server's own currency (docs/economy.md): coins, gems, points... with
+// its own name and icon, earned by what members do and spent in the shop.
+message Currency {
+  string id = 1;
+  string server_id = 2;
+  // 1 to 32 characters.
+  string name = 3;
+  // Its icon: a standard emoji's characters, or one of the server's custom
+  // emoji (`icon_emoji_id`), which wins when it's still there. Apps fall
+  // back to 🪙 when neither is.
+  string icon_emoji = 4;
+  string icon_emoji_id = 5;
+  // Up to 200 characters.
+  string description = 6;
+  // How members earn it: at most one rule per action.
+  repeated EarnRule earn = 7;
+  // Whether members may send it to each other (EconomyService.Transfer).
+  bool transferable = 8;
+  // Lower first.
+  int32 position = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+// What members do that a server rewards.
+enum CurrencyAction {
+  CURRENCY_ACTION_UNSPECIFIED = 0;
+  // Sending a message (not in secure channels, not commands' answers).
+  CURRENCY_ACTION_MESSAGE = 1;
+  // Pressing Claim once a UTC day (EconomyService.ClaimDaily).
+  CURRENCY_ACTION_DAILY = 2;
+  // Joining the server, once per person ever.
+  CURRENCY_ACTION_JOIN = 3;
+  // Finishing the server's onboarding, once per person ever.
+  CURRENCY_ACTION_ONBOARDING = 4;
+  // Someone else reacting to one of their messages.
+  CURRENCY_ACTION_REACTION_RECEIVED = 5;
+  // Each minute in a voice channel with someone else there, not deafened.
+  CURRENCY_ACTION_VOICE_MINUTE = 6;
+}
+
+// How much one action earns.
+message EarnRule {
+  CurrencyAction action = 1;
+  // 1 to 1,000,000,000.
+  int64 amount = 2;
+  // MESSAGE and REACTION_RECEIVED: the least time between two earnings,
+  // so spam doesn't pay. 0 for none, up to a day.
+  int32 cooldown_seconds = 3;
+  // The most this rule gives one person in a UTC day; 0 for no limit.
+  int64 daily_cap = 4;
+  // DAILY: added for each day in a row claimed after the first...
+  int64 streak_bonus = 5;
+  // ...up to this many days (0 for no streak bonus).
+  int32 streak_max_days = 6;
+}
+
+enum ShopListingKind {
+  SHOP_LISTING_KIND_UNSPECIFIED = 0;
+  // One of the server's roles, kept for good once bought (a manager can
+  // still take it away like any role).
+  SHOP_LISTING_KIND_ROLE = 1;
+  // One of the server's profile items. While an item is listed, only those
+  // who bought it may wear it in the server.
+  SHOP_LISTING_KIND_PROFILE_ITEM = 2;
+  // Anything else, by name: the server (or its agents, told by
+  // PurchaseMade) hands it out. May be bought again and again.
+  SHOP_LISTING_KIND_CUSTOM = 3;
+}
+
+// Something the shop sells.
+message ShopListing {
+  string id = 1;
+  string server_id = 2;
+  string currency_id = 3;
+  ShopListingKind kind = 4;
+  // The role's or profile item's id; empty for CUSTOM.
+  string target_id = 5;
+  // CUSTOM: 1 to 60 characters. Roles and items show their own name when
+  // this is empty.
+  string name = 6;
+  // Up to 200 characters.
+  string description = 7;
+  // 1 to 1,000,000,000,000.
+  int64 price = 8;
+  // How many are left; unset for no limit.
+  optional int64 stock = 9;
+  // How many have been bought.
+  int64 sold = 10;
+  // Lower first.
+  int32 position = 11;
+  // Members see and buy only listings that are available; managers see all.
+  bool available = 12;
+  google.protobuf.Timestamp created_at = 13;
+}
+
+// How much of one currency someone has.
+message Balance {
+  string currency_id = 1;
+  string user_id = 2;
+  int64 amount = 3;
+  // Everything they've ever earned, been given or been sent; and spent,
+  // had taken or sent away.
+  int64 earned = 4;
+  int64 spent = 5;
+  // Their daily claim: the last one, and how many days in a row.
+  google.protobuf.Timestamp daily_claimed_at = 6;
+  int32 daily_streak = 7;
+}
+
+enum LedgerKind {
+  LEDGER_KIND_UNSPECIFIED = 0;
+  // Earned by an action (`action`).
+  LEDGER_KIND_EARN = 1;
+  // Given (or taken, below zero) by `actor_id`, alone or through a role
+  // (`role_id`), with a reason (`note`). Audited.
+  LEDGER_KIND_GRANT = 2;
+  // Sent to (below zero) or received from `counterpart_id`.
+  LEDGER_KIND_TRANSFER = 3;
+  // Spent on `listing_id` (below zero).
+  LEDGER_KIND_PURCHASE = 4;
+}
+
+// One change to someone's balance.
+message LedgerEntry {
+  string id = 1;
+  string currency_id = 2;
+  // Whose balance it is.
+  string user_id = 3;
+  // Above zero in, below zero out.
+  int64 amount = 4;
+  int64 balance_after = 5;
+  LedgerKind kind = 6;
+  CurrencyAction action = 7;
+  string actor_id = 8;
+  string counterpart_id = 9;
+  string listing_id = 10;
+  string role_id = 11;
+  // A grant's reason or a transfer's note, up to 200 characters.
+  string note = 12;
+  google.protobuf.Timestamp created_at = 13;
+}
+
+message CurrenciesUpdated {
+  repeated Currency currencies = 1;
+}
+
+// Every listing, available or not: apps show members the available ones.
+message ShopUpdated {
+  repeated ShopListing listings = 1;
+}
+
+message ShopListingUpdated {
+  ShopListing listing = 1;
+}
+
+message BalanceUpdated {
+  Balance balance = 1;
+  // What changed it.
+  LedgerEntry entry = 2;
+}
+
+message WalletsChanged {
+  string currency_id = 1;
+}
+
+message PurchaseMade {
+  LedgerEntry entry = 1;
+  ShopListing listing = 2;
 }

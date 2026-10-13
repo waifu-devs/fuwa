@@ -84,6 +84,7 @@ struct Clients {
     live_tiles: pb::live_tile_service_client::LiveTileServiceClient<Channel>,
     profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
     moderation: pb::moderation_service_client::ModerationServiceClient<Channel>,
+    economy: pb::economy_service_client::EconomyServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -108,7 +109,8 @@ async fn clients(instance: &Instance) -> Clients {
         shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
         live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel.clone()),
         profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel.clone()),
-        moderation: pb::moderation_service_client::ModerationServiceClient::new(channel),
+        moderation: pb::moderation_service_client::ModerationServiceClient::new(channel.clone()),
+        economy: pb::economy_service_client::EconomyServiceClient::new(channel),
     }
 }
 
@@ -12090,5 +12092,430 @@ async fn mod_view_cases_reports_and_people() {
     let everyone = names(&find(&mika, "i").await.unwrap());
     assert_eq!(everyone.last().map(String::as_str), Some("kai"));
     assert!(everyone.contains(&"mika".to_string()) && everyone.contains(&"rin".to_string()));
+    instance.stop().await;
+}
+
+fn earn(action: pb::CurrencyAction, amount: i64) -> pb::EarnRule {
+    pb::EarnRule { action: action as i32, amount, ..Default::default() }
+}
+
+async fn wallet(c: &mut Clients, token: &str, server_id: &str, user_id: &str) -> Result<pb::GetWalletResponse, Code> {
+    let request = pb::GetWalletRequest { server_id: server_id.into(), user_id: user_id.into() };
+    c.economy.get_wallet(authed(token, request)).await.map(|r| r.into_inner()).map_err(|s| s.code())
+}
+
+/// How much of the server's first currency someone holds.
+async fn coins(c: &mut Clients, token: &str, server_id: &str) -> i64 {
+    wallet(c, token, server_id, "").await.unwrap().balances[0].amount
+}
+
+async fn buy(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    listing: &pb::ShopListing,
+    price: i64,
+) -> Result<i64, Code> {
+    let request = pb::BuyRequest { server_id: server_id.into(), listing_id: listing.id.clone(), expected_price: price };
+    c.economy.buy(authed(token, request)).await.map(|r| r.into_inner().balance.unwrap().amount).map_err(|s| s.code())
+}
+
+async fn list_item(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    listing: pb::NewShopListing,
+) -> Result<pb::ShopListing, Code> {
+    let request = pb::CreateShopListingRequest { server_id: server_id.into(), listing: Some(listing) };
+    c.economy
+        .create_shop_listing(authed(token, request))
+        .await
+        .map(|r| r.into_inner().listing.unwrap())
+        .map_err(|s| s.code())
+}
+
+async fn grant(c: &mut Clients, token: &str, request: pb::GrantRequest) -> Result<pb::GrantResponse, Code> {
+    c.economy.grant(authed(token, request)).await.map(|r| r.into_inner()).map_err(|s| s.code())
+}
+
+/// The economy events in a server's log, as one member is shown them.
+async fn economy_events(c: &mut Clients, token: &str, server_id: &str) -> Vec<Payload> {
+    let request = pb::ListEventsRequest { server_id: server_id.into(), after_sequence: 0, limit: 500 };
+    c.events
+        .list_events(authed(token, request))
+        .await
+        .unwrap()
+        .into_inner()
+        .events
+        .into_iter()
+        .filter_map(|e| e.payload)
+        .filter(|p| {
+            matches!(
+                p,
+                Payload::CurrenciesUpdated(_)
+                    | Payload::ShopUpdated(_)
+                    | Payload::ShopListingUpdated(_)
+                    | Payload::BalanceUpdated(_)
+                    | Payload::WalletsChanged(_)
+                    | Payload::PurchaseMade(_)
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn economy_currencies_earning_shop_and_grants() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (economy, servers) = (c.economy.clone(), c.servers.clone());
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    let sid = create_server(&mut c, &juan, "Market", true).await.id;
+    for token in [&mika, &rin] {
+        join(&mut c, token, &sid).await;
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap()
+        .id;
+
+    // Only Manage Economy makes currencies, and their rules are checked.
+    let coin = |earn: Vec<pb::EarnRule>| pb::CreateCurrencyRequest {
+        server_id: sid.clone(),
+        currency: Some(pb::CurrencyChange {
+            name: Some("Coins".into()),
+            icon_emoji: Some("🪙".into()),
+            replace_earn: true,
+            earn,
+            ..Default::default()
+        }),
+    };
+    let refused = c.economy.create_currency(authed(&rin, coin(vec![]))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let twice = vec![earn(pb::CurrencyAction::Join, 5), earn(pb::CurrencyAction::Join, 6)];
+    let refused = c.economy.create_currency(authed(&juan, coin(twice))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let nothing = vec![earn(pb::CurrencyAction::Message, 0)];
+    let refused = c.economy.create_currency(authed(&juan, coin(nothing))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let rules = vec![
+        pb::EarnRule { cooldown_seconds: 3600, ..earn(pb::CurrencyAction::Message, 5) },
+        pb::EarnRule {
+            streak_bonus: 2,
+            streak_max_days: 5,
+            cooldown_seconds: 9,
+            ..earn(pb::CurrencyAction::Daily, 10)
+        },
+        earn(pb::CurrencyAction::Join, 50),
+        pb::EarnRule { daily_cap: 2, ..earn(pb::CurrencyAction::ReactionReceived, 1) },
+    ];
+    let currency = c.economy.create_currency(authed(&juan, coin(rules))).await.unwrap().into_inner().currency.unwrap();
+    assert_eq!(currency.name, "Coins");
+    assert_eq!(currency.earn.len(), 4);
+    // Fields that mean nothing for an action are dropped.
+    let daily = currency.earn.iter().find(|r| r.action == pb::CurrencyAction::Daily as i32).unwrap();
+    assert_eq!((daily.cooldown_seconds, daily.streak_bonus), (0, 2));
+    let listed = c
+        .economy
+        .list_currencies(authed(&rin, pb::ListCurrenciesRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .currencies;
+    assert_eq!(listed, vec![currency.clone()]);
+
+    // Joining pays once, ever.
+    join(&mut c, &kai, &sid).await;
+    assert_eq!(coins(&mut c, &kai, &sid).await, 50);
+    c.servers.leave_server(authed(&kai, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
+    join(&mut c, &kai, &sid).await;
+    assert_eq!(coins(&mut c, &kai, &sid).await, 50);
+    // Those who joined before there was a rule got nothing.
+    assert_eq!(coins(&mut c, &rin, &sid).await, 0);
+
+    // A message pays, then not again during the cooldown.
+    let hello = send(&mut c, &rin, &sid, &general, "hello").await.unwrap();
+    send(&mut c, &rin, &sid, &general, "hello again").await.unwrap();
+    assert_eq!(coins(&mut c, &rin, &sid).await, 5);
+    // Others' reactions pay the author, up to the daily cap; your own don't.
+    react(&mut c, &rin, &sid, &general, &hello.id, "👍", true).await.unwrap();
+    assert_eq!(coins(&mut c, &rin, &sid).await, 5);
+    for (token, emoji) in [(&mika, "👍"), (&kai, "👍"), (&juan, "🎉")] {
+        react(&mut c, token, &sid, &general, &hello.id, emoji, true).await.unwrap();
+    }
+    assert_eq!(coins(&mut c, &rin, &sid).await, 7);
+
+    // The daily reward, once a day.
+    let claim = pb::ClaimDailyRequest { server_id: sid.clone(), currency_id: currency.id.clone() };
+    let claimed = c.economy.claim_daily(authed(&rin, claim.clone())).await.unwrap().into_inner();
+    let balance = claimed.balance.unwrap();
+    assert_eq!((balance.amount, balance.daily_streak), (17, 1));
+    assert!(balance.daily_claimed_at.is_some());
+    assert_eq!(claimed.entry.unwrap().action(), pb::CurrencyAction::Daily);
+    let again = c.economy.claim_daily(authed(&rin, claim.clone())).await;
+    assert_eq!(again.unwrap_err().code(), Code::FailedPrecondition);
+
+    // Sending it needs the currency to allow it, and enough of it.
+    let send_coins = |amount: i64, to: &str| pb::TransferRequest {
+        server_id: sid.clone(),
+        currency_id: currency.id.clone(),
+        user_id: to.into(),
+        amount,
+        note: "thanks!".into(),
+    };
+    let refused = c.economy.transfer(authed(&rin, send_coins(3, &mika_user.id))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::FailedPrecondition);
+    let transferable = pb::UpdateCurrencyRequest {
+        server_id: sid.clone(),
+        currency_id: currency.id.clone(),
+        change: Some(pb::CurrencyChange { transferable: Some(true), ..Default::default() }),
+    };
+    c.economy.update_currency(authed(&juan, transferable)).await.unwrap();
+    let sent = c.economy.transfer(authed(&rin, send_coins(3, &mika_user.id))).await.unwrap().into_inner();
+    assert_eq!(sent.balance.unwrap().amount, 14);
+    assert_eq!(sent.entry.unwrap().amount, -3);
+    assert_eq!(coins(&mut c, &mika, &sid).await, 3);
+    let too_much = c.economy.transfer(authed(&rin, send_coins(100, &mika_user.id))).await;
+    assert_eq!(too_much.unwrap_err().code(), Code::FailedPrecondition);
+    let to_self = c.economy.transfer(authed(&rin, send_coins(1, &rin_user.id))).await;
+    assert_eq!(to_self.unwrap_err().code(), Code::InvalidArgument);
+
+    // Wallets are private.
+    assert_eq!(wallet(&mut c, &mika, &sid, &rin_user.id).await.unwrap_err(), Code::PermissionDenied);
+    assert_eq!(wallet(&mut c, &juan, &sid, &rin_user.id).await.unwrap().balances[0].amount, 14);
+
+    // The shop: roles that moderate or manage can't be sold.
+    let vip = create_role(&mut c, &juan, &sid, "VIP", &[pb::Permission::AttachFiles]).await.unwrap();
+    let mods = create_role(&mut c, &juan, &sid, "Mods", &[pb::Permission::KickMembers]).await.unwrap();
+    let for_sale = |kind: pb::ShopListingKind, target: &str, price: i64| pb::NewShopListing {
+        currency_id: currency.id.clone(),
+        kind: kind as i32,
+        target_id: target.into(),
+        price,
+        available: true,
+        ..Default::default()
+    };
+    let refused = list_item(&mut c, &juan, &sid, for_sale(pb::ShopListingKind::Role, &mods.id, 5)).await;
+    assert_eq!(refused.unwrap_err(), Code::FailedPrecondition);
+    let refused = list_item(&mut c, &rin, &sid, for_sale(pb::ShopListingKind::Role, &vip.id, 10)).await;
+    assert_eq!(refused.unwrap_err(), Code::PermissionDenied);
+    let vip_listing = list_item(&mut c, &juan, &sid, for_sale(pb::ShopListingKind::Role, &vip.id, 10)).await.unwrap();
+    let nameless = list_item(&mut c, &juan, &sid, for_sale(pb::ShopListingKind::Custom, "", 2)).await;
+    assert_eq!(nameless.unwrap_err(), Code::InvalidArgument);
+    let shoutout =
+        pb::NewShopListing { name: "Shoutout".into(), stock: Some(1), ..for_sale(pb::ShopListingKind::Custom, "", 2) };
+    let shoutout = list_item(&mut c, &juan, &sid, shoutout).await.unwrap();
+    let hidden =
+        pb::NewShopListing { name: "Secret".into(), available: false, ..for_sale(pb::ShopListingKind::Custom, "", 1) };
+    let hidden = list_item(&mut c, &juan, &sid, hidden).await.unwrap();
+    let shop = |token: &str| {
+        let mut economy = economy.clone();
+        let request = authed(token, pb::ListShopRequest { server_id: sid.clone() });
+        async move { economy.list_shop(request).await.unwrap().into_inner().listings }
+    };
+    assert_eq!(shop(&rin).await.len(), 3);
+    assert_eq!(buy(&mut c, &rin, &sid, &hidden, 1).await.unwrap_err(), Code::NotFound);
+
+    // A price that changed is never paid unseen; a role is bought once.
+    assert_eq!(buy(&mut c, &rin, &sid, &vip_listing, 9).await.unwrap_err(), Code::FailedPrecondition);
+    assert_eq!(buy(&mut c, &rin, &sid, &vip_listing, 10).await.unwrap(), 4);
+    let member = c
+        .servers
+        .list_members(authed(&rin, pb::ListMembersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members
+        .into_iter()
+        .find(|m| m.user.as_ref().is_some_and(|u| u.id == rin_user.id))
+        .unwrap();
+    assert!(member.role_ids.contains(&vip.id));
+    assert_eq!(buy(&mut c, &rin, &sid, &vip_listing, 10).await.unwrap_err(), Code::AlreadyExists);
+    // Stock runs out.
+    assert_eq!(buy(&mut c, &mika, &sid, &shoutout, 2).await.unwrap(), 1);
+    assert_eq!(buy(&mut c, &kai, &sid, &shoutout, 2).await.unwrap_err(), Code::FailedPrecondition);
+    let sold = shop(&kai).await.into_iter().find(|l| l.id == shoutout.id).unwrap();
+    assert_eq!((sold.sold, sold.stock), (1, Some(0)));
+
+    // A profile item for sale is worn only by those who bought it.
+    let petals = c
+        .profile_items
+        .create_server_profile_item(authed(
+            &juan,
+            pb::CreateServerProfileItemRequest { server_id: sid.clone(), item: Some(new_effect("Petals")) },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    let petals_listing =
+        list_item(&mut c, &juan, &sid, for_sale(pb::ShopListingKind::ProfileItem, &petals.id, 4)).await.unwrap();
+    let wear = |token: &str| {
+        let mut servers = servers.clone();
+        let request = authed(
+            token,
+            pb::UpdateMemberRequest { server_id: sid.clone(), effect: Some(petals.id.clone()), ..Default::default() },
+        );
+        async move { servers.update_member(request).await.map_err(|s| s.code()) }
+    };
+    assert_eq!(wear(&rin).await.unwrap_err(), Code::FailedPrecondition);
+    assert_eq!(buy(&mut c, &rin, &sid, &petals_listing, 4).await.unwrap(), 0);
+    assert_eq!(wallet(&mut c, &rin, &sid, "").await.unwrap().owned_item_ids, vec![petals.id.clone()]);
+    wear(&rin).await.unwrap();
+    // Not enough left for anything.
+    assert_eq!(buy(&mut c, &kai, &sid, &petals_listing, 4).await.unwrap(), 46);
+    assert_eq!(buy(&mut c, &mika, &sid, &petals_listing, 4).await.unwrap_err(), Code::FailedPrecondition);
+
+    // Grants: Grant Currency only, audited, and taking stops at zero.
+    let to = |user_id: &str, role_id: &str, amount: i64| pb::GrantRequest {
+        server_id: sid.clone(),
+        currency_id: currency.id.clone(),
+        user_id: user_id.into(),
+        role_id: role_id.into(),
+        amount,
+        reason: "event prize".into(),
+    };
+    assert_eq!(grant(&mut c, &rin, to(&mika_user.id, "", 5)).await.unwrap_err(), Code::PermissionDenied);
+    let granted = grant(&mut c, &juan, to(&mika_user.id, "", 100)).await.unwrap();
+    assert_eq!((granted.people, granted.total), (1, 100));
+    let taken = grant(&mut c, &juan, to(&mika_user.id, "", -1000)).await.unwrap();
+    assert_eq!((taken.people, taken.total), (1, -101));
+    assert_eq!(coins(&mut c, &mika, &sid).await, 0);
+    assert_eq!(grant(&mut c, &juan, to(&mika_user.id, &vip.id, 1)).await.unwrap_err(), Code::InvalidArgument);
+    // To everyone with a role (the server's id for @everyone).
+    let everyone = grant(&mut c, &juan, to("", &sid, 7)).await.unwrap();
+    assert_eq!((everyone.people, everyone.total), (4, 28));
+    assert_eq!(coins(&mut c, &rin, &sid).await, 7);
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let grants: Vec<_> = log.entries.iter().filter(|e| e.action() == pb::AuditAction::CurrencyGrant).collect();
+    assert_eq!(grants.len(), 3);
+    assert!(grants.iter().all(|e| e.reason == "event prize"));
+    assert!(grants.iter().any(|e| e.target_id == sid && e.role_name == "@everyone"));
+
+    // Someone with Grant Currency (an agent, say) needs no other permission.
+    let bank = create_role(&mut c, &juan, &sid, "Bank", &[pb::Permission::GrantCurrency]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &bank.id).await.unwrap();
+    grant(&mut c, &mika, to(&rin_user.id, "", 1)).await.unwrap();
+    assert_eq!(wallet(&mut c, &mika, &sid, &rin_user.id).await.unwrap().balances[0].amount, 8);
+
+    // The ledger: your own, or everyone's with Manage Economy.
+    let ledger = |token: &str, user_id: &str| {
+        let mut economy = economy.clone();
+        let request = authed(
+            token,
+            pb::ListLedgerRequest { server_id: sid.clone(), user_id: user_id.into(), limit: 100, ..Default::default() },
+        );
+        async move { economy.list_ledger(request).await.map(|r| r.into_inner()).map_err(|s| s.code()) }
+    };
+    let own = ledger(&rin, "").await.unwrap().entries;
+    assert!(own.iter().all(|e| e.user_id == rin_user.id));
+    assert_eq!(own[0].kind(), pb::LedgerKind::Grant);
+    assert_eq!(own[0].actor_id, mika_user.id);
+    assert_eq!(ledger(&rin, "*").await.unwrap_err(), Code::PermissionDenied);
+    let everything = ledger(&juan, "*").await.unwrap();
+    assert!(everything.entries.len() > own.len());
+    assert!(everything.users.iter().any(|u| u.id == kai_user.id));
+    let page = c
+        .economy
+        .list_ledger(authed(&rin, pb::ListLedgerRequest { server_id: sid.clone(), limit: 2, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(page.has_more);
+    let next = c
+        .economy
+        .list_ledger(authed(
+            &rin,
+            pb::ListLedgerRequest {
+                server_id: sid.clone(),
+                limit: 2,
+                before_id: page.entries[1].id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(next.entries[0].id, own[2].id);
+
+    // The finance page.
+    let overview = c
+        .economy
+        .get_economy_overview(authed(
+            &juan,
+            pb::GetEconomyOverviewRequest { server_id: sid.clone(), currency_id: currency.id.clone(), days: 7 },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .overview
+        .unwrap();
+    assert_eq!(overview.days.len(), 7);
+    assert_eq!(overview.purchases, 4);
+    assert_eq!(overview.spent, 10 + 2 + 4 + 4);
+    assert_eq!(overview.earned, 50 + 5 + 2 + 10);
+    assert_eq!((overview.granted, overview.taken), (100 + 28 + 1, 101));
+    assert_eq!(overview.circulating, overview.top_holders.iter().map(|p| p.amount).sum::<i64>());
+    assert_eq!(overview.top_listings[0].listing_id, petals_listing.id);
+    assert_eq!(overview.top_spenders[0].user_id, rin_user.id);
+    let by_action: Vec<i32> = overview.earned_by_action.iter().map(|a| a.action).collect();
+    assert_eq!(by_action[0], pb::CurrencyAction::Join as i32);
+    let refused = c
+        .economy
+        .get_economy_overview(authed(
+            &mika,
+            pb::GetEconomyOverviewRequest { server_id: sid.clone(), currency_id: currency.id.clone(), days: 7 },
+        ))
+        .await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+
+    // Balances and purchases reach only whose they are (and managers).
+    let seen = economy_events(&mut c, &kai, &sid).await;
+    assert!(seen.iter().any(|p| matches!(p, Payload::WalletsChanged(_))));
+    for payload in &seen {
+        match payload {
+            Payload::BalanceUpdated(b) => {
+                assert_eq!(b.balance.as_ref().unwrap().user_id, b.entry.as_ref().unwrap().user_id)
+            }
+            Payload::PurchaseMade(p) => assert_ne!(p.entry.as_ref().unwrap().user_id, rin_user.id),
+            _ => {}
+        }
+    }
+    assert!(
+        !seen
+            .iter()
+            .any(|p| matches!(p, Payload::BalanceUpdated(b) if b.balance.as_ref().unwrap().user_id == rin_user.id))
+    );
+    let managed = economy_events(&mut c, &juan, &sid).await;
+    assert_eq!(managed.iter().filter(|p| matches!(p, Payload::PurchaseMade(_))).count(), 4);
+
+    // A role or item that goes takes its listing along.
+    c.roles
+        .delete_role(authed(&juan, pb::DeleteRoleRequest { server_id: sid.clone(), role_id: vip.id.clone() }))
+        .await
+        .unwrap();
+    assert!(shop(&juan).await.iter().all(|l| l.id != vip_listing.id));
+    // Deleting the currency takes everything in it.
+    c.economy
+        .delete_currency(authed(
+            &juan,
+            pb::DeleteCurrencyRequest { server_id: sid.clone(), currency_id: currency.id.clone() },
+        ))
+        .await
+        .unwrap();
+    assert!(shop(&juan).await.is_empty());
+    assert!(wallet(&mut c, &rin, &sid, "").await.unwrap().balances.is_empty());
+    assert!(ledger(&juan, "*").await.unwrap().entries.is_empty());
     instance.stop().await;
 }

@@ -9,6 +9,7 @@ mod calls;
 mod channels;
 mod commands;
 mod dms;
+mod economy;
 mod emoji;
 mod endpoints;
 mod events;
@@ -39,6 +40,8 @@ mod webhooks;
 
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
+pub(crate) use economy::forget_account as forget_economy;
+pub use economy::spawn_voice_earnings;
 pub use endpoints::{ENDPOINT_GIVE_UP_AFTER, spawn_agent_deliveries};
 pub use live_tiles::{LIVE_TILE_PUBLISH_MS, LIVE_TILE_UPDATES_PER_MINUTE};
 pub use media::PictureOwner;

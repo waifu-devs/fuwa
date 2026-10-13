@@ -374,5 +374,7 @@
   "decorations.hint": "A picture around your avatar, wherever it shows on this instance. These are the ones it offers.",
   "serverProfiles.useMine": "Use my profile's",
   "serverProfiles.effectHint": "Plays on your card in this server instead of your profile's effect. The server may offer its own.",
-  "serverProfiles.decorationHint": "Shows around your avatar in this server instead of your profile's."
+  "serverProfiles.decorationHint": "Shows around your avatar in this server instead of your profile's.",
+  "serverProfiles.forSale": "{name} is for sale in the server's shop",
+  "serverProfiles.notForSale": "Not for sale"
 }

@@ -244,6 +244,7 @@ impl RoleService for Api {
                     .await?;
                     events.push(Payload::RoleDeleted(pb::RoleDeleted { role_id: role.id.clone() }));
                     shift(conn, &sdb.id, role.position + 1, -1, now_ms(), events).await?;
+                    super::economy::unlist(conn, &sdb.id, pb::ShopListingKind::Role, &role.id, events).await?;
                     store::audit(conn, &account.id, Audit::new(pb::AuditAction::RoleDelete, &role.id).role(&role.name))
                         .await
                 })

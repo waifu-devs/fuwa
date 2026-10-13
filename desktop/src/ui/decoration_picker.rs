@@ -29,6 +29,7 @@ impl SettingsView {
         me: &pb::User,
         items: &[pb::ProfileItem],
         none_label: Option<String>,
+        locked: &HashMap<String, String>,
         ready: bool,
         width: f32,
         p: &Palette,
@@ -101,6 +102,12 @@ impl SettingsView {
                     square = square
                         .child(div().absolute().inset_0().rounded(radius_xl()).border_2().border_color(p.primary));
                 }
+                // Sold in the server's shop and not bought: a padlock and its price, and no picking.
+                let lock = locked.get(id).filter(|_| !active);
+                if let Some(price) = lock {
+                    square = square.child(lock_badge(price, radius_xl(), p));
+                }
+                let open = lock.is_none();
                 let pick_id = id.clone();
                 let fg = p.foreground;
                 row = row.child(
@@ -116,10 +123,13 @@ impl SettingsView {
                         .rounded(radius_2xl())
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .hover(|s| s.translate_y(px(-3.0)))
-                        .active(|s| s.scale(0.95))
-                        .on_click(cx.listener(move |this, _, _, cx| pick(this, pick_id.clone(), cx)))
+                        .when(open, |el| {
+                            el.cursor_pointer()
+                                .hover(|s| s.translate_y(px(-3.0)))
+                                .active(|s| s.scale(0.95))
+                                .on_click(cx.listener(move |this, _, _, cx| pick(this, pick_id.clone(), cx)))
+                        })
+                        .when(!open, |el| el.cursor_not_allowed())
                         .child(square)
                         .child(
                             div()
@@ -137,6 +147,45 @@ impl SettingsView {
         }
         rows.child(ring).into_any_element()
     }
+}
+
+/// Over a tile sold in the server's shop that you haven't bought: dimmed,
+/// with a padlock and what it costs.
+pub(crate) fn lock_badge(price: &str, radius: gpui_kit::Pixels, p: &Palette) -> AnyElement {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded(radius)
+        .bg(crate::ui::theme::alpha(p.background, 0.55))
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(4.0))
+        .child(
+            div()
+                .size(px(26.0))
+                .rounded_full()
+                .bg(p.card)
+                .shadow(crate::ui::settings_controls::shadow_sm())
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(p.muted_foreground)
+                .child(icon("lock").size(px(14.0))),
+        )
+        .child(
+            div()
+                .px(px(6.0))
+                .rounded_full()
+                .bg(p.card)
+                .text_xs()
+                .font_weight(FontWeight::EXTRA_BOLD)
+                .text_color(p.foreground)
+                .whitespace_nowrap()
+                .child(price.to_owned()),
+        )
+        .into_any_element()
 }
 
 /// Where each picker's ring last was, and when it moved.

@@ -205,6 +205,18 @@ through the cases with `agent.api.moderation` (`listModCases`,
 `getModCase`, `updateModCase`, `getMemberOverview`...), and gets
 `modCaseUpdated` events; the MCP server has the same calls as tools.
 
+### Currencies and the shop
+
+A server's economy ([docs/economy.md](economy.md)) is `agent.api.economy`.
+An agent given Grant Currency hands out rewards with
+`agent.grant({ serverId, userId }, currencyId, 10, "won the quiz")` (to a
+role with `roleId`; below zero takes), and reads anyone's balances with
+`agent.wallet(serverId, userId)`. With Manage Economy it gets
+`purchaseMade` for everything bought, to hand out what a custom listing
+promises; everyone gets `balanceUpdated` for their own balance. Agents
+never earn by what they do in a server, but can hold, send and spend
+currency like anyone.
+
 ### Typed events
 
 Every event kind has a handler named after its payload, with that payload's

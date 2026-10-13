@@ -85,6 +85,13 @@ pub(crate) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'stati
         A::ModCaseUpdate => ("shield-check", violet, "modCaseUpdate"),
         A::ModNoteAdd => ("notebook-pen", sky, "modNoteAdd"),
         A::ModNoteDelete => ("notebook", red, "modNoteDelete"),
+        A::CurrencyCreate => ("coins", green, "currencyCreate"),
+        A::CurrencyUpdate => ("coins", sky, "currencyUpdate"),
+        A::CurrencyDelete => ("coins", red, "currencyDelete"),
+        A::ShopListingCreate => ("store", green, "listingCreate"),
+        A::ShopListingUpdate => ("store", sky, "listingUpdate"),
+        A::ShopListingDelete => ("store", red, "listingDelete"),
+        A::CurrencyGrant => ("hand-coins", amber, "currencyGrant"),
     };
     (glyph, bg, fg, key)
 }
@@ -95,8 +102,21 @@ pub(crate) fn kind_label(action: A, p: &Palette) -> String {
         A::ModCaseUpdate | A::ModNoteAdd | A::ModNoteDelete => {
             t(&format!("desktop.modView.audit.kind.{}", kind(action, p).3))
         }
+        // The economy's, likewise.
+        A::CurrencyCreate
+        | A::CurrencyUpdate
+        | A::CurrencyDelete
+        | A::ShopListingCreate
+        | A::ShopListingUpdate
+        | A::ShopListingDelete
+        | A::CurrencyGrant => t(&format!("desktop.economy.audit.kind.{}", kind(action, p).3)),
         _ => t(&format!("serversettings.audit.kind.{}", kind(action, p).3)),
     }
+}
+
+/// Whether an entry is about a shop listing.
+fn economy_listing(action: A) -> bool {
+    matches!(action, A::ShopListingCreate | A::ShopListingUpdate | A::ShopListingDelete)
 }
 
 impl ServerSettingsView {
@@ -286,7 +306,12 @@ impl ServerSettingsView {
         let (glyph, bg, fg, _) = kind(action, p);
         let actor = self.audit_people.get(&entry.actor_id);
         let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
-        let details: Vec<&pb::AuditChange> = entry.changes.iter().filter(|c| c.field != "deleted_messages").collect();
+        // A listing's "target" is the id of the role or item it sells, which says nothing on its own.
+        let details: Vec<&pb::AuditChange> = entry
+            .changes
+            .iter()
+            .filter(|c| c.field != "deleted_messages" && !(c.field == "target" && economy_listing(action)))
+            .collect();
         let expandable = !details.is_empty() || !entry.reason.is_empty();
         let open = expandable && self.audit_open.as_deref() == Some(entry.id.as_str());
         let id = entry.id.clone();

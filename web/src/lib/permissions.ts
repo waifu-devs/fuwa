@@ -50,6 +50,8 @@ export const KNOWN: P[] = [
   P.CREATE_POLLS,
   P.ADD_REACTIONS,
   P.MODERATE,
+  P.MANAGE_ECONOMY,
+  P.GRANT_CURRENCY,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -95,8 +97,38 @@ export const TALK: Bits = [
   0,
 );
 
+/**
+ * What a role anyone can get by themselves may never carry, as the server
+ * checks it: one picked in onboarding, or bought in the shop. Those are
+ * for roles that only look and open channels.
+ */
+export const POWERS: Bits = [
+  P.ADMINISTRATOR,
+  P.MANAGE_SERVER,
+  P.MANAGE_ROLES,
+  P.MANAGE_CHANNELS,
+  P.MANAGE_EMOJI,
+  P.MANAGE_WEBHOOKS,
+  P.MANAGE_MESSAGES,
+  P.MENTION_EVERYONE,
+  P.VIEW_AUDIT_LOG,
+  P.KICK_MEMBERS,
+  P.BAN_MEMBERS,
+  P.TIME_OUT_MEMBERS,
+  P.MANAGE_NICKNAMES,
+  P.MUTE_MEMBERS,
+  P.MOVE_MEMBERS,
+  P.RECORD,
+  P.MODERATE,
+  P.MANAGE_ECONOMY,
+  P.GRANT_CURRENCY,
+].reduce((bits, p) => bits | bit(p), 0);
+
 export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), 0);
 export const toList = (bits: Bits): P[] => KNOWN.filter((p) => bits & bit(p));
+
+/** Whether anyone may get a role by themselves (onboarding, the shop): it carries none of the `POWERS`. */
+export const harmless = (role: Pick<Role, "permissions">) => (fromList(role.permissions) & POWERS) === 0;
 
 /** A permission's name, what it does, and (`channel`) what it does in one channel's settings where that reads differently; catalog keys (serversettings.permission.*). */
 type PermissionInfo = { label: Key; about: Key; channel?: Key };
@@ -168,6 +200,8 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
   },
   [P.MANAGE_WEBHOOKS]: { label: "serversettings.permission.manageWebhooks", about: "serversettings.permission.manageWebhooksAbout" },
   [P.MODERATE]: { label: "serversettings.permission.moderate", about: "serversettings.permission.moderateAbout" },
+  [P.MANAGE_ECONOMY]: { label: "serversettings.permission.manageEconomy", about: "serversettings.permission.manageEconomyAbout" },
+  [P.GRANT_CURRENCY]: { label: "serversettings.permission.grantCurrency", about: "serversettings.permission.grantCurrencyAbout" },
 };
 
 /** A known permission's catalog keys (every permission the settings pages list is one). */
@@ -193,6 +227,7 @@ export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
     permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "serversettings.permission.group.economy", permissions: [P.MANAGE_ECONOMY, P.GRANT_CURRENCY] },
   { title: "serversettings.permission.group.advanced", permissions: [P.ADMINISTRATOR] },
 ];
 
