@@ -1,4 +1,4 @@
-import { CheckIcon, FileJsonIcon, ImagePlusIcon, LoaderCircleIcon, PencilIcon, SparklesIcon, Trash2Icon, WandIcon, XIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, DownloadIcon, FileJsonIcon, ImagePlusIcon, LoaderCircleIcon, PencilIcon, SparklesIcon, Trash2Icon, WandIcon, WandSparklesIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -7,7 +7,7 @@ import { createProfileItem, deleteProfileItem, loadInstanceProfileItems, run, up
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
-import { Count } from "@/components/motion";
+import { Count, SwapText } from "@/components/motion";
 import { DecorationImage } from "@/components/ProfileDecoration";
 import { ProfileEffect } from "@/components/ProfileEffect";
 import { cardColor, MiniCard } from "@/components/settings/account/EffectPicker";
@@ -15,11 +15,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { type Key, useI18n } from "@/i18n/react";
-import type { ProfileEffectSpec } from "@/lib/effects/profile";
+import { BUILTIN_EFFECTS, type ProfileEffectSpec } from "@/lib/effects/profile";
+import { effectKeys } from "@/lib/effects/text";
 import { formatBytes } from "@/lib/format";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PICTURE_TYPES } from "@/lib/pictures";
-import { checkEffectText, ITEM_DECORATION, ITEM_EFFECT, itemEffect, itemsOfKind, nameFromFile, type EffectProblem } from "@/lib/profile-items";
+import {
+  checkEffectText,
+  DECORATION_DOCS,
+  DECORATION_PROMPT,
+  EFFECT_DOCS,
+  EFFECT_PROMPT,
+  ITEM_DECORATION,
+  ITEM_EFFECT,
+  itemEffect,
+  itemsOfKind,
+  nameFromFile,
+  starterText,
+  TEMPLATE_AVATAR,
+  TEMPLATE_SIZE,
+  type EffectProblem,
+} from "@/lib/profile-items";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -98,41 +114,54 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted-foreground">{t(serverId ? "serversettings.profileItems.introServer" : "serversettings.profileItems.introInstance")}</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <motion.button
-          type="button"
-          animate={shake}
-          whileHover={{ y: -2 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => input.current?.click()}
-          {...drop}
-          className={cn(
-            "group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed p-5 text-center transition-colors",
-            dragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5",
-          )}
-        >
-          <motion.span
-            animate={dragging ? { scale: 1.2, rotate: -12, y: -4 } : { scale: 1, rotate: 0, y: 0 }}
-            transition={{ type: "spring", stiffness: 500, damping: 14 }}
-            className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary"
+        <div className="flex flex-col gap-2">
+          <motion.button
+            type="button"
+            animate={shake}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => input.current?.click()}
+            {...drop}
+            className={cn(
+              "group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed p-5 text-center transition-colors",
+              dragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5",
+            )}
           >
-            <ImagePlusIcon className="size-5 transition group-hover:rotate-12" />
-          </motion.span>
-          <span className="font-extrabold">{dragging ? t("serversettings.emoji.letGo") : t("serversettings.profileItems.addDecoration")}</span>
-          <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addDecorationHint")}</span>
-        </motion.button>
-        <motion.button
-          type="button"
-          whileHover={{ y: -2 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => setDraft({ kind: "effect" })}
-          className="group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed border-border p-5 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
-        >
-          <span className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary">
-            <SparklesIcon className="size-5 transition group-hover:scale-110 group-hover:-rotate-12" />
-          </span>
-          <span className="font-extrabold">{t("serversettings.profileItems.addEffect")}</span>
-          <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addEffectHint")}</span>
-        </motion.button>
+            <motion.span
+              animate={dragging ? { scale: 1.2, rotate: -12, y: -4 } : { scale: 1, rotate: 0, y: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 14 }}
+              className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary"
+            >
+              <ImagePlusIcon className="size-5 transition group-hover:rotate-12" />
+            </motion.span>
+            <span className="font-extrabold">{dragging ? t("serversettings.emoji.letGo") : t("serversettings.profileItems.addDecoration")}</span>
+            <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addDecorationHint")}</span>
+          </motion.button>
+          <Helpers>
+            <TemplateButton />
+            <CopyPrompt text={DECORATION_PROMPT} hint={t("serversettings.profileItems.askAiDecorationHint")} />
+            <GuideLink href={DECORATION_DOCS} />
+          </Helpers>
+        </div>
+        <div className="flex flex-col gap-2">
+          <motion.button
+            type="button"
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setDraft({ kind: "effect" })}
+            className="group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed border-border p-5 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary">
+              <SparklesIcon className="size-5 transition group-hover:scale-110 group-hover:-rotate-12" />
+            </span>
+            <span className="font-extrabold">{t("serversettings.profileItems.addEffect")}</span>
+            <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addEffectHint")}</span>
+          </motion.button>
+          <Helpers>
+            <CopyPrompt text={EFFECT_PROMPT} hint={t("serversettings.profileItems.askAiEffectHint")} />
+            <GuideLink href={EFFECT_DOCS} />
+          </Helpers>
+        </div>
       </div>
       <input
         ref={input}
@@ -352,6 +381,14 @@ function NewEffect({ instanceKey, serverId, me, onDone }: { instanceKey: string;
 
   return (
     <DraftPanel title={t("serversettings.profileItems.newEffect")} error={error} busy={busy} canAdd={"spec" in checked && !!name.trim()} onAdd={() => void add()} onCancel={onDone}>
+      <Starters
+        disabled={busy}
+        onPick={(spec, starterName) => {
+          setText(spec);
+          setError(null);
+          if (!name.trim()) setName(starterName);
+        }}
+      />
       <EffectSource
         text={text}
         me={me}
@@ -418,6 +455,8 @@ function EffectSource({
           <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={disabled} onClick={() => file.current?.click()}>
             <FileJsonIcon /> {t("serversettings.profileItems.openFile")}
           </Button>
+          <CopyPrompt text={EFFECT_PROMPT} hint={t("serversettings.profileItems.askAiEffectHint")} />
+          <GuideLink href={EFFECT_DOCS} />
           <AnimatePresence mode="wait" initial={false}>
             {text.trim() && problem && (
               <motion.span key={problem} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={SPRING} className="text-xs text-destructive">
@@ -611,6 +650,129 @@ function pretty(json: string) {
   } catch {
     return json;
   }
+}
+
+/** A row of small helpers under something to add. */
+function Helpers({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-2 text-xs">{children}</div>;
+}
+
+/** The built-in effects as specs to start from, each filling in its layers to change. */
+function Starters({ disabled, onPick }: { disabled?: boolean; onPick: (spec: string, name: string) => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-xs font-bold text-muted-foreground">{t("serversettings.profileItems.startFrom")}</span>
+      {BUILTIN_EFFECTS.map((effect) => {
+        const keys = effectKeys(effect.id);
+        const name = keys ? t(keys.name) : effect.name;
+        return (
+          <motion.button
+            key={effect.id}
+            type="button"
+            disabled={disabled}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.94 }}
+            title={keys ? t(keys.about) : effect.description}
+            onClick={() => onPick(starterText(effect.id) ?? "", name)}
+            className="rounded-full border bg-background/60 px-2.5 py-1 text-xs font-bold transition-colors hover:border-primary/50 hover:bg-primary/10 disabled:opacity-50"
+          >
+            {name}
+          </motion.button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Copies a prompt for an AI, which the person finishes by describing what they want. */
+function CopyPrompt({ text, hint }: { text: string; hint: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = () => {
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 2400);
+      },
+      () => toast(t("serversettings.profileItems.askAiFailed")),
+    );
+  };
+  return (
+    <motion.button
+      type="button"
+      onClick={copy}
+      title={hint}
+      whileTap={{ scale: 0.94 }}
+      className={cn("flex items-center gap-1 text-xs font-bold hover:underline", copied ? "text-emerald-500" : "text-primary")}
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={copied ? "copied" : "copy"}
+          initial={{ opacity: 0, scale: 0.6, rotate: -30 }}
+          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+          exit={{ opacity: 0, scale: 0.6 }}
+          transition={SPRING}
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <WandSparklesIcon className="size-3.5" />}
+        </motion.span>
+      </AnimatePresence>
+      <SwapText>{copied ? t("serversettings.profileItems.askAiCopied") : t("serversettings.profileItems.askAi")}</SwapText>
+    </motion.button>
+  );
+}
+
+/** A link to the docs for one kind. */
+function GuideLink({ href }: { href: string }) {
+  const { t } = useI18n();
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+      <BookOpenIcon className="size-3.5" /> {t("serversettings.profileItems.guide")}
+    </a>
+  );
+}
+
+/** Downloads a picture to draw a decoration on: the size to make it, with the avatar's circle marked. */
+function TemplateButton() {
+  const { t } = useI18n();
+  const download = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = TEMPLATE_SIZE;
+    const g = canvas.getContext("2d");
+    if (!g) return;
+    const mid = TEMPLATE_SIZE / 2;
+    g.beginPath();
+    g.arc(mid, mid, TEMPLATE_AVATAR / 2, 0, Math.PI * 2);
+    g.fillStyle = "rgba(128, 128, 128, 0.35)";
+    g.fill();
+    g.setLineDash([12, 8]);
+    g.lineWidth = 3;
+    g.strokeStyle = "rgba(128, 128, 128, 0.9)";
+    g.stroke();
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "fuwa-decoration-template.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  };
+  return (
+    <motion.button
+      type="button"
+      onClick={download}
+      title={t("serversettings.profileItems.templateHint")}
+      whileTap={{ scale: 0.94 }}
+      className="flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+    >
+      <DownloadIcon className="size-3.5" /> {t("serversettings.profileItems.template")}
+    </motion.button>
+  );
 }
 
 /** Text changed in place: saved when it loses focus or on Enter, put back on Escape or when the server says no. */

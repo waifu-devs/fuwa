@@ -149,7 +149,8 @@ pub fn about(id: &str) -> Option<String> {
     fx::IDS.contains(&id).then(|| t(&format!("accountsettings.effects.about.{id}")))
 }
 
-fn name(id: &str) -> String {
+/// A built-in effect's name, in the app's language.
+pub fn effect_name(id: &str) -> String {
     t(&format!("accountsettings.effects.name.{id}"))
 }
 
@@ -157,7 +158,7 @@ fn name(id: &str) -> String {
 /// other its own (the web's `effectText`).
 pub fn effect_text(spec: &fx::Spec) -> (String, String) {
     if fx::IDS.contains(&spec.id.as_str()) {
-        (name(&spec.id), about(&spec.id).unwrap_or_default())
+        (effect_name(&spec.id), about(&spec.id).unwrap_or_default())
     } else {
         (spec.name.clone(), spec.description.clone())
     }

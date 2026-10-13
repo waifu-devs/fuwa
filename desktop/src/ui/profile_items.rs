@@ -5,7 +5,9 @@
 //! before they're added; effects are specs, pasted or from a `.json` file,
 //! checked and played before they're added. Each one's name and line change
 //! in place, an effect can take a new spec, and deleting one asks first,
-//! since it takes it off everyone wearing it.
+//! since it takes it off everyone wearing it. Under each kind are the
+//! helpers for making one: a template to draw a decoration on, prompts to
+//! copy for an AI and the guides; a new effect can start from a built-in.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,7 +18,7 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnimationExt as _, AnyElement, AppContext as _, Context, Entity, ExternalPaths, FontWeight,
+    AnimationExt as _, AnyElement, AppContext as _, ClipboardItem, Context, Entity, ExternalPaths, FontWeight,
     InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, Window, div, img, px, rgb,
 };
@@ -25,8 +27,11 @@ use crate::core::Core;
 use crate::core::account::picture_type;
 use crate::core::api::Problem;
 use crate::core::i18n::t;
-use crate::core::profile_effects::Spec;
-use crate::core::profile_items::{NewItem, Scope, check_effect_text, item_effect, name_from_file};
+use crate::core::profile_effects::{self as fx, Spec};
+use crate::core::profile_items::{
+    DECORATION_DOCS, DECORATION_PROMPT, EFFECT_DOCS, EFFECT_PROMPT, NewItem, Scope, TEMPLATE_SIZE, check_effect_text,
+    item_effect, name_from_file, starter_text, template_pixels,
+};
 use crate::pb;
 use crate::ui::motion;
 use crate::ui::profile_effect::{EffectView, effect_in, mini_card};
@@ -81,6 +86,9 @@ pub struct ProfileItemsView {
     error: Option<String>,
     /// When a file that isn't a picture was refused, to shake the drop card.
     refused: Option<Instant>,
+    /// The prompt just copied (its button's id) and which copy it was, so only the latest clears.
+    copied: Option<(&'static str, u64)>,
+    copies: u64,
     inline: HashMap<String, Inline>,
     effects: HashMap<String, Entity<EffectView>>,
     _subscriptions: Vec<Subscription>,
@@ -146,6 +154,8 @@ impl ProfileItemsView {
             busy: false,
             error: None,
             refused: None,
+            copied: None,
+            copies: 0,
             inline: HashMap::new(),
             effects: HashMap::new(),
             _subscriptions: subscriptions,
@@ -267,6 +277,54 @@ impl ProfileItemsView {
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// A built-in effect's layers into the new effect's box, and its name when there's none yet.
+    fn start_from(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = starter_text(id) else { return };
+        self.spec.update(cx, |s, cx| s.set_value(text, window, cx));
+        if self.name.read(cx).value().trim().is_empty() {
+            let name = crate::ui::profile_effect::effect_name(id);
+            self.name.update(cx, |s, cx| s.set_value(name, window, cx));
+        }
+        self.error = None;
+        cx.notify();
+    }
+
+    /// Copies a prompt for an AI; its button says so for a moment.
+    fn copy_prompt(&mut self, id: &'static str, text: &'static str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+        self.copies += 1;
+        let copy = self.copies;
+        self.copied = Some((id, copy));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(2400)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.copied.is_some_and(|(_, c)| c == copy) {
+                    this.copied = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Saves the decoration template where the person says.
+    fn save_template(&mut self, cx: &mut Context<Self>) {
+        let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
+        let path = cx.prompt_for_new_path(&dir, Some("fuwa-decoration-template.png"));
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = path.await else { return };
+            let file = crate::ui::png::png(TEMPLATE_SIZE, TEMPLATE_SIZE, &template_pixels(), true);
+            if std::fs::write(&path, file).is_err() {
+                let _ = this.update(cx, |this, cx| {
+                    this.error = Some(t("desktop.profileItems.cantSaveTemplate"));
+                    cx.notify();
+                });
+            }
         })
         .detach();
     }
@@ -501,6 +559,118 @@ impl ProfileItemsView {
             .child(div().max_w(px(320.0)).text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(about))
     }
 
+    /// A small helper under something to add: a glyph and a few words, in the primary color.
+    fn helper(
+        id: &'static str,
+        glyph: &'static str,
+        label: String,
+        tip: Option<String>,
+        color: gpui_kit::Rgba,
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .text_xs()
+            .font_weight(FontWeight::BOLD)
+            .text_color(color)
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .active(|s| s.scale(0.94))
+            .when_some(tip, |el, tip| {
+                el.tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
+            })
+            .child(icon(glyph).size(px(14.0)))
+            .child(label)
+    }
+
+    /// Copies a prompt for an AI, then says it's copied for a moment.
+    fn ask_ai(
+        &self,
+        id: &'static str,
+        text: &'static str,
+        tip: String,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let copied = self.copied.is_some_and(|(at, _)| at == id);
+        motion::rise(
+            Self::helper(
+                id,
+                if copied { "check" } else { "wand-sparkles" },
+                t(if copied { "serversettings.profileItems.askAiCopied" } else { "serversettings.profileItems.askAi" }),
+                Some(tip),
+                if copied { p.success } else { p.primary },
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.copy_prompt(id, text, cx))),
+            SharedString::from(format!("{id}-{copied}")),
+            Duration::ZERO,
+            12.0,
+        )
+        .into_any_element()
+    }
+
+    /// Opens a kind's guide in the browser.
+    fn guide(id: &'static str, url: &'static str, p: &Palette) -> AnyElement {
+        Self::helper(id, "book-open", t("serversettings.profileItems.guide"), None, p.primary)
+            .on_click(move |_, _, cx| cx.open_url(url))
+            .into_any_element()
+    }
+
+    fn helpers(children: Vec<AnyElement>) -> AnyElement {
+        div()
+            .flex()
+            .flex_wrap()
+            .justify_center()
+            .items_center()
+            .gap_x(px(12.0))
+            .gap_y(px(4.0))
+            .px(px(8.0))
+            .children(children)
+            .into_any_element()
+    }
+
+    /// The built-in effects as specs to start from.
+    fn starters(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let (border, hover_border, hover_bg) = (p.border, alpha(p.primary, 0.5), alpha(p.primary, 0.1));
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .mr(px(4.0))
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.profileItems.startFrom")),
+            )
+            .children(fx::IDS.into_iter().map(|id| {
+                let tip = crate::ui::profile_effect::about(id).unwrap_or_default();
+                div()
+                    .id(SharedString::from(format!("pi-start-{id}")))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(border)
+                    .bg(alpha(p.background, 0.6))
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .hover(move |s| s.border_color(hover_border).bg(hover_bg).translate_y(px(-1.0)))
+                    .active(|s| s.scale(0.94))
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
+                    .when(!self.busy, |el| {
+                        el.on_click(cx.listener(move |this, _, window, cx| this.start_from(id, window, cx)))
+                    })
+                    .child(crate::ui::profile_effect::effect_name(id))
+            }))
+            .into_any_element()
+    }
+
     fn adders(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let (primary, drag_bg) = (p.primary, alpha(p.primary, 0.1));
         let decoration = self
@@ -535,7 +705,38 @@ impl ProfileItemsView {
                 p,
             )
             .on_click(cx.listener(|this, _, window, cx| this.start(Draft::Effect, String::new(), window, cx)));
-        div().flex().gap(px(12.0)).child(decoration).child(effect).into_any_element()
+        let decoration_help = Self::helpers(vec![
+            Self::helper(
+                "pi-template",
+                "download",
+                t("serversettings.profileItems.template"),
+                Some(t("serversettings.profileItems.templateHint")),
+                p.primary,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.save_template(cx)))
+            .into_any_element(),
+            self.ask_ai(
+                "pi-ask-decoration",
+                DECORATION_PROMPT,
+                t("serversettings.profileItems.askAiDecorationHint"),
+                p,
+                cx,
+            ),
+            Self::guide("pi-guide-decoration", DECORATION_DOCS, p),
+        ]);
+        let effect_help = Self::helpers(vec![
+            self.ask_ai("pi-ask-effect", EFFECT_PROMPT, t("serversettings.profileItems.askAiEffectHint"), p, cx),
+            Self::guide("pi-guide-effect", EFFECT_DOCS, p),
+        ]);
+        let column = |card: AnyElement, help: AnyElement| {
+            div().flex_1().min_w_0().flex().flex_col().gap(px(8.0)).child(card).child(help)
+        };
+        div()
+            .flex()
+            .gap(px(12.0))
+            .child(column(decoration, decoration_help))
+            .child(column(effect.into_any_element(), effect_help))
+            .into_any_element()
     }
 
     /// A panel for something about to be added: its preview and fields, then Cancel or Add.
@@ -747,7 +948,27 @@ impl ProfileItemsView {
                                 Textarea::new(&state).appearance(false).with_size(px(13.72)).font_family("monospace"),
                             ),
                     )
-                    .child(div().flex().flex_wrap().items_center().gap(px(8.0)).child(open).children(status)),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(open)
+                            .child(self.ask_ai(
+                                if replacing { "pi-ask-replace" } else { "pi-ask-new" },
+                                EFFECT_PROMPT,
+                                t("serversettings.profileItems.askAiEffectHint"),
+                                p,
+                                cx,
+                            ))
+                            .child(Self::guide(
+                                if replacing { "pi-guide-replace" } else { "pi-guide-new" },
+                                EFFECT_DOCS,
+                                p,
+                            ))
+                            .children(status),
+                    ),
             )
             .child(div().flex_none().w(px(card_w)).child(card))
             .into_any_element()
@@ -802,7 +1023,8 @@ impl ProfileItemsView {
             Draft::Effect => {
                 let checked = check_effect_text(&self.spec.read(cx).value());
                 let ok = checked.is_ok();
-                let body = vec![self.effect_source(false, me, &checked, p, cx), self.name_fields(p)];
+                let body =
+                    vec![self.starters(p, cx), self.effect_source(false, me, &checked, p, cx), self.name_fields(p)];
                 Some(self.panel(
                     "pi-new-effect",
                     t("serversettings.profileItems.newEffect"),

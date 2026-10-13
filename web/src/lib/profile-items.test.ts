@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUILTIN_EFFECTS } from "./effects/profile.ts";
+import { BUILTIN_EFFECTS, builtinEffect } from "./effects/profile.ts";
 import {
   checkEffectText,
+  DECORATION_PROMPT,
+  EFFECT_PROMPT,
   ITEM_DECORATION,
   ITEM_EFFECT,
   itemEffect,
@@ -10,6 +12,9 @@ import {
   nameFromFile,
   resolveDecoration,
   resolveEffect,
+  starterText,
+  TEMPLATE_AVATAR,
+  TEMPLATE_SIZE,
   wornDecoration,
   wornEffect,
   type Item,
@@ -96,4 +101,22 @@ test("lists by kind, and names from files", () => {
   assert.deepEqual(itemsOfKind(undefined, ITEM_EFFECT), []);
   assert.equal(nameFromFile("cherry_blossom-frame.png"), "cherry blossom frame");
   assert.equal(nameFromFile("x".repeat(60) + ".gif").length, 40);
+});
+
+test("every starter is its built-in's layers, laid out to read", () => {
+  for (const effect of BUILTIN_EFFECTS) {
+    const text = starterText(effect.id)!;
+    assert.deepEqual(JSON.parse(text), { layers: effect.layers }, effect.id);
+    assert.ok("spec" in checkEffectText(text), effect.id);
+    assert.match(text, /"size": \[\d+, \d+\]/);
+  }
+  assert.equal(starterText("nope"), undefined);
+});
+
+test("the effect prompt's example is Sakura and plays, and both prompts end where the person writes", () => {
+  const example = EFFECT_PROMPT.slice(EFFECT_PROMPT.indexOf('{\n  "layers": [\n    {'), EFFECT_PROMPT.indexOf("\n\nAnswer with"));
+  assert.deepEqual(JSON.parse(example).layers, builtinEffect("sakura")!.layers);
+  for (const prompt of [EFFECT_PROMPT, DECORATION_PROMPT]) assert.ok(prompt.endsWith("What I want:\n"));
+  assert.ok(DECORATION_PROMPT.includes(`${TEMPLATE_SIZE} by ${TEMPLATE_SIZE}`) && DECORATION_PROMPT.includes(`${TEMPLATE_AVATAR} pixels across`));
+  assert.equal(TEMPLATE_SIZE / TEMPLATE_AVATAR, 1.2);
 });
