@@ -91,7 +91,8 @@ jobs:
           name: sdk-package
           path: package
       - name: Publish
-        # Provenance comes with trusted publishing.
+        # Provenance comes with trusted publishing. The path starts with ./
+        # because npm reads "package/x.tgz" as a GitHub repository (user/repo).
         run: |
           shopt -s nullglob
           tarballs=(package/*.tgz)
@@ -99,4 +100,4 @@ jobs:
             echo "::error::expected exactly the tag's package, found: ${tarballs[*]}"
             exit 1
           fi
-          npm publish "${tarballs[0]}" --access public
+          npm publish "./${tarballs[0]}" --access public
