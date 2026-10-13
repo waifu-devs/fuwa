@@ -738,7 +738,8 @@ pub(crate) fn alert_row(
         );
         for m in &alert.matched {
             chips = chips.child(
-                chip(None, m.clone(), p.destructive.into(), alpha(p.destructive, 0.1), false).font_family("monospace"),
+                chip(None, m.clone(), p.destructive.into(), alpha(p.destructive, 0.1), false)
+                    .font_family(crate::ui::theme::mono()),
             );
         }
         if alert.timed_out_seconds > 0 {

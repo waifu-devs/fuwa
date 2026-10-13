@@ -199,7 +199,7 @@ impl SettingsView {
                         .px(px(12.0))
                         .py(px(10.0))
                         .text_size(px(12.8))
-                        .font_family("monospace")
+                        .font_family(crate::ui::theme::mono())
                         .child(recovery.clone()),
                 )
                 .child(
@@ -335,7 +335,7 @@ impl SettingsView {
                                         field(Input::new(&input).appearance(false), p)
                                             .h(px(36.0))
                                             .text_xs()
-                                            .font_family("monospace"),
+                                            .font_family(crate::ui::theme::mono()),
                                     ),
                                 )
                                 .child(

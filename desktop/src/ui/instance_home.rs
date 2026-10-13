@@ -471,7 +471,12 @@ impl FuwaApp {
             .child("·")
             .when_some(build, |el, (version, commit)| {
                 el.child(div().flex().items_center().child(version).when(!commit.is_empty(), |el| {
-                    el.child(div().font_family("monospace").font_weight(FontWeight::BOLD).child(format!(" · {commit}")))
+                    el.child(
+                        div()
+                            .font_family(crate::ui::theme::mono())
+                            .font_weight(FontWeight::BOLD)
+                            .child(format!(" · {commit}")),
+                    )
                 }))
             })
             .when_some(hosted, |el, chip| el.child(chip));

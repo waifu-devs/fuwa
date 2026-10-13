@@ -75,7 +75,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --font-sans: "M PLUS Rounded 1c", ui-rounded, ui-sans-serif, system-ui, sans-serif;
+  /* The fonts picked in settings (lib/fonts.ts), or these. */
+  --font-sans: var(--app-font, "M PLUS Rounded 1c", ui-rounded, ui-sans-serif, system-ui, sans-serif);
+  --font-mono: var(--code-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 @layer base {
@@ -405,7 +407,7 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
   padding: 0.1em 0.35em;
   border-radius: 0.35em;
   background: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 0.875em;
 }
 :where(.markdown, .markdown-inline) del { opacity: 0.7; }

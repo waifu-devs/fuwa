@@ -74,6 +74,8 @@ tokio-util = "0.7"
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 tonic-prost = "0.14"
 tonic-web = "0.14"
+# The family a font file of yours holds (core/fonts.rs): the version fontdb, and so GPUI, uses.
+ttf-parser = "0.25.1"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

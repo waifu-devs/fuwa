@@ -650,6 +650,10 @@
     `settings_overlay.rs` its settings page, `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
+    `settings_fonts.rs` its Font and Code font (the app's own, the
+    system's, an installed family or a font file of yours, copied into the
+    config folder's `fonts/` by `core/fonts.rs` and loaded by `theme.rs`,
+    whose `font()` and `mono()` everything draws with; this computer's only),
     `settings_privacy.rs` the Privacy page ("Help fix bugs", what a report
     holds, and what's waiting to go out), `settings_updates.rs` the Updates
     page (status, "Download updates in the background", what's new) and `update.rs` the
@@ -844,6 +848,11 @@
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
+    Fonts (the app's and code's: the bundled one, the system's, one installed
+    on the computer or an imported file) are `lib/fonts.ts` (pure) and
+    `lib/font-files.ts` (imported files in IndexedDB, put on the page as
+    FontFaces), picked in `settings/app/Fonts.tsx`; like every app setting,
+    they never reach an instance.
   - Themes (`docs/themes.md` is the format every app shares): built-ins in
     `src/lib/themes.ts` (copied from waifu.dev), custom themes and theme files
     in `lib/theme-file.ts`, the backdrop (picture and effect) in

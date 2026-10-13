@@ -56,6 +56,11 @@ impl Paths {
     pub fn sounds(&self) -> PathBuf {
         self.config.join("sounds")
     }
+
+    /// Font files picked for the app's text (`core::fonts::import`).
+    pub fn fonts(&self) -> PathBuf {
+        self.config.join("fonts")
+    }
 }
 
 /// An instance you added, with its session token when you're signed in.
@@ -297,6 +302,71 @@ pub struct SoundPick {
     pub name: String,
 }
 
+/// A font picked for the app's text or its fixed-width text (`Prefs::font`,
+/// `Prefs::code_font`): the app's own, the system's interface font, a family
+/// installed on this computer, or a font file of yours (`file`, in
+/// `Paths::fonts`, with the `name` it had and the `family` it holds). Kept on
+/// this computer and never sent anywhere.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum FontPick {
+    #[default]
+    Default,
+    System,
+    Installed {
+        family: String,
+    },
+    File {
+        file: String,
+        name: String,
+        family: String,
+    },
+}
+
+/// The longest font family or file name kept.
+const MAX_FONT_NAME: usize = 100;
+
+impl FontPick {
+    /// Made into one this app can use: names trimmed and cut short, anything
+    /// empty or a file this app didn't make back to the default, and the
+    /// system's interface font where it means nothing (`code`).
+    fn tidy(&mut self, code: bool) {
+        let cut = |s: &str| s.trim().chars().take(MAX_FONT_NAME).collect::<String>();
+        let tidied = match std::mem::take(self) {
+            FontPick::System if code => FontPick::Default,
+            FontPick::Installed { family } => {
+                let family = cut(&family);
+                if family.is_empty() { FontPick::Default } else { FontPick::Installed { family } }
+            }
+            FontPick::File { file, name, family } => {
+                let family = cut(&family);
+                if family.is_empty() || !crate::core::fonts::valid_file_name(&file) {
+                    FontPick::Default
+                } else {
+                    FontPick::File { file, name: cut(&name), family }
+                }
+            }
+            other => other,
+        };
+        *self = tidied;
+    }
+
+    /// The font file it keeps in `Paths::fonts`, if any.
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            FontPick::File { file, .. } => Some(file),
+            _ => None,
+        }
+    }
+}
+
+/// A font pick from the settings file, or the default when it's one this app
+/// can't read (from a newer app), rather than losing every other setting.
+fn lenient_font<'de, D: serde::Deserializer<'de>>(d: D) -> Result<FontPick, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
 /// (Enter for a new line); the web app's `sendWith`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -391,6 +461,12 @@ pub struct Prefs {
     pub chat_font_size: u8,
     /// The whole app's size, in percent (80 to 150).
     pub zoom: u16,
+    /// The font the app is written in (`ui::theme::font`).
+    #[serde(deserialize_with = "lenient_font")]
+    pub font: FontPick,
+    /// The font for code and other fixed-width text (`ui::theme::mono`); never `System`.
+    #[serde(deserialize_with = "lenient_font")]
+    pub code_font: FontPick,
     /// Effects on other people's profile cards play (your own always shows to you).
     pub others_effects: bool,
     /// Color saturation, in percent.
@@ -507,6 +583,8 @@ impl Default for Prefs {
             spacing: Spacing::Default,
             chat_font_size: 15,
             zoom: 100,
+            font: FontPick::Default,
+            code_font: FontPick::Default,
             others_effects: true,
             saturation: 100,
             underline_links: false,
@@ -618,6 +696,8 @@ impl Prefs {
         self.zoom = self.zoom.clamp(80, 150);
         self.text_scale = f32::from(self.zoom) / 100.0;
         self.chat_font_size = self.chat_font_size.clamp(12, 20);
+        self.font.tidy(false);
+        self.code_font.tidy(true);
         if !crate::core::voice::ceiling::HEIGHTS.contains(&self.camera_height) {
             self.camera_height = 0;
         }
@@ -771,5 +851,55 @@ mod tests {
         std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"custom-gone1","follow_system":false}"#)
             .unwrap();
         assert_eq!(load_prefs(&paths).active_theme(true).id, "sakura");
+    }
+
+    #[test]
+    fn font_picks_round_trip_and_tidy() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::under(home.path());
+        let file = FontPick::File {
+            file: "0123456789abcdef01234567.ttf".into(),
+            name: "Mine.ttf".into(),
+            family: "Mine".into(),
+        };
+        let prefs =
+            Prefs { font: FontPick::Installed { family: "Inter".into() }, code_font: file.clone(), ..Prefs::default() };
+        store_prefs(&paths, &prefs);
+        let text = std::fs::read_to_string(home.path().join("config/settings.json")).unwrap();
+        assert!(text.contains(r#""kind":"installed""#) && text.contains(r#""kind":"file""#), "{text}");
+        assert_eq!(load_prefs(&paths), prefs);
+        // Older files have neither: the defaults.
+        std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"matcha"}"#).unwrap();
+        let old = load_prefs(&paths);
+        assert_eq!((old.font, old.code_font, old.theme.as_str()), (FontPick::Default, FontPick::Default, "matcha"));
+        // A kind from a newer app, or nonsense, is the default, and the rest still reads.
+        std::fs::write(
+            home.path().join("config/settings.json"),
+            r#"{"theme":"matcha","font":{"kind":"web","url":"x"},"code_font":7}"#,
+        )
+        .unwrap();
+        let newer = load_prefs(&paths);
+        assert_eq!(
+            (newer.font, newer.code_font, newer.theme.as_str()),
+            (FontPick::Default, FontPick::Default, "matcha")
+        );
+
+        let tidied = |font: FontPick, code_font: FontPick| {
+            let mut p = Prefs { font, code_font, ..Prefs::default() };
+            p.tidy();
+            (p.font, p.code_font)
+        };
+        // The system's interface font means nothing for code.
+        assert_eq!(tidied(FontPick::System, FontPick::System), (FontPick::System, FontPick::Default));
+        // Names are trimmed and cut short; an empty one is the default.
+        let long = "x".repeat(300);
+        let (font, code) =
+            tidied(FontPick::Installed { family: format!("  {long} ") }, FontPick::Installed { family: "  ".into() });
+        assert_eq!((font, code), (FontPick::Installed { family: "x".repeat(100) }, FontPick::Default));
+        // A file this app didn't make, or one without a family, is the default.
+        let elsewhere = FontPick::File { file: "../../etc/passwd".into(), name: "a".into(), family: "A".into() };
+        let nameless = FontPick::File { file: "0123456789abcdef.otf".into(), name: "a".into(), family: " ".into() };
+        assert_eq!(tidied(elsewhere, nameless), (FontPick::Default, FontPick::Default));
+        assert_eq!(tidied(file.clone(), FontPick::Default), (file, FontPick::Default));
     }
 }

@@ -71,6 +71,8 @@ function appSections(t: I18n["t"]): SettingsSection[] {
         { id: "message-display", label: t("appsettings.appearance.display"), keywords: "cozy compact" },
         { id: "chat-font-size", label: t("settings.nav.chatTextSize"), keywords: "font scaling" },
         { id: "zoom", label: t("appsettings.appearance.zoom"), keywords: "scale size" },
+        { id: "font", label: t("appsettings.appearance.font"), keywords: "typeface family installed file" },
+        { id: "code-font", label: t("appsettings.appearance.codeFont"), keywords: "monospace typeface" },
       ],
     },
     {

@@ -382,7 +382,7 @@ impl InstanceSettingsView {
                                         if custom && host.is_none() {
                                             el.italic()
                                         } else {
-                                            el.font_family("monospace").font_weight(FontWeight::BOLD)
+                                            el.font_family(crate::ui::theme::mono()).font_weight(FontWeight::BOLD)
                                         }
                                     })
                                     .child(known.host.clone()),
@@ -472,7 +472,7 @@ impl InstanceSettingsView {
                                     has_focus(&url_box, window, cx),
                                     p,
                                 )
-                                .font_family("monospace"),
+                                .font_family(crate::ui::theme::mono()),
                             )),
                         ),
                 )
@@ -500,7 +500,7 @@ impl InstanceSettingsView {
                                     has_focus(&header_box, window, cx),
                                     p,
                                 )
-                                .font_family("monospace"),
+                                .font_family(crate::ui::theme::mono()),
                             )),
                         )
                         .child(
@@ -511,7 +511,7 @@ impl InstanceSettingsView {
                                     has_focus(&model_box, window, cx),
                                     p,
                                 )
-                                .font_family("monospace"),
+                                .font_family(crate::ui::theme::mono()),
                             )),
                         ),
                 );
@@ -564,7 +564,7 @@ impl InstanceSettingsView {
                     has_focus(&account, window, cx),
                     p,
                 )
-                .font_family("monospace"),
+                .font_family(crate::ui::theme::mono()),
             ));
         }
 

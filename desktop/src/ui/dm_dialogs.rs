@@ -367,7 +367,7 @@ impl FuwaApp {
                     // drawn here as the group unfolding from a line).
                     div().w(gpui_kit::relative(0.25)).flex().justify_center().child(motion::spring_in(
                         div()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .text_size(px(16.0))
                             .line_height(px(24.0))
                             .font_weight(FontWeight::BOLD)
@@ -542,7 +542,7 @@ impl FuwaApp {
                                 )
                                 .child(
                                     div()
-                                        .font_family("monospace")
+                                        .font_family(crate::ui::theme::mono())
                                         .text_size(px(11.2))
                                         .line_height(px(16.8))
                                         .text_color(p.muted_foreground)

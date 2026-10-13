@@ -741,10 +741,13 @@ impl ProfileItemsView {
                             .px(px(12.0))
                             .py(px(8.0))
                             .text_xs()
-                            .font_family("monospace")
+                            .font_family(crate::ui::theme::mono())
                             .shadow(shadow_sm())
                             .child(
-                                Textarea::new(&state).appearance(false).with_size(px(13.72)).font_family("monospace"),
+                                Textarea::new(&state)
+                                    .appearance(false)
+                                    .with_size(px(13.72))
+                                    .font_family(crate::ui::theme::mono()),
                             ),
                     )
                     .child(div().flex().flex_wrap().items_center().gap(px(8.0)).child(open).children(status)),

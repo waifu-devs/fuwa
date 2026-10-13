@@ -260,7 +260,7 @@ impl InstanceSettingsView {
                             has_focus(&ice, window, cx),
                             p,
                         )
-                        .font_family("monospace"),
+                        .font_family(crate::ui::theme::mono()),
                     ),
                     (None, false) => el,
                 }

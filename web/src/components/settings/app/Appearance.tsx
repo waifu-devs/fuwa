@@ -14,6 +14,7 @@ import { clickPoint, switchTheme } from "@/lib/theme-switch";
 import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { PrefSetting, ThemeGrid } from "./common";
+import { FontSetting } from "./Fonts";
 
 export function Appearance({ instanceKey }: { instanceKey?: string }) {
   const { t, number } = useI18n();
@@ -84,6 +85,8 @@ export function Appearance({ instanceKey }: { instanceKey?: string }) {
           />
         </PrefSetting>
         <Zoom />
+        <FontSetting role="app" />
+        <FontSetting role="code" />
       </div>
     </WithPreview>
   );

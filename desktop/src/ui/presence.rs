@@ -271,7 +271,7 @@ fn leave_box(id: &str, url: &str, p: &Palette, cx: &mut Context<FuwaApp>) -> Any
                 .rounded(corner(8.0))
                 .bg(p.muted)
                 .text_xs()
-                .font_family("monospace")
+                .font_family(crate::ui::theme::mono())
                 .child(shown),
         )
         .child(

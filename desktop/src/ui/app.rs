@@ -24,7 +24,7 @@ use crate::ui::instance_settings::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::ui::panel::Part;
 use crate::ui::server_settings::{ServerSettingsEvent, ServerSettingsView};
 use crate::ui::settings::{SettingsEvent, SettingsView};
-use crate::ui::theme::{self, FONT};
+use crate::ui::theme;
 use crate::ui::widgets::pal;
 
 actions!(fuwa, [CloseOverlay, OpenSettings, AddInstance, ComposerEmoji, ComposerTimestamp]);
@@ -2181,7 +2181,7 @@ impl FuwaApp {
             .size_full()
             .relative()
             .overflow_hidden()
-            .font_family(FONT)
+            .font_family(theme::font())
             .bg(p.background)
             .text_color(p.foreground)
             .when_some(behind, |el, behind| el.child(behind));

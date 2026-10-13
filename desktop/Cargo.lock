@@ -3215,6 +3215,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
  "url",
  "wgpu",
  "windows 0.62.2",

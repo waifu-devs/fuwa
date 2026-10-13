@@ -179,7 +179,7 @@ impl InstanceSettingsView {
             has_focus(&self.gifs.key, window, cx),
             p,
         )
-        .font_family("monospace")
+        .font_family(crate::ui::theme::mono())
         .when(missing, |el| el.border_2().border_color(gpui_kit::hsla(38.0 / 360.0, 0.92, 0.5, 0.5)));
         let trying = matches!(self.gifs.tried, Some(Tried::Trying));
         let result = match &self.gifs.tried {

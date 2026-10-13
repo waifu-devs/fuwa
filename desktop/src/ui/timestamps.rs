@@ -526,7 +526,7 @@ impl FuwaApp {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .font_family("monospace")
+                    .font_family(crate::ui::theme::mono())
                     .text_xs()
                     .text_color(p.muted_foreground)
                     .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.timestamp.sent")).build(window, cx))

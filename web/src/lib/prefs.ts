@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
+import { loadFontFile, sweepFontFiles } from "@/lib/font-files";
+import { DEFAULT_FONT, fontStack, sanitizeFont, type FontPick } from "@/lib/fonts";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { isTag } from "@/i18n/core";
 import { DEFAULT_SHARE, SHARE_SURFACES, shareQuality, type ShareFps, type ShareHeight, type ShareSurface } from "@/lib/screen-share";
@@ -43,6 +45,9 @@ export type Prefs = {
   messageDisplay: MessageDisplay;
   /** Message text size, in pixels. */
   chatFontSize: number;
+  /** The app's font and the one for code (lib/fonts.ts). */
+  font: FontPick;
+  codeFont: FontPick;
   /** The whole app's size, in percent. */
   zoom: number;
   reduceMotion: ReduceMotion;
@@ -121,6 +126,8 @@ export const DEFAULT_PREFS: Prefs = {
   density: "default",
   messageDisplay: "cozy",
   chatFontSize: 15,
+  font: DEFAULT_FONT,
+  codeFont: DEFAULT_FONT,
   zoom: 100,
   reduceMotion: "system",
   othersEffects: true,
@@ -214,6 +221,8 @@ function sanitize(p: Prefs): Prefs {
     density: oneOf(p.density, ["compact", "default", "spacious"], d.density),
     messageDisplay: oneOf(p.messageDisplay, ["cozy", "compact"], d.messageDisplay),
     chatFontSize: clamp(p.chatFontSize, 12, 20, d.chatFontSize),
+    font: sanitizeFont(p.font, "app"),
+    codeFont: sanitizeFont(p.codeFont, "code"),
     zoom: clamp(p.zoom, 80, 150, d.zoom),
     reduceMotion: oneOf(p.reduceMotion, ["system", "always", "never"], d.reduceMotion),
     saturation: clamp(p.saturation, 0, 100, d.saturation),
@@ -271,6 +280,7 @@ export function setPrefs(patch: Partial<Prefs> | ((p: Prefs) => Partial<Prefs>))
   }
   applyPrefs();
   emit();
+  if ("font" in changes || "codeFont" in changes) void sweepFontFiles([prefs.font, prefs.codeFont].flatMap((f) => (f.kind === "file" ? [f.id] : [])));
 }
 
 export function subscribePrefs(listener: () => void) {
@@ -340,6 +350,10 @@ export function applyPrefs() {
   // Everything is sized in rem, so the root size zooms the whole app.
   root.style.fontSize = p.zoom === 100 ? "" : `${(16 * p.zoom) / 100}px`;
   root.style.setProperty("--chat-font", `${p.chatFontSize}px`);
+  root.style.setProperty("--app-font", fontStack(p.font, "app"));
+  root.style.setProperty("--code-font", fontStack(p.codeFont, "code"));
+  // An imported font is drawn once it's read back; until then, the default stands in.
+  for (const pick of [p.font, p.codeFont]) if (pick.kind === "file") void loadFontFile(pick.id);
   root.dataset.density = p.density;
   root.dataset.display = p.messageDisplay;
   root.style.setProperty("--saturation", `${p.saturation}%`);

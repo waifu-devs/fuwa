@@ -39,7 +39,7 @@ use crate::ui::call_parts::{green, red, voice_avatar};
 use crate::ui::click_through;
 use crate::ui::motion;
 use crate::ui::notify::Clicked;
-use crate::ui::theme::{FONT, alpha, radius_lg, radius_xl};
+use crate::ui::theme::{alpha, radius_lg, radius_xl};
 use crate::ui::widgets::{icon, pal};
 
 /// How long a message stays in the overlay, before it fades.
@@ -548,7 +548,7 @@ impl Render for GameOverlay {
             .on_key_down(cx.listener(Self::on_key))
             .size_full()
             .relative()
-            .font_family(FONT)
+            .font_family(crate::ui::theme::font())
             .text_color(gpui_kit::white());
         if self.using.get() {
             let hint = match key_label(&prefs) {
