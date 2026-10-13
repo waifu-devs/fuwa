@@ -21,7 +21,9 @@ service EconomyService {
 
   // The server's currencies, in order.
   rpc ListCurrencies(ListCurrenciesRequest) returns (ListCurrenciesResponse);
-  // The shop: what's available, in order (everything, for MANAGE_ECONOMY).
+  // The shop, in order: every listing, as ShopUpdated has them. Apps show
+  // members the available ones; the rest still keep their profile items
+  // for those who bought them.
   rpc ListShop(ListShopRequest) returns (ListShopResponse);
   // Your balances and the profile items you bought; someone else's with
   // MANAGE_ECONOMY or GRANT_CURRENCY.
@@ -107,6 +109,9 @@ message ListLedgerRequest {
 message ListLedgerResponse {
   repeated LedgerEntry entries = 1;
   bool has_more = 2;
+  // Everyone the entries name (whose they are, who granted, the other side
+  // of a transfer), as the server last saw them, including people who left.
+  repeated User users = 3;
 }
 
 message ClaimDailyRequest {

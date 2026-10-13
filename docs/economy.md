@@ -65,7 +65,10 @@ how much today) is the server file's `currency_earnings`.
 
 A `ShopListing` sells one thing for one currency:
 
-- **A role** (`ROLE`): bought once, kept for good. Someone with Manage
+- **A role** (`ROLE`): bought once, kept for good. Like the roles
+  onboarding hands out, it may carry nothing that moderates or manages the
+  server (a role that gains such a permission can't be bought until it
+  loses it again). Someone with Manage
   Roles can still take it away like any role; buying it again pays again.
   Nobody may buy a role they already have.
 - **A profile item** (`PROFILE_ITEM`): one of the server's effects or
@@ -78,8 +81,9 @@ A `ShopListing` sells one thing for one currency:
   by `PurchaseMade`.
 
 A listing has a price, an optional stock (how many are left), how many were
-sold, a position and whether it's available: members see and buy only
-available listings, managers see them all. Buying checks the price the app
+sold, a position and whether it's available: members buy, and apps show
+them, only available listings. Every member gets every listing (`ListShop`,
+`ShopUpdated`), so apps know which profile items stay locked. Buying checks the price the app
 showed (`expected_price`), so a price that just changed is never paid
 unseen. Buying, the stock and the balance are one write.
 
