@@ -16,6 +16,8 @@ import {
   MessageIntent,
   ModCaseStatus,
   ModReportReason,
+  Permission,
+  ShopListingKind,
   LiveTileSource,
   MediaPurpose,
   FuwaError,
@@ -216,6 +218,34 @@ test("an agent reports a message to the server's moderators", async () => {
     reports.map((r) => [r.reporterId, r.note]),
     [[agent.me.id, "looks like spam"]],
   );
+  await agent.stop();
+});
+
+test("an agent gives currency and hears what's bought", async () => {
+  const { currency } = await person.economy.createCurrency({ serverId, currency: { name: "Gems", iconEmoji: "💎" } });
+  const { role } = await person.roles.createRole({
+    serverId,
+    name: "Treasurer",
+    permissions: [Permission.GRANT_CURRENCY, Permission.MANAGE_ECONOMY],
+  });
+  const agent = newAgent();
+  const bought: string[] = [];
+  agent.on("purchaseMade", (payload) => void bought.push(payload.listing?.name ?? ""));
+  await agent.start();
+  await person.roles.addMemberRole({ serverId, userId: agent.me.id, roleId: role!.id });
+  const { user: owner } = await person.auth.getMe({});
+  const given = await agent.grant({ serverId, userId: owner!.id }, currency!.id, 30, "welcome gift");
+  assert.equal(given.total, 30n);
+  const [held] = await agent.wallet(serverId, owner!.id);
+  assert.equal(held!.amount, 30n);
+  const { listing } = await person.economy.createShopListing({
+    serverId,
+    listing: { currencyId: currency!.id, kind: ShopListingKind.CUSTOM, name: "Shoutout", price: 25n, available: true },
+  });
+  await person.economy.buy({ serverId, listingId: listing!.id, expectedPrice: 25n });
+  await until("the purchase reaches the agent", () => (bought.includes("Shoutout") ? true : undefined));
+  const [left] = await agent.wallet(serverId, owner!.id);
+  assert.equal(left!.amount, 5n);
   await agent.stop();
 });
 

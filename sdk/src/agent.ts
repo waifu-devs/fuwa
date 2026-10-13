@@ -4,7 +4,8 @@ import { EventFollower, type EventKind, type EventPayload } from "./events.js";
 import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
-import type { LiveTile, LiveTileContentSchema, ModReportReason } from "./gen/fuwa/v1/types_pb.js";
+import type { Balance, LiveTile, LiveTileContentSchema, ModReportReason } from "./gen/fuwa/v1/types_pb.js";
+import type { GrantResponse } from "./gen/fuwa/v1/economy_pb.js";
 import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
   AccountKind,
@@ -436,6 +437,38 @@ export class Agent {
       reason,
       note,
     });
+  }
+
+  /**
+   * Gives a member (`userId`), or everyone with a role (`roleId`; the
+   * server's id for @everyone), an amount of one of the server's
+   * currencies, or takes it away with an amount below zero (never below
+   * zero). The reason (up to 200 characters) goes to them and to the audit
+   * log. Needs Grant Currency.
+   */
+  async grant(
+    to: { serverId: string; userId?: string; roleId?: string },
+    currencyId: string,
+    amount: number | bigint,
+    reason = "",
+  ): Promise<GrantResponse> {
+    return this.api.economy.grant({
+      serverId: to.serverId,
+      currencyId,
+      userId: to.userId ?? "",
+      roleId: to.roleId ?? "",
+      amount: BigInt(amount),
+      reason,
+    });
+  }
+
+  /**
+   * Balances in each of a server's currencies: the agent's own, or a
+   * member's with Manage Economy or Grant Currency.
+   */
+  async wallet(serverId: string, userId = ""): Promise<Balance[]> {
+    const { balances } = await this.api.economy.getWallet({ serverId, userId });
+    return balances;
   }
 
   /** Who reacted to a message with an emoji, the earliest first (up to 100). */
