@@ -22,6 +22,7 @@ use std::path::Path;
 /// through `widgets::inner_scroll` instead.
 const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("attachments.rs", 1),
+    ("board.rs", 1),
     ("connect.rs", 2),
     ("context_menu.rs", 2),
     ("dialogs.rs", 1),
