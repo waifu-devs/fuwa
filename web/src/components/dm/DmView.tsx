@@ -86,6 +86,7 @@ import { PendingFiles, SealedFiles } from "@/components/dm/SealedFiles";
 import { EncryptedAttach, PickedTray } from "@/components/dm/EncryptedFiles";
 import { clearPicked, isSpoiler, pickFiles, usePicked } from "@/components/dm/use-picked";
 import { DropOverlay } from "@/components/chat/ComposerFiles";
+import { EMOJI_TOKEN } from "@/lib/emoji";
 
 /** Messages from one person closer together than this share a header. */
 const GROUP_GAP_MS = 7 * 60 * 1000;
@@ -892,7 +893,8 @@ function DmRowBody({
   const { t } = useI18n();
   if (item.deleted) return <p className="text-sm text-muted-foreground italic">{t("dms-calls.dm.deleted")}</p>;
   if (item.kind === "voice" && item.voice) return <DmVoice instanceKey={instanceKey} item={item} />;
-  if (editing) return <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />;
+  // Server emoji are edited as :name:, and go back to their tokens on save.
+  if (editing) return <EditBox initial={item.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />;
   return (
     <>
       {(item.content || !item.files) && <MessageBody content={item.content} emojis={item.emojis} display={display} />}
