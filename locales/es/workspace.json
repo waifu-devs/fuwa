@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "Se abrió la imagen para que la guardes desde ahí",
   "menu.message.openThread": "Abrir el hilo",
   "menu.message.replyInThread": "Responder en un hilo",
+  "menu.message.reply": "Responder",
   "menu.message.edit": "Editar el mensaje",
   "menu.message.copyText": "Copiar el texto",
   "menu.message.keepOut": "Dejar a {name} fuera",

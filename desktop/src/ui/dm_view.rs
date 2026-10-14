@@ -148,6 +148,81 @@ pub struct EncBits {
     pub files: Vec<crate::core::vault::FileRef>,
     /// While it's on its way: the files going with it, by name and size.
     pub sending: Vec<(String, i64)>,
+    /// The line it answers, quoted over it.
+    pub quote: Option<Quote>,
+    /// "Reply" shows on hover and in its menu: you may write where it is.
+    pub can_reply: bool,
+}
+
+/// Over a reply: the line it answers, as this device opened it (the web's `ReplyQuote`).
+#[derive(Clone, PartialEq, Default)]
+pub struct Quote {
+    /// The answered line's record, which clicking the quote brings into view.
+    pub seq: i64,
+    /// Who wrote it and their name as shown; None when it's not here or was deleted.
+    pub who: Option<(Option<pb::User>, String)>,
+    /// One line of what it said, or (`missing`) that it's gone or not on this device.
+    pub text: String,
+    pub missing: bool,
+}
+
+/// The quote of the line at `seq`, from a conversation's lines by record.
+fn quote_of(seq: i64, by_seq: &HashMap<i64, &Item>, who: &dyn Fn(&str) -> Who) -> Quote {
+    match by_seq.get(&seq) {
+        None => Quote { seq, who: None, text: t("dms-calls.dm.reply.missing"), missing: true },
+        Some(item) if item.deleted => Quote { seq, who: None, text: t("dms-calls.dm.deleted"), missing: true },
+        Some(item) => {
+            let author = who(&item.sender_id);
+            Quote { seq, who: Some((author.user, author.name)), text: quote_text(item), missing: false }
+        }
+    }
+}
+
+/// What a quote shows of a line: one line of its text (or what it carries), without Markdown's marks.
+fn quote_text(item: &Item) -> String {
+    let text = if let Some(voice) = &item.voice {
+        let secs = voice.duration_ms / 1000;
+        let length = format!("{}:{:02}", secs / 60, secs % 60);
+        t_with("system.e2ee.voiceLine", &[("length", Arg::Str(&length))])
+    } else if item.content.trim().is_empty() && !item.files.is_empty() {
+        match item.files.as_slice() {
+            [one] => t_with("system.e2ee.lineFile", &[("name", Arg::Str(&one.name))]),
+            many => t_with("system.e2ee.lineFiles", &[("count", Arg::Num(many.len() as i64))]),
+        }
+    } else {
+        crate::core::spoilers::hide(&item.content)
+    };
+    let plain: String = text.chars().filter(|c| !matches!(c, '*' | '_' | '~' | '`' | '>' | '#' | '|')).collect();
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+thread_local! {
+    /// The line the next message answers, per place (a conversation, a secure
+    /// channel, or a secure thread's `{id}#{parent}`). Only on this device
+    /// until it's sent, and then only inside the encryption.
+    static REPLYING: RefCell<HashMap<String, i64>> = RefCell::new(HashMap::new());
+}
+
+/// The line a place's next message answers, or 0.
+pub(crate) fn replying(place: &str) -> i64 {
+    REPLYING.with(|r| r.borrow().get(place).copied().unwrap_or(0))
+}
+
+/// Starts answering the line at `seq` from a place's box, or stops (0).
+pub(crate) fn set_replying(place: &str, seq: i64) {
+    REPLYING.with(|r| {
+        let mut r = r.borrow_mut();
+        if seq > 0 {
+            r.insert(place.to_owned(), seq);
+        } else {
+            r.remove(place);
+        }
+    });
+}
+
+/// The line a place's next message answers, no longer waiting once it's taken.
+pub(crate) fn take_replying(place: &str) -> i64 {
+    REPLYING.with(|r| r.borrow_mut().remove(place).unwrap_or(0))
 }
 
 /// Where the messages from before this device joined came from (the web's `earlierFrom`).
@@ -326,6 +401,7 @@ pub(crate) fn encrypted_rows(
     question: &str,
     lines: Option<Lines>,
     react: Option<bool>,
+    can_reply: bool,
 ) -> Vec<Row> {
     let me = i.me.clone();
     let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
@@ -335,6 +411,8 @@ pub(crate) fn encrypted_rows(
         None => stored.map(|v| v.as_slice()).unwrap_or_default(),
     };
     let in_thread = lines.as_ref().is_some_and(|l| l.in_thread);
+    // Every line opened here, by record, for the quotes over replies.
+    let by_seq: HashMap<i64, &Item> = stored.map(|v| v.iter().map(|i| (i.seq, i)).collect()).unwrap_or_default();
     let mut rows = vec![start];
     // Still joining (or nothing opened yet): a key that wobbles under the start.
     if !in_thread && (stored.is_none() || i.dms.joining.contains(id)) {
@@ -390,13 +468,15 @@ pub(crate) fn encrypted_rows(
             let name_of = |u: &str| who_of(u).name;
             Rc::new(crate::ui::reactions::ReactBits::encrypted_item(i, id, item, can_add, &name_of))
         });
+        let quote = (item.reply_to > 0).then(|| quote_of(item.reply_to, &by_seq, &who_of));
         // Everything the row is made from, so an unchanged line is reused rather than built again.
         let sig = {
             let mut h = std::hash::DefaultHasher::new();
             item_digest(item, &mut h);
             (&author.name, author.color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits))).hash(&mut h);
             author.user.as_ref().map(prost::Message::encode_to_vec).hash(&mut h);
-            (mine, editing, can_delete, pinned, question).hash(&mut h);
+            (mine, editing, can_delete, pinned, question, can_reply).hash(&mut h);
+            quote.as_ref().map(|q| (&q.text, q.missing, q.who.as_ref().map(|w| &w.1))).hash(&mut h);
             if let Some(r) = &reactions {
                 r.digest(&mut h);
             }
@@ -412,6 +492,8 @@ pub(crate) fn encrypted_rows(
                     question: question.to_owned(),
                     files: if item.deleted { Vec::new() } else { item.files.clone() },
                     sending: Vec::new(),
+                    quote,
+                    can_reply: can_reply && !item.deleted,
                 };
                 let mut m = plain_msg(key.clone(), author, item.content.clone(), item.at, mine, enc);
                 m.editing = editing;
@@ -446,7 +528,8 @@ pub(crate) fn encrypted_rows(
     let shows = |p: &crate::core::dms::DmPending| lines.as_ref().is_none_or(|l| (l.pending)(p));
     for pending in i.dms.sending.get(id).into_iter().flatten().filter(|p| shows(p)) {
         let who = Who { name: me.as_ref().map(user_name).unwrap_or_default(), color: None, user: me.clone() };
-        let enc = EncBits { question: question.to_owned(), ..Default::default() };
+        let quote = (pending.reply_to > 0).then(|| quote_of(pending.reply_to, &by_seq, &who_of));
+        let enc = EncBits { question: question.to_owned(), quote, ..Default::default() };
         let mut m = plain_msg(format!("p{}", pending.nonce), who, pending.text.clone(), pending.created_at, true, enc);
         m.can_delete = false;
         m.pending = true;
@@ -533,6 +616,7 @@ impl FuwaApp {
             &question,
             None,
             react,
+            true,
         )
     }
 }
@@ -1343,6 +1427,139 @@ pub(crate) fn set_problem(id: &str, problem: Option<String>) {
 }
 
 impl FuwaApp {
+    /// Where the open conversation's or secure channel's box answers from: the
+    /// list's own, or (`in_thread`) the open secure thread's.
+    fn reply_place(&self, in_thread: bool) -> Option<String> {
+        if in_thread {
+            let (_, _, channel, parent) = crate::ui::secure_threads::open_thread(self)?;
+            return Some(crate::ui::secure_threads::place_of(&channel, parent));
+        }
+        match self.target()? {
+            Target::Dm { conversation: id, .. } | Target::Secure { channel: id, .. } => Some(id),
+            Target::Channel { .. } => None,
+        }
+    }
+
+    /// Answers a line of the open conversation or secure channel (`id` is its
+    /// record, or a secure thread's top copy) from the box under it, quoting it.
+    pub(crate) fn start_reply(&mut self, id: &str, in_thread: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Ok(seq) = id.strip_prefix("top|").unwrap_or(id).parse::<i64>() else { return };
+        let Some(place) = self.reply_place(in_thread) else { return };
+        set_replying(&place, seq);
+        let input = if in_thread { self.threads.reply.clone() } else { self.composer.clone() };
+        input.update(cx, |state, cx| state.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Stops answering a line from the focused box; false when it wasn't answering one.
+    pub(crate) fn cancel_reply_here(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
+        let in_thread = self.threads.reply.read(cx).focus_handle(cx).is_focused(window);
+        if !in_thread && !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        let Some(place) = self.reply_place(in_thread) else { return false };
+        if replying(&place) == 0 {
+            return false;
+        }
+        set_replying(&place, 0);
+        cx.notify();
+        true
+    }
+
+    /// Brings a line of the open list into view and lets it glow (a reply's
+    /// quote, clicked); in a secure thread's panel, it glows where it is.
+    pub(crate) fn jump_to_line(&mut self, seq: i64, in_thread: bool, cx: &mut Context<Self>) {
+        let id = seq.to_string();
+        self.search.jumped = Some((id.clone(), std::time::Instant::now()));
+        if !in_thread {
+            self.sync_list(cx);
+            if let Some(ix) = self.rows.iter().position(|r| r.id_str() == id) {
+                self.scroller.update(cx, |s, cx| s.scroll_to_item(ix, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Over the box while it answers a line (the web's `ReplyBar`): whose, and the × that stops. Esc stops too.
+    fn reply_bar(&self, c: &Composer, place: &str, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let seq = replying(place);
+        if seq == 0 {
+            return None;
+        }
+        let target = self.target();
+        let name = self.core.shared.read(|s| {
+            let i = s.instance(&c.key)?;
+            let sender = i.dms.items.get(&c.id)?.iter().find(|i| i.seq == seq)?.sender_id.clone();
+            Some(match &target {
+                Some(Target::Secure { server, .. }) => i.display_name(Some(server), &sender),
+                _ => i
+                    .dms
+                    .conversations
+                    .iter()
+                    .find(|v| v.id == c.id)
+                    .and_then(|v| v.users.iter().find(|u| u.id == sender))
+                    .or_else(|| i.users.get(&sender))
+                    .map(user_name)
+                    .unwrap_or_else(|| "Someone".into()),
+            })
+        });
+        let label: AnyElement = match name {
+            Some(name) => crate::ui::text::hint_line(
+                &t_with("dms-calls.dm.reply.to", &[("name", Arg::Str("{name}"))]),
+                &[("name", &name)],
+                p,
+            )
+            .into_any_element(),
+            None => div().child(t("dms-calls.dm.reply.toLine")).into_any_element(),
+        };
+        let place = place.to_owned();
+        Some(
+            motion::rise(
+                div()
+                    .mb(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(12.0))
+                    .py(px(6.0))
+                    .rounded(radius_xl())
+                    .bg(alpha(p.muted, 0.6))
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(p.muted_foreground)
+                    .child(icon("reply").size(px(14.0)))
+                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(label))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("reply-cancel|{place}")))
+                            .size(px(20.0))
+                            .flex_none()
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .hover({
+                                let (bg, fg) = (p.muted, p.foreground);
+                                move |st| st.bg(bg).text_color(fg)
+                            })
+                            .tooltip(|window, cx| {
+                                crate::ui::overlay::Tip::new(t("dms-calls.dm.reply.cancel")).build(window, cx)
+                            })
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                set_replying(&place, 0);
+                                cx.notify();
+                            }))
+                            .child(icon("x").size(px(14.0))),
+                    ),
+                SharedString::from(format!("reply-bar|{}|{seq}", c.id)),
+                Duration::ZERO,
+                8.0,
+            )
+            .into_any_element(),
+        )
+    }
+
     /// Sends again a message that didn't go, in the open conversation or secure channel.
     pub(crate) fn retry_dm(&mut self, nonce: u64, cx: &mut Context<Self>) {
         let Some(Target::Dm { key, conversation: id } | Target::Secure { key, channel: id, .. }) = self.target() else {
@@ -1727,6 +1944,7 @@ impl FuwaApp {
             _ => None,
         };
         let typing = self.typing_line(&place, typing, &p, window, cx);
+        let replying = self.reply_bar(&c, &place, &p, cx);
         // Files dragged over the window go with the next message here, as on the web: not
         // from a thread's box, whose channel's box takes them.
         let drop = match &c.drop_to {
@@ -1750,6 +1968,7 @@ impl FuwaApp {
             .pb(px(12.0))
             .children(typing)
             .children(time_panel)
+            .children(replying)
             .children(gif_panel)
             .child(self.shaken(card))
             .child(footer)
@@ -1845,7 +2064,7 @@ mod tests {
         let who = |_: &str| Who { name: "U".into(), color: None, user: None };
         let start = || Row::Older { loading: false };
         let marks = |pins: Option<&[pb::DmPin]>| {
-            encrypted_rows(&i, "c", start(), &who, &|_| String::new(), None, None, pins, "", None, None)
+            encrypted_rows(&i, "c", start(), &who, &|_| String::new(), None, None, pins, "", None, None, true)
                 .iter()
                 .filter_map(|r| match r {
                     Row::Msg(m) => Some((m.id.clone(), m.pinned, m.can_pin)),

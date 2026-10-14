@@ -825,6 +825,7 @@ export function MessageLine({
   instanceKey,
   app = false,
   from,
+  above,
   children,
 }: {
   display: MessageDisplay;
@@ -841,6 +842,8 @@ export function MessageLine({
   status?: string;
   /** Where the author's profile card loads from; without it, names don't open one. */
   instanceKey?: string;
+  /** Over the whole line, lined up with the text: a reply's quote. */
+  above?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -854,8 +857,8 @@ export function MessageLine({
     ) : (
       child
     );
-  if (display === "compact")
-    return (
+  if (display === "compact") {
+    const line = (
       <div className="chat-text min-w-0 flex-1 leading-relaxed">
         {date ? (
           <time className="mr-2 inline-block w-[4.6em] text-right text-[0.7em] text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
@@ -875,7 +878,16 @@ export function MessageLine({
         {children}
       </div>
     );
-  return (
+    return above ? (
+      <div className="min-w-0 flex-1">
+        <div className="pl-[5.1em]">{above}</div>
+        {line}
+      </div>
+    ) : (
+      line
+    );
+  }
+  const columns = (
     <>
       <div className="w-10 shrink-0">
         {first ? (
@@ -912,6 +924,14 @@ export function MessageLine({
         <div className="chat-text leading-relaxed">{children}</div>
       </div>
     </>
+  );
+  return above ? (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="pl-[3.25rem]">{above}</div>
+      <div className="flex gap-3">{columns}</div>
+    </div>
+  ) : (
+    columns
   );
 }
 

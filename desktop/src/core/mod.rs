@@ -363,8 +363,16 @@ impl Shared {
 
     /// Someone else's message in a secure channel, just opened: it chimes and
     /// notifies by the channel's settings, like any channel's. The server
-    /// can't see who it mentions, so this device works it out.
-    pub(crate) fn notify_secure(&self, key: &str, server_id: &str, channel_id: &str, item: &vault::Item) {
+    /// can't see who it mentions, so this device works it out (a reply to one
+    /// of yours, `answers_me`, counts as a mention).
+    pub(crate) fn notify_secure(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        item: &vault::Item,
+        answers_me: bool,
+    ) {
         if self.is_focused(key, channel_id) || dms::now_ms() - item.at > 30_000 {
             return;
         }
@@ -375,8 +383,12 @@ impl Shared {
                 return None;
             }
             let settings = i.effective_notifications(server_id, channel_id, dms::now_ms());
-            let message =
-                pb::Message { author_id: item.sender_id.clone(), content: item.content.clone(), ..Default::default() };
+            let message = pb::Message {
+                author_id: item.sender_id.clone(),
+                content: item.content.clone(),
+                mention_user_ids: i.me.iter().filter(|_| answers_me).map(|m| m.id.clone()).collect(),
+                ..Default::default()
+            };
             let mention = i.pings_me(server_id, &message, settings.suppress_everyone);
             notifications::should_notify(settings, mention, &prefs).then(|| Notice::Message {
                 instance: key.to_owned(),
@@ -1439,17 +1451,17 @@ impl Core {
             _ => {}
         }
         // A new message shows dimmed until it's sent, and stays (with why) if it can't be; an edit changes the one already there.
-        let (text, thread, in_channel) = match &content {
-            Content::Text { text, .. } => (Some(text.clone()), 0, false),
-            Content::Reply { text, thread, in_channel, files } if files.is_empty() => {
-                (Some(text.clone()), *thread, *in_channel)
+        let (text, thread, in_channel, reply_to) = match &content {
+            Content::Text { text, reply_to } => (Some(text.clone()), 0, false, *reply_to),
+            Content::Reply { text, thread, in_channel, files, reply_to } if files.is_empty() => {
+                (Some(text.clone()), *thread, *in_channel, *reply_to)
             }
             Content::Edit { .. }
             | Content::Voice(_)
             | Content::Files { .. }
             | Content::Reply { .. }
             | Content::Lock { .. }
-            | Content::React { .. } => (None, 0, false),
+            | Content::React { .. } => (None, 0, false, 0),
         };
         let nonce = crate::core::dms::new_nonce();
         if let Some(text) = &text {
@@ -1460,6 +1472,7 @@ impl Core {
                 failed: None,
                 thread,
                 in_channel,
+                reply_to,
             };
             self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(pending));
         }

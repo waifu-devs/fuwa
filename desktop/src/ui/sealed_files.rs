@@ -777,6 +777,7 @@ impl FuwaApp {
         thread: Option<(i64, bool)>,
         cx: &mut Context<Self>,
     ) {
+        let reply_to = crate::ui::dm_view::take_replying(&place);
         let nonce = crate::core::dms::new_nonce();
         let sizes: Vec<(String, i64)> =
             files.iter().map(|f| (sealed_files::clean_name(&f.name), f.bytes.len() as i64)).collect();
@@ -790,7 +791,7 @@ impl FuwaApp {
         let core = self.core.clone();
         self.run(
             cx,
-            async move { core.send_dm_files(&key, &id, files, text, thread).await },
+            async move { core.send_dm_files(&key, &id, files, text, thread, reply_to).await },
             move |this, result, cx| {
                 PENDING.with(|p| {
                     let mut p = p.borrow_mut();
