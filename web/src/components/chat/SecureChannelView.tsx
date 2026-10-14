@@ -317,7 +317,7 @@ function SecureHeader({
         transition={SPRING}
         className="flex min-w-0 shrink items-center gap-2"
       >
-        <ShieldCheckIcon className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <ShieldCheckIcon className="size-5 shrink-0 text-seal-icon" />
         <h1 className="truncate font-extrabold">
           <SwapText className="truncate align-bottom">{channel.name}</SwapText>
         </h1>
@@ -358,7 +358,7 @@ function SecureHeader({
       animate={{ opacity: 1, scale: 1 }}
       transition={SPRING}
       title={t("chat.secure.seeWho")}
-      className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+      className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full border border-seal-edge bg-seal-surface text-seal-ink shadow-sm hover:bg-seal-surface-hover px-2.5 py-1 text-xs font-bold transition-colors"
     >
       <span aria-hidden className="shine pointer-events-none absolute inset-0" />
       <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
@@ -504,20 +504,20 @@ function SecureBeginning({ channel, sharesHistory }: { channel: Channel; sharesH
   const { t } = useI18n();
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.05 }} className="px-4 pt-10 pb-4">
-      <span className="relative inline-grid size-16 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+      <span className="relative inline-grid size-16 place-items-center rounded-2xl border border-seal-edge bg-seal-surface text-seal-ink">
         <ShieldCheckIcon className="size-8" />
         <motion.span
           initial={{ scale: 0, rotate: -30 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.45 }}
-          className="absolute -right-1.5 -bottom-1.5 grid size-7 place-items-center rounded-full bg-emerald-500 text-white ring-4 ring-card"
+          className="absolute -right-1.5 -bottom-1.5 grid size-7 place-items-center rounded-full bg-seal-ink text-seal-surface ring-4 ring-card"
         >
           <LockKeyholeIcon className="size-3.5" />
         </motion.span>
       </span>
       <h2 className="mt-3 text-2xl font-extrabold sm:text-3xl">{t("chat.beginning.title", { channel: channel.name })}</h2>
-      <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-900 dark:text-emerald-100">
-        <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl border border-seal-edge bg-seal-surface px-3 py-2.5 text-sm text-card-foreground">
+        <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-seal-ink" />
         <span>
           <T k="chat.secure.beginning.about" values={{ secure: <b>{t("chat.secure.beginning.secureChannel")}</b> }} />{" "}
           {sharesHistory ? t("chat.secure.beginning.history") : t("chat.secure.beginning.noHistory")}
@@ -626,7 +626,7 @@ function SecureChannelDialog({
                   <span className="flex items-center gap-1.5 truncate font-bold">
                     {userId === me?.id ? t("chat.secure.dialog.you") : nameIn(byId, users, userId)}
                     {verified.has(userId) && (
-                      <BadgeCheckIcon className="size-4 text-emerald-500" aria-label={t("chat.secure.dialog.verified")} />
+                      <BadgeCheckIcon className="size-4 text-seal-icon" aria-label={t("chat.secure.dialog.verified")} />
                     )}
                   </span>
                   <span className="block text-xs text-muted-foreground">

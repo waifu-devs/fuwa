@@ -13,7 +13,7 @@ use crate::core::i18n::t;
 use crate::core::typing::{self, Place};
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::Palette;
 
 /// How long the dots take to bob once.
 const BOB: Duration = Duration::from_millis(1200);
@@ -106,9 +106,10 @@ impl FuwaApp {
         Some(Words { key, names })
     }
 
-    /// The typing line for a box (`tag` tells boxes apart), placed just over
-    /// it: the box's own element is `relative`, and this floats above its
-    /// top edge. It springs in, fades out, and draws nothing once gone.
+    /// The typing line for a box (`tag` tells boxes apart): a row of its
+    /// own just above the box, kept wherever someone could type, so it never
+    /// covers the last message nor moves anything when it shows. Its words
+    /// spring in and fade out.
     pub(crate) fn typing_line(
         &self,
         tag: &str,
@@ -117,17 +118,20 @@ impl FuwaApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let words = place.and_then(|(place, server)| self.typing_words(&place, server.as_deref()));
+        let (place, server) = place?;
+        // The row is there whether or not anyone types.
+        let row = div().relative().flex_none().h(px(20.0));
+        let words = self.typing_words(&place, server.as_deref());
         let id = format!("typing-line|{tag}");
         let (words, leaving) = match words {
             Some(words) => {
                 motion::kept(&id, Some(&words), window, cx);
                 (words, None)
             }
-            None => {
-                let (words, t) = motion::kept::<Words>(&id, None, window, cx)?;
-                (words, Some(t))
-            }
+            None => match motion::kept::<Words>(&id, None, window, cx) {
+                Some((words, t)) => (words, Some(t)),
+                None => return Some(row.into_any_element()),
+            },
         };
         let template = t(words.key);
         let values: Vec<(&str, &str)> = words.names.iter().map(|(k, v)| (*k, v.as_str())).collect();
@@ -144,7 +148,6 @@ impl FuwaApp {
             .px(px(8.0))
             .py(px(1.0))
             .rounded_full()
-            .bg(alpha(p.background, 0.85))
             .text_size(px(11.2))
             .line_height(px(16.0))
             .text_color(p.muted_foreground)
@@ -154,19 +157,7 @@ impl FuwaApp {
             Some(t) => div().opacity(1.0 - gpui_kit::ease_out_quint()(t)).child(line).into_any_element(),
             None => motion::rise(line, SharedString::from(format!("{id}|in")), Duration::ZERO, 4.0).into_any_element(),
         };
-        // It takes no pointer, so the messages under it scroll and click as ever.
-        Some(
-            div()
-                .absolute()
-                .left(px(20.0))
-                .right(px(16.0))
-                .top(px(-20.0))
-                .h(px(18.0))
-                .flex()
-                .items_center()
-                .child(shown)
-                .into_any_element(),
-        )
+        Some(row.child(div().absolute().inset_0().left(px(4.0)).flex().items_center().child(shown)).into_any_element())
     }
 }
 

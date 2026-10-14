@@ -2,7 +2,11 @@ import { DownloadIcon, EyeIcon, LoaderCircleIcon, LockKeyholeIcon, PlayIcon, Shi
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
+import { FirstFrame } from "@/components/chat/GifImage";
+import { fitGif } from "@/components/chat/GifMessage";
 import { ImageViewer, type ViewerPicture } from "@/components/chat/ImageViewer";
+import { GifProvider } from "@/gen/fuwa/v1/types_pb";
+import { providerName } from "@/fuwa/gifs";
 import { SpoilerBadge, SpoilerCover } from "@/components/chat/SpoilerCover";
 import type { FileRef } from "@/e2ee/vault";
 import { animated, sniff, type Preview } from "@/files/sealed";
@@ -85,17 +89,21 @@ export const SealedFiles = memo(function SealedFiles({ instanceKey, files, anima
   const pictures = files.flatMap((f) => viewable[f.mediaId] ?? []);
   return (
     <div className="mt-1 flex flex-col gap-1.5">
-      {files.map((file, n) => (
-        <SealedFile
-          key={file.mediaId}
-          instanceKey={instanceKey}
-          file={file}
-          delay={animate ? n * 0.04 : 0}
-          animate={animate}
-          onViewable={report}
-          onView={() => setOpen(Math.max(0, pictures.findIndex((p) => p.key === file.mediaId)))}
-        />
-      ))}
+      {files.map((file, n) =>
+        file.gif ? (
+          <SealedGif key={file.mediaId} instanceKey={instanceKey} file={file} animate={animate} />
+        ) : (
+          <SealedFile
+            key={file.mediaId}
+            instanceKey={instanceKey}
+            file={file}
+            delay={animate ? n * 0.04 : 0}
+            animate={animate}
+            onViewable={report}
+            onView={() => setOpen(Math.max(0, pictures.findIndex((p) => p.key === file.mediaId)))}
+          />
+        ),
+      )}
       <ImageViewer pictures={pictures} index={pictures.length ? open : null} onIndex={setOpen} onClose={() => setOpen(null)} />
     </div>
   );
@@ -221,7 +229,7 @@ function SealedFile({
       >
         <span className="relative">
           <FileBadge name={file.name} />
-          <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
+          <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-seal-icon shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
             <LockKeyholeIcon className="size-2.5" />
           </span>
         </span>
@@ -252,6 +260,81 @@ function SealedFile({
         </CardButton>
       </motion.div>
     </SpoilerCover>
+  );
+}
+
+const noop = () => {};
+
+/**
+ * A GIF sent from the picker, sealed as a file: opened by itself once it's on
+ * screen and shown like a GIF in a channel (sized before it opens, playing
+ * inline, still under reduce motion until it's pointed at or tapped, with
+ * its credit). Whatever its own bytes don't say is a picture shows as a file.
+ */
+function SealedGif({ instanceKey, file, animate }: { instanceKey: string; file: FileRef; animate: boolean }) {
+  const { t } = useI18n();
+  const still = usePrefs(reduceMotion);
+  const [hover, setHover] = useState(false);
+  const [tapped, setTapped] = useState(false);
+  const { state, place } = useOpening(instanceKey, file, (file.fileSize || file.size) <= AUTO_OPEN_BYTES);
+  const opened = state.at === "open" ? state.opened : null;
+  const url = useBlobUrl(opened);
+  if (state.at === "failed" || (opened && opened.preview?.kind !== "image")) {
+    return <SealedFile instanceKey={instanceKey} file={file} delay={0} animate={animate} onViewable={noop} onView={noop} />;
+  }
+  const size = fitGif(file.width || 240, file.height || 180);
+  const playing = !still || hover || tapped;
+  const alt = file.gif?.title || t("chat.gif.gif");
+  const credit = providerName(file.gif?.provider ?? GifProvider.UNSPECIFIED);
+  return (
+    <motion.div
+      ref={place}
+      initial={animate ? { opacity: 0, scale: 0.94, y: 6 } : false}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 460, damping: 30 }}
+      style={{ width: size.width, height: size.height }}
+      onPointerEnter={() => setHover(true)}
+      onPointerLeave={() => setHover(false)}
+      className="group/gif relative max-w-full overflow-hidden rounded-xl bg-muted shadow-sm"
+    >
+      {url ? (
+        <button
+          type="button"
+          onClick={() => still && setTapped((on) => !on)}
+          onFocus={() => setHover(true)}
+          onBlur={() => setHover(false)}
+          aria-label={alt}
+          className={cn("block size-full", still ? "cursor-pointer" : "cursor-default")}
+        >
+          {playing || !opened?.moves ? (
+            <img src={url} alt={alt} draggable={false} decoding="async" className="size-full object-cover" />
+          ) : (
+            <FirstFrame src={url} alt={alt} className="size-full object-cover" />
+          )}
+        </button>
+      ) : (
+        <span className="grid size-full place-items-center text-muted-foreground">
+          <LoaderCircleIcon className="size-5 animate-spin" aria-label={t("dms-calls.dm.sealed.opening")} />
+        </span>
+      )}
+      <AnimatePresence>
+        {url && still && !playing && opened?.moves && (
+          <motion.span
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-white"
+          >
+            {t("chat.gif.gif")}
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {credit && (
+        <span className="pointer-events-none absolute right-2 bottom-1.5 text-[0.6rem] font-bold text-white/85 opacity-0 transition-opacity duration-150 [text-shadow:0_1px_2px_rgb(0_0_0/0.6)] group-hover/gif:opacity-100">
+          {t("chat.gif.via", { provider: credit })}
+        </span>
+      )}
+    </motion.div>
   );
 }
 
@@ -358,7 +441,7 @@ function Still({ url, name, width, height, onView }: { url: string; name: string
  * Files on their way in an encrypted message: sealed and uploaded on this
  * device before it's sent. One marked as a spoiler says so, its name blurred.
  */
-export function PendingFiles({ files }: { files: { name: string; size: number; spoiler?: boolean }[] }) {
+export function PendingFiles({ files }: { files: { name: string; size: number; spoiler?: boolean; gif?: boolean }[] }) {
   const lang = useI18n();
   return (
     <div className="mt-1 flex flex-col gap-1.5">
@@ -366,11 +449,11 @@ export function PendingFiles({ files }: { files: { name: string; size: number; s
         <div key={n} className="relative flex w-full max-w-sm items-center gap-3 overflow-hidden rounded-xl border bg-muted/40 px-3 py-2.5">
           <FileBadge name={file.name} />
           <div className="min-w-0 flex-1">
-            <p className={cn("truncate text-sm font-bold", file.spoiler && "blur-[4px] select-none")}>{shortName(file.name, 48)}</p>
+            <p className={cn("truncate text-sm font-bold", file.spoiler && "blur-[4px] select-none")}>{file.gif ? lang.t("chat.gif.gif") : shortName(file.name, 48)}</p>
             <p className="truncate text-xs text-muted-foreground tabular-nums">{formatBytes(lang, file.size)}</p>
           </div>
           {file.spoiler && <SpoilerBadge className="shrink-0 px-2 py-0.5 text-[0.6rem]" />}
-          <LockKeyholeIcon className="size-4 shrink-0 text-emerald-500" />
+          <LockKeyholeIcon className="size-4 shrink-0 text-seal-icon" />
         </div>
       ))}
     </div>

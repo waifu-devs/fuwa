@@ -21,7 +21,7 @@ use gpui_kit::{
 use crate::core::attachments;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::sealed_files::{self, Outgoing};
-use crate::core::vault::FileRef;
+use crate::core::vault::{FileRef, GifMark};
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::dm_view::seal;
 use crate::ui::motion;
@@ -163,7 +163,7 @@ fn one_file(
     cx: &mut gpui_kit::App,
 ) -> AnyElement {
     let s = seal(p);
-    let hinted = file.content_type.starts_with("image/") || file.width > 0;
+    let hinted = file.content_type.starts_with("image/") || file.width > 0 || file.gif.is_some();
     let auto = hinted && (if file.file_size > 0 { file.file_size } else { file.size }) <= AUTO_OPEN_BYTES;
     let state = state_of(&file.media_id);
     // A spoiler stays covered until it's clicked (it may open meanwhile, unseen).
@@ -172,6 +172,16 @@ fn one_file(
     if auto && state.is_none() {
         let (this, key, file) = (this.clone(), key.to_owned(), file.clone());
         cx.defer(move |cx| open(&this, &key, &file, cx));
+    }
+    if let Some(mark) = &file.gif {
+        match &state {
+            Some(State::Open { picture: Some(picture), .. }) => {
+                return gif_view(id, file, mark, Some(picture.clone()), p);
+            }
+            None | Some(State::Opening) => return gif_view(id, file, mark, None, p),
+            // One that didn't open, or isn't a picture after all, is a card like any file.
+            _ => {}
+        }
     }
     if let Some(State::Open { bytes, picture: Some(picture) }) = &state {
         let (w, h) = attachments::fit_box(file.width as i32, file.height as i32, MEDIA_BOX);
@@ -456,6 +466,51 @@ fn capital(text: &str) -> String {
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
+/// A GIF sent from the picker, sealed as a file (the web's `SealedGif`): sized
+/// before it opens, playing inline as a GIF in a channel does (and holding
+/// still with reduced motion, as every picture does), with its credit on hover.
+fn gif_view(id: &str, file: &FileRef, mark: &GifMark, picture: Option<Arc<Image>>, p: &Palette) -> AnyElement {
+    let (w, h) = crate::core::gifs::fit(file.width as i32, file.height as i32);
+    let group = SharedString::from(format!("sealed-gif|{id}"));
+    let credit = crate::core::gifs::provider_name(mark.provider);
+    let fg = p.muted_foreground;
+    div()
+        .id(SharedString::from(format!("sealed-gif-box|{id}")))
+        .group(group.clone())
+        .relative()
+        .mt(px(4.0))
+        .w(px(w))
+        .h(px(h))
+        .max_w_full()
+        .rounded(radius_xl())
+        .overflow_hidden()
+        .bg(p.muted)
+        .map(|el| match picture {
+            Some(picture) => el.child(
+                img(picture)
+                    .id(SharedString::from(format!("sealed-gif-img|{id}")))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            ),
+            None => el.flex().items_center().justify_center().text_color(fg).child(t("chat.gif.gif")),
+        })
+        .when(!credit.is_empty(), |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .right(px(8.0))
+                    .bottom(px(6.0))
+                    .text_size(px(10.0))
+                    .font_weight(gpui_kit::FontWeight::BOLD)
+                    .text_color(gpui_kit::white().opacity(0.85))
+                    .opacity(0.0)
+                    .group_hover(group, |s| s.opacity(1.0))
+                    .child(t_with("chat.gif.via", &[("provider", Arg::Str(credit))])),
+            )
+        })
+        .into_any_element()
+}
+
 /// Files on their way in an encrypted message (the web's `PendingFiles`).
 pub(crate) fn pending_files(files: &[(String, i64)], p: &Palette) -> AnyElement {
     let s = seal(p);
@@ -706,6 +761,22 @@ impl FuwaApp {
         if files.is_empty() {
             return false;
         }
+        self.send_files_in(key, id, place, files, text, thread, cx);
+        true
+    }
+
+    /// Sends `files` (picked, or a GIF from the picker) in `place`, showing them on their way.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn send_files_in(
+        &mut self,
+        key: String,
+        id: String,
+        place: String,
+        files: Vec<Outgoing>,
+        text: String,
+        thread: Option<(i64, bool)>,
+        cx: &mut Context<Self>,
+    ) {
         let reply_to = crate::ui::dm_view::take_replying(&place);
         let nonce = crate::core::dms::new_nonce();
         let sizes: Vec<(String, i64)> =
@@ -732,7 +803,6 @@ impl FuwaApp {
                 cx.notify();
             },
         );
-        true
     }
 }
 

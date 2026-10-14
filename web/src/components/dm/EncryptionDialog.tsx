@@ -103,7 +103,7 @@ export function EncryptionDialog({
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.5, opacity: 0 }}
                   transition={{ type: "spring", stiffness: 600, damping: 16 }}
-                  className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300"
+                  className="flex items-center gap-1 rounded-full border border-seal-edge bg-seal-surface px-2 py-0.5 text-xs font-bold text-seal-ink"
                 >
                   <BadgeCheckIcon className="size-3.5" /> {t("dms-calls.dm.trust.verified")}
                 </motion.span>
@@ -113,7 +113,7 @@ export function EncryptionDialog({
                   initial={{ scale: 0.5, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.5, opacity: 0 }}
-                  className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300"
+                  className="flex items-center gap-1 rounded-full border border-seal-warn-edge bg-seal-warn-surface px-2 py-0.5 text-xs font-bold text-seal-warn-ink"
                 >
                   <ShieldAlertIcon className="size-3.5" /> {t("dms-calls.dm.encryption.changed")}
                 </motion.span>

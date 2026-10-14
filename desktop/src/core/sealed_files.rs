@@ -24,7 +24,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::core::api::Problem;
 use crate::core::dms::{Content, DmError};
-use crate::core::vault::FileRef;
+use crate::core::vault::{FileRef, GifMark};
 use crate::pb;
 use crate::rpc;
 
@@ -175,6 +175,13 @@ pub fn files_of(list: &[pb::SealedFile]) -> Vec<FileRef> {
             height: f.height.min(16_384),
             file_size,
             spoiler: f.spoiler,
+            gif: f.gif.as_ref().map(|g| GifMark {
+                title: g.title.chars().take(MAX_GIF_TITLE).collect(),
+                provider: match pb::GifProvider::try_from(g.provider) {
+                    Ok(known @ (pb::GifProvider::Giphy | pb::GifProvider::Klipy)) => known as i32,
+                    _ => 0,
+                },
+            }),
         });
     }
     out
@@ -197,6 +204,7 @@ pub fn to_sealed(files: &[FileRef]) -> Vec<pb::SealedFile> {
             chunk_bytes: f.chunk_bytes,
             file_size: f.file_size,
             spoiler: f.spoiler,
+            gif: f.gif.as_ref().map(|g| pb::SealedGif { title: g.title.clone(), provider: g.provider }),
         })
         .collect()
 }
@@ -273,6 +281,23 @@ pub struct Outgoing {
     pub content_type: String,
     pub bytes: Arc<Vec<u8>>,
     pub spoiler: bool,
+    /// A GIF from the picker, sent as a file marked as one.
+    pub gif: Option<GifMark>,
+}
+
+/// The most a GIF fetched to be sealed may be: the most the instance ever stores (docs/gifs.md).
+const MAX_GIF_BYTES: usize = 32 * 1024 * 1024;
+/// The most of a GIF's title kept.
+const MAX_GIF_TITLE: usize = 200;
+
+/// Where to fetch a GIF the picker gave: its `/media/<id>` path on this
+/// instance's own address (`base`), whatever host its link names.
+pub fn gif_address(base: &str, url: &str) -> Option<String> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let path = rest[rest.find('/')?..].split(['?', '#']).next().unwrap_or_default();
+    let id = path.strip_prefix("/media/")?;
+    let ok = !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric());
+    ok.then(|| format!("{}/media/{id}", base.trim_end_matches('/')))
 }
 
 /// Why these files can't go, if they can't (the web's `cantSendFiles`).
@@ -305,6 +330,27 @@ impl crate::core::Core {
         let plain = Arc::new(plain);
         keep_opened(&file.media_id, plain.clone());
         Ok(plain)
+    }
+
+    /// Fetches a GIF the picker gave (stored on this instance) so it can go
+    /// sealed like a file: the instance never learns which conversation it
+    /// went to. Only ever from this instance's own address.
+    pub async fn fetch_gif(&self, key: &str, gif: &pb::MessageGif) -> Result<Outgoing, Problem> {
+        let api = self.api(key).ok_or_else(|| Problem::new(tonic::Code::Unavailable, "That instance isn't here."))?;
+        let url = gif_address(&api.url, &gif.url)
+            .ok_or_else(|| Problem::new(tonic::Code::InvalidArgument, "That GIF isn't on this instance."))?;
+        let bytes = crate::core::account::fetch(&url, MAX_GIF_BYTES).await?;
+        let kind = picture_kind(&bytes[..bytes.len().min(64)])
+            .ok_or_else(|| Problem::new(tonic::Code::DataLoss, crate::core::i18n::t("system.files.cantOpen")))?;
+        crate::core::reports::used("gif.send");
+        self.set_prefs(|p| crate::core::gifs::remember(p.recent_gifs.entry(key.to_owned()).or_default(), gif));
+        Ok(Outgoing {
+            name: format!("gif.{kind}"),
+            content_type: format!("image/{kind}"),
+            bytes: Arc::new(bytes),
+            spoiler: false,
+            gif: Some(GifMark { title: gif.title.chars().take(MAX_GIF_TITLE).collect(), provider: gif.provider }),
+        })
     }
 
     /// Sends files in a conversation or secure channel, with `text`: each sealed on this device
@@ -358,6 +404,7 @@ impl crate::core::Core {
                 height,
                 file_size: file.bytes.len() as i64,
                 spoiler: file.spoiler,
+                gif: file.gif.clone(),
             });
         }
         let files = to_sealed(&refs);
@@ -425,6 +472,50 @@ mod tests {
         assert!(kept.get("spoiler").is_none());
         kept.as_object_mut().unwrap().remove("spoiler");
         assert!(!serde_json::from_value::<FileRef>(kept).unwrap().spoiler);
+    }
+
+    #[test]
+    fn gif_marks_go_inside_the_message() {
+        let file = pb::SealedFile {
+            media_id: "01j9zzzzzzzzzzzzzzzzzzzzzz".into(),
+            key: vec![1; 32],
+            sha256: vec![2; 32],
+            size: sealed_size(padded_size(10), CHUNK_BYTES as u64) as i64,
+            chunk_bytes: CHUNK_BYTES as u32,
+            name: "gif.gif".into(),
+            gif: Some(pb::SealedGif { title: "a".repeat(500), provider: pb::GifProvider::Giphy as i32 }),
+            ..Default::default()
+        };
+        let odd = pb::SealedFile {
+            media_id: "01j9yyyyyyyyyyyyyyyyyyyyyy".into(),
+            gif: Some(pb::SealedGif { title: "wave".into(), provider: 99 }),
+            ..file.clone()
+        };
+        let read = files_of(&[file, odd]);
+        let marks: Vec<_> = read.iter().map(|f| f.gif.clone().unwrap()).collect();
+        // A long title is cut short, and a provider this app doesn't know credits nobody.
+        assert_eq!(marks[0].title.chars().count(), MAX_GIF_TITLE);
+        assert_eq!(marks[0].provider, pb::GifProvider::Giphy as i32);
+        assert_eq!(marks[1], GifMark { title: "wave".into(), provider: 0 });
+        assert_eq!(to_sealed(&read)[1].gif, Some(pb::SealedGif { title: "wave".into(), provider: 0 }));
+        // Kept files from before GIFs went in messages read as plain ones.
+        let mut kept = serde_json::to_value(&read[0]).unwrap();
+        kept.as_object_mut().unwrap().remove("gif");
+        assert!(serde_json::from_value::<FileRef>(kept).unwrap().gif.is_none());
+    }
+
+    #[test]
+    fn gifs_are_fetched_from_this_instance_only() {
+        let base = "https://fuwa.example/";
+        assert_eq!(
+            gif_address(base, "https://cdn.elsewhere/media/01j9zzzz?x=1").as_deref(),
+            Some("https://fuwa.example/media/01j9zzzz")
+        );
+        assert_eq!(gif_address(base, "/media/abc").as_deref(), Some("https://fuwa.example/media/abc"));
+        assert_eq!(gif_address(base, "https://fuwa.example/media/servers/s/abc"), None);
+        assert_eq!(gif_address(base, "https://fuwa.example/api/secret"), None);
+        assert_eq!(gif_address(base, "https://fuwa.example/media/../api"), None);
+        assert_eq!(gif_address(base, "https://fuwa.example"), None);
     }
 
     #[test]

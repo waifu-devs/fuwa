@@ -117,7 +117,7 @@ fn outgoing(pasted: Pasted) -> Option<Outgoing> {
         Pasted::Picture { format, bytes } => picture_file(format, &bytes)?,
     };
     let content_type = attachments::content_type_of(&name).to_owned();
-    Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false })
+    Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false, gif: None })
 }
 
 impl FuwaApp {

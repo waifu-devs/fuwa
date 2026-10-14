@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cleanName, MIN_CHUNK, openFile, paddedSize, plausible, sealedSize, sealFile, sniff } from "./sealed.ts";
+import { cleanName, gifAddress, MIN_CHUNK, openFile, paddedSize, plausible, sealedSize, sealFile, sniff } from "./sealed.ts";
 
 const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
 
@@ -85,4 +85,13 @@ test("names lose paths and characters that hide or turn text", () => {
   assert.equal(cleanName("...hidden"), "hidden");
   assert.equal(cleanName("  \u200b "), "file");
   assert.equal(cleanName("x".repeat(400)).length, 255);
+});
+
+test("GIFs are fetched from this instance's own address only", () => {
+  const base = "https://fuwa.example/";
+  assert.equal(gifAddress(base, "https://cdn.elsewhere/media/01j9zzzz?x=1"), "https://fuwa.example/media/01j9zzzz");
+  assert.equal(gifAddress(base, "/media/abc"), "https://fuwa.example/media/abc");
+  assert.equal(gifAddress(base, "https://fuwa.example/media/servers/s/abc"), null);
+  assert.equal(gifAddress(base, "https://fuwa.example/media/../api"), null);
+  assert.equal(gifAddress(base, "https://fuwa.example/api/secret"), null);
 });

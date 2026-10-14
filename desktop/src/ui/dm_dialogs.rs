@@ -141,7 +141,7 @@ pub(crate) fn padlock(tag: &str, p: &Palette) -> AnyElement {
     let s = seal(p);
     let green = s.icon;
     let card: Hsla = p.card.into();
-    let disc = s.green;
+    let (disc, edge) = (s.surface, s.edge);
     motion::once(
         div().relative().size(px(64.0)),
         SharedString::from(format!("padlock-{tag}")),
@@ -178,7 +178,7 @@ pub(crate) fn padlock(tag: &str, p: &Palette) -> AnyElement {
                         .top(px(32.0 - disc_size / 2.0))
                         .size(px(disc_size))
                         .rounded_full()
-                        .bg(Hsla { a: 0.15 * b.clamp(0.2, 1.0), ..disc }),
+                        .bg(Hsla { a: b.clamp(0.2, 1.0), ..disc }),
                 )
                 .child(
                     div()
@@ -188,7 +188,7 @@ pub(crate) fn padlock(tag: &str, p: &Palette) -> AnyElement {
                         .size(px(ring_size))
                         .rounded_full()
                         .border_1()
-                        .border_color(Hsla { a: 0.4 * ring_alpha / 0.8, ..disc }),
+                        .border_color(Hsla { a: ring_alpha / 0.8, ..edge }),
                 )
                 // The lock, on the web's 32px drawing in the middle of the 64px mark.
                 .child(
@@ -333,19 +333,13 @@ impl FuwaApp {
             )
         };
         let state_chip = if is_verified {
-            Some(chip(
-                "safety-chip-verified",
-                "badge-check",
-                t("dms-calls.dm.trust.verified"),
-                Hsla { a: 0.15, ..s.green },
-                s.pill,
-            ))
+            Some(chip("safety-chip-verified", "badge-check", t("dms-calls.dm.trust.verified"), s.surface, s.pill))
         } else if changed {
             Some(chip(
                 "safety-chip-changed",
                 "shield-alert",
                 t("dms-calls.dm.encryption.changed"),
-                Hsla { a: 0.15, ..s.amber },
+                s.amber_surface,
                 s.amber_text,
             ))
         } else {

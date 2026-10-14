@@ -45,6 +45,14 @@ instance stored. A GIF needs Attach Files, AutoMod's picture checks look at
 its first frame, and with reduce motion on it stays still until it's pointed
 at or tapped. GIFs can't be sent in shared channels yet.
 
+In direct messages, group conversations and secure channels the same picker
+sends a GIF end-to-end encrypted: the app prepares it as above, fetches the
+stored GIF from its own instance and seals it on the device like any file
+(`SealedFile.gif` marks it as a GIF, with its title and credit), so the
+instance can't tell it from a file or learn which conversation it went to.
+Readers open it like any sealed file and show it like a GIF in a channel. In
+a secure channel it needs Attach Files.
+
 People can save GIFs (up to 200) and upload their own (shown under Saved).
 Recently sent GIFs are kept on the device only.
 
