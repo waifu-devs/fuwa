@@ -25,6 +25,17 @@
   --border: #f8d3e0;
   --input: #f8d3e0;
   --ring: #f06292;
+  /* The encryption marks (lib/accessibility.ts sealColors, set with the theme). */
+  --seal-surface: #dbf6ed;
+  --seal-surface-hover: #c7f0e2;
+  --seal-ink: #007753;
+  --seal-edge: #73b9a2;
+  --seal-icon: #009966;
+  --seal-warn-surface: #fff1db;
+  --seal-warn-surface-hover: #ffe9c7;
+  --seal-warn-ink: #b44a00;
+  --seal-warn-edge: #cca870;
+  --seal-warn-icon: #e07100;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -47,6 +58,16 @@
     --border: #342b4d;
     --input: #342b4d;
     --ring: #b388ff;
+    --seal-surface: #1b3139;
+    --seal-surface-hover: #183e3f;
+    --seal-ink: #5ee9b5;
+    --seal-edge: #166756;
+    --seal-icon: #00d492;
+    --seal-warn-surface: #3e2c28;
+    --seal-warn-surface-hover: #503624;
+    --seal-warn-ink: #ffd230;
+    --seal-warn-edge: #835419;
+    --seal-warn-icon: #ffb900;
   }
 }
 
@@ -75,6 +96,16 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-seal-surface: var(--seal-surface);
+  --color-seal-surface-hover: var(--seal-surface-hover);
+  --color-seal-ink: var(--seal-ink);
+  --color-seal-edge: var(--seal-edge);
+  --color-seal-icon: var(--seal-icon);
+  --color-seal-warn-surface: var(--seal-warn-surface);
+  --color-seal-warn-surface-hover: var(--seal-warn-surface-hover);
+  --color-seal-warn-ink: var(--seal-warn-ink);
+  --color-seal-warn-edge: var(--seal-warn-edge);
+  --color-seal-warn-icon: var(--seal-warn-icon);
   /* The fonts picked in settings (lib/fonts.ts), or these. */
   --font-sans: var(--app-font, "M PLUS Rounded 1c", ui-rounded, ui-sans-serif, system-ui, sans-serif);
   --font-mono: var(--code-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);

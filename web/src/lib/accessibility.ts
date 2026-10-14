@@ -133,3 +133,59 @@ export function highContrastTokens(t: ThemeTokens): ThemeTokens {
     ring: ensureContrast(t.ring, surfaces, 3),
   };
 }
+
+// ───────────────────────── Encryption marks ─────────────────────────
+
+/** What end-to-end encryption is drawn with: green, and amber when a safety number changed. */
+export type SealColors = {
+  /** A pill or note's own solid surface, and pointed at. */
+  surface: string;
+  surfaceHover: string;
+  /** Text and icons on that surface. */
+  ink: string;
+  /** Its outline, so it stands apart from whatever is behind it. */
+  edge: string;
+  /** A mark on its own, on the theme's card or background. */
+  icon: string;
+  warnSurface: string;
+  warnSurfaceHover: string;
+  warnInk: string;
+  warnEdge: string;
+  warnIcon: string;
+};
+
+const SEAL_GREEN = "#00bc7d";
+const SEAL_AMBER = "#fe9a00";
+
+/**
+ * The encryption marks in a theme. They sit over see-through panels and
+ * backdrop pictures, so each draws on a solid surface of its own (the
+ * theme's card, tinted), never on what's behind it, with text at 4.5:1
+ * against that surface and lone icons at 3:1 against the card and the
+ * background, whatever the theme. The desktop's `core/accessibility.rs`
+ * does the same math.
+ */
+export function sealColors(t: ThemeTokens): SealColors {
+  const dark = luminance(t.card) < luminance(t["card-foreground"]);
+  const paint = (hue: string, ink: string, icon: string) => {
+    const surface = mix(hue, t.card, 0.14);
+    const surfaceHover = mix(hue, t.card, 0.22);
+    return {
+      surface,
+      surfaceHover,
+      ink: ensureContrast(ink, [surface, surfaceHover], 4.5),
+      edge: ensureContrast(mix(hue, t.card, 0.45), [surface], 2),
+      icon: ensureContrast(icon, [t.card, t.background], 3),
+    };
+  };
+  const green = paint(SEAL_GREEN, dark ? "#5ee9b5" : "#007a55", dark ? "#00d492" : "#009966");
+  const amber = paint(SEAL_AMBER, dark ? "#ffd230" : "#bb4d00", dark ? "#ffb900" : "#e17100");
+  return {
+    ...green,
+    warnSurface: amber.surface,
+    warnSurfaceHover: amber.surfaceHover,
+    warnInk: amber.ink,
+    warnEdge: amber.edge,
+    warnIcon: amber.icon,
+  };
+}

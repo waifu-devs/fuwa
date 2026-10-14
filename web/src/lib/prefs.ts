@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { COLOR_VISIONS, colorVisionMatrix, feColorMatrix, highContrastTokens, type ColorVision } from "@/lib/accessibility";
+import { COLOR_VISIONS, colorVisionMatrix, feColorMatrix, highContrastTokens, sealColors, type ColorVision } from "@/lib/accessibility";
 import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { loadFontFile, sweepFontFiles } from "@/lib/font-files";
@@ -460,8 +460,10 @@ export function reduceMotion(p: Prefs = prefs): boolean {
 export function applyPrefs() {
   if (typeof document === "undefined") return;
   const p = prefs;
-  applyTheme(shownTheme(p));
+  const theme = shownTheme(p);
+  applyTheme(theme);
   const root = document.documentElement;
+  applySeal(root, theme.variant.tokens);
   // Everything is sized in rem, so the root size zooms the whole app.
   root.style.fontSize = p.zoom === 100 ? "" : `${(16 * p.zoom) / 100}px`;
   root.style.setProperty("--chat-font", `${p.chatFontSize}px`);
@@ -482,6 +484,12 @@ export function applyPrefs() {
 const COLOR_FILTER = "fuwa-color-vision";
 
 /** Corrects every color on the page for the color blindness picked, with an SVG filter on the root (app.css). */
+/** The encryption marks' colors for the theme on screen (`--seal-*`, styles/app.css). */
+function applySeal(root: HTMLElement, tokens: ThemeTokens) {
+  const seal = sealColors(tokens);
+  for (const [key, value] of Object.entries(seal)) root.style.setProperty(`--seal-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, value);
+}
+
 function applyColorVision(root: HTMLElement, p: Prefs) {
   const on = p.colorVision !== "off" && p.colorVisionStrength > 0;
   toggleData(root, "colorVision", on);

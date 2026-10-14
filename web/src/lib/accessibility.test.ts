@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyMatrix, colorVisionMatrix, contrast, ensureContrast, feColorMatrix, highContrastTokens, seenBy, type ColorVision } from "./accessibility.ts";
+import { applyMatrix, colorVisionMatrix, contrast, ensureContrast, feColorMatrix, highContrastTokens, sealColors, seenBy, type ColorVision } from "./accessibility.ts";
 import { BUILTIN_THEMES } from "./themes.ts";
 
 const distance = (a: string, b: string) => {
@@ -62,11 +62,39 @@ test("every built-in theme meets the high contrast ratios", () => {
   }
 });
 
+test("the encryption marks read on every theme, whatever is behind them", () => {
+  const odd = (card: string, fg: string, background: string) => ({ ...BUILTIN_THEMES[0]!.variant.tokens, card, "card-foreground": fg, background });
+  const themes = [
+    ...BUILTIN_THEMES.flatMap((t) => [t.variant.tokens, highContrastTokens(t.variant.tokens)]),
+    // Custom themes can be anything: mid greys, the seal's own green, loud yellow.
+    odd("#808080", "#ffffff", "#707070"),
+    odd("#00bc7d", "#000000", "#00bc7d"),
+    odd("#ffff00", "#000000", "#ffffff"),
+  ];
+  for (const t of themes) {
+    const s = sealColors(t);
+    for (const [ink, surfaces, icon] of [
+      [s.ink, [s.surface, s.surfaceHover], s.icon],
+      [s.warnInk, [s.warnSurface, s.warnSurfaceHover], s.warnIcon],
+    ] as const) {
+      for (const surface of surfaces) {
+        assert.match(surface, /^#[0-9a-f]{6}$/, "solid, never see-through");
+        assert.ok(contrast(ink, surface) >= 4.5, `${t.card} text`);
+      }
+      assert.ok(contrast(icon, t.card) >= 3 && contrast(icon, t.background) >= 3, `${t.card} icon`);
+    }
+    assert.ok(contrast(s.edge, s.surface) >= 2, `${t.card} outline`);
+  }
+});
+
 /** The desktop's `core/accessibility.rs` pins the same values, so both apps paint alike. */
 test("matches the desktop", () => {
   const shown = (i: number) => Object.values(highContrastTokens(BUILTIN_THEMES[i]!.variant.tokens)).join(" ");
   assert.equal(shown(0), "#fffafc #3b2330 #ffffff #3b2330 #ffffff #3b2330 #be4d73 #ffffff #fdecf2 #3b2330 #fce6ed #604753 #e3c9d2 #3b2330 #cf4146 #a48c95 #a48c95 #ee6191");
   assert.equal(shown(1), "#0a0910 #ece6ff #100d17 #ece6ff #100d17 #ece6ff #b388ff #13101e #312747 #ece6ff #221d34 #aea6c6 #332c46 #ece6ff #e5484d #625b76 #625b76 #b388ff");
+  const seal = (i: number) => Object.values(sealColors(BUILTIN_THEMES[i]!.variant.tokens)).join(" ");
+  assert.equal(seal(0), "#dbf6ed #c7f0e2 #007753 #73b9a2 #009966 #fff1db #ffe9c7 #b44a00 #cca870 #e07100");
+  assert.equal(seal(1), "#1b3139 #183e3f #5ee9b5 #166756 #00d492 #3e2c28 #503624 #ffd230 #835419 #ffb900");
   const samples: [ColorVision, string, string][] = [
     ["protanopia", "#e593ab", "#2f9352"],
     ["deuteranopia", "#e56295", "#2fa658"],

@@ -79,6 +79,23 @@ secondary, muted unchanged
 The surfaces are then made from these as usual, the backdrop's `panels`
 counts as 100 (solid), and the web app draws focus rings thicker.
 
+**Encryption marks** (the "End-to-end encrypted" pills, the start of an
+encrypted conversation, the composer's lock) always read, whatever the
+theme or what's behind the panels: `sealColors` (`seal_colors` on the
+desktop) gives each a solid surface of its own instead of a see-through
+tint, so a backdrop picture never shows through them. Green is `#00bc7d`
+and amber, for a changed safety number, `#fe9a00`; a theme is dark here
+when its card is darker than its card's text.
+
+```
+surface = mix(hue, card, 0.14); surface-hover = mix(hue, card, 0.22)
+ink = ensure(emerald-700 or amber-700 (300 dark), [surface, surface-hover], 4.5)
+edge = ensure(mix(hue, card, 0.45), [surface], 2)
+icon = ensure(emerald-600 or amber-600 (400 dark), [card, background], 3)
+```
+
+The web app puts them on the page as `--seal-*` (Tailwind `seal-*`).
+
 **Color blindness** (`colorVision`: `off`, `protanopia`, `deuteranopia`,
 `tritanopia`, with `colorVisionStrength`, 0 to 100 %) corrects colors by
 daltonizing, in sRGB: `M = I + s · SHIFT · (I − SEEN)`, where `SEEN` is how

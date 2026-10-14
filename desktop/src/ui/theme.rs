@@ -140,6 +140,8 @@ pub struct Palette {
     /// The primary turned 48° in hue, for gradients and effects.
     pub glow: Rgba,
     pub success: Rgba,
+    /// The encryption marks, readable whatever's behind them.
+    pub seal: crate::core::accessibility::SealColors,
     /// Corner radius, in rem (1 is the size the app's corners are drawn for).
     pub radius: f32,
     /// What the chat, the sidebars and the rail are painted with: solid, or
@@ -172,6 +174,7 @@ impl Palette {
             sidebar: rgba(themes::mix(t.get("card"), background, 0.55)),
             glow: rgba(themes::turn(primary, 48.0)),
             success: rgba(if dark { 0x4ade80 } else { 0x2fb47c }),
+            seal: crate::core::accessibility::seal_colors(t),
             radius: theme.radius,
             chat_surface: rgba(background).into(),
             side_surface: rgba(themes::mix(t.get("card"), background, 0.55)).into(),

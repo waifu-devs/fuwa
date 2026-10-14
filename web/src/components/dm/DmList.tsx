@@ -57,7 +57,7 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
           initial={{ scale: 0.4, rotate: -30, opacity: 0 }}
           animate={{ scale: 1, rotate: 0, opacity: 1 }}
           transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}
-          className="inline-grid text-emerald-500"
+          className="inline-grid text-seal-icon"
         >
           <LockKeyholeIcon className="size-3" />
         </motion.span>
@@ -69,7 +69,7 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="mx-2 my-1 flex items-start gap-2 rounded-xl bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300"
+            className="mx-2 my-1 flex items-start gap-2 rounded-xl border border-seal-warn-edge bg-seal-warn-surface px-2.5 py-2 text-xs text-seal-warn-ink"
           >
             <ShieldAlertIcon className="mt-0.5 size-3.5 shrink-0" />
             <span>{problem ?? t("dms-calls.dm.unavailable")}</span>
@@ -85,7 +85,7 @@ export function DmList({ instanceKey }: { instanceKey: string }) {
             className="group mx-1 mt-1 rounded-2xl border border-dashed px-3 py-3 text-xs text-muted-foreground"
           >
             <p className="flex items-center gap-2 font-bold text-foreground">
-              <span className="grid size-6 place-items-center rounded-lg bg-emerald-500/15 text-emerald-600 transition-transform duration-500 group-hover:rotate-[-12deg] dark:text-emerald-400">
+              <span className="grid size-6 place-items-center rounded-lg bg-seal-surface text-seal-ink transition-transform duration-500 group-hover:rotate-[-12deg]">
                 <LockKeyholeIcon className="size-3.5" />
               </span>
               {t("dms-calls.dm.list.emptyTitle")}
@@ -154,7 +154,7 @@ const DmLink = memo(function DmLink({ instanceKey, conversation, enter }: { inst
       >
         <span className="relative shrink-0">
           <UserAvatar user={other} className="size-8 text-xs transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3" />
-          <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full bg-card text-emerald-500 ring-2 ring-card">
+          <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full bg-card text-seal-icon ring-2 ring-card">
             <LockKeyholeIcon className="size-2.5 transition-transform duration-300 group-hover:scale-125" />
           </span>
         </span>
