@@ -22,6 +22,13 @@ on:
 permissions:
   contents: read
 
+# One release per tag at a time. A tag pushed again (or several pushes of it in
+# a row) starts more runs; they queue behind this one rather than racing it to
+# npm, and find the version already published.
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build @waifu-devs/fuwa
@@ -99,5 +106,12 @@ jobs:
           if [ "${#tarballs[@]}" -ne 1 ] || [ "${tarballs[0]}" != "package/waifu-devs-fuwa-${GITHUB_REF_NAME#v}.tgz" ]; then
             echo "::error::expected exactly the tag's package, found: ${tarballs[*]}"
             exit 1
+          fi
+          # npm never takes a version twice, so a rerun for a tag that already
+          # published has nothing left to do.
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$(npm view "@waifu-devs/fuwa@$version" version 2>/dev/null)" = "$version" ]; then
+            echo "::notice::@waifu-devs/fuwa@$version is already on npm"
+            exit 0
           fi
           npm publish "./${tarballs[0]}" --access public
