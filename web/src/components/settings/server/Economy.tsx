@@ -1,4 +1,4 @@
-import { ChevronDownIcon, CoinsIcon, EyeOffIcon, InfinityIcon, PlusIcon, ShieldIcon, SparklesIcon, StoreIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import { ChevronDownIcon, CoinsIcon, DicesIcon, EyeOffIcon, InfinityIcon, PlusIcon, ShieldIcon, SparklesIcon, StoreIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Permission, type Currency, type ProfileItem, type Role, type ShopListing } from "@/gen/fuwa/v1/types_pb";
@@ -578,6 +578,11 @@ function ListingCard({
               {listing && !listing.available && (
                 <span className="flex items-center gap-0.5 rounded bg-muted px-1 text-[0.6rem] font-extrabold tracking-wide text-muted-foreground uppercase">
                   <EyeOffIcon className="size-2.5" /> {t("serversettings.economy.hidden")}
+                </span>
+              )}
+              {listing?.gachaOnly && (
+                <span className="flex items-center gap-0.5 rounded bg-violet-500/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-violet-600 uppercase dark:text-violet-400">
+                  <DicesIcon className="size-2.5" /> {t("chattools.economy.gacha.only")}
                 </span>
               )}
             </span>
